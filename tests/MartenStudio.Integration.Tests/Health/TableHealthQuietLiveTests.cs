@@ -91,9 +91,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_hidden_document_type_never_appears_though_its_table_has_everything_wrong_with_it()
     {
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(
+        // A clock a week past the statistics' start, or T05's unused index is withheld rather than found (issue #8 G4).
+        await using HealthLiveHost host = await HostAsync(
             postgres,
             "health_tables_hidden",
+            new ManualClock(Covering),
             store: static o =>
             {
                 o.Schema.For<HealthSecretThing>().Index(x => x.Name).Index(new System.Linq.Expressions.Expression<Func<HealthSecretThing, object>>[] { x => x.Name, x => x.Rank });

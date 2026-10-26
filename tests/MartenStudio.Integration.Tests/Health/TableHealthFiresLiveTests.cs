@@ -33,12 +33,15 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
     [HealthFires("T01")]
     public async Task Sequential_scans_that_keep_reading_a_large_table_are_T01()
     {
-        ManualClock clock = new(Start);
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = await HostAsync(postgres, "health_t01_fires", clock, static o => o.Schema.For<HealthScanThing>());
         await ApplyAsync(host.Store);
 
         string table = TableOf<HealthScanThing>(host.Store);
         await InsertAsync(postgres, table, 120_000);
+
+        // A batch of its own, after the insert's flush: the moment the usage guard's window is proven from.
+        await ExecuteAsync(postgres, "analyze " + table);
 
         (await ReportAsync(host)).Findings.Should().NotContain(static x => x.Code == "T01", "one sample is not a rate");
 
@@ -108,7 +111,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
     [HealthFires("T05")]
     public async Task A_declared_index_nothing_scans_on_a_table_of_a_hundred_thousand_inserts_is_T05()
     {
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "health_t05_fires", store: static o => o.Schema.For<HealthIndexedThing>().Index(x => x.Name));
+        await using HealthLiveHost host = await HostAsync(postgres, "health_t05_fires", new ManualClock(Covering), static o => o.Schema.For<HealthIndexedThing>().Index(x => x.Name));
         await ApplyAsync(host.Store);
 
         string table = TableOf<HealthIndexedThing>(host.Store);
@@ -121,7 +124,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
 
         HealthReportFinding finding = OnTable(report, "T05", KeyOf<HealthIndexedThing>(host.Store)).Should().ContainSingle().Subject;
         finding.Finding.Subject.Should().EndWith("_idx_name");
-        finding.Finding.Caveat.Should().Contain("statistics were last reset");
+        finding.Finding.Caveat.Should().Contain("a usage verdict is never given over less than 7 days");
         finding.Finding.Caveat.Should().NotContain("multi-host", "the fixture's data source names one host, read off a connection it never opened");
     }
 
@@ -133,12 +136,13 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
     [HealthFires("T06")]
     public async Task Updates_on_full_pages_with_no_blocking_index_are_a_T06_FillFactor_warning_worded_for_this_Marten()
     {
-        ManualClock clock = new(Start);
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = await HostAsync(postgres, "health_t06_fires", clock, static o => o.Schema.For<HealthScanThing>());
         await ApplyAsync(host.Store);
 
         string table = TableOf<HealthScanThing>(host.Store);
         await InsertAsync(postgres, table, 12_000);
+        await ExecuteAsync(postgres, "analyze " + table);
         await ReportAsync(host);
 
         await ExecuteAsync(postgres, "update " + table + " set data = data || jsonb_build_object('Rank', 0)");
@@ -159,12 +163,13 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
     [HealthFires("T06")]
     public async Task With_a_computed_index_every_upsert_blocks_HOT_and_T06_says_fillfactor_cannot_help()
     {
-        ManualClock clock = new(Start);
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = await HostAsync(postgres, "health_t06_blocked", clock, static o => o.Schema.For<HealthIndexedThing>().Index(x => x.Name));
         await ApplyAsync(host.Store);
 
         string table = TableOf<HealthIndexedThing>(host.Store);
         await InsertAsync(postgres, table, 12_000);
+        await ExecuteAsync(postgres, "analyze " + table);
         await ReportAsync(host);
 
         await ExecuteAsync(postgres, "update " + table + " set data = data || jsonb_build_object('Rank', 0)");

@@ -38,6 +38,13 @@ public class TableHealthLiveTests(PostgresFixture postgres)
 
     private static readonly DateTimeOffset Start = new(2026, 10, 26, 9, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// A studio clock eight days past the server's: T01, T05 and T06 give no usage verdict over statistics under seven days
+    /// old (issue #8 G4), and a fresh container's are minutes old. Paired with an <c>ANALYZE</c> of a table in the schema, so
+    /// that a database whose own reset time is null (15+) records a moment its counters provably cover (W5-B1).
+    /// </summary>
+    private static DateTimeOffset Covering => DateTimeOffset.UtcNow.AddDays(8);
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     [PostgresFact]
@@ -45,7 +52,7 @@ public class TableHealthLiveTests(PostgresFixture postgres)
     public async Task Sequential_scans_that_keep_reading_a_large_table_are_T01_with_an_index_to_add_in_a_migration()
     {
         const string schema = "ps_health_t01";
-        ManualClock clock = new(Start);
+        ManualClock clock = new(Covering);
         await using StudioHost host = await HostAsync(schema, clock);
 
         // No ANALYZE in the same batch: run in the backend whose insert counts are still pending, it reports its own estimate
@@ -53,6 +60,7 @@ public class TableHealthLiveTests(PostgresFixture postgres)
         await ExecuteAsync(
             "create table ps_health_t01.orders (id int primary key, customer int not null, note text)",
             "insert into ps_health_t01.orders select g, g % 1000, 'n' || g from generate_series(1, 120000) g");
+        await ExecuteAsync("create table ps_health_t01.anchor (id int primary key)", "analyze ps_health_t01.anchor");
 
         OnTable(await ReportAsync(host), "T01", schema + ".orders").Should().BeEmpty("one sample is not a rate");
 
@@ -133,7 +141,7 @@ public class TableHealthLiveTests(PostgresFixture postgres)
     public async Task An_index_nothing_scans_on_a_table_of_a_hundred_thousand_inserts_is_T05_on_the_hosts_table_only()
     {
         const string schema = "ps_health_t05";
-        await using StudioHost host = await HostAsync(schema, new ManualClock(Start));
+        await using StudioHost host = await HostAsync(schema, new ManualClock(Covering));
 
         foreach (string table in new[] { "orders", "qrtz_fired_triggers" })
         {
@@ -150,7 +158,7 @@ public class TableHealthLiveTests(PostgresFixture postgres)
         HealthReportFinding finding = OnTable(report, "T05", schema + ".orders").Should().ContainSingle().Subject;
         finding.Finding.Subject.Should().Be(schema + ".orders.orders_by_name");
         finding.Finding.Remedy!.Code.Should().Be("DROP INDEX CONCURRENTLY \"ps_health_t05\".\"orders_by_name\";");
-        finding.Finding.Caveat.Should().Contain("statistics were last reset");
+        finding.Finding.Caveat.Should().Contain("a usage verdict is never given over less than 7 days");
 
         OnTable(report, "T05", schema + ".qrtz_fired_triggers").Should().BeEmpty("a library's table is exempt from the index-design rules");
     }
@@ -165,12 +173,13 @@ public class TableHealthLiveTests(PostgresFixture postgres)
     public async Task Updates_on_full_pages_of_a_Marten_document_table_are_a_T06_warning_with_no_migration_SQL()
     {
         const string schema = "ps_health_t06";
-        ManualClock clock = new(Start);
+        ManualClock clock = new(Covering);
         await using StudioHost host = await HostAsync(schema, clock);
 
         await ExecuteAsync(
             "create table ps_health_t06.mt_doc_thing (id uuid primary key, data jsonb not null)",
             "insert into ps_health_t06.mt_doc_thing select gen_random_uuid(), jsonb_build_object('Name', 'n' || g, 'Rank', g) from generate_series(1, 12000) g");
+        await ExecuteAsync("create table ps_health_t06.anchor (id int primary key)", "analyze ps_health_t06.anchor");
         await ReportAsync(host);
 
         await ExecuteAsync("update ps_health_t06.mt_doc_thing set data = data || jsonb_build_object('Rank', 0)");
@@ -298,7 +307,7 @@ public class TableHealthLiveTests(PostgresFixture postgres)
     public async Task Healthy_tables_and_a_librarys_table_are_quiet_on_every_table_check_and_the_sweep_writes_and_locks_nothing()
     {
         const string schema = "ps_health_quiet";
-        ManualClock clock = new(Start);
+        ManualClock clock = new(Covering);
         HealthSweepProbe probe = new(postgres);
         await using StudioHost host = await HostAsync(schema, clock, probe);
 

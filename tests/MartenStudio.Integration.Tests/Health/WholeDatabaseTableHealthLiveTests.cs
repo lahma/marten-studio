@@ -148,7 +148,8 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
             "analyze " + table,
             "delete from " + table + " where id % 4 = 0");
 
-        ManualClock clock = new(Start);
+        // T01 and T05 judge usage only over statistics a week old: a clock eight days on, from the ANALYZE above.
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = Host(clock);
 
         HealthReport first = await ReportAsync(host);

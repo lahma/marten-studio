@@ -39,6 +39,11 @@ public class HealthLiveTestConventionTests
         ["K05"] = "a live host's options with and without SqlConsoleRole - Server/ServerPostureLiveTests",
         ["K06"] = "a live host's options with \"*\" and with and without SqlConsoleRole - Server/ServerPostureLiveTests",
         ["K07"] = "a studio mapped on Kestrel, anonymous and authorized - Server/AnonymousStudioLiveTests",
+        ["T15"] = "a foreign key on a table past 8 MiB with no covering index - Health/IndexLintLiveTests",
+        ["T19"] = "200 partitions of two indexes each at max_locks_per_transaction = 64 - Health/IndexLintLiveTests",
+        ["T20"] = "a monthly range that ended, and rows in a default partition - Health/IndexLintLiveTests",
+        ["T25"] = "a 75 MiB primary key with 39 rows in 40 deleted and vacuumed - Health/IndexLintLiveTests",
+        ["T26"] = "an int4 identity restarted at 1,500,000,000 - Health/IndexLintLiveTests",
     };
 
     [Fact]
