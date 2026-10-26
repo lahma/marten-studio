@@ -82,6 +82,31 @@ public class AutovacuumTriggersTests
         new AutovacuumUnit { Counter = 51, Trigger = 50 }.Due.Should().BeTrue();
     }
 
+    /// <summary>
+    /// The locks autovacuum gives way to (W5-V1 review, N1): a prepared transaction's, which have no process, and a request
+    /// still waiting - autovacuum takes its lock only if it can have it at once, so a queued ALTER keeps it away too.
+    /// </summary>
+    [Fact]
+    public void The_lock_read_counts_a_prepared_transactions_locks_and_a_queued_request()
+    {
+        string sql = HealthTableQueries.TablesSql;
+        int start = sql.IndexOf("locks as (", StringComparison.Ordinal);
+        string locks = sql[start..sql.IndexOf("settings as (", start, StringComparison.Ordinal)];
+
+        locks.Should().Contain("l.pid is null", "a prepared transaction's locks have a null pid");
+        locks.Should().NotContain("granted", "a queued strong request keeps autovacuum's conditional lock away as a granted one does");
+        locks.Should().Contain("'AccessExclusiveLock'").And.Contain("'ShareUpdateExclusiveLock'").And.NotContain("'AccessShareLock'");
+    }
+
+    [Fact]
+    public void A_decision_the_read_marks_locked_is_locked()
+    {
+        HealthTableQueries.ParseUnit("""{"counter": 1, "trigger": 2, "threshold": 1, "scale": 0.2, "tuples": 5, "last": null, "running": false, "locked": true}""")
+            .Locked.Should().BeTrue();
+        HealthTableQueries.ParseUnit("""{"counter": 1, "trigger": 2, "threshold": 1, "scale": 0.2, "tuples": 5, "last": null, "running": false}""")
+            .Locked.Should().BeFalse("a read without the field is no lock");
+    }
+
     [Fact]
     public void A_negative_insert_threshold_switches_the_insert_trigger_off()
     {

@@ -443,11 +443,6 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
                 yield return new HealthSamplePart(series, 1) { Remembered = true };
             }
         }
-
-        // How long the oldest holder of the tables has held them, as Postgres' own timestamps bound it - a number about the
-        // database, no name - for T07 to say a held horizon is what keeps vacuum from a table's dead rows (W5-V1 review).
-        TimeSpan? held = facts.Holders.Where(static x => x.HoldsTables && x.AtLeast is not null).Select(static x => x.AtLeast).Max();
-        yield return new HealthSamplePart(AutovacuumHindrances.HorizonHeldSeries, held?.TotalSeconds ?? 0);
     }
 
     /// <inheritdoc />

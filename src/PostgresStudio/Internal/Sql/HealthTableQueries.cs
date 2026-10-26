@@ -306,8 +306,10 @@ internal sealed record AutovacuumUnit
     public bool Running { get; init; }
 
     /// <summary>
-    /// Whether another session holds a lock on the unit that autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with - a
-    /// running VACUUM or ANALYZE apart - so autovacuum, which skips a table it cannot lock, passes it by now.
+    /// Whether another session - or a prepared transaction, whose locks have no process - holds or waits for a lock on the
+    /// unit that autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with, a running VACUUM or ANALYZE apart: autovacuum
+    /// takes its lock only if it can have it at once, so it passes the table by while one is held, and while a stronger
+    /// request waits in the queue in front of it (W5-V1 review).
     /// </summary>
     public bool Locked { get; init; }
 
@@ -638,13 +640,13 @@ internal static class HealthTableQueries
             select distinct l.relation as relid
             from pg_catalog.pg_locks l
             where l.locktype = 'relation'
-              and l.granted
               and l.database = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
               and l.mode in ('ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
-              and l.pid <> pg_catalog.pg_backend_pid()
-              and l.pid not in (select v.pid from pg_catalog.pg_stat_progress_vacuum v
-                                union all
-                                select z.pid from pg_catalog.pg_stat_progress_analyze z)
+              and (l.pid is null
+                   or (l.pid <> pg_catalog.pg_backend_pid()
+                       and l.pid not in (select v.pid from pg_catalog.pg_stat_progress_vacuum v
+                                         union all
+                                         select z.pid from pg_catalog.pg_stat_progress_analyze z)))
         ),
         settings as (
             select pg_catalog.current_setting('block_size')::bigint as block_size,
@@ -688,8 +690,7 @@ internal static class HealthTableQueries
                    d.reltuples < 0 and s.last_analyze is null and s.last_autoanalyze is null
                        and (coalesce(s.n_live_tup, 0) >= @min_rows
                             or (coalesce(s.seq_tup_read, 0) + coalesce(s.idx_tup_fetch, 0) >= @min_rows
-                                and (coalesce(s.n_live_tup, 0) = 0
-                                     or (coalesce(s.seq_scan, 0) > 0 and coalesce(s.seq_tup_read, 0) >= @min_rows * s.seq_scan)))) as unanalyzed_sized,
+                                and coalesce(s.seq_scan, 0) > 0 and coalesce(s.seq_tup_read, 0) >= @min_rows * s.seq_scan)) as unanalyzed_sized,
                    exists (select 1 from locks k where k.relid = u.relid) as locked,
                    coalesce(ro.enabled, 'true')::boolean as enabled,
                    coalesce(tro.enabled, 'true')::boolean as toast_enabled,
@@ -1352,9 +1353,8 @@ internal static class HealthTableQueries
 
     /// <summary>
     /// T08's line for a table never analysed (<c>StaleStatisticsCheck.MinRows</c>): that many live rows, or that many read
-    /// with a sign the table is that big - a sequential scan that reads that many on average, or counters that say nothing
-    /// lives in it, which is the shape <c>pg_upgrade</c> leaves (W5-V1 review). Bound into <see cref="TablesSql" />, which
-    /// judges each partition against it alone.
+    /// by sequential scans that read that many on average - the one sign rows read give of the table's size (W5-V1 review).
+    /// Bound into <see cref="TablesSql" />, which judges each partition against it alone.
     /// </summary>
     public const long UnanalyzedMinRows = 1_000;
 

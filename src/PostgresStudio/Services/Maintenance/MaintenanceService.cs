@@ -640,6 +640,7 @@ internal sealed class MaintenanceService : IMaintenanceService
                                 schema,
                                 table.Table.Schema,
                                 table.Table.Table,
+                                settings.QueryTimeout,
                                 commandTimeout,
                                 token,
                                 MaintenanceQueries.HasApproximate(pre.ExtensionVersion))

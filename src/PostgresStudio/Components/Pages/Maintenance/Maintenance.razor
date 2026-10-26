@@ -246,16 +246,16 @@
                         @if (measure.IndexesNotMeasured > 0)
                         {
                             <p class="ms-muted">
-                                @SessionText.Number(measure.IndexesNotMeasured) more index@(measure.IndexesNotMeasured == 1 ? string.Empty : "es") not measured: the measure reads the
-                                @MaintenanceQueries.MeasuredIndexes largest, within the one statement_timeout.
+                                @SessionText.Number(measure.IndexesNotMeasured) more index@(measure.IndexesNotMeasured == 1 ? string.Empty : "es") not measured: the measure takes up to the
+                                @MaintenanceQueries.MeasuredIndexes largest, smallest first, while QueryTimeout lasts - the heap's own figures stand either way.
                             </p>
                         }
 
                         <p class="ms-muted">
-                            Measured @State.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex, in one statement under
-                            QueryTimeout: an estimate of the heap from the visibility map and an exact read of every page of the largest
-                            indexes, each holding an ACCESS SHARE lock for as long as it reads - which a migration's ALTER waits behind. A leaf
-                            density far below the index's fillfactor (90% by default) is space a REINDEX CONCURRENTLY would give back.
+                            Measured @State.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex, all within QueryTimeout:
+                            an estimate of the heap from the visibility map, then an exact read of every page of each index measured, each holding
+                            an ACCESS SHARE lock for as long as it reads - which a migration's ALTER waits behind. A leaf density far below the
+                            index's fillfactor (90% by default) is space a REINDEX CONCURRENTLY would give back.
                         </p>
                     }
                     else

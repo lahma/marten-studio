@@ -64,9 +64,11 @@ internal enum VacuumBehindKind
 /// </para>
 /// <para>
 /// <b>The remedy is for what keeps autovacuum away</b> (W5-V1 review): a table behind is already past its trigger, so a lower
-/// scale factor changes nothing. A lock autovacuum skips, every worker busy (T16), throttling, a horizon held for an hour
-/// (T14) - each named from what the sweep read, with a setting where one answers it - and a scale factor only where it
-/// would at least halve the trigger, so the next pass starts sooner.
+/// scale factor changes nothing. A lock autovacuum gives way to, every worker busy (T16), throttling - each named from what
+/// the sweep read, with a setting where one answers it - and a scale factor only where it would at least halve the
+/// trigger, so the next pass starts sooner. A held horizon is not one: autovacuum keeps running under it, so the table is
+/// not behind, and T14 says it. The folded finding's key is the dead-row one once the dead rows are behind too, so a
+/// finding that began as <c>inserts</c> can change key mid-incident (accepted, W5-V1 review).
 /// </para>
 /// </remarks>
 [HealthCheck("T07", HealthArea.Tables, HealthCostTier.Catalog, "Vacuum falling behind", Variants = [DeadRowsVariant, InsertsVariant])]
@@ -259,7 +261,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
 
         AutovacuumHindrance hindrance = table.AutovacuumOff
             ? AutovacuumHindrance.None
-            : AutovacuumHindrances.Of(table, unit, facts.Workers, evaluation.History, horizonMatters: dead);
+            : AutovacuumHindrances.Of(table, unit, facts.Workers, evaluation.History);
 
         string what = partitioned ? "A partition of " + declared.Key : declared.Key;
         string vacuumed = unit.Last is { } last

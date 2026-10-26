@@ -124,7 +124,7 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         inserts.Evidence.Should().Contain(new HealthEvidence("Inserted since the last vacuum", "28,500"));
         inserts.Evidence.Single(static x => x.Label == "Its insert trigger").Value.Should().StartWith(major >= 18 ? "1,000 (" : "6,000 (");
         // What keeps autovacuum away is the test's own lock, and the finding says so - with no setting to change (W5-V1 review).
-        inserts.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "a lock another session holds on the table, which autovacuum skips"));
+        inserts.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", AutovacuumHindrances.LockedLabel));
         inserts.Finding.Remedy.Should().BeNull();
 
         HealthReportFinding dead = AutovacuumServer.About(report, "T07", "ps_g2.dr").Should().ContainSingle().Subject;
@@ -133,7 +133,7 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         dead.Finding.Title.Should().StartWith("ps_g2.dr has 15,000 dead rows, ", "7.5% dead, nowhere near the fifth 0.4 waited for");
         dead.Evidence.Single(static x => x.Label == "Its dead-row trigger").Value.Should().StartWith("2,050 (")
             .And.Contain("autovacuum_vacuum_scale_factor 0.01, the table's own storage parameter");
-        dead.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "a lock another session holds on the table, which autovacuum skips"));
+        dead.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", AutovacuumHindrances.LockedLabel));
         dead.Finding.Remedy.Should().BeNull();
 
         // Released: autovacuum, woken every second, vacuums both - the trigger read said it would.
