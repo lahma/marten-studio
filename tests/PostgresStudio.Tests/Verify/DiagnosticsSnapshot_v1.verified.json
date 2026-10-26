@@ -1,0 +1,274 @@
+{
+  "schema": "postgresstudio-diagnostics",
+  "schemaVersion": 1,
+  "producer": "PostgresStudio 0.5.0",
+  "generatedAt": "2026-11-02T06:00:04.0000000+00:00",
+  "database": {
+    "source": "tenants",
+    "database": "acme"
+  },
+  "outcome": "read",
+  "reason": null,
+  "server": {
+    "versionNumber": 140013,
+    "version": "14.13",
+    "platform": "amazonAurora",
+    "instance": "acme-writer-1",
+    "inRecovery": false,
+    "startedAt": "2026-10-01T03:12:00.0000000+00:00"
+  },
+  "compute": {
+    "current": 4.5,
+    "minimum": 0.5,
+    "maximum": 16,
+    "unit": "ACU",
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "ioOptimized": true
+  },
+  "findings": {
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "withheld": 2,
+    "items": [
+      {
+        "code": "T07",
+        "variant": "dead-rows",
+        "subject": "public.orders",
+        "tenantId": null,
+        "severity": "warning",
+        "category": "tables",
+        "title": "Vacuum is falling behind on public.orders",
+        "detail": "Dead rows accumulate faster than autovacuum clears them.",
+        "caveat": "Statistics since 2026-10-30.",
+        "action": "ALTER TABLE \"public\".\"orders\" SET (autovacuum_vacuum_scale_factor = 0.02);",
+        "actionExplanation": "Vacuums it at 2% dead rows instead of 20%.",
+        "actionKind": "migration",
+        "actionRequires": null,
+        "evidence": [
+          {
+            "label": "Dead rows",
+            "value": "1,204,331"
+          },
+          {
+            "label": "Session 1",
+            "value": "withheld - Activity-grade: call with IncludeActivity = true"
+          }
+        ],
+        "docsUrl": "https://github.com/lahma/marten-studio/blob/v0.5.0/docs/health/tables.md#t07-vacuum-falling-behind",
+        "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+        "key": "T07|dead-rows|public.orders"
+      }
+    ],
+    "checks": [
+      {
+        "code": "C04",
+        "category": "connections",
+        "title": "Idle in transaction",
+        "variants": [],
+        "requiresActivity": true,
+        "docsUrl": "https://github.com/lahma/marten-studio/blob/v0.5.0/docs/health/connections.md#c04-idle-in-transaction",
+        "outcome": "withheld",
+        "reason": null,
+        "sqlState": null,
+        "findings": 0
+      },
+      {
+        "code": "T07",
+        "category": "tables",
+        "title": "Vacuum falling behind",
+        "variants": [
+          "dead-rows",
+          "inserts"
+        ],
+        "requiresActivity": false,
+        "docsUrl": "https://github.com/lahma/marten-studio/blob/v0.5.0/docs/health/tables.md#t07-vacuum-falling-behind",
+        "outcome": "read",
+        "reason": null,
+        "sqlState": null,
+        "findings": 1
+      },
+      {
+        "code": "T08",
+        "category": "tables",
+        "title": "Never analysed, or stale statistics",
+        "variants": [],
+        "requiresActivity": false,
+        "docsUrl": "https://github.com/lahma/marten-studio/blob/v0.5.0/docs/health/tables.md#t08-never-analysed-or-stale-statistics",
+        "outcome": "unavailable",
+        "reason": "Not checked: this needs pg_read_all_stats for role studio_reader.",
+        "sqlState": "42501",
+        "findings": 0
+      }
+    ]
+  },
+  "storage": {
+    "outcome": "read",
+    "reason": null,
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "databaseBytes": 51234567890,
+    "sizesAreEstimates": true,
+    "statisticsSince": "2026-10-03T06:00:01.0000000+00:00",
+    "growthBytesPerDay": 812345678,
+    "largestTables": [
+      {
+        "schema": "public",
+        "name": "orders",
+        "ownership": "application",
+        "owner": null,
+        "totalBytes": 26000000000,
+        "tableBytes": 20000000000,
+        "indexBytes": 5000000000,
+        "toastBytes": 1000000000,
+        "estimatedRows": 300000000,
+        "shareOfDatabase": 0.5075,
+        "hotUpdateRatio": 0.25,
+        "growthBytesPerDay": 600000000
+      },
+      {
+        "schema": "quartz",
+        "name": "qrtz_triggers",
+        "ownership": "library",
+        "owner": "Quartz.NET",
+        "totalBytes": 8192,
+        "tableBytes": 8192,
+        "indexBytes": 0,
+        "toastBytes": 0,
+        "estimatedRows": 3,
+        "shareOfDatabase": 0,
+        "hotUpdateRatio": null,
+        "growthBytesPerDay": null
+      }
+    ]
+  },
+  "statements": {
+    "outcome": "read",
+    "reason": null,
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "statisticsSince": "2026-10-30T06:00:01.0000000+00:00",
+    "windowSeconds": 600,
+    "totalMilliseconds": 200.5,
+    "top": [
+      {
+        "queryId": "-7234567890123456789",
+        "text": "select d.data from public.mt_doc_order as d where d.id = $1",
+        "textTruncated": false,
+        "textWithheld": null,
+        "calls": 5,
+        "totalMilliseconds": 120.25,
+        "meanMilliseconds": 24.05,
+        "shareOfTime": 0.6,
+        "rows": 5,
+        "sharedBlocksHit": 450,
+        "sharedBlocksRead": 15,
+        "tempBlocksWritten": 2,
+        "storageBlocksRead": 9
+      },
+      {
+        "queryId": "42",
+        "text": null,
+        "textTruncated": false,
+        "textWithheld": "Withheld: it still carries a string constant as written.",
+        "calls": 1,
+        "totalMilliseconds": 10,
+        "meanMilliseconds": 10,
+        "shareOfTime": 0.05,
+        "rows": 0,
+        "sharedBlocksHit": 0,
+        "sharedBlocksRead": 0,
+        "tempBlocksWritten": 0,
+        "storageBlocksRead": null
+      }
+    ]
+  },
+  "settings": {
+    "outcome": "read",
+    "reason": null,
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "settings": [
+      {
+        "name": "shared_buffers",
+        "group": "memory",
+        "value": "16384",
+        "unit": "8kB",
+        "source": "configuration file",
+        "pendingRestart": false
+      },
+      {
+        "name": "max_connections",
+        "group": "connections",
+        "value": "100",
+        "unit": null,
+        "source": "configuration file",
+        "pendingRestart": true
+      },
+      {
+        "name": "max_slot_wal_keep_size",
+        "group": "wal",
+        "value": null,
+        "unit": null,
+        "source": null,
+        "pendingRestart": false
+      }
+    ],
+    "extensions": [
+      {
+        "name": "pg_stat_statements",
+        "installedVersion": "1.11",
+        "availableVersion": "1.11",
+        "usable": true,
+        "note": null
+      },
+      {
+        "name": "pgstattuple",
+        "installedVersion": null,
+        "availableVersion": "1.5",
+        "usable": false,
+        "note": "Not installed in this database."
+      }
+    ]
+  },
+  "connections": {
+    "outcome": "read",
+    "reason": null,
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "maxConnections": 100,
+    "reservedConnections": 3,
+    "serverConnections": 41,
+    "database": {
+      "applicationName": null,
+      "total": 12,
+      "active": 2,
+      "idle": 8,
+      "idleInTransaction": 1,
+      "waiting": 1,
+      "stateUnknown": 0,
+      "oldestTransactionSeconds": 95.5
+    },
+    "byApplication": [
+      {
+        "applicationName": "orders-api",
+        "total": 10,
+        "active": 2,
+        "idle": 7,
+        "idleInTransaction": 1,
+        "waiting": 1,
+        "stateUnknown": 0,
+        "oldestTransactionSeconds": 95.5
+      },
+      {
+        "applicationName": "",
+        "total": 2,
+        "active": 0,
+        "idle": 1,
+        "idleInTransaction": 0,
+        "waiting": 0,
+        "stateUnknown": 1,
+        "oldestTransactionSeconds": null
+      }
+    ],
+    "allSessionsVisible": false
+  },
+  "withheld": {
+    "connections.byApplication": "Activity-grade: call with IncludeActivity = true",
+    "statements": "Activity-grade: call with IncludeActivity = true"
+  }
+}

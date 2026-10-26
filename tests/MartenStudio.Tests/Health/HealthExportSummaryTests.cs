@@ -174,7 +174,7 @@ public class HealthExportSummaryTests
 
         summary.Level.Should().Be(HealthExportLevel.Healthy);
         summary.Describe(TimeSpan.FromSeconds(60)).Should().Be(
-            "No findings on 1 database; 3 databases skipped: past the most one run checks; "
+            "No findings on 1 database; 3 databases skipped: not yet reached by the rotation; "
             + "1 store not enumerated: it holds no database it can name without building one. Refreshed after 60 s, served for at most 120 s.");
     }
 
@@ -190,7 +190,7 @@ public class HealthExportSummaryTests
         summary.Level.Should().Be(HealthExportLevel.Healthy);
         summary.ToData()["databasesSkipped"].Should().Be(3);
         summary.Describe(TimeSpan.FromSeconds(60)).Should().Be(
-            "No findings on 1 database; 1 database skipped: past the most one run checks; "
+            "No findings on 1 database; 1 database skipped: not yet reached by the rotation; "
             + "2 held databases skipped: naming them would read the master table. Refreshed after 60 s, served for at most 120 s.");
     }
 

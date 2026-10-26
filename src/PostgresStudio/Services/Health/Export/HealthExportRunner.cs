@@ -9,7 +9,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace PostgresStudio.Services.Health.Export;
 
 /// <summary>How much one export run may do.</summary>
-/// <param name="MaxDatabases">The most databases one run checks; the rest are counted as skipped.</param>
+/// <param name="MaxDatabases">
+/// The most databases one run checks; the rest wait for a later run (<see cref="HealthExportRotation" />), and are counted as
+/// skipped until one has checked them.
+/// </param>
 /// <param name="Budget">
 /// How long one run may take in all, or <see langword="null" /> for <see cref="BudgetFor" />'s default. A
 /// database the run has not finished when it runs out is counted as timed out, which reports Degraded: a
@@ -72,10 +75,18 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// empty slot behind, so a stopping host is never left holding a run that will not finish.
 /// </para>
 /// <para>
-/// <b>The sweeper directly, never a visitor's cache.</b> <see cref="HealthSweepCache" /> is the pages' - keyed by
-/// what a visitor resolved, counted by a test that proves a studio nobody has open sweeps nothing - and the
-/// export neither fills it nor reads it. Its sweeps are ordinary regular sweeps all the same, so they add
-/// samples to <see cref="HealthHistory" /> like a page's do.
+/// <b>The sweeper directly, and a page's sweep when there is a fresh one.</b> <see cref="HealthSweepCache" /> is the pages' -
+/// keyed by what a visitor resolved, counted by a test that proves a studio nobody has open sweeps nothing - and the export
+/// never fills it. It does read it (backlog C, 0.4 security review A L4): a database whose page sweep finished within the
+/// interval is reported from that sweep (<see cref="HealthSweepCache.Latest" />, an age check, no sweep), so an open Health
+/// page and the export never sweep one database twice in one interval. Its own sweeps are ordinary regular sweeps, so they
+/// add samples to <see cref="HealthHistory" /> like a page's do.
+/// </para>
+/// <para>
+/// <b>Twenty-five a run, in rotation</b> (<see cref="HealthExportRotation" />, API design §3.4): every one-database source,
+/// then the others from a cursor per source, and each database's latest result reported for one full rotation and one run
+/// more, counted in runs (<see cref="HealthExportPlan.RunsKept" />) - so a host with two hundred tenant databases has every
+/// one checked within eight runs, and a Critical stays reported until a sweep clears it.
 /// </para>
 /// <para>
 /// <b>No visitor, so no authorization - and so nothing that would need one.</b> A store and database are resolved
@@ -83,9 +94,10 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// <see cref="HealthExportSummary" />: codes and counts, built from nothing a finding wrote.
 /// </para>
 /// <para>
-/// <b>The databases are the ones the sources already hold</b> (<see cref="IStudioSourceProvider.SweepTargetsAsync" />;
+/// <b>The databases are the ones the sources already hold</b> (<see cref="IStudioSourceProvider.ListUnattendedAsync" />;
 /// MartenStudio's are the ones each tenancy holds), so the export's own listing never makes a master-table, sharded or
-/// single-server tenancy apply, seed, query or create anything. The provider is a circuit's service, so a run resolves it
+/// single-server tenancy apply, seed, query or create anything, and a database is opened only when the run reaches it
+/// (<see cref="IStudioSourceProvider.ResolveUnattendedAsync" />). The provider is a circuit's service, so a run resolves it
 /// from a scope of its own and disposes the scope when it ends.
 /// One thing inside the sweep still enumerates, and it is Marten's: with a projection coordinator hosted in this
 /// process, the daemon checks ask that coordinator for its daemons (<c>AllDaemonsAsync()</c>, once per sweep),
@@ -112,6 +124,8 @@ internal sealed class HealthExportRunner
     private readonly CancellationToken stopping;
     private readonly StudioText registeredText;
     private readonly Lock gate = new();
+
+    private readonly HealthExportRotation rotation = new();
 
     private Task<HealthExportSummary>? running;
     private HealthExportSummary? completed;
@@ -297,7 +311,11 @@ internal sealed class HealthExportRunner
         return summary;
     }
 
-    /// <summary>Every source, every database it already holds, one regular sweep each, in order.</summary>
+    /// <summary>
+    /// One run: every source's databases listed by name, every one-database source swept and then the others in rotation
+    /// (API design §3.4), up to the limit - each through a page's sweep finished within the interval when there is one - and
+    /// every database's latest result aggregated while it is young enough.
+    /// </summary>
     private async Task<HealthExportSummary> RunAsync(DateTimeOffset started)
     {
         HealthSweeper? sweeper = services.GetService<HealthSweeper>();
@@ -322,25 +340,25 @@ internal sealed class HealthExportRunner
             return HealthExportSummary.NoStores(started, settings.Text);
         }
 
+        TimeSpan interval = settings.EffectiveHealthInterval;
+
         // The run's own budget, on top of each sweep's (one interval each), so that a store of many slow databases
         // cannot hold the one run every probe is answered from for ever - and the host's stopping, so that it
         // cannot outlive the application either.
-        using CancellationTokenSource timer = new(limits.BudgetFor(settings.EffectiveHealthInterval), timeProvider);
+        using CancellationTokenSource timer = new(limits.BudgetFor(interval), timeProvider);
         using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(timer.Token, stopping);
 
-        List<HealthSweep> sweeps = [];
-        int attempted = 0;
-        int skipped = 0;
         int timedOut = 0;
         int notReached = 0;
         int notEnumerated = 0;
         int unnamed = 0;
 
-        // Streamed, and never cancelled by the budget: the enumeration goes on past the budget and the cap only to count
-        // what was left out, and it names databases, never connects to them.
-        await foreach (StudioSweepTarget target in sources.SweepTargetsAsync(CancellationToken.None).ConfigureAwait(false))
+        // Every database by name, never cancelled by the budget: the listing opens nothing, and the run counts what it lists.
+        List<StudioListedDatabase> listed = [];
+
+        await foreach (StudioListedDatabase entry in sources.ListUnattendedAsync(CancellationToken.None).ConfigureAwait(false))
         {
-            switch (target.Outcome)
+            switch (entry.Outcome)
             {
                 case StudioSweepTargetOutcome.SourceNotReached:
                     // The source has logged why, throttled (9210 or 9213); the endpoint says only that a store was not reached.
@@ -349,7 +367,7 @@ internal sealed class HealthExportRunner
 
                 case StudioSweepTargetOutcome.Unnamed:
                     // Held, but under an id the tenancy would correct before it looked in its cache: not looked up.
-                    unnamed += target.Count;
+                    unnamed += entry.Count;
                     break;
 
                 case StudioSweepTargetOutcome.SourceNotEnumerated:
@@ -359,51 +377,274 @@ internal sealed class HealthExportRunner
                     {
                         logger.LogDebug(
                             "Postgres Studio's health export left data source {StoreKey} out: it holds no database it can name ({Shape})",
-                            target.Source.Key,
-                            target.Detail);
+                            entry.Source.Key,
+                            entry.Detail);
                     }
                     else if (logger.IsEnabled(LogLevel.Debug))
                     {
                         logger.LogDebug(
                             "Marten Studio's health export left store {StoreKey} out: its tenancy holds no database it can name without building one ({Shape})",
-                            target.Source.Key,
-                            target.Detail);
+                            entry.Source.Key,
+                            entry.Detail);
                     }
 
                     notEnumerated++;
                     break;
 
-                case StudioSweepTargetOutcome.Database when target.Resolved is { } resolved:
-                    if (attempted >= limits.MaxDatabases)
-                    {
-                        skipped++;
-                        break;
-                    }
-
-                    if (budget.IsCancellationRequested)
-                    {
-                        timedOut++;
-                        break;
-                    }
-
-                    attempted++;
-
-                    try
-                    {
-                        sweeps.Add(await sweeper.SweepAsync(resolved, HealthSweepKind.Regular, budget.Token).ConfigureAwait(false));
-                    }
-                    catch (OperationCanceledException) when (budget.IsCancellationRequested)
-                    {
-                        timedOut++;
-                    }
-
+                case StudioSweepTargetOutcome.Database when entry.DatabaseId is not null:
+                    listed.Add(entry);
                     break;
             }
         }
 
-        // A run the application's stopping cut short is said as that, not as databases that were slow.
-        return stopping.IsCancellationRequested
-            ? HealthExportSummary.Stopping(started, settings.Text)
-            : HealthExportSummary.From(started, sweeps, skipped, timedOut, notReached, notEnumerated, unnamed);
+        HealthExportPlan plan = rotation.Plan(listed, limits.MaxDatabases);
+        HashSet<string> attempted = new(StringComparer.OrdinalIgnoreCase);
+        HealthSweepCache? pages = services.GetService<HealthSweepCache>();
+
+        foreach (StudioListedDatabase target in plan.Targets)
+        {
+            string key = HealthExportRotation.KeyOf(target);
+            attempted.Add(key);
+
+            if (budget.IsCancellationRequested)
+            {
+                timedOut++;
+                continue;
+            }
+
+            try
+            {
+                StudioUnattendedResolution resolution = await sources
+                    .ResolveUnattendedAsync(target.Source.Key, target.DatabaseId!, budget.Token)
+                    .ConfigureAwait(false);
+
+                if (resolution.Outcome == StudioUnattendedOutcome.NotReached)
+                {
+                    // Logged by the provider: a database whose data source could not be had counts as not reached.
+                    notReached++;
+                    continue;
+                }
+
+                if (resolution.Resolved is not { } resolved)
+                {
+                    // It left its source's list between the listing and now: nothing to report on, and nothing to count.
+                    continue;
+                }
+
+                // A page's sweep of the same database finished within the interval is this run's result - read, never
+                // filled (backlog C, 0.4 security review A L4) - so an open Health page and the export never sweep one
+                // database twice in one interval. It is the same regular sweep the export would have run.
+                HealthSweep? page = pages?.Latest(resolved.Source.Key, resolved.Target.Identity);
+                HealthSweep sweep = page is not null && timeProvider.GetUtcNow() - page.MeasuredAt < interval
+                    ? page
+                    : await sweeper.SweepAsync(resolved, HealthSweepKind.Regular, budget.Token).ConfigureAwait(false);
+
+                rotation.Remember(key, HealthExportDatabaseResult.Of(sweep));
+            }
+            catch (OperationCanceledException) when (budget.IsCancellationRequested)
+            {
+                timedOut++;
+            }
+        }
+
+        if (stopping.IsCancellationRequested)
+        {
+            // A run the application's stopping cut short is said as that, not as databases that were slow.
+            return HealthExportSummary.Stopping(started, settings.Text);
+        }
+
+        (IReadOnlyList<HealthExportDatabaseResult> latest, int skipped) = rotation.Collect(listed, attempted, plan.RunsKept);
+
+        return HealthExportSummary.From(started, latest, skipped, timedOut, notReached, notEnumerated, unnamed);
     }
+}
+
+/// <summary>Which databases one export run sweeps, and in what order (API design §3.4).</summary>
+/// <param name="Targets">The databases, one-database sources first, then the others in rotation.</param>
+/// <param name="RunsPerRotation">How many runs it takes to sweep every database once, at this run's numbers.</param>
+internal sealed record HealthExportPlan(IReadOnlyList<StudioListedDatabase> Targets, int RunsPerRotation)
+{
+    /// <summary>
+    /// For how many runs a database's latest result is reported: one full rotation and one run more, so a finding in the last
+    /// tenant of the rotation stays reported until a sweep clears it, and does not flap with the cursor. Counted in runs,
+    /// never in time: a run of slow databases takes longer than an interval, and a window in time would let a result expire
+    /// before the rotation came back to it (W5-API-fix F3).
+    /// </summary>
+    public int RunsKept => RunsPerRotation + 1;
+}
+
+/// <summary>
+/// The export's memory between runs: where each multi-database source's rotation stands, and each database's latest result,
+/// codes and counts only (<see cref="HealthExportDatabaseResult" />).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Rotation</b> (API design §3.4, the orchestrator's decision 4). Every run sweeps every one-database source first - a data
+/// source, a store whose tenancy is one database - so an admin database is in every run, and then takes the multi-database
+/// sources' databases one at a time from each source's cursor, round robin, until the run's limit: a host source of two
+/// hundred tenants is swept twenty-five a run, and a second source never waits behind the first. Each cursor moves on by
+/// what the run took. Should there be more one-database sources than one run takes, they rotate too, as one group ahead of
+/// the others.
+/// </para>
+/// <para>
+/// <b>Reported until cleared.</b> Each database's latest result is reported for one full rotation and one run more, counted
+/// in runs rather than in time (<see cref="HealthExportPlan.RunsKept" />), so a Critical in tenant 180 surfaces within
+/// <c>ceil(200 / 25)</c> runs and stays reported however long each run takes, rather than coming and going with the cursor.
+/// A database no longer listed is forgotten. <c>databasesSkipped</c> counts only the listed databases no run has checked
+/// in this process and this run did not set out to check; one checked before whose result has aged out is neither reported
+/// nor skipped, and the rotation comes back to it.
+/// </para>
+/// <para>
+/// Touched only by the one run in flight (the runner is single flight), so it needs no lock of its own.
+/// </para>
+/// </remarks>
+internal sealed class HealthExportRotation
+{
+    /// <summary>The cursor key of the one-database sources, when there are more of them than one run takes.</summary>
+    private const string SingleSourcesGroup = " one-database sources";
+
+    private readonly Dictionary<string, int> cursors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (HealthExportDatabaseResult Result, long Run)> latest = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How many runs this rotation has planned: the clock a result's age is counted on.</summary>
+    private long run;
+
+    /// <summary>A listed database's key: its source's key and its identity.</summary>
+    public static string KeyOf(StudioListedDatabase database)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        return database.Source.Key + "|" + database.DatabaseId;
+    }
+
+    /// <summary>This run's targets, and moves each multi-database source's cursor on by what it takes.</summary>
+    /// <param name="listed">Every listed database, in registration order.</param>
+    /// <param name="limit">The most one run sweeps.</param>
+    public HealthExportPlan Plan(IReadOnlyList<StudioListedDatabase> listed, int limit)
+    {
+        ArgumentNullException.ThrowIfNull(listed);
+
+        run++;
+        List<StudioListedDatabase> targets = [];
+        List<StudioListedDatabase> singleSources = [.. listed.Where(static x => x.SingleDatabaseSource)];
+
+        // Every one-database source in every run - unless there are more of them than one run takes, when they rotate too,
+        // as one group of their own ahead of the others, so that none waits for ever.
+        bool singlesRotate = singleSources.Count > limit;
+        int singles = singlesRotate ? 0 : singleSources.Count;
+
+        if (!singlesRotate)
+        {
+            targets.AddRange(singleSources);
+        }
+
+        List<(string Source, List<StudioListedDatabase> Databases)> groups =
+        [
+            .. listed
+                .Where(static x => !x.SingleDatabaseSource)
+                .GroupBy(static x => x.Source.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(static x => (x.Key, x.ToList())),
+        ];
+
+        if (singlesRotate)
+        {
+            // A key no source can have: a source key is a letter or digit first (PostgresSourceNames, MartenStoreRegistry).
+            groups.Insert(0, (SingleSourcesGroup, singleSources));
+        }
+
+        Dictionary<string, int> taken = groups.ToDictionary(static x => x.Source, static _ => 0, StringComparer.OrdinalIgnoreCase);
+        bool tookAny = true;
+
+        while (targets.Count < limit && tookAny)
+        {
+            tookAny = false;
+
+            foreach ((string source, List<StudioListedDatabase> databases) in groups)
+            {
+                if (targets.Count >= limit || taken[source] >= databases.Count)
+                {
+                    continue;
+                }
+
+                int start = cursors.TryGetValue(source, out int cursor) ? cursor % databases.Count : 0;
+                targets.Add(databases[(start + taken[source]) % databases.Count]);
+                taken[source]++;
+                tookAny = true;
+            }
+        }
+
+        foreach ((string source, List<StudioListedDatabase> databases) in groups)
+        {
+            int start = cursors.TryGetValue(source, out int cursor) ? cursor % databases.Count : 0;
+            cursors[source] = (start + taken[source]) % databases.Count;
+        }
+
+        // Forget the cursor of a source that lists nothing any more.
+        foreach (string gone in cursors.Keys.Where(x => groups.All(g => !string.Equals(g.Source, x, StringComparison.OrdinalIgnoreCase))).ToList())
+        {
+            cursors.Remove(gone);
+        }
+
+        int rotating = groups.Sum(static x => x.Databases.Count);
+        int perRun = Math.Max(1, limit - singles);
+        int runs = rotating == 0 ? 1 : (rotating + perRun - 1) / perRun;
+
+        return new HealthExportPlan(targets, Math.Max(1, runs));
+    }
+
+    /// <summary>Keeps a database's latest result, as of the run this rotation last planned.</summary>
+    public void Remember(string key, HealthExportDatabaseResult result)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(result);
+        latest[key] = (result, run);
+    }
+
+    /// <summary>
+    /// Every listed database's latest result still within <paramref name="runsKept" /> runs of the one that took it, and how
+    /// many listed databases no run has checked and this run did not set out to. Forgets every result of a database no longer
+    /// listed.
+    /// </summary>
+    /// <param name="listed">This run's listing.</param>
+    /// <param name="attempted">The keys this run set out to sweep, whether or not it finished.</param>
+    /// <param name="runsKept">For how many runs a result is reported (<see cref="HealthExportPlan.RunsKept" />).</param>
+    public (IReadOnlyList<HealthExportDatabaseResult> Latest, int Skipped) Collect(
+        IReadOnlyList<StudioListedDatabase> listed,
+        IReadOnlySet<string> attempted,
+        int runsKept)
+    {
+        ArgumentNullException.ThrowIfNull(listed);
+        ArgumentNullException.ThrowIfNull(attempted);
+        ArgumentOutOfRangeException.ThrowIfLessThan(runsKept, 1);
+
+        HashSet<string> keys = new(listed.Select(KeyOf), StringComparer.OrdinalIgnoreCase);
+
+        foreach (string gone in latest.Keys.Where(x => !keys.Contains(x)).ToList())
+        {
+            latest.Remove(gone);
+        }
+
+        List<HealthExportDatabaseResult> reported = [];
+        int skipped = 0;
+
+        foreach (string key in keys)
+        {
+            if (latest.TryGetValue(key, out (HealthExportDatabaseResult Result, long Run) kept))
+            {
+                // Checked before: reported while young enough, and never skipped - the rotation comes back to it.
+                if (run - kept.Run < runsKept)
+                {
+                    reported.Add(kept.Result);
+                }
+            }
+            else if (!attempted.Contains(key))
+            {
+                skipped++;
+            }
+        }
+
+        return (reported, skipped);
+    }
+
+    /// <summary>How many databases have a result kept, for a test.</summary>
+    internal int Remembered => latest.Count;
 }

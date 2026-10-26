@@ -73,7 +73,7 @@ public class ServerFindingGatesTests
             .Should().NotBeEmpty()
             .And.OnlyContain(static x => x.Value.Contains("MartenStudioOptions.Capabilities.ViewDatabaseActivity", StringComparison.Ordinal));
 
-        HealthReportFinding inactive = report.Findings.Single(static x => x.Finding.Subject == "inactive");
+        HealthReportFinding inactive = report.Findings.Single(static x => x.Finding.Variant == "inactive");
         inactive.Evidence.Should().Contain(new HealthEvidence("WAL they hold", "5.0 GiB"), "a size is the database's, another database's slot's included");
     }
 
@@ -104,7 +104,7 @@ public class ServerFindingGatesTests
 
         HealthReport report = await ReportAsync(harness);
 
-        HealthReportFinding inactive = report.Findings.Single(static x => x.Finding.Subject == "inactive");
+        HealthReportFinding inactive = report.Findings.Single(static x => x.Finding.Variant == "inactive");
         inactive.Evidence.Should().Contain(new HealthEvidence("Inactive slots holding 1.0 GiB or more", "2 of 3 slots on this server"),
             "another database's slot is counted");
         inactive.Evidence.Should().Contain(static x => x.Value.StartsWith(ReplicationSlot.AnotherDatabase, StringComparison.Ordinal));
@@ -148,7 +148,8 @@ public class ServerFindingGatesTests
     private static HealthVerdict Recode(HealthVerdict verdict, string code) =>
         new([.. verdict.Findings.Select(x => x with { Code = code })], verdict.Note);
 
-    [HealthCheck("R91", HealthArea.Replication, HealthCostTier.Catalog, "Stated replication slots")]
+    [HealthCheck("R91", HealthArea.Replication, HealthCostTier.Catalog, "Stated replication slots",
+        Variants = [ReplicationSlotCheck.NearLimitVariant, ReplicationSlotCheck.InactiveVariant, ReplicationSlotCheck.LostVariant])]
     private sealed class StatedSlotsCheck : HealthCheck<ReplicationSlotFacts>
     {
         public static ReplicationSlotFacts Facts(DateTimeOffset at) => new(

@@ -619,7 +619,7 @@ internal static class DatabaseObjectAssembler
                     _ => "volatile",
                 },
                 routine.SecurityDefiner,
-                routine.Config.Any(static x => x.StartsWith("search_path=", StringComparison.OrdinalIgnoreCase)),
+                RoutineSecurity.PinsSearchPath(routine.Config),
                 gate.RedactConfig(routine.Config),
                 kind != DatabaseObjectKind.Aggregate && gate.DefinitionAccess(routine.Schema, ownership).Allowed);
         }
@@ -797,7 +797,10 @@ internal static class DatabaseObjectAssembler
             visible && gate.Classifier.ClassifyRelation(key.LinkedSchema, key.LinkedTable) is { } far ? gate.Present(far) : null,
             key.Validated,
             Action(key.OnDelete),
-            Action(key.OnUpdate));
+            Action(key.OnUpdate))
+        {
+            Covered = key.Covered,
+        };
     }
 
     /// <summary>
@@ -826,7 +829,10 @@ internal static class DatabaseObjectAssembler
             gate.Classifier.ClassifyRelation(key.Schema, key.Table) is { } near ? gate.Present(near) : null,
             key.Validated,
             Action(key.OnDelete),
-            Action(key.OnUpdate));
+            Action(key.OnUpdate))
+        {
+            Covered = key.Covered,
+        };
     }
 
     private static bool IsAt(string schema, string table, CatalogRelation relation) =>

@@ -131,9 +131,22 @@ internal static partial class SessionQueryText
     /// <param name="query">What <c>pg_stat_activity</c> holds, as read (already cut on the server).</param>
     /// <param name="truncated">Whether Postgres or the read cut it.</param>
     /// <param name="screen">What this visitor's statements are checked against.</param>
-    public static SessionStatementText Present(string? query, bool truncated, StatementScreen screen)
+    public static SessionStatementText Present(string? query, bool truncated, StatementScreen screen) =>
+        Present(query, truncated, screen, DisplayCharacters);
+
+    /// <summary>
+    /// The text one visitor is shown, by every rule, capped at <paramref name="displayCharacters" /> rather than
+    /// <see cref="DisplayCharacters" />: the Statements page shows as much as it reads of <c>pg_stat_statements</c>, 4,096
+    /// characters (W5-Q1).
+    /// </summary>
+    /// <param name="query">The statement, as read.</param>
+    /// <param name="truncated">Whether Postgres or the read cut it.</param>
+    /// <param name="screen">What this visitor's statements are checked against.</param>
+    /// <param name="displayCharacters">The most characters shown.</param>
+    public static SessionStatementText Present(string? query, bool truncated, StatementScreen screen, int displayCharacters)
     {
         ArgumentNullException.ThrowIfNull(screen);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayCharacters);
 
         if (string.IsNullOrEmpty(query))
         {
@@ -173,11 +186,11 @@ internal static partial class SessionQueryText
 
         string text = truncated ? DropOpenTail(query) : query;
         string masked = PostgresErrorText.Redact(text, withheld) ?? text;
-        bool capped = masked.Length > DisplayCharacters;
+        bool capped = masked.Length > displayCharacters;
 
         if (capped)
         {
-            masked = masked[..SafeCut(masked, DisplayCharacters)];
+            masked = masked[..SafeCut(masked, displayCharacters)];
         }
 
         return truncated || capped

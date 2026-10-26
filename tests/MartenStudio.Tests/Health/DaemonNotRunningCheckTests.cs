@@ -53,7 +53,9 @@ public class DaemonNotRunningCheckTests
 
         finding.Code.Should().Be("D02");
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Subject.Should().Be("no-daemon");
+        finding.Variant.Should().Be("no-daemon");
+        finding.Subject.Should().BeNull("the daemon of this store in this database is no object of its own");
+        finding.Key.Should().Be("D02|no-daemon", "the variant split moved the kind out of the subject and kept the key");
         finding.Title.Should().Contain("380 events behind");
         finding.Evidence.Should().Contain(x => x.Label == "Leadership locks held" && x.Value.StartsWith("none of this store's 3 lock ids", StringComparison.Ordinal));
         finding.Remedy!.Code.Should().Contain("AddAsyncDaemon(DaemonMode.HotCold)");
@@ -95,7 +97,7 @@ public class DaemonNotRunningCheckTests
 
         HealthFinding finding = Evaluate(reading, holders: [holder]).Findings.Should().ContainSingle().Subject;
 
-        finding.Subject.Should().Be("lock-held-idle");
+        finding.Variant.Should().Be("lock-held-idle");
         finding.Title.Should().Be(title);
         finding.WhyItMatters.Should().Contain(why).And.NotContain("for ever");
     }
@@ -181,7 +183,7 @@ public class DaemonNotRunningCheckTests
         HealthFinding finding = Evaluate(PinnedQuiet(), runtime: From943).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Subject.Should().Be("no-daemon");
+        finding.Variant.Should().Be("no-daemon");
     }
 
     [Fact]
@@ -247,7 +249,7 @@ public class DaemonNotRunningCheckTests
         HealthFinding finding = Evaluate(Quiet(TimeSpan.FromMinutes(10)), holders: [holder]).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Subject.Should().Be("lock-held-idle");
+        finding.Variant.Should().Be("lock-held-idle");
         finding.Title.Should().NotContain("4242");
 
         HealthEvidence named = finding.Evidence.Single(static x => x.Label == "Lock holder 1");

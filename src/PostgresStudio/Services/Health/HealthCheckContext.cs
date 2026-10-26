@@ -164,6 +164,15 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     public IHealthPlanAdvisor? PlanAdvisor { get; init; }
 
     /// <summary>
+    /// The database's statistics window (W5-CAP): since when its counters have counted, and whether they look reset. The sweep
+    /// computes it once, after its gatherers, whenever one of them read its signals (<see cref="StatisticsWindow.ReadingAsync" />),
+    /// and hands it only to an evaluator at or above <see cref="HealthGate.Database" />, the gate its series are written at.
+    /// <see langword="null" /> when no gatherer read it, and in a unit test that does not set it - an evaluator then computes it
+    /// from its own facts and <see cref="History" /> (<see cref="StatisticsWindow.Compute(StatisticsReading, HealthHistoryView)" />).
+    /// </summary>
+    public StatisticsWindow? Statistics { get; init; }
+
+    /// <summary>
     /// The studio's own words for a finding (<see cref="IStudioSettings.Text" />) - an option it names, a remedy that is
     /// code, the tables it judges. The sweep sets it from its settings; there is no default to forget.
     /// </summary>
@@ -228,6 +237,28 @@ internal sealed class HealthSweepMemo
 
         value = default;
         return false;
+    }
+
+    /// <summary>
+    /// Every shared read of the sweep that finished with an answer, by key - what the sweep keeps beside its results so that
+    /// a page's facts read (the Maintenance page's, W5-V1) reuses the sweep's reads rather than reading again (W5 §2.3).
+    /// </summary>
+    internal IReadOnlyDictionary<string, object> Completed()
+    {
+        Dictionary<string, object> completed = new(StringComparer.Ordinal);
+
+        lock (gate)
+        {
+            foreach ((string key, Entry entry) in entries)
+            {
+                if (entry.Work is { IsValueCreated: true } work && work.Value.IsCompletedSuccessfully && work.Value.Result is { } answer)
+                {
+                    completed[key] = answer;
+                }
+            }
+        }
+
+        return completed;
     }
 
     /// <summary>The shared read for <paramref name="key" />: started by the first caller, awaited by every one.</summary>
@@ -356,7 +387,7 @@ internal sealed class HealthSqlRunner
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken) =>
-        QueryAsync(session, query, map, cancellationToken);
+        QueryAsync(session, asApplicationRole: false, query, map, cancellationToken);
 
     /// <summary>
     /// Runs <paramref name="query" /> as the store's own Postgres role - the role its data source connects as -
@@ -391,10 +422,11 @@ internal sealed class HealthSqlRunner
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken) =>
-        QueryAsync(applicationRoleSession, query, map, cancellationToken);
+        QueryAsync(applicationRoleSession, asApplicationRole: true, query, map, cancellationToken);
 
     private async Task<IReadOnlyList<T>> QueryAsync<T>(
         ReadOnlySqlSession readOnly,
+        bool asApplicationRole,
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken)
@@ -449,12 +481,39 @@ internal sealed class HealthSqlRunner
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception) when (open.State is not System.Data.ConnectionState.Open)
+        catch (Exception exception)
         {
-            // The connection broke under the statement. The next check gets a fresh one.
-            await connection.ResetAsync().ConfigureAwait(false);
+            // What Postgres refused a statement read as the application's role is that role's to be granted, not
+            // SqlConsoleRole's: said on the exception, which a shared read hands every check that asked for it.
+            // The flag rather than the session: only QueryAsApplicationRoleAsync touches that session (StatementChecksFenceTests).
+            if (exception is PostgresException && asApplicationRole)
+            {
+                exception.Data[ApplicationRoleKey] = true;
+            }
+
+            if (open.State is not System.Data.ConnectionState.Open)
+            {
+                // The connection broke under the statement. The next check gets a fresh one.
+                await connection.ResetAsync().ConfigureAwait(false);
+            }
+
             throw;
         }
+    }
+
+    /// <summary>The <see cref="Exception.Data" /> key that marks a failure of a statement read as the application's role.</summary>
+    internal const string ApplicationRoleKey = "PostgresStudio.Health.ReadAsApplicationRole";
+
+    /// <summary>
+    /// Whether <paramref name="exception" /> (or the exception it wraps) is Postgres refusing a statement this runner read as
+    /// the application's role (<see cref="QueryAsApplicationRoleAsync{T}" />) rather than as <c>SqlConsoleRole</c>.
+    /// </summary>
+    internal static bool WasReadAsApplicationRole(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception.Data.Contains(ApplicationRoleKey)
+            || (exception.InnerException is { } inner && inner.Data.Contains(ApplicationRoleKey));
     }
 
     /// <summary>Runs <paramref name="query" /> and reads the first column of its first row.</summary>

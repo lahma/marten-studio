@@ -4,9 +4,14 @@ using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
+using PostgresStudio.Services.Replication;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Statements;
+using PostgresStudio.Services.Storage;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -134,6 +139,10 @@ internal static class StudioCoreRegistration
         // Health page or the Overview asks. What a visitor is shown, what they muted and which Critical they
         // have already been toasted about are that circuit's, so scoped.
         services.TryAddSingleton<HealthCheckRegistry>();
+
+        // W5-API: one process-wide bound on the databases the advisor keeps state for (API design §3.5) - the history, the
+        // sweep cache and the statement texts each register with it and forget a database together.
+        services.TryAddSingleton<HealthDatabaseBound>();
         services.TryAddSingleton<HealthHistory>();
         services.TryAddSingleton<HealthSweeper>();
         services.TryAddSingleton<HealthSweepCache>();
@@ -141,9 +150,22 @@ internal static class StudioCoreRegistration
         // H7: the statement checks' memory of the texts they have read, so a statement sweep whose statements are all
         // known makes no text call - each one costs pg_stat_statements its whole query-text file.
         services.TryAddSingleton<StatementTextCache>();
+
+        // Wave 6 (SEC2): the protector a browser's mute key is kept under, created once per process from the host's Data
+        // Protection - which AddRazorComponents() above has already registered - or, in a container without it, from an
+        // in-memory provider this constructs and registers nowhere.
+        services.TryAddSingleton(static provider =>
+            new HealthMuteKeys(provider.GetService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()));
         services.TryAddScoped<HealthMutes>();
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();
+
+        // W5-V1: the Maintenance page. Its facts are the regular sweep's own reads, the database's and every circuit's, and so
+        // is the one bloat measure per database at once; what a visitor is shown of them is the circuit's.
+        services.TryAddSingleton<IMaintenanceFacts, MaintenanceFactsReader>();
+        services.TryAddSingleton<BloatMeasureFlights>();
+        services.TryAddScoped<IMaintenanceNameGate, DatabaseAccessNameGate>();
+        services.TryAddScoped<IMaintenanceService, MaintenanceService>();
 
         // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
         // MeterListener is process-wide, and it listens only while a sweep or an open Sessions page holds a
@@ -163,5 +185,40 @@ internal static class StudioCoreRegistration
         // IRelationshipNodeSource, which the data service takes as optional - a studio with none draws plain tables.
         services.TryAddScoped<RelationshipReads>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
+
+        // W5-CAP: Storage. The facts are the database's - one read per database per HealthInterval, single flight, the same
+        // for every circuit - and what a visitor is shown of them is the circuit's.
+        services.TryAddSingleton<IStorageFacts, StorageFactsReader>();
+        services.TryAddScoped<IStorageService, StorageService>();
+
+        // W5-R2: the Replication page. The facts are the database's, read once per HealthInterval for every circuit; what a
+        // visitor is shown of them, which names it has audited and its one tablespace measurement at a time are the circuit's.
+        services.TryAddSingleton<IReplicationFactsReader, ReplicationFactsReader>();
+        services.TryAddSingleton<ReplicationFactsCache>();
+        services.TryAddScoped<IReplicationService, ReplicationService>();
+
+        // W5-S2: the Server page. The facts are the database's, read once per HealthInterval for every circuit; what a visitor
+        // is shown of them is the circuit's.
+        services.TryAddSingleton<IServerSettingsFactsReader, ServerSettingsFactsReader>();
+        services.TryAddSingleton<ServerSettingsFactsCache>();
+        services.TryAddScoped<IServerPageService, ServerPageService>();
+
+        // S07's update paths, remembered by database, extension and both versions across sweeps.
+        services.TryAddSingleton<ExtensionUpdatePaths>();
+        // W5-AUR: the host's capacity source, asked once per database and instance per HealthInterval for the whole process
+        // (issue #8 A8); and the Server page's Aurora section, whose facts are the database's and whose view is the circuit's.
+        services.TryAddSingleton<Aurora.CapacityReader>();
+        services.TryAddSingleton<Aurora.IAuroraFactsReader, Aurora.AuroraFactsReader>();
+        services.TryAddSingleton<Aurora.AuroraFactsCache>();
+        services.TryAddScoped<Aurora.IAuroraService, Aurora.AuroraService>();
+        // W5-Q1: the Statements page. The facts are the statement sweep's own read - the database's, single flight, kept for five
+        // minutes for every circuit - grouped by the studio's IStatementClassifier, which each Add*Studio registers; what a
+        // visitor is shown of them, and which first read this circuit has audited, are the circuit's.
+        services.TryAddSingleton<IStatementFacts, StatementFactsReader>();
+        services.TryAddScoped<IStatementsService, StatementsService>();
+
+        // W5-API: the Health page's Snapshot menu. The circuit's, because it asks each page's service as this visitor; it never
+        // reaches the diagnostics API, which each Add*Studio registers for host code alone.
+        services.TryAddScoped<Diagnostics.VisitorSnapshotBuilder>();
     }
 }

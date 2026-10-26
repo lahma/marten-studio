@@ -2,6 +2,7 @@ using System.Diagnostics;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -31,7 +32,10 @@ internal enum HealthCheckOutcome
     /// <summary>It ran, and its evaluator judged what it read - with or without findings.</summary>
     Checked,
 
-    /// <summary>The host's Marten lacks a feature the check needs, so it was never run.</summary>
+    /// <summary>
+    /// The host's runtime lacks a feature the check needs, or the server's platform does what it judges (Aurora's storage
+    /// layer checkpoints - <see cref="HealthCheckNotApplicableException" />), so it was never run.
+    /// </summary>
     NotApplicable,
 
     /// <summary>
@@ -157,8 +161,36 @@ internal sealed record HealthSweep(
     TimeSpan Duration,
     IReadOnlyList<HealthCheckResult> Results)
 {
+    private static readonly IReadOnlyDictionary<string, object> NoShared = new Dictionary<string, object>();
+
     /// <summary>Every finding of every check.</summary>
     public IEnumerable<HealthFinding> Findings => Results.SelectMany(static x => x.Findings);
+
+    /// <summary>
+    /// The sweep's shared reads that finished with an answer, by key (<see cref="HealthCheckContext.Shared{T}" />): gate-free
+    /// facts about the database, which a page's facts read takes rather than reading again (W5 §2.3; the Maintenance page).
+    /// Who is shown what of them is the page's view's decision, as a finding's is the report's.
+    /// </summary>
+    public IReadOnlyDictionary<string, object> Shared { get; init; } = NoShared;
+
+    /// <summary>
+    /// The statistics window a regular sweep computed (W5-CAP), when a gatherer read its signals: database-wide, so only ever
+    /// shown at <see cref="HealthGate.Database" /> - the Health page's "the statistics look reset" line (W5-AUR, A1's failover).
+    /// </summary>
+    public StatisticsWindow? Statistics { get; init; }
+
+    /// <summary>The shared read under <paramref name="key" />, when the sweep finished it as a <typeparamref name="T" />.</summary>
+    public bool TryShared<T>(string key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
+    {
+        if (Shared.TryGetValue(key, out object? found) && found is T typed)
+        {
+            value = typed;
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
 }
 
 /// <summary>
@@ -191,7 +223,9 @@ internal sealed record HealthSweep(
 /// <b>Expected states are values</b> (AGENTS.md, the memory rule): a gatherer's
 /// <see cref="HealthCheckUnavailableException" />, a privilege Postgres refused (42501), a statement that ran
 /// out of its timeout (57014) or its lock wait (55P03) - each is an <see cref="HealthCheckOutcome.Unavailable" />
-/// row and a Debug line. Anything else is a <see cref="HealthCheckOutcome.Failed" /> row and event 9222, at
+/// row and a Debug line. A refused privilege's row says which role was refused and who grants what on this platform
+/// (<see cref="PostgresGrants.Refused" />, W5 §2.6), from the sweep's one grant read. Anything else is a
+/// <see cref="HealthCheckOutcome.Failed" /> row and event 9222, at
 /// Warning once per check, database and kind of failure in ten minutes (<see cref="StudioLogThrottle" />),
 /// because a page polls this. A database that will not take a connection is one failure, not one per check.
 /// </para>
@@ -223,6 +257,7 @@ internal sealed class HealthSweeper
     private readonly TimeProvider timeProvider;
     private readonly IStudioRuntime runtime;
     private readonly IHealthStatementObserver? observer;
+    private readonly HealthDatabaseBound? bound;
 
     public HealthSweeper(
         HealthCheckRegistry registry,
@@ -233,7 +268,8 @@ internal sealed class HealthSweeper
         ILogger<HealthSweeper> logger,
         TimeProvider? timeProvider = null,
         IStudioRuntime? runtime = null,
-        IHealthStatementObserver? observer = null)
+        IHealthStatementObserver? observer = null,
+        HealthDatabaseBound? bound = null)
     {
         this.registry = registry;
         this.history = history;
@@ -244,6 +280,7 @@ internal sealed class HealthSweeper
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.runtime = runtime ?? NoStudioRuntime.Instance;
         this.observer = observer;
+        this.bound = bound;
     }
 
     /// <summary>
@@ -251,6 +288,13 @@ internal sealed class HealthSweeper
     /// <see langword="null" /> - always, in a host - is one <c>EffectiveHealthInterval</c>.
     /// </summary>
     internal TimeSpan? SweepBudget { get; set; }
+
+    /// <summary>
+    /// Every health statement's <c>lock_timeout</c>, when a test needs one shorter than the read-only session's own -
+    /// the version matrix's "returns under 300 ms behind somebody's <c>ACCESS EXCLUSIVE</c> lock"; <see langword="null" />
+    /// - always, in a host - is <see cref="ReadOnlySqlOptions.LockTimeout" />'s default.
+    /// </summary>
+    internal TimeSpan? LockTimeout { get; set; }
 
     /// <summary>The tiers a kind of sweep runs.</summary>
     public static IReadOnlySet<HealthCostTier> TiersOf(HealthSweepKind kind) => kind switch
@@ -280,12 +324,21 @@ internal sealed class HealthSweeper
         IReadOnlySet<HealthCostTier> tiers = TiersOf(kind);
         TimeSpan interval = settings.EffectiveHealthInterval;
 
+        // The database is used now, so its history and texts are kept, and the least recently used past the bound's capacity
+        // forgets its own (API design §3.5) - before this sweep writes anything.
+        bound?.Touch(storeKey, databaseId);
+
         TimeSpan statementTimeout = settings.QueryTimeout < MaxStatementTimeout ? settings.QueryTimeout : MaxStatementTimeout;
         ReadOnlySqlOptions sessionOptions = new()
         {
             StatementTimeout = statementTimeout,
             Role = settings.SqlConsoleRole,
         };
+
+        if (LockTimeout is { } lockTimeout)
+        {
+            sessionOptions = sessionOptions with { LockTimeout = lockTimeout };
+        }
 
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         await using HealthConnection connection = new(resolved.Target);
@@ -310,6 +363,7 @@ internal sealed class HealthSweeper
         Gathered[] gathered = new Gathered[run.Length];
         Dictionary<string, double> sample = new(StringComparer.Ordinal);
         Dictionary<string, HealthGate> sampleGates = new(StringComparer.Ordinal);
+        Dictionary<string, HealthGate> remembered = new(StringComparer.Ordinal);
 
         foreach (int index in Enumerable.Range(0, run.Length).OrderBy(i => run[i].Info.Tier))
         {
@@ -321,14 +375,58 @@ internal sealed class HealthSweeper
                 : await GatherAsync(descriptor).ConfigureAwait(false);
         }
 
+        // Aurora's wait profile and this database's commit latency (issue #8 A4, W5-AUR): no check judges them, so a regular sweep
+        // of an Aurora database reads them itself, once its gatherers have run - through this sweep's memo, so the platform read
+        // the checks made is not repeated - and samples them at the database-wide gate for the page's window deltas. The Server
+        // page reads its own facts (AuroraFactsCache, one read per HealthInterval) and takes only these samples from the sweep.
+        if (kind == HealthSweepKind.Regular
+            && !sweepBudget.IsCancellationRequested
+            && memo.TryGetCompleted<PostgresServerFacts>(HealthServerQueries.PlatformKey, out PostgresServerFacts? server)
+            && server.Platform.Kind == PostgresPlatformKind.AmazonAurora)
+        {
+            HealthSqlRunner platformSql = new(connection, sessionOptions, observer);
+            HealthCheckContext platform = new(resolved, settings, runtime, scope.ServiceProvider, platformSql, now, memo, sweepBudget.Token);
+
+            foreach (HealthSamplePart part in await AuroraSamplesAsync(platform, server, cancellationToken).ConfigureAwait(false))
+            {
+                if (sample.TryAdd(part.Series, part.Value))
+                {
+                    sampleGates[part.Series] = part.Gate;
+                }
+            }
+        }
+
+        // The database is still in use, and about to have its history, its texts and its cache slot written: touched again, so
+        // a database other sweeps evicted while this one gathered is tracked once more rather than left holding state the bound
+        // no longer knows of (W5-API-fix F7).
+        bound?.Touch(storeKey, databaseId);
+
         // Phase 2: one sample, from every check that read something - a regular sweep's into the database's history,
         // a statement sweep's into a history of its own that only statement sweeps read, and a deeper sweep's nowhere -
         // so that nothing a gated tier reads becomes history an ungated evaluator can see.
         string ring = HealthHistory.RingOf(databaseId, kind);
 
+        // The statistics window (W5-CAP), when a gatherer read its signals: computed once, against the history before this
+        // sweep's sample, and written into that sample - at the database-wide gate, the window's own - for the next sweep to
+        // compare with. No check writes a stats. series, so these never meet a check's.
+        StatisticsWindow? statistics = null;
+
+        if (memo.TryGetCompleted<StatisticsReading>(StatisticsWindow.ReadingKey, out StatisticsReading? reading))
+        {
+            statistics = StatisticsWindow.Compute(reading, history.Read(storeKey, ring));
+
+            foreach (HealthSamplePart part in statistics.Sample(reading))
+            {
+                if (sample.TryAdd(part.Series, part.Value))
+                {
+                    sampleGates[part.Series] = part.Gate;
+                }
+            }
+        }
+
         if (kind is HealthSweepKind.Regular or HealthSweepKind.Statements)
         {
-            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, interval / 2);
+            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, interval / 2, remembered);
         }
 
         HealthHistoryView view = history.Read(storeKey, ring);
@@ -345,6 +443,9 @@ internal sealed class HealthSweeper
                     TableRemedies = tableRemedies,
                     PlanAdvisor = planAdvisor,
                     Text = settings.Text,
+
+                    // Database-wide numbers, so only for an evaluator at or above that gate - as its series are.
+                    Statistics = gate >= HealthGate.Database ? statistics : null,
                 };
                 evaluations[gate] = evaluation;
             }
@@ -358,7 +459,14 @@ internal sealed class HealthSweeper
         List<HealthCheckResult> results =
             [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage))];
 
-        return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results);
+        // A regular sweep keeps its shared reads for the pages that reuse them (W5-V1), and a statement sweep keeps its own for
+        // the Statements page (W5-Q1), whose service shows them only through the activity gate - the gate the sweep itself
+        // ran behind. The deeper tier's reads are kept for nobody.
+        return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results)
+        {
+            Shared = kind is HealthSweepKind.Regular or HealthSweepKind.Statements ? memo.Completed() : new Dictionary<string, object>(),
+            Statistics = kind == HealthSweepKind.Regular ? statistics : null,
+        };
 
         async Task<Gathered> GatherAsync(HealthCheckDescriptor descriptor)
         {
@@ -384,7 +492,7 @@ internal sealed class HealthSweeper
                 // Checked whole before any of it is kept, so a check that breaks the rule leaves no part behind.
                 List<HealthSamplePart> parts = [.. descriptor.Check.Sample(facts)];
                 HashSet<string> own = new(StringComparer.Ordinal);
-                List<string> twice = [.. parts.Select(static x => x.Series).Where(series => sample.ContainsKey(series) || !own.Add(series))];
+                List<string> twice = [.. parts.Select(static x => x.Series).Where(series => sample.ContainsKey(series) || remembered.ContainsKey(series) || !own.Add(series))];
 
                 if (twice.Count > 0)
                 {
@@ -399,10 +507,18 @@ internal sealed class HealthSweeper
 
                 foreach (HealthSamplePart part in parts)
                 {
-                    sample[part.Series] = part.Value;
-
                     // The writer's gate, or a stricter one the part names - never a looser one.
-                    sampleGates[part.Series] = part.Gate > info.Gate ? part.Gate : info.Gate;
+                    HealthGate written = part.Gate > info.Gate ? part.Gate : info.Gate;
+
+                    // A sighting goes to the first-seen map, never into the sample (W5-V1).
+                    if (part.Remembered)
+                    {
+                        remembered[part.Series] = written;
+                        continue;
+                    }
+
+                    sample[part.Series] = part.Value;
+                    sampleGates[part.Series] = written;
                 }
 
                 return new Gathered(descriptor, facts, HealthCheckOutcome.Checked, null, null, sql.Statements, checkStarted);
@@ -411,9 +527,20 @@ internal sealed class HealthSweeper
             {
                 throw;
             }
+            catch (HealthCheckNotApplicableException notApplicable)
+            {
+                // The platform's design, not a state the host chose: listed, with the reason, and nothing logged.
+                return Gathered.Without(descriptor, HealthCheckOutcome.NotApplicable, notApplicable.Message, null, sql.Statements, checkStarted);
+            }
             catch (Exception exception)
             {
                 (HealthCheckOutcome outcome, HealthCheckProblem problem) = Classify(exception, budget.IsCancellationRequested);
+
+                if (problem.SqlState == PostgresErrorCodes.InsufficientPrivilege)
+                {
+                    problem = await NamingTheGrantAsync(context, info, HealthSqlRunner.WasReadAsApplicationRole(exception), problem).ConfigureAwait(false);
+                }
+
                 Report(info, outcome, exception, storeKey, databaseId);
 
                 return Gathered.Without(descriptor, outcome, null, problem, sql.Statements, checkStarted);
@@ -460,6 +587,13 @@ internal sealed class HealthSweeper
                         $"{info.Code}'s evaluator produced a finding coded {finding.Code}; a check speaks only for its own code.");
                 }
 
+                if (HealthCheckRegistry.FindingProblems(info, finding) is { Count: > 0 } variant)
+                {
+                    throw new HealthSweepRuleException(
+                        $"One of {info.Code}'s findings is of a variant the check does not list, or names none while the check lists its kinds; a variant is frozen per code.",
+                        variant[0]);
+                }
+
                 if (finding.Evidence.GroupBy(static x => x.Label, StringComparer.Ordinal).FirstOrDefault(static x => x.Count() > 1) is { } twice)
                 {
                     throw new HealthSweepRuleException(
@@ -494,6 +628,107 @@ internal sealed class HealthSweeper
                 : new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null);
 
             return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
+        }
+    }
+
+    /// <summary>
+    /// What an Aurora database adds to the sweep's sample (<see cref="Aurora.AuroraSamples" />): what of the waits and the
+    /// commit latency could be read - asked only once a check has read the server facts and they say Aurora, so the sweep
+    /// never reads anything on another platform. A failure is a value - fewer series this sweep - at Debug for a state the
+    /// host chose and event 9501 at the throttle's level otherwise; nothing escapes but cancellation of the sweep itself.
+    /// </summary>
+    private async Task<IReadOnlyList<HealthSamplePart>> AuroraSamplesAsync(HealthCheckContext context, PostgresServerFacts server, CancellationToken cancellationToken)
+    {
+        Aurora.AuroraWaitProfile? waits = await AuroraReadAsync(context, "waits", Aurora.AuroraWaitProfile.SharedAsync, cancellationToken).ConfigureAwait(false);
+        Aurora.AuroraDatabaseActivity? database = await AuroraReadAsync(context, "commit latency", Aurora.AuroraDatabaseActivity.SharedAsync, cancellationToken).ConfigureAwait(false);
+
+        return [.. Aurora.AuroraSamples.Of(server, waits, database)];
+    }
+
+    private async Task<T?> AuroraReadAsync<T>(HealthCheckContext context, string section, Func<HealthCheckContext, Task<T>> read, CancellationToken cancellationToken)
+        where T : class
+    {
+        try
+        {
+            return await read(context).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            (HealthCheckOutcome outcome, HealthCheckProblem problem) = Classify(exception, false);
+
+            if (outcome != HealthCheckOutcome.Failed)
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "{Product} did not sample Aurora's {Section} of {DatabaseId}", settings.Text.ProductName, section, context.DatabaseId);
+                }
+            }
+            else
+            {
+                LogLevel level = throttle.WarningOrDebug("Aurora.Read", context.StoreKey, context.DatabaseId, StudioLogThrottle.KindOf(exception));
+
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.PostgresStudioAuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
+                }
+                else
+                {
+                    logger.AuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
+                }
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A privilege Postgres refused (<c>42501</c>), worded as every "not checked" row is (W5 §2.6): the role the refused
+    /// statement ran as, whose each kind of object is to grant, and who grants a monitoring role on this platform
+    /// (<see cref="PostgresGrants.Refused" />), with what was refused left to Postgres' own words - from the sweep's one
+    /// grant read and its one platform read. Should either read fail, the row keeps the sentence it had, which names
+    /// neither, and the log says why at Debug.
+    /// </summary>
+    /// <param name="context">The refused check's context, whose runner the two shared reads go through.</param>
+    /// <param name="info">The refused check.</param>
+    /// <param name="asApplicationRole">
+    /// Whether the refused statement was read as the application's role, which names the login (<see cref="PostgresGrants.LoginRole" />)
+    /// rather than <c>SqlConsoleRole</c>.
+    /// </param>
+    /// <param name="problem">The row as <see cref="Classify" /> worded it.</param>
+    private async Task<HealthCheckProblem> NamingTheGrantAsync(
+        HealthCheckContext context,
+        HealthCheckInfo info,
+        bool asApplicationRole,
+        HealthCheckProblem problem)
+    {
+        try
+        {
+            PostgresGrants grants = await PostgresGrants.SharedAsync(context).ConfigureAwait(false);
+            PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+
+            return problem with { Reason = PostgresGrants.Refused(server.Platform, grants.RoleOf(asApplicationRole, settings.SqlConsoleRole)) };
+        }
+        catch (Exception exception)
+        {
+            // Including a cancellation: this runs inside the check's own catch, and the sweep's loop is what rethrows
+            // a cancellation of the whole sweep, at its next turn - nothing here may escape the sweep.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
+                }
+            }
+
+            return problem;
         }
     }
 

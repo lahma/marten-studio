@@ -67,8 +67,10 @@ internal sealed class LargeDocumentsCheck : HealthCheck<LargeDocumentsFacts>
     {
         IReadOnlyList<TableFacts> tables = await MartenTables.TablesAsync(context).ConfigureAwait(false);
 
+        // The store's own collections only: a document table nobody declares (an orphan the judged set lists beside the
+        // store) is Marten's but no visible type's, and its rows are never read raw (D27).
         List<TableFacts> documents = [.. tables
-            .Where(static x => x.Table.Kind == MartenTableKind.Document)
+            .Where(static x => x.Table.Kind == MartenTableKind.Document && x.Table.IsDeclaredByStore)
             .OrderByDescending(static x => x.Row.HeapBytes + x.Row.ToastBytes)
             .ThenBy(static x => x.Key, StringComparer.Ordinal)];
 

@@ -70,9 +70,12 @@ public class EventHealthSweepLiveTests(PostgresFixture postgres)
         probe.Statements.Should().NotContain(static x => x.Contains("as has_progression", StringComparison.Ordinal),
             "the daemon checks' own shape statement is gone");
 
-        // The budget, as a number: nine statements, where the two shape reads made it ten (measured at 9.39.0 and 9.50.2).
-        probe.Statements.Should().HaveCount(9,
-            "one sweep of these checks over the sample store runs nine statements, one of them the shape; it was ten. Ran: "
+        // The budget, as a number: eight statements. The two shape reads made it ten (measured at 9.39.0 and 9.50.2), one
+        // shape made it nine, and since W5-G1M the registered shards' rows are one read per sweep too: D02 and D03 asked for
+        // them in a statement each, which with extended tracking off is the same statement twice.
+        probe.Statements.Should().HaveCount(8,
+            "one sweep of these checks over the sample store runs eight statements, one of them the shape and one the shard rows "
+            + "D02 and D03 share; it was ten. Ran: "
             + string.Join(" || ", probe.Statements.Select(static x => x[..Math.Min(60, x.Length)])));
 
         // The one read is every reader's: the memo attributes it to each check that asked, so each one's Show SQL has it.

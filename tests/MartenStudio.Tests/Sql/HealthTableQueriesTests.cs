@@ -6,6 +6,7 @@ using Npgsql;
 
 using NpgsqlTypes;
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 
 namespace MartenStudio.Tests.Sql;
 
@@ -76,7 +77,8 @@ public partial class HealthTableQueriesTests
     {
         foreach (HealthQuery query in new[] { HealthTableQueries.Tables(Targets), HealthTableQueries.Indexes(Targets), HealthTableQueries.SoftDeleteShares(Targets) })
         {
-            query.ParameterNames.Should().Equal("@schemas", "@tables");
+            // The table read binds T08's line too (W5-V1 review), so each partition is judged against it in the statement.
+            query.ParameterNames.Take(2).Should().Equal("@schemas", "@tables");
             query.Parameters[0].NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Text);
             query.Parameters[0].Value.Should().BeEquivalentTo(TargetSchemas);
             query.Parameters[1].Value.Should().BeEquivalentTo(TargetTables);
@@ -231,5 +233,44 @@ public partial class HealthTableQueriesTests
         Action build = () => HealthTableQueries.DocumentSizeSample("studio", "mt_doc_order", percent, 10);
 
         build.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    /// <summary>
+    /// G1M: MartenStudio's list of the tables beside the store is Postgres Studio's statement and two predicates more -
+    /// the same admission the database browser makes, the same estimates and cap - so the two cannot drift apart.
+    /// </summary>
+    [Fact]
+    public void The_undeclared_tables_statement_is_the_relational_one_with_two_exclusions_and_nothing_else()
+    {
+        const string Exclusions =
+            "      and not (@skip_documents and pg_catalog.starts_with(pg_catalog.lower(c.relname::text), @document_prefix))\n"
+            + "      and not exists (\n"
+            + "          select 1\n"
+            + "          from rows from (pg_catalog.unnest(@declared_schemas), pg_catalog.unnest(@declared_tables)) as x(schema_name, table_name)\n"
+            + "          where pg_catalog.lower(x.schema_name) = pg_catalog.lower(a.nspname::text)\n"
+            + "            and pg_catalog.lower(x.table_name) = pg_catalog.lower(c.relname::text))\n";
+
+        HealthTableQueries.UndeclaredTablesSql.Should().Contain(Exclusions);
+        HealthTableQueries.UndeclaredTablesSql.Replace(Exclusions, string.Empty, StringComparison.Ordinal)
+            .Should().Be(HealthTableQueries.RelationalTablesSql);
+        HealthTableQueries.DocumentTablePrefix.Should().Be(DatabaseObjectClassifier.DocumentTablePrefix);
+    }
+
+    [Fact]
+    public void The_undeclared_tables_statement_binds_every_name_and_names_none()
+    {
+        HealthQuery query = HealthTableQueries.UndeclaredTables(
+            ["studio", "quartz"], everything: false, Targets, skipDocumentTables: true, 1_990);
+
+        query.Sql.Should().NotContain("studio").And.NotContain("quartz").And.NotContain("mt_doc_order").And.Contain("limit @cap");
+        query.Parameters.Select(static x => x.ParameterName).Should().BeEquivalentTo(
+            ["names", "everything", "cap", "system", "skip_documents", "document_prefix", "declared_schemas", "declared_tables"]);
+        query.Parameters.Single(static x => x.ParameterName == "declared_schemas").Value.Should().BeEquivalentTo(TargetSchemas);
+        query.Parameters.Single(static x => x.ParameterName == "declared_tables").Value.Should().BeEquivalentTo(TargetTables);
+        query.Parameters.Single(static x => x.ParameterName == "skip_documents").Value.Should().Be(true);
+        query.Parameters.Single(static x => x.ParameterName == "cap").Value.Should().Be(1_990);
+
+        Action none = () => HealthTableQueries.UndeclaredTables(["studio"], false, [], false, 0);
+        none.Should().Throw<ArgumentOutOfRangeException>("a sweep whose declared tables fill the cap reads no list at all");
     }
 }

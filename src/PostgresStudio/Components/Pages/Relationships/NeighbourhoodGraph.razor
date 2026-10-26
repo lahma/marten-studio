@@ -177,8 +177,7 @@
             <h3 class="ms-section-title">Not on the diagram</h3>
             <p class="ms-schema-note">
                 @(neighbourhood.Graph.Edges.Count == 0 ? "Its foreign keys have" : "These foreign keys have")
-                an end that is not a document type of this store or a table the studio can place, so there is
-                nothing to draw them between.
+                @Settings.Text.RelationshipNeighbourhoodUnmatched
             </p>
             <TableScroll Label="@($"Foreign keys of {Schema}.{Name} not on the diagram")">
                 <table class="ms-table">

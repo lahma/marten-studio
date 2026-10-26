@@ -1,4 +1,5 @@
 using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 
@@ -137,6 +138,63 @@ public class PoolChecksTests
         Server(20, version: 150008).AvailableText.Should().NotContain(" reserved_connections", "there is no such setting before PostgreSQL 16");
 
         new ConnectionBudgetCheck().Evaluate(new ConnectionBudgetFacts(2, 2, 90, 0, 2, sixteen), At()).Findings.Should().ContainSingle();
+    }
+
+    private static DatabasePoolSettings Pool(string? user, int max = 100, string server = "db:5432", bool pooling = true) =>
+        new(pooling, max, server, "app") { Username = user };
+
+    [Fact]
+    public void C02_charges_the_login_role_only_with_the_pools_that_log_in_as_it()
+    {
+        DatabasePoolSettings mine = Pool("app");
+
+        ConnectionBudgetTally tally = ConnectionBudgetCheck.Tally(
+            [
+                mine,
+                Pool("app", max: 30),
+                Pool("tenant_b", max: 70),
+                Pool(null, max: 40),
+                Pool("app", max: 500, server: "other:5432"),
+                Pool("app", pooling: false),
+                null,
+            ],
+            mine,
+            "app");
+
+        tally.OnServer.Should().Be(5, "the other server's database and the unreadable one are not counted");
+        tally.Pooled.Should().Be(4);
+        tally.Unpooled.Should().Be(1);
+        tally.Ceilings.Should().Be(240, "the server's budget is spent by every pool on it, whoever it logs in as");
+        tally.CeilingsAsLogin.Should().Be(130, "only the two pools naming role app spend its CONNECTION LIMIT");
+    }
+
+    [Fact]
+    public void C02_reads_a_login_from_the_connection_strings_alone()
+    {
+        ConnectionBudgetCheck.SameLogin(Pool(null), Pool(null), "postgres").Should().BeTrue("both take the process's own PGUSER or OS user");
+        ConnectionBudgetCheck.SameLogin(Pool(null), Pool("app"), "app").Should().BeFalse("what a pool naming no user logs in as is not known without connecting");
+        ConnectionBudgetCheck.SameLogin(Pool("app"), Pool("app@server"), "app").Should().BeTrue("it names the role this database's sessions log in as");
+        ConnectionBudgetCheck.SameLogin(Pool("App"), Pool("app"), "app").Should().BeFalse("Postgres compares a role name exactly");
+        ConnectionBudgetCheck.SameLogin(Pool("tenant_b"), Pool("app"), "app").Should().BeFalse();
+    }
+
+    [Fact]
+    public void C02_says_the_role_limit_only_when_the_role_s_own_pools_pass_it()
+    {
+        ServerConnectionLimits limited = Server(20) with { LoginRole = "app", RoleLimit = 50 };
+
+        ConnectionBudgetFacts tenantsOwnRoles = new(3, 3, 300, 0, 3, limited) { CeilingsAsLogin = 40 };
+        ConnectionBudgetCheck.RoleSentence(tenantsOwnRoles).Should().BeNull("the other tenants log in as roles of their own");
+        new ConnectionBudgetCheck().Evaluate(tenantsOwnRoles, At()).Findings.Single().Evidence
+            .Should().NotContain(x => x.Label == "The login role's limit");
+
+        ConnectionBudgetFacts shared = tenantsOwnRoles with { CeilingsAsLogin = 120 };
+        ConnectionBudgetCheck.RoleSentence(shared).Should().Be("this process alone may open 120 connections as role app, which may open 50");
+        new ConnectionBudgetCheck().Evaluate(shared, At()).Findings.Single().Evidence
+            .Should().Contain(new HealthEvidence("The login role's limit", "this process alone may open 120 connections as role app, which may open 50"));
+
+        ConnectionBudgetCheck.RoleSentence(shared with { Server = limited with { RoleSuperuser = true } })
+            .Should().BeNull("neither limit is enforced against a superuser");
     }
 
     // ----------------------------------------------------------------------------------------------

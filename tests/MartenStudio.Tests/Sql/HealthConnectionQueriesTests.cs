@@ -112,7 +112,12 @@ public class HealthConnectionQueriesTests
         string sql = HealthConnectionQueries.ServerConnections().Sql;
 
         sql.Should().Contain("(select count(*) from pg_stat_activity a where " + HealthConnectionQueries.ClientSession + ") as client_backends");
-        sql.Should().NotContain("usename").And.NotContain("query").And.NotContain("client_addr").And.NotContain("application_name");
+        sql.Should().NotContain("query").And.NotContain("client_addr").And.NotContain("application_name");
+
+        // W5-AUR: the login role's sessions on the server are counted against its CONNECTION LIMIT - a filter on usename, never
+        // a column: the one place the read names a session's role is the count of the login role's own.
+        Regex.Matches(sql, @"usename").Should().ContainSingle();
+        sql.Should().Contain("(select count(*) from pg_stat_activity a where " + HealthConnectionQueries.ClientSession + " and a.usename = session_user) as role_sessions");
     }
 
     /// <summary>

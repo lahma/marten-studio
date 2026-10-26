@@ -1,0 +1,73 @@
+C01 | Connections | - | - | both | since 0.4 | current
+C02 | Connections | - | - | Marten | since 0.4 | current
+C03 | Connections | server, role, database | - | both | since 0.4 | current
+C04 | Connections | - | - | both | since 0.4 | current
+C05 | Connections | - | - | both | since 0.4 | current
+C06 | Connections | - | - | both | since 0.4 | current
+C07 | Connections | - | - | both | since 0.4 | current
+C08 | Connections | deadlocks, rollbacks, temp-files | - | both | since 0.4 | current
+C09 | Connections | - | - | Marten | since 0.4 | current
+C10 | Connections | - | - | Marten | since 0.4 | current
+C11 | Connections | - | - | both | since 0.5 | current
+D01 | Daemon | - | - | Marten | since 0.4 | current
+D02 | Daemon | no-daemon, lock-held-idle | - | Marten | since 0.4 | current
+D03 | Daemon | - | shard | Marten | since 0.4 | current
+D04 | Daemon | - | shard | Marten | since 0.4 | current
+D05 | Daemon | - | shard | Marten | since 0.4 | current
+D06 | Daemon | - | projection | Marten | since 0.4 | current
+D07 | Daemon | - | - | Marten | since 0.4 | current
+D08 | Daemon | - | shard | Marten | since 0.4 | current
+D09 | Daemon | mark-ahead, shard-ahead, sequence-behind | `mark-ahead`: progression row; `shard-ahead`: shard; `sequence-behind`: sequence | Marten | since 0.5 | current
+E02 | Events | - | - | Marten | since 0.4 | current
+E03 | Events | - | stream | Marten | since 0.4 | current
+E04 | Events | - | - | Marten | since 0.4 | current
+E05 | Events | - | - | Marten | since 0.4 | current
+E06 | Events | - | - | Marten | since 0.4 | current
+E07 | Events | - | - | Marten | since 0.4 | current
+E08 | Events | - | - | Marten | since 0.4 | current
+K01 | Configuration | - | - | Marten | since 0.4 | current
+K02 | Configuration | - | - | Marten | since 0.4 | current
+K03 | Configuration | - | - | Marten | since 0.4 | current
+K04 | Configuration | - | - | Marten | since 0.4 | current
+K05 | Configuration | - | - | both | since 0.5 | current
+K06 | Configuration | - | - | both | since 0.5 | current
+K07 | Configuration | - | - | both | since 0.5 | current
+K08 | Configuration | idle-in-transaction, transaction-timeout, idle-session | setting | Marten | since 0.5 | current
+R01 | Replication | near-limit, inactive, lost | - | both | since 0.4 | current
+R02 | Replication | failing, backlog | - | both | since 0.5 | current
+R03 | Replication | primary-view, standby-view, paused, aurora-reader | - | both | since 0.5 | current
+R04 | Replication | - | - | both | since 0.5 | current
+S01 | Server | - | - | both | since 0.4 | current
+S02 | Server | setting, pending-restart | `setting`: setting; `pending-restart`: - | both | since 0.4 | current
+S03 | Server | - | - | both | since 0.4 | current
+S04 | Server | superuser, provider-admin, file-access | - | both | since 0.5 | current
+S05 | Server | - | - | both | since 0.5 | current
+S06 | Server | - | schema | both | since 0.5 | current
+S07 | Server | - | extension | both | since 0.5 | current
+S08 | Server | - | - | both | since 0.5 | current
+S09 | Server | - | setting | both | since 0.5 | current
+S10 | Server | read-only, standby | - | both | since 0.5 | current
+T01 | Tables | - | table | both | since 0.4 | current
+T02 | Tables | - | statement | both | since 0.4 | current
+T03 | Tables | index, partitions | `index`: index; `partitions`: table | both | since 0.4 | current
+T04 | Tables | - | index | both | since 0.4 | current
+T05 | Tables | - | index | both | since 0.4 | current
+T06 | Tables | - | table | both | since 0.4 | current
+T07 | Tables | dead-rows, inserts | table | both | since 0.4 | current
+T08 | Tables | stale, never-analysed, since-restart | `stale`, `never-analysed`: table; `since-restart`: - | both | since 0.4 | current
+T09 | Tables | - | table | Marten | since 0.4 | current
+T10 | Tables | - | table | Marten | since 0.4 | current
+T11 | Tables | - | document type | Marten | since 0.4 | current
+T12 | Tables | - | - | both | since 0.4 | current
+T13 | Tables | - | - | both | since 0.4 | current
+T14 | Tables | - | - | both | since 0.4 | current
+T15 | Tables | uncovered, partly-covered | foreign key | both | since 0.5 | current
+T16 | Tables | - | - | both | since 0.5 | current
+T17 | Tables | - | - | Marten | since 0.5 | current
+T19 | Tables | per-transaction, capacity | table | both | since 0.5 | current
+T20 | Tables | running-out, default-partition-rows | table | both | since 0.5 | current
+T22 | Tables | - | table | Marten | since 0.4 | current
+T23 | Tables | - | - | both | since 0.4 | current
+T24 | Tables | - | table | both | since 0.5 | current
+T25 | Tables | issue-rule, key-width | index | both | since 0.5 | current
+T26 | Tables | column, sequence | column | both | since 0.5 | current

@@ -235,7 +235,8 @@ internal sealed class HighWaterPinnedCheck : HealthCheck<HighWaterPinnedFacts>
                 + "Advance high water mark there, which moves the mark to the latest committed event: anything that commits "
                 + "inside the gap afterwards is never projected. The cap above does the same automatically once a gap has been "
                 + "held that long, with the same cost, so set it only if a leaked session is likelier than a slow append. "
-                + "PostgreSQL's idle_in_transaction_session_timeout removes the cause instead."),
+                + "PostgreSQL's idle_in_transaction_session_timeout removes the cause instead - set longer than the HotCold "
+                + "leader's idle stretch in its leadership transaction, or it ends the daemon's leadership too (K08)."),
         });
     }
 }

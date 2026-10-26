@@ -50,8 +50,52 @@ internal sealed record HealthStatementText(string Text, bool Truncated);
 /// <param name="ParameterNames">Its parameters as the statement spells them (<c>@schemas</c>).</param>
 internal sealed record HealthStatement(string Sql, IReadOnlyList<string> ParameterNames);
 
+/// <summary>What kind of change a remedy is: which rule its text is held to, and how the page heads it.</summary>
+/// <remarks>
+/// The kind is what lets a remedy be something other than a configuration line without loosening the rule for the ones
+/// that are. A configuration line (the first kind) and a one-off repair (<see cref="Repair" />) are refused DDL. No kind
+/// may be a privilege change (<c>GRANT</c>, <c>REVOKE</c>): a "not checked" row names the grant it needs in words, for
+/// whoever may give it, and never as a statement to paste (<c>PostgresGrants</c>). The values are never persisted; they
+/// are explicit so that an addition is visibly one.
+/// </remarks>
+internal enum HealthRemedyKind
+{
+    /// <summary>
+    /// A line for the host's own configuration - a <c>StoreOptions</c> line, a connection-string option, a studio
+    /// option. Never DDL. What the public constructor makes.
+    /// </summary>
+    Configuration = 0,
+
+    /// <summary>
+    /// SQL for the host's own migrations, for a table the host's migrations own
+    /// (<see cref="HealthRemedy.ForMigration" />, issue #8 G12), drawn under <see cref="HealthRemedy.MigrationHeading" />.
+    /// </summary>
+    Migration = 1,
+
+    /// <summary>
+    /// A server setting, <c>name = value</c>, for whoever runs the server, worded for the platform that runs it
+    /// (<c>ServerSettingRemedy</c>).
+    /// </summary>
+    ServerSetting = 2,
+
+    /// <summary>
+    /// A change only the managed platform's own console, API or support can make - a parameter group, an instance class,
+    /// a capacity range (<see cref="HealthRemedy.ForManagedPlatform" />).
+    /// </summary>
+    ManagedPlatform = 3,
+
+    /// <summary>
+    /// A one-off statement for whoever runs the database to run by hand, once, in the database the finding is about -
+    /// data, never schema: a <c>setval</c> that moves a sequence on (<see cref="HealthRemedy.ForRepair" />), drawn under
+    /// <see cref="HealthRemedy.RepairHeading" />. The studio never runs it. Refused DDL, as a configuration line is: a
+    /// repair that changed the schema would be schema no configuration declares.
+    /// </summary>
+    Repair = 4,
+}
+
 /// <summary>
-/// What to change: a <c>StoreOptions</c> line the host pastes into its own registration - never DDL.
+/// What to change: a <c>StoreOptions</c> line the host pastes into its own registration - never DDL - or, by its
+/// <see cref="Kind" />, migration SQL, a server setting, a change on the managed platform or a one-off repair.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -68,11 +112,19 @@ internal sealed record HealthStatement(string Sql, IReadOnlyList<string> Paramet
 /// cannot claim a version the probe does not check.
 /// </para>
 /// <para>
-/// <b>The one exception is a relational table's migration SQL</b> (<see cref="ForMigration" />, issue #8 G12). A table
-/// the host's own migrations own has no configuration that reconciles it, so the reason above does not hold - and
-/// without DDL a plain data source's index and storage findings would have no remedy at all. Such a remedy is marked
-/// <see cref="IsMigration" />, drawn under "For your own migrations - the studio never runs this", and only ever made by
-/// a studio's <c>IHealthTableRemedies</c> for a <c>Relational</c> table, from SQL built under <c>Internal/Sql</c>.
+/// <b>The exceptions are kinds, and each says what it is</b> (<see cref="HealthRemedyKind" />). A relational table's
+/// migration SQL (<see cref="ForMigration" />, issue #8 G12): a table the host's own migrations own has no configuration
+/// that reconciles it, so the reason above does not hold - and without DDL a plain data source's index and storage
+/// findings would have no remedy at all. Such a remedy is drawn under "For your own migrations - the studio never runs
+/// this", and only ever made by a studio's <c>IHealthTableRemedies</c> for a <c>Relational</c> table, from SQL built
+/// under <c>Internal/Sql</c>. A server setting (<see cref="HealthRemedyKind.ServerSetting" />) is made by
+/// <c>ServerSettingRemedy</c>, which words where the setting changes on the platform that runs the server, and a change
+/// on the managed platform (<see cref="ForManagedPlatform" />) is for its console or support; both are drawn under
+/// <see cref="ChangeHeading" />, as a server setting always was. A one-off repair (<see cref="ForRepair" />) is a
+/// statement that puts data right - D09's <c>setval</c>, which moves an event sequence past the events it is behind -
+/// for whoever runs the database to run by hand: no configuration states where a sequence stands, so no configuration
+/// line can be the remedy. It is drawn under <see cref="RepairHeading" />, ends with <see cref="RepairHandOverNote" />,
+/// and is refused DDL like a configuration line. No kind may be a privilege change.
 /// </para>
 /// </remarks>
 internal sealed record HealthRemedy
@@ -84,25 +136,95 @@ internal sealed record HealthRemedy
     /// <summary>The heading a migration remedy is drawn under.</summary>
     public const string MigrationHeading = "For your own migrations - the studio never runs this";
 
+    /// <summary>What a one-off repair says of itself, after its own explanation.</summary>
+    public const string RepairHandOverNote =
+        "It is a statement for whoever runs this database to run once, by hand; the studio never runs it.";
+
+    /// <summary>The heading a one-off repair is drawn under.</summary>
+    public const string RepairHeading = "A one-off repair, run by hand - the studio never runs this";
+
+    /// <summary>The heading every other kind of remedy is drawn under.</summary>
+    public const string ChangeHeading = "What to change";
+
     /// <summary>
     /// A remedy that is SQL for the host's own migrations - <c>ALTER TABLE ... SET (...)</c>,
     /// <c>CREATE INDEX CONCURRENTLY ...</c> - which the DDL rule of the constructor does not apply to.
     /// </summary>
     /// <param name="sql">The statement, built under <c>Internal/Sql</c> with every identifier quoted.</param>
     /// <param name="explanation">What it changes and what it costs; <see cref="HandOverNote" /> is added after it.</param>
+    /// <exception cref="ArgumentException"><paramref name="sql" /> is empty, or a privilege change.</exception>
     public static HealthRemedy ForMigration(string sql, string explanation)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sql);
         ArgumentException.ThrowIfNullOrWhiteSpace(explanation);
 
-        return new HealthRemedy(sql, explanation + " " + HandOverNote, isMigration: true);
+        return new HealthRemedy(HealthRemedyKind.Migration, sql, explanation + " " + HandOverNote, requires: null);
     }
 
-    private HealthRemedy(string code, string explanation, bool isMigration)
+    /// <summary>
+    /// A server setting - <c>name = value</c> lines, perhaps under a comment - for whoever runs the server. Made by
+    /// <c>ServerSettingRemedy</c>, which words it for the platform. The DDL rule does not apply; the privilege rule does.
+    /// </summary>
+    /// <param name="code">The lines, as they go in the server's configuration.</param>
+    /// <param name="explanation">Where the setting changes, and what changing it costs.</param>
+    /// <exception cref="ArgumentException"><paramref name="code" /> is empty, or a privilege change.</exception>
+    internal static HealthRemedy ForServerSetting(string code, string? explanation) =>
+        new(HealthRemedyKind.ServerSetting, code, explanation, requires: null);
+
+    /// <summary>
+    /// A change only the managed platform can make - in its console, its API or through its support - described rather
+    /// than pasted.
+    /// </summary>
+    /// <param name="code">What to change, as the platform names it.</param>
+    /// <param name="explanation">Where, and what it costs.</param>
+    /// <exception cref="ArgumentException"><paramref name="code" /> is empty, or a privilege change.</exception>
+    public static HealthRemedy ForManagedPlatform(string code, string? explanation) =>
+        new(HealthRemedyKind.ManagedPlatform, code, explanation, requires: null);
+
+    /// <summary>
+    /// A one-off repair: a statement - under comment lines, perhaps - for whoever runs the database to run by hand, once,
+    /// built under <c>Internal/Sql</c> with every identifier quoted. Data, never schema: the DDL rule applies, and so does
+    /// the privilege rule.
+    /// </summary>
+    /// <param name="code">The statement, and the comment lines that say when to run it.</param>
+    /// <param name="explanation">What it changes, where it runs and what to stop first; <see cref="RepairHandOverNote" /> is added after it.</param>
+    /// <exception cref="ArgumentException"><paramref name="code" /> is empty, DDL or a privilege change.</exception>
+    public static HealthRemedy ForRepair(string code, string explanation)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(explanation);
+
+        return new HealthRemedy(HealthRemedyKind.Repair, code, explanation + " " + RepairHandOverNote, requires: null);
+    }
+
+    private HealthRemedy(HealthRemedyKind kind, string code, string? explanation, StudioFeatureRequirement? requires)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(code);
+
+        // The privilege rule first: it holds for every kind, and a grant is a privilege change before it is DDL.
+        if (HealthRemedyRules.PrivilegeStatement().IsMatch(code))
+        {
+            throw new ArgumentException(
+                "A health remedy is never a privilege change: a grant is named in words, for whoever may give it, never as a statement to paste.",
+                nameof(code));
+        }
+
+        if (kind == HealthRemedyKind.Configuration && HealthRemedyRules.DdlStatement().IsMatch(code))
+        {
+            throw new ArgumentException(
+                "A health remedy is a StoreOptions line, never DDL: an object the studio created would be one the host's configuration does not declare.",
+                nameof(code));
+        }
+
+        if (kind == HealthRemedyKind.Repair && HealthRemedyRules.DdlStatement().IsMatch(code))
+        {
+            throw new ArgumentException(
+                "A repair puts data right and is never DDL: schema changed by hand is schema the host's configuration does not declare.",
+                nameof(code));
+        }
+
+        Kind = kind;
         Code = code;
         Explanation = explanation;
-        IsMigration = isMigration;
+        Requires = requires;
     }
 
     /// <param name="code">The line, or lines, to paste.</param>
@@ -110,20 +232,12 @@ internal sealed record HealthRemedy
     /// <param name="requires">The newer-than-floor feature the line needs, or <see langword="null" />.</param>
     /// <exception cref="ArgumentException"><paramref name="code" /> is empty, or begins a DDL statement.</exception>
     public HealthRemedy(string code, string? explanation = null, StudioFeatureRequirement? requires = null)
+        : this(HealthRemedyKind.Configuration, code, explanation, requires)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(code);
-
-        if (HealthRemedyRules.DdlStatement().IsMatch(code))
-        {
-            throw new ArgumentException(
-                "A health remedy is a StoreOptions line, never DDL: an object the studio created would be one the host's configuration does not declare.",
-                nameof(code));
-        }
-
-        Code = code;
-        Explanation = explanation;
-        Requires = requires;
     }
+
+    /// <summary>What kind of change it is, which decides the rule its text is held to and the heading it is drawn under.</summary>
+    public HealthRemedyKind Kind { get; }
 
     /// <summary>The line, or lines, to paste.</summary>
     public string Code { get; }
@@ -135,9 +249,15 @@ internal sealed record HealthRemedy
     public StudioFeatureRequirement? Requires { get; }
 
     /// <summary>
-    /// Whether it is SQL for the host's own migrations (<see cref="ForMigration" />) rather than a configuration line.
+    /// The heading the page draws it under: <see cref="MigrationHeading" />, <see cref="RepairHeading" /> or
+    /// <see cref="ChangeHeading" />.
     /// </summary>
-    public bool IsMigration { get; }
+    public string Heading => Kind switch
+    {
+        HealthRemedyKind.Migration => MigrationHeading,
+        HealthRemedyKind.Repair => RepairHeading,
+        _ => ChangeHeading,
+    };
 }
 
 /// <summary>What a remedy may not be.</summary>
@@ -148,6 +268,12 @@ internal static partial class HealthRemedyRules
         @"(^|;)\s*(create|alter|drop|truncate|grant|revoke|vacuum|analyze|reindex|cluster|comment\s+on)\s",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     internal static partial Regex DdlStatement();
+
+    /// <summary>A line that starts a privilege change, which no kind of remedy may be.</summary>
+    [GeneratedRegex(
+        @"(^|;)\s*(grant|revoke)\s",
+        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    internal static partial Regex PrivilegeStatement();
 }
 
 /// <summary>
@@ -189,6 +315,14 @@ internal sealed record HealthFinding
     /// mute another's.
     /// </summary>
     public string? Subject { get; init; }
+
+    /// <summary>
+    /// Which of its check's fixed kinds of finding this is - <c>deadlocks</c>, <c>temp-files</c> - or
+    /// <see langword="null" /> for a check with one kind. Only a value its check lists in
+    /// <see cref="HealthCheckAttribute.Variants" />; the sweep refuses any other (<see cref="HealthCheckRegistry.FindingProblems" />).
+    /// Part of <see cref="Key" /> when it is set.
+    /// </summary>
+    public string? Variant { get; init; }
 
     /// <summary>The tenant the finding is about, or <see langword="null" /> for the database as a whole.</summary>
     public string? TenantId { get; init; }
@@ -249,8 +383,18 @@ internal sealed record HealthFinding
     /// <summary>What the check's gatherer ran, for "Show SQL".</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
 
-    /// <summary>What identifies this finding among the others of its database: the code, then the subject.</summary>
-    public string Key => Subject is null ? Code : Code + "|" + Subject;
+    /// <summary>
+    /// What identifies this finding among the others of its database: the code, then the variant when there is one, then
+    /// the subject - <c>Code</c>, <c>Code|Subject</c>, <c>Code|Variant</c> or <c>Code|Variant|Subject</c>. A finding with
+    /// no variant keeps the key it always had, so no mute key moves until a check sets one.
+    /// </summary>
+    public string Key => (Variant, Subject) switch
+    {
+        (null, null) => Code,
+        (null, { } subject) => Code + "|" + subject,
+        ({ } variant, null) => Code + "|" + variant,
+        ({ } variant, { } subject) => Code + "|" + variant + "|" + subject,
+    };
 }
 
 /// <summary>

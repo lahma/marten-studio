@@ -32,6 +32,13 @@ internal enum HorizonTimeKind
     /// </summary>
     Behind,
 
+    /// <summary>
+    /// A lower bound from the first sweep that saw the holder's own identity unchanged - a writer's process, backend start
+    /// and transaction id, a slot's name and xmin, a standby's WAL sender and xmin - kept in the database's first-seen map,
+    /// which outlives the history's ring (W5-V1, <see cref="HealthHistoryView.FirstSeen" />).
+    /// </summary>
+    Watched,
+
     /// <summary>Not known: not recorded, not readable, and no sample of the counter past an id it owns.</summary>
     Unknown,
 }
@@ -139,6 +146,32 @@ internal sealed record HorizonHolder
     public long Total { get; init; } = 1;
 
     /// <summary>
+    /// The id it owns as the raw transaction id - a session's <c>backend_xid</c>, a prepared transaction's - or
+    /// <see langword="null" />: what a slot pinned at it is matched by (<see cref="HorizonHeldCheck.RootsOf" />).
+    /// </summary>
+    public long? OwnXid { get; init; }
+
+    /// <summary>
+    /// The horizon it holds as the raw transaction id: a slot's <c>xmin</c> (or <c>catalog_xmin</c>, for that holder), a
+    /// standby's or a session's <c>backend_xmin</c> - or <see langword="null" />.
+    /// </summary>
+    public long? Xmin { get; init; }
+
+    /// <summary>
+    /// What identifies this very hold from one sweep to the next, or <see langword="null" /> for a holder T14 does not date
+    /// by it: <c>(pid, backend_start, backend_xid)</c> for a writer, <c>(slot, xmin)</c> for a slot, <c>(WAL-sender pid, xmin)</c>
+    /// for a standby (W5-V1). Never shown: only its hash is kept, at T14's gate (<see cref="HorizonHeldCheck.SightingOf" />).
+    /// </summary>
+    public string? Identity { get; init; }
+
+    /// <summary>
+    /// Whether it is a physical slot with a consumer streaming from it now - a standby, whose <c>hot_standby_feedback</c>
+    /// lands on the slot's <c>xmin</c> (B0 §4).
+    /// </summary>
+    public bool StandbyThroughSlot => Kind == HealthHorizonHolderKind.SlotXmin && Active && !Lost
+        && string.Equals(SlotType, "physical", StringComparison.Ordinal);
+
+    /// <summary>
     /// Whether it holds back vacuum of the store's tables - dead rows stay, freezing stops at it. The other kinds hold back
     /// only the system catalogs, and through them every database's freeze.
     /// </summary>
@@ -169,6 +202,17 @@ internal sealed record HorizonHolder
             HoldsDaemonLock = row.HoldsDaemonLock,
             Total = row.Total,
             OwnXidAge = row.OwnXidAge,
+            OwnXid = row.OwnXid,
+            Xmin = row.Xmin,
+            Identity = row switch
+            {
+                { Kind: HealthHorizonHolderKind.Session, ProcessId: { } pid, OwnXid: { } xid } =>
+                    "writer:" + pid.ToString(CultureInfo.InvariantCulture) + ":"
+                    + (row.BackendStart?.UtcTicks ?? 0).ToString(CultureInfo.InvariantCulture) + ":" + xid.ToString(CultureInfo.InvariantCulture),
+                { Kind: HealthHorizonHolderKind.Standby, ProcessId: { } pid, Xmin: { } xmin } =>
+                    "standby:" + pid.ToString(CultureInfo.InvariantCulture) + ":" + xmin.ToString(CultureInfo.InvariantCulture),
+                _ => null,
+            },
         };
     }
 
@@ -226,10 +270,10 @@ internal sealed record HorizonHolder
         // An inactive slot's xmin has not moved since it went inactive: a lower bound of how long it has held it.
         TimeSpan? inactive = slot.Active ? null : slot.InactiveAtRead;
 
-        foreach ((HealthHorizonHolderKind kind, int? age) in new[]
+        foreach ((HealthHorizonHolderKind kind, int? age, long? raw) in new[]
                  {
-                     (HealthHorizonHolderKind.SlotXmin, slot.XminAge),
-                     (HealthHorizonHolderKind.SlotCatalogXmin, slot.CatalogXminAge),
+                     (HealthHorizonHolderKind.SlotXmin, slot.XminAge, slot.Xmin),
+                     (HealthHorizonHolderKind.SlotCatalogXmin, slot.CatalogXminAge, slot.CatalogXmin),
                  })
         {
             if (age is { } xids)
@@ -249,6 +293,12 @@ internal sealed record HorizonHolder
                     SlotDatabase = slot.ThisDatabase ? slot.Database : null,
                     Active = slot.Active,
                     Lost = IsReportedLost(slot),
+                    Xmin = raw,
+
+                    // The slot's own name, whichever database it is - only ever hashed, and never shown.
+                    Identity = raw is { } xmin
+                        ? "slot:" + kind.ToString() + ":" + slot.Name + ":" + xmin.ToString(CultureInfo.InvariantCulture)
+                        : null,
                 };
             }
         }
@@ -349,6 +399,52 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
     /// <summary>The link a writer's finding carries: D01's Explain, which names what pins the high-water mark.</summary>
     internal static readonly HealthLink ExplainLink = new("Explain it on the projections screen", "projections");
 
+    /// <summary>
+    /// The family of T14's sightings (<see cref="HealthSamplePart.Remembered" />): a holder identity's hash after the colon,
+    /// never the identity.
+    /// </summary>
+    internal const string SightingSeries = "tables.horizon-seen:";
+
+    /// <summary>
+    /// How far back a slot or a standby must hold before the time since T14 first saw it is its age (W5-V1): a slot whose
+    /// <c>xmin</c> stays put because nothing assigns a transaction id holds nothing back, however long.
+    /// </summary>
+    public const long WatchedMinimumXids = 1_000;
+
+    /// <summary>The remembered series of a holder's identity, or <see langword="null" /> for a holder that has none.</summary>
+    internal static string? SightingOf(HorizonHolder holder)
+    {
+        ArgumentNullException.ThrowIfNull(holder);
+
+        if (holder.Identity is not { } identity)
+        {
+            return null;
+        }
+
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(identity));
+        return SightingSeries + Convert.ToHexStringLower(hash.AsSpan(0, 12));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Each holder identity, as a sighting: the database's first-seen map keeps when a sweep first saw it, beyond the ring,
+    /// at T14's gate - so a hold is dated honestly past the hour the ring reaches (W5-V1). Only the hash is written.
+    /// </remarks>
+    public override IEnumerable<HealthSamplePart> Sample(HorizonFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        HashSet<string> written = new(StringComparer.Ordinal);
+
+        foreach (HorizonHolder holder in facts.Holders)
+        {
+            if (SightingOf(holder) is { } series && written.Add(series))
+            {
+                yield return new HealthSamplePart(series, 1) { Remembered = true };
+            }
+        }
+    }
+
     /// <inheritdoc />
     public override async Task<HorizonFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
@@ -412,6 +508,8 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             low = upper;
         }
 
+        (TimeSpan? Age, HorizonTimeKind Kind) best = low is { } bound ? (bound, HorizonTimeKind.AtLeast) : (null, HorizonTimeKind.Unknown);
+
         // Only an id the holder owns is dated by the counter (H9 re-review, blocking 1): it has held its own transaction id
         // since the id was handed out, and the first sample of the counter already past it is when, at the latest, that
         // was. A snapshot's xmin is the oldest id running anywhere when it was taken - somebody else's - so it is not.
@@ -426,13 +524,35 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
                 fromHistory = most;
             }
 
-            if (low is not { } least || fromHistory > least)
+            if (best.Age is not { } least || fromHistory > least)
             {
-                return (fromHistory, HorizonTimeKind.FromHistory);
+                best = (fromHistory, HorizonTimeKind.FromHistory);
             }
         }
 
-        return low is { } bound ? (bound, HorizonTimeKind.AtLeast) : (null, HorizonTimeKind.Unknown);
+        // Honest time beyond the ring (W5-V1): the first sweep that saw this very identity - a writer's process and own
+        // transaction id, a slot's or a standby's unchanged xmin - is when, at the latest, it began to hold. The map outlives
+        // the ring, so the bound does too. A slot or a standby counts only once it holds a thousand transactions back: one
+        // whose xmin stays put because nothing hands out ids holds nothing back, however long.
+        if (SightingOf(holder) is { } series
+            && evaluation.History.FirstSeen(series) is { } first
+            && evaluation.Now > first
+            && (holder.Kind is HealthHorizonHolderKind.Session or HealthHorizonHolderKind.Prepared || holder.XidAge >= WatchedMinimumXids))
+        {
+            TimeSpan watched = evaluation.Now - first;
+
+            if (high is { } most && watched > most)
+            {
+                watched = most;
+            }
+
+            if (best.Age is not { } least || watched > least)
+            {
+                best = (watched, HorizonTimeKind.Watched);
+            }
+        }
+
+        return best;
     }
 
     /// <summary>
@@ -457,8 +577,10 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
     /// <c>XidAge</c> is exactly another holder's <see cref="HorizonHolder.OwnedXidAge" /> is behind that holder: a snapshot's
     /// <c>xmin</c> is the oldest transaction running anywhere when it was taken, and that is the owner's id. It moves on the
     /// moment the owner ends. Followed to the root, which owns its horizon or is behind nothing found. Exact, because both
-    /// ages come from one statement and <c>age()</c> measures against one transaction id throughout it; a replication slot
-    /// is read in another statement - H10's shared read - so it is never matched, and is judged as its own holder.
+    /// ages come from one statement and <c>age()</c> measures against one transaction id throughout it. A replication slot
+    /// is read in another statement - H10's shared read - so its age is never matched; its raw <c>xmin</c> is
+    /// (<c>xmin::text</c>, W5-V1): a slot whose <c>xmin</c> or <c>catalog_xmin</c> is exactly a writer's own
+    /// <c>backend_xid</c> is behind that writer, as a standby streaming from it while the writer runs would be.
     /// </remarks>
     internal static IReadOnlyDictionary<HorizonHolder, HorizonHolder> RootsOf(IReadOnlyList<HorizonHolder> holders)
     {
@@ -469,13 +591,19 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
 
         foreach (HorizonHolder holder in holders)
         {
-            if (holder.HoldsOwnId || holder.SlotOrdinal is not null)
+            if (holder.HoldsOwnId)
             {
                 continue;
             }
 
-            HorizonHolder? owner = holders.FirstOrDefault(x =>
-                !ReferenceEquals(x, holder) && x.SlotOrdinal is null && x.OwnedXidAge is { } own && own == holder.XidAge);
+            // A slot is read in another statement, so its age is never matched; its raw xmin is (W5-V1): a slot pinned at
+            // exactly a writer's own transaction id is behind that writer, and moves on when it ends.
+            HorizonHolder? owner = holder.SlotOrdinal is not null
+                ? holder.Xmin is { } pinned
+                    ? holders.FirstOrDefault(x => !ReferenceEquals(x, holder) && x.SlotOrdinal is null && x.OwnXid == pinned)
+                    : null
+                : holders.FirstOrDefault(x =>
+                    !ReferenceEquals(x, holder) && x.SlotOrdinal is null && x.OwnedXidAge is { } own && own == holder.XidAge);
 
             if (owner is not null)
             {
@@ -648,7 +776,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
 
         if (chosen.HoldsTables)
         {
-            evidence.Add(new HealthEvidence("Dead rows in the store's tables", DeadRows(facts, chosen.Age, chosen.TimeKind)));
+            evidence.Add(new HealthEvidence(evaluation.Text.HorizonDeadRowsLabel, DeadRows(facts, chosen.Age, chosen.TimeKind)));
         }
 
         if (oldest is { } binding && binding.Holder.XidAge > held.XidAge)
@@ -686,12 +814,22 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
                 + "while this transaction was running, so this one is at least that old.");
         }
 
+        if (chosen.TimeKind == HorizonTimeKind.Watched)
+        {
+            caveat.Add("Its age in time is dated from the first sweep that saw this very hold - the same "
+                + (held.Kind is HealthHorizonHolderKind.SlotXmin or HealthHorizonHolderKind.SlotCatalogXmin
+                    ? "slot at the same xmin"
+                    : held.Kind == HealthHorizonHolderKind.Standby ? "WAL sender at the same xmin" : "process with the same transaction id")
+                + " - which the advisor remembers beyond its hour of samples, in memory and only while a page is open: a bound, never an "
+                + "estimate, so the hold may be older, never younger.");
+        }
+
         return HealthVerdict.Of(new HealthFinding
         {
             Code = "T14",
             Severity = chosen.Severity!.Value,
             Title = Title(held, chosen.Age, chosen.TimeKind, chosen.HoldsTables),
-            WhyItMatters = WhyItMatters(held, leader, facts, chosen.HoldsTables, chosen.Behind.Count > 0),
+            WhyItMatters = WhyItMatters(held, leader, facts, chosen.HoldsTables, chosen.Behind.Count > 0, evaluation.Text),
             Evidence = evidence,
             Caveat = string.Join(" ", caveat),
             Remedy = RemedyFor(held, leader, facts.LeaderLockInTransaction, evaluation.Text),
@@ -715,6 +853,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             HealthHorizonHolderKind.OtherDatabasePrepared => "a prepared transaction in another database on this server",
             HealthHorizonHolderKind.Standby => "a standby's hot_standby_feedback",
             HealthHorizonHolderKind.SlotXmin when holder.OtherDatabase => "a logical slot of another database on this server",
+            HealthHorizonHolderKind.SlotXmin when holder.StandbyThroughSlot => "a standby, through a physical replication slot",
             HealthHorizonHolderKind.SlotXmin => "a " + (holder.Lost ? "lost " : string.Empty) + (holder.SlotType ?? "replication") + " replication slot",
             _ when holder.OtherDatabase => "a logical slot of another database on this server (its hold on the system catalogs)",
             _ => "a " + (holder.Lost ? "lost " : string.Empty) + (holder.SlotType ?? "logical") + " replication slot's hold on the system catalogs",
@@ -727,6 +866,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         HorizonTimeKind.AtLeast => "at least " + SessionText.Duration(age) + " (" + LowerBoundWhy(holder) + ")",
         HorizonTimeKind.FromHistory => "at least " + SessionText.Duration(age) + " (by the advisor's samples of the transaction-id counter)",
         HorizonTimeKind.Behind => "at least " + SessionText.Duration(age) + " (a snapshot behind it, at its id, has been held that long)",
+        HorizonTimeKind.Watched => "at least " + SessionText.Duration(age) + " (the advisor has seen it hold this horizon, unchanged, that long)",
         _ => "not known",
     };
 
@@ -774,6 +914,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             HealthHorizonHolderKind.Standby => "A standby's hot_standby_feedback",
             HealthHorizonHolderKind.SlotXmin or HealthHorizonHolderKind.SlotCatalogXmin when holder.OtherDatabase =>
                 "A logical slot of another database on this server",
+            HealthHorizonHolderKind.SlotXmin when holder.StandbyThroughSlot => "A standby, through a physical replication slot,",
             HealthHorizonHolderKind.SlotXmin => holder.Lost ? "A lost replication slot" : "A replication slot",
             _ => holder.Lost ? "A lost logical replication slot" : "A logical replication slot",
         };
@@ -802,6 +943,9 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             + (string.IsNullOrEmpty(holder.Application) ? string.Empty : ", application '" + holder.Application + "'")
             + ", from " + (holder.Client ?? "(not readable)")
             + (holder.State is { } state ? ", " + state : string.Empty),
+        HealthHorizonHolderKind.SlotXmin when holder.StandbyThroughSlot =>
+            "a standby, through slot '" + holder.Name + "' (physical, active): the standby streaming from it sends its oldest "
+            + "snapshot here as the slot's xmin",
         HealthHorizonHolderKind.SlotXmin or HealthHorizonHolderKind.SlotCatalogXmin when !holder.OtherDatabase =>
             "slot '" + holder.Name + "'"
             + (holder.Plugin is { } plugin ? ", plugin " + plugin : string.Empty)
@@ -859,7 +1003,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             static x => x.Kind == HealthHorizonHolderKind.Prepared);
         Add("replication slot", "replication slots", holders
             .Where(static x => x.Kind is HealthHorizonHolderKind.SlotXmin or HealthHorizonHolderKind.SlotCatalogXmin)
-            .DistinctBy(static x => x.SlotOrdinal), static _ => false);
+            .DistinctBy(static x => x.SlotOrdinal), static x => x.Kind is HealthHorizonHolderKind.SlotXmin or HealthHorizonHolderKind.SlotCatalogXmin);
         Add("standby", "standbys", holders.Where(static x => x.Kind == HealthHorizonHolderKind.Standby).Take(1),
             static x => x.Kind == HealthHorizonHolderKind.Standby);
 
@@ -890,7 +1034,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             + "; of one that holds only a snapshot it is not known, because the snapshot's id is somebody else's.";
     }
 
-    private static string WhyItMatters(HorizonHolder holder, bool leader, HorizonFacts facts, bool holdsTables, bool anythingBehind)
+    private static string WhyItMatters(HorizonHolder holder, bool leader, HorizonFacts facts, bool holdsTables, bool anythingBehind, StudioText text)
     {
         string why =
             "Vacuum removes a dead row, and freezes a live one, only once no transaction could still see it - and the oldest "
@@ -931,12 +1075,17 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
                 " It is a logical slot of another database on this server - possibly another tenant's - so the studio names "
                 + "nothing about it; its hold still counts, because every database's freeze counts the shared catalogs. Its "
                 + "database's own studio, or a DBA, can see which slot it is (R01 watches the WAL slots retain).",
+            HealthHorizonHolderKind.SlotXmin when holder.StandbyThroughSlot =>
+                " A standby with hot_standby_feedback = on streams from this slot and sends its oldest snapshot here, as the slot's xmin "
+                + "- the standby's own row in pg_stat_replication shows no backend_xmin then - so a long query on the standby holds back "
+                + "vacuum on the primary. Whoever runs the standby ends the query, or sets max_standby_streaming_delay there instead of "
+                + "relying on the feedback.",
             HealthHorizonHolderKind.SlotXmin =>
                 " A physical slot's xmin is its standby's hot_standby_feedback, kept even while the standby is away; a DBA ends it by "
                 + "bringing the standby back or dropping a slot nothing uses any more (R01 watches the WAL it retains).",
             HealthHorizonHolderKind.SlotCatalogXmin =>
-                " A logical slot keeps the system catalogs as they were when its consumer last confirmed - Debezium, a CDC pipeline on "
-                + "mt_events, a subscription - and an abandoned one holds them, and every database's freeze, for good. Restart its "
+                " A logical slot keeps the system catalogs as they were when its consumer last confirmed - " + text.LogicalSlotConsumers
+                + " - and an abandoned one holds them, and every database's freeze, for good. Restart its "
                 + "consumer, or have a DBA drop a slot nothing uses (R01 watches the WAL it retains).",
             HealthHorizonHolderKind.Standby =>
                 " A standby with hot_standby_feedback = on sends its oldest snapshot here, so a long query on the standby holds back "
@@ -991,7 +1140,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         return new HealthRemedy(
             text.ShortTransactionCode,
             "The studio never ends another session. Find it from the application name on Database › Sessions; a server-wide "
-            + "idle_in_transaction_session_timeout or transaction_timeout (PostgreSQL 17) is the DBA's backstop.");
+            + "idle_in_transaction_session_timeout or transaction_timeout (PostgreSQL 17) is the DBA's backstop" + text.LeaderTimeoutClause + ".");
     }
 
     private static HealthLink? LinkFor(HorizonHolder holder, bool hasAsyncShards) => holder.Kind switch

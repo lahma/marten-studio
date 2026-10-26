@@ -24,8 +24,8 @@ internal enum HealthExportLevel
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Built from codes, and from nothing a finding wrote.</b> <see cref="From" /> reads, of each check's
-/// result, only the check's own code (<see cref="HealthCheckInfo.Code" />, an attribute constant the registry
+/// <b>Built from codes, and from nothing a finding wrote.</b> <see cref="HealthExportDatabaseResult.Of" /> keeps, of each
+/// check's result, only the check's own code (<see cref="HealthCheckInfo.Code" />, an attribute constant the registry
 /// holds to a letter and two digits), its <see cref="HealthCheckOutcome" /> - with, for a check not checked, the
 /// <see cref="HealthUnavailableReason" /> the sweeper classified it as, an enum and never a sentence - and the
 /// <see cref="HealthFinding.Severity" /> of each finding. A title, a subject, a tenant, a piece of evidence,
@@ -78,10 +78,17 @@ internal sealed record HealthExportSummary
     /// </summary>
     public IReadOnlyList<string> TimedOut { get; init; } = [];
 
-    /// <summary>How many databases were checked.</summary>
+    /// <summary>
+    /// How many databases are reported: each one's latest sweep, for one full rotation and one run more, counted in runs - the
+    /// ones this run checked and the ones an earlier run did (API design §3.4).
+    /// </summary>
     public int Databases { get; init; }
 
-    /// <summary>Databases the run did not check because it had already checked as many as one run may.</summary>
+    /// <summary>
+    /// Databases the run did not report because no run has checked them yet in this process, and this one did not reach them:
+    /// a run checks at most 25, every one-database source first and then the others in rotation, so a database waits at most
+    /// one rotation for its first check. From 0.5; before, it counted every database past the first 25 of every run.
+    /// </summary>
     public int DatabasesSkipped { get; init; }
 
     /// <summary>
@@ -121,7 +128,7 @@ internal sealed record HealthExportSummary
     /// <summary>The summary of a run that swept <paramref name="sweeps" />.</summary>
     /// <param name="measuredAt">When the run began.</param>
     /// <param name="sweeps">One regular sweep per database checked.</param>
-    /// <param name="databasesSkipped">Databases left out because the run had checked as many as it may.</param>
+    /// <param name="databasesSkipped">Databases left out: not yet checked in this process, and not reached by this run.</param>
     /// <param name="databasesTimedOut">Databases left out because the run ran out of time.</param>
     /// <param name="storesNotReached">Stores that would not build, or whose databases could not be listed.</param>
     /// <param name="storesNotEnumerated">Stores whose tenancy holds no database it can name without building one.</param>
@@ -137,6 +144,38 @@ internal sealed record HealthExportSummary
     {
         ArgumentNullException.ThrowIfNull(sweeps);
 
+        return From(
+            measuredAt,
+            [.. sweeps.Select(HealthExportDatabaseResult.Of)],
+            databasesSkipped,
+            databasesTimedOut,
+            storesNotReached,
+            storesNotEnumerated,
+            databasesUnnamed);
+    }
+
+    /// <summary>
+    /// The summary of each database's latest result - what a run that rotates (API design §3.4) aggregates: the databases it
+    /// swept now, and the ones an earlier run swept recently enough.
+    /// </summary>
+    /// <param name="measuredAt">When the run began.</param>
+    /// <param name="results">One result per database checked, each its latest.</param>
+    /// <param name="databasesSkipped">Databases left out: not yet checked in this process, and not reached by this run.</param>
+    /// <param name="databasesTimedOut">Databases this run left out because it ran out of time.</param>
+    /// <param name="storesNotReached">Stores that would not build, or whose databases could not be listed or opened.</param>
+    /// <param name="storesNotEnumerated">Stores whose tenancy holds no database it can name without building one.</param>
+    /// <param name="databasesUnnamed">Held databases left out because naming them would read the master table.</param>
+    public static HealthExportSummary From(
+        DateTimeOffset measuredAt,
+        IReadOnlyCollection<HealthExportDatabaseResult> results,
+        int databasesSkipped,
+        int databasesTimedOut,
+        int storesNotReached,
+        int storesNotEnumerated,
+        int databasesUnnamed)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+
         SortedSet<string> critical = new(StringComparer.Ordinal);
         SortedSet<string> warning = new(StringComparer.Ordinal);
         SortedSet<string> info = new(StringComparer.Ordinal);
@@ -147,12 +186,12 @@ internal sealed record HealthExportSummary
         int warningFindings = 0;
         int infoFindings = 0;
 
-        foreach (HealthSweep sweep in sweeps)
+        foreach (HealthExportDatabaseResult database in results)
         {
-            foreach (HealthCheckResult result in sweep.Results)
+            foreach (HealthExportCheckResult result in database.Checks)
             {
                 // The check's own code - never anything one of its findings wrote.
-                string code = result.Check.Code;
+                string code = result.Code;
 
                 if (result.Outcome == HealthCheckOutcome.Failed)
                 {
@@ -161,28 +200,27 @@ internal sealed record HealthExportSummary
                 else if (result.Outcome == HealthCheckOutcome.Unavailable)
                 {
                     // The sweeper's own classification, never its sentence: a reason it did not mark is the host's.
-                    (result.Problem?.UnavailableReason is HealthUnavailableReason.TimedOut or HealthUnavailableReason.SweepBudget
+                    (result.UnavailableReason is HealthUnavailableReason.TimedOut or HealthUnavailableReason.SweepBudget
                         ? timedOut
                         : unavailable).Add(code);
                 }
 
-                foreach (HealthFinding finding in result.Findings)
+                if (result.Critical > 0)
                 {
-                    if (finding.Severity == HealthSeverity.Critical)
-                    {
-                        critical.Add(code);
-                        criticalFindings++;
-                    }
-                    else if (finding.Severity == HealthSeverity.Warning)
-                    {
-                        warning.Add(code);
-                        warningFindings++;
-                    }
-                    else
-                    {
-                        info.Add(code);
-                        infoFindings++;
-                    }
+                    critical.Add(code);
+                    criticalFindings += result.Critical;
+                }
+
+                if (result.Warning > 0)
+                {
+                    warning.Add(code);
+                    warningFindings += result.Warning;
+                }
+
+                if (result.Info > 0)
+                {
+                    info.Add(code);
+                    infoFindings += result.Info;
                 }
             }
         }
@@ -199,7 +237,7 @@ internal sealed record HealthExportSummary
             Failed = [.. failed],
             Unavailable = [.. unavailable],
             TimedOut = [.. timedOut],
-            Databases = sweeps.Count,
+            Databases = results.Count,
             DatabasesSkipped = databasesSkipped,
             DatabasesTimedOut = databasesTimedOut,
             StoresNotReached = storesNotReached,
@@ -251,8 +289,13 @@ internal sealed record HealthExportSummary
     /// the result is reused for. Codes and counts only, like the data.
     /// </summary>
     /// <param name="interval">How long the result is served before the next run.</param>
-    public string Describe(TimeSpan interval)
+    /// <param name="words">
+    /// The studio's words for a source it could not reach (<see cref="StudioText.ExportSourceNoun" />), or
+    /// <see langword="null" /> for MartenStudio's.
+    /// </param>
+    public string Describe(TimeSpan interval, StudioText? words = null)
     {
+        words ??= StudioText.Marten;
         StringBuilder text = new();
 
         if (Problem is not null)
@@ -295,7 +338,7 @@ internal sealed record HealthExportSummary
 
             if (StoresNotReached > 0)
             {
-                text.Append("; ").Append(Count(StoresNotReached, "store", "stores")).Append(" could not be reached");
+                text.Append("; ").Append(Count(StoresNotReached, words.ExportSourceNoun, words.ExportSourceNoun + "s")).Append(" could not be reached");
             }
 
             if (DatabasesTimedOut > 0)
@@ -307,7 +350,7 @@ internal sealed record HealthExportSummary
             if (DatabasesSkipped > 0)
             {
                 text.Append("; ").Append(Count(DatabasesSkipped, "database", "databases"))
-                    .Append(" skipped: past the most one run checks");
+                    .Append(" skipped: not yet reached by the rotation");
             }
 
             if (DatabasesUnnamed > 0)
@@ -359,3 +402,47 @@ internal sealed record HealthExportSummary
     private static string Count(int count, string one, string many) =>
         count.ToString(CultureInfo.InvariantCulture) + " " + (count == 1 ? one : many);
 }
+
+/// <summary>
+/// One database's sweep as the export keeps it between runs: codes, outcomes and counts, and nothing a finding wrote
+/// (API design §3.4) - so a rotation over hundreds of tenants holds a few hundred bytes a database, never their findings.
+/// </summary>
+/// <param name="MeasuredAt">When the sweep read its facts.</param>
+/// <param name="Checks">Every check that did not check cleanly, or found something; a clean one is not kept.</param>
+internal sealed record HealthExportDatabaseResult(DateTimeOffset MeasuredAt, IReadOnlyList<HealthExportCheckResult> Checks)
+{
+    /// <summary>What the export keeps of <paramref name="sweep" />: its own codes, outcomes and severities.</summary>
+    public static HealthExportDatabaseResult Of(HealthSweep sweep)
+    {
+        ArgumentNullException.ThrowIfNull(sweep);
+
+        return new HealthExportDatabaseResult(
+            sweep.MeasuredAt,
+            [
+                .. sweep.Results
+                    .Select(static x => new HealthExportCheckResult(
+                        x.Check.Code,
+                        x.Outcome,
+                        x.Outcome == HealthCheckOutcome.Unavailable ? x.Problem?.UnavailableReason : null,
+                        x.Findings.Count(static f => f.Severity == HealthSeverity.Critical),
+                        x.Findings.Count(static f => f.Severity == HealthSeverity.Warning),
+                        x.Findings.Count(static f => f.Severity == HealthSeverity.Info)))
+                    .Where(static x => x.Outcome != HealthCheckOutcome.Checked || x.Critical + x.Warning + x.Info > 0),
+            ]);
+    }
+}
+
+/// <summary>One check's part of a <see cref="HealthExportDatabaseResult" />.</summary>
+/// <param name="Code">The check's own code.</param>
+/// <param name="Outcome">How it ended.</param>
+/// <param name="UnavailableReason">For an unavailable check, the sweeper's classification - never its sentence.</param>
+/// <param name="Critical">How many Critical findings.</param>
+/// <param name="Warning">How many Warnings.</param>
+/// <param name="Info">How many Info findings.</param>
+internal sealed record HealthExportCheckResult(
+    string Code,
+    HealthCheckOutcome Outcome,
+    HealthUnavailableReason? UnavailableReason,
+    int Critical,
+    int Warning,
+    int Info);

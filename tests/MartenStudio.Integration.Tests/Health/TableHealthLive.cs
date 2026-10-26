@@ -99,6 +99,13 @@ internal static class TableHealthLive
     /// <summary>When every manual clock starts.</summary>
     public static readonly DateTimeOffset Start = new(2026, 10, 15, 9, 0, 0, TimeSpan.Zero);
 
+    /// <summary>
+    /// A studio clock eight days past the server's, for T01, T05 and T06, which give no usage verdict over statistics under
+    /// seven days old (issue #8 G4) - and a fresh container's are minutes old. Paired with an <c>ANALYZE</c> of a table the
+    /// sweep judges, so that a database whose own reset time is null (15+) records a moment its counters cover (W5-B1).
+    /// </summary>
+    public static DateTimeOffset Covering => DateTimeOffset.UtcNow.AddDays(8);
+
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     /// <summary>A host whose sweeps follow <paramref name="clock" />.</summary>

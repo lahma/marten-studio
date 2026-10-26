@@ -174,10 +174,20 @@ internal static class HealthConnectionQueries
     /// <c>reserved_connections</c>. C02 and C03.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every backend has a row in <c>pg_stat_activity</c> for every role, whatever it may read of it - but a role
     /// without <c>pg_read_all_stats</c> reads another role's row with its <c>backend_type</c> null, so the counts
     /// take <see cref="ClientSession" />, which counts such a row rather than dropping it. A hidden background
     /// worker that runs for a role in a database is counted with them: over by that much, never under.
+    /// </para>
+    /// <para>
+    /// <b>And the two limits Postgres enforces before <c>max_connections</c></b> (W5-AUR, the 2026-10-26 health-gap analysis):
+    /// the login role's <c>CONNECTION LIMIT</c> (<c>pg_roles.rolconnlimit</c>, against that role's sessions on the whole server -
+    /// <c>pg_stat_activity.usename</c>, which every role may read, B0 G9) and this database's (<c>pg_database.datconnlimit</c>,
+    /// against its client sessions). The login role is <c>session_user</c>, which a <c>SET ROLE</c> to <c>SqlConsoleRole</c> does
+    /// not change, because that is the role a new connection is counted against. <c>-1</c> is "no limit", and neither limit is
+    /// enforced against a superuser - which is why whether the login role is one is read too.
+    /// </para>
     /// </remarks>
     public static HealthQuery ServerConnections() => new(
         "select (select count(*) from pg_stat_activity a where " + ClientSession + ") as client_backends,\n" +
@@ -185,7 +195,12 @@ internal static class HealthConnectionQueries
         "       current_setting('max_connections')::int4 as max_connections,\n" +
         "       current_setting('superuser_reserved_connections')::int4 as superuser_reserved,\n" +
         "       coalesce(nullif(current_setting('reserved_connections', true), ''), '0')::int4 as reserved,\n" +
-        "       current_setting('server_version_num')::int4 as server_version");
+        "       current_setting('server_version_num')::int4 as server_version,\n" +
+        "       session_user::text as login_role,\n" +
+        "       (select r.rolconnlimit from pg_catalog.pg_roles r where r.rolname = session_user) as role_limit,\n" +
+        "       coalesce((select r.rolsuper from pg_catalog.pg_roles r where r.rolname = session_user), false) as role_superuser,\n" +
+        "       (select count(*) from pg_stat_activity a where " + ClientSession + " and a.usename = session_user) as role_sessions,\n" +
+        "       (select d.datconnlimit from pg_catalog.pg_database d where d.datname = current_database()) as database_limit");
 
     /// <summary>
     /// The sessions of this database that are idle inside a transaction, oldest first, with what they hold -
@@ -324,9 +339,17 @@ internal static class HealthConnectionQueries
     /// is what finds the head of a chain. C06.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A blocker can be in another database - a lock on a shared catalog is the server's - and nothing about such a
     /// session is this database's to say: its state, role, application and client are null, and the finding says
     /// "a session in another database".
+    /// </para>
+    /// <para>
+    /// <b>A <c>VACUUM</c> at the head</b> (W5-V1): whether the blocker has a row in <c>pg_stat_progress_vacuum</c> - whose
+    /// process id every role may read (B0 §7c) - its <c>backend_type</c>, and whether it is autovacuum running to prevent
+    /// wraparound, which only a role that may read the worker's <c>query</c> (<c>pg_read_all_stats</c>) is told. The query is
+    /// read for that test alone and never returned: it names the table.
+    /// </para>
     /// </remarks>
     /// <param name="processIds">The blockers' process ids, from <c>pg_blocking_pids</c>.</param>
     public static HealthQuery Blockers(IReadOnlyCollection<int> processIds)
@@ -342,8 +365,12 @@ internal static class HealthConnectionQueries
             "       extract(epoch from (now() - a.xact_start))::float8 as transaction_seconds,\n" +
             "       extract(epoch from (now() - a.state_change))::float8 as state_seconds,\n" +
             "       a.backend_xid is not null as has_xid,\n" +
-            "       a.wait_event_type = 'Lock' as waiting\n" +
+            "       a.wait_event_type = 'Lock' as waiting,\n" +
+            "       v.pid is not null as vacuum,\n" +
+            "       a.backend_type::text as backend_type,\n" +
+            "       case when a.backend_type = 'autovacuum worker' then a.query like 'autovacuum:%(to prevent wraparound)%' end as prevents_wraparound\n" +
             "  from pg_stat_activity a\n" +
+            "  left join pg_catalog.pg_stat_progress_vacuum v on v.pid = a.pid\n" +
             " where a.pid = any(@pids)\n" +
             "   and a.pid <> pg_backend_pid()\n" +
             " order by a.pid\n" +

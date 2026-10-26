@@ -349,11 +349,14 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
             group by 1
             """);
 
+        // W5-B1-rest: the two 2026 halves, and every half from 2027 through next year and one beyond.
+        long laterHalves = (2 * (DateTime.UtcNow.Year + 2 - 2027)) + 1;
+
         relations.Should().BeEquivalentTo(new Dictionary<string, long>
         {
             ["r"] = 10,           // ordinary tables
             ["p"] = 1,            // the partitioned table ...
-            ["r/partition"] = 2,  // ... and its two partitions
+            ["r/partition"] = 2 + laterHalves,  // ... and its partitions
             ["v"] = 1,            // a plain view
             ["m"] = 2,            // two materialized views
             ["S"] = 3,            // three sequences
@@ -527,10 +530,18 @@ public class RelationalDemoSchemaLiveTests(RelationalDemoSchemaFixture fixture) 
         (await ScalarAsync(connection, "select count(*) from legacy.integration_messages where attachment is not null")).Should().BeGreaterThan(0);
         (await ScalarAsync(connection, "select count(*) from legacy.integration_messages where sent_at_local is null")).Should().BeGreaterThan(0);
 
-        (await PairsAsync(
+        IReadOnlyDictionary<string, long> partitions = await PairsAsync(
             connection,
-            "select c.relname::text, (select count(*) from legacy.sensor_readings r where r.tableoid = c.oid) from pg_catalog.pg_inherits i join pg_catalog.pg_class c on c.oid = i.inhrelid where i.inhparent = 'legacy.sensor_readings'::regclass"))
-            .Values.Should().AllSatisfy(x => x.Should().BeGreaterThan(0, "both partitions hold rows"));
+            "select c.relname::text, (select count(*) from legacy.sensor_readings r where r.tableoid = c.oid) from pg_catalog.pg_inherits i join pg_catalog.pg_class c on c.oid = i.inhrelid where i.inhparent = 'legacy.sensor_readings'::regclass");
+        partitions["sensor_readings_2026_h1"].Should().BeGreaterThan(0, "the seeded readings fill both 2026 halves");
+        partitions["sensor_readings_2026_h2"].Should().BeGreaterThan(0);
+
+        // W5-B1-rest: every half through next year, and one beyond, so the demo never ages into T20.
+        DateOnly today = DateOnly.FromDateTime(DateTime.UtcNow);
+        partitions.Keys.Should().Contain("sensor_readings_" + (today.Year + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + "_h2")
+            .And.Contain("sensor_readings_" + (today.Year + 2).ToString(System.Globalization.CultureInfo.InvariantCulture) + "_h1");
+        partitions.Where(static x => !x.Key.StartsWith("sensor_readings_2026", StringComparison.Ordinal)).Select(static x => x.Value)
+            .Should().AllSatisfy(static x => x.Should().Be(0, "the later halves wait for readings"));
 
         (await ScalarAsync(connection, "select count(*) from legacy.stock_by_region")).Should().BeGreaterThan(0, "refreshed after the stock was written");
 

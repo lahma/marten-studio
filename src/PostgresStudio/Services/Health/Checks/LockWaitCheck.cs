@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -50,7 +51,22 @@ internal sealed record LockBlocker(
     string? ClientAddress,
     TimeSpan? TransactionAtRead,
     bool HasTransactionId,
-    bool Waiting);
+    bool Waiting)
+{
+    /// <summary>Whether it is running a <c>VACUUM</c> (it has a row in <c>pg_stat_progress_vacuum</c>, which every role may read).</summary>
+    public bool Vacuum { get; init; }
+
+    /// <summary>Whether <c>pg_stat_activity</c> shows it as an autovacuum worker - known only to a role with <c>pg_read_all_stats</c>.</summary>
+    public bool Autovacuum { get; init; }
+
+    /// <summary>Whether it is autovacuum running to prevent wraparound - known only to a role with <c>pg_read_all_stats</c>.</summary>
+    public bool PreventsWraparound { get; init; }
+
+    /// <summary>What the head of a chain is, when it is a <c>VACUUM</c>: "an autovacuum to prevent wraparound", "an autovacuum", "a VACUUM".</summary>
+    public string? VacuumLabel => PreventsWraparound
+        ? "an autovacuum to prevent wraparound"
+        : Autovacuum ? "an autovacuum" : Vacuum ? "a VACUUM" : null;
+}
 
 /// <summary>What C06 reads.</summary>
 /// <param name="ReadAt">When, by the studio's clock.</param>
@@ -161,7 +177,8 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
             new("Held up by", heads.Count == 0
                 ? "sessions this role cannot see into, or that finished as the check read them"
                 : string.Join("; ", heads
-                    .GroupBy(static x => x.Blocker.SameDatabase ? x.Blocker.State ?? "a session whose state is not readable" : "a session in another database")
+                    .GroupBy(static x => x.Blocker.VacuumLabel
+                        ?? (x.Blocker.SameDatabase ? x.Blocker.State ?? "a session whose state is not readable" : "a session in another database"))
                     .Select(x => SessionText.Count(x.Count(), "session") + " " + x.Key
                         + (x.Max(static y => y.Open) is { } open ? ", the oldest transaction open " + SessionText.Duration(open) : string.Empty)))),
         ];
@@ -194,13 +211,15 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
                 blocker.Application,
                 blocker.ClientAddress,
                 null,
-                (blocker.SameDatabase ? blocker.State ?? "state not readable" : "in another database")
+                (blocker.VacuumLabel is { } vacuum ? vacuum + ", " : string.Empty)
+                + (blocker.SameDatabase ? blocker.State ?? "state not readable" : "in another database")
                 + (open is { } age ? ", transaction open " + SessionText.Duration(age) : string.Empty)
                 + (blocker.HasTransactionId ? ", has written" : string.Empty)));
         }
 
         bool applyLock = waits.Any(static x => x.Waiter.Target.Kind == LockTargetKind.ApplyChangesLock);
         bool streamRows = waits.Any(static x => x.Waiter.Target is { Kind: LockTargetKind.EventTable, Row: true });
+        LockBlocker? vacuumHead = heads.Select(static x => x.Blocker).FirstOrDefault(static x => x.VacuumLabel is not null);
 
         return HealthVerdict.Of(new HealthFinding
         {
@@ -219,6 +238,7 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
                     ? "Waits on an mt_streams row are appends to one stream from two sessions at once; they are serialized on that row by design, "
                       + "and a long wait there means the first append's transaction is still open. "
                     : string.Empty)
+                + (vacuumHead is { } head ? VacuumHeadAdvice(head, evaluation.Text) : string.Empty)
                 + "The head of the chain is the session to look at; the studio never cancels or ends one.",
             Evidence = evidence,
             Caveat = SessionEvidence.Caveat(
@@ -240,6 +260,33 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
                     + "wait for the one that got the lock.")
                 : null,
         });
+    }
+
+    /// <summary>
+    /// What a <c>VACUUM</c> at the head of a chain means, and what to do about it (W5-V1, the 2026-10-26 health-gap analysis,
+    /// 7a): a manual <c>VACUUM</c> and an anti-wraparound autovacuum never give way to a lock request - an ordinary autovacuum
+    /// is cancelled by one after <c>deadlock_timeout</c> - so a migration's <c>ALTER</c> queued behind it waits, and every reader
+    /// of the table queues behind the <c>ALTER</c>.
+    /// </summary>
+    internal static string VacuumHeadAdvice(LockBlocker head, StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(head);
+        ArgumentNullException.ThrowIfNull(text);
+
+        string migration = text.Product == StudioProduct.MartenStudio
+            ? "a migration queued behind it (ApplyAllDatabaseChangesOnStartup, db-apply)"
+            : "a migration queued behind it (an ALTER TABLE, from whatever tool runs the host's migrations)";
+
+        return "The head of the chain is " + head.VacuumLabel + ". "
+            + (head.PreventsWraparound
+                ? "An anti-wraparound autovacuum does not give way to a lock request, as a manual VACUUM does not; "
+                : head.Autovacuum
+                    ? "An ordinary autovacuum is cancelled by a lock request after deadlock_timeout, but one running to prevent wraparound, "
+                      + "like a manual VACUUM, does not give way; "
+                    : "A manual VACUUM, like an anti-wraparound autovacuum, does not give way to a lock request (an ordinary autovacuum is "
+                      + "cancelled by one after deadlock_timeout); ")
+            + migration + " holds every reader of the table behind itself. Let the vacuum finish and retry the migration - and never "
+            + "cancel the vacuum while T12 is near its line. ";
     }
 
     /// <summary>
@@ -319,5 +366,10 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
         SessionReads.Text(reader, 5),
         SessionReads.Seconds(reader, 6),
         !reader.IsDBNull(8) && reader.GetBoolean(8),
-        !reader.IsDBNull(9) && reader.GetBoolean(9));
+        !reader.IsDBNull(9) && reader.GetBoolean(9))
+    {
+        Vacuum = !reader.IsDBNull(10) && reader.GetBoolean(10),
+        Autovacuum = string.Equals(SessionReads.Text(reader, 11), "autovacuum worker", StringComparison.Ordinal),
+        PreventsWraparound = !reader.IsDBNull(12) && reader.GetBoolean(12),
+    };
 }

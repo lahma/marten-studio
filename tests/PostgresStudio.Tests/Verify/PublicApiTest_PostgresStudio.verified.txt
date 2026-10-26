@@ -9,6 +9,34 @@ namespace PostgresStudio
         System.Threading.Tasks.ValueTask<Npgsql.NpgsqlDataSource?> GetDataSourceAsync(string name, System.Threading.CancellationToken cancellationToken);
         System.Collections.Generic.IAsyncEnumerable<string> ListAsync(System.Threading.CancellationToken cancellationToken);
     }
+    public interface IPostgresDiagnostics
+    {
+        System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresCheck> Checks { get; }
+        System.Threading.Tasks.Task<PostgresStudio.PostgresDiagnosticsSnapshot> GetSnapshotAsync(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresDiagnosticsRequest request, System.Threading.CancellationToken cancellationToken = default);
+        System.Collections.Generic.IAsyncEnumerable<PostgresStudio.PostgresDatabaseRef> ListDatabasesAsync(System.Threading.CancellationToken cancellationToken = default);
+    }
+    public enum PostgresActionKind
+    {
+        ApplicationConfiguration = 0,
+        Migration = 1,
+        ServerSetting = 2,
+        ManagedPlatform = 3,
+        Repair = 4,
+    }
+    public sealed record PostgresCheck : System.IEquatable<PostgresStudio.PostgresCheck>
+    {
+        public PostgresCheck() { }
+        public PostgresStudio.PostgresFindingCategory Category { get; init; }
+        public string Code { get; init; }
+        public string DocsUrl { get; init; }
+        public int Findings { get; init; }
+        public PostgresStudio.PostgresReadOutcome? Outcome { get; init; }
+        public string? Reason { get; init; }
+        public bool RequiresActivity { get; init; }
+        public string? SqlState { get; init; }
+        public string Title { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Variants { get; init; }
+    }
     public sealed record PostgresComputeCapacity : System.IEquatable<PostgresStudio.PostgresComputeCapacity>
     {
         public double Current { get; }
@@ -20,11 +48,111 @@ namespace PostgresStudio
         public static PostgresStudio.PostgresComputeCapacity AuroraServerlessV2(double currentAcu, double minimumAcu, double maximumAcu, System.DateTimeOffset measuredAt) { }
         public static PostgresStudio.PostgresComputeCapacity Of(double current, double minimum, double maximum, string unit, System.DateTimeOffset measuredAt) { }
     }
+    public sealed record PostgresConnectionCounts : System.IEquatable<PostgresStudio.PostgresConnectionCounts>
+    {
+        public PostgresConnectionCounts() { }
+        public int Active { get; init; }
+        public string? ApplicationName { get; init; }
+        public int Idle { get; init; }
+        public int IdleInTransaction { get; init; }
+        public System.TimeSpan? OldestTransaction { get; init; }
+        public int StateUnknown { get; init; }
+        public int Total { get; init; }
+        public int Waiting { get; init; }
+    }
+    public sealed record PostgresConnectionsSection : System.IEquatable<PostgresStudio.PostgresConnectionsSection>
+    {
+        public PostgresConnectionsSection() { }
+        public bool AllSessionsVisible { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresConnectionCounts> ByApplication { get; init; }
+        public PostgresStudio.PostgresConnectionCounts Database { get; init; }
+        public int MaxConnections { get; init; }
+        public System.DateTimeOffset MeasuredAt { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public string? Reason { get; init; }
+        public int ReservedConnections { get; init; }
+        public int ServerConnections { get; init; }
+    }
     public sealed record PostgresDatabaseRef : System.IEquatable<PostgresStudio.PostgresDatabaseRef>
     {
         public PostgresDatabaseRef(string source, string database) { }
         public string Database { get; }
         public string Source { get; }
+    }
+    public sealed record PostgresDiagnosticsRequest : System.IEquatable<PostgresStudio.PostgresDiagnosticsRequest>
+    {
+        public PostgresDiagnosticsRequest() { }
+        public bool Connections { get; init; }
+        public bool Findings { get; init; }
+        public bool IncludeActivity { get; init; }
+        public bool RunDeeperChecks { get; init; }
+        public bool Settings { get; init; }
+        public bool Statements { get; init; }
+        public bool Storage { get; init; }
+        public static PostgresStudio.PostgresDiagnosticsRequest AllSections { get; }
+        public static PostgresStudio.PostgresDiagnosticsRequest FindingsOnly { get; }
+    }
+    public sealed record PostgresDiagnosticsSnapshot : System.IEquatable<PostgresStudio.PostgresDiagnosticsSnapshot>
+    {
+        public PostgresDiagnosticsSnapshot() { }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresCheck> Checks { get; init; }
+        public PostgresStudio.PostgresComputeCapacity? Compute { get; init; }
+        public PostgresStudio.PostgresConnectionsSection? Connections { get; init; }
+        public PostgresStudio.PostgresDatabaseRef Database { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresFinding> Findings { get; init; }
+        public System.DateTimeOffset? FindingsMeasuredAt { get; init; }
+        public int FindingsWithheld { get; init; }
+        public System.DateTimeOffset GeneratedAt { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public string Producer { get; init; }
+        public string? Reason { get; init; }
+        public int SchemaVersion { get; init; }
+        public PostgresStudio.PostgresServerInfo? Server { get; init; }
+        public PostgresStudio.PostgresSettingsSection? Settings { get; init; }
+        public PostgresStudio.PostgresStatementsSection? Statements { get; init; }
+        public PostgresStudio.PostgresStorageSection? Storage { get; init; }
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Withheld { get; init; }
+        public string ToJson() { }
+    }
+    public sealed record PostgresExtension : System.IEquatable<PostgresStudio.PostgresExtension>
+    {
+        public PostgresExtension() { }
+        public string? AvailableVersion { get; init; }
+        public string? InstalledVersion { get; init; }
+        public string Name { get; init; }
+        public string? Note { get; init; }
+        public bool Usable { get; init; }
+    }
+    public sealed record PostgresFinding : System.IEquatable<PostgresStudio.PostgresFinding>
+    {
+        public PostgresFinding() { }
+        public string? Action { get; init; }
+        public string? ActionExplanation { get; init; }
+        public PostgresStudio.PostgresActionKind? ActionKind { get; init; }
+        public string? ActionRequires { get; init; }
+        public PostgresStudio.PostgresFindingCategory Category { get; init; }
+        public string? Caveat { get; init; }
+        public string Code { get; init; }
+        public string Detail { get; init; }
+        public string DocsUrl { get; init; }
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Evidence { get; init; }
+        public string Key { get; }
+        public System.DateTimeOffset MeasuredAt { get; init; }
+        public PostgresStudio.PostgresSeverity Severity { get; init; }
+        public string? Subject { get; init; }
+        public string? TenantId { get; init; }
+        public string Title { get; init; }
+        public string? Variant { get; init; }
+    }
+    public enum PostgresFindingCategory
+    {
+        Daemon = 0,
+        Events = 1,
+        Tables = 2,
+        Connections = 3,
+        Replication = 4,
+        Server = 5,
+        Configuration = 6,
     }
     public enum PostgresPlatformKind
     {
@@ -36,6 +164,16 @@ namespace PostgresStudio
         Neon = 5,
         Supabase = 6,
     }
+    public enum PostgresReadOutcome
+    {
+        Read = 0,
+        NotApplicable = 1,
+        Unavailable = 2,
+        TimedOut = 3,
+        Failed = 4,
+        NotFound = 5,
+        Withheld = 6,
+    }
     public sealed record PostgresServerInfo : System.IEquatable<PostgresStudio.PostgresServerInfo>
     {
         public PostgresServerInfo() { }
@@ -45,6 +183,71 @@ namespace PostgresStudio
         public System.DateTimeOffset? StartedAt { get; init; }
         public string Version { get; init; }
         public int VersionNumber { get; init; }
+    }
+    public sealed record PostgresSetting : System.IEquatable<PostgresStudio.PostgresSetting>
+    {
+        public PostgresSetting() { }
+        public string Group { get; init; }
+        public string Name { get; init; }
+        public bool PendingRestart { get; init; }
+        public string? Source { get; init; }
+        public string? Unit { get; init; }
+        public string? Value { get; init; }
+    }
+    public sealed record PostgresSettingsSection : System.IEquatable<PostgresStudio.PostgresSettingsSection>
+    {
+        public PostgresSettingsSection() { }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresExtension> Extensions { get; init; }
+        public System.DateTimeOffset MeasuredAt { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public string? Reason { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresSetting> Settings { get; init; }
+    }
+    public enum PostgresSeverity
+    {
+        Critical = 0,
+        Warning = 1,
+        Info = 2,
+    }
+    public sealed record PostgresStatement : System.IEquatable<PostgresStudio.PostgresStatement>
+    {
+        public PostgresStatement() { }
+        public long Calls { get; init; }
+        public double MeanMilliseconds { get; init; }
+        public long QueryId { get; init; }
+        public long Rows { get; init; }
+        public double ShareOfTime { get; init; }
+        public long SharedBlocksHit { get; init; }
+        public long SharedBlocksRead { get; init; }
+        public long? StorageBlocksRead { get; init; }
+        public long TempBlocksWritten { get; init; }
+        public string? Text { get; init; }
+        public bool TextTruncated { get; init; }
+        public string? TextWithheld { get; init; }
+        public double TotalMilliseconds { get; init; }
+    }
+    public sealed record PostgresStatementsSection : System.IEquatable<PostgresStudio.PostgresStatementsSection>
+    {
+        public PostgresStatementsSection() { }
+        public System.DateTimeOffset MeasuredAt { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public string? Reason { get; init; }
+        public System.DateTimeOffset? StatisticsSince { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresStatement> Top { get; init; }
+        public double TotalMilliseconds { get; init; }
+        public System.TimeSpan? Window { get; init; }
+    }
+    public sealed record PostgresStorageSection : System.IEquatable<PostgresStudio.PostgresStorageSection>
+    {
+        public PostgresStorageSection() { }
+        public long DatabaseBytes { get; init; }
+        public long? GrowthBytesPerDay { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresTableStorage> LargestTables { get; init; }
+        public System.DateTimeOffset MeasuredAt { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public string? Reason { get; init; }
+        public bool SizesAreEstimates { get; init; }
+        public System.DateTimeOffset? StatisticsSince { get; init; }
     }
     public sealed class PostgresStudioCapabilities
     {
@@ -97,5 +300,27 @@ namespace PostgresStudio
     public static class PostgresStudioServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresStudio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresStudioOptions>? configure = null) { }
+    }
+    public enum PostgresTableOwnership
+    {
+        Application = 0,
+        Library = 1,
+        Other = 2,
+    }
+    public sealed record PostgresTableStorage : System.IEquatable<PostgresStudio.PostgresTableStorage>
+    {
+        public PostgresTableStorage() { }
+        public long EstimatedRows { get; init; }
+        public long? GrowthBytesPerDay { get; init; }
+        public double? HotUpdateRatio { get; init; }
+        public long IndexBytes { get; init; }
+        public string Name { get; init; }
+        public string? Owner { get; init; }
+        public PostgresStudio.PostgresTableOwnership Ownership { get; init; }
+        public string Schema { get; init; }
+        public double ShareOfDatabase { get; init; }
+        public long TableBytes { get; init; }
+        public long ToastBytes { get; init; }
+        public long TotalBytes { get; init; }
     }
 }

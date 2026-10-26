@@ -102,10 +102,37 @@ public class ServerChecksTests
     [Fact]
     public void A_major_newer_than_the_table_is_quiet_and_says_so_rather_than_guessing()
     {
-        HealthVerdict verdict = EndOfLife(190001, Today);
+        HealthVerdict verdict = EndOfLife(200001, Today);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("PostgreSQL 19 is newer than").And.Contain("ends at 18");
+        verdict.Note.Should().Contain("PostgreSQL 20 is newer than").And.Contain("ends at 19");
+    }
+
+    /// <summary>W5-VERS: 19 is in the table, planned - its release candidate is quiet and says the dates are the plan's.</summary>
+    [Fact]
+    public void PostgreSQL_19_before_its_release_is_quiet_and_says_its_dates_are_planned()
+    {
+        HealthVerdict verdict = EndOfLife(190000, Today);
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Be(
+            "PostgreSQL 19's first release is planned for 2026-11-19, and the community's policy supports a major for five years "
+            + "from it: until 2031-11-13, which https://www.postgresql.org/support/versioning/ publishes once it ships.");
+    }
+
+    /// <summary>W5-VERS: a server below the supported floor says so in S01's finding, which 13's end of life raises anyway.</summary>
+    [Fact]
+    public void PostgreSQL_13_s_finding_names_the_supported_floor()
+    {
+        HealthFinding finding = EndOfLife(130023, Today).Findings.Should().ContainSingle().Subject;
+
+        finding.WhyItMatters.Should().EndWith(
+            " It is also below the supported floor (14): the studio still reads it, read by read, but is tested only on 14 and "
+            + "later, so a check here may not check.");
+        finding.Evidence.Should().Contain(new HealthEvidence("Studio's supported floor", "PostgreSQL 14"));
+
+        EndOfLife(140019, Today).Findings.Single().Evidence.Should().NotContain(static x => x.Label == "Studio's supported floor",
+            "14 is the floor itself");
     }
 
     [Fact]
@@ -136,6 +163,7 @@ public class ServerChecksTests
     [
         On("track_counts", "default"), On("fsync", "default"), On("full_page_writes", "default"),
         Off("zero_damaged_pages", "default"), Off("ignore_checksum_failure", "default"), On("synchronous_commit", "default"),
+        On("autovacuum", "default"), On("track_activities", "default"),
     ];
 
     private static ServerSetting[] With(params ServerSetting[] changed) =>
@@ -147,8 +175,41 @@ public class ServerChecksTests
         HealthVerdict verdict = Settings("Production", null, Defaults);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Be("track_counts, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
-            + "synchronous_commit is on, and nothing waits for a restart.");
+        verdict.Note.Should().Be("track_counts, autovacuum, track_activities, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are "
+            + "at their safe values, synchronous_commit is on, and nothing waits for a restart.");
+    }
+
+    /// <summary>W5-V1 (issue #8 G2): autovacuum switched off for the whole server is Critical anywhere, as track_counts is.</summary>
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    [InlineData(null)]
+    public void Autovacuum_off_is_Critical_in_every_environment_with_the_server_setting_to_turn_it_on(string? environment)
+    {
+        HealthFinding finding = Settings(environment, null, With(new ServerSetting("autovacuum", "off", "configuration file", false) { Context = "sighup" }))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Code.Should().Be("S02");
+        finding.Variant.Should().Be("setting");
+        finding.Subject.Should().Be("autovacuum");
+        finding.Severity.Should().Be(HealthSeverity.Critical);
+        finding.Title.Should().Be("Autovacuum is switched off for the whole server (autovacuum = off)");
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
+        finding.Remedy.Code.Should().EndWith("autovacuum = on");
+        finding.Remedy.Explanation.Should().Contain("postgresql.conf").And.NotContain("restarts", "autovacuum is a sighup setting");
+    }
+
+    /// <summary>W5-V1 (2026-10-26 health-gap analysis): without track_activities the session checks are blind.</summary>
+    [Fact]
+    public void Track_activities_off_is_a_warning_that_names_the_checks_it_blinds()
+    {
+        HealthFinding finding = Settings("Production", null, With(Off("track_activities")))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Subject.Should().Be("track_activities");
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.WhyItMatters.Should().Contain("C04, C05 and T14 cannot see sessions' state or age");
+        finding.Remedy!.Code.Should().EndWith("track_activities = on");
     }
 
     /// <summary>A watched setting with no row is not judged, and the status row says so, rather than calling it safe.</summary>
@@ -290,7 +351,8 @@ public class ServerChecksTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Info);
-        finding.Subject.Should().Be("pending-restart");
+        finding.Variant.Should().Be("pending-restart");
+        finding.Subject.Should().BeNull("the finding is about every setting that waits, and names them in its evidence");
         finding.Title.Should().Be("2 changed settings wait for the server to restart");
         finding.Evidence.Should().Contain(new HealthEvidence("Waiting for a restart", "max_connections, shared_buffers"));
         finding.Remedy.Should().BeNull();

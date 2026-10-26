@@ -266,7 +266,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         if (result.IsSaved && result.Preview is { } preview && preview.HasDrops)
         {
             logger.DocumentWriteRoundTripDropped(
-                UserName(),
+                StudioLogValue.Cap(UserName()),
                 WriteAuditText.Sanitize(preview.DocumentTypeName ?? alias, WriteAuditText.MaxTokenLength),
                 WriteAuditText.Sanitize(id, WriteAuditText.MaxTokenLength),
                 preview.DroppedPaths.Length,
@@ -1059,7 +1059,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         ResolvedScope resolved,
         CancellationToken cancellationToken)
     {
-        var connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        var connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
         try
         {

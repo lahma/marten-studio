@@ -213,9 +213,12 @@ public class HealthPageTests
 
         var page = context.Render<HealthPage>();
 
+        // W5-Q1: every connection the studio opens is metered now, and what is still not counted is Marten's own sessions.
         page.WaitForAssertion(() => page.Find(".ms-health-cost").TextContent.Should()
-            .Contain("1.23 s of database time in 37 read-only sessions against this database over the last 5 minutes")
-            .And.Contain("not counted yet"));
+            .Contain("1.23 s of database time over 37 connections to this database in the last 5 minutes")
+            .And.Contain("measured from open to close of every connection the studio opens to it")
+            .And.Contain("document, event and projection reads")
+            .And.Contain("a Marten session the studio opens to write or to steer the daemon is not counted"));
     }
 
     [Fact]

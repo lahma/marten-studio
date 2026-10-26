@@ -177,12 +177,12 @@ public class HorizonChecksTests
         HealthFinding finding = new TransactionIdAgeCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Title.Should().StartWith("This database (a table that is not the store's) is 1.2 billion transactions");
+        finding.Title.Should().StartWith("This database (a table that is not among the tables the studio judges) is 1.2 billion transactions");
         finding.Evidence.Should().Contain(new HealthEvidence("This database's age(datfrozenxid)", "1,200,000,000"));
         finding.Evidence.Should().Contain(new HealthEvidence("Other tables past autovacuum_freeze_max_age",
-            "3 (1 of them temporary), never named: they are not the store's"));
-        finding.Evidence.Should().Contain(new HealthEvidence("Marten tables past the warning line", "0"));
-        finding.WhyItMatters.Should().Contain("not one the store declares").And.Contain("only by the session that created it");
+            "3 (1 of them temporary), never named: they are not among the tables the studio judges"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Tables the studio judges past the warning line", "0"));
+        finding.WhyItMatters.Should().Contain("not one the studio judges").And.Contain("only by the session that created it");
         finding.DocumentTypes.Should().BeEmpty("no table of the store's is past the line");
         finding.Subject.Should().BeNull();
     }
@@ -486,7 +486,8 @@ public class HorizonChecksTests
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().StartWith("At the rate of the last 40 minutes, Postgres would stop creating multixacts in about 29 days");
         finding.Evidence.Should().Contain(static x => x.Label == "New multixacts refused in");
-        finding.Evidence.Should().Contain(new HealthEvidence("Other tables past autovacuum_multixact_freeze_max_age", "0, never named: they are not the store's"));
+        finding.Evidence.Should().Contain(new HealthEvidence(
+            "Other tables past autovacuum_multixact_freeze_max_age", "0, never named: they are not among the tables the studio judges"));
     }
 
     [Fact]
@@ -870,7 +871,8 @@ public class HorizonChecksTests
             Horizon([.. HorizonHolder.From(slot, 0), standby], database: static x => x with { XidCounter = 5_000_000 }), Evaluation(counter));
 
         quiet.Findings.Should().BeEmpty("the counter passed their ids over an hour ago, which dates whoever was handed them - not the slot");
-        quiet.Note.Should().Contain("the oldest holder is a physical replication slot, 1,500,000 transactions back - for how long is not known: "
+        // W5-V1 (B0 §4): an active physical slot's xmin is the standby streaming from it, so it is worded as that standby.
+        quiet.Note.Should().Contain("the oldest holder is a standby, through a physical replication slot, 1,500,000 transactions back - for how long is not known: "
             + "Postgres records no time for it");
 
         HealthFinding finding = Single(
@@ -879,12 +881,13 @@ public class HorizonChecksTests
             counter);
 
         finding.Severity.Should().Be(HealthSeverity.Warning, "the forced freeze cannot get past it");
-        finding.Title.Should().Be("A replication slot holds back vacuum by 210 million transactions");
+        finding.Title.Should().Be("A standby, through a physical replication slot, holds back vacuum by 210 million transactions");
         finding.Evidence.Should().Contain(static x => x.Label == "Held for" && x.Value.Contains("cannot date it", StringComparison.Ordinal));
         finding.Evidence.Should().NotContain(static x => x.Label == "Oldest holder of all", "the slot binds, and is the oldest itself");
         finding.Evidence.Should().Contain(new HealthEvidence("Holders found", "1 replication slot, 1 standby"));
         finding.Caveat.Should().NotContain("samples of the transaction-id counter");
-        finding.Evidence.Single(static x => x.Label == "Who it is").Value.Should().Be("slot 'standby_a', active");
+        finding.Evidence.Single(static x => x.Label == "Who it is").Value.Should().Be(
+            "a standby, through slot 'standby_a' (physical, active): the standby streaming from it sends its oldest snapshot here as the slot's xmin");
     }
 
     /// <summary>

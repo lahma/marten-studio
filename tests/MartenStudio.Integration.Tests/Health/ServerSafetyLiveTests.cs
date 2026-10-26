@@ -71,7 +71,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
             HealthReportFinding finding = second.Findings.Should().ContainSingle(static x => x.Code == "R01").Subject;
 
             finding.Severity.Should().Be(HealthSeverity.Warning);
-            finding.Finding.Subject.Should().Be("inactive");
+            finding.Finding.Variant.Should().Be("inactive");
             finding.Evidence.Should().Contain(static x => x.Label == "Held for at least" && x.Value == "11 min",
                 "the run is the advisor's two samples, eleven minutes apart; Postgres's own inactive_since is seconds old");
             finding.Evidence.Should().Contain(new HealthEvidence("max_slot_wal_keep_size", "unlimited (-1, the default)"));
@@ -133,7 +133,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
 
             HealthReportFinding shown = (await open.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "R01").Subject;
             shown.Severity.Should().Be(HealthSeverity.Critical);
-            shown.Finding.Subject.Should().Be("near-limit");
+            shown.Finding.Variant.Should().Be("near-limit");
             shown.Evidence.Should().Contain(new HealthEvidence("max_slot_wal_keep_size", "64.0 MiB"));
             shown.Evidence.Should().ContainSingle(static x => x.Gate == HealthGate.Activity).Which.Value
                 .Should().Contain("'" + Slot + "'").And.Contain("logical (pgoutput)").And.Contain("for database 'health_r01_logical'");
@@ -188,7 +188,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
             HealthReport report = await host.ReportAsync();
 
             HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "R01").Subject;
-            finding.Finding.Subject.Should().Be("lost");
+            finding.Finding.Variant.Should().Be("lost");
             finding.Evidence.Should().Contain(new HealthEvidence("Invalidated slots", "1 of 1 slot on this server"), "database B's slot is counted from A");
             finding.Evidence.Should().ContainSingle(static x => x.Gate == HealthGate.Activity).Which.Value
                 .Should().StartWith("a logical slot of another database on this server").And.Contain("wal_removed");
@@ -237,7 +237,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
 
             HealthReportFinding finding = (await host.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "R01").Subject;
             finding.Severity.Should().Be(HealthSeverity.Info);
-            finding.Finding.Subject.Should().Be("lost");
+            finding.Finding.Variant.Should().Be("lost");
             finding.Evidence.Should().ContainSingle(static x => x.Gate == HealthGate.Activity).Which.Value.Should().Contain("wal_removed");
         }
         finally
@@ -294,7 +294,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
 
         report.Findings.Should().NotContain(static x => x.Code == "S02");
         ConnectionsLiveHost.Status(report, "S02").Note.Should().Be(
-            "track_counts, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
+            "track_counts, autovacuum, track_activities, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
             + "synchronous_commit is on, and nothing waits for a restart.",
             "every watched setting was read, and each is at its safe value");
     }

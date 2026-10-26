@@ -6,41 +6,51 @@ using Npgsql;
 namespace PostgresStudio.Internal.Sql;
 
 /// <summary>What the studio has itself spent in one database recently.</summary>
-/// <param name="Total">The summed wall time of the sessions counted.</param>
-/// <param name="Sessions">How many sessions that was.</param>
+/// <param name="Total">The summed wall time of the connections counted.</param>
+/// <param name="Connections">
+/// How many connections that was - each one the studio opened to the database and closed again - and, for a read-only
+/// session on a connection the studio did not open through its sources, that session.
+/// </param>
 /// <param name="Window">How far back the sum reaches.</param>
-internal readonly record struct StudioCost(TimeSpan Total, int Sessions, TimeSpan Window);
+internal readonly record struct StudioCost(TimeSpan Total, int Connections, TimeSpan Window);
 
 /// <summary>
-/// The health advisor's "studio cost" line: how much database time the studio's own read-only sessions
-/// took in one database over the last five minutes - and, for a check that subtracts the studio's own
-/// footprint from a server counter, how many sessions and rollbacks it has run there since the process
-/// started.
+/// The studio's own cost in each database - the health advisor's "studio cost" line and the Statements page's "the studio
+/// itself" line, one meter for both: how much connection time the studio took in one database over the last five minutes,
+/// and, for a check that subtracts the studio's own footprint from a server counter, how many read-only sessions and
+/// rollbacks it has run there since the process started.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What is counted.</b> Every <see cref="ReadOnlySqlSession" /> transaction, measured client side from
-/// <c>BEGIN</c> to <c>ROLLBACK</c>: the SQL console, the Query page's Marten mode and its <c>EXPLAIN</c>, the
-/// schema screen's statistics reads, the relationships screen, the database browser's catalog and row
-/// reads, and every health check. The time is wall time on the studio's side, round trips included, so it
-/// is an upper bound on what the server spent rather than a server-side measurement.
+/// <b>What is counted: every connection the studio opens through its sources</b> (W5-Q1, backlog §C). Both of the studio's
+/// databases - MartenStudio's over <c>IMartenDatabase</c> and Postgres Studio's over the host's <see cref="NpgsqlDataSource" />
+/// - hand out connections metered by <see cref="StudioConnectionMeter" />, which times each from its open to its close. So
+/// every statement the studio issues on them is inside the time: health sweeps, catalog and schema reads, the database
+/// browser's lists and rows, the documents and event reads, the projections screen, the SQL console and the Query page, the
+/// relationships screen, and the documents' write path's own reads. A read-only session on a connection that was not metered
+/// - a caller that opened its own - is still counted, begin to rollback, as it always was.
 /// </para>
 /// <para>
-/// <b>What is not.</b> Reads that open their own command without the session: the documents browser's lists
-/// and counts, the event store's reads, the projections screen, the column and index catalogs, Marten's own
-/// sessions for writes and daemon control. Metering those needs a hook on every read path, which is a
-/// follow-up rather than something this line pretends to cover.
+/// <b>What is not.</b> Marten's own sessions, which the studio opens for its writes (<c>StoreObjects</c>,
+/// <c>DeleteObjects</c>, the event store's operations) and to steer the daemon: their connections are Marten's, taken from
+/// its own data source by its own session, and nothing of the studio's sits between them and the pool. The time is wall
+/// time on the studio's side, round trips and the time between one statement and the next included, so it is an upper bound
+/// on what the server spent rather than a server-side measurement.
 /// </para>
 /// <para>
 /// <b>Per database.</b> A database is keyed by what its connection string names - host, port, database -
-/// read off the connection (<see cref="KeyOf(NpgsqlConnection)" />), never a password. The health report
-/// shows only the selected database's total, so a visitor of one database does not see the studio's work
-/// in another.
+/// read off the connection (<see cref="KeyOf(NpgsqlConnection)" />), never a password. The health report and the Statements
+/// page show only the selected database's total, so a visitor of one database does not see the studio's work in another.
 /// </para>
 /// <para>
-/// <b>Bounded, and cheap enough to sit on every session.</b> Thirty ten-second buckets in a ring per database,
-/// under one lock taken once per session. <see cref="Shared" /> is process-wide because the sessions are
-/// created with <c>new</c> wherever a read is made; a test makes its own on a fake clock.
+/// <b>The rollbacks stay exact.</b> <see cref="RollbacksEver" /> counts the read-only sessions' rollbacks alone, as it always
+/// has - a connection's open and close add none - so C08 subtracts exactly the studio's own from
+/// <c>pg_stat_database.xact_rollback</c>.
+/// </para>
+/// <para>
+/// <b>Bounded, and cheap enough to sit on every connection.</b> Thirty ten-second buckets in a ring per database, under one
+/// lock taken once per connection and once per session. <see cref="Shared" /> is process-wide because the connections and
+/// sessions are created wherever a read is made; a test makes its own on a fake clock.
 /// </para>
 /// </remarks>
 internal sealed class StudioDatabaseTime
@@ -63,7 +73,7 @@ internal sealed class StudioDatabaseTime
         this.timeProvider = timeProvider;
     }
 
-    /// <summary>The process's meter, which every session records into unless told otherwise.</summary>
+    /// <summary>The process's meter, which every connection and session records into unless told otherwise.</summary>
     public static StudioDatabaseTime Shared { get; } = new(TimeProvider.System);
 
     /// <summary>
@@ -83,7 +93,10 @@ internal sealed class StudioDatabaseTime
             + (settings.Database ?? string.Empty);
     }
 
-    /// <summary>Adds one session's time, and counts it - and its rollback, when there was one.</summary>
+    /// <summary>
+    /// Adds one read-only session's time on a connection that was not metered, and counts it - and its rollback, when there
+    /// was one.
+    /// </summary>
     /// <param name="database">The database's key (<see cref="KeyOf(NpgsqlConnection)" />).</param>
     /// <param name="elapsed">Begin to rollback.</param>
     /// <param name="rolledBack">Whether the session's rollback reached the server.</param>
@@ -91,43 +104,60 @@ internal sealed class StudioDatabaseTime
     {
         ArgumentNullException.ThrowIfNull(database);
 
-        long slot = SlotOf(timeProvider.GetUtcNow());
-        int index = (int) (slot % BucketCount);
-
         lock (gate)
         {
-            if (!meters.TryGetValue(database, out Meter? meter))
-            {
-                meter = new Meter();
-                meters[database] = meter;
-            }
-
+            Meter meter = MeterOf(database);
             meter.SessionsEver++;
+
             if (rolledBack)
             {
                 meter.RollbacksEver++;
             }
 
-            if (elapsed <= TimeSpan.Zero)
-            {
-                return;
-            }
-
-            if (meter.Slots[index] != slot)
-            {
-                meter.Slots[index] = slot;
-                meter.Ticks[index] = 0;
-                meter.Sessions[index] = 0;
-            }
-
-            meter.Ticks[index] += elapsed.Ticks;
-            meter.Sessions[index]++;
+            AddTime(meter, elapsed);
         }
     }
 
-    /// <summary>Times one session from <paramref name="startedAt" /> (a <see cref="Stopwatch" /> timestamp).</summary>
+    /// <summary>Times one session on a connection that was not metered, from <paramref name="startedAt" /> (a <see cref="Stopwatch" /> timestamp).</summary>
     public void RecordSince(string database, long startedAt, bool rolledBack = true) =>
         Record(database, Stopwatch.GetElapsedTime(startedAt), rolledBack);
+
+    /// <summary>
+    /// Counts one read-only session on a metered connection, and its rollback, when there was one - and no time: the
+    /// connection's own open-to-close time already holds it (<see cref="StudioConnectionMeter" />).
+    /// </summary>
+    /// <param name="database">The database's key (<see cref="KeyOf(NpgsqlConnection)" />).</param>
+    /// <param name="rolledBack">Whether the session's rollback reached the server.</param>
+    public void RecordSession(string database, bool rolledBack)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+
+        lock (gate)
+        {
+            Meter meter = MeterOf(database);
+            meter.SessionsEver++;
+
+            if (rolledBack)
+            {
+                meter.RollbacksEver++;
+            }
+        }
+    }
+
+    /// <summary>Adds one metered connection's time, open to close, and counts it.</summary>
+    /// <param name="database">The database's key (<see cref="KeyOf(NpgsqlConnection)" />).</param>
+    /// <param name="elapsed">Open to close.</param>
+    public void RecordConnection(string database, TimeSpan elapsed)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+
+        lock (gate)
+        {
+            Meter meter = MeterOf(database);
+            meter.ConnectionsEver++;
+            AddTime(meter, elapsed);
+        }
+    }
 
     /// <summary>The total for <paramref name="database" /> over the last <see cref="Window" />.</summary>
     public StudioCost Total(string database)
@@ -149,7 +179,7 @@ internal sealed class StudioDatabaseTime
                     if (meter.Slots[i] >= oldest && meter.Slots[i] <= newest)
                     {
                         total += meter.Ticks[i];
-                        count += meter.Sessions[i];
+                        count += meter.Counts[i];
                     }
                 }
             }
@@ -170,6 +200,15 @@ internal sealed class StudioDatabaseTime
         }
     }
 
+    /// <summary>How many metered connections the studio has opened and closed against <paramref name="database" /> since this process started.</summary>
+    public long ConnectionsEver(string database)
+    {
+        lock (gate)
+        {
+            return meters.TryGetValue(database, out Meter? meter) ? meter.ConnectionsEver : 0;
+        }
+    }
+
     /// <summary>
     /// How many of those sessions ended in a rollback that reached the server - every one of them, normally:
     /// a read-only session always rolls back - so that a check reading <c>pg_stat_database.xact_rollback</c>
@@ -185,6 +224,40 @@ internal sealed class StudioDatabaseTime
 
     private static long SlotOf(DateTimeOffset at) => at.UtcTicks / BucketWidth.Ticks;
 
+    /// <summary>The meter of <paramref name="database" />, made on first use. Called under the lock.</summary>
+    private Meter MeterOf(string database)
+    {
+        if (!meters.TryGetValue(database, out Meter? meter))
+        {
+            meter = new Meter();
+            meters[database] = meter;
+        }
+
+        return meter;
+    }
+
+    /// <summary>Adds time to the current bucket, and counts it there; nothing for no time. Called under the lock.</summary>
+    private void AddTime(Meter meter, TimeSpan elapsed)
+    {
+        if (elapsed <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        long slot = SlotOf(timeProvider.GetUtcNow());
+        int index = (int) (slot % BucketCount);
+
+        if (meter.Slots[index] != slot)
+        {
+            meter.Slots[index] = slot;
+            meter.Ticks[index] = 0;
+            meter.Counts[index] = 0;
+        }
+
+        meter.Ticks[index] += elapsed.Ticks;
+        meter.Counts[index]++;
+    }
+
     /// <summary>One database's ring of buckets and its running counts.</summary>
     private sealed class Meter
     {
@@ -194,9 +267,11 @@ internal sealed class StudioDatabaseTime
 
         public long[] Ticks { get; } = new long[BucketCount];
 
-        public int[] Sessions { get; } = new int[BucketCount];
+        public int[] Counts { get; } = new int[BucketCount];
 
         public long SessionsEver { get; set; }
+
+        public long ConnectionsEver { get; set; }
 
         public long RollbacksEver { get; set; }
     }

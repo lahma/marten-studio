@@ -68,7 +68,7 @@ public sealed record PostgresComputeCapacity
     /// <param name="maximumAcu">The cluster's maximum, in ACU.</param>
     /// <param name="measuredAt">When it was measured.</param>
     /// <returns>The reading.</returns>
-    /// <exception cref="ArgumentOutOfRangeException">A value is outside 0 to 256 ACU or not finite, or minimum exceeds maximum.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A value is outside 0 to 384 ACU or not finite, or minimum exceeds maximum.</exception>
     public static PostgresComputeCapacity AuroraServerlessV2(double currentAcu, double minimumAcu, double maximumAcu, DateTimeOffset measuredAt)
     {
         RequireAcu(currentAcu, nameof(currentAcu));
@@ -79,8 +79,12 @@ public sealed record PostgresComputeCapacity
         return new PostgresComputeCapacity(currentAcu, minimumAcu, maximumAcu, "ACU", measuredAt);
     }
 
-    /// <summary>The most ACU an Aurora Serverless v2 cluster may be configured with.</summary>
-    internal const double MaxAcu = 256;
+    /// <summary>
+    /// The most ACU an Aurora Serverless v2 cluster may be configured with: 384 on platform version 4, whose row of the default
+    /// <c>max_connections</c> table goes to 384 ACU (<i>Performance and scaling for Aurora serverless</i>, Aurora User Guide, read
+    /// 2026-10-26); earlier platform versions stop at 256.
+    /// </summary>
+    internal const double MaxAcu = 384;
 
     private static void RequireNonNegative(double value, string name)
     {
@@ -94,7 +98,7 @@ public sealed record PostgresComputeCapacity
     {
         if (!double.IsFinite(value) || value < 0 || value > MaxAcu)
         {
-            throw new ArgumentOutOfRangeException(name, value, "Aurora Serverless v2 capacity is between 0 and 256 ACU.");
+            throw new ArgumentOutOfRangeException(name, value, "Aurora Serverless v2 capacity is between 0 and 384 ACU.");
         }
     }
 

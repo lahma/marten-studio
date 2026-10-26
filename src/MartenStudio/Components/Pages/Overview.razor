@@ -87,6 +87,9 @@
         <section class="ms-section ms-overview-region ms-overview-health">
             <h2 class="ms-section-title">Health</h2>
 
+            @* Which instance answered and its capacity (issue #8 A1, A8): the Health report's, through the database-wide gate. *@
+            <ServerAnswer Model="health?.Server" />
+
             @if (healthError is { Length: > 0 } healthProblem)
             {
                 <ErrorAlert Message="@healthProblem" OnRetry="RefreshHealthAsync" />
@@ -413,6 +416,13 @@
                     </div>
 
                     <div class="ms-kv">
+                        @if (System.Version.TryParse(store.PostgresVersion, out System.Version? parsed) && PostgresStudio.Services.Server.PostgresFeatures.IsBelowFloor(parsed))
+                        {
+                            <div class="ms-kv-row ms-overview-floor">
+                                <span class="ms-kv-key">PostgreSQL</span>
+                                <span class="ms-kv-value">@store.PostgresVersion, @PostgresStudio.Services.Server.PostgresFeatures.BelowFloor</span>
+                            </div>
+                        }
                         <div class="ms-kv-row">
                             <span class="ms-kv-key">Tenancy</span>
                             <span class="ms-kv-value">@store.Cardinality</span>

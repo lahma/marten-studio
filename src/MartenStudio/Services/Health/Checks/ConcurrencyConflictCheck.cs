@@ -89,7 +89,7 @@ internal sealed partial class ConcurrencyConflictCheck : HealthCheck<Concurrency
         foreach (ObservedStatement statement in read.Statements)
         {
             if (statement is { Text: { } text, TextTruncated: false } && Classify(text) is { } shape
-                && statement.Tables.FirstOrDefault(x => IsTarget(x, shape.Target)) is { } table)
+                && statement.Tables.FirstOrDefault(x => x.IsDeclaredByStore && IsTarget(x, shape.Target)) is { } table)
             {
                 writes.Add(new GuardedWrite(statement, shape.Kind, table));
             }

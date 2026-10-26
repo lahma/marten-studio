@@ -1,7 +1,5 @@
 using System.Globalization;
 
-using Marten.Storage;
-
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
@@ -27,7 +25,22 @@ internal sealed record ConnectionBudgetFacts(
     int UnpooledOnServer,
     int DatabasesInStore,
     ServerConnectionLimits Server,
-    bool Estimated = false);
+    bool Estimated = false)
+{
+    /// <summary>
+    /// The <c>Max Pool Size</c> of the pooled databases on this server that log in as the login role, summed - what the role's
+    /// <c>CONNECTION LIMIT</c> is spent by (<see cref="ConnectionBudgetCheck.SameLogin" />). Zero when none is known to.
+    /// </summary>
+    public long CeilingsAsLogin { get; init; }
+}
+
+/// <summary>What C02 counts of a store's databases on one server, read from their connection strings without I/O.</summary>
+/// <param name="OnServer">How many point at the server.</param>
+/// <param name="Pooled">How many of those pool.</param>
+/// <param name="Ceilings">Their <c>Max Pool Size</c>, summed.</param>
+/// <param name="Unpooled">How many do not pool.</param>
+/// <param name="CeilingsAsLogin">The <c>Max Pool Size</c> of the pooled ones that log in as the login role, summed.</param>
+internal readonly record struct ConnectionBudgetTally(int OnServer, int Pooled, long Ceilings, int Unpooled, long CeilingsAsLogin);
 
 /// <summary>
 /// C02: a store with a database per tenant whose pools, together, can open more connections to one server than
@@ -83,25 +96,51 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
             // to be like this one - those the helper could not name from the cache included, since they are held.
             int count = Math.Max(listed.Databases.Count + listed.Unnamed, 1);
 
+            long estimate = mine.Pooling ? (long) count * mine.MaxPoolSize : 0;
+
             return new ConnectionBudgetFacts(
                 count,
                 mine.Pooling ? count : 0,
-                mine.Pooling ? (long) count * mine.MaxPoolSize : 0,
+                estimate,
                 mine.Pooling ? 0 : count,
                 count,
                 server,
-                Estimated: true);
+                Estimated: true)
+            {
+                // Taken to be like this one in its login too: this database is the one the role was read through.
+                CeilingsAsLogin = estimate,
+            };
         }
+
+        ConnectionBudgetTally tally = Tally([.. listed.Databases.Select(static database => DatabasePoolSettings.Of(database))], mine, server.LoginRole);
+
+        return new ConnectionBudgetFacts(tally.OnServer, tally.Pooled, tally.Ceilings, tally.Unpooled, listed.Databases.Count, server)
+        {
+            CeilingsAsLogin = tally.CeilingsAsLogin,
+        };
+    }
+
+    /// <summary>
+    /// Counts <paramref name="databases" /> on <paramref name="mine" />'s server - a database whose pool settings could not be
+    /// read (<see langword="null" />) is not counted - and sums the ceilings of those that log in as <paramref name="loginRole" />.
+    /// </summary>
+    /// <param name="databases">The store's databases' pool settings.</param>
+    /// <param name="mine">This database's, the one the server was read through.</param>
+    /// <param name="loginRole">The role this database's sessions log in as (<c>session_user</c>).</param>
+    internal static ConnectionBudgetTally Tally(IReadOnlyList<DatabasePoolSettings?> databases, DatabasePoolSettings mine, string? loginRole)
+    {
+        ArgumentNullException.ThrowIfNull(databases);
+        ArgumentNullException.ThrowIfNull(mine);
 
         int onServer = 0;
         int pooled = 0;
         int unpooled = 0;
         long ceilings = 0;
+        long asLogin = 0;
 
-        foreach (IMartenDatabase database in listed.Databases)
+        foreach (DatabasePoolSettings? settings in databases)
         {
-            if (DatabasePoolSettings.Of(database) is not { } settings
-                || !string.Equals(settings.ServerKey, mine.ServerKey, StringComparison.Ordinal))
+            if (settings is null || !string.Equals(settings.ServerKey, mine.ServerKey, StringComparison.Ordinal))
             {
                 continue;
             }
@@ -112,6 +151,11 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
             {
                 pooled++;
                 ceilings += settings.MaxPoolSize;
+
+                if (SameLogin(settings, mine, loginRole))
+                {
+                    asLogin += settings.MaxPoolSize;
+                }
             }
             else
             {
@@ -119,7 +163,23 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
             }
         }
 
-        return new ConnectionBudgetFacts(onServer, pooled, ceilings, unpooled, listed.Databases.Count, server);
+        return new ConnectionBudgetTally(onServer, pooled, ceilings, unpooled, asLogin);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="database" />'s pool logs in as the login role, as far as connection strings say: it names the
+    /// same <c>Username</c> as <paramref name="mine" /> - the database the role was read through, both naming none included,
+    /// since Npgsql then takes the user from the process's own environment - or names <paramref name="loginRole" /> itself.
+    /// Postgres compares a role name exactly, so this does too. A pool that names no user while this one names one is not
+    /// counted: what it logs in as is not known without connecting, and the role sentence errs towards a smaller sum.
+    /// </summary>
+    internal static bool SameLogin(DatabasePoolSettings database, DatabasePoolSettings mine, string? loginRole)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(mine);
+
+        return string.Equals(database.Username, mine.Username, StringComparison.Ordinal)
+            || (database.Username is { } user && loginRole is not null && string.Equals(user, loginRole, StringComparison.Ordinal));
     }
 
     /// <inheritdoc />
@@ -145,7 +205,8 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
             return HealthVerdict.Quiet(
                 SessionText.Count(facts.PooledOnServer, "database") + " on this server can open" + estimated + " at most "
                 + SessionText.Number(facts.CeilingsOnServer) + " connections between them, within the server's "
-                + available.ToString("N0", CultureInfo.InvariantCulture) + ".");
+                + available.ToString("N0", CultureInfo.InvariantCulture) + "."
+                + (RoleSentence(facts) is { } role ? " " + char.ToUpperInvariant(role[0]) + role[1..] + "." : string.Empty));
         }
 
         List<HealthEvidence> evidence =
@@ -163,6 +224,11 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
         if (facts.UnpooledOnServer > 0)
         {
             evidence.Add(new HealthEvidence("Without a pool", SessionText.Count(facts.UnpooledOnServer, "database") + ", which have no ceiling at all"));
+        }
+
+        if (RoleSentence(facts) is { } roleLimit)
+        {
+            evidence.Add(new HealthEvidence("The login role's limit", roleLimit));
         }
 
         return HealthVerdict.Of(new HealthFinding
@@ -200,5 +266,23 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
                 + "such as PgBouncer in front of the server is the other way out; raising max_connections is the server's own "
                 + "setting, and the studio never changes it."),
         });
+    }
+
+    /// <summary>
+    /// "this process alone may open 300 connections as role app, which may open 50" - when the login role has a
+    /// <c>CONNECTION LIMIT</c> that the pools on this server logging in as that role can pass together (W5-AUR, C03's role
+    /// limit; <see cref="ConnectionBudgetFacts.CeilingsAsLogin" />, so a tenant database that logs in as a role of its own
+    /// is not charged to this one), or <see langword="null" />. Not enforced against a superuser, so never said for one.
+    /// </summary>
+    internal static string? RoleSentence(ConnectionBudgetFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        ServerConnectionLimits server = facts.Server;
+
+        return server.RoleLimited && facts.CeilingsAsLogin > server.RoleLimit
+            ? "this process alone may open " + SessionText.Number(facts.CeilingsAsLogin) + " connections as role "
+              + (server.LoginRole ?? "(the login role)") + ", which may open " + SessionText.Number(server.RoleLimit)
+            : null;
     }
 }

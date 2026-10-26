@@ -272,13 +272,16 @@ public class SchemaLiveTests(PostgresFixture fixture)
 
         // Fires inside the write-authorization check, which is the last step that still honours the
         // caller's token. Everything after it - the rendered script and the migration itself - is the
-        // studio's own operation.
+        // studio's own operation. The scope names the database by its identity, as a page's does: an empty
+        // db id is asked about twice, as spelled and then by the identity it matched (SEC-fix F1), and the
+        // hook would fire on the first ask, before the gate has passed.
         SchemaFixture.OnAuthorized = circuit.Cancel;
+        StudioScope named = SchemaFixture.Scope with { DatabaseId = identity };
 
         try
         {
             SchemaApplyResult result = await host.SchemaAsync(
-                x => x.ApplyAsync(SchemaFixture.Scope, identity, circuit.Token));
+                x => x.ApplyAsync(named, identity, circuit.Token));
 
             result.Succeeded.Should().BeTrue(result.Message);
         }

@@ -23,6 +23,8 @@ public class IndexChecksTests
         finding.Code.Should().Be("T03");
         finding.Severity.Should().Be(HealthSeverity.Critical);
         finding.Subject.Should().Be(orders.Key + ".mt_doc_healthorderdoc_idx_status", "the Indexes tab finds its row by this key");
+        finding.Variant.Should().Be("index");
+        finding.Key.Should().Be("T03|index|" + orders.Key + ".mt_doc_healthorderdoc_idx_status");
         finding.WhyItMatters.Should().Contain("declares it, so a re-apply drops it and builds it again");
         finding.Remedy!.Code.Should().Contain("ApplyAllConfiguredChangesToDatabaseAsync()");
         finding.Remedy.Explanation.Should().Contain("not additive");
@@ -54,7 +56,9 @@ public class IndexChecksTests
 
         HealthFinding finding = new InvalidIndexCheck().Evaluate(new InvalidIndexFacts([], [table]), Evaluation()).Findings.Should().ContainSingle().Subject;
 
-        finding.Subject.Should().Be(orders.Key + "#partitions", "a subject distinct from every index's");
+        finding.Variant.Should().Be("partitions", "the kind is the variant, and the subject only the table (API design §1.10)");
+        finding.Subject.Should().Be(orders.Key);
+        finding.Key.Should().Be("T03|partitions|" + orders.Key, "a key distinct from every index finding's, whose variant is index");
         finding.Title.Should().StartWith("2 indexes on the partitions of " + orders.Key);
         finding.WhyItMatters.Should().Contain("after the tenant");
         finding.WhyItMatters.Should().Contain("A DBA drops that leftover partition index first", "a re-apply cannot resume a partition's build");
@@ -264,105 +268,78 @@ public class IndexChecksTests
     private static UnusedIndexFacts Unused(IndexFacts index, TableFacts table, DateTimeOffset? statsReset, bool multiHost = false) =>
         new(Now, [index], [table], new DatabaseStatistics(statsReset, true, 2), multiHost);
 
-    /// <summary>The advisor's own samples of an index seen unscanned, every ten minutes for so long, up to now.</summary>
-    private static HealthHistoryView SeenUnscanned(IndexFacts index, TimeSpan forSo) =>
-        History([.. Enumerable.Range(0, (int) (forSo / TimeSpan.FromMinutes(10)) + 1)
-            .Select(i => (TimeSpan.FromMinutes(10 * i), new[]
-            {
-                (UnusedIndexCheck.SweptSeries, 1d),
-                (UnusedIndexCheck.UnscannedSeries + index.Key, 1d),
-            }))]);
-
     [Fact]
-    public void A_never_scanned_index_of_a_megabyte_on_a_table_with_a_hundred_thousand_writes_is_a_warning_once_a_day_of_samples_says_so()
+    public void A_never_scanned_index_of_a_megabyte_on_a_table_with_a_hundred_thousand_writes_is_a_warning_over_a_covering_window()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts index = Index(orders, IndexRow(orders, "by_status", "(data ->> 'Status'::text)") with { Scans = 0, Bytes = 2 * 1024 * 1024 });
         TableFacts table = Table(orders, row => row with { Inserts = 90_000, Updates = 20_000, HotUpdates = 0 });
 
-        HealthFinding finding = new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation(SeenUnscanned(index, TimeSpan.FromDays(1))))
+        HealthFinding finding = new UnusedIndexCheck().Evaluate(Unused(index, table, null), UsageEvaluation())
             .Findings.Should().ContainSingle().Subject;
 
         finding.Code.Should().Be("T05");
-        finding.Severity.Should().Be(HealthSeverity.Warning, "a day of the advisor's own samples proves what counters of unknown age cannot");
+        finding.Severity.Should().Be(HealthSeverity.Warning, "thirty days of statistics, not looking reset, is the proof (issue #8 G4)");
         finding.Subject.Should().Be(index.Key);
-        finding.Title.Should().Contain("110,000 writes");
-        finding.WhyItMatters.Should().Contain("110,000 entries").And.Contain("2.0 MiB");
-        finding.Caveat.Should().Contain("never", "a database whose statistics were never reset says so");
+        finding.Title.Should().Contain("110,000 writes").And.Contain("has never been scanned");
+        finding.WhyItMatters.Should().Contain("110,000 entries").And.Contain("2.0 MiB").And.Contain("30 days of statistics");
+        finding.Caveat.Should().Contain("Judged over 30 days of statistics").And.Contain("pg_stat_checkpointer.stats_reset");
         finding.Remedy!.Code.Should().Contain("opts.Schema.For<HealthOrderDoc>()");
     }
 
+    /// <summary>
+    /// Issue #8 G4 folds 0.4's "Info until a day of the advisor's own samples" into the guard: under seven days, or over
+    /// counters that look reset, there is no finding at all - the status row says why - and from seven days a Warning.
+    /// </summary>
     [Fact]
-    public void Statistics_never_reset_are_of_unknown_age_and_cap_the_finding_at_Info_until_the_history_covers_a_day()
+    public void Under_seven_days_of_statistics_or_over_counters_that_look_reset_there_is_no_finding_and_the_row_says_why()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts index = Index(orders, IndexRow(orders, "by_status", "id") with { Scans = 0 });
         TableFacts table = Table(orders, row => row with { Inserts = 1_000_000 });
 
-        HealthFinding unknown = new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation()).Findings.Single();
-        unknown.Severity.Should().Be(HealthSeverity.Info);
-        unknown.Caveat.Should().Contain("never reset, so how long they have been counting is not known")
-            .And.Contain("Info until the advisor's own samples have seen the index unscanned for a day");
+        HealthVerdict young = new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation() with { Statistics = StatisticsOver(TimeSpan.FromDays(6)) });
+        young.Findings.Should().BeEmpty();
+        young.Note.Should().StartWith("Withheld: statistics 6 days old").And.Contain("pg_stat_checkpointer.stats_reset").And.Contain("7 days");
 
-        new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation(SeenUnscanned(index, TimeSpan.FromHours(23))))
-            .Findings.Single().Severity.Should().Be(HealthSeverity.Info, "23 hours is not a day");
+        HealthVerdict reset = new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation() with { Statistics = StatisticsOver(TimeSpan.FromDays(30), looksReset: true) });
+        reset.Findings.Should().BeEmpty();
+        reset.Note.Should().StartWith("Withheld: the counters look reset (the server restarted without its statistics)");
+
+        new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation() with { Statistics = StatisticsOver(TimeSpan.FromDays(7)) })
+            .Findings.Single().Severity.Should().Be(HealthSeverity.Warning, "seven days is the line");
+
+        new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation()).Note.Should().Be(UsageGuard.NotRead,
+            "a window nobody measured is never one a verdict is given over");
     }
 
     /// <summary>
-    /// The advisor's history is samples of the primary's own <c>idx_scan</c>: however many days of zeroes it holds,
-    /// it says nothing about the scans a standby served, so on a multi-host data source T05 is Info always.
+    /// The primary's counters say nothing about the scans a standby served, so on a multi-host data source T05 is Info always,
+    /// however long the window.
     /// </summary>
     [Fact]
-    public void A_multi_host_data_source_keeps_the_finding_at_Info_however_old_the_counters_and_however_long_the_history()
+    public void A_multi_host_data_source_keeps_the_finding_at_Info_however_long_the_window()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts index = Index(orders, IndexRow(orders, "by_status", "id") with { Scans = 0 });
         TableFacts table = Table(orders, row => row with { Inserts = 1_000_000 });
 
-        HealthFinding standby = new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30), multiHost: true), Evaluation()).Findings.Single();
+        HealthFinding standby = new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30), multiHost: true), UsageEvaluation()).Findings.Single();
         standby.Severity.Should().Be(HealthSeverity.Info, "reads served by a standby are counted there, not on the primary");
-        standby.Caveat.Should().Contain("multi-host data source").And.Contain("every standby").And.Contain("stays Info")
-            .And.NotContain("until the advisor's own samples", "no length of primary-side history lifts it");
+        standby.Caveat.Should().Contain("multi-host data source").And.Contain("every standby").And.Contain("stays Info");
 
-        HealthFinding afterDays = new UnusedIndexCheck()
-            .Evaluate(Unused(index, table, Now.AddDays(-30), multiHost: true), Evaluation(SeenUnscanned(index, TimeSpan.FromDays(7))))
-            .Findings.Single();
-        afterDays.Severity.Should().Be(HealthSeverity.Info, "a week of the primary's zeroes proves nothing about a standby's scans");
-
-        new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30)), Evaluation(SeenUnscanned(index, TimeSpan.FromDays(7))))
-            .Findings.Single().Severity.Should().Be(HealthSeverity.Warning, "the same history on one host is the proof");
+        new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-30)), UsageEvaluation())
+            .Findings.Single().Severity.Should().Be(HealthSeverity.Warning, "the same window on one host is the proof");
     }
 
     [Fact]
-    public void A_scan_in_between_restarts_the_day_the_history_must_cover()
-    {
-        MartenTable orders = Document<HealthOrderDoc>();
-        IndexFacts index = Index(orders, IndexRow(orders, "by_status", "id") with { Scans = 0 });
-        TableFacts table = Table(orders, row => row with { Inserts = 1_000_000 });
-
-        HealthHistoryView broken = History(
-            (TimeSpan.FromDays(2), [(UnusedIndexCheck.SweptSeries, 1d), (UnusedIndexCheck.UnscannedSeries + index.Key, 1d)]),
-            (TimeSpan.FromHours(5), [(UnusedIndexCheck.SweptSeries, 1d)]),
-            (TimeSpan.FromHours(4), [(UnusedIndexCheck.SweptSeries, 1d), (UnusedIndexCheck.UnscannedSeries + index.Key, 1d)]),
-            (TimeSpan.Zero, [(UnusedIndexCheck.SweptSeries, 1d), (UnusedIndexCheck.UnscannedSeries + index.Key, 1d)]));
-
-        new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation(broken)).Findings.Single()
-            .Severity.Should().Be(HealthSeverity.Info, "five hours ago the index was not seen unscanned, so the day starts four hours ago");
-    }
-
-    [Fact]
-    public void The_sample_marks_every_sweep_and_every_unscanned_candidate()
+    public void T05_writes_no_history_of_its_own_any_more()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts unscanned = Index(orders, IndexRow(orders, "by_status", "id") with { Scans = 0 });
-        IndexFacts scanned = Index(orders, IndexRow(orders, "by_name", "id") with { Scans = 3 });
-        UnusedIndexFacts facts = new(Now, [unscanned, scanned], [Table(orders)], new DatabaseStatistics(null, true, 2));
+        UnusedIndexFacts facts = new(Now, [unscanned], [Table(orders)], new DatabaseStatistics(null, true, 2));
 
-        new UnusedIndexCheck().Sample(facts).Should().BeEquivalentTo(
-        [
-            new HealthSamplePart(UnusedIndexCheck.SweptSeries, 1),
-            new HealthSamplePart(UnusedIndexCheck.UnscannedSeries + unscanned.Key, 1),
-        ]);
+        new UnusedIndexCheck().Sample(facts).Should().BeEmpty("the statistics window is the proof now, not the advisor's own samples");
     }
 
     [Theory]
@@ -390,7 +367,7 @@ public class IndexChecksTests
         });
         TableFacts table = Table(orders, row => row with { Inserts = 1_000_000 });
 
-        new UnusedIndexCheck().Evaluate(Unused(index, table, null), Evaluation()).Findings.Should().BeEmpty();
+        new UnusedIndexCheck().Evaluate(Unused(index, table, null), UsageEvaluation()).Findings.Should().BeEmpty();
     }
 
     [Fact]
@@ -400,25 +377,10 @@ public class IndexChecksTests
         IndexFacts small = Index(orders, IndexRow(orders, "small", "id") with { Scans = 0, Bytes = 8192 });
         IndexFacts large = Index(orders, IndexRow(orders, "large", "id") with { Scans = 0 });
 
-        new UnusedIndexCheck().Evaluate(Unused(small, Table(orders, row => row with { Inserts = 1_000_000 }), null), Evaluation())
+        new UnusedIndexCheck().Evaluate(Unused(small, Table(orders, row => row with { Inserts = 1_000_000 }), null), UsageEvaluation())
             .Findings.Should().BeEmpty();
-        new UnusedIndexCheck().Evaluate(Unused(large, Table(orders, row => row with { Inserts = 99_999 }), null), Evaluation())
+        new UnusedIndexCheck().Evaluate(Unused(large, Table(orders, row => row with { Inserts = 99_999 }), null), UsageEvaluation())
             .Findings.Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Statistics_reset_less_than_a_day_ago_make_the_finding_Info_and_say_why_and_older_ones_a_Warning()
-    {
-        MartenTable orders = Document<HealthOrderDoc>();
-        IndexFacts index = Index(orders, IndexRow(orders, "by_status", "id") with { Scans = 0 });
-        TableFacts table = Table(orders, row => row with { Inserts = 1_000_000 });
-
-        HealthFinding young = new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddHours(-3)), Evaluation()).Findings.Single();
-        young.Severity.Should().Be(HealthSeverity.Info);
-        young.Caveat.Should().Contain("The statistics were reset 3 h ago").And.Contain("Info until");
-
-        new UnusedIndexCheck().Evaluate(Unused(index, table, Now.AddDays(-3)), Evaluation()).Findings.Single()
-            .Severity.Should().Be(HealthSeverity.Warning);
     }
 
     [Fact]
@@ -427,7 +389,7 @@ public class IndexChecksTests
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts index = Index(orders, IndexRow(orders, "mt_doc_healthorderdoc_idx_mt_deleted", "mt_deleted") with { Scans = 0 }, IndexOrigin.Structural);
 
-        new UnusedIndexCheck().Evaluate(Unused(index, Table(orders, row => row with { Inserts = 1_000_000 }), null), Evaluation())
+        new UnusedIndexCheck().Evaluate(Unused(index, Table(orders, row => row with { Inserts = 1_000_000 }), null), UsageEvaluation())
             .Findings.Should().BeEmpty();
     }
 

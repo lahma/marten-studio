@@ -2,13 +2,18 @@
 
 These checks look at who is connected to the store's database and what they hold: this process's connection
 pool (C01, C09), the server's connection budget (C02, C03), sessions and statements that hold things back (C04,
-C05, C06, C07), the database's own counters (C08), and whether a transaction-mode pooler stands between the
-HotCold daemon and its lock (C10). Back to the [index](../health.md).
+C05, C06, C07), the database's own counters (C08), whether a transaction-mode pooler stands between the
+HotCold daemon and its lock (C10), and how much of what the database reads its shared buffers hold (C11). Back to the
+[index](../health.md).
+
+**Studios.** C01, C03 to C08 and C11 read Postgres alone and run in both studios, with the data source in place of the
+store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
+Studio. The list of every code and its studios is [codes.md](codes.md).
 
 ## What these checks read, and when
 
 `pg_stat_activity`, `pg_locks`, `pg_prepared_xacts` and `pg_stat_database` are read **only by a health sweep**
-- once per `MartenStudioOptions.HealthInterval` (a minute by default) for everybody watching - and by the
+- once per `HealthInterval` (a minute by default) for everybody watching - and by the
 **Database › Sessions** page, at the same interval or on Refresh, through a shared snapshot that is never read
 twice within ten seconds. Nothing on the five-second `RefreshInterval` path reads them: they are scans of the
 server's process array and lock table, cheap once a minute and not something to do on every poll of every open
@@ -28,7 +33,7 @@ A finding's count, ages, states, wait classes, lock modes and the Marten label o
 anybody the store policy passes for the database as a whole (`TenantId = null`).
 
 Who the sessions are - **process ids, roles, client addresses, application names, connection times** and, on
-the Sessions page, **statements** - needs `MartenStudioOptions.Capabilities.ViewDatabaseActivity` (off by
+the Sessions page, **statements** - needs `Capabilities.ViewDatabaseActivity` (off by
 default, in `All()`, off under `ReadOnly`) **and** the write policy, asked with
 `Capability = "ViewDatabaseActivity"` and `TenantId = null`. Without it a visitor reads "withheld" in place of
 each of those, with what it would take.
@@ -169,6 +174,41 @@ Counts every client backend on the server, every database included - only the co
 The remedy is fewer connections per process, or a pooler in front of the server; `max_connections` is the
 server's own setting and the studio never changes it.
 
+Runs in both studios, Marten Studio and Postgres Studio. Variants: `server`, `role`, `database`.
+
+**The limits Postgres enforces first.** A role's `CONNECTION LIMIT` refuses "too many connections for role", and a
+database's "too many connections for database", while `max_connections` still has room. So C03 also judges, on the same
+80 % and 95 % lines:
+
+- **`role`**: the login role's `pg_roles.rolconnlimit` against that role's client sessions on the whole server
+  (`pg_stat_activity.usename`, which every role may read). The login role is `session_user` - the role a new connection
+  is counted against - whatever `SqlConsoleRole` the studio's reads run as.
+- **`database`**: this database's `pg_database.datconnlimit` against its client sessions, every role's.
+
+`-1`, the default, is no limit. Neither limit is enforced against a superuser, so a superuser login is judged against
+the server alone (S04's `superuser` variant is the problem there). The finding names the nearest of the three; the
+server's own finding is the `server` variant (from 0.5's split, its key is `C03|server` rather than `C03`). This process's pool
+ceiling - C01's `Maximum Pool Size` - is compared with the role's limit: "this process alone may open 100 connections
+as role app, which may open 50", in the role finding's evidence and the quiet row. The remedy for a role or database
+limit is a `Maximum Pool Size` that keeps one process under the limit's warning line; raising the limit itself
+(`ALTER ROLE ... CONNECTION LIMIT`, `ALTER DATABASE ... CONNECTION LIMIT`) is for whoever administers the role or owns
+the database, and the studio never words it as a statement.
+
+**On Aurora** `max_connections` is not a setting to raise: Aurora derives it from the instance's memory, and on Serverless
+v2 from the memory of the cluster's *maximum* capacity, held while the instance scales ("it uses the memory size based on
+the maximum Aurora capacity units (ACUs) for the DB instance, not the current ACU value" - *Performance and scaling for
+Aurora serverless*, Aurora User Guide). Two caps sit on top: a minimum capacity of 0 or 0.5 ACU caps `max_connections`
+at 2,000, and its default stops at 5,000 from a maximum of 32 ACU. So with an `ACU` reading from the host's capacity
+source ([`IPostgresCapacitySource`](../aurora.md#the-capacity-source)) the remedy is "Raise the cluster's minimum capacity
+to 1 ACU or more" when a minimum of 0.5 ACU or less holds it at 2,000; "Lower the pool ceilings of the applications that
+share the cluster, or put RDS Proxy or PgBouncer in front of it" at Aurora's ceiling - a maximum of 32 ACU or more, or
+`max_connections` at 5,000 - where more capacity adds no connections; and otherwise "Raise the cluster's maximum capacity
+(now 16 ACU)". Without one it names the Serverless v2 cases - the maximum, or the minimum if it is 0 or 0.5 - and the
+provisioned one, a larger instance class or `max_connections` in the DB cluster parameter group, and asks for a capacity
+source; at 5,000 it is the ceiling's remedy whatever the capacity. Each says that a `max_connections` set in a custom
+parameter group replaces Aurora's formula. A capacity reading, on any platform, is one more line of evidence. Every other
+platform's remedy is the text above.
+
 The count is whole without `pg_read_all_stats` too, but not because Postgres lists everything plainly: a role
 that is not a member reads another role's row with its `backend_type` null, and a filter on `client backend`
 alone would drop every such row. So a row whose backend type is withheld and that has a role behind it and a
@@ -192,16 +232,17 @@ Marten 9.39 and 9.40 (`Events.UseAdvisoryLockTransaction` on by default) it hold
 `Events.UseMonitoredAdvisoryLock` on, also the default, that session is `idle in transaction` from taking the lock
 until about 0.9 s after the first leadership poll that follows - five seconds or so at the default
 `LeadershipPollingTime` of 5,000 ms - and from then on `active`, running the lock monitor's `pg_sleep(60)` inside the
-same transaction, the next sleep beginning as the last one ends (measured live at 9.39). So it is idle in its
-transaction for a few seconds once, when it takes the lead. From 9.41 the lock is the session's by default and the
-leader is not in a transaction at all.
+same transaction, the next sleep beginning as the last one ends (measured live at 9.39.0, whose Weasel 9.33 carries the
+upstream DistributedLock.Postgres 1.3.0). So it is idle in its transaction for a few seconds once, when it takes the
+lead. From 9.41 the lock is the session's by default and the leader is not in a transaction at all.
 
-At Marten 9.50.2 (Weasel 9.45, Patched.DistributedLock.Postgres 1.3.3) with `Events.UseAdvisoryLockTransaction = true`
-- what a host behind a transaction-mode pooler keeps - there is no `pg_sleep` monitor: the leader sits `idle in
-transaction`, with a snapshot, until DistributedLock's keepalive (`SELECT 0`) runs in it about 61 s after the lock,
-and again every minute (measured live). Where the connection string sets Npgsql's `Keepalive` or `Multiplexing`,
-DistributedLock falls back to 9.39's `pg_sleep` instead: the leader is `active` in it, not idle, and C04 does not judge
-it. That reaches C04's minute, so **the leader is recognised by its leadership
+From Marten 9.39.1 (Weasel 9.34, the first with Patched.DistributedLock.Postgres 1.3.3), with
+`Events.UseAdvisoryLockTransaction = true` - the default up to 9.40, and what a host behind a transaction-mode pooler
+keeps - there is no `pg_sleep` monitor: the leader sits `idle in transaction`, with a snapshot, until DistributedLock's
+keepalive (`SELECT 0`) runs in it about 61 s after the lock, and again every minute (measured live at 9.45.0 and 9.50.2;
+K08 reads which monitor the process loads off the DistributedLock assembly Weasel binds to). Where the connection
+string sets Npgsql's `Keepalive` or `Multiplexing`, DistributedLock falls back to 9.39.0's `pg_sleep` instead: the
+leader is `active` in it, not idle, and C04 does not judge it. That reaches C04's minute, so **the leader is recognised by its leadership
 lock, never by its name**: a session that holds one of the store's daemon advisory lock ids, granted, in this
 database, and is idle in a transaction (`pg_locks` cannot say which scope the lock has), with the leader's shape - no
 transaction id and no relation lock - is not raised while it has been idle for less than three minutes
@@ -214,7 +255,7 @@ really does hold back vacuum; `Events.UseAdvisoryLockTransaction = false` is the
 The fix is in the application: dispose every session (`await using`), and end what it began. A server-wide
 `idle_in_transaction_session_timeout` is the DBA's backstop - and with the leadership lock transaction-scoped it can
 also end the HotCold daemon's leadership session: a timeout shorter than the minute or so the leader sits idle in its
-transaction (after taking the lead at 9.39, between keepalives at 9.50.2), or any timeout with lock monitoring off.
+transaction (after taking the lead at 9.39.0, between keepalives from 9.39.1), or any timeout with lock monitoring off.
 
 ## C05 Long-running statement
 
@@ -252,6 +293,16 @@ state, role, application and client are not read. The head of each chain - a blo
 wait itself - is described by its state and how long its transaction has been open. Waits are measured from
 `pg_locks.waitstart` (PostgreSQL 14+), else from the session's last state change, an upper bound.
 
+**A `VACUUM` at the head** (0.5) is named for what it is. Every role sees a `VACUUM`'s process id in
+`pg_stat_progress_vacuum`, so a head running one is "a VACUUM"; a role with `pg_read_all_stats` also sees its
+`backend_type` and its statement, so it is "an autovacuum", or "an autovacuum to prevent wraparound" when its
+statement says `autovacuum: VACUUM … (to prevent wraparound)` - a test made in SQL, so the statement, which names the
+table, never leaves the database. The finding then says what to do: a manual `VACUUM` and an anti-wraparound
+autovacuum do not give way to a lock request (an ordinary autovacuum is cancelled by one after `deadlock_timeout`), so
+a migration queued behind it - in Marten Studio `ApplyAllDatabaseChangesOnStartup` or `db-apply`, in Postgres Studio
+whatever runs the host's migrations - holds every reader of the table behind itself. Let the vacuum finish and retry
+the migration, and never cancel the vacuum while T12 is near its line.
+
 ## C07 Orphaned prepared transaction
 
 **Critical** when a prepared transaction has waited five minutes for its `COMMIT PREPARED` or `ROLLBACK PREPARED`.
@@ -275,7 +326,77 @@ From `pg_stat_database`'s counters, as rates over the advisor's history - which 
 - **Info** when statements wrote temporary files: a sort or a hash that did not fit `work_mem`, usually an
   `ORDER BY` on a document field no index covers.
 
-Each finding says when the statistics were last reset.
+And per day, over the statistics window - the same counters, cumulative since the database's statistics began, divided
+by how long they have counted - once that window is at least a day long and the counters do not look reset (see
+[the statistics window](#the-statistics-window) below):
+
+- **Warning** when statements wrote **1 GiB or more of temporary files a day**. It stands on its own: a database that
+  spills this much is told so whether or not it spilled in the last hour, and it takes the place of the hour's Info for
+  the temp files. Under it, the hour's Info stays as it was.
+- A deadlock finding adds the window's **deadlocks per day** to its evidence. Its severity is unchanged: any deadlock in
+  the hour is already a Warning.
+- Nothing per day is said while the window is under a day, or in the check in which the counters first look reset; the
+  status row says how long the window has counted so far.
+
+Variants: `deadlocks`, `rollbacks`, `temp-files` - at most one finding of each, about the database as a whole, so none has
+a subject. Until 0.5 the kind was the finding's subject; a finding's key (`C08|deadlocks`) is the same either way. Each
+finding says when the statistics were last reset. Both studios run it.
+
+**On Aurora** a temp-file finding says where the files go: "In Aurora PostgreSQL, these files share local storage with
+other log files" (*Managing temporary files with PostgreSQL*, Aurora User Guide), not the cluster volume, and "The local
+storage size depends on the instance class that you use" (*Amazon Aurora storage*). So the day's Warning speaks of a steady
+load on the instance's local storage rather than on the database's own disk, and both findings point at CloudWatch's
+`FreeLocalStorage` and at `temp_file_limit` in the DB cluster parameter group.
+
+### The statistics window
+
+The one place every rate per day - C08's and C11's, and the Storage page's growth - asks since when this database's
+counters have counted, and whether they were reset:
+
+- **Since** is the later of `pg_stat_database.stats_reset` and the earlier of the two shared views' `stats_reset`
+  (`pg_stat_bgwriter` up to PostgreSQL 16 or `pg_stat_checkpointer` from 17, and `pg_stat_archiver`):
+  `max(database, min(shared, archiver))`. From 15, `pg_stat_database.stats_reset` stays null through a crash that
+  zeroes every counter, while a crash, a restore and a first start stamp both shared views at one instant on 14 and 17
+  alike. A `pg_stat_reset_shared()` of one view - `'archiver'` to clear its failure count, `'bgwriter'` - moves only
+  that view and leaves the database's counters alone, so it never moves **Since**.
+- **A clean restart is not a reset.** 14 and 15+ keep their statistics across a clean shutdown and start; a crash, an
+  immediate shutdown or a restore discards them. So the server's start (`pg_postmaster_start_time()`) moving counts
+  only together with a counter going down or a reset time moving.
+- **Reset**, for the one check that first sees it, when against the previous check: another server took over (the
+  timeline went up - `pg_control_checkpoint().timeline_id`, which shows a promotion once the new timeline has had a
+  checkpoint - on a server that started at another time, or the server answering started before the last check with its
+  counters down), the cluster's system identifier or major version changed (`pg_upgrade`, a restore from a dump), the
+  server restarted without its statistics, a reset time moved, or `xact_commit` or `blks_read` went down. After a
+  failover the window starts at the promoted server's reset times; after a counter went down with nothing to say when,
+  at the check that saw it.
+- **A standby keeps its window.** From PostgreSQL 15 a standby keeps its statistics through a clean restart in
+  recovery and through its own promotion, its reset times those of its first start from the base backup; 14 discards
+  them at every start of a standby and stamps the times anew (measured on 14.24, 17.11 and 18.6). So neither the watched
+  server's own promotion nor a standby following a promotion upstream is a reset. A promoted server counts the rows it
+  writes only from its promotion, while its reads count from its first start, so growth just after a failover reads
+  low, never high.
+- A reset of both shared views at once with this database's counters still climbing - PostgreSQL 17's argument-less
+  `pg_stat_reset_shared()` - is not a reset of the window when it is seen live. Seen only after the fact, by a process
+  that started since, it reads like a backend's crash and the window begins at it: the shorter side.
+- The Storage page, which reads the window without adding to the history, stops calling the statistics reset once
+  they have counted for a day.
+- The page and each finding say where **Since** came from and what the counters' start looks like: the server's start,
+  a reset, a crash, a restore, a failover, a new cluster (only when the system identifier or major version is seen to
+  change), or nothing at all.
+- **The control functions are optional.** `pg_control_checkpoint()` and `pg_control_system()` are read by statements
+  of their own: `has_function_privilege` first, then a call of only the functions it allowed, because PostgreSQL checks
+  `EXECUTE` on every function a statement names before it runs, `CASE` or not. When a platform refuses them - revoked,
+  missing, or failing with any SQLSTATE - only the timeline and the system identifier are unknown: no failover and no
+  new cluster is said from them, a failure is logged at Debug and nowhere else, and the window, C08, C11 and the Storage
+  page go on as before.
+- When the window's own statement cannot be read, C08's status row says its rates per day were not checked, and the
+  Storage page shows its sizes and tables with growth "not available" and why. C11, which is nothing but the window,
+  is then not checked for a privilege the role lacks (`42501`), timed out for a statement or lock timeout (`57014`,
+  `55P03`), and could not be checked for anything else; the opt-in health check counts the last two as Degraded.
+
+Known limit: from PostgreSQL 15 a database created after the shared views were last reset reads as having counted
+since then, because its own `stats_reset` is null and no view an unprivileged role can read says when it was created. Its
+rates per day then read low, never high.
 
 ## C09 Async shards against the pool
 
@@ -336,6 +457,29 @@ Never probed for `Solo` (no lock), `ExternallyManaged` (not Marten's lock), a pr
 or a transaction-scoped lock. The two process ids are the studio's own sessions, and still behind
 `ViewDatabaseActivity`. This measures what this process's configuration meets; a daemon node with another
 connection string may not go through the pooler.
+
+## C11 Low cache hit ratio
+
+**Warning** when fewer than **95 %** of the blocks this database read were found in shared buffers
+(`blks_hit / (blks_hit + blks_read)` in `pg_stat_database`) and at least **a million blocks a day** were read from outside
+them - both over [the statistics window](#the-statistics-window), so only once it has counted for a day and does not
+look reset. Until then the status row says how many hours of statistics there are so far, and nothing is found: a ratio
+over an hour after a restart is a cold cache, not a small one.
+
+A block not found in shared buffers is read from the operating system, from its page cache if it is lucky and from
+storage if not, so `blks_read` measures the database's own cache, not the disk's. What helps is more memory for the
+database, or less to hold in it: an index that reads fewer pages, dead rows vacuumed away, data nobody reads any more moved
+out. The finding names no setting and no value: a size derived from the machine's memory is not advice the studio gives.
+
+Its evidence is the ratio, the blocks read a day, both totals, the window and where its start came from. One finding per
+database, with no kinds. Both studios run it; every role can read what it reads.
+
+**On Aurora a miss can be a bill** (issue #8 A5). A read that misses shared buffers goes to the cluster volume, and on
+*Aurora Standard* "you also pay a standard rate per 1 million requests for I/O operations", while *Aurora I/O-Optimized*
+has "no additional charges for read and write I/O operations" (*Amazon Aurora storage*, Aurora User Guide). Which one a
+cluster uses is not visible from SQL, so the finding says so from the host's capacity source's
+`PostgresComputeCapacity.IoOptimized` when it is set, and names both when it is not
+([the capacity source](../aurora.md#the-capacity-source)). The threshold is the same on every platform.
 
 ## Database › Sessions
 

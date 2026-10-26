@@ -71,8 +71,8 @@
                     <td>
                         @if (routine.UnpinnedSecurityDefiner)
                         {
-                            <span class="ms-db-badge ms-db-badge-warning"
-                                  title="Runs with its owner's privileges and does not pin search_path, so a caller's search_path decides what its unqualified names resolve to. Add SET search_path to it.">SECURITY DEFINER</span>
+                            <span class="ms-db-badge ms-db-badge-warning ms-db-security-unpinned"
+                                  title="@RoutineSecurity.UnpinnedReason">@UnpinnedText</span>
                         }
                         else if (routine.SecurityDefiner)
                         {
@@ -90,6 +90,10 @@
                 {
                     <tr class="ms-doc-preview-row ms-db-definition-row" id="@DefinitionId(rowKey)" @key="@(rowKey + "\u001fdefinition")">
                         <td class="ms-doc-preview-cell" colspan="@ColumnSpan">
+                            @if (routine.UnpinnedSecurityDefiner)
+                            {
+                                <p class="ms-db-security-note" role="note"><strong>@UnpinnedText.</strong> @RoutineSecurity.UnpinnedReason</p>
+                            }
                             @if (available)
                             {
                                 <DatabaseDefinitionBody Model="definitions.Find(reference)"
@@ -113,6 +117,9 @@
 
 @code {
     private const int ColumnSpan = 8;
+
+    /// <summary>The badge of a SECURITY DEFINER routine that does not pin <c>search_path</c> (W5-B1; <c>search_path=""</c> pins it).</summary>
+    internal const string UnpinnedText = "SECURITY DEFINER, search_path not pinned";
 
     private readonly HashSet<DatabaseObjectRef> expanded = [];
     private readonly DatabaseDefinitionLoader definitions = new();

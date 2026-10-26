@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Server;
 
 namespace PostgresStudio.Services.Health.Checks;
 
@@ -9,17 +10,35 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <param name="Name">The major, as Postgres names it: "17", "9.6".</param>
 /// <param name="FirstRelease">Its first release.</param>
 /// <param name="FinalRelease">Its final release: the community's end of life.</param>
-internal sealed record PostgresMajorSupport(int Major, string Name, DateOnly FirstRelease, DateOnly FinalRelease);
+internal sealed record PostgresMajorSupport(int Major, string Name, DateOnly FirstRelease, DateOnly FinalRelease)
+{
+    /// <summary>
+    /// Whether the dates are the community's plan rather than its record: a major not yet released, whose first release
+    /// is the planned general-availability date and whose final release is the versioning policy's five years on (the
+    /// November minor release of that year) - the versioning page lists neither until the release ships.
+    /// </summary>
+    public bool Planned { get; init; }
+}
 
 /// <summary>
 /// The PostgreSQL community's support dates, shipped in the package: "The PostgreSQL Global Development Group supports a
-/// major version for 5 years after its initial release" (<see cref="Source" />, read 2026-10-17).
+/// major version for 5 years after its initial release" (<see cref="Source" />, read 2026-10-17 and again 2026-10-26,
+/// when every row from 9.6 to 18 still matched it).
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>Dated, and held to its date.</b> The final-release dates are the ones the versioning page publishes, which are the
 /// November minor releases five years on; a release that ships after this table was written is not in it, so the
 /// fast suite fails a year before <see cref="Last" />'s end of life, and whenever the Postgres image the live suite
 /// runs is a major the table does not have (<c>PostgresEndOfLifeTableTests</c>). Extending it is a line per major.
+/// </para>
+/// <para>
+/// <b>19 is planned</b> (<see cref="PostgresMajorSupport.Planned" />). On 2026-10-26 the versioning page does not list it;
+/// "The planned date for the general availability of PostgreSQL 19 is November 19, 2026" (PostgreSQL 19 RC 1 Released!,
+/// https://www.postgresql.org/about/news/postgresql-19-rc-1-released-3409/, 2026-10-15), and the policy's five years end
+/// with 2031's November minor release, the second Thursday, 2031-11-13 - as 18's is 2030-11-14 and 17's 2029-11-08. Once 19
+/// ships, the row takes the page's dates and loses the flag.
+/// </para>
 /// </remarks>
 internal static class PostgresCommunitySupport
 {
@@ -39,6 +58,7 @@ internal static class PostgresCommunitySupport
         new(16, "16", new DateOnly(2023, 9, 14), new DateOnly(2028, 11, 9)),
         new(17, "17", new DateOnly(2024, 9, 26), new DateOnly(2029, 11, 8)),
         new(18, "18", new DateOnly(2025, 9, 25), new DateOnly(2030, 11, 14)),
+        new(19, "19", new DateOnly(2026, 11, 19), new DateOnly(2031, 11, 13)) { Planned = true },
     ];
 
     /// <summary>The newest major in the table.</summary>
@@ -111,6 +131,14 @@ internal sealed class PostgresEndOfLifeCheck : HealthCheck<PostgresServerFacts>
         TimeSpan until = finalRelease.ToDateTime(TimeOnly.MinValue) - today.ToDateTime(TimeOnly.MinValue);
         string date = finalRelease.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
+        if (row is { Planned: true } && until > InfoWindow)
+        {
+            return HealthVerdict.Quiet(
+                "PostgreSQL " + facts.MajorName + "'s first release is planned for "
+                + row.FirstRelease.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ", and the community's policy supports a major "
+                + "for five years from it: until " + date + ", which " + PostgresCommunitySupport.Source + " publishes once it ships.");
+        }
+
         if (row is not null && until > InfoWindow)
         {
             return HealthVerdict.Quiet("PostgreSQL " + facts.MajorName + " has community support until " + date + ".");
@@ -135,6 +163,13 @@ internal sealed class PostgresEndOfLifeCheck : HealthCheck<PostgresServerFacts>
             new("Source", PostgresCommunitySupport.Source),
         ];
 
+        bool belowFloor = PostgresFeatures.IsBelowFloor(facts.VersionNumber);
+
+        if (belowFloor)
+        {
+            evidence.Add(new HealthEvidence("Studio's supported floor", "PostgreSQL " + PostgresFeatures.MinimumSupportedMajor.ToString(CultureInfo.InvariantCulture)));
+        }
+
         if (managed)
         {
             evidence.Add(new HealthEvidence("Platform", facts.Platform.Name, HealthGate.Database));
@@ -155,6 +190,11 @@ internal sealed class PostgresEndOfLifeCheck : HealthCheck<PostgresServerFacts>
                 + (managed
                     ? " Community support ends on this date; your provider runs this server and its schedule may differ - an extended-support "
                       + "period, or an upgrade it starts itself - so its own lifecycle page is the one that decides."
+                    : string.Empty)
+                + (belowFloor
+                    ? " It is also " + PostgresFeatures.BelowFloor + ": the studio still reads it, read by read, but is tested only on "
+                      + PostgresFeatures.MinimumSupportedMajor.ToString(CultureInfo.InvariantCulture) + " and later, so a check here may "
+                      + "not check."
                     : string.Empty),
             Evidence = evidence,
             Caveat =

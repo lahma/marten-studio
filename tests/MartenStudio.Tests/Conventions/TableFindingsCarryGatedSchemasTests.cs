@@ -29,6 +29,8 @@ public class TableFindingsCarryGatedSchemasTests
         ["HorizonHeldCheck.cs"] = "T14 names who holds the horizon back and only counts the store's tables",
         ["TransactionIdAgeCheck.cs"] = "T12 is database-wide and names a table outside the store's schemas generically (MartenTable.NoteName)",
         ["MultixactAgeCheck.cs"] = "T13 is database-wide and names a table outside the store's schemas generically (MartenTable.NoteName)",
+        ["AutovacuumWorkersCheck.cs"] = "T16 is about the server's autovacuum workers and names no table",
+        ["OrphanedDocumentTablesCheck.cs"] = "T17 counts the store's own schemas' orphaned tables and never names one (R1)",
     };
 
     private static readonly Regex TablesArea =

@@ -127,14 +127,16 @@ public class ConnectionDaemonLiveTests(PostgresFixture postgres)
 
     /// <summary>
     /// Whether a transaction-scoped HotCold leader keeps its transaction with DistributedLock's keepalive rather than its
-    /// lock monitor's <c>pg_sleep</c>: Weasel 9.45 (weasel#614, Patched.DistributedLock.Postgres 1.3.3), which Marten 9.50.2
-    /// brings. Measured by CL3 at 9.50.2, at <c>LeadershipPollingTime</c> 1 s and 5 s alike: no <c>pg_sleep</c> at all - each
+    /// lock monitor's <c>pg_sleep</c>: Patched.DistributedLock.Postgres 1.3.3 (weasel#614), from Weasel 9.34 - Marten 9.39.1 -
+    /// read off the DistributedLock this process loads (<c>LeaderLockMonitor</c>), never a Weasel version. Measured by CL3 at
+    /// 9.50.2, and by W5-S2 at 9.45.0, at <c>LeadershipPollingTime</c> 1 s and 5 s alike: no <c>pg_sleep</c> at all - each
     /// leader session sits <c>idle in transaction</c> with the snapshot of its lock statement until
     /// <c>SELECT 0 /* DistributedLock connection keepalive */</c> runs in the transaction about 61 s after the lock, and again
-    /// a minute on. At Weasel 9.33 (Marten 9.39) the monitor's <c>pg_sleep(60)</c> runs from the first leadership poll.
+    /// a minute on. With the upstream DistributedLock.Postgres 1.3.0 (Weasel 9.33, Marten 9.39.0) the monitor's
+    /// <c>pg_sleep(60)</c> runs from the first leadership poll.
     /// </summary>
     internal static bool LeaderKeepsItsTransactionWithAKeepalive =>
-        (MartenRuntime.Current.VersionOf(RuntimePackage.WeaselCore) ?? new Version(0, 0)) >= new Version(9, 45);
+        MartenStudio.Services.Health.Checks.LeaderLockMonitor.Current.Keepalive;
 
     /// <summary>The Marten this run resolved, for the measurements the HotCold tests write to their output.</summary>
     internal static Version Marten => MartenRuntime.Current.VersionOf(RuntimePackage.Marten) ?? throw new InvalidOperationException("No Marten version.");
@@ -260,7 +262,7 @@ public class ConnectionDaemonLiveTests(PostgresFixture postgres)
 
             if (transactionScopedLock && LeaderKeepsItsTransactionWithAKeepalive)
             {
-                // Weasel 9.45: no monitor statement, so the leader sits idle in its leadership transaction, with a snapshot,
+                // The keepalive (from Weasel 9.34): no monitor statement, so the leader sits idle in its leadership transaction, with a snapshot,
                 // between DistributedLock's keepalives. C04's own read lists it, holding the store's daemon lock.
                 IdleInTransactionFacts? seen = null;
                 await LiveWait.UntilAsync(

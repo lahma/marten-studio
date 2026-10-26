@@ -184,7 +184,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             HashSet<string> schemas = SchemaNames(resolved.Store);
@@ -254,7 +254,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list the document collections of {StoreKey}", scope.StoreKey);
+            logger.LogWarning(exception, "Marten Studio could not list the document collections of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
             return CollectionRail.Failed(Describe(exception));
         }
     }
@@ -271,7 +271,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
             // Marked, so that a dry pool or a connect timeout is never read as the count's own statement
             // timeout by the IsTimeout filter below: that would draw "?" and offer the button again for a
@@ -352,7 +352,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not count '{Alias}' exactly", alias);
+            logger.LogWarning(exception, "Marten Studio could not count '{Alias}' exactly", StudioLogValue.Cap(alias));
             return DocumentCount.Unavailable;
         }
     }
@@ -369,7 +369,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
             // Through PostgresFailure, so that the timeout catch below never reads a pool that ran dry or
             // a connect that timed out - spelled exactly like a statement timeout - as "too large to scan".
@@ -425,7 +425,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         {
             // The _recent pseudo-collection is one region of a page. A store where one table of fifty has
             // drifted must lose that region, not the documents browser.
-            logger.LogWarning(exception, "Marten Studio could not read the recent documents of {StoreKey}", scope.StoreKey);
+            logger.LogWarning(exception, "Marten Studio could not read the recent documents of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
             return RecentDocuments.Failed(Describe(exception));
         }
     }
@@ -522,7 +522,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
@@ -541,7 +541,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not list '{Alias}'", alias);
+            logger.LogWarning(exception, "Marten Studio could not list '{Alias}'", StudioLogValue.Cap(alias));
             return DocumentPage.Failed(Describe(exception));
         }
     }
@@ -879,7 +879,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (PostgresException exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", table.Alias);
+            logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", StudioLogValue.Cap(table.Alias));
             return DocumentCount.Unavailable;
         }
     }
@@ -1559,7 +1559,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         }
         catch (PostgresException exception)
         {
-            logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", table.Alias);
+            logger.LogWarning(exception, "Marten Studio could not count '{Alias}'", StudioLogValue.Cap(table.Alias));
             return DocumentCount.Unavailable;
         }
     }

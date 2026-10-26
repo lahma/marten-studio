@@ -82,9 +82,42 @@ internal static class PostgresStudioText
             + "or SourceAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this data source and "
             + "database.",
 
+        StorageStorePolicyDenial =
+            "Your account may not see this database's storage. The source policy "
+            + "(PostgresStudioOptions.SourceAuthorizationPolicy) refused this data source and database.",
+
+        StatementsCapabilityDenial =
+            "The statements this database runs, their counters and their text, need PostgresStudioOptions.Capabilities.ViewDatabaseActivity.",
+        StatementsReadOnlyDenial =
+            "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.ViewDatabaseActivity off "
+            + "with every other capability.",
+        StatementsStorePolicyDenial =
+            "Your account may not see this database's statements. The source policy "
+            + "(PostgresStudioOptions.SourceAuthorizationPolicy) refused this data source and database.",
+        StatementsWritePolicyDenial =
+            "Your account may not see the statements this database runs. The write policy "
+            + "(PostgresStudioOptions.WriteAuthorizationPolicy, or SourceAuthorizationPolicy when no write policy is set) refused "
+            + "ViewDatabaseActivity for this data source and database.",
+        StudioCostCovers =
+            "health checks, the SQL console, the database browser, Sessions, Maintenance, Storage, Replication, Server and the "
+            + "relationship reads",
+        StatementsStudioRoles =
+            "Every read the studio makes here but these reads of pg_stat_statements runs as it - the health checks, the SQL "
+            + "console, the database browser, Sessions, the Maintenance, Storage, Replication and Server pages and the "
+            + "Relationships graph - and this page lists none of their statements. These reads run as the data source's own "
+            + "role, and are among the statements above when they rank among the ones kept.",
+
         ExamplesIntro = "Catalog reads that run against any database. Click one to load it.",
         ExamplesEmpty = "There is no example to offer.",
         RelationshipTableKey = "A foreign key - enforced by Postgres.",
+        RelationshipTableCaption =
+            "Every foreign key between the tables on the diagram, with the end that points, the end pointed at, the columns, "
+            + "whether the database has the constraint, and what a delete does.",
+        RelationshipIsolatedLabel = "Tables with no foreign key",
+        RelationshipUnmatchedNote =
+            "These foreign keys have an end in a table this studio does not draw, so there is nothing to draw them between.",
+        RelationshipNeighbourhoodUnmatched = "an end in a table this studio does not draw, so there is nothing to draw them between.",
+        RelationshipTablesUnavailable = "No table is drawn:",
 
         StatementsOnSessionsPage =
             "The statements themselves are on Database › Sessions, behind PostgresStudioOptions.Capabilities.ViewDatabaseActivity, "
@@ -124,5 +157,102 @@ internal static class PostgresStudioText
         MartenTablePartitionParameters =
             "each partition's pg_class.reloptions says which; Marten Studio's Schema screen, over the store whose StoreOptions "
             + "declare this table, shows which parameters the partitions differ on",
+        LeaderTimeoutClause = string.Empty,
+        ReadOnlyWrites = "write the application makes",
+        ReadOnlyNeverAsks = "and most data access never asks",
+
+        // The two checks whose titles name a store: S02, whose docs heading says what it guards in Marten Studio's words, and
+        // S10. The docs heading stays the attribute's, so the "Docs" link still finds its anchor.
+        CheckTitles = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["S02"] = "Settings that blind or endanger the database",
+            ["S10"] = "Connections cannot write",
+        },
+        AmbiguousPoolNotChecked =
+            "More than one Npgsql pool in this process uses this database's connection string - a second data source built from "
+            + "the same connection string, or NpgsqlConnections opened with it - and Npgsql reports each under that same name. "
+            + "Their numbers differ, so which pool is this data source's cannot be told, and the pool is not judged; naming the "
+            + "other data source (NpgsqlDataSourceBuilder.Name), or giving its connections an Application Name of their own, "
+            + "tells them apart.",
+        PoolBorrowers = "Every command this process sends through the data source",
+        PoolRemedyCode =
+            """
+            // The ceiling, in the connection string the data source is built from (Npgsql's default is 100):
+            Maximum Pool Size=200
+            """,
+        PoolRemedyExplanation =
+            "Raise it only when the server has the headroom (C03), and after ruling out connections held too long: dispose "
+            + "every connection and transaction on every path (await using), and keep transactions short.",
+        NextConnectionExamples = "a pool that wants to grow, a deployment's new instance, a scheduled job's next connection",
+        EveryDatabasesConnections = "this application's and everybody else's",
+        FewerConnectionsRemedyCode =
+            """
+            // Fewer connections per process, in the connection string each data source is built from:
+            Maximum Pool Size=50
+            """,
+        IdleTransactionIdCost = ", which holds vacuum back as well, snapshot or not",
+        SkippedCommit = "its commit",
+        IdleTimeoutLeaderClause = string.Empty,
+        StrongerLockExamples = "a migration's ALTER TABLE, a TRUNCATE",
+        LongStatementRemedyCode =
+            """
+            // A ceiling for the application's own statements, in seconds, in the connection string the data source is built
+            // from (Npgsql's default is 30):
+            Command Timeout=60
+            """,
+        LongStatementRemedyExplanation =
+            "Command Timeout bounds what the application sends through this data source; it does not reach another "
+            + "application's statements. A query over a large table with no index for its filter needs that index, in the "
+            + "application's own migrations.",
+        PreparedTransactionHolds = "for good and blocks whatever needs its locks",
+        RetriedFailures = "serialization failures, optimistic-concurrency conflicts, unique violations",
+        ScopePolicyNoun = "source",
+        ChangeDataCaptureConsumer = "a change data capture connector",
+        EveryWriteExamples = "every insert, update and delete",
+        EverySourceDatabase = "every database on this server",
+        UnclearedDeadRows = "every row updated or deleted leaves a dead row version that is never cleared",
+        LostCommitsMeaning = string.Empty,
+        ZeroedPageRows = "including rows that other rows, or other systems, still point at",
+        SettingsReadOn =
+            "on a connection from the data source - so a value set for its role, its database or in its connection string is "
+            + "the one its sessions run with",
+        PageRowsExamples = "table rows, index entries",
+        ConnectionCarries = "every row it reads or writes",
+        GenericPlanPlaceholders =
+            " are placeholders; a filter that needs its constant to match an expression index, or a partial index's WHERE clause, "
+            + "cannot use that index in that plan, so a sequential scan filtering on one does not show that the table lacks an "
+            + "index.",
+        OwnRoleOnTables = "the data source's own role on the tables the studio judges",
+        OneOfTheTables = "one of them",
+        SlowStatementCause =
+            "A statement this slow is most often a query over a large table with no index for its filter, or one that reads far "
+            + "more rows than it returns.",
+        UnboundedRead = "a query with no LIMIT or paging",
+        PlanReadsNoneOfTheTables = "The plan reads none of the tables the studio judges directly",
+        UnnamedPlanScans = " of a partition, or of a table the studio does not judge or does not show, not named here",
+        PartitionedIndexRepair =
+            " Whoever owns the schema rebuilds the leftover invalid index on the partition - REINDEX INDEX CONCURRENTLY, or drops "
+            + "it and builds it again with CREATE INDEX CONCURRENTLY and ALTER INDEX ... ATTACH PARTITION - in the host's own "
+            + "migrations or by hand. The partition is not named here; pg_index.indisvalid on the table's partitions says which.",
+        DeclaredIndexRebuild =
+            " Whoever owns the schema rebuilds it (REINDEX INDEX CONCURRENTLY), in the host's own migrations or by hand.",
+        AppendOnlyExamples = "an event log, an audit or history table",
+        HorizonDeadRowsLabel = "Dead rows in the tables the studio judges",
+        LogicalSlotConsumers = "Debezium, a CDC pipeline, a subscription",
+        ConfiguredKeyColumnClause = string.Empty,
+        JudgedStatementNoun = "statement",
+        ShortStatementsJit =
+            "An application's statements are mostly short, and a large table's cost estimates are what push them over the line.",
+        JitRemedyCode =
+            """
+            // In the connection string the data source is built from:
+            Options=-c jit=off
+            """,
+        JitRemedyExplanation =
+            "Turns JIT off for this data source's own connections only, and leaves the server's setting alone for everybody else. "
+            + "To keep JIT for the occasional long query, a DBA can raise jit_above_cost for the data source's role instead.",
+        DatabaseGateReason = "needs the source policy to allow this data source and database",
+        ExportSourceNoun = "data source",
+        PickInTheHeader = "a database",
     };
 }

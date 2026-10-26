@@ -95,6 +95,49 @@ internal interface IHealthTableRemedies
     /// <param name="value">Its suggested value, as SQL spells it.</param>
     /// <param name="explanation">What the setting changes, in words that hold for any source.</param>
     HealthRemedy? AutovacuumSetting(StudioTable table, string parameter, string value, string explanation);
+
+    // ---- W5-V1 ---------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// T24: switching autovacuum back on for a table's TOAST table, whose own storage parameter
+    /// (<c>toast.autovacuum_enabled = false</c>) switched it off - which Marten's <c>StorageParameter</c> does not manage
+    /// (<c>toast.*</c> parameters are not supported, its own documentation says), so for a Marten table it is words, never a line.
+    /// </summary>
+    /// <param name="table">The table whose TOAST table it is.</param>
+    HealthRemedy? ReenableToastAutovacuum(StudioTable table);
+
+    // ---- W5-B1 ---------------------------------------------------------------------------------------------------------
+
+    /// <summary>T15: an index whose leading columns are a foreign key's, so a delete from the referenced table reads no whole table.</summary>
+    /// <param name="table">The referencing table.</param>
+    /// <param name="columns">The key's columns, in key order.</param>
+    /// <param name="partitioned">Whether the table is partitioned, where <c>CREATE INDEX CONCURRENTLY</c> is not allowed.</param>
+    HealthRemedy? IndexTheForeignKey(StudioTable table, IReadOnlyList<string> columns, bool partitioned);
+
+    /// <summary>
+    /// T15: why the studio offers no index for the key, in its own words, when <see cref="IndexTheForeignKey" /> has none -
+    /// a table the source's library creates and reconciles (MartenStudio: Marten's DCB tag tables, marten#5694) - or
+    /// <see langword="null" /> for nothing to add.
+    /// </summary>
+    /// <param name="table">The referencing table.</param>
+    /// <param name="columns">The key's columns, in key order.</param>
+    string? ForeignKeyIndexNote(StudioTable table, IReadOnlyList<string> columns);
+
+    /// <summary>T25: rebuilding an index that is mostly empty space, under the same name and definition.</summary>
+    /// <param name="table">The table.</param>
+    /// <param name="index">The bloated index.</param>
+    /// <param name="origin">Where it comes from.</param>
+    HealthRemedy? RebuildBloatedIndex(StudioTable table, HealthIndexRow index, IndexOrigin origin);
+
+    /// <summary>T26: an integer key, and the sequence that feeds it, widened to <c>bigint</c>.</summary>
+    /// <param name="table">The table.</param>
+    /// <param name="key">The column and its sequence.</param>
+    HealthRemedy? WidenKey(StudioTable table, HealthIntegerKeyRow key);
+
+    /// <summary>T20: the next period's partition of a table partitioned by range, before its newest one runs out.</summary>
+    /// <param name="table">The partitioned table.</param>
+    /// <param name="next">The partition the next period needs.</param>
+    HealthRemedy? ExtendRangePartitions(StudioTable table, RangePartitionNext next);
 }
 
 /// <summary>

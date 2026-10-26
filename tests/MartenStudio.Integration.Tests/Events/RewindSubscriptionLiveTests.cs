@@ -216,6 +216,55 @@ public class RewindSubscriptionLiveTests(PostgresFixture postgres) : IAsyncLifet
     }
 
     /// <summary>
+    /// SEC-fix 5: a page that goes away once every check has passed - its token cancelled just before the daemon is
+    /// asked - does not stop the rewind half-way. The daemon is handed a token of the operation's own, the rewind runs to
+    /// its end, the shard runs again, and the audit says it succeeded.
+    /// </summary>
+    /// <remarks>
+    /// The page's token is cancelled from the service's own hook (<c>EventDataService.CommitStarting</c>), which runs at
+    /// exactly that point: after the capability, the policies, the name, the tenant proof and the coordinator lookup, and
+    /// before the daemon call. Before the fix the daemon was handed the page's token there.
+    /// </remarks>
+    [PostgresFact]
+    public async Task A_page_that_goes_away_after_the_checks_does_not_stop_the_rewind_and_it_is_audited()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        using IServiceScope scope = host!.Services.CreateScope();
+        var events = (EventDataService) scope.ServiceProvider.GetRequiredService<IEventDataService>();
+
+        DeadLetterRow letter = await NewestLetterAsync(events, token);
+        long sequenceBefore = await ShardSequenceAsync(letter.ProjectionName, token);
+
+        using var page = CancellationTokenSource.CreateLinkedTokenSource(token);
+        events.CommitStarting = () => page.CancelAsync();
+
+        await events.RewindSubscriptionAsync(Scope, letter.ProjectionName, letter.EventSequence, page.Token);
+
+        page.IsCancellationRequested.Should().BeTrue("the premise: the page's token was cancelled before the daemon was asked");
+
+        string sequence = letter.EventSequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        StudioActionLogService audit = host.Services.GetRequiredService<StudioActionLogService>();
+
+        audit.GetLatest().Should().Contain(x =>
+            x.Action == "Rewind subscription"
+            && x.Succeeded
+            && x.Target.EndsWith("#" + sequence, StringComparison.Ordinal)
+            && x.Message!.Contains("progression set to", StringComparison.Ordinal));
+
+        // The agents were started again: the poison event is re-applied and the shard catches up.
+        await WaitForAsync(
+            async () => await FindLetterAsync(letter.EventSequence, token) is { } current && current.Id != letter.Id,
+            "the restarted daemon to re-apply the poison event and record a new dead letter",
+            token);
+
+        await WaitForAsync(
+            async () => await ShardSequenceAsync(letter.ProjectionName, token) >= sequenceBefore,
+            "the shard to catch up again",
+            token);
+    }
+
+    /// <summary>
     /// A projection nothing registers has no shard for the daemon to restart, and the refusal names only
     /// the name that was asked for. It is audited as a failed action rather than swallowed.
     /// </summary>

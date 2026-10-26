@@ -1,7 +1,7 @@
 # Health: daemon and high water (D)
 
 These checks answer the question asked most often: **why aren't my projections moving?** They read
-`mt_event_progression` (a few dozen rows), the event sequence, one primary-key probe of `mt_events`, the
+`mt_event_progression` (a few dozen rows), the event sequence, two primary-key probes of `mt_events`, the
 dead-letter table, and - only when there is work and no healthy daemon in this process - `pg_locks`. Every read
 runs in the advisor's read-only transaction at the health cadence (`HealthInterval`, 60 s by default), never on
 a page's poll, and takes only the `AccessShareLock` a plain read takes on what it reads, and none on a table
@@ -9,18 +9,21 @@ your documents are stored in. Each finding is about the database as a whole, so 
 store policy allows for the database with no tenant selected; a name of a session or a tenant sits behind
 `ViewDatabaseActivity`. Back to the [index](../health.md).
 
+**Studios.** Every check here reads a Marten store's event store and daemon, and runs only in Marten Studio
+([codes.md](codes.md)).
+
 Every age of a row below is measured in the **database server's** time (`transaction_timestamp()`), against
 timestamps the server wrote, so a clock that differs between the application and the database changes nothing.
 A rate, a "for the whole window" and how long a committed event has waited behind a gap come from the advisor's
 own samples, which exist only while somebody has the Health page or the Overview open; before two samples a minute
 apart exist, the checks that need them say they are watching and report nothing.
 
-A finding that names a projection - D03, D04, D05 and D06 - carries the document types that projection writes, so a
+A finding that names a projection - D03, D04, D05, D06 and D09 - carries the document types that projection writes, so a
 projection of a type `IsDocumentTypeVisible` hides is never named, in a finding or in a check's status line.
 
 A store with `Events.UseTenantPartitionedEvents` keeps a high-water mark per tenant and no durable record of when
-one was pinned: D01-D04 say "not checked" there rather than read store-global rows nothing maintains. D05 and
-D06 still apply.
+one was pinned: D01-D04 and D09 say "not checked" there rather than read store-global rows nothing maintains. D05
+and D06 still apply.
 
 ## D01 High-water mark pinned behind a gap
 
@@ -111,6 +114,10 @@ pause is recorded, or within `2 x SlowPollingTime + 1 min` of the start of a pro
 HotCold node just restarted holds no lock and has written nothing yet, and is starting, not dead. Another store
 sharing this database with the same `DaemonLockId` would count as a holder; Marten asks for a lock id unique to
 each application on a database.
+
+Variants: `no-daemon` (the Critical) and `lock-held-idle` (the Warning). Neither has a subject: each is about the store's
+daemon in this database as a whole. Until 0.5 the kind was the finding's subject; its key (`D02|no-daemon`) is the same
+either way. Marten Studio only.
 
 ```csharp
 builder.Services.AddMarten(opts => { /* ... */ })
@@ -351,3 +358,100 @@ is not covered.
 
 There is no `StoreOptions` line. If another process is rebuilding, let it finish; if a rebuild stopped part-way,
 restarting the shard continues it from its position, and a rebuild here starts it again from the first event.
+
+## D09 Event sequence and daemon progression disagree
+
+**Critical.** Marten Studio only. The event sequence, the high-water mark, the registered shards and the events
+already committed disagree about where the event store is. There are three kinds of finding, all from the snapshot the
+high-water read already takes: the sequence's `last_value` and `is_called`, the progression rows, and one more
+backward probe of `mt_events`' primary key (`max(seq_id)`, under the same `AccessShareLock` as D01's `min(seq_id)`
+probe).
+
+- **`mark-ahead`**: the `HighWaterMark` row is above the highest number the sequence has handed out. New events take
+  numbers the daemon has already passed, so no async projection or subscription sees them, and nothing reports them as
+  lost. The registered shards that are ahead with it are listed in the same finding.
+- **`shard-ahead`**: a registered shard is above the sequence and the mark is not, so that one projection or
+  subscription never sees the next events.
+- **`sequence-behind`**: the highest committed `seq_id` is at or above the number the sequence hands out next. The next
+  append draws a number `mt_events` already holds and fails with a unique violation (23505) on its primary key. Each
+  failed append burns the number it drew, so appends go on failing one at a time until the sequence has passed every
+  event. Where the events are partitioned by archive status, a number that only an archived event holds is no conflict
+  at all, and two events then share it.
+
+"Handed out" is Marten's own reading of the sequence (#5091's `AllocatedSequenceHigh`, read at `V9.39.0`, `v9.51.0` and
+`V9.54.1`): `last_value` once the sequence has been called, `last_value - 1` before. So a sequence restarted at `n` has
+handed out `n - 1`, and the next append takes `n`. A sequence is not transactional, so an append that drew a number at
+the instant of the read counts as handed out. That can only make the sequence look further ahead. In a healthy store the
+mark, every shard and every committed event are at or below the sequence, and nothing fires.
+
+These are what leave a store like this:
+
+- a reset of the sequence (`ALTER SEQUENCE ... RESTART`, or a `TRUNCATE` of `mt_events` with `RESTART IDENTITY`);
+- a restore of `mt_events`, its sequence or `mt_event_progression` from a different point in time than the others;
+- a cut-over to a database that logical replication filled: it copies rows, and before PostgreSQL 19 it does not copy a
+  sequence's position.
+
+What to do, read at `V9.39.0`, `v9.51.0` and `V9.54.1`:
+
+- **`mark-ahead`** gets one of three remedies, and which one depends first on whether D09 also reports
+  `sequence-behind`:
+  - **The sequence is behind the events too** - the commonest state, a `RESTART` under a table full of events. Do not
+    run **Correct progression**: Marten would set the mark and every shard back to the sequence's `last_value`, and
+    every event above it up to the mark, which the daemon has already processed, would be processed again. The remedy is
+    the `sequence-behind` repair alone. It moves the sequence past the events and past the mark alike: one repair for
+    both findings, not two.
+  - **The sequence is not behind the events, and the mark is above `last_value`**: the projections screen's **Correct
+    progression** (`Capabilities.CorrectProgression`), which runs Marten's own
+    `store.Advanced.TryCorrectProgressInDatabaseAsync`. Marten sets the mark and every shard's row back to the
+    sequence's `last_value`, leaving its own allocation-fence and stuck-gap rows alone, and it does so only while the
+    mark is above that value. Every event appended since the reset at a number at or below it is then treated as
+    processed, so rebuild the projections that should hold those events - a rebuild empties the projection's tables
+    before it replays.
+  - **The sequence is not behind the events, and the mark is at `last_value`**. Right after a `RESTART` over an empty
+    table, before anything is appended, `last_value` is the number the sequence hands out next, and the correction
+    leaves the mark exactly there: it has done all it can, and D09 no longer offers it. The next event appended would
+    take the mark's own number and be treated as already processed. The remedy is a DBA's, with appends stopped, and
+    only while `mt_events_sequence` still reads `is_called = false`: `setval` it to the greater of the mark and
+    `max(seq_id)` of `mt_events`. The statement does nothing once anything has drawn from the sequence; by then the
+    event at the mark's number has been taken, and the projections that should hold it need a rebuild.
+  - A shard past the mark itself keeps its own remedy, a rebuild or a rewind, after either repair. The repair leaves the
+    sequence at the mark at least, so the rewind's floor is the mark.
+- **`shard-ahead`**: Correct progression does nothing here, because the mark is not ahead. Either fix leaves the shard
+  where the events are:
+  - rebuild the projection, which empties its tables and replays from the first event to the mark;
+  - or rewind the subscription to the lower of the mark and the highest number the sequence has handed out (that
+    number alone when there is no mark). No shard is rightly past the mark. JasperFx replays from the number after the
+    floor it is given, so events appended since the reset at or below the floor are not replayed by a rewind; a rebuild
+    is the way to those. A floor below what a subscription has already processed repeats its side effects: every event
+    it replays is handled a second time.
+- **`sequence-behind`**: a DBA's repair, with appends stopped: `setval` the sequence to the greater of `max(seq_id)` of
+  `mt_events` and the mark. The statement reads both when it runs and never moves the sequence back, so pasting it after
+  more events have committed is as safe as running it at once. Because it moves the sequence past the mark as well, a
+  `mark-ahead` reported beside it needs nothing more for the mark, and certainly not the correction.
+
+Every `setval` is a one-off repair, drawn on the Health page under "A one-off repair, run by hand - the studio never
+runs this". Its explanation names the database to run it in by the studio's identity for that database - Marten's
+server-and-database id, as the scope selector lists it - and never by a connection string: each database has its own
+sequence and its own events.
+
+The statement D09 shows, for an event store in `public`. The last line is there only for the repair after a `RESTART`:
+
+```sql
+select pg_catalog.setval('"public"."mt_events_sequence"', t.target)
+from "public"."mt_events_sequence" q
+cross join lateral (
+    select greatest(
+        coalesce((select h.last_seq_id from "public"."mt_event_progression" h where h.name = 'HighWaterMark'), 0),
+        coalesce((select pg_catalog.max(e.seq_id) from "public"."mt_events" e), 0)) as target) t
+where t.target > (case when q.is_called then q.last_value else q.last_value - 1 end)
+  and not q.is_called;
+```
+
+An event store whose schema name holds a single or double quote or a backslash, or a character a pasted line could
+not show as it is, gets the same repair in words instead.
+
+`mark-ahead` and `shard-ahead` are judged only for a store that registers an async projection or subscription, as D02,
+D03, D05, D07 and D08 are: without one, nothing waits on a progression row. `sequence-behind` is judged for any store
+with events, because an append fails either way. A shard whose projection writes a document type `IsDocumentTypeVisible`
+hides is never named. Like D01-D04, a store with `Events.UseTenantPartitionedEvents` is not checked, because every
+tenant draws from a sequence of its own there.

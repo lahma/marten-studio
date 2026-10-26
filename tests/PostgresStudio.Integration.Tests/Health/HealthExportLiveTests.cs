@@ -58,7 +58,9 @@ public class HealthExportLiveTests(PostgresFixture postgres)
         ((string[]) entry.Data["timedOut"]).Should().BeEmpty();
         entry.Exception.Should().BeNull();
 
-        host.Asked.Should().Equal(host.Names, "the host is asked for each name in the order it lists them, and asked once");
+        // W5-API: listing builds no data source (G11), so the host is asked only for the databases this run checks - the
+        // first twenty-five, in the order it lists them, once each; the rotation asks for the other five on the next run.
+        host.Asked.Should().Equal(host.Names.Take(25), "the host is asked for each name this run checks, in the order it lists them, and asked once");
 
         string everything = entry.Description + " " + string.Join(" ", entry.Data.Values.Select(static x => x is string[] codes ? string.Join(",", codes) : Convert.ToString(x, CultureInfo.InvariantCulture)));
         everything.Should().NotContain("tenant_", "the export reports codes and counts, never a database's name")

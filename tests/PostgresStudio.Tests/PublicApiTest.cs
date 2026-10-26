@@ -12,8 +12,9 @@ namespace PostgresStudio.Tests;
 /// The surface is the six registration types - three static classes, two classes and one record, mirroring
 /// MartenStudio's - and the six inbound types a host implements or builds: <c>IPostgresDatabaseSource</c>,
 /// <c>IPostgresCapacitySource</c>, <c>PostgresComputeCapacity</c>, <c>PostgresDatabaseRef</c>,
-/// <c>PostgresServerInfo</c> and <c>PostgresPlatformKind</c>. The diagnostics read model is a later packet's. Anything
-/// else appearing in the baseline is a mistake rather than a feature (AGENTS.md hard rule 7, D12).
+/// <c>PostgresServerInfo</c> and <c>PostgresPlatformKind</c> - and the diagnostics read model (D31, W5-API): the
+/// <c>IPostgresDiagnostics</c> service, its request, its snapshot, findings and checks, the four sections and their rows, and
+/// five enums. Anything else appearing in the baseline is a mistake rather than a feature (AGENTS.md hard rule 7, D12).
 /// </para>
 /// <para>
 /// A failure here is not automatically a bug. Run the test, open the <c>.received.txt</c> beside the
@@ -57,9 +58,12 @@ public class PublicApiTest
             .UseFileName("PublicApiTest_PostgresStudio");
     }
 
-    /// <summary>The twelve public types, by name, so an extra one fails with its name rather than a diff.</summary>
+    /// <summary>
+    /// The thirty-one public types, by name, so an extra one fails with its name rather than a diff: the six registration
+    /// types, the six inbound types and the nineteen of the diagnostics read model (API design §5.1).
+    /// </summary>
     [Fact]
-    public void The_public_types_are_the_six_registration_types_and_the_six_inbound_types()
+    public void The_public_types_are_the_registration_types_the_inbound_types_and_the_diagnostics_read_model()
     {
         string[] exported =
         [
@@ -72,15 +76,34 @@ public class PublicApiTest
         exported.Should().Equal(
             "PostgresStudio.IPostgresCapacitySource",
             "PostgresStudio.IPostgresDatabaseSource",
+            "PostgresStudio.IPostgresDiagnostics",
+            "PostgresStudio.PostgresActionKind",
+            "PostgresStudio.PostgresCheck",
             "PostgresStudio.PostgresComputeCapacity",
+            "PostgresStudio.PostgresConnectionCounts",
+            "PostgresStudio.PostgresConnectionsSection",
             "PostgresStudio.PostgresDatabaseRef",
+            "PostgresStudio.PostgresDiagnosticsRequest",
+            "PostgresStudio.PostgresDiagnosticsSnapshot",
+            "PostgresStudio.PostgresExtension",
+            "PostgresStudio.PostgresFinding",
+            "PostgresStudio.PostgresFindingCategory",
             "PostgresStudio.PostgresPlatformKind",
+            "PostgresStudio.PostgresReadOutcome",
             "PostgresStudio.PostgresServerInfo",
+            "PostgresStudio.PostgresSetting",
+            "PostgresStudio.PostgresSettingsSection",
+            "PostgresStudio.PostgresSeverity",
+            "PostgresStudio.PostgresStatement",
+            "PostgresStudio.PostgresStatementsSection",
+            "PostgresStudio.PostgresStorageSection",
             "PostgresStudio.PostgresStudioCapabilities",
             "PostgresStudio.PostgresStudioEndpointRouteBuilderExtensions",
             "PostgresStudio.PostgresStudioHealthChecksBuilderExtensions",
             "PostgresStudio.PostgresStudioOptions",
             "PostgresStudio.PostgresStudioResource",
-            "PostgresStudio.PostgresStudioServiceCollectionExtensions");
+            "PostgresStudio.PostgresStudioServiceCollectionExtensions",
+            "PostgresStudio.PostgresTableOwnership",
+            "PostgresStudio.PostgresTableStorage");
     }
 }

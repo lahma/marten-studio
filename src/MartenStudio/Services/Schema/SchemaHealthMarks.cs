@@ -1,4 +1,5 @@
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace MartenStudio.Services.Schema;
 
@@ -47,8 +48,11 @@ internal static class SchemaHealthMarks
 
         foreach (HealthReportFinding finding in findings)
         {
+            // T03's finding about a table's partitions is about the table, not an index of the tab: its subject is a table's
+            // key, which never names an index row (API design §1.10's split).
             if (finding.Finding.Subject is not { Length: > 0 } subject
-                || Label(finding.Code) is not { } label)
+                || Label(finding.Code) is not { } label
+                || string.Equals(finding.Finding.Variant, InvalidIndexCheck.PartitionsVariant, StringComparison.Ordinal))
             {
                 continue;
             }

@@ -111,6 +111,18 @@ internal sealed class StudioSnapshotCache
         }
     }
 
+    /// <summary>
+    /// Whether <see cref="GetAsync{T}" /> for <paramref name="key" /> would be answered without starting the work: a value in
+    /// hand that is still fresh, or work in flight. A lookup that starts nothing - what the diagnostics API asks before it
+    /// spends one of its two fresh reads (API design §3.4).
+    /// </summary>
+    /// <param name="key">The key.</param>
+    public bool Holds(string key)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        return entries.TryGetValue(key, out Entry? entry) && IsUsable(entry, timeProvider.GetUtcNow(), timeToLive);
+    }
+
     /// <summary>Drops one key, so the next read really reads. Called after anything is changed.</summary>
     public void Invalidate(string key)
     {

@@ -79,7 +79,8 @@ internal sealed record IdleInTransactionFacts(
 /// than raised; Marten's daemon lock ids are read too, so the row can say when it is the daemon's.
 /// </para>
 /// <para>
-/// <b>The leader is recognised by its leadership lock, never by its name.</b> At Weasel 9.45 (Marten 9.50.2) with the lock
+/// <b>The leader is recognised by its leadership lock, never by its name.</b> From Weasel 9.34 (Marten 9.39.1, Patched
+/// DistributedLock.Postgres 1.3.3; measured at Marten 9.45.0 and 9.50.2) with the lock
 /// transaction-scoped there is no <c>pg_sleep</c> monitor: the leader sits idle in its leadership transaction, holding a
 /// snapshot, until DistributedLock's keepalive runs in it about 61 s after the lock and every minute on (measured, CL3) -
 /// which reaches this check's minute. So a listed session that holds one of the store's daemon lock ids
@@ -219,21 +220,17 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
             WhyItMatters =
                 "A transaction left open between statements keeps every lock it took - a schema apply, or any ALTER on those "
                 + "tables, waits behind it, and everything after the ALTER waits too - holds back vacuum for the whole database while "
-                + "it has a snapshot, and once it has written it holds a transaction id that Marten's high-water detection can wait "
-                + "behind, so async projections stop moving (D01). It is nearly always application code that began a transaction "
-                + "and never finished it: a session that was never disposed, an exception path that skipped SaveChangesAsync, a "
-                + "debugger paused at a breakpoint." + harmlessNote + leaderNote,
+                + "it has a snapshot, and once it has written it holds a transaction id" + evaluation.Text.IdleTransactionIdCost
+                + ". It is nearly always application code that began a transaction "
+                + "and never finished it: a session that was never disposed, an exception path that skipped "
+                + evaluation.Text.SkippedCommit + ", a debugger paused at a breakpoint." + harmlessNote + leaderNote,
             Evidence = evidence,
             Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, evaluation.Text.StatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
             Remedy = new HealthRemedy(
                 evaluation.Text.EndWhatYouBeginCode,
                 "The studio never ends another session. Find the code path from the application name and the time it went idle; "
-                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop. With the HotCold leadership lock "
-                + "transaction-scoped (Events.UseAdvisoryLockTransaction, the default at Marten 9.39 and 9.40) it can also end the "
-                + "daemon's leadership session: one shorter than the minute or so the leader sits idle in its transaction - after "
-                + "taking the lead at 9.39, between DistributedLock's keepalives at 9.50.2 - or any timeout with "
-                + "Events.UseMonitoredAdvisoryLock off."),
+                + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop." + evaluation.Text.IdleTimeoutLeaderClause),
         });
     }
 

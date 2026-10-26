@@ -21,9 +21,13 @@ prints a banner saying so. It never falls back to `localhost` silently. Unlike t
 container every run; set `MARTENSTUDIO_PG_REUSE=true` to reuse one (a container of its own: it never attaches to the
 Marten sample's or the integration suite's).
 
-Pointed at a database of your own, that database is the admin database, and the sample creates the three tenant
-databases beside it, which needs a role with `CREATEDB`. A database of one of those names that the sample did not
-create is left alone and not listed; so is a `quartz` or `legacy` schema it did not create.
+Pointed at a database of your own, that database is the admin database, and the sample writes nothing to it unless it
+is started with `--allow-data-generation`. Without the switch it starts read-only, says so in one line, and the studio
+shows only what is already there: no tenants, unless an earlier start with the switch created them. With the switch it
+creates the three tenant databases beside it, which needs a role with `CREATEDB`, and the `quartz`, `legacy` and
+`studio_sample` schemas in it (`dotnet run --project samples/PostgresStudio.Sample -- --allow-data-generation
+--ConnectionStrings:Postgres "…"`). A database of one of those names that the sample did not create is left alone and
+not listed; so is a `quartz` or `legacy` schema it did not create.
 
 Sign in at `/login` as `admin`, `ops` or `viewer` - the password is the user name.
 

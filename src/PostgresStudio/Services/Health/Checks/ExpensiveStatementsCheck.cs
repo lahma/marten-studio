@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -21,7 +22,14 @@ internal sealed record StatementPlan(long QueryId, IReadOnlyList<ExplainPlanScan
 /// <param name="Read">The statement checks' shared read.</param>
 /// <param name="Plans">The plans of the statements worth planning, at most <see cref="ExpensiveStatementsCheck.MaxPlans" />.</param>
 /// <param name="Indexes">Every index on the store's tables, read only when a plan reads a whole document table.</param>
-internal sealed record ExpensiveStatementFacts(StatementRead Read, IReadOnlyList<StatementPlan> Plans, IReadOnlyList<IndexFacts> Indexes);
+internal sealed record ExpensiveStatementFacts(StatementRead Read, IReadOnlyList<StatementPlan> Plans, IReadOnlyList<IndexFacts> Indexes)
+{
+    /// <summary>
+    /// The tables locked for a schema change when the indexes were read (<see cref="HealthIndexRead.LockedTables" />): the
+    /// advisor says nothing about a whole-table read of one of them this sweep, whose indexes it did not see.
+    /// </summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T02: the store's own statements that cost the database the most - by the time they take, and by the time each
@@ -102,12 +110,15 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
     /// <summary>The series of a statement's rows.</summary>
     internal const string RowsSeries = "statements.rows:";
 
-    /// <summary>What the caveat says about a generic plan, whenever a finding carries one.</summary>
-    internal const string GenericPlanCaveat =
-        " The plan is PostgreSQL's generic plan for the text as pg_stat_statements recorded it, in which the statement's "
-        + "constants - the JSON member names Marten writes into its SQL included - are placeholders; a filter on data ->> $n "
-        + "can never use an expression index in that plan, so a sequential scan filtering on one does not show that the table "
-        + "lacks an index.";
+    /// <summary>What the caveat says about a generic plan, whenever a finding carries one, in the studio's words.</summary>
+    /// <param name="text">The studio's words: what the placeholders cost an index.</param>
+    internal static string GenericPlanCaveat(StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return " The plan is PostgreSQL's generic plan for the text as pg_stat_statements recorded it, in which the statement's "
+            + "constants" + text.GenericPlanPlaceholders;
+    }
 
     /// <inheritdoc />
     public override async Task<ExpensiveStatementFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
@@ -125,11 +136,11 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         bool readsWholeDocumentTable = plans.Any(plan => plan.Scans.Any(scan =>
             IsSequential(scan) && TableOf(read.Statements.First(x => x.QueryId == plan.QueryId), scan) is { Kind: StudioTableKind.DocumentTable }));
 
-        IReadOnlyList<IndexFacts> indexes = readsWholeDocumentTable
-            ? await HealthTables.IndexesAsync(context).ConfigureAwait(false)
-            : [];
+        HealthIndexRead indexes = readsWholeDocumentTable
+            ? await HealthTables.IndexReadAsync(context).ConfigureAwait(false)
+            : HealthIndexRead.Empty;
 
-        return new ExpensiveStatementFacts(read, plans, indexes);
+        return new ExpensiveStatementFacts(read, plans, indexes.Indexes) { LockedTables = indexes.LockedTables };
     }
 
     /// <inheritdoc />
@@ -147,11 +158,11 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
             yield return new HealthSamplePart(StatementWindows.DeallocSeries, dealloc);
         }
 
-        foreach (ObservedStatement statement in read.Statements.Where(static x => x.NamesStoreTable && x.IsWorkload))
+        // Every kept statement, not only the ones T02 judges: the Statements page shows a window for each (W5-Q1), and a
+        // series has one writer - this check, which every statement sweep runs. T02 reads back only its own statements'.
+        foreach (HealthSamplePart part in StatementReads.Sample(read))
         {
-            yield return new HealthSamplePart(CallsSeries + statement.Key, statement.Counters.Calls);
-            yield return new HealthSamplePart(ExecSeries + statement.Key, statement.Counters.TotalExecMs);
-            yield return new HealthSamplePart(RowsSeries + statement.Key, statement.Counters.Rows);
+            yield return part;
         }
     }
 
@@ -187,10 +198,10 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         if (expensive.Count == 0)
         {
             return HealthVerdict.Quiet(
-                "No statement of the store's own role on its tables ran " + TableText.Percent(LoadInfo) + " of the time (over "
+                "No statement of " + evaluation.Text.OwnRoleOnTables + " ran " + TableText.Percent(LoadInfo) + " of the time (over "
                 + StatementWindows.Milliseconds(MinExecutionMs) + " of execution at least) or averaged "
                 + StatementWindows.Milliseconds(SlowMeanMs) + " a call (" + TableText.Count(storeStatements) + " of the "
-                + TableText.Count(read.Statements.Count) + " most expensive statements name one of its tables).");
+                + TableText.Count(read.Statements.Count) + " most expensive statements name " + evaluation.Text.OneOfTheTables + ").");
         }
 
         HealthFinding[] findings =
@@ -203,7 +214,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
                 .Select(x => Finding(facts, x.Statement, x.Window, x.Severity, x.Slow, evaluation)),
         ];
 
-        return new HealthVerdict(findings);
+        return new HealthVerdict(findings, HealthTables.LockedNote(facts.LockedTables));
     }
 
     /// <summary>The window T02 judges a statement over: its own samples, or its totals since its counters began.</summary>
@@ -427,7 +438,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         double rowsPerCall = window.Calls > 0 ? window.Rows / window.Calls : 0;
         evidence.Add(new HealthEvidence("Rows per call", rowsPerCall.ToString(rowsPerCall < 10 ? "0.0" : "N0", CultureInfo.InvariantCulture)
             + (rowsPerCall >= ManyRowsPerCall
-                ? " - a read that returns this many rows each time is often a ToListAsync() with no Take() or paging"
+                ? " - a read that returns this many rows each time is often " + evaluation.Text.UnboundedRead
                 : string.Empty)));
 
         if (statement.Counters.TempBlocksWritten > 0)
@@ -446,7 +457,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         // A withheld text is never planned (PlanCandidates), and a plan is never read for one even if it were.
         StatementPlan? plan = statement.TextWithheld is null ? facts.Plans.FirstOrDefault(x => x.QueryId == statement.QueryId) : null;
         StatementPlanAdvice.Reading? reading = plan is { NotPlanned: null }
-            ? StatementPlanAdvice.Read(plan.Scans, statement, facts.Indexes, evaluation.PlanAdvisor)
+            ? StatementPlanAdvice.Read(plan.Scans, statement, facts.Indexes, evaluation.PlanAdvisor, facts.LockedTables, evaluation.Text)
             : null;
 
         evidence.Add(new HealthEvidence("Plan", reading?.Summary
@@ -475,13 +486,13 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
                   + TableText.Span(window.Span ?? TimeSpan.Zero),
             WhyItMatters = slow
                 ? "Every call of this statement holds a connection from the pool, and a snapshot that vacuum cannot clean up behind, for "
-                  + "as long as it runs; a request that makes it waits that long. A statement this slow is most often a query over a "
-                  + "large document table with no index for its filter, or one that reads far more rows than it returns."
-                : "This is where the store's own role spends its database time. Time a statement spends executing is time the "
+                  + "as long as it runs; a request that makes it waits that long. " + evaluation.Text.SlowStatementCause
+                : "This is where " + evaluation.Text.SourcePossessive + " own role spends its database time. Time a statement spends executing is time the "
                   + "server's processors, disks and buffer cache spend on it, and it grows with the table: the cheapest database time to "
                   + "win back is usually here, with an index or a narrower query.",
             Evidence = evidence,
-            Caveat = StatementWindows.Caveat(read, window, evaluation.History) + (reading is not null ? GenericPlanCaveat : string.Empty),
+            Caveat = StatementWindows.Caveat(read, window, evaluation.History, evaluation.Text)
+                + (reading is not null ? GenericPlanCaveat(evaluation.Text) : string.Empty),
             Remedy = Remedy(reading, document, evaluation.TableRemedies),
             Link = document is { Alias: { } alias }
                 ? new HealthLink(
@@ -549,14 +560,25 @@ internal static class StatementPlanAdvice
     /// <param name="statement">The statement planned.</param>
     /// <param name="indexes">The indexes on the judged tables, as the sweep read them.</param>
     /// <param name="advisor">What the studio can say about a whole-table read of one of its tables, or <see langword="null" />.</param>
+    /// <param name="lockedTables">
+    /// The tables locked for a schema change when the indexes were read (<see cref="HealthIndexRead.LockedTables" />): the
+    /// advisor is not asked about a whole-table read of one, whose indexes it did not see. Required, so that no caller can
+    /// read a locked table as one with no index on the member it filters on.
+    /// </param>
+    /// <param name="text">The studio's words for the tables it judges, or <see langword="null" /> for MartenStudio's.</param>
     public static Reading Read(
         IReadOnlyList<ExplainPlanScan> scans,
         ObservedStatement statement,
         IReadOnlyList<IndexFacts> indexes,
-        IHealthPlanAdvisor? advisor)
+        IHealthPlanAdvisor? advisor,
+        IReadOnlySet<string> lockedTables,
+        StudioText? text = null)
     {
+        text ??= StudioText.Marten;
+
         ArgumentNullException.ThrowIfNull(scans);
         ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(lockedTables);
         ArgumentNullException.ThrowIfNull(indexes);
 
         List<string> described = [];
@@ -576,10 +598,11 @@ internal static class StatementPlanAdvice
             string how = scan.Index is { } index ? scan.NodeType + " using " + index + " on " + table.Table : scan.NodeType + " on " + table.Table;
 
             if (scan.NodeType.Equals("Seq Scan", StringComparison.Ordinal)
+                && !lockedTables.Contains(table.Key)
                 && advisor?.AdviseSequentialScan(
                     table,
                     scan.Filter,
-                    [.. indexes.Where(x => string.Equals(x.Table.Key, table.Key, StringComparison.OrdinalIgnoreCase))]) is { } advice)
+                    [.. indexes.Where(x => string.Equals(x.Table.Key, table.Key, StringComparison.Ordinal))]) is { } advice)
             {
                 unnamed |= advice.UnnamedMember;
 
@@ -598,13 +621,13 @@ internal static class StatementPlanAdvice
         }
 
         string summary = described.Count == 0
-            ? "The plan reads none of the store's tables directly"
+            ? text.PlanReadsNoneOfTheTables
             : string.Join("; ", described);
 
         if (others > 0)
         {
             summary += "; and " + others.ToString(CultureInfo.InvariantCulture) + (others == 1 ? " scan" : " scans")
-                + " of a partition, or of a table this store does not declare or the studio does not show, not named here";
+                + text.UnnamedPlanScans;
         }
 
         return new Reading(summary + ".", verdicts, unnamed);

@@ -46,6 +46,18 @@ if (await SampleDatabaseCheck.PrepareAsync(
     return 1;
 }
 
+// The role the studio's SQL console, database browser and health checks read as, narrower than the store's login (which on
+// the throwaway container is the server's superuser): created here, before anything reads, and granted the demo's schemas in
+// the seeding once they exist (SampleConsoleRole). A role is the server's, not the database's, so only on a database that is
+// the demo's - the throwaway container, or one --allow-data-generation names - and anywhere else the studio reads as the
+// login, as does one whose login may not create it.
+bool consoleRole = (EphemeralPostgres.IsThrowaway(connectionString) || sample.AllowDataGeneration)
+    && await SampleConsoleRole.EnsureAsync(connectionString, Console.Out);
+
+// And the seeding grants the role the demo's schemas only on such a database, as the role itself is made only there: role
+// membership is the server's, so a login an earlier start made a member is one on every database of that server.
+builder.Services.AddSingleton(new SampleSeeding(GrantConsoleRole: consoleRole));
+
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -110,6 +122,13 @@ builder.Services.AddMartenStudio(options =>
     }
 });
 #endregion
+
+if (consoleRole)
+{
+    // Outside the README's snippet on purpose: what a host's SqlConsoleRole is depends on its own database's roles.
+    // K05 - "SQL console without a narrowed role" - is then the remedy applied, not a Warning.
+    builder.Services.Configure<MartenStudioOptions>(static options => options.SqlConsoleRole = SampleConsoleRole.Name);
+}
 
 #region readme_health
 // Optional, and AddMartenStudio() does not do it for you: the health advisor's configuration and catalog

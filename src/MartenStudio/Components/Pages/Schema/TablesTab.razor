@@ -248,8 +248,14 @@ else
     /// <summary>The row figures a tenancy registry table withholds: rows, live, dead, dead %, HOT %, and both scan counters.</summary>
     private const int WithheldFigureColumns = 7;
 
-    /// <summary>The dead share T07 speaks above, so the tab marks what the advisor would.</summary>
-    private const double DeadShareWorth = PostgresStudio.Services.Health.Checks.VacuumBehindCheck.MaxDeadShare;
+    /// <summary>
+    /// The dead share the tab marks above - the fifth that T07 judged by until 0.5. T07 now judges each table against its own
+    /// autovacuum trigger (issue #8 G2), which the Maintenance page draws; this mark stays the tab's own rough cue.
+    /// </summary>
+    private const double DeadShareWorth = 0.2;
+
+    /// <summary>The dead rows below which the tab marks nothing, as T07's floor was until 0.5.</summary>
+    private const long DeadRowsWorth = 10_000;
 
     /// <summary>The HOT share T06 speaks below.</summary>
     private const double HotShareWorth = PostgresStudio.Services.Health.Checks.HotUpdateCheck.MinHotShare;
@@ -283,10 +289,10 @@ else
             ? (value * 100).ToString(value < 0.1 ? "0.0" : "0", System.Globalization.CultureInfo.InvariantCulture) + "%"
             : "n/a";
 
-    /// <summary>The dead-share cell, marked past T07's share and its minimum of dead rows.</summary>
+    /// <summary>The dead-share cell, marked past a fifth dead and ten thousand dead rows.</summary>
     private static string DeadClass(TableStats table) =>
         "ms-table-cell ms-num ms-schema-dead" +
-        (table.DeadShare > DeadShareWorth && table.DeadRows >= PostgresStudio.Services.Health.Checks.VacuumBehindCheck.MinDeadRows
+        (table.DeadShare > DeadShareWorth && table.DeadRows >= DeadRowsWorth
             ? " ms-schema-share-high"
             : string.Empty);
 

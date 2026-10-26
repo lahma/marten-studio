@@ -65,14 +65,26 @@ internal static class HealthServerQueries
         "             else s.setting::int8 end\n" +
         "   from pg_catalog.pg_settings s where s.name = '" + name + "')";
 
+    /// <summary>
+    /// Where a provider's setting can come from: the server's own configuration - defence in depth, not the fence itself
+    /// (W5-R2-fix2 4). On a server without the provider's module, a setting of that name can only be a placeholder, and
+    /// Postgres never lists a placeholder in <c>pg_settings</c> (it is <c>GUC_NO_SHOW_ALL</c>), whether a session's <c>SET</c>
+    /// or <c>SET LOCAL</c> or a client's startup options made it; a database's or a role's <c>SET</c> of one is refused to
+    /// anybody but a superuser. Should a module define one, this still counts only a value from the server's configuration.
+    /// </summary>
+    private const string ServerConfigured = "s.source in ('default', 'environment variable', 'configuration file', 'command line', 'override')";
+
     private static readonly HealthQuery PlatformQuery = new(
         "select pg_catalog.current_setting('server_version_num')::int4 as server_version_num,\n" +
         "       pg_catalog.current_setting('server_version') as server_version,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name in ('rds.extensions', 'rds.allowed_extensions')) as rds,\n" +
-        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version') as aurora,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions') as azure,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%') as cloud_sql,\n" +
-        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser') as neon");
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name in ('rds.extensions', 'rds.allowed_extensions') and " + ServerConfigured + ") as rds,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora,\n" +
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions' and " + ServerConfigured + ") as azure,\n" +
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%' and " + ServerConfigured + ") as cloud_sql,\n" +
+        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon,\n" +
+        "       pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
+        "       pg_catalog.pg_postmaster_start_time() as started_at,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora_instance");
 
     private static readonly HealthQuery ChecksumsQuery = new(
         "select pg_catalog.current_setting('data_checksums') = 'on' as enabled,\n" +
@@ -95,12 +107,46 @@ internal static class HealthServerQueries
     /// and Neon's <c>neon_superuser</c> role. Each one is an existence test against the catalog, so a marker that is
     /// absent - every one of them on a server of somebody's own - costs nothing and errs nowhere.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Fenced so that no role short of a superuser can plant one</b> (W5-R2-fix B3): a platform decides wording, a
+    /// stand-down (S02's <c>fsync</c> on Neon) and which checks are not applicable (R02-R04 on Aurora), so a planted
+    /// marker would silence findings with nothing logged.
+    /// </para>
+    /// <list type="bullet">
+    /// <item>A setting is read from <c>pg_settings</c>, which never lists a placeholder: on a server without the provider's
+    /// module, a <c>rds.*</c>, <c>azure.*</c> or <c>cloudsql.*</c> name a session <c>SET</c>s (or <c>SET LOCAL</c>s) or a
+    /// client passes in its startup options is invisible there, and a database owner's <c>ALTER DATABASE … SET</c> or a role's
+    /// own <c>ALTER ROLE … SET</c> of one is refused (42501) to anybody but a superuser - measured on 14, 17 and 18 by
+    /// <c>PlatformMarkerSpoofLiveTests</c>. On top of that, as defence in depth, a setting counts only from the server's own
+    /// configuration (<c>source</c> in <c>default</c>, <c>environment variable</c>, <c>configuration file</c>,
+    /// <c>command line</c>, <c>override</c>).</item>
+    /// <item><c>aurora_version()</c> counts only in <c>pg_catalog</c>, where only a superuser may create a function. Not
+    /// also fenced to <c>oid &lt; 16384</c> (initdb's objects): a function an engine or a superuser adds after initdb -
+    /// the test shim among them - has a higher oid, and the namespace already keeps out every role but a superuser.</item>
+    /// <item><c>neon_superuser</c> counts only as Neon makes it - <c>NOLOGIN</c>, <c>REPLICATION</c> and <c>BYPASSRLS</c>
+    /// (<i>Manage roles</i>, Neon docs, read 2026-10-26) - two attributes only a superuser may grant before PostgreSQL 16,
+    /// and from 16 only a <c>CREATEROLE</c> role that holds both itself.</item>
+    /// <item>A host (<c>*.neon.tech</c>, <c>*.supabase.co</c>) is the data source's own connection string, the host's.</item>
+    /// </list>
+    /// <para>
+    /// <b>And which server answered</b> (issue #8 A1, W5-AUR): <c>pg_is_in_recovery()</c>, <c>pg_postmaster_start_time()</c>,
+    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - fenced to <c>pg_catalog</c> exactly as
+    /// <c>aurora_version()</c> is, because the instance it names decides whether the statistics window looks reset, and a
+    /// window that looks reset holds back every verdict that needs a long one. Neither Aurora function is called here: an
+    /// Aurora server's instance is read by <see cref="AuroraQueries.Instance" />, only once this read has said Aurora, and a
+    /// release before 13.7, 12.11, 11.16 or 10.21 has no identifier function (<i>aurora_db_instance_identifier</i>, Aurora
+    /// User Guide, read 2026-10-26), so its instance is unknown rather than a failure.
+    /// </para>
+    /// </remarks>
     public static HealthQuery Platform() => PlatformQuery;
 
     /// <summary>
     /// Every replication slot on the server, most WAL retained first, with the server's settings that bound what a
     /// slot may hold - one row with nulls for the slot columns when there is none, so the settings are read either
-    /// way. R01, and T14's horizon (<c>xmin</c> and <c>catalog_xmin</c> ages).
+    /// way. R01, and T14's horizon (<c>xmin</c> and <c>catalog_xmin</c> ages) - and, W5-V1, the two as raw transaction ids
+    /// (<c>xmin::text</c>), so that T14 can see a slot pinned at exactly a writer's own transaction id as behind that writer,
+    /// which two <c>age()</c>s from two statements cannot say.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -115,13 +161,24 @@ internal static class HealthServerQueries
     /// application's - and a visitor admitted to this database is never shown them (H10 review, B1). They are still
     /// read, because a row is a row, and the check withholds them.
     /// </para>
+    /// <para>
+    /// <b>On Aurora, a WAL position only with logical WAL</b> (W5-AUR-fix F2). Aurora's own storage layer replicates and its
+    /// readers do not stream, so an Aurora instance below <c>wal_level = logical</c> refuses <c>pg_current_wal_lsn()</c>
+    /// (<c>55000</c>), and the WAL functions of a standby mean nothing on a reader. There the position is read only where
+    /// <c>wal_level</c> is <c>logical</c> - the one setting under which Aurora has a slot to measure (a logical one) - and is
+    /// null otherwise; <c>position_read</c> says which, and a slot's retention is then not measured, never an error.
+    /// </para>
     /// </remarks>
-    public static HealthQuery ReplicationSlots() => new(
+    /// <param name="aurora">Whether the platform read called the server Aurora.</param>
+    public static HealthQuery ReplicationSlots(bool aurora = false) => new(
         "with server as (\n" +
         "  select pg_catalog.current_setting('server_version_num')::int4 as server_version,\n" +
         "         pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
-        "         case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_wal_replay_lsn()\n" +
-        "              else pg_catalog.pg_current_wal_lsn() end as current_lsn,\n" +
+        (aurora
+            ? "         case when not pg_catalog.pg_is_in_recovery() and pg_catalog.current_setting('wal_level') = 'logical'\n" +
+              "              then pg_catalog.pg_current_wal_lsn() end as current_lsn,\n"
+            : "         case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_wal_replay_lsn()\n" +
+              "              else pg_catalog.pg_current_wal_lsn() end as current_lsn,\n") +
         "         " + SizeSetting("max_slot_wal_keep_size") + " as max_slot_wal_keep_bytes,\n" +
         "         " + SizeSetting("wal_keep_size") + " as wal_keep_bytes\n" +
         "),\n" +
@@ -137,7 +194,9 @@ internal static class HealthServerQueries
         "         x.j ->> 'invalidation_reason' as invalidation_reason,\n" +
         "         (x.j ->> 'conflicting')::bool as conflicting,\n" +
         "         pg_catalog.count(*) over () as total,\n" +
-        "         (s.database is null or s.database = pg_catalog.current_database()) as this_database\n" +
+        "         (s.database is null or s.database = pg_catalog.current_database()) as this_database,\n" +
+        "         s.xmin::text as xmin,\n" +
+        "         s.catalog_xmin::text as catalog_xmin\n" +
         "    from pg_catalog.pg_replication_slots s\n" +
         "   cross join server v\n" +
         "   cross join lateral (select pg_catalog.to_jsonb(s) as j) x\n" +
@@ -147,13 +206,16 @@ internal static class HealthServerQueries
         "select v.server_version, v.in_recovery, v.max_slot_wal_keep_bytes, v.wal_keep_bytes,\n" +
         "       r.slot_name, r.slot_type, r.plugin, r.database, r.temporary, r.active, r.retained_bytes,\n" +
         "       r.wal_status, r.safe_wal_size, r.xmin_age, r.catalog_xmin_age, r.inactive_seconds,\n" +
-        "       r.invalidation_reason, r.conflicting, r.total, r.this_database\n" +
+        "       r.invalidation_reason, r.conflicting, r.total, r.this_database, r.xmin, r.catalog_xmin,\n" +
+        "       v.current_lsn is not null as position_read\n" +
         "  from server v left join slots r on true",
         [Integer("limit", MaxSlots)]);
 
     /// <summary>
     /// The named settings as this session sees them - which is what the store's own sessions see, because they open
     /// from the same data source - with where each was set, and every setting whose change waits for a restart. S02.
+    /// Each with its <c>context</c>, which is how a server-setting remedy knows whether a change needs a restart
+    /// (<c>ServerSettingRemedy</c>).
     /// </summary>
     /// <remarks>
     /// <c>pg_settings</c> shows a role that is neither a superuser nor a member of <c>pg_read_all_settings</c> every
@@ -166,7 +228,7 @@ internal static class HealthServerQueries
         ArgumentNullException.ThrowIfNull(names);
 
         return new HealthQuery(
-            "select s.name, s.setting, s.source, s.pending_restart, pg_catalog.count(*) over () as total\n" +
+            "select s.name, s.setting, s.source, s.pending_restart, pg_catalog.count(*) over () as total, s.context\n" +
             "  from pg_catalog.pg_settings s\n" +
             " where s.name = any(@names) or s.pending_restart\n" +
             " order by s.name\n" +

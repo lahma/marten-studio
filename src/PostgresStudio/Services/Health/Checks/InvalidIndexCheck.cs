@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Health.Checks;
@@ -7,7 +8,11 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <summary>What T03 reads: every index on the declared tables, and each table's count of invalid partition indexes.</summary>
 /// <param name="Indexes">The indexes on the declared tables (never a partition's).</param>
 /// <param name="Tables">The declared tables, for the invalid indexes on their partitions.</param>
-internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IReadOnlyList<TableFacts> Tables);
+internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IReadOnlyList<TableFacts> Tables)
+{
+    /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T03: an index on a Marten table that Postgres has marked invalid - and that no build is still working on.
@@ -47,11 +52,25 @@ internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IRea
 /// child index with <c>42P07</c>. There the finding says, in words, that a DBA drops the leftover index on the
 /// partition first - and names no partition: a partition is named after its tenant.
 /// </para>
+/// <para>
+/// <b>Two kinds of finding, each a variant</b> (API design §1.10): <see cref="IndexVariant" />, whose subject is the invalid
+/// index, and <see cref="PartitionsVariant" />, whose subject is the table whose partitions carry invalid indexes - until
+/// 0.5 the subject <c>table#partitions</c>, a kind and an object at once.
+/// </para>
 /// </remarks>
-[HealthCheck("T03", HealthArea.Tables, HealthCostTier.Catalog, "Invalid index")]
+[HealthCheck("T03", HealthArea.Tables, HealthCostTier.Catalog, "Invalid index", Variants = [IndexVariant, PartitionsVariant])]
 internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 {
-    /// <summary>What a partitioned table's invalid index needs instead of a re-apply.</summary>
+    /// <summary>The variant of a finding about one invalid index; its subject is the index.</summary>
+    internal const string IndexVariant = "index";
+
+    /// <summary>The variant of a finding about the invalid indexes on a table's partitions; its subject is the table.</summary>
+    internal const string PartitionsVariant = "partitions";
+
+    /// <summary>
+    /// What a partitioned table's invalid index needs instead of a re-apply, in MartenStudio
+    /// (<see cref="Settings.StudioText.PartitionedIndexRepair" /> is each studio's).
+    /// </summary>
     internal const string PartitionedInWords =
         " On a partitioned table a re-apply cannot resume the build: Weasel reads only the partitioned table's own indexes, "
         + "and rebuilding under the same child index name fails while the leftover index on the partition is still there. A "
@@ -61,10 +80,10 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
     /// <inheritdoc />
     public override async Task<InvalidIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
+        HealthIndexRead read = await HealthTables.IndexReadAsync(context).ConfigureAwait(false);
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
-        return new InvalidIndexFacts(indexes, tables);
+        return new InvalidIndexFacts(read.Indexes, tables) { LockedTables = read.LockedTables };
     }
 
     /// <inheritdoc />
@@ -74,11 +93,11 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         List<string> building = [];
         HashSet<string> partitioned = new(
             facts.Tables.Where(static x => x.Row.IsPartitioned).Select(static x => x.Key),
-            StringComparer.OrdinalIgnoreCase);
+            StringComparer.Ordinal);
 
         foreach (IndexFacts index in facts.Indexes)
         {
-            if (index.Row.IsValid)
+            if (index.Row.IsValid || facts.LockedTables.Contains(index.Table.Key))
             {
                 continue;
             }
@@ -90,11 +109,16 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
                 continue;
             }
 
-            findings.Add(OnTable(index, partitioned.Contains(index.Table.Key), evaluation.TableRemedies));
+            findings.Add(OnTable(index, partitioned.Contains(index.Table.Key), evaluation.TableRemedies, evaluation.Text));
         }
 
         foreach (TableFacts table in facts.Tables)
         {
+            if (facts.LockedTables.Contains(table.Key))
+            {
+                continue;
+            }
+
             if (table.Row.BuildingPartitionIndexes > 0)
             {
                 int count = table.Row.BuildingPartitionIndexes;
@@ -104,7 +128,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
             if (table.Row.InvalidPartitionIndexes > 0)
             {
-                findings.Add(OnPartitions(table));
+                findings.Add(OnPartitions(table, evaluation.Text));
             }
         }
 
@@ -114,10 +138,12 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
         if (findings.Count > 0)
         {
-            return new HealthVerdict(findings, note);
+            return new HealthVerdict(findings, HealthTables.WithLockedNote(note, facts.LockedTables));
         }
 
-        return HealthVerdict.Quiet(note ?? (facts.Indexes.Count == 0 ? "No table this store declares exists yet." : null));
+        return HealthVerdict.Quiet(HealthTables.WithLockedNote(
+            note ?? (facts.Indexes.Count == 0 && facts.LockedTables.Count == 0 ? evaluation.Text.NoJudgedTable : null),
+            facts.LockedTables));
     }
 
     /// <summary>
@@ -156,7 +182,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             + "pg_stat_progress_create_index as a role that can, before acting." + meanwhile);
     }
 
-    private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable, IHealthTableRemedies? remedies)
+    private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable, IHealthTableRemedies? remedies, StudioText text)
     {
         StudioTable table = index.Table;
         (HealthSeverity severity, string builds, string caveat) = Certainty(
@@ -176,17 +202,18 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
                 + "drops or rebuilds it in Postgres directly.",
             _ when onPartitionedTable =>
                 " On a partitioned table an index stays invalid until every partition has its own index attached - a build that "
-                + "stopped before the last partition." + PartitionedInWords,
+                + "stopped before the last partition." + text.PartitionedIndexRepair,
             IndexOrigin.Undeclared =>
                 " Nothing in the configuration declares it, so it is a hand-made CREATE INDEX CONCURRENTLY that failed, and the "
                 + "next apply drops it. If it is wanted, declare it first.",
-            _ => " Marten's configuration declares it, so a re-apply drops it and builds it again.",
+            _ => text.DeclaredIndexRebuild,
         };
 
         return new HealthFinding
         {
             Code = "T03",
             Severity = severity,
+            Variant = IndexVariant,
             Subject = index.Key,
             DocumentTypes = table.DocumentTypes,
             GatedSchemas = table.GatedSchemas,
@@ -210,7 +237,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         };
     }
 
-    private static HealthFinding OnPartitions(TableFacts table)
+    private static HealthFinding OnPartitions(TableFacts table, StudioText text)
     {
         int count = table.Row.InvalidPartitionIndexes;
         string indexes = count == 1 ? "1 index" : count.ToString("N0", CultureInfo.InvariantCulture) + " indexes";
@@ -229,14 +256,15 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         {
             Code = "T03",
             Severity = severity,
-            Subject = table.Key + "#partitions",
+            Variant = PartitionsVariant,
+            Subject = table.Key,
             DocumentTypes = table.Table.DocumentTypes,
             GatedSchemas = table.Table.GatedSchemas,
             Title = indexes + " on the partitions of " + table.Key + (count == 1 ? " is" : " are") + " invalid",
             WhyItMatters =
                 "Postgres has marked an index on one or more of this table's partitions invalid" + builds
                 + " a concurrent build or rebuild on a partition that failed leaves behind. Queries that reach that partition read it "
-                + "without the index, and every write to it still maintains it." + PartitionedInWords,
+                + "without the index, and every write to it still maintains it." + text.PartitionedIndexRepair,
             Evidence =
             [
                 new HealthEvidence("Table", table.Table.Describe()),

@@ -246,6 +246,34 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not probe the collections for id '{Id}'"] = (Verdict.VisitorAction,
             "The find-by-id probe the visitor ran failed; per-collection probe failures inside it are Debug."),
 
+        // ---- W5-V1 ------------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
+            "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Maintenance.cs : 9420 PostgresStudioBloatMeasureFailed"] = (Verdict.VisitorAction,
+            "9420 in Postgres Studio's words: a bloat measure the visitor pressed failed after its gates passed; one line per press."),
+
+        // ---- W5-R2 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Replication.cs : 9430 ReplicationReadFailed"] = (Verdict.Throttled,
+            "A section of the Replication page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Replication.cs : 9430 PostgresStudioReplicationReadFailed"] = (Verdict.Throttled,
+            "9430 in Postgres Studio's words: a section of the Replication page's facts failed, re-read every HealthInterval."),
+        ["src/PostgresStudio/Services/StudioLog.Replication.cs : 9431 TablespaceSizeFailed"] = (Verdict.VisitorAction,
+            "A tablespace size the visitor pressed Measure for failed other than by a privilege or a timeout (both Debug); one line per click."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Replication.cs : 9431 PostgresStudioTablespaceSizeFailed"] = (Verdict.VisitorAction,
+            "9431 in Postgres Studio's words: a tablespace size the visitor asked for failed; one line per click."),
+
+        // ---- W5-S2 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.ServerPosture.cs : 9440 ServerFactsReadFailed"] = (Verdict.Throttled,
+            "A section of the Server page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.ServerPosture.cs : 9440 PostgresStudioServerFactsReadFailed"] = (Verdict.Throttled,
+            "9440 in Postgres Studio's words: a section of the Server page's facts failed, re-read every HealthInterval."),
+
+        // ---- W5-Q1 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.StatementsPage.cs : 9451 StatementsReadFailed"] = (Verdict.Throttled,
+            "The Statements page could not take the statement sweep for a reason nobody chose; an expected state is the page's sentence, a check that failed is the sweep's 9222, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.StatementsPage.cs : 9451 PostgresStudioStatementsReadFailed"] = (Verdict.Throttled,
+            "9451 in Postgres Studio's words: the Statements page's read failed for a reason nobody chose, re-read every HealthInterval."),
+
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),
@@ -253,6 +281,30 @@ public class LogLevelsTests
             "The same line in Postgres Studio's words: a page's scope-change handler threw, and it can show another scope's data."),
         ["src/MartenStudio/Services/Projections/StudioOperationTracker.cs : Marten Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
             "A rebuild the visitor started failed after tearing the projection's tables down; they stay empty until rebuilt."),
+
+        // ---- W5-CAP ---------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Storage.cs : 9410 StorageReadFailed"] = (Verdict.Throttled,
+            "A read of a database's storage failed by connection, an unexpected SQLSTATE or a table source that threw; privilege and timeouts are Debug, and the Storage page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Storage.cs : 9410 PostgresStudioStorageReadFailed"] = (Verdict.Throttled,
+            "9410 in Postgres Studio's words: a storage read failed by connection or an unexpected SQLSTATE, re-read every HealthInterval."),
+
+        // ---- W5-AUR ---------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Aurora.cs : 9500 CapacitySourceFailed"] = (Verdict.Throttled,
+            "The host's IPostgresCapacitySource threw; asked once per database and instance per HealthInterval, so Warning once in ten minutes and Debug in between, and the capacity reads as unknown."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Aurora.cs : 9500 PostgresStudioCapacitySourceFailed"] = (Verdict.Throttled,
+            "9500 in Postgres Studio's words: the host's capacity source threw, asked once per HealthInterval."),
+        ["src/PostgresStudio/Services/StudioLog.Aurora.cs : 9501 AuroraReadFailed"] = (Verdict.Throttled,
+            "One of Aurora's own reads failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the sweep and the Server page re-read every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Aurora.cs : 9501 PostgresStudioAuroraReadFailed"] = (Verdict.Throttled,
+            "9501 in Postgres Studio's words: one of Aurora's own reads failed, re-read every HealthInterval."),
+
+        // ---- W5-API ---------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Diagnostics.cs : 9251 DiagnosticsSectionFailed"] = (Verdict.Throttled,
+            "A section the diagnostics API was asked for failed by connection, an unexpected SQLSTATE or a reader that threw; a host polls, so Warning once per source, database and kind in ten minutes, and privilege and timeouts are Debug."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Diagnostics.cs : 9251 PostgresStudioDiagnosticsSectionFailed"] = (Verdict.Throttled,
+            "9251 in Postgres Studio's words: a section of a diagnostics snapshot failed, asked as often as the host polls."),
+        ["src/PostgresStudio/Components/Pages/Health/SnapshotMenu.razor : The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built"] = (Verdict.VisitorAction,
+            "The Snapshot menu's builder threw, which the page services never should: one line per click, and the menu says it failed."),
     };
 
     [Fact]
@@ -396,8 +448,9 @@ public class LogLevelsTests
     }
 
     /// <summary>
-    /// The events the rule is about are exactly the ones the roster files as throttled in
-    /// <c>StudioLog.cs</c> and <c>MartenLog.cs</c> - 9210, 9212-9222 and 9237 - so neither list can drift from the other.
+    /// The events the rule is about are exactly the ones the roster files as throttled in the event files - 9210,
+    /// 9212-9222 and 9237 in the main ones, and the partials' 9246, 9270, 9410, 9430, 9440, 9451, 9500 and 9501 - so
+    /// neither list can drift from the other.
     /// </summary>
     [Fact]
     public void The_throttled_events_are_the_ones_the_roster_files_as_throttled()
@@ -409,6 +462,37 @@ public class LogLevelsTests
 
         ThrottledEventMethods().Should().BeEquivalentTo(fromRoster);
         ThrottledEventMethods().Should().Contain(["StoreUnavailable", "DaemonUnreachable", "LiveUpdateHandlerFailed"]);
+
+        // Anti-vacuity for the partials: 9246 is declared in StudioLog.Sessions.cs, and 9410 in a partial of each class.
+        ThrottledEventMethods().Should().Contain(
+            ["SessionActivityReadFailed", "StorageReadFailed", "PostgresStudioStorageReadFailed"],
+            "a throttled event declared in a partial is a throttled event, and its calls are checked like any other");
+    }
+
+    /// <summary>
+    /// <see cref="EventFiles" /> is every file that declares a part of <c>StudioLog</c>, <c>PostgresStudioLog</c> or
+    /// <c>MartenLog</c> - so a partial named otherwise, or put in another folder, fails here rather than going unscanned.
+    /// </summary>
+    [Fact]
+    public void The_event_files_are_every_partial_of_every_declaring_class()
+    {
+        var declaration = new Regex(
+            @"\bpartial\s+class\s+(?<name>" + string.Join("|", EventClasses.Select(static x => x.Class)) + @")\b",
+            RegexOptions.None,
+            RegexTimeout);
+
+        string[] declaring =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(file => declaration.IsMatch(SourceScanner.StripCommentsAndStrings(File.ReadAllText(file))))
+                .Select(SourceScanner.Relative)
+                .Order(StringComparer.Ordinal),
+        ];
+
+        declaring.Should().HaveCountGreaterThan(EventClasses.Length, "the classes have partials, and a scan that finds none has stopped working");
+        EventFiles.Should().BeEquivalentTo(declaring, "every part of an event class is an event file, and every event file is one");
+        EventFiles.Should().Contain(
+            ["src/PostgresStudio/Services/StudioLog.Sessions.cs", "src/PostgresStudio/Services/PostgresStudioLog.Storage.cs", "src/MartenStudio/Services/MartenLog.Query.cs"]);
     }
 
     /// <summary>Every listed throttle-less helper exists, as a static method of that name on that type.</summary>
@@ -513,16 +597,42 @@ public class LogLevelsTests
     /// <param name="Problem">What is wrong, or <see langword="null" /> when the level is the throttle's.</param>
     public sealed record ThrottledCall(string Location, string Method, string? Problem);
 
+    /// <summary>The classes that declare the studio's events, each in a file of its own name and its partials.</summary>
+    private static readonly (string Folder, string Class)[] EventClasses =
+    [
+        ("src/PostgresStudio/Services", "StudioLog"),
+        ("src/PostgresStudio/Services", "PostgresStudioLog"),
+        ("src/MartenStudio/Services", "MartenLog"),
+    ];
+
     /// <summary>
-    /// The files that declare the studio's main event blocks: the shared <c>StudioLog.cs</c> and, since 0.5's split
-    /// (PS-1a), MartenStudio's own <c>MartenLog.cs</c> - one id space, two declaring classes.
+    /// The files that declare the studio's events: the shared <c>StudioLog</c>, Postgres Studio's
+    /// <c>PostgresStudioLog</c> and, since 0.5's split (PS-1a), MartenStudio's own <c>MartenLog</c> - one id space - each
+    /// as its own file <em>and every partial of it</em> (<c>StudioLog.Sessions.cs</c>, <c>PostgresStudioLog.Storage.cs</c>,
+    /// <c>MartenLog.Query.cs</c> and the rest), read from disk rather than listed.
     /// </summary>
+    /// <remarks>
+    /// Until wave 6 this was the three main files by name, so a throttled event declared in a partial - 9246, the
+    /// Sessions page's read failure, and every one wave 5 added in a file of its own - was in the roster but not in
+    /// <see cref="ThrottledEventMethods" />, and nothing checked where its calls took their level from.
+    /// <see cref="The_event_files_are_every_partial_of_every_declaring_class" /> holds the list to the disk.
+    /// </remarks>
     private static readonly string[] EventFiles =
     [
-        "src/PostgresStudio/Services/StudioLog.cs",
-        "src/PostgresStudio/Services/PostgresStudioLog.cs",
-        "src/MartenStudio/Services/MartenLog.cs",
+        .. EventClasses.SelectMany(static x => EventFilesOf(x.Folder, x.Class)),
     ];
+
+    /// <summary><c>{Class}.cs</c> and every <c>{Class}.*.cs</c> in <paramref name="folder" />, repository-relative.</summary>
+    private static IEnumerable<string> EventFilesOf(string folder, string className) =>
+        Directory.EnumerateFiles(RepositoryRoot.Combine(folder), "*.cs", SearchOption.TopDirectoryOnly)
+            .Where(file =>
+            {
+                string name = Path.GetFileName(file);
+                return name == className + ".cs"
+                    || (name.StartsWith(className + ".", StringComparison.Ordinal) && name.EndsWith(".cs", StringComparison.Ordinal));
+            })
+            .Select(SourceScanner.Relative)
+            .Order(StringComparer.Ordinal);
 
     /// <summary>
     /// The event methods whose level is a parameter - read out of <see cref="EventFiles" /> by the

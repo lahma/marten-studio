@@ -179,8 +179,9 @@ public class StudioScopeResolverTest
     public async Task A_write_is_checked_against_the_write_policy_with_the_capability_named()
     {
         using var harness = CreateHarness();
+        string identity = await IdentityAsync(harness);
 
-        await harness.Resolver.ResolveAsync(new StudioScope("default", string.Empty, null), nameof(StudioCapability.EditDocuments), Token);
+        await harness.Resolver.ResolveAsync(new StudioScope("default", identity, null), nameof(StudioCapability.EditDocuments), Token);
 
         harness.Authorization.Calls.Should().HaveCount(2);
         harness.Authorization.Calls[0].Policy.Should().Be(StorePolicy);
@@ -208,8 +209,9 @@ public class StudioScopeResolverTest
     public async Task Without_a_write_policy_the_store_policy_answers_for_writes()
     {
         using var harness = CreateHarness(static options => options.WriteAuthorizationPolicy = null);
+        string identity = await IdentityAsync(harness);
 
-        await harness.Resolver.ResolveAsync(new StudioScope("default", string.Empty, null), nameof(StudioCapability.RunSql), Token);
+        await harness.Resolver.ResolveAsync(new StudioScope("default", identity, null), nameof(StudioCapability.RunSql), Token);
 
         harness.Authorization.Calls.Should().HaveCount(2);
         harness.Authorization.Calls.Should().OnlyContain(x => x.Policy == StorePolicy);
@@ -273,5 +275,152 @@ public class StudioScopeResolverTest
 
         scope.ToResource(null).Should().Be(new MartenStoreResource("default", "server/database", "acme", null));
         scope.ToResource("EditDocuments").Should().Be(new MartenStoreResource("default", "server/database", "acme", "EditDocuments"));
+    }
+
+    // SEC-fix F1: the policies are asked the registered key and the matched identity, whatever the link spelled
+
+    /// <summary>
+    /// A deny-list handler keyed on the registered name (<c>StoreName != "default"</c>, ordinally) passes the spelling
+    /// <c>DEFAULT</c>, which the registry matches ignoring case. The resolver must ask again by the name it matched and
+    /// refuse - carrying that name for the audit - before the store's databases are checked for a tenant.
+    /// </summary>
+    [Fact]
+    public async Task A_deny_list_policy_refuses_another_spelling_of_the_store_it_names()
+    {
+        using var harness = CreateHarness();
+        string identity = await IdentityAsync(harness);
+        harness.Authorization.Allow(static resource => !string.Equals(resource.StoreName, "default", StringComparison.Ordinal));
+
+        var refused = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("DEFAULT", identity, null), null, Token).AsTask())
+            .Should().ThrowAsync<StudioNotAuthorizedException>();
+
+        harness.Authorization.Calls.Select(static x => x.Resource).Should().Equal(
+            new MartenStoreResource("DEFAULT", identity, null, null),
+            new MartenStoreResource("default", identity, null, null));
+        refused.Which.Scope.Should().Be(new StudioScope("default", identity, null), "the audit names the scope that was refused");
+    }
+
+    /// <summary>
+    /// The same for the database: a link without <c>?db=</c> is the store's first database, and a database id in another
+    /// case is the same one. A handler that refuses that database by its identity is asked about the identity.
+    /// </summary>
+    [Fact]
+    public async Task A_deny_list_policy_refuses_an_empty_or_differently_cased_spelling_of_the_database_it_names()
+    {
+        using var harness = CreateHarness();
+        string identity = await IdentityAsync(harness);
+        identity.Should().NotBe(identity.ToUpperInvariant(), "the premise: the identity has a letter whose case can differ");
+        harness.Authorization.Allow(resource => !string.Equals(resource.DatabaseIdentifier, identity, StringComparison.Ordinal));
+
+        await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("default", string.Empty, null), null, Token).AsTask())
+            .Should().ThrowAsync<StudioNotAuthorizedException>("an empty id is the first database, which the policy refuses by name");
+
+        await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("default", identity.ToUpperInvariant(), null), null, Token).AsTask())
+            .Should().ThrowAsync<StudioNotAuthorizedException>("another case of the identity is the same database");
+
+        harness.Authorization.Calls.Should().HaveCount(4, "each spelling is asked, and then the identity it matched");
+        harness.Authorization.Calls[1].Resource.DatabaseIdentifier.Should().Be(identity);
+        harness.Authorization.Calls[3].Resource.DatabaseIdentifier.Should().Be(identity);
+    }
+
+    /// <summary>A scope spelled exactly as registered and matched is asked once - the second question is for another spelling only.</summary>
+    [Fact]
+    public async Task A_scope_spelled_as_registered_is_asked_once()
+    {
+        using var harness = CreateHarness();
+        string identity = await IdentityAsync(harness);
+
+        ResolvedScope resolved = await harness.Resolver.ResolveAsync(new StudioScope("default", identity, null), null, Token);
+
+        resolved.Database.Id.Identity.Should().Be(identity);
+        harness.Authorization.Calls.Should().ContainSingle()
+            .Which.Resource.Should().Be(new MartenStoreResource("default", identity, null, null));
+    }
+
+    /// <summary>
+    /// A write spelled another way asks both policies twice, in order: the spelling, then the registered names - each the
+    /// store policy and then the write policy with the capability named - and the tenant travels on both unchanged.
+    /// </summary>
+    [Fact]
+    public async Task A_write_spelled_another_way_asks_both_policies_again_by_the_registered_names()
+    {
+        using var harness = CreateHarness(static options => options.KnownTenantIds.Add("acme"));
+        string identity = await IdentityAsync(harness);
+
+        await harness.Resolver.ResolveAsync(new StudioScope("Default", string.Empty, "acme"), nameof(StudioCapability.EditDocuments), Token);
+
+        harness.Authorization.Calls.Should().Equal(
+            (StorePolicy, new MartenStoreResource("Default", string.Empty, "acme", null)),
+            (WritePolicy, new MartenStoreResource("Default", string.Empty, "acme", nameof(StudioCapability.EditDocuments))),
+            (StorePolicy, new MartenStoreResource("default", identity, "acme", null)),
+            (WritePolicy, new MartenStoreResource("default", identity, "acme", nameof(StudioCapability.EditDocuments))));
+    }
+
+    /// <summary>
+    /// A write refused only under the registered names is refused: the write policy is asked again too, not only the
+    /// store policy.
+    /// </summary>
+    [Fact]
+    public async Task A_write_policy_that_refuses_only_the_registered_names_refuses_the_write()
+    {
+        using var harness = CreateHarness();
+        string identity = await IdentityAsync(harness);
+        harness.Authorization.Allow(static resource => resource.Capability is null || resource.StoreName != "default");
+
+        await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("DEFAULT", identity, null), nameof(StudioCapability.DeleteDocuments), Token).AsTask())
+            .Should().ThrowAsync<StudioNotAuthorizedException>();
+
+        harness.Authorization.Calls.Should().HaveCount(4);
+        harness.Authorization.Calls[3].Should().Be((WritePolicy, new MartenStoreResource("default", identity, null, nameof(StudioCapability.DeleteDocuments))));
+    }
+
+    // SEC-fix 7: what a visitor typed reaches a refusal's message escaped and bounded, because that message is logged and
+    // audited whole
+
+    [Fact]
+    public async Task An_unknown_database_id_reaches_the_refusal_escaped_and_bounded()
+    {
+        using var harness = CreateHarness();
+        string typed = "line\nbreak" + new string('x', 10_000);
+
+        var refused = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("default", typed, null), null, Token).AsTask())
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        refused.Which.Message.Should().NotContain("\n").And.Contain(StudioLogValue.Cap(typed));
+        refused.Which.Message.Length.Should().BeLessThan(StudioLogValue.MaxLength + 200);
+    }
+
+    [Fact]
+    public async Task An_unknown_store_key_and_an_unlisted_tenant_reach_the_refusal_escaped_and_bounded()
+    {
+        using var harness = CreateHarness(static options => options.KnownTenantIds.Add("acme"));
+        string typed = "line\nbreak" + new string('x', 10_000);
+
+        var store = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope(typed, string.Empty, null), null, Token).AsTask())
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        store.Which.Message.Should().NotContain("\n");
+        store.Which.Message.Length.Should().BeLessThan(StudioLogValue.MaxLength + 200);
+
+        var tenant = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("default", string.Empty, typed), null, Token).AsTask())
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        tenant.Which.Message.Should().NotContain("\n").And.Contain(StudioLogValue.Cap(typed));
+        tenant.Which.Message.Length.Should().BeLessThan(StudioLogValue.MaxLength + 200);
+    }
+
+    /// <summary>The default store's first database identity, read through the resolver; the questions it asked are forgotten.</summary>
+    private static async Task<string> IdentityAsync(Harness harness)
+    {
+        ResolvedScope resolved = await harness.Resolver.ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+        harness.Authorization.Calls.Clear();
+        return resolved.Database.Id.Identity;
     }
 }

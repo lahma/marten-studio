@@ -39,6 +39,7 @@
                     Run statement checks
                 </button>
             }
+            <SnapshotMenu />
         </div>
     </div>
 
@@ -73,7 +74,7 @@
     {
         <div class="ms-empty">
             <p class="ms-empty-title">No database selected</p>
-            <p class="ms-empty-description">Pick a store and database in the header to see its health.</p>
+            <p class="ms-empty-description">Pick @Settings.Text.PickInTheHeader in the header to see its health.</p>
         </div>
     }
     else if (report.Refusal != HealthRefusal.None)
@@ -95,8 +96,10 @@
                 </p>
             }
 
+            <ServerAnswer Model="report.Server" />
+
             <p class="ms-health-summary-line ms-health-cost">
-                @(report.Cost is { } cost ? HealthPresentation.Cost(cost) : "Studio cost: withheld - " + report.CostWithheld + ".")
+                @(report.Cost is { } cost ? HealthPresentation.Cost(cost, Settings.Text) : "Studio cost: withheld - " + report.CostWithheld + ".")
             </p>
 
             @if (!report.DeeperChecksExist)
@@ -147,6 +150,16 @@
         @if (actionError is { Length: > 0 })
         {
             <ErrorAlert Message="@actionError" OnRetry="RefreshAsync" />
+        }
+
+        @if (report.StatisticsReset is { Length: > 0 } reset)
+        {
+            @* Said once, in the sweep that first sees it: a failover, a crash or a reset reads as such, never as a quiet database. *@
+            <div class="ms-alert ms-alert-info ms-aur-reset" role="status">
+                <div class="ms-alert-content">
+                    <p>@reset</p>
+                </div>
+            </div>
         }
 
         @if (report.WithheldCount > 0)
@@ -448,7 +461,7 @@
             {
                 <div class="ms-health-remedy">
                     <div class="ms-health-remedy-header">
-                        <span class="ms-health-remedy-title">@(remedy.IsMigration ? HealthRemedy.MigrationHeading : "What to change")</span>
+                        <span class="ms-health-remedy-title">@remedy.Heading</span>
                         @if (remedy.Requires is { } feature)
                         {
                             <span class="@(finding.RemedyAvailable ? "ms-health-requirement" : "ms-health-requirement ms-health-requirement-missing")">

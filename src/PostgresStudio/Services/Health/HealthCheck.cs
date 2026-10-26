@@ -57,6 +57,32 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
     /// needs, and never run.
     /// </summary>
     public string? RequiresFeature { get; set; }
+
+    /// <summary>
+    /// The fixed kinds of finding the check makes - <c>deadlocks</c>, <c>temp-files</c> - each a lower-case word or words
+    /// joined by hyphens, or empty (the default) for a check with one kind of finding.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Frozen per code</b> (API design §1.10, D31): a variant, like a code, is never reused for another meaning, never
+    /// renamed, and keeps its meaning within its code - a host keys its own wording on <c>Code</c> and
+    /// <see cref="HealthFinding.Variant" />, so a renamed variant is a host's wording silently gone. A check may only set
+    /// <see cref="HealthFinding.Variant" /> to a value listed here (<see cref="HealthCheckRegistry.FindingProblems" />),
+    /// and the registry refuses a list that is malformed or repeats itself.
+    /// </para>
+    /// <para>
+    /// <b>Not the subject.</b> <see cref="HealthFinding.Subject" /> names the object a finding is about - a table, an
+    /// index, a setting, a slot - and never the kind of finding; a check with fixed kinds lists them here instead. The five
+    /// checks whose subject carried a kind until 0.5 (C08, R01, S02, D02, T03) were split by the API packet, in the release
+    /// whose HMAC mute keys reset every mute once.
+    /// </para>
+    /// <para>
+    /// <b>All or nothing.</b> A check that lists variants names one on every finding it makes
+    /// (<see cref="HealthCheckRegistry.FindingProblems" />), so a finding's variant is <see langword="null" /> exactly when
+    /// its check has one kind of finding.
+    /// </para>
+    /// </remarks>
+    public string[] Variants { get; set; } = [];
 }
 
 /// <summary>A check's metadata, read once from its <see cref="HealthCheckAttribute" />.</summary>
@@ -64,7 +90,10 @@ internal sealed class HealthCheckAttribute(string code, HealthArea area, HealthC
 /// <param name="Area">The area.</param>
 /// <param name="Tier">The cost tier.</param>
 /// <param name="Gate">Who may see its findings.</param>
-/// <param name="Title">What it looks for, and its docs heading.</param>
+/// <param name="Title">
+/// What it looks for, as this studio says it - its status row's and its findings' title. The attribute's, unless the studio's
+/// words have one of their own (<see cref="Settings.StudioText.CheckTitles" />).
+/// </param>
 /// <param name="Requires">The feature it needs to run, or <see langword="null" />.</param>
 /// <param name="CheckType">The class.</param>
 internal sealed record HealthCheckInfo(
@@ -76,6 +105,16 @@ internal sealed record HealthCheckInfo(
     StudioFeatureRequirement? Requires,
     Type CheckType)
 {
+    /// <summary>The fixed kinds of finding it makes, frozen per code (<see cref="HealthCheckAttribute.Variants" />); empty for one kind.</summary>
+    public IReadOnlyList<string> Variants { get; init; } = [];
+
+    /// <summary>
+    /// The attribute's title, which is the docs heading in every studio: what <see cref="DocsHeading" />,
+    /// <see cref="DocsAnchor" /> and <see cref="DocsUrl" /> are built from, so a studio that words a title its own way still
+    /// links to the one heading the docs carry.
+    /// </summary>
+    public string DocsTitle { get; init; } = Title;
+
     /// <summary>
     /// Where the published docs live for this build of the studio; the area's file and anchor are appended.
     /// </summary>
@@ -91,10 +130,10 @@ internal sealed record HealthCheckInfo(
     public string DocsFile => "docs/health/" + AreaFileName(Area);
 
     /// <summary>The heading the docs file must carry for this check.</summary>
-    public string DocsHeading => "## " + Code + " " + Title;
+    public string DocsHeading => "## " + Code + " " + DocsTitle;
 
     /// <summary>The heading's anchor, as GitHub derives it.</summary>
-    public string DocsAnchor => Anchor(Code + " " + Title);
+    public string DocsAnchor => Anchor(Code + " " + DocsTitle);
 
     /// <summary>The published page and anchor, for the finding's "Docs" link.</summary>
     public string DocsUrl => DocsRoot + AreaFileName(Area) + "#" + DocsAnchor;
@@ -246,6 +285,38 @@ internal sealed class HealthCheckUnavailableException : Exception
     /// <param name="reason">Why, for the status row.</param>
     /// <param name="innerException">What said so.</param>
     public HealthCheckUnavailableException(string reason, Exception innerException) : base(reason, innerException)
+    {
+    }
+}
+
+/// <summary>
+/// What a gatherer throws when what it judges does not exist on this server's platform: the check is listed as not
+/// applicable, with the reason, and never run (issue #8 A2).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Not "not checked".</b> <see cref="HealthCheckUnavailableException" /> is a state the host chose and could change - a
+/// grant, an extension; this one is the platform's design - Aurora's storage layer checkpoints and archives, and its readers
+/// do not stream - so the row says "not applicable" (<see cref="HealthCheckOutcome.NotApplicable" />), as it does for a
+/// feature the host's runtime lacks, and the health export counts it with the checks that ran clean.
+/// </para>
+/// <para>
+/// <b>Thrown before the check's own reads.</b> A gatherer asks the sweep's shared platform read
+/// (<c>PostgresServerFacts.SharedAsync</c>) and nothing else first, so a not-applicable check runs no statement of its own.
+/// The message names the platform and why, written for the status row, and is the platform's to give (R2's
+/// <c>ReplicationPlatform</c>), so two checks never word one platform two ways.
+/// </para>
+/// </remarks>
+internal sealed class HealthCheckNotApplicableException : Exception
+{
+    /// <param name="reason">Why, for the status row.</param>
+    public HealthCheckNotApplicableException(string reason) : base(reason)
+    {
+    }
+
+    /// <param name="reason">Why, for the status row.</param>
+    /// <param name="innerException">What said so.</param>
+    public HealthCheckNotApplicableException(string reason, Exception innerException) : base(reason, innerException)
     {
     }
 }

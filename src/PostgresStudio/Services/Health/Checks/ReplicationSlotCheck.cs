@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Health.Checks;
@@ -46,9 +47,10 @@ internal sealed record ReplicationSlotFacts(ReplicationSlotSnapshot Slots, Postg
 /// <para>
 /// <b>One finding per kind, a server-wide total.</b> Slots are the server's - a physical slot belongs to no database
 /// and a logical one for another database still holds the WAL this one writes - so, like C03, the numbers are the
-/// whole server's, and every store database on the server reports them. A finding's subject is its kind
-/// (<c>near-limit</c>, <c>inactive</c>, <c>lost</c>) and never a slot: a subject is part of the mute key every visitor
-/// of the finding is handed. Counts, sizes and the settings are the database's.
+/// whole server's, and every store database on the server reports them. A finding's kind is its variant
+/// (<see cref="NearLimitVariant" />, <see cref="InactiveVariant" />, <see cref="LostVariant" />, API design §1.10) and it has
+/// no subject - never a slot: a subject is part of the mute key every visitor of the finding is handed. Counts, sizes and
+/// the settings are the database's.
 /// </para>
 /// <para>
 /// <b>A slot is named only where this database may name it</b> (H10 review, B1). A physical slot's name is the server's,
@@ -72,9 +74,19 @@ internal sealed record ReplicationSlotFacts(ReplicationSlotSnapshot Slots, Postg
 /// T14, which reads the same snapshot through <c>server.replication-slots</c>.
 /// </para>
 /// </remarks>
-[HealthCheck("R01", HealthArea.Replication, HealthCostTier.Catalog, "Replication slot retaining WAL")]
+[HealthCheck("R01", HealthArea.Replication, HealthCostTier.Catalog, "Replication slot retaining WAL",
+    Variants = [NearLimitVariant, InactiveVariant, LostVariant])]
 internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
 {
+    /// <summary>The variant of a finding about slots about to lose WAL they still need.</summary>
+    internal const string NearLimitVariant = "near-limit";
+
+    /// <summary>The variant of a finding about inactive slots holding WAL.</summary>
+    internal const string InactiveVariant = "inactive";
+
+    /// <summary>The variant of a finding about invalidated slots.</summary>
+    internal const string LostVariant = "lost";
+
     /// <summary>An inactive slot holding this much WAL, for <see cref="RetainedWindow" />, is a Warning: 1 GiB.</summary>
     public const long RetainedWarningBytes = 1L << 30;
 
@@ -86,6 +98,13 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
 
     /// <summary>The series prefix; the slot's name follows.</summary>
     public const string SeriesPrefix = "replication.slot-idle-retained:";
+
+    /// <summary>
+    /// <c>max_slot_wal_keep_size</c>'s <c>pg_settings.context</c> for its remedy: not read, so the remedy says nothing about
+    /// a restart - and none is needed, the setting being <c>sighup</c> on every release that has it (13+; B0's catalog dumps
+    /// of 13-18, <c>matrix-*.txt</c>).
+    /// </summary>
+    private const string? MaxSlotWalKeepSizeContext = null;
 
     /// <summary>How long an inactive slot must have held <see cref="RetainedWarningBytes" /> for a Warning.</summary>
     public static readonly TimeSpan RetainedWindow = TimeSpan.FromMinutes(10);
@@ -152,9 +171,21 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
 
         ReplicationSlotSnapshot snapshot = facts.Slots;
 
+        // Aurora's reader, or its writer below logical WAL (W5-AUR-fix F2): no WAL position to measure against.
+        string unmeasured = snapshot.PositionRead
+            ? string.Empty
+            : snapshot.InRecovery
+                ? " An Aurora reader has no WAL position of its own, so no slot's retention is measured here."
+                : " Aurora gives no WAL position below wal_level = logical (rds.logical_replication off), so no slot's retention is measured.";
+
         if (snapshot.Slots.Count == 0)
         {
-            return HealthVerdict.Quiet("This server has no replication slots.");
+            return HealthVerdict.Quiet("This server has no replication slots." + unmeasured);
+        }
+
+        if (!snapshot.PositionRead)
+        {
+            return HealthVerdict.Quiet(SessionText.Count(snapshot.Total, "replication slot") + " on this server." + unmeasured);
         }
 
         List<(ReplicationSlot Slot, string Why)> nearLimit = [];
@@ -337,7 +368,7 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
         {
             Code = "R01",
             Severity = HealthSeverity.Critical,
-            Subject = "near-limit",
+            Variant = NearLimitVariant,
             Title = unreserved
                 ? (ordered.Count == 1
                     ? "A replication slot is about to lose WAL it still needs"
@@ -347,18 +378,23 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
                     : SessionText.Number(ordered.Count) + " inactive replication slots are at " + WalText.Percent(CapCriticalShare) + " of max_slot_wal_keep_size or more"),
             WhyItMatters =
                 "max_slot_wal_keep_size caps the WAL a slot may hold. Past it, Postgres stops keeping WAL for the slot (wal_status "
-                + "'unreserved') and removes the files at the next checkpoint; the slot is then lost, and whatever consumed it - a change "
-                + "data capture connector reading Marten's events, a logical subscription, a standby - stops receiving changes and has to "
+                + "'unreserved') and removes the files at the next checkpoint; the slot is then lost, and whatever consumed it - "
+                + text.ChangeDataCaptureConsumer + ", a logical subscription, a standby - stops receiving changes and has to "
                 + "be rebuilt from a fresh copy of the data. A consumer that is restarted before that catches up and keeps its place.",
             Evidence = evidence,
             Caveat = Caveat(snapshot, text),
-            Remedy = new HealthRemedy(
-                "# " + text.ServerSettingComment + " (PostgreSQL 13+). Raise it only if the WAL volume can hold the difference:\n"
-                + "max_slot_wal_keep_size = 100GB",
-                "Restart the consumer that reads the slot now, before the next checkpoint, so that it catches up and Postgres can "
-                + "recycle the WAL it confirms. If nothing will read the slot again, drop it (pg_drop_replication_slot) and the WAL "
-                + "goes at the next checkpoint. Raising max_slot_wal_keep_size, in " + facts.Server.Platform.WhereSettingsChange + ", "
-                + "buys time only where the disk has room for it."),
+            Remedy = ServerSettingRemedy.Build(
+                facts.Server.Platform,
+                "max_slot_wal_keep_size",
+                "100GB",
+                text,
+                MaxSlotWalKeepSizeContext,
+                " (PostgreSQL 13+). Raise it only if the WAL volume can hold the difference:",
+                static where =>
+                    "Restart the consumer that reads the slot now, before the next checkpoint, so that it catches up and Postgres can "
+                    + "recycle the WAL it confirms. If nothing will read the slot again, drop it (pg_drop_replication_slot) and the WAL "
+                    + "goes at the next checkpoint. Raising max_slot_wal_keep_size, in " + where + ", "
+                    + "buys time only where the disk has room for it."),
         };
     }
 
@@ -377,14 +413,14 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
         {
             Code = "R01",
             Severity = HealthSeverity.Warning,
-            Subject = "inactive",
+            Variant = InactiveVariant,
             Title = ordered.Count == 1
                 ? "An inactive replication slot has held " + WalText.Bytes(total) + " of WAL for " + SessionText.Duration(RetainedWindow) + " or more"
                 : SessionText.Number(ordered.Count) + " inactive replication slots hold " + WalText.Bytes(total) + " of WAL between them, for "
                   + SessionText.Duration(RetainedWindow) + " or more",
             WhyItMatters =
                 "A replication slot keeps every WAL file its consumer has not confirmed, and with no consumer connected it confirms "
-                + "nothing: it grows with every write the server takes - every Marten append, every document upsert - until the WAL volume "
+                + "nothing: it grows with every write the server takes - " + text.EveryWriteExamples + " - until the WAL volume "
                 + "fills and Postgres stops accepting writes altogether"
                 + (snapshot.HasSlotCap
                     ? ", or until it passes max_slot_wal_keep_size and is invalidated, which loses its consumer's place. "
@@ -396,14 +432,19 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
             Caveat = Caveat(snapshot, text)
                 + " How long it has been inactive is measured across the advisor's own samples, which exist only while somebody watches"
                 + (snapshot.ServerVersion >= 170000 ? ", and by the slot's own inactive_since." : "; from PostgreSQL 17 Postgres records it itself (inactive_since)."),
-            Remedy = new HealthRemedy(
-                "# " + text.ServerSettingComment + " (PostgreSQL 13+): no slot may hold more than this.\n"
-                + "max_slot_wal_keep_size = 50GB",
-                "First the consumer: restart whatever reads the slot - a change data capture connector, a logical subscription, a "
-                + "standby - so that it catches up and Postgres can recycle the WAL; or, if nothing will read it again, drop the slot "
-                + "(pg_drop_replication_slot). Then cap what any slot may hold, in " + facts.Server.Platform.WhereSettingsChange + ": a "
-                + "slot that passes max_slot_wal_keep_size is invalidated instead of filling the disk, and its consumer has to be "
-                + "re-initialised - so size it above the longest outage a consumer should survive."),
+            Remedy = ServerSettingRemedy.Build(
+                facts.Server.Platform,
+                "max_slot_wal_keep_size",
+                "50GB",
+                text,
+                MaxSlotWalKeepSizeContext,
+                " (PostgreSQL 13+): no slot may hold more than this.",
+                static where =>
+                    "First the consumer: restart whatever reads the slot - a change data capture connector, a logical subscription, a "
+                    + "standby - so that it catches up and Postgres can recycle the WAL; or, if nothing will read it again, drop the slot "
+                    + "(pg_drop_replication_slot). Then cap what any slot may hold, in " + where + ": a "
+                    + "slot that passes max_slot_wal_keep_size is invalidated instead of filling the disk, and its consumer has to be "
+                    + "re-initialised - so size it above the longest outage a consumer should survive."),
         };
     }
 
@@ -418,7 +459,7 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
         {
             Code = "R01",
             Severity = HealthSeverity.Info,
-            Subject = "lost",
+            Variant = LostVariant,
             Title = slots.Count == 1
                 ? "A replication slot has been invalidated and can no longer be used"
                 : SessionText.Number(slots.Count) + " replication slots have been invalidated and can no longer be used",
@@ -494,7 +535,7 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
     private static string Caveat(ReplicationSlotSnapshot snapshot, StudioText text) =>
         "Read in pg_replication_slots at " + snapshot.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
         + "; what a slot holds is the server's WAL position less the slot's restart_lsn. Slots are the server's, not this "
-        + "database's, so every store database on this server counts the same ones. A physical slot's name, and a logical slot's "
+        + "database's, so " + text.EverySourceDatabase + " counts the same ones. A physical slot's name, and a logical slot's "
         + "name, plugin and database when it is this database's, are shown only with "
         + text.OptionName("Capabilities.ViewDatabaseActivity") + "; a logical slot of another database is never named here.";
 }

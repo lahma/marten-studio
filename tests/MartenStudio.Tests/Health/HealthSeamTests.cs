@@ -84,7 +84,7 @@ public class HealthSeamTests
 
         IndexFacts unused = Index(events, IndexRow(events, "z_unused", "seq_id") with { Scans = 0, Bytes = 2 * 1024 * 1024 }, IndexOrigin.Undeclared);
         TableFacts written = Table(events, row => row with { Inserts = 200_000 });
-        new UnusedIndexCheck().Evaluate(new UnusedIndexFacts(Now, [unused], [written], new DatabaseStatistics(null, true, 2)), Evaluation())
+        new UnusedIndexCheck().Evaluate(new UnusedIndexFacts(Now, [unused], [written], new DatabaseStatistics(null, true, 2)), UsageEvaluation())
             .Findings.Should().ContainSingle().Which.Subject.Should().EndWith(".z_unused");
 
         IndexFacts invalid = Index(events, IndexRow(events, "z_invalid", "type") with { IsValid = false }, IndexOrigin.Undeclared);
@@ -115,15 +115,21 @@ public class HealthSeamTests
 
         IndexFacts unused = Index(jobs, IndexRow(jobs, "z_unused", "job_group") with { Scans = 0, Bytes = 2 * 1024 * 1024 }, IndexOrigin.Host);
         TableFacts written = Table(jobs, row => row with { Inserts = 200_000 });
-        new UnusedIndexCheck().Evaluate(new UnusedIndexFacts(Now, [unused], [written], new DatabaseStatistics(null, true, 2)), Evaluation())
+        new UnusedIndexCheck().Evaluate(new UnusedIndexFacts(Now, [unused], [written], new DatabaseStatistics(null, true, 2)), UsageEvaluation())
             .Findings.Should().BeEmpty("an unused index on a library's table is the library's design");
 
         TableFacts scanned = Table(jobs, row => row with { LiveRows = 500_000, SequentialScans = 10, SequentialRowsRead = 5_000_000 });
         new SequentialScansCheck().Sample(new SequentialScanFacts(Now, [scanned], DatabaseStatistics.Of([scanned])))
             .Should().BeEmpty("T01 does not watch a table whose missing index is not the host's to add");
 
-        TableFacts bloated = Table(jobs, row => row with { LiveRows = 50_000, DeadRows = 50_000, LastAutovacuum = Now.AddDays(-3) });
-        VacuumBehindCheck.IsBehind(bloated, Now).Should().BeTrue("vacuum rules still apply to a library's table");
+        TableFacts bloated = Table(jobs, row => row with
+        {
+            LiveRows = 50_000,
+            DeadRows = 50_000,
+            LastAutovacuum = Now.AddDays(-3),
+            Vacuum = Unit(50_000, 10_050, Now.AddDays(-3), tuples: 50_000),
+        });
+        VacuumBehindCheck.IsBehind(bloated, VacuumBehindKind.DeadRows, Now).Should().BeTrue("vacuum rules still apply to a library's table");
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -147,13 +153,19 @@ public class HealthSeamTests
             DeadRows = 50_000,
             LastAutovacuum = Now.AddDays(-3),
             StorageOptions = ["autovacuum_enabled=false"],
+            Vacuum = Unit(50_000, 10_050, Now.AddDays(-3), tuples: 50_000),
         });
 
         HealthFinding finding = new VacuumBehindCheck().Evaluate(new VacuumFacts(Now, [off]), Evaluation())
             .Findings.Should().ContainSingle().Subject;
 
         finding.Evidence.Should().Contain(new HealthEvidence("Table", "the table app.orders"));
-        finding.Remedy.Should().BeNull("MartenStudio's wording has no line for a table no store declares");
+
+        // G1M (issue #8, G1): a table no store declares is the host's migrations' to change, so MartenStudio composes
+        // Postgres Studio's migration SQL for it - never a StoreOptions line.
+        finding.Remedy.Should().NotBeNull();
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
+        finding.Remedy.Code.Should().Be("ALTER TABLE \"app\".\"orders\" RESET (autovacuum_enabled);");
         finding.WhyItMatters.Should().Contain("the host's to do, in its own migrations")
             .And.NotContain("StoreOptions").And.NotContain("Marten");
     }
@@ -169,7 +181,10 @@ public class HealthSeamTests
 
         finding.WhyItMatters.Should().Contain("the host's own index").And.NotContain("Marten");
         finding.Evidence.Should().Contain(new HealthEvidence("Declared", "by the host's own schema"));
-        finding.Remedy.Should().BeNull();
+
+        // G1M: the rebuild the finding describes, as the host's migration - no re-apply, which would not touch it.
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
+        finding.Remedy.Code.Should().Contain("REINDEX INDEX CONCURRENTLY").And.NotContain("ApplyAllConfiguredChangesToDatabaseAsync");
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -219,7 +234,9 @@ public class HealthSeamTests
 
         registry.All.Select(static x => x.Info.CheckType).Should().BeEquivalentTo(
             MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
-        registry.All.Should().HaveCount(49, "the studio ships 49 checks");
+        registry.All.Should().HaveCount(73,
+            "the studio ships 73 checks: 0.4's 49, W5's D09 and C11, W5-V1's T16 and T24, W5-R2's R02-R04, W5-S2's S04-S10 and K05-K08, "
+            + "and W5-B1's T15, T17, T19, T20, T25 and T26");
 
         HealthCheckRegistry.Describe(typeof(ScriptedLightUpCheck), MartenStudioRuntime.Current).Requires
             .Should().BeSameAs(RuntimeFeature.TransientFailureClassifier);

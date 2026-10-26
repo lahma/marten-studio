@@ -53,14 +53,33 @@ internal sealed record ChecksumFacts(
 /// <c>initdb</c> did not turn them on by default; turning them on takes a stopped server and <c>pg_checksums</c>, and that
 /// is a DBA's decision the studio cannot weigh.
 /// </para>
+/// <para>
+/// <b>Not applicable on Aurora</b> (issue #8 A2, W5-AUR): its data lives in the cluster volume, "copies of the data across three
+/// Availability Zones" (<i>Amazon Aurora storage</i>, Aurora User Guide), in a storage system that is "distributed,
+/// fault-tolerant, and self-healing" (<i>Amazon Aurora FAQ</i>) - both read 2026-10-26. Whether Postgres' own page checksums are
+/// on is not the host's to choose there, and the quiet row's advice (<c>initdb --data-checksums</c>, <c>pg_checksums</c>) has no
+/// meaning on a cluster nobody runs <c>initdb</c> for; so S03 is listed, with that reason, and never run.
+/// </para>
 /// </remarks>
 [HealthCheck("S03", HealthArea.Server, HealthCostTier.Catalog, "Checksum failures")]
 internal sealed class ChecksumFailuresCheck : HealthCheck<ChecksumFacts>
 {
+    /// <summary>What S03's row says on Aurora.</summary>
+    public const string AuroraReason =
+        "Not applicable on Aurora: the cluster volume is Aurora's storage layer - six copies across three Availability Zones, "
+        + "\"distributed, fault-tolerant, and self-healing\" - so Postgres' own page checksums are not the host's to choose or repair.";
+
     /// <inheritdoc />
     public override async Task<ChecksumFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+
+        if (server.Platform.Kind == PostgresPlatformKind.AmazonAurora)
+        {
+            throw new HealthCheckNotApplicableException(AuroraReason);
+        }
 
         var query = HealthServerQueries.Checksums();
         IReadOnlyList<ChecksumFacts> rows = await context.Sql
@@ -114,7 +133,7 @@ internal sealed class ChecksumFailuresCheck : HealthCheck<ChecksumFacts>
             WhyItMatters =
                 "A checksum failure is a page that changed on disk after Postgres wrote it: the storage, a controller, memory, a "
                 + "filesystem or a copy taken the wrong way corrupted it. The statement that read it failed with \"invalid page\", and "
-                + "the rows on that page - documents, events, index entries - cannot be read until it is repaired. Corruption seldom "
+                + "the rows on that page - " + evaluation.Text.PageRowsExamples + " - cannot be read until it is repaired. Corruption seldom "
                 + "stops at one page: check the storage and the server's memory, find the relation from the server log (\"page "
                 + "verification failed\" names its file), and restore it from a backup or a replica that does not have the damage. "
                 + "zero_damaged_pages and ignore_checksum_failure are not repairs - they throw the page away or use it as it is (S02).",

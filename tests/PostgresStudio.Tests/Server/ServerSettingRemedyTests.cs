@@ -1,0 +1,186 @@
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Server;
+using PostgresStudio.Services.Settings;
+
+namespace PostgresStudio.Tests.Server;
+
+/// <summary>
+/// A server setting as a remedy: <c>setting = value</c>, worded for the platform, a restart said only for a setting whose
+/// <c>pg_settings.context</c> is <c>postmaster</c> - and every kind of remedy held to its own rule.
+/// </summary>
+public class ServerSettingRemedyTests
+{
+    private static readonly StudioText Text = PostgresStudioText.Instance;
+
+    [Fact]
+    public void The_plain_form_is_the_line_under_the_comment_and_ends_where_it_is_set()
+    {
+        HealthRemedy remedy = ServerSettingRemedy.For(PostgresPlatform.SelfHosted, "track_counts", "on", null, Text, "superuser");
+
+        remedy.Kind.Should().Be(HealthRemedyKind.ServerSetting);
+        remedy.Code.Should().Be("# A server setting:\ntrack_counts = on");
+        remedy.Explanation.Should().Be("Set it in postgresql.conf, followed by a reload.");
+        remedy.Heading.Should().Be(HealthRemedy.ChangeHeading);
+    }
+
+    [Fact]
+    public void A_postmaster_setting_says_the_server_must_restart()
+    {
+        HealthRemedy remedy = ServerSettingRemedy.For(
+            new PostgresPlatform(PostgresPlatformKind.AmazonAurora, "marker"), "max_connections", "400", "Leaves room for the pools.", Text, "postmaster");
+
+        remedy.Code.Should().Be("# A server setting:\nmax_connections = 400");
+        remedy.Explanation.Should().Be(
+            "Leaves room for the pools. Set it in the cluster's DB cluster parameter group, or one instance's DB parameter group to set "
+            + "it for that instance alone (Aurora); on Aurora Serverless v2 it follows the cluster's maximum capacity (ACU) instead, "
+            + "held while the instance scales. It takes effect only when the server restarts.");
+    }
+
+    [Fact]
+    public void A_setting_whose_context_was_not_read_says_nothing_about_a_restart()
+    {
+        ServerSettingRemedy.For(PostgresPlatform.SelfHosted, "max_connections", "400", null, Text, context: null).Explanation
+            .Should().Be("Set it in postgresql.conf, followed by a reload.");
+    }
+
+    [Fact]
+    public void The_general_form_carries_the_checks_own_comment_and_names_the_place_where_the_check_puts_it()
+    {
+        HealthRemedy remedy = ServerSettingRemedy.Build(
+            new PostgresPlatform(PostgresPlatformKind.CloudSql, "marker"),
+            "max_slot_wal_keep_size",
+            "50GB",
+            Text,
+            "sighup",
+            " (PostgreSQL 13+): no slot may hold more than this.",
+            static where => "Cap it, in " + where + ", above the longest outage.");
+
+        remedy.Code.Should().Be("# A server setting (PostgreSQL 13+): no slot may hold more than this.\nmax_slot_wal_keep_size = 50GB");
+        remedy.Explanation.Should().Be("Cap it, in the instance's database flags (Cloud SQL), above the longest outage.");
+    }
+
+    /// <summary>W5-AUR refines Aurora alone: every other platform's place stays its own, byte for byte, for every setting.</summary>
+    [Theory]
+    [InlineData(PostgresPlatformKind.SelfHosted)]
+    [InlineData(PostgresPlatformKind.AmazonRds)]
+    [InlineData(PostgresPlatformKind.Azure)]
+    [InlineData(PostgresPlatformKind.CloudSql)]
+    [InlineData(PostgresPlatformKind.Neon)]
+    [InlineData(PostgresPlatformKind.Supabase)]
+    public void Every_setting_changes_where_the_platform_says_off_Aurora(PostgresPlatformKind kind)
+    {
+        PostgresPlatform platform = new(kind, null);
+
+        foreach (string setting in new[] { "max_connections", "work_mem", "autovacuum_max_workers", "enable_seqscan", "max_wal_size", "track_io_timing" })
+        {
+            ServerSettingRemedy.WhereToSet(platform, setting).Should().Be(platform.WhereSettingsChange, setting);
+        }
+    }
+
+    /// <summary>
+    /// On Aurora each setting changes where the Aurora User Guide's parameter reference lists it (issue #8 A6): the DB cluster
+    /// parameter group, an instance's DB parameter group as well, or - for a setting neither table lists - said so.
+    /// </summary>
+    [Theory]
+    [InlineData("autovacuum_naptime", "the cluster's DB cluster parameter group (Aurora)")]
+    [InlineData("synchronous_commit", "the cluster's DB cluster parameter group (Aurora)")]
+    [InlineData("work_mem", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora)")]
+    [InlineData("enable_seqscan", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora)")]
+    [InlineData("track_io_timing", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora)")]
+    [InlineData("max_wal_size", "the cluster's DB cluster parameter group (Aurora), where Aurora allows it - the Aurora User Guide's parameter reference does not list max_wal_size")]
+    [InlineData("autovacuum_max_workers", "the cluster's DB cluster parameter group (Aurora); on Aurora Serverless v2 its default follows the cluster's maximum capacity (ACU)")]
+    [InlineData("shared_buffers", "the cluster's DB cluster parameter group, or one instance's DB parameter group to set it for that instance alone (Aurora); on Aurora Serverless v2 Aurora sizes it as the instance scales and does not use a value set there")]
+    public void On_Aurora_each_setting_changes_where_the_parameter_reference_lists_it(string setting, string where)
+    {
+        ServerSettingRemedy.WhereToSet(new PostgresPlatform(PostgresPlatformKind.AmazonAurora, null), setting).Should().Be(where);
+    }
+
+    [Theory]
+    [InlineData("Max_Connections")]
+    [InlineData("max connections")]
+    [InlineData("x;drop")]
+    public void A_name_that_is_not_a_settings_is_refused(string setting)
+    {
+        FluentActions.Invoking(() => ServerSettingRemedy.For(PostgresPlatform.SelfHosted, setting, "1", null, Text, null))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void A_value_on_two_lines_is_refused()
+    {
+        FluentActions.Invoking(static () => ServerSettingRemedy.For(PostgresPlatform.SelfHosted, "work_mem", "4MB\nfsync = off", null, Text, null))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void Only_a_configuration_line_and_a_repair_are_refused_DDL()
+    {
+        FluentActions.Invoking(static () => new HealthRemedy("ALTER TABLE x SET (fillfactor = 80);"))
+            .Should().Throw<ArgumentException>().WithMessage("*never DDL*");
+
+        HealthRemedy.ForMigration("ALTER TABLE \"public\".\"x\" SET (fillfactor = 80);", "Leaves room.").Kind.Should().Be(HealthRemedyKind.Migration);
+        HealthRemedy.ForServerSetting("alter_system_is_not_a_command = on", null).Kind.Should().Be(HealthRemedyKind.ServerSetting);
+        HealthRemedy.ForManagedPlatform("Create a parameter group with max_connections = 400.", null).Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
+    }
+
+    /// <summary>
+    /// A one-off repair (W5-G1M-fix3) puts data right - D09's <c>setval</c> - and is held to the configuration line's DDL
+    /// rule as well as every kind's privilege rule: a repair that changed the schema would be schema no configuration
+    /// declares.
+    /// </summary>
+    [Theory]
+    [InlineData("-- With appends stopped:\nCREATE INDEX ON \"public\".\"x\" (y);")]
+    [InlineData("select 1;\nalter sequence \"public\".\"s\" restart")]
+    [InlineData("DROP TABLE \"public\".\"x\";")]
+    [InlineData("truncate \"public\".\"mt_events\"")]
+    [InlineData("vacuum \"public\".\"x\"")]
+    [InlineData("comment on table \"public\".\"x\" is 'y'")]
+    public void A_repair_is_refused_DDL(string code)
+    {
+        FluentActions.Invoking(() => HealthRemedy.ForRepair(code, "Puts it right."))
+            .Should().Throw<ArgumentException>().WithMessage("*never DDL*");
+    }
+
+    [Theory]
+    [InlineData("grant usage on schema \"public\" to app")]
+    [InlineData("select 1;\nREVOKE ALL ON SCHEMA \"public\" FROM PUBLIC")]
+    public void A_repair_is_never_a_privilege_change(string code)
+    {
+        FluentActions.Invoking(() => HealthRemedy.ForRepair(code, "Puts it right."))
+            .Should().Throw<ArgumentException>().WithMessage("*never a privilege change*");
+    }
+
+    [Fact]
+    public void A_repair_is_a_statement_that_puts_data_right_said_to_be_one_the_studio_never_runs()
+    {
+        HealthRemedy repair = HealthRemedy.ForRepair(
+            "-- With appends stopped:\nselect pg_catalog.setval('\"public\".\"mt_events_sequence\"', t.target)\nfrom (values (31)) as t(target);",
+            "Moves the sequence past the events.");
+
+        repair.Kind.Should().Be(HealthRemedyKind.Repair);
+        repair.Heading.Should().Be(HealthRemedy.RepairHeading).And.Be("A one-off repair, run by hand - the studio never runs this");
+        repair.Explanation.Should().Be("Moves the sequence past the events. " + HealthRemedy.RepairHandOverNote);
+        HealthRemedy.RepairHandOverNote.Should().Be("It is a statement for whoever runs this database to run once, by hand; the studio never runs it.");
+        repair.Requires.Should().BeNull("a repair is SQL, which no library version gates");
+
+        FluentActions.Invoking(static () => HealthRemedy.ForRepair("select 1;", " ")).Should().Throw<ArgumentException>("a repair says what it does");
+    }
+
+    [Fact]
+    public void Each_kind_has_its_value_and_heading()
+    {
+        ((int) HealthRemedyKind.Configuration).Should().Be(0);
+        ((int) HealthRemedyKind.Migration).Should().Be(1);
+        ((int) HealthRemedyKind.ServerSetting).Should().Be(2);
+        ((int) HealthRemedyKind.ManagedPlatform).Should().Be(3);
+        ((int) HealthRemedyKind.Repair).Should().Be(4);
+        Enum.GetValues<HealthRemedyKind>().Should().HaveCount(5, "an addition is visibly one");
+
+        new HealthRemedy("opts.Schema.For<Order>().FillFactor(80);").Heading.Should().Be("What to change");
+        HealthRemedy.ForMigration("ALTER TABLE \"public\".\"x\" SET (fillfactor = 80);", "Leaves room.").Heading
+            .Should().Be("For your own migrations - the studio never runs this");
+        HealthRemedy.ForManagedPlatform("Raise the maximum capacity.", null).Heading.Should().Be("What to change");
+        HealthRemedy.ForRepair("select 1;", "Nothing.").Heading.Should().Be("A one-off repair, run by hand - the studio never runs this");
+    }
+}

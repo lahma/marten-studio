@@ -80,6 +80,39 @@ internal sealed class HealthLiveHost : IAsyncDisposable
         await postgres.CreateSchemaAsync(schema);
         await postgres.CreateSchemaAsync(schema + "_events");
 
+        return Build(postgres.ConnectionString, schema, environment, options =>
+        {
+            options.DatabaseSchemaName = schema;
+            options.Events.DatabaseSchemaName = schema + "_events";
+            store?.Invoke(options);
+        }, studio, services);
+    }
+
+    /// <summary>
+    /// A host over a database of the test's own, with the sample domain's own schema names - for a test whose data needs
+    /// them, as the relational demo does (its scripts name <c>studio_sample</c>, <c>quartz</c> and <c>legacy</c>).
+    /// </summary>
+    /// <param name="connectionString">The database, already created and seeded by the test.</param>
+    /// <param name="environment">The host's environment.</param>
+    /// <param name="store">Changes on top of the sample domain's configuration.</param>
+    /// <param name="studio">The studio's options.</param>
+    /// <param name="services">Anything else the container needs.</param>
+    public static HealthLiveHost CreateOverDatabase(
+        string connectionString,
+        string? environment = "Development",
+        Action<StoreOptions>? store = null,
+        Action<MartenStudioOptions>? studio = null,
+        Action<IServiceCollection>? services = null) =>
+        Build(connectionString, SampleStore.DocumentSchema, environment, store, studio, services);
+
+    private static HealthLiveHost Build(
+        string connectionString,
+        string schema,
+        string? environment,
+        Action<StoreOptions>? store,
+        Action<MartenStudioOptions>? studio,
+        Action<IServiceCollection>? services)
+    {
         LogCapture logs = new();
         ServiceCollection collection = new();
 
@@ -99,9 +132,7 @@ internal sealed class HealthLiveHost : IAsyncDisposable
 
         collection.AddMarten(options =>
         {
-            SampleStore.Configure(options, postgres.ConnectionString);
-            options.DatabaseSchemaName = schema;
-            options.Events.DatabaseSchemaName = schema + "_events";
+            SampleStore.Configure(options, connectionString);
             store?.Invoke(options);
         });
 

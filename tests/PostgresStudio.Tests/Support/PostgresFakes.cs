@@ -38,6 +38,66 @@ public sealed class TestSourceAuthorizationService : IAuthorizationService
     }
 }
 
+/// <summary>
+/// The Storage page's service (W5-CAP): a view built by the real per-visitor step, in Postgres Studio's settings, over a
+/// table in its own schema and one in another whose gate could not be read - so the page draws a named row, a withheld row
+/// and the sentence that says why. Every request recorded.
+/// </summary>
+internal sealed class FakeStorage : PostgresStudio.Services.Storage.IStorageService
+{
+    public List<StudioScope> Requests { get; } = [];
+
+    public PostgresStudio.Services.Storage.StorageView? View { get; set; }
+
+    public async Task<PostgresStudio.Services.Storage.StorageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(scope);
+        return View ??= await BuildAsync(scope);
+    }
+
+    private static Task<PostgresStudio.Services.Storage.StorageView> BuildAsync(StudioScope scope)
+    {
+        DateTimeOffset now = DateTimeOffset.UnixEpoch.AddYears(56);
+
+        StudioTable own = new("public", "orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+        StudioTable other = new("legacy", "employees", StudioTableKind.Relational, StudioTableOwnership.Other) { GatedSchemas = ["legacy"] };
+
+        PostgresStudio.Services.Storage.StorageFacts facts = PostgresStudio.Services.Storage.StorageFacts.Build(
+            "default",
+            "app",
+            new StatisticsWindow { MeasuredAt = now, Since = now.AddHours(-3), Basis = StatisticsBasis.ServerReset },
+            new PostgresStudio.Internal.Sql.StorageDatabaseRow(64L << 20, 60L << 20, 8192, 170_011),
+            new OneSet([own, other]),
+            [
+                new PostgresStudio.Internal.Sql.StorageTableRow { Schema = "public", Table = "orders", HeapBytes = 8L << 20, EstimatedRows = 10_000 },
+                new PostgresStudio.Internal.Sql.StorageTableRow { Schema = "legacy", Table = "employees", HeapBytes = 4L << 20, EstimatedRows = -1 },
+            ]);
+
+        PostgresStudio.Services.Storage.StorageService service = new(
+            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+            PostgresStudioDescriptor.Instance,
+            authorization: null!,
+            resolver: null!,
+            facts: null!,
+            new StudioLogThrottle(TimeProvider.System),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<PostgresStudio.Services.Storage.StorageService>.Instance);
+
+        return service.ShowAsync(facts, scope, static () => Task.FromResult<DatabaseGate?>(null));
+    }
+
+    private sealed class OneSet(IReadOnlyList<StudioTable> tables) : IStudioTableSet
+    {
+        public IReadOnlyList<StudioTable> Tables { get; } = tables;
+
+        public string? Coverage => null;
+
+        public StudioTable? Find(string schema, string table) => Tables.FirstOrDefault(x => x.Schema == schema && x.Table == table);
+
+        public PostgresStudio.Services.Health.Checks.IndexOrigin OriginOf(PostgresStudio.Internal.Sql.HealthIndexRow index, StudioTable table) =>
+            PostgresStudio.Services.Health.Checks.IndexOrigin.Host;
+    }
+}
+
 /// <summary>Database › Sessions' service: three sessions, no details, every request recorded.</summary>
 internal sealed class FakeSessions : ISessionActivityService
 {
@@ -79,11 +139,32 @@ internal sealed class FakeServerReader : IPostgresServerReader
 
     public List<bool> Refreshes { get; } = [];
 
+    /// <summary>What the read answers: 17.4, self-hosted, unless a test says otherwise.</summary>
+    public PostgresServerFacts Facts { get; init; } = new(DateTimeOffset.UnixEpoch, 170004, "17.4", PostgresPlatform.SelfHosted);
+
     public Task<PostgresServerRead> ReadAsync(StudioScope scope, bool refresh = false, CancellationToken cancellationToken = default)
     {
         Requests.Add(scope);
         Refreshes.Add(refresh);
-        return Task.FromResult(new PostgresServerRead(new PostgresServerFacts(DateTimeOffset.UnixEpoch, 170004, "17.4", PostgresPlatform.SelfHosted), null));
+        return Task.FromResult(new PostgresServerRead(Facts, null));
+    }
+}
+
+/// <summary>The Server page's Aurora section: a server that is not Aurora, with no capacity source, unless a test says otherwise.</summary>
+internal sealed class FakeAurora : PostgresStudio.Services.Aurora.IAuroraService
+{
+    public List<StudioScope> Requests { get; } = [];
+
+    /// <summary>What the section is handed.</summary>
+    public PostgresStudio.Services.Aurora.AuroraView View { get; set; } = new();
+
+    /// <summary>When set, answers in place of <see cref="View" /> - to hold a read, or to fail it.</summary>
+    public Func<StudioScope, Task<PostgresStudio.Services.Aurora.AuroraView>>? Answer { get; set; }
+
+    public Task<PostgresStudio.Services.Aurora.AuroraView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(scope);
+        return Answer is { } answer ? answer(scope) : Task.FromResult(View);
     }
 }
 

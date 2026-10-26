@@ -57,6 +57,15 @@ internal sealed record ReplicationSlot(
     bool ThisDatabase)
 {
     /// <summary>
+    /// Its <c>xmin</c> as the raw 32-bit transaction id (<c>xmin::text</c>), or <see langword="null" /> - for T14, which
+    /// matches it to a writer's own transaction id: a slot pinned at exactly that id is behind that writer (W5-V1).
+    /// </summary>
+    public long? Xmin { get; init; }
+
+    /// <summary>Its <c>catalog_xmin</c> as the raw transaction id, likewise.</summary>
+    public long? CatalogXmin { get; init; }
+
+    /// <summary>
     /// Whether Postgres has given up on it: <c>wal_status = 'lost'</c>, an invalidation reason (17+), or a recovery
     /// conflict (16+). Such a slot holds no WAL and cannot be used again.
     /// </summary>
@@ -124,6 +133,12 @@ internal sealed record ReplicationSlotSnapshot(
     /// <summary>Whether <c>max_slot_wal_keep_size</c> caps what a slot may hold.</summary>
     public bool HasSlotCap => MaxSlotWalKeepBytes is > 0;
 
+    /// <summary>
+    /// Whether the server's WAL position was read, so each slot's retention is measured. False only on Aurora below
+    /// <c>wal_level = logical</c>, which refuses <c>pg_current_wal_lsn()</c> and has no logical slot to measure (W5-AUR-fix F2).
+    /// </summary>
+    public bool PositionRead { get; init; } = true;
+
     /// <summary>The sweep's one read (<see cref="HealthCheckContext.Shared{T}" />).</summary>
     public static Task<ReplicationSlotSnapshot> SharedAsync(HealthCheckContext context)
     {
@@ -136,8 +151,22 @@ internal sealed record ReplicationSlotSnapshot(
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        // The platform first (the sweep's shared read): Aurora below logical WAL refuses pg_current_wal_lsn() (W5-AUR-fix F2).
+        // A failed platform read reads the slots as any other server's, whose own read then says what went wrong.
+        bool aurora;
+
+        try
+        {
+            aurora = (await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false)).Platform.Kind == PostgresPlatformKind.AmazonAurora;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            aurora = false;
+        }
+
+        var query = HealthServerQueries.ReplicationSlots(aurora);
         IReadOnlyList<Row> rows = await context.Sql
-            .QueryAsync(HealthServerQueries.ReplicationSlots(), Map, cancellationToken)
+            .QueryAsync(query, Map, cancellationToken)
             .ConfigureAwait(false);
 
         if (rows.Count == 0)
@@ -154,7 +183,10 @@ internal sealed record ReplicationSlotSnapshot(
             first.MaxSlotWalKeepBytes,
             first.WalKeepBytes,
             first.Total,
-            [.. rows.Where(static x => x.Slot is not null).Select(static x => x.Slot!)]);
+            [.. rows.Where(static x => x.Slot is not null).Select(static x => x.Slot!)])
+        {
+            PositionRead = first.PositionRead,
+        };
     }
 
     private static Row Map(NpgsqlDataReader reader)
@@ -178,7 +210,11 @@ internal sealed record ReplicationSlotSnapshot(
                 reader.IsDBNull(17) ? null : reader.GetBoolean(17),
 
                 // Fail closed: a row whose flag did not come back is somebody else's.
-                !reader.IsDBNull(19) && reader.GetBoolean(19));
+                !reader.IsDBNull(19) && reader.GetBoolean(19))
+            {
+                Xmin = RawXid(reader, 20),
+                CatalogXmin = RawXid(reader, 21),
+            };
 
         return new Row(
             reader.GetInt32(0),
@@ -186,12 +222,24 @@ internal sealed record ReplicationSlotSnapshot(
             reader.IsDBNull(2) ? null : reader.GetInt64(2),
             reader.IsDBNull(3) ? null : reader.GetInt64(3),
             reader.IsDBNull(18) ? 0 : reader.GetInt64(18),
-            slot);
+            slot)
+        {
+            PositionRead = reader.IsDBNull(22) || reader.GetBoolean(22),
+        };
     }
 
     private static string? NullableString(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 
-    private sealed record Row(int ServerVersion, bool InRecovery, long? MaxSlotWalKeepBytes, long? WalKeepBytes, long Total, ReplicationSlot? Slot);
+    /// <summary>A transaction id read as text (<c>xid::text</c>), or <see langword="null" />.</summary>
+    internal static long? RawXid(NpgsqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) || !long.TryParse(reader.GetString(ordinal), NumberStyles.None, CultureInfo.InvariantCulture, out long xid)
+            ? null
+            : xid;
+
+    private sealed record Row(int ServerVersion, bool InRecovery, long? MaxSlotWalKeepBytes, long? WalKeepBytes, long Total, ReplicationSlot? Slot)
+    {
+        public bool PositionRead { get; init; } = true;
+    }
 }
 
 /// <summary>Sizes, worded once for the replication checks: "1.4 GiB".</summary>

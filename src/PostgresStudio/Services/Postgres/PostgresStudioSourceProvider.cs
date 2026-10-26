@@ -103,65 +103,110 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
 
     /// <inheritdoc />
     /// <remarks>
-    /// Every source in order: a data source is its one database; a host's source is every name it lists, each opened
-    /// through the host as it is reached - so a name the host no longer has is passed over, and one whose data source
-    /// cannot be had is counted as not reached. A source that will not build, or whose list cannot be read, is one
-    /// <see cref="StudioSweepTargetOutcome.SourceNotReached" />.
+    /// Every source in order. A data source is its one database, named by its key - and is not built to say so: a source
+    /// that will not build is found out by whoever resolves it. A host's source is every name it lists, through the
+    /// registry's minute-long cache, and nothing it names is opened; a source that will not build, or whose list cannot be
+    /// read, is one <see cref="StudioSweepTargetOutcome.SourceNotReached" />.
     /// </remarks>
-    public async IAsyncEnumerable<StudioSweepTarget> SweepTargetsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<StudioListedDatabase> ListUnattendedAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         foreach (StudioSourceRegistration registration in Registrations())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!TryResolve(registration, out IStudioSource? source).IsAvailable || source is null)
+            if (registration.Kind == StudioSourceKind.DataSource)
+            {
+                // Its one database's identity is its key (PostgresDatabases.cs): nothing needs building to name it.
+                yield return new StudioListedDatabase(registration, StudioSweepTargetOutcome.Database, registration.Key) { SingleDatabaseSource = true };
+                continue;
+            }
+
+            if (!TryResolve(registration, out IStudioSource? source).IsAvailable || source is not PostgresHostSource host)
             {
                 // TryResolve has logged why, throttled (9210).
-                yield return new StudioSweepTarget(registration, StudioSweepTargetOutcome.SourceNotReached);
+                yield return new StudioListedDatabase(registration, StudioSweepTargetOutcome.SourceNotReached);
                 continue;
             }
 
-            if (source is PostgresDataSourceSource single)
-            {
-                yield return new StudioSweepTarget(
-                    registration,
-                    StudioSweepTargetOutcome.Database,
-                    new ResolvedSource(new StudioScope(registration.Key, single.Database.Identity, null), registration, single.Database));
-                continue;
-            }
-
-            PostgresHostSource host = (PostgresHostSource) source;
             IReadOnlyList<string>? names = await host.TryListAsync(cancellationToken).ConfigureAwait(false);
 
             if (names is null)
             {
-                yield return new StudioSweepTarget(registration, StudioSweepTargetOutcome.SourceNotReached);
+                yield return new StudioListedDatabase(registration, StudioSweepTargetOutcome.SourceNotReached);
                 continue;
             }
 
             if (names.Count == 0)
             {
-                yield return new StudioSweepTarget(registration, StudioSweepTargetOutcome.SourceNotEnumerated, Count: 0, Detail: "the source listed no databases");
+                yield return new StudioListedDatabase(registration, StudioSweepTargetOutcome.SourceNotEnumerated, Count: 0, Detail: "the source listed no databases");
                 continue;
             }
 
             foreach (string name in names)
             {
-                (DataSourceDatabase? opened, bool failed) = await host.TryOpenAsync(name, cancellationToken).ConfigureAwait(false);
-
-                if (opened is not null)
-                {
-                    yield return new StudioSweepTarget(
-                        registration,
-                        StudioSweepTargetOutcome.Database,
-                        new ResolvedSource(new StudioScope(registration.Key, name, null), registration, opened));
-                }
-                else if (failed)
-                {
-                    yield return new StudioSweepTarget(registration, StudioSweepTargetOutcome.SourceNotReached);
-                }
+                yield return new StudioListedDatabase(registration, StudioSweepTargetOutcome.Database, name);
             }
         }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A data source answers for its key, or for an empty id. A host's source answers for a name it lists - from the same
+    /// cache - and the host is asked for that one database's data source for this operation alone (API design §3.3): null
+    /// is "not found", and a throw or a timeout is "not reached", logged at Debug, because the caller counts it.
+    /// </remarks>
+    public async ValueTask<StudioUnattendedResolution> ResolveUnattendedAsync(string sourceKey, string databaseId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sourceKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        if (Find(sourceKey) is not { } registration)
+        {
+            return StudioUnattendedResolution.NotFound("No data source is registered under '" + sourceKey + "'.");
+        }
+
+        if (!TryResolve(registration, out IStudioSource? source).IsAvailable || source is null)
+        {
+            // TryResolve has logged why, throttled (9210).
+            return StudioUnattendedResolution.NotReached(
+                "Data source '" + registration.Key + "' could not be built; the server log says why (event 9210).");
+        }
+
+        if (source is PostgresDataSourceSource single)
+        {
+            return databaseId.Length > 0 && !string.Equals(databaseId, single.Database.Identity, StringComparison.OrdinalIgnoreCase)
+                ? StudioUnattendedResolution.NotFound(
+                    "Data source '" + registration.Key + "' is one database, named '" + single.Database.Identity + "', not '" + databaseId + "'.")
+                : StudioUnattendedResolution.Of(
+                    new ResolvedSource(new StudioScope(registration.Key, single.Database.Identity, null), registration, single.Database));
+        }
+
+        PostgresHostSource host = (PostgresHostSource) source;
+        IReadOnlyList<string>? names = await host.TryListAsync(cancellationToken).ConfigureAwait(false);
+
+        if (names is null)
+        {
+            return StudioUnattendedResolution.NotReached(
+                "The databases of data source '" + registration.Key + "' could not be listed; the server log says why (event 9213).");
+        }
+
+        string? name = databaseId.Length == 0
+            ? (names.Count > 0 ? names[0] : null)
+            : names.FirstOrDefault(x => string.Equals(x, databaseId, StringComparison.OrdinalIgnoreCase));
+
+        if (name is null)
+        {
+            return StudioUnattendedResolution.NotFound("Data source '" + registration.Key + "' lists no database named '" + databaseId + "'.");
+        }
+
+        (DataSourceDatabase? opened, bool failed) = await host.TryOpenAsync(name, cancellationToken).ConfigureAwait(false);
+
+        return opened is not null
+            ? StudioUnattendedResolution.Of(new ResolvedSource(new StudioScope(registration.Key, name, null), registration, opened))
+            : failed
+                ? StudioUnattendedResolution.NotReached(
+                    "Data source '" + registration.Key + "' could not hand over database '" + name + "': the host's database source failed or took too long.")
+                : StudioUnattendedResolution.NotFound("Data source '" + registration.Key + "' no longer has a database named '" + name + "'.");
     }
 
     /// <summary>The host's list, through the registry's minute-long cache.</summary>

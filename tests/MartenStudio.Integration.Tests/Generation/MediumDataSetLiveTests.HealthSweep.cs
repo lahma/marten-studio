@@ -37,9 +37,9 @@ namespace MartenStudio.Integration.Tests.Generation;
 /// </para>
 /// <para>
 /// <b>Database time is the sweep's own.</b> It is the sum of the gather times of the checks that ran SQL - each little
-/// more than that check's read-only transactions, begin to rollback, round trips included, which is what
-/// <c>StudioDatabaseTime</c> meters for the Health page's "Studio cost" line, measured the same way, client side, so an
-/// upper bound on what the server spent. The meter itself is not read here: it is process-wide
+/// more than that check's read-only transactions, begin to rollback, round trips included - client side, so an upper bound
+/// on what the server spent, as <c>StudioDatabaseTime</c>'s "Studio cost" line is (which since 0.5 times the sweep's whole
+/// connection, open to close, W5-Q1). The meter itself is not read here: it is process-wide
 /// and keyed by host, port and database, and every parallel test class in this assembly reads the same database through
 /// the same key, so its total over a sweep is the sweep's plus whatever the rest of the suite did meanwhile.
 /// </para>
@@ -53,11 +53,43 @@ namespace MartenStudio.Integration.Tests.Generation;
 public partial class MediumDataSetLiveTests
 {
     /// <summary>
-    /// The health statements one regular sweep of this set ran when it was measured, on 2026-10-19: 27 from 32 of the 42
-    /// checks, at the Marten floor (9.39.0) and at the latest tested (9.50.2) alike - so one budget serves both. See
-    /// <see cref="SweepStatementBudget" /> for the margin.
+    /// The health statements one regular sweep of this set runs, measured on 2026-10-26: 44 from 46 of the 60 checks, at the
+    /// Marten floor (9.39.0) and at the latest tested (9.54.1) alike - so one budget serves both. The test's output lists
+    /// every check's count and every distinct statement with the checks that share it. See <see cref="SweepStatementBudget" />
+    /// for the margin.
     /// </summary>
-    private const int MeasuredSweepStatements = 27;
+    /// <remarks>
+    /// <para>
+    /// 0.4 measured 27 from 32 of 42 checks (2026-10-19), and wave 5's base (<c>main</c> at 1c3e21ef) still ran exactly those
+    /// 27, all of which a sweep still runs. Wave 5 added 22, each a catalog or statistics read run once per sweep, of a fixed
+    /// shape or under a <c>LIMIT</c> - none per table, per row, per shard or per tenant, and none of a data table:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>W5-G1M, 1: the admitted-tables list every table check now shares, MartenStudio's judging the whole database
+    /// (<c>HealthTableQueries.UndeclaredTablesSql</c>: estimates, capped).</item>
+    /// <item>W5-CAP, 3: the statistics window C08, C11 and T08 share - its signals, and, apart since CAP-fix2, the control
+    /// functions' privilege probe and the call it allows (<c>StatisticsWindowQueries</c>).</item>
+    /// <item>W5-R2, 7: R02's archiver, the replication settings R02 and R04 share, R03's recovery state and its standbys,
+    /// R04's checkpoints and WAL counters (<c>ReplicationQueries</c>), and the grant read R02 and R03 share - W5-VERS's
+    /// statement (<c>ServerReachQueries.Grants</c>), which nothing else in a regular sweep of this set asks for.</item>
+    /// <item>W5-S2, 4: the login's posture (S04, S05, S08, S10), its settings (S05, S09, S10), the schemas PUBLIC may create
+    /// in (S06) and the extensions (S07) (<c>ServerPostureQueries</c>).</item>
+    /// <item>W5-V1, 2: the autovacuum workers T16 reads and T07 shares, and T16's running maintenance
+    /// (<c>MaintenanceQueries</c>).</item>
+    /// <item>W5-B1, 5: T15's foreign keys, the usage guard's counters-age read T01, T05 and T06 share, T26's integer keys,
+    /// the partition read T19 and T20 share (<c>IndexLintQueries</c>, <c>PartitionQueries</c>), and T17's document-named
+    /// tables (<c>OrphanedDocumentTableQueries</c>).</item>
+    /// </list>
+    /// <para>
+    /// W5-Q1 adds only to statement sweeps, and W5-AUR's Aurora reads run only on Aurora, so neither moves this count.
+    /// </para>
+    /// <para>
+    /// T24, C11 and D09 add none of their own - each shares reads counted above - and K05-K08 read configuration in process.
+    /// The reads wave 5 makes only on a condition this set does not meet are not counted: R02's WAL directory (archiving on,
+    /// and <c>pg_monitor</c>), S07's update paths (an extension behind its default).
+    /// </para>
+    /// </remarks>
+    private const int MeasuredSweepStatements = 49;
 
     /// <summary>
     /// The statement budget: the measured count plus two. A check that adds a statement on a path this data set takes is
@@ -68,7 +100,8 @@ public partial class MediumDataSetLiveTests
 
     /// <summary>
     /// The database-time ceiling for one regular sweep of this set: 5 s, against 400-450 ms measured at the floor and
-    /// 456 ms at 9.50.2 on 2026-10-19 (500-570 ms wall clock).
+    /// 456 ms at 9.50.2 on 2026-10-19 (500-570 ms wall clock) - and, with wave 5's 17 more statements, 600-780 ms at the
+    /// floor and 590-880 ms at 9.54.1 on 2026-10-26 (730-1,110 ms wall clock; 316 ms on CI's runner).
     /// </summary>
     /// <remarks>
     /// A ceiling, not a budget a regression must miss by a margin: ten times a measured sweep, because the assembly runs
@@ -133,6 +166,15 @@ public partial class MediumDataSetLiveTests
             Write(string.Format(CultureInfo.InvariantCulture, "  {0,-4} {1,6:N0} ms  {2} statement(s)", result.Check.Code, result.Duration.TotalMilliseconds, result.Statements.Count));
         }
 
+        // Each distinct statement once, with every check it was attributed to - what a change to the budget is reviewed
+        // against: which check a new statement is, and that its text is one read rather than one per table.
+        Write("The distinct statements, by the checks that share each:");
+
+        foreach ((string codes, string sql) in DistinctStatements(timed))
+        {
+            Write("  " + codes + ": " + sql);
+        }
+
         statements.Should().BePositive("so the budget is not met by a sweep that read nothing");
         statements.Should().BeLessThanOrEqualTo(SweepStatementBudget,
             "one regular sweep of every area runs a bounded set of catalog statements, whatever the data set's size");
@@ -187,6 +229,39 @@ public partial class MediumDataSetLiveTests
 
         IReadOnlySet<string> after = await HealthSweepProbe.SnapshotAsync(fixture.Postgres, schemas);
         after.Should().BeEquivalentTo(before, "two sweeps over the set created, dropped and altered nothing");
+    }
+
+    /// <summary>
+    /// Each distinct statement of <paramref name="sweep" /> (by reference, as the budget counts them), with the codes of every
+    /// check it was attributed to and the head of its text on one line, ordered by code.
+    /// </summary>
+    private static List<(string Codes, string Sql)> DistinctStatements(HealthSweep sweep)
+    {
+        Dictionary<HealthStatement, SortedSet<string>> codes = new(ReferenceEqualityComparer.Instance);
+
+        foreach (HealthCheckResult result in sweep.Results)
+        {
+            foreach (HealthStatement statement in result.Statements)
+            {
+                if (!codes.TryGetValue(statement, out SortedSet<string>? set))
+                {
+                    codes[statement] = set = new SortedSet<string>(StringComparer.Ordinal);
+                }
+
+                set.Add(result.Check.Code);
+            }
+        }
+
+        return [.. codes
+            .Select(static x => (Codes: string.Join("/", x.Value), Sql: Head(x.Key.Sql)))
+            .OrderBy(static x => x.Codes, StringComparer.Ordinal)
+            .ThenBy(static x => x.Sql, StringComparer.Ordinal)];
+
+        static string Head(string sql)
+        {
+            string flat = string.Join(' ', sql.Split((char[]) [' ', '\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries));
+            return flat.Length <= 140 ? flat : flat[..140] + "…";
+        }
     }
 
     /// <summary>One regular sweep through the container's own sweeper, the scope resolved as a circuit resolves it.</summary>
@@ -250,7 +325,8 @@ public partial class MediumDataSetLiveTests
 /// </para>
 /// <para>
 /// <b>The readers</b>, measured over the hundred-thousand-row set on 2026-10-19: the progression table D01, D02, D03, D05
-/// and D08; the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02 and D03 share;
+/// and D08; the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02, D03 and D09 share
+/// (with D09's <c>max(seq_id)</c>, W5-G1M);
 /// the high-water skips D07; the dead letters D06 - each with the table's indexes, which the planner opens with it - and
 /// <c>mt_hilo</c> T11. The event checks of a regular sweep (E05, E07) read only the catalog and the statistics views, so a
 /// lock of theirs on <c>mt_events</c> fails this.
@@ -262,7 +338,7 @@ internal sealed class SweepLockAllowList
     public static readonly string[] EventBookkeeping = ["mt_event_progression", "mt_events", "mt_high_water_skips", "mt_doc_deadletterevent"];
 
     /// <summary>The checks whose statements may read <see cref="EventBookkeeping" />: the daemon checks, and no other.</summary>
-    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08"];
+    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09"];
 
     /// <summary>The checks whose statements may read <c>mt_hilo</c>.</summary>
     public static readonly string[] HiloReaders = ["T11"];

@@ -35,12 +35,16 @@ namespace MartenStudio.Integration.Tests.Browser;
 /// because no test-only threshold reaches a sample host in a child process.
 /// </para>
 /// <para>
-/// <b>The toast's Critical is not a switch's.</b> None of the four reaches Critical within a scenario: the pool hog
-/// leaves two connections free, so C01 never sees its pool saturated; C04 and D01 are Critical only after ten minutes;
-/// T07 is a Warning; and the D02 a host without a daemon raises is Critical already on the first sweep, which is exactly
-/// the case the toast stays quiet about. So the toast scenario takes the cheapest real path to a new Critical: as
-/// another client of the server, it puts the sample's <c>Invoice</c> HiLo row past 80% of <c>int.MaxValue</c>, which T11
-/// judges Critical on the next sweep, and restores the row afterwards.
+/// <b>The toast's Critical is not a switch's.</b> The bloated table's T07 is Critical from its first sweep - the switch
+/// turns autovacuum off for the table itself, which is G2's Critical (W5-V1) - so whether it toasts depends on whether the
+/// circuit's first look at the database came before that sweep or after it, which is the sweep cache's timing, not the
+/// scenario's. The other three do not reach Critical within a scenario: the pool hog leaves two connections free, so C01
+/// never sees its pool saturated; C04 and D01 are Critical only after ten minutes; and the D02 a host without a daemon
+/// raises is Critical already on the first sweep, which is exactly the case the toast stays quiet about. So the toast
+/// takes the cheapest real path to a Critical that is new while the page watches: as another client of the server, the
+/// scenario puts the sample's <c>Invoice</c> HiLo row past 80% of <c>int.MaxValue</c>, which T11 judges Critical on the
+/// next sweep, and restores the row afterwards. The toast it waits for is T11's by its text, so a toast T07 may have
+/// raised earlier cannot stand in for it.
 /// </para>
 /// <para>Like every browser scenario, these skip locally when Chromium is not installed and throw on CI (D19).</para>
 /// </remarks>
@@ -68,9 +72,9 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// The bloated-table switch makes T07 appear after a refresh, with its evidence and its docs anchor; muting it drops
-    /// the badge by one and the mute is kept in the browser across a reload; and a Critical that appears while the page
-    /// is open raises a toast.
+    /// The bloated-table switch makes T07 appear after a refresh, Critical because autovacuum is off for the table itself,
+    /// with its evidence and its docs anchor; muting it drops the badge by one and the mute is kept in the browser across a
+    /// reload; and a Critical that appears while the page is open raises a toast.
     /// </summary>
     [BrowserFact]
     public async Task A_switch_raises_its_finding_a_mute_drops_the_badge_and_a_new_critical_raises_a_toast()
@@ -90,7 +94,8 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 await UntilShownAsync(t07, HealthRefresh(studio.Page), NextSweep, "T07 after the bloated-table switch was turned on");
 
                 (await t07.Locator(".ms-health-code").InnerTextAsync()).Trim().Should().Be("T07");
-                (await t07.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be("Warning");
+                (await t07.Locator(".ms-health-severity").InnerTextAsync()).Trim().Should().Be(
+                    "Critical", "the switch turns autovacuum off for the table itself, and a table behind with that is Critical (G2)");
                 (await t07.Locator(".ms-health-evidence-row").CountAsync()).Should().BePositive("a finding carries the facts behind it");
                 (await t07.InnerTextAsync()).Should().Contain(UnhealthyDemoStore.BloatTableName, "the finding names the table the switch bloated");
                 (await t07.Locator("a.ms-health-docs").GetAttributeAsync("href")).Should().Contain(
@@ -99,7 +104,7 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
                 // The badge counts the same unmuted Warnings and Criticals the page shows - read once both agree, because
                 // the sidebar reads the glance on its own poll, a few seconds behind the page.
                 int before = await BadgeAgreesWithThePageAsync(studio.Page);
-                before.Should().BePositive("T07 is a Warning");
+                before.Should().BePositive("T07 is Critical, and the badge counts Warnings and Criticals");
                 int stored = await MutedInStorageAsync(studio);
 
                 await t07.Locator(".ms-health-mute").ClickAsync();
@@ -316,9 +321,12 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
     // Helpers
     // ------------------------------------------------------------------------------------------------
 
-    /// <summary>How many mute keys this browser keeps in <c>localStorage</c>.</summary>
+    /// <summary>
+    /// How many mute keys this browser keeps in <c>localStorage</c>: the hashes beside its protected key (wave 6), an object
+    /// the studio writes - read as none for anything else.
+    /// </summary>
     private static Task<int> MutedInStorageAsync(StudioPage studio) =>
-        studio.Page.EvaluateAsync<int>("() => JSON.parse(window.localStorage.getItem('ms_health_muted') || '[]').length");
+        studio.Page.EvaluateAsync<int>("() => { const kept = JSON.parse(window.localStorage.getItem('ms_health_muted') || '{}'); return Array.isArray(kept && kept.muted) ? kept.muted.length : 0; }");
 
     /// <summary>
     /// Keeps every toast this page shows, class and text, in <c>window.__msToasts</c> - a toast is removed after four

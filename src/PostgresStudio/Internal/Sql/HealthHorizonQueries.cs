@@ -108,7 +108,11 @@ internal enum HealthHorizonHolderKind
     /// <summary>A prepared transaction of another database.</summary>
     OtherDatabasePrepared,
 
-    /// <summary>A standby's <c>hot_standby_feedback</c>, through its WAL sender's <c>backend_xmin</c>.</summary>
+    /// <summary>
+    /// A standby's <c>hot_standby_feedback</c>, through its WAL sender's <c>backend_xmin</c> - only for a standby that streams
+    /// without a replication slot. Through a slot the feedback lands on the slot's <c>xmin</c> instead, a
+    /// <see cref="SlotXmin" /> holder, and the WAL sender's <c>backend_xmin</c> reads null - for <c>pg_monitor</c> too (B0 §4).
+    /// </summary>
     Standby,
 
     /// <summary>A replication slot's <c>xmin</c>: it holds back vacuum of every table in every database.</summary>
@@ -192,6 +196,18 @@ internal sealed record HealthHorizonHolderRow
     /// another database's holders are an age and nothing else, not even a count (1).
     /// </summary>
     public long Total { get; init; } = 1;
+
+    /// <summary>
+    /// The id it owns as the raw 32-bit transaction id - a session's <c>backend_xid</c>, a prepared transaction's - or
+    /// <see langword="null" />: what a replication slot pinned at it is matched by (W5-V1), and part of a writer's identity.
+    /// </summary>
+    public long? OwnXid { get; init; }
+
+    /// <summary>
+    /// Its snapshot's <c>backend_xmin</c> as the raw transaction id - a session's, or a standby's WAL sender's - or
+    /// <see langword="null" />: part of a standby's identity.
+    /// </summary>
+    public long? Xmin { get; init; }
 }
 
 /// <summary>
@@ -474,7 +490,8 @@ internal static class HealthHorizonQueries
         "            exists (select 1 from pg_catalog.pg_locks l where l.pid = a.pid and l.granted and l.locktype = 'advisory'\n" +
         "                       and " + AdvisoryKey + " = any(@daemon_lock_ids)) as holds_daemon_lock,\n" +
         "            pg_catalog.count(*) over () as total,\n" +
-        "            " + SessionOwnXidAge + " as own_xid_age\n" +
+        "            " + SessionOwnXidAge + " as own_xid_age,\n" +
+        "            a.backend_xid::text as own_xid, a.backend_xmin::text as xmin_raw\n" +
         "     from pg_catalog.pg_stat_activity a\n" +
         "     where a.datname = pg_catalog.current_database()\n" +
         "       and " + HoldingSession + "\n" +
@@ -489,7 +506,8 @@ internal static class HealthHorizonQueries
         "            null::int, null::text, null::text, null::text, null::timestamptz, null::text, null::text,\n" +
         "            a.backend_xid is not null, a.backend_type is null, false,\n" +
         "            1::bigint,\n" +
-        "            " + SessionOwnXidAge + "\n" +
+        "            " + SessionOwnXidAge + ",\n" +
+        "            a.backend_xid::text, a.backend_xmin::text\n" +
         "     from pg_catalog.pg_stat_activity a\n" +
         "     where a.datname is distinct from pg_catalog.current_database()\n" +
         "       and " + HoldingSession + "\n" +
@@ -503,7 +521,8 @@ internal static class HealthHorizonQueries
         "            null::int, p.owner::text, null::text, null::text, null::timestamptz, null::text, p.gid::text,\n" +
         "            true, false, false,\n" +
         "            pg_catalog.count(*) over (),\n" +
-        "            pg_catalog.age(p.transaction)::bigint\n" +
+        "            pg_catalog.age(p.transaction)::bigint,\n" +
+        "            p.transaction::text, null::text\n" +
         "     from pg_catalog.pg_prepared_xacts p\n" +
         "     where p.database = pg_catalog.current_database()\n" +
         "     order by 2 desc nulls last\n" +
@@ -516,7 +535,8 @@ internal static class HealthHorizonQueries
         "            null::int, null::text, null::text, null::text, null::timestamptz, null::text, null::text,\n" +
         "            true, false, false,\n" +
         "            1::bigint,\n" +
-        "            pg_catalog.age(p.transaction)::bigint\n" +
+        "            pg_catalog.age(p.transaction)::bigint,\n" +
+        "            p.transaction::text, null::text\n" +
         "     from pg_catalog.pg_prepared_xacts p\n" +
         "     where p.database is distinct from pg_catalog.current_database()\n" +
         "     order by 2 desc nulls last\n" +
@@ -529,7 +549,8 @@ internal static class HealthHorizonQueries
         "            r.pid, r.usename::text, r.application_name::text, pg_catalog.host(r.client_addr), r.backend_start, r.state::text,\n" +
         "            null::text, false, r.state is null, false,\n" +
         "            pg_catalog.count(*) over (),\n" +
-        "            null::bigint\n" +
+        "            null::bigint,\n" +
+        "            null::text, r.backend_xmin::text\n" +
         "     from pg_catalog.pg_stat_replication r\n" +
         "     where r.backend_xmin is not null\n" +
         "     order by 2 desc nulls last\n" +
@@ -537,7 +558,7 @@ internal static class HealthHorizonQueries
         ")\n" +
         "select v.can_read_all_stats, v.hidden_sessions, h.kind, h.xid_age, h.at_least, h.transaction_open, h.bound, h.pid, h.usename,\n" +
         "       h.application_name, h.client_addr, h.backend_start, h.state, h.gid, h.has_xid, h.hidden, h.holds_daemon_lock, h.total,\n" +
-        "       h.own_xid_age\n" +
+        "       h.own_xid_age, h.own_xid, h.xmin_raw\n" +
         "from visibility v\n" +
         "left join holders h on true\n" +
         "order by h.kind, h.xid_age desc";
@@ -659,6 +680,8 @@ internal static class HealthHorizonQueries
             HoldsDaemonLock = reader.GetBoolean(16),
             Total = reader.GetInt64(17),
             OwnXidAge = NullableInt64(reader, 18),
+            OwnXid = RawXid(reader, 19),
+            Xmin = RawXid(reader, 20),
         };
 
         return (canReadAllStats, hidden, holder);
@@ -669,6 +692,13 @@ internal static class HealthHorizonQueries
 
     private static string? NullableText(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
+    /// <summary>A transaction id read as text (<c>xid::text</c>), or <see langword="null" />.</summary>
+    private static long? RawXid(NpgsqlDataReader reader, int ordinal) =>
+        reader.FieldCount <= ordinal || reader.IsDBNull(ordinal)
+        || !long.TryParse(reader.GetString(ordinal), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long xid)
+            ? null
+            : xid;
 
     private static TimeSpan? NullableSeconds(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? null : TimeSpan.FromSeconds(Math.Max(0d, reader.GetDouble(ordinal)));

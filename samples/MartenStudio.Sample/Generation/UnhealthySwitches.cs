@@ -195,22 +195,27 @@ internal sealed class IdleInTransactionSwitch(IDocumentStore store) : UnhealthyS
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Declared to Marten, owned by the sample.</b> T07 judges only the tables a store's configuration declares - a table
-/// Marten knows nothing about is somebody else's, and its dead rows are not the store's problem. So the demo table is
-/// one of <c>StoreOptions.Storage.ExtendedSchemaObjects</c> (<see cref="UnhealthyDemoStore.Configure" />): Marten-managed
-/// relational data, in the store's own schema, holding nothing but this switch's rows - not a document table, not an
-/// event table, and not named <c>mt_</c>. It lives in the document schema rather than one of its own because the
-/// advisor reads a declared table only in a schema the store's documents or events use.
+/// <b>Declared to Marten, owned by the sample.</b> T07 judges every table of the store's own schemas (issue #8 G1), and a
+/// table the store declares keeps its declaration's remedies. So the demo table is one of
+/// <c>StoreOptions.Storage.ExtendedSchemaObjects</c> (<see cref="UnhealthyDemoStore.Configure" />): Marten-managed relational
+/// data, in the store's own schema, holding nothing but this switch's rows - not a document table, not an event table, and
+/// not named <c>mt_</c>. It lives in the document schema, where the store's own declarations are read, rather than in a
+/// schema of its own, which the advisor would judge only past the database browser's gate.
 /// </para>
 /// <para>
-/// <b>Recreated every time.</b> T07 also wants the last vacuum to be more than a day old, or never - and turning the
-/// switch off runs <c>VACUUM</c>. So each run drops and recreates the table from its own declaration (Weasel's, the same
-/// statement Marten's apply would write), which gives it fresh statistics; then switches autovacuum off for it, fills
-/// it, and updates every row once. The updated column is indexed, so no update can be HOT and every old version stays a
-/// dead row until a vacuum: half the table dead, against T07's line of 20% and 10,000 rows. <c>ANALYZE</c> last, so the
-/// planner's statistics are current and T08 (never analysed) stays out of this demo - after the backend has flushed the
-/// insert's and the update's counts where the server can be told to, or it may count the inserted rows twice
-/// (<see cref="FlushPendingStatisticsAsync" />).
+/// <b>Recreated every time.</b> T07 judges a table against its own autovacuum trigger, the way autovacuum decides (W5-V1,
+/// issue #8 G2): dead rows at least 10,000 past twice the dead-row trigger - <c>autovacuum_vacuum_threshold</c> plus
+/// <c>autovacuum_vacuum_scale_factor</c> times the table's rows, its own storage parameters over the server's settings -
+/// with the last vacuum more than an hour ago or never, and none running. Turning the switch off runs <c>VACUUM</c>, so
+/// each run drops and recreates the table from its own declaration (Weasel's, the same statement Marten's apply would
+/// write), which gives it fresh statistics and no vacuum yet; then switches autovacuum off for it, fills it, and updates
+/// every row once. The updated column is indexed, so no update can be HOT and every old version stays a dead row until a
+/// vacuum: 30,000 dead rows against a trigger of about 6,050 (50 + 0.2 × 30,000) - past twice it by far more than 10,000.
+/// With autovacuum off for the table there is nothing to wait for, so T07 does not hold the condition for its ten minutes
+/// of samples first, and its own <c>autovacuum_enabled = false</c> makes the finding Critical. <c>ANALYZE</c> last, so the
+/// planner's statistics are current and the trigger is read from the table's real size, and T08 (never analysed) stays
+/// out of this demo - after the backend has flushed the insert's and the update's counts where the server can be told to,
+/// or it may count the inserted rows twice (<see cref="FlushPendingStatisticsAsync" />).
 /// </para>
 /// <para>
 /// Turned off: <c>autovacuum_enabled</c> is reset, which is the table's own default, and the table is vacuumed.

@@ -756,7 +756,15 @@ internal sealed record DatabaseForeignKeyInfo(
     DatabaseObjectOwnership? OtherEndOwnership,
     bool Validated,
     string OnDelete,
-    string OnUpdate);
+    string OnUpdate)
+{
+    /// <summary>
+    /// Whether an index on the pointing table serves its lookup - <see langword="false" /> only when none leads with any of
+    /// its columns (<c>ForeignKeyCoverage.Judge</c>, T15's rule, W5-B1) - or <see langword="null" /> when that was not read,
+    /// so the Keys tab says nothing either way.
+    /// </summary>
+    public bool? Covered { get; init; }
+}
 
 /// <summary>One relation a view reads.</summary>
 /// <param name="Schema">Its schema, or <see langword="null" /> when this visitor may not see it.</param>
@@ -849,9 +857,133 @@ internal sealed record DatabaseSequenceValue(
     /// <summary>Whether the value was read - it may still be <see langword="null" />, for a sequence never called.</summary>
     public bool Found => Refusal == DatabaseRefusal.None;
 
+    /// <summary>
+    /// What its headroom is judged by, read with the value (W5-B1): the sequence's own range and step, the columns it feeds,
+    /// and when it was read - or <see langword="null" /> where none was read.
+    /// </summary>
+    public SequenceHeadroomFacts? Headroom { get; init; }
+
     /// <summary>No value, and this is why.</summary>
     public static DatabaseSequenceValue Unavailable(DatabaseObjectRef reference, DatabaseRefusal refusal, string reason) =>
         new(reference, null, refusal, reason);
+}
+
+/// <summary>What a sequence's headroom is judged by, read beside its value - every part of it from the catalog (W5-B1).</summary>
+/// <param name="DataType">The sequence's own type.</param>
+/// <param name="Start"><c>seqstart</c>.</param>
+/// <param name="Increment"><c>seqincrement</c>: negative for a descending sequence.</param>
+/// <param name="Minimum"><c>seqmin</c>.</param>
+/// <param name="Maximum"><c>seqmax</c>.</param>
+/// <param name="Cycles"><c>seqcycle</c>: it wraps at its limit rather than failing.</param>
+/// <param name="ColumnTypes">The types of the columns it feeds, or <see langword="null" />.</param>
+/// <param name="ColumnMaximum">
+/// The narrowest of those columns' ranges' maximum - an <c>integer</c> column on a <c>bigint</c> sequence is judged against
+/// <c>integer</c>'s - or <see langword="null" /> for none.
+/// </param>
+/// <param name="ReadAt">When it was read, by the server's clock.</param>
+internal sealed record SequenceHeadroomFacts(
+    string DataType,
+    long Start,
+    long Increment,
+    long Minimum,
+    long Maximum,
+    bool Cycles,
+    string? ColumnTypes,
+    long? ColumnMaximum,
+    DateTimeOffset ReadAt);
+
+/// <summary>How far a sequence is through the range it may use, and - from two reads - how long it has left.</summary>
+/// <param name="Used">The share of the range used.</param>
+/// <param name="Limit">The value it fails at: the narrower of its own limit and its columns' range.</param>
+/// <param name="LimitIsColumn">Whether the limit is a column's range rather than the sequence's own.</param>
+/// <param name="Remaining">How many more values it can hand out before the limit.</param>
+/// <param name="PerSecond">How many values a second it handed out between the two reads, or <see langword="null" /> for one read.</param>
+/// <param name="Left">At that rate, how long until the limit, or <see langword="null" />.</param>
+internal sealed record SequenceHeadroomReading(double Used, long Limit, bool LimitIsColumn, double Remaining, double? PerSecond, TimeSpan? Left);
+
+/// <summary>A sequence's headroom, from its value and its catalog row - pure, for the Sequences list's on-demand read (W5-B1).</summary>
+internal static class SequenceHeadroom
+{
+    /// <summary>
+    /// The headroom of a sequence whose last value is <paramref name="lastValue" /> (<see langword="null" /> for one never
+    /// called), and - with <paramref name="previous" />, an earlier read in this session - its rate and time left.
+    /// </summary>
+    /// <param name="lastValue">The value just read.</param>
+    /// <param name="facts">Its range, step and columns, read with it.</param>
+    /// <param name="previous">An earlier read of the same sequence: its value and when.</param>
+    public static SequenceHeadroomReading Of(long? lastValue, SequenceHeadroomFacts facts, (long? Value, DateTimeOffset At)? previous = null)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        bool ascending = facts.Increment >= 0;
+        long? columnMinimum = facts.ColumnMaximum is { } maximum ? -maximum - 1 : null;
+
+        long limit = ascending
+            ? Math.Min(facts.Maximum, facts.ColumnMaximum ?? long.MaxValue)
+            : Math.Max(facts.Minimum, columnMinimum ?? long.MinValue);
+        bool limitIsColumn = ascending
+            ? facts.ColumnMaximum is { } columnMax && columnMax < facts.Maximum
+            : columnMinimum is { } columnMin && columnMin > facts.Minimum;
+
+        // Never called: nothing used yet - the first value is the start.
+        double value = lastValue ?? ((double) facts.Start - facts.Increment);
+        double origin = ascending ? facts.Minimum : facts.Maximum;
+        double span = Math.Abs((double) limit - origin);
+        double used = lastValue is null ? 0 : span <= 0 ? 1 : Math.Clamp(Math.Abs(value - origin) / span, 0, 1);
+        double remaining = Math.Max(0, ascending ? limit - value : value - limit);
+
+        double? perSecond = null;
+        TimeSpan? left = null;
+
+        if (previous is { } earlier && facts.ReadAt > earlier.At)
+        {
+            double before = earlier.Value ?? ((double) facts.Start - facts.Increment);
+            double moved = ascending ? value - before : before - value;
+            double seconds = (facts.ReadAt - earlier.At).TotalSeconds;
+
+            if (moved >= 0 && seconds > 0)
+            {
+                perSecond = moved / seconds;
+                left = perSecond > 0 && remaining / perSecond.Value < TimeSpan.MaxValue.TotalSeconds
+                    ? TimeSpan.FromSeconds(remaining / perSecond.Value)
+                    : null;
+            }
+        }
+
+        return new SequenceHeadroomReading(used, limit, limitIsColumn, remaining, perSecond, left);
+    }
+
+    /// <summary>A share, to a tenth of a percent: "0.4%", "51.0%".</summary>
+    public static string Percent(double share) => (share * 100).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    /// <summary>How long is left, as a person says it: "about 3 years", "about 40 days", "about 5 hours", "under two hours".</summary>
+    public static string Describe(TimeSpan left) => left switch
+    {
+        _ when left >= TimeSpan.FromDays(730) => "about " + ((int) (left.TotalDays / 365.25)).ToString(System.Globalization.CultureInfo.InvariantCulture) + " years",
+        _ when left >= TimeSpan.FromDays(2) => "about " + ((int) left.TotalDays).ToString(System.Globalization.CultureInfo.InvariantCulture) + " days",
+        _ when left >= TimeSpan.FromHours(2) => "about " + ((int) left.TotalHours).ToString(System.Globalization.CultureInfo.InvariantCulture) + " hours",
+        _ => "under two hours",
+    };
+}
+
+/// <summary>Whether a <c>SECURITY DEFINER</c> routine pins its <c>search_path</c> - the database browser's badge (W5-B1, B0 §9).</summary>
+internal static class RoutineSecurity
+{
+    /// <summary>
+    /// Whether <paramref name="config" /> (<c>pg_proc.proconfig</c>, <c>name=value</c>) sets <c>search_path</c> - to anything,
+    /// <c>""</c> included, which leaves only <c>pg_catalog</c> and the temporary schema and is the tightest pin of all.
+    /// </summary>
+    public static bool PinsSearchPath(IReadOnlyList<string> config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return config.Any(static x => x.StartsWith("search_path=", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The badge's title: why an unpinned <c>SECURITY DEFINER</c> routine is the classic hole.</summary>
+    public const string UnpinnedReason =
+        "Runs with its owner's privileges and does not pin search_path, so the caller's search_path decides what its unqualified "
+        + "names resolve to - a caller who can create a schema or a temporary object can make it call theirs. Add SET search_path "
+        + "to it (SET search_path = '' and schema-qualified names is the tightest).";
 }
 
 /// <summary>

@@ -227,7 +227,7 @@ public class DataChecksTests
         finding.Severity.Should().Be(severity);
         finding.Subject.Should().BeNull();
         finding.Remedy.Should().BeNull("VACUUM is a DBA's statement, and a remedy is never one");
-        finding.Evidence.Should().Contain(static x => x.Label == "Marten tables past the warning line");
+        finding.Evidence.Should().Contain(static x => x.Label == "Tables the studio judges past the warning line");
         finding.Evidence.Should().Contain(new HealthEvidence(
             "autovacuum_freeze_max_age", freezeMaxAge.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)));
         finding.WhyItMatters.Should().Contain("which this server sets to");

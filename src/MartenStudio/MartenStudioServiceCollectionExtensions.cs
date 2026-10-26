@@ -11,6 +11,7 @@ using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
+using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -123,6 +124,9 @@ public static partial class MartenStudioServiceCollectionExtensions
         // a made-up MartenRuntime first, which this one then reads).
         services.TryAddSingleton<IHealthTableRemedies>(MartenHealthRemedyProvider.Instance);
         services.TryAddSingleton<IHealthPlanAdvisor>(MartenStatementPlanAdvisor.Instance);
+
+        // W5-Q1: the Statements page's groups - a Marten operation and its document type, read off Marten's own SQL.
+        services.TryAddSingleton<IStatementClassifier>(MartenStatementClassifier.Instance);
         services.TryAddSingleton<IHorizonContributor, MartenHorizonContributor>();
         services.TryAddSingleton<IStudioRuntime>(static provider =>
             new MartenStudioRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));
@@ -158,6 +162,12 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<DaemonControlState>();
         services.TryAddScoped<DaemonAccessor>();
         services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
+
+        // W5-API: the diagnostics API for the host's own code (D31), the same implementation as Postgres Studio's over this
+        // studio's stores, checks and descriptor - one per process, as the studio is - with its limit of two fresh reads at a
+        // time. Inert until host code calls it: no endpoint, no hosted service.
+        services.TryAddSingleton<FreshReadLimiter>();
+        services.TryAddSingleton<PostgresStudio.IPostgresDiagnostics, PostgresDiagnosticsService>();
 
         return services;
     }

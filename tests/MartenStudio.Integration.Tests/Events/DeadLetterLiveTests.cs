@@ -180,6 +180,43 @@ public class DeadLetterLiveTests(PoisonStoreFixture fixture) : IClassFixture<Poi
     }
 
     /// <summary>
+    /// SEC-fix 5: a page that goes away once every check has passed - its token cancelled just before Marten is asked to
+    /// mark the event - does not cancel the skip. Marten is handed a token of the operation's own, the event is marked,
+    /// and the audit says so; before the fix the cancelled write left no audit entry at all.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_page_that_goes_away_after_the_checks_does_not_cancel_the_skip_and_it_is_audited()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        var service = (EventDataService) Events.Service;
+
+        DeadLetterPage page = await service.ListDeadLettersAsync(Events.Scope, new DeadLetterQuery(), token);
+        long sequence = page.Rows[^1].EventSequence;
+
+        using var visit = CancellationTokenSource.CreateLinkedTokenSource(token);
+        service.CommitStarting = () => visit.CancelAsync();
+
+        try
+        {
+            await service.SkipEventAsync(Events.Scope, sequence, visit.Token);
+        }
+        finally
+        {
+            service.CommitStarting = null;
+        }
+
+        visit.IsCancellationRequested.Should().BeTrue("the premise: the page's token was cancelled before Marten was asked");
+
+        EventRow? offending = await service.GetEventBySequenceAsync(Events.Scope, sequence, token);
+        offending!.IsSkipped.Should().BeTrue("the skip ran to its end");
+
+        string target = sequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Events.Audit.GetLatest().Should().Contain(x =>
+            x.Action == "Skip event" && x.Succeeded && x.Target == target && x.Message == "marked as skipped");
+    }
+
+    /// <summary>
     /// CL1 item 4, live: a host that hides <c>DeadLetterEvent</c> gets no dead-letter list, no number on the badge and
     /// no discard - over real dead letters the daemon recorded, which a studio that shows the type still lists, and
     /// which the refused discard leaves exactly as they were.

@@ -70,18 +70,24 @@ internal sealed partial class HealthCheckRegistry
     /// <summary>Every check in the assemblies <paramref name="descriptor" /> names, resolved against the studio's runtime.</summary>
     /// <param name="descriptor">The studio's descriptor.</param>
     /// <param name="runtime">The studio's runtime, or <see langword="null" /> for a studio that registers none.</param>
-    public HealthCheckRegistry(StudioDescriptor descriptor, IStudioRuntime? runtime = null)
+    /// <param name="settings">
+    /// The studio's settings, whose words title a check its own way (<see cref="StudioText.CheckTitles" />), or
+    /// <see langword="null" /> for the attributes' titles.
+    /// </param>
+    public HealthCheckRegistry(StudioDescriptor descriptor, IStudioRuntime? runtime = null, IStudioSettings? settings = null)
         : this(
             DiscoverAll((descriptor ?? throw new ArgumentNullException(nameof(descriptor))).HealthCheckAssemblies),
             runtime ?? NoStudioRuntime.Instance,
-            descriptor.ProductName)
+            descriptor.ProductName,
+            settings?.Text)
     {
     }
 
     private HealthCheckRegistry(
         IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks,
         IStudioRuntime runtime,
-        string productName = "Marten Studio")
+        string productName = "Marten Studio",
+        StudioText? text = null)
     {
         IReadOnlyList<string> problems = Problems([.. checks.Select(static x => x.Type)], runtime);
 
@@ -95,7 +101,7 @@ internal sealed partial class HealthCheckRegistry
         [
             .. checks
                 .Select(check => new HealthCheckDescriptor(
-                    Describe(check.Type, runtime), (IHealthCheck) Activator.CreateInstance(check.Type)!, check.SourceKinds))
+                    Describe(check.Type, runtime, text), (IHealthCheck) Activator.CreateInstance(check.Type)!, check.SourceKinds))
                 .OrderBy(static x => x.Info.Area)
                 .ThenBy(static x => x.Info.Code, StringComparer.Ordinal),
         ];
@@ -189,7 +195,11 @@ internal sealed partial class HealthCheckRegistry
     /// <summary>The metadata of one check class. It must carry the attribute.</summary>
     /// <param name="checkType">The check class.</param>
     /// <param name="runtime">The runtime its <c>RequiresFeature</c> is resolved against, or <see langword="null" /> for none.</param>
-    internal static HealthCheckInfo Describe(Type checkType, IStudioRuntime? runtime = null)
+    /// <param name="text">
+    /// The studio's words, whose <see cref="StudioText.CheckTitles" /> may title the check its own way; <see langword="null" />
+    /// for the attribute's title. The docs heading is the attribute's title either way (<see cref="HealthCheckInfo.DocsTitle" />).
+    /// </param>
+    internal static HealthCheckInfo Describe(Type checkType, IStudioRuntime? runtime = null, StudioText? text = null)
     {
         ArgumentNullException.ThrowIfNull(checkType);
         runtime ??= NoStudioRuntime.Instance;
@@ -202,9 +212,48 @@ internal sealed partial class HealthCheckRegistry
             attribute.Area,
             attribute.Tier,
             attribute.Gate,
-            attribute.Title,
+            text?.CheckTitle(attribute.Code, attribute.Title) ?? attribute.Title,
             attribute.RequiresFeature is { } feature ? runtime.FindFeature(feature) : null,
-            checkType);
+            checkType)
+        {
+            Variants = [.. attribute.Variants ?? []],
+            DocsTitle = attribute.Title,
+        };
+    }
+
+    /// <summary>
+    /// What is wrong with one finding of a check, one sentence each - empty when it is fine: a variant the check does not
+    /// list (<see cref="HealthCheckAttribute.Variants" />), which a host keying its wording on the code and the variant
+    /// would have no row for; or no variant from a check that lists some, so that a variant is <see langword="null" />
+    /// exactly for a check with one kind of finding (API design §1.10, the public <c>PostgresFinding.Variant</c>).
+    /// </summary>
+    /// <remarks>
+    /// The sweep refuses a verdict that has one - that check's "could not check" row, like any broken verdict - and an
+    /// evaluator test asserts it over every finding it makes, so a check cannot be born speaking a variant it never
+    /// declared.
+    /// </remarks>
+    /// <param name="info">The check's metadata.</param>
+    /// <param name="finding">One of its findings.</param>
+    internal static IReadOnlyList<string> FindingProblems(HealthCheckInfo info, HealthFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        ArgumentNullException.ThrowIfNull(finding);
+
+        if (finding.Variant is not { } variant)
+        {
+            return info.Variants.Count == 0
+                ? []
+                : [info.Code + " made a finding with no variant, but lists its kinds of finding (" + string.Join(", ", info.Variants) + "); every finding of such a check names its kind."];
+        }
+
+        if (info.Variants.Count == 0)
+        {
+            return [info.Code + " made a finding of variant '" + variant + "', but lists no variants; a check with fixed kinds of finding lists them in [HealthCheck(Variants = ...)]."];
+        }
+
+        return info.Variants.Contains(variant, StringComparer.Ordinal)
+            ? []
+            : [info.Code + " made a finding of variant '" + variant + "', which is not one of its variants (" + string.Join(", ", info.Variants) + "); a variant is frozen per code."];
     }
 
     /// <summary>
@@ -298,6 +347,18 @@ internal sealed partial class HealthCheckRegistry
             {
                 problems.Add(name + " reads statements (tier 3) and is not behind the activity gate.");
             }
+
+            string[] variants = attribute.Variants ?? [];
+
+            foreach (string variant in variants.Where(static x => x is null || !VariantShape().IsMatch(x)))
+            {
+                problems.Add(name + "'s variant '" + variant + "' is not lower-case words joined by hyphens.");
+            }
+
+            foreach (string twice in variants.Where(static x => x is not null).GroupBy(static x => x, StringComparer.Ordinal).Where(static x => x.Count() > 1).Select(static x => x.Key))
+            {
+                problems.Add(name + " lists the variant '" + twice + "' twice; each kind of finding is one variant.");
+            }
         }
 
         return problems;
@@ -332,4 +393,7 @@ internal sealed partial class HealthCheckRegistry
     // \A and \z, because .NET's $ also matches before a final line feed.
     [GeneratedRegex(@"\A[DETCRSK][0-9]{2}\z", RegexOptions.CultureInvariant)]
     private static partial Regex CodeShape();
+
+    [GeneratedRegex("^[a-z][a-z0-9]*(-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]
+    private static partial Regex VariantShape();
 }

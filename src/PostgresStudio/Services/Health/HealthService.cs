@@ -289,6 +289,11 @@ internal sealed class HealthService : IHealthService
             History = history.Read(storeKey, databaseId).Describe(cache.Now),
             Cost = database ? meter.Total(CostKey(resolved.Target)) : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
+            Server = database ? HealthServerLine.Of(regular) : null,
+            StatisticsReset = database && regular.Statistics is { LooksReset: true } window
+                ? "The statistics look reset since the last check: " + (window.Signal ?? window.ReasonText) + ". Rates and verdicts that "
+                  + "need a long window are judged again once the counters have counted long enough."
+                : null,
             DeeperChecksExist = deeperExist,
             DeeperChecksAllowed = deeperAllowed,
             DeeperChecksRefused = deeperExist && !deeperAllowed ? gate.WhyNot(HealthGate.Database) : null,
@@ -352,6 +357,19 @@ internal sealed class HealthService : IHealthService
     /// <summary>The mute key of a finding: store, database and the finding's own key.</summary>
     internal static string MuteKeyOf(string storeKey, string databaseId, HealthFinding finding) =>
         storeKey + "|" + databaseId + "|" + finding.Key;
+
+    /// <summary>
+    /// The gate a reader must pass to be shown <paramref name="finding" /> at all (D29): its check's, or - for a finding
+    /// about one tenant, which names it - <see cref="HealthGate.Activity" /> at least. The one rule the Health page's visitor
+    /// gate and the diagnostics API's host gate (<c>HostGate</c>, D31) both apply; a visitor also needs that tenant's store
+    /// policy, and the host needs nothing more.
+    /// </summary>
+    /// <param name="finding">The finding.</param>
+    internal static HealthGate RequiredGate(HealthFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        return finding.TenantId is not null && finding.Gate != HealthGate.Activity ? HealthGate.Activity : finding.Gate;
+    }
 
     /// <summary>
     /// The key the studio-cost meter files this database under - read off an unopened connection's settings,
@@ -566,7 +584,7 @@ internal sealed class HealthService : IHealthService
         {
             foreach (HealthFinding finding in result.Findings)
             {
-                HealthGate required = finding.TenantId is not null && finding.Gate != HealthGate.Activity ? HealthGate.Activity : finding.Gate;
+                HealthGate required = RequiredGate(finding);
 
                 string? reason = !await gate.PassesAsync(required).ConfigureAwait(false)
                     ? gate.WhyNot(required)
@@ -830,7 +848,7 @@ internal sealed class HealthService : IHealthService
                     null,
                     result.Check.DocsUrl,
                     [],
-                    FindingsWithheld: true));
+                    FindingsWithheld: true) { BelowGate = gate.WhyNot(result.Check.Gate) });
 
                 continue;
             }
@@ -933,7 +951,7 @@ internal sealed class HealthService : IHealthService
         /// <summary>What it would take to pass <paramref name="gate" />, naming the setting or the policy.</summary>
         public string WhyNot(HealthGate gate) => gate switch
         {
-            HealthGate.Database => "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
+            HealthGate.Database => owner.settings.Text.DatabaseGateReason,
             HealthGate.Activity => activityRefusal ?? "needs " + owner.capabilities.OptionFor(StudioCapability.ViewDatabaseActivity),
             _ => "withheld",
         };

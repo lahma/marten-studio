@@ -255,7 +255,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         catch (StudioCapabilityDeniedException denied)
         {
             audit.RecordCapabilityDenied(denied, LinqQueryAction, run.CapabilityTarget);
-            logger.LinqQueryRefused(run.User, run.LoggedAlias, scope.StoreKey, scope.DatabaseId, "capability", denied.Message, TextNotRecorded, TextNotRecorded);
+            logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, "capability", denied.Message, TextNotRecorded, TextNotRecorded);
             throw;
         }
 
@@ -269,7 +269,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         catch (StudioNotAuthorizedException denied)
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), LinqQueryAction, run.Target, StudioCapability.RunLinqQueries);
-            logger.LinqQueryRefused(run.User, run.LoggedAlias, scope.StoreKey, scope.DatabaseId, "authorization", "not authorized for this scope", run.LoggedWhere, run.LoggedOrderBy);
+            logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, "authorization", "not authorized for this scope", run.LoggedWhere, run.LoggedOrderBy);
             throw;
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
@@ -293,7 +293,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
-            logger.LinqQueryUnexpected(exception, run.LoggedAlias, scope.StoreKey);
+            logger.LinqQueryUnexpected(exception, run.LoggedAlias, run.LoggedStoreKey);
             return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(scope, run)));
         }
 
@@ -321,7 +321,7 @@ internal sealed class LinqQueryService : ILinqQueryService
             catch (StudioNotAuthorizedException denied)
             {
                 audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), LinqQueryAction, run.Target, StudioCapability.RunLinqQueries);
-                logger.LinqQueryRefused(run.User, run.LoggedAlias, scope.StoreKey, scope.DatabaseId, "authorization",
+                logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, "authorization",
                     "not authorized for this database as a whole", run.LoggedWhere, run.LoggedOrderBy);
                 throw;
             }
@@ -379,7 +379,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
-            logger.LinqQueryUnexpected(exception, request.Alias, scope.StoreKey);
+            logger.LinqQueryUnexpected(exception, run.LoggedAlias, run.LoggedStoreKey);
 
             return Refuse(run, new LinqRefusal(LinqStage.Translate, LinqClause.None,
                 "The query could not be built (" + exception.GetType().Name + "). The application log has the details."));
@@ -387,7 +387,7 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         if (composed.Unexpected is { } unexpected)
         {
-            logger.LinqQueryUnexpected(unexpected, request.Alias, scope.StoreKey);
+            logger.LinqQueryUnexpected(unexpected, run.LoggedAlias, run.LoggedStoreKey);
         }
 
         if (composed.Refusal is not null || composed.Command is null)
@@ -440,7 +440,7 @@ internal sealed class LinqQueryService : ILinqQueryService
             Role = value.SqlConsoleRole,
         });
 
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
         var stopwatch = new Stopwatch();
         LinqPage? page = null;
@@ -489,7 +489,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         {
             // Not Postgres and not the connection: a statement Marten shaped in a way the reader does not expect.
             // Recorded like every other failure, and the page is told no more than the exception's type.
-            logger.LinqQueryUnexpected(exception, run.Request.Alias, run.Scope.StoreKey);
+            logger.LinqQueryUnexpected(exception, run.LoggedAlias, run.LoggedStoreKey);
 
             return Refuse(run, new LinqRefusal(LinqStage.Database, LinqClause.None,
                 "The result could not be read (" + exception.GetType().Name + "). The application log has the details."), sql, parameters);
@@ -499,7 +499,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         {
             // Nothing ran: no plan, no advice - the connection is not there to fetch them on.
             AuditFailure(run, LinqStage.Database, "Postgres " + error.SqlState);
-            logger.LinqQueryFailed(run.User, run.Request.Alias, run.Scope.StoreKey, run.Scope.DatabaseId, error.SqlState);
+            logger.LinqQueryFailed(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, error.SqlState);
 
             return new LinqQueryResult(run.Request.Alias, [], false, run.Request.Offset, run.PageSize, sql, parameters, TimeSpan.Zero,
                 Error: error, Scope: scopeFacts);
@@ -518,7 +518,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         if (error is not null)
         {
             AuditFailure(run, LinqStage.Database, "Postgres " + error.SqlState);
-            logger.LinqQueryFailed(run.User, run.Request.Alias, run.Scope.StoreKey, run.Scope.DatabaseId, error.SqlState);
+            logger.LinqQueryFailed(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, error.SqlState);
 
             return new LinqQueryResult(run.Request.Alias, [], false, run.Request.Offset, run.PageSize, sql, parameters,
                 stopwatch.Elapsed, Error: error, Plan: plan, Advice: advice, Scope: scopeFacts);
@@ -977,7 +977,7 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         if (logger.IsEnabled(LogLevel.Information))
         {
-            logger.LinqQueryRefused(run.User, run.LoggedAlias, run.Scope.StoreKey, run.Scope.DatabaseId, stage.ToString(), reason, run.LoggedWhere, run.LoggedOrderBy);
+            logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, stage.ToString(), StudioLogValue.CapText(reason), run.LoggedWhere, run.LoggedOrderBy);
         }
     }
 
@@ -1009,7 +1009,7 @@ internal sealed class LinqQueryService : ILinqQueryService
                          (string.Equals(plan?.UnavailableReason, PlanRefusedMessage, StringComparison.Ordinal) ? "; plan withheld" : string.Empty) + ".";
 
         audit.Record(LinqQueryAction, run.Target, succeeded: true, outcome, StudioCapability.RunLinqQueries, run.AuditScope);
-        logger.LinqQueryExecuted(run.User, run.LoggedAlias, run.Scope.StoreKey, run.Scope.DatabaseId, run.Scope.TenantId ?? "(all)",
+        logger.LinqQueryExecuted(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, run.LoggedTenant,
             elapsed, rows, run.LoggedWhere, run.LoggedOrderBy);
     }
 
@@ -1042,19 +1042,36 @@ internal sealed class LinqQueryService : ILinqQueryService
         public string CapabilityTarget { get; } = QueryService.Target(Request.Alias + ": " + TextNotRecorded);
 
         /// <summary>
-        /// The alias as events 9260 and 9261 carry it: capped and on one line, as <see cref="Target" /> is, because it is
-        /// the visitor's text too - a scripted circuit can send any string as an alias.
+        /// The alias as events 9260 to 9263 carry it: capped and on one line, as <see cref="Target" /> is, because it is
+        /// the visitor's text too - a scripted circuit can send any string as an alias - and escaped (wave 6,
+        /// <see cref="StudioLogValue" />).
         /// </summary>
-        public string LoggedAlias { get; } = QueryService.Target(Request.Alias);
+        public string LoggedAlias { get; } = StudioLogValue.Cap(QueryService.Target(Request.Alias));
 
         /// <summary>
         /// The predicate as events 9260 and 9261 carry it: <see cref="QueryService.Target" />'s cap and one line, exactly
-        /// as the ring's target is cut, never the text whole. Literals are in it, as a console statement's are in 9204.
+        /// as the ring's target is cut, never the text whole, and escaped. Literals are in it, as a console statement's are
+        /// in 9204.
         /// </summary>
-        public string LoggedWhere { get; } = QueryService.Target(Where);
+        public string LoggedWhere { get; } = StudioLogValue.Cap(QueryService.Target(Where));
 
         /// <summary>The ordering as events 9260 and 9261 carry it, capped as <see cref="LoggedWhere" /> is.</summary>
-        public string LoggedOrderBy { get; } = QueryService.Target(OrderBy);
+        public string LoggedOrderBy { get; } = StudioLogValue.Cap(QueryService.Target(OrderBy));
+
+        /// <summary>
+        /// The visitor and the scope as events 9260 to 9263 carry them (wave 6): escaped and bounded, because a refused
+        /// scope is what the address asked for, before anything resolved it.
+        /// </summary>
+        public string LoggedUser { get; } = StudioLogValue.Cap(User);
+
+        /// <summary>The scope's store key, as <see cref="LoggedUser" /> is carried.</summary>
+        public string LoggedStoreKey { get; } = StudioLogValue.Cap(Scope.StoreKey);
+
+        /// <summary>The scope's database id, as <see cref="LoggedUser" /> is carried.</summary>
+        public string LoggedDatabaseId { get; } = StudioLogValue.Cap(Scope.DatabaseId);
+
+        /// <summary>The scope's tenant, or <c>(all)</c>, as <see cref="LoggedUser" /> is carried.</summary>
+        public string LoggedTenant { get; } = StudioLogValue.Cap(Scope.TenantId ?? "(all)");
     }
 
     /// <summary>A document type LINQ mode may query: the mapping whose table it reads, and the CLR type it closes over.</summary>

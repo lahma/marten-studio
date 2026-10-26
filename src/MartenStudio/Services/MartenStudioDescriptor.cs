@@ -112,6 +112,16 @@ internal static class MartenStudioDescriptor
             // Health is first in its section: it is where a person starts when something is wrong, and its
             // badge reads the last sweep a Health page or the Overview ran - it never starts one.
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+
+            // W5-Q1: the top statements by total time, after Health and before Maintenance (W5-index §4).
+            new("Statements", "statements", "statements", Title: "The top statements by total time, over the window the statement checks watched"),
+            new("Maintenance", "maintenance", "maintenance", Title: "Autovacuum's triggers, running maintenance, the freeze forecast and the horizon"),
+
+            // W5-CAP: the database's size, growth and largest tables, after Maintenance.
+            new("Storage", "storage", "storage", Title: "Database size, growth and the largest tables"),
+
+            // W5-R2: the shared Replication page, after Storage (W5-index §4).
+            new("Replication", "replication", "replication", Title: "Slots, standbys, the archiver, WAL, checkpoints and I/O"),
             new("Projections", "projections", "projection", ProjectionsBadge),
 
             // Schema deliberately carries no badge. Finding drift costs a CreateMigrationAsync, which is
@@ -121,6 +131,8 @@ internal static class MartenStudioDescriptor
         ]),
         new("System",
         [
+            // W5-S2: the shared Server page, first in System (W5-index §4).
+            new("Server", "server", "server", Title: "Settings, extensions, the roles the studio reads as, and the security posture"),
             new("Configuration", "config", "cog"),
             new("Activity", "activity", "list"),
         ]),

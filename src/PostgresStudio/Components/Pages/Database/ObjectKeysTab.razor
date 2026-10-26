@@ -155,6 +155,10 @@
                                     {
                                         <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked, so a pointed-at row may be missing">NOT VALID</span>
                                     }
+                                    @if (key.Covered == false)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning ms-db-fk-uncovered" title="@UncoveredTitle">@UncoveredText</span>
+                                    }
                                 </td>
                                 <td class="ms-db-cell-type">@string.Join(", ", key.Columns)</td>
                                 <td class="ms-db-cell-name">
@@ -211,6 +215,10 @@
                                     {
                                         <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked">NOT VALID</span>
                                     }
+                                    @if (key.Covered == false)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-warning ms-db-fk-uncovered" title="@UncoveredTitle">@UncoveredText</span>
+                                    }
                                 </td>
                                 <td class="ms-db-cell-type">@string.Join(", ", key.Columns)</td>
                                 <td class="ms-db-cell-type">@string.Join(", ", key.LinkedColumns)</td>
@@ -231,6 +239,16 @@
     public object? Detail { get; set; }
 
     private DatabaseObjectDetail? DetailModel => Detail as DatabaseObjectDetail;
+
+    /// <summary>The badge of a foreign key no index covers - T15's rule, <c>ForeignKeyCoverage.IsCovered</c> (W5-B1).</summary>
+    internal const string UncoveredText = "No index covers this foreign key";
+
+    /// <summary>Why it matters, in the badge's title.</summary>
+    internal const string UncoveredTitle =
+        "No valid, unconditional index on the pointing table leads with the key's columns, so every delete from the table it "
+        + "references - and every update of that table's key - reads the whole pointing table to find the rows that point at "
+        + "it. Postgres indexes a primary key and a unique constraint by itself, never a foreign key. Health's T15 says so once "
+        + "the table is 8 MiB.";
 
     private static string ConstraintKind(DatabaseConstraintKind kind) => kind switch
     {

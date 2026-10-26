@@ -34,6 +34,17 @@ internal sealed record HealthSamplePart(string Series, double Value)
     /// gate, which the sweep stamps.
     /// </summary>
     public HealthGate Gate { get; init; } = HealthGate.None;
+
+    /// <summary>
+    /// Whether this part is a sighting rather than a number: the history keeps when it first saw the series - beyond its
+    /// ring of samples, in the database's first-seen map (<see cref="HealthHistoryView.FirstSeen" />) - and nothing of its
+    /// <see cref="Value" />, which is not put in the sample at all (W5-V1).
+    /// </summary>
+    /// <remarks>
+    /// For T14's holder identities, which date a hold by the first sweep that saw it unchanged: a series name that carries an
+    /// identity is a hash, never the identity, so nothing it is made of - a process id, a slot's name - is in the history.
+    /// </remarks>
+    public bool Remembered { get; init; }
 }
 
 /// <summary>What one sweep recorded: when, and a bag of numbers keyed by series.</summary>
@@ -90,11 +101,26 @@ internal sealed record HealthTrend(string Series, IReadOnlyList<(DateTimeOffset 
 /// </param>
 internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, DateTimeOffset? WatchingSince = null)
 {
+    private static readonly IReadOnlyDictionary<string, HealthSighting> NoSightings = new Dictionary<string, HealthSighting>();
+
     /// <summary>A history that has seen nothing.</summary>
     public static HealthHistoryView Empty { get; } = new([]);
 
     /// <summary>When watching began, or <see langword="null" /> before the first sweep.</summary>
     public DateTimeOffset? Since => WatchingSince ?? (Samples.Count == 0 ? null : Samples[0].At);
+
+    /// <summary>
+    /// The database's first-seen map: for each remembered series (<see cref="HealthSamplePart.Remembered" />), when a sweep
+    /// first saw it and the gate it was written at. It outlives the ring, and is dropped with the database's history.
+    /// </summary>
+    public IReadOnlyDictionary<string, HealthSighting> Sightings { get; init; } = NoSightings;
+
+    /// <summary>When a remembered series was first seen, or <see langword="null" /> when it never was (or is above this view's gate).</summary>
+    public DateTimeOffset? FirstSeen(string series)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(series);
+        return Sightings.TryGetValue(series, out HealthSighting? sighting) ? sighting.First : null;
+    }
 
     /// <summary>
     /// The history as a check at <paramref name="gate" /> may read it: only the series written at or below that
@@ -130,7 +156,10 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
             }
         }
 
-        return new HealthHistoryView(visible, Since);
+        return new HealthHistoryView(visible, Since)
+        {
+            Sightings = Sightings.Where(x => x.Value.Gate <= gate).ToDictionary(static x => x.Key, static x => x.Value, StringComparer.Ordinal),
+        };
     }
 
     /// <summary>
@@ -198,12 +227,16 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// ordinary store, up to a few megabytes for one with hundreds of shards or slots. A store with a database per
 /// tenant keeps a ring per database it has been swept for, each carrying the same server's slots, so R01's part is
 /// bounded by <c>MaxSlots</c> × the databases swept × <see cref="Capacity" /> - the one place this grows with the
-/// deployment. A database whose statement checks were run has a second ring (<see cref="RingOf" />), of at most
-/// <c>HealthStatementQueries.MaxTexts</c> (20) statements' few series a sample, written only when a visitor runs the
-/// statement checks: kilobytes, never a number per statement the extension holds. Beside it, the statement checks'
-/// <c>StatementTextCache</c> holds up to 200 texts of at most 4,096 characters per database whose statement checks
-/// have run, for the life of the process - about 1.6 MB a database at its worst - so it, too, grows with the number
-/// of databases swept, and with nothing else.
+/// deployment. A database whose statement checks or Statements page were run has a second ring (<see cref="RingOf" />), of
+/// at most <c>HealthStatementQueries.MaxTexts</c> (120, or 220 on Aurora) statements' seven or eight series a sample (W5-Q1),
+/// written only when a visitor through the activity gate runs the statement checks or opens the Statements page - at most
+/// one sample per statement sweep, every five minutes - and with each series name shared between samples
+/// (<c>StatementReads.SeriesName</c>): about 25 KB a sample, so up to about 1.5 MB a database for a full ring at its worst,
+/// never a number per statement the extension holds. Beside it, the statement checks' <c>StatementTextCache</c> holds up to
+/// 256 texts of at most 4,096 characters per database whose statement checks have run, for the life of the process - about
+/// 2 MB a database at its worst - so it, too, grows with the number of databases swept, and with nothing else. Since 0.5
+/// that number is bounded: the 64 databases swept or read most recently keep their rings and their texts, and the least
+/// recently used past them loses both (<see cref="HealthDatabaseBound" />, API design §3.5).
 /// </para>
 /// <para>
 /// Singleton. Two circuits watching one database are watching one history: the sweep is shared, so its
@@ -224,10 +257,26 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// watching began.
 /// </para>
 /// </remarks>
-internal sealed class HealthHistory
+internal sealed class HealthHistory : IPerDatabaseState
 {
     /// <summary>How many samples a database keeps.</summary>
     public const int Capacity = 60;
+
+    /// <param name="bound">
+    /// The process's bound on databases with state (API design §3.5), which forgets a database's rings - its first-seen map
+    /// with them - once it is the least recently used past the bound; <see langword="null" /> for no bound, in a test.
+    /// </param>
+    public HealthHistory(HealthDatabaseBound? bound = null)
+    {
+        bound?.Register(this);
+    }
+
+    /// <summary>
+    /// How many remembered series a database's first-seen map keeps (W5-V1): T14's holder identities, at most twenty
+    /// sessions, twenty standbys and two hundred slots a sweep. Past it the series seen longest ago goes first, and a new one
+    /// is dated from a later sweep - a bound that comes out shorter, never longer.
+    /// </summary>
+    public const int SightingCapacity = 512;
 
     private readonly Dictionary<string, Ring> rings = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock gate = new();
@@ -248,8 +297,21 @@ internal sealed class HealthHistory
     /// Adds a regular sweep's sample, dropping the oldest past <see cref="Capacity" />, unless it is not newer
     /// than the newest one held by at least <paramref name="minimumSpacing" /> or carries no numbers.
     /// </summary>
+    /// <param name="storeKey">The store.</param>
+    /// <param name="databaseId">The database's ring (<see cref="RingOf" />).</param>
+    /// <param name="sample">The sweep's numbers.</param>
+    /// <param name="minimumSpacing">How long after the newest sample held this one must be to be kept.</param>
+    /// <param name="remembered">
+    /// The sweep's sightings (<see cref="HealthSamplePart.Remembered" />), with the gate each was written at: recorded in the
+    /// first-seen map whether or not the sample is kept, because a sighting is an observation, not a number.
+    /// </param>
     /// <returns>Whether the sample was kept.</returns>
-    public bool Append(string storeKey, string databaseId, HealthSample sample, TimeSpan minimumSpacing = default)
+    public bool Append(
+        string storeKey,
+        string databaseId,
+        HealthSample sample,
+        TimeSpan minimumSpacing = default,
+        IReadOnlyDictionary<string, HealthGate>? remembered = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(storeKey);
         ArgumentNullException.ThrowIfNull(databaseId);
@@ -263,6 +325,11 @@ internal sealed class HealthHistory
             {
                 ring = new Ring(sample.At);
                 rings[key] = ring;
+            }
+
+            if (remembered is { Count: > 0 })
+            {
+                ring.See(remembered, sample.At);
             }
 
             if (sample.Values.Count == 0)
@@ -286,6 +353,8 @@ internal sealed class HealthHistory
                 ring.Samples.Dequeue();
             }
 
+            ring.Forget();
+
             return true;
         }
     }
@@ -297,6 +366,9 @@ internal sealed class HealthHistory
         {
             return rings.TryGetValue(KeyFor(storeKey, databaseId), out Ring? ring)
                 ? new HealthHistoryView([.. ring.Samples], ring.WatchingSince)
+                {
+                    Sightings = ring.Sightings.ToDictionary(static x => x.Key, static x => x.Value, StringComparer.Ordinal),
+                }
                 : HealthHistoryView.Empty;
         }
     }
@@ -314,13 +386,81 @@ internal sealed class HealthHistory
     /// <summary>What a statement history's ring is keyed by after the database's identity.</summary>
     internal const string StatementsRingSuffix = "|statements";
 
+    /// <inheritdoc />
+    /// <remarks>Both of the database's rings - its own and its statement history - and the first-seen map that is part of each.</remarks>
+    public void Forget(string storeKey, string databaseId)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        lock (gate)
+        {
+            rings.Remove(KeyFor(storeKey, RingOf(databaseId, HealthSweepKind.Regular)));
+            rings.Remove(KeyFor(storeKey, RingOf(databaseId, HealthSweepKind.Statements)));
+        }
+    }
+
     private static string KeyFor(string storeKey, string databaseId) => storeKey + "|" + databaseId;
 
-    /// <summary>One database: when watching began, and its samples.</summary>
+    /// <summary>One database: when watching began, its samples, and its first-seen map - dropped together.</summary>
     private sealed class Ring(DateTimeOffset watchingSince)
     {
         public DateTimeOffset WatchingSince { get; } = watchingSince;
 
         public Queue<HealthSample> Samples { get; } = new(Capacity);
+
+        public Dictionary<string, HealthSighting> Sightings { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Records one sweep's sightings: a new series is first seen now, a known one is seen again.</summary>
+        public void See(IReadOnlyDictionary<string, HealthGate> remembered, DateTimeOffset at)
+        {
+            foreach ((string series, HealthGate gate) in remembered)
+            {
+                if (Sightings.TryGetValue(series, out HealthSighting? known))
+                {
+                    Sightings[series] = known with { Last = at > known.Last ? at : known.Last, Gate = gate > known.Gate ? gate : known.Gate };
+                    continue;
+                }
+
+                if (Sightings.Count >= SightingCapacity)
+                {
+                    // The one seen longest ago goes first; if every one was seen in this very sweep, the new one waits.
+                    KeyValuePair<string, HealthSighting> stalest = Sightings.MinBy(static x => x.Value.Last);
+                    if (stalest.Value.Last >= at)
+                    {
+                        continue;
+                    }
+
+                    Sightings.Remove(stalest.Key);
+                }
+
+                Sightings[series] = new HealthSighting(at, at, gate);
+            }
+        }
+
+        /// <summary>
+        /// Drops every sighting not seen since the oldest sample the ring still holds: what no sweep in the window saw has
+        /// ended - an identity carries its own transaction id, so it does not come back.
+        /// </summary>
+        public void Forget()
+        {
+            if (Samples.Count < Capacity)
+            {
+                return;
+            }
+
+            DateTimeOffset oldest = Samples.Peek().At;
+
+            foreach (string gone in Sightings.Where(x => x.Value.Last < oldest).Select(static x => x.Key).ToList())
+            {
+                Sightings.Remove(gone);
+            }
+        }
     }
 }
+
+/// <summary>When the history first and last saw a remembered series, and the gate it was written at.</summary>
+/// <param name="First">The first sweep that saw it.</param>
+/// <param name="Last">The latest.</param>
+/// <param name="Gate">Who may read it through the history: its writer's gate.</param>
+internal sealed record HealthSighting(DateTimeOffset First, DateTimeOffset Last, HealthGate Gate);

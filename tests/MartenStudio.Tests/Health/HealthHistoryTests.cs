@@ -165,7 +165,7 @@ public class HealthHistoryTests
 
         StudioCost now = meter.Total("db");
         now.Total.Should().Be(TimeSpan.FromMilliseconds(500));
-        now.Sessions.Should().Be(2, "a session that took no time adds no time");
+        now.Connections.Should().Be(2, "a session that took no time adds no time");
         now.Window.Should().Be(TimeSpan.FromMinutes(5));
 
         clock.Advance(TimeSpan.FromMinutes(4));
@@ -173,7 +173,7 @@ public class HealthHistoryTests
             "the first session is more than five minutes old");
 
         clock.Advance(TimeSpan.FromHours(1));
-        meter.Total("db").Sessions.Should().Be(0);
+        meter.Total("db").Connections.Should().Be(0);
     }
 
     [Fact]
@@ -206,13 +206,34 @@ public class HealthHistoryTests
 
         meter.Total("one").Total.Should().Be(TimeSpan.FromSeconds(2));
         meter.Total("two").Total.Should().Be(TimeSpan.FromSeconds(5));
-        meter.Total("three").Sessions.Should().Be(0);
+        meter.Total("three").Connections.Should().Be(0);
 
         clock.Advance(TimeSpan.FromHours(2));
 
         meter.SessionsEver("one").Should().Be(3, "cumulative, whatever the window has forgotten");
         meter.RollbacksEver("one").Should().Be(2, "one session's rollback never reached the server");
         meter.SessionsEver("three").Should().Be(0);
+    }
+
+    /// <summary>
+    /// W5-Q1: a metered connection records its time and is counted once; a session on it counts itself and its rollback and
+    /// no time of its own, so no statement is timed twice and C08's rollbacks stay exact.
+    /// </summary>
+    [Fact]
+    public void A_metered_connection_carries_the_time_and_its_sessions_only_their_count_and_rollback()
+    {
+        FakeTimeProvider clock = new(Start);
+        StudioDatabaseTime meter = new(clock);
+
+        meter.RecordConnection("db", TimeSpan.FromMilliseconds(700));
+        meter.RecordSession("db", rolledBack: true);
+        meter.RecordSession("db", rolledBack: false);
+
+        meter.Total("db").Should().Be(new StudioCost(TimeSpan.FromMilliseconds(700), 1, TimeSpan.FromMinutes(5)),
+            "the connection carries the time, and the sessions on it add none");
+        meter.ConnectionsEver("db").Should().Be(1);
+        meter.SessionsEver("db").Should().Be(2);
+        meter.RollbacksEver("db").Should().Be(1, "a connection's open and close are no rollback");
     }
 
     [Fact]

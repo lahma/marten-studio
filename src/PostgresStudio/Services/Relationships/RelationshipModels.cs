@@ -368,8 +368,17 @@ internal sealed record RelationshipGraph(
     /// <summary>Whether there is no foreign key at all to show or to list.</summary>
     public bool IsEmpty => Edges.Count == 0 && Unmatched.Count == 0;
 
-    /// <summary>Whether any table takes part in a drawn key - what shows the Documents · Tables · Both switch.</summary>
+    /// <summary>
+    /// Whether any table takes part in a drawn key - what, with <see cref="HasDocuments" />, shows the Documents · Tables ·
+    /// Both switch.
+    /// </summary>
     public bool HasTableEdges => Edges.Any(static x => x.IsTableEdge);
+
+    /// <summary>
+    /// Whether the graph has a document node at all. Without one - every graph a studio over plain data sources reads -
+    /// the Documents view would draw nothing and the Tables view is the Both view, so the screen draws no switch.
+    /// </summary>
+    public bool HasDocuments => Nodes.Count > 0;
 
     /// <summary>A one-sentence description of the picture, which is the SVG's accessible name.</summary>
     public string Summary
@@ -385,8 +394,12 @@ internal sealed record RelationshipGraph(
 
             if (tables > 0)
             {
-                return $"A diagram of {Nodes.Count} document types and {tables} tables, and {Edges.Count} foreign " +
-                       "keys between them. The table below lists the same relationships.";
+                // A graph with no document type - every graph a studio over plain data sources reads - names none.
+                return Nodes.Count == 0
+                    ? $"A diagram of {tables} tables and {Edges.Count} foreign keys between them. The table below lists the same " +
+                      "relationships."
+                    : $"A diagram of {Nodes.Count} document types and {tables} tables, and {Edges.Count} foreign " +
+                      "keys between them. The table below lists the same relationships.";
             }
 
             return Edges.Count == 0

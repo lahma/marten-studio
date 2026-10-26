@@ -37,7 +37,7 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
@@ -96,7 +96,7 @@ internal sealed partial class DocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not read document '{Id}' of '{Alias}'", id, alias);
+            logger.LogWarning(exception, "Marten Studio could not read document '{Id}' of '{Alias}'", StudioLogValue.Cap(id), StudioLogValue.Cap(alias));
             return DocumentDetailResult.Missing(Describe(exception));
         }
     }
@@ -131,7 +131,7 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
@@ -194,7 +194,7 @@ internal sealed partial class DocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not read the related documents of '{Alias}'", alias);
+            logger.LogWarning(exception, "Marten Studio could not read the related documents of '{Alias}'", StudioLogValue.Cap(alias));
             return new RelatedDocuments([], Describe(exception));
         }
     }
@@ -222,7 +222,7 @@ internal sealed partial class DocumentDataService
             // with no tenant in scope was *DEFAULT* - a link that never appeared for a stream the page shows.
             string schema = resolved.Store.Options.Events.DatabaseSchemaName;
 
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             TableColumns streams = await columnCatalog
@@ -285,7 +285,7 @@ internal sealed partial class DocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
@@ -315,7 +315,7 @@ internal sealed partial class DocumentDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(exception, "Marten Studio could not probe the collections for id '{Id}'", id);
+            logger.LogWarning(exception, "Marten Studio could not probe the collections for id '{Id}'", StudioLogValue.Cap(id));
         }
 
         return probes;

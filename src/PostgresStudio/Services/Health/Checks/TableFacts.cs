@@ -1,11 +1,15 @@
 using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Schema;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
+
+using Npgsql;
 
 namespace PostgresStudio.Services.Health.Checks;
 
@@ -101,6 +105,31 @@ internal sealed record IndexFacts(StudioTable Table, HealthIndexRow Row, IndexOr
 
     /// <summary>Whether anything in the configuration, or the host's own schema, can be changed to remove it.</summary>
     public bool Removable => Origin is IndexOrigin.Declared or IndexOrigin.Managed or IndexOrigin.Undeclared or IndexOrigin.Ignored or IndexOrigin.Host;
+}
+
+/// <summary>The sweep's index read: the indexes it read, and the tables locked for a schema change it left out.</summary>
+/// <param name="Indexes">Every index on the judged tables but the locked ones.</param>
+/// <param name="LockedTables">
+/// The keys (<see cref="StudioTable.Key" />, compared ordinally, as Postgres compares names: <c>"Orders"</c> and
+/// <c>orders</c> are two tables) of the judged tables somebody held or awaited <c>ACCESS EXCLUSIVE</c> on when the read
+/// ran: their indexes were not deparsed, so a check that judges a table by its indexes skips them this sweep and says how
+/// many (<see cref="HealthTables.LockedNote" />).
+/// </param>
+internal sealed record HealthIndexRead(IReadOnlyList<IndexFacts> Indexes, IReadOnlySet<string> LockedTables)
+{
+    /// <summary>No table to read about.</summary>
+    public static HealthIndexRead Empty { get; } = new([], new HashSet<string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// The indexes of the locked tables, read but not deparsed: <see cref="HealthIndexRow.Definition" /> and
+    /// <see cref="HealthIndexRow.Columns" /> are empty, and everything the catalog holds without opening the table - validity,
+    /// scans, size, origin - is there. Never judged; a check whose history must not skip a sweep samples them (0.4's T05
+    /// did, until W5-B1 folded its "unscanned since" clock into the usage guard).
+    /// </summary>
+    public IReadOnlyList<IndexFacts> LockedIndexes { get; init; } = [];
+
+    /// <summary>Whether the table of <paramref name="tableKey" /> was locked and its indexes left out.</summary>
+    public bool IsLocked(string tableKey) => LockedTables.Contains(tableKey);
 }
 
 /// <summary>The database-wide facts every row of the table read carries.</summary>
@@ -205,23 +234,56 @@ internal static class HealthTables
         return context.Shared(TablesKey, token => ReadTablesAsync(context, set, token));
     }
 
-    /// <summary>Every index on the judged tables, read once per sweep like <see cref="TablesAsync(HealthCheckContext)" />.</summary>
-    public static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context)
+    /// <summary>
+    /// The sweep's index read: every index on the judged tables, and the tables locked for a schema change whose indexes it
+    /// left out (<see cref="HealthIndexRead.LockedTables" />), read once per sweep.
+    /// </summary>
+    /// <remarks>
+    /// The only way to the indexes, on purpose: a check that judges a table by its indexes must know which tables it could
+    /// not read, or a locked table reads as one with no covering index, no blocking index, nothing redundant.
+    /// </remarks>
+    public static async Task<HealthIndexRead> IndexReadAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         IStudioTableSet set = await SetAsync(context).ConfigureAwait(false);
-        return await IndexesAsync(context, set).ConfigureAwait(false);
+        return await IndexReadAsync(context, set).ConfigureAwait(false);
     }
 
-    /// <summary>Every index on the tables of <paramref name="set" />, as <see cref="TablesAsync(HealthCheckContext, IStudioTableSet)" />.</summary>
-    internal static Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context, IStudioTableSet set)
+    /// <summary>The index read of the tables of <paramref name="set" />, as <see cref="IndexReadAsync(HealthCheckContext)" />.</summary>
+    internal static Task<HealthIndexRead> IndexReadAsync(HealthCheckContext context, IStudioTableSet set)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(set);
 
         return context.Shared(IndexesKey, token => ReadIndexesAsync(context, set, token));
     }
+
+    /// <summary>
+    /// What a check that judges tables by their indexes adds to its status row while some were locked: "1 table was locked
+    /// for a schema change and not judged this sweep." - a count, never a name, because the row is shown at the check's
+    /// gate. <see langword="null" /> when none was.
+    /// </summary>
+    public static string? LockedNote(IReadOnlySet<string> lockedTables)
+    {
+        ArgumentNullException.ThrowIfNull(lockedTables);
+
+        return lockedTables.Count switch
+        {
+            0 => null,
+            1 => "1 table was locked for a schema change and not judged this sweep.",
+            int count => SessionText.Number(count) + " tables were locked for a schema change and not judged this sweep.",
+        };
+    }
+
+    /// <summary><paramref name="note" /> followed by <see cref="LockedNote" />, or whichever of them there is.</summary>
+    public static string? WithLockedNote(string? note, IReadOnlySet<string> lockedTables) =>
+        (note, LockedNote(lockedTables)) switch
+        {
+            ({ Length: > 0 } first, { } locked) => first + " " + locked,
+            (_, { } locked) => locked,
+            _ => note,
+        };
 
     /// <summary>What the statements bind, for every table of <paramref name="set" />.</summary>
     public static IReadOnlyList<HealthTableTarget> Targets(IStudioTableSet set)
@@ -258,31 +320,89 @@ internal static class HealthTables
         return facts;
     }
 
-    /// <summary>Every index on the judged tables, with where each comes from.</summary>
-    private static async Task<IReadOnlyList<IndexFacts>> ReadIndexesAsync(
+    /// <summary>
+    /// Every index on the judged tables, with where each comes from - and none of a table locked for a schema change, whose
+    /// key goes in <see cref="HealthIndexRead.LockedTables" /> instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A table somebody holds or awaits <c>ACCESS EXCLUSIVE</c> on - a migration - comes back undeparsed rather than queued
+    /// behind (<see cref="HealthTableQueries.IndexesSql" />). Its indexes cannot be judged, nor told from a declared one by
+    /// their definition, so they are left out and the table is counted: every other table is still judged, and each check
+    /// that judges by indexes says how many were not (<see cref="LockedNote" />).
+    /// </para>
+    /// <para>
+    /// <b>The residual race, once.</b> A lock taken after the statement's <c>pg_locks</c> snapshot makes a deparse wait out
+    /// <c>lock_timeout</c> and the statement fail with <c>55P03</c>. The read is then asked once more, when the snapshot sees
+    /// the lock and leaves that table out (<see cref="RetryOnceBehindALockAsync{T}" />). A second <c>55P03</c> is not
+    /// guessed at - it may be a lock the snapshot cannot see, or one taken again in that instant - so it reaches the sweep,
+    /// which says the checks waited too long for a lock (Unavailable, TimedOut), as it would of any read.
+    /// </para>
+    /// </remarks>
+    private static async Task<HealthIndexRead> ReadIndexesAsync(
         HealthCheckContext context,
         IStudioTableSet set,
         CancellationToken cancellationToken)
     {
         if (set.Tables.Count == 0)
         {
-            return [];
+            return HealthIndexRead.Empty;
         }
 
-        IReadOnlyList<HealthIndexRow> rows = await context.Sql
-            .QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, cancellationToken)
+        IReadOnlyList<HealthIndexRow> rows = await RetryOnceBehindALockAsync(
+                token => context.Sql.QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, token),
+                cancellationToken)
             .ConfigureAwait(false);
 
+        // Keyed as the table set keys its tables - ordinally - so a lock on "Orders" skips that table and never orders.
+        HashSet<string> locked = new(StringComparer.Ordinal);
         List<IndexFacts> facts = new(rows.Count);
+        List<IndexFacts> undeparsed = [];
+
         foreach (HealthIndexRow row in rows)
         {
-            if (set.Find(row.Schema, row.Table) is { } table)
+            if (set.Find(row.Schema, row.Table) is not { } table)
             {
-                facts.Add(new IndexFacts(table, row, set.OriginOf(row, table)));
+                continue;
             }
+
+            // An origin is decided by the index's key, never its text, so a locked table's index is told apart as well.
+            IndexFacts index = new(table, row, set.OriginOf(row, table));
+
+            if (row.TableLocked)
+            {
+                locked.Add(table.Key);
+                undeparsed.Add(index);
+                continue;
+            }
+
+            facts.Add(index);
         }
 
-        return facts;
+        return new HealthIndexRead(facts, locked) { LockedIndexes = undeparsed };
+    }
+
+    /// <summary>
+    /// Runs <paramref name="read" />, and once more if the first attempt waited out <c>lock_timeout</c> (<c>55P03</c>); a
+    /// second <c>55P03</c>, and anything else, is the caller's.
+    /// </summary>
+    /// <param name="read">The read, given the cancellation token.</param>
+    /// <param name="cancellationToken">Cancels both attempts.</param>
+    internal static async Task<T> RetryOnceBehindALockAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        try
+        {
+            return await read(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when ((exception as PostgresException ?? exception.InnerException as PostgresException)?.SqlState
+                                           == PostgresErrorCodes.LockNotAvailable)
+        {
+            // Taken between the snapshot and a deparse: the second attempt's snapshot sees it, and leaves that table out.
+        }
+
+        return await read(cancellationToken).ConfigureAwait(false);
     }
 }
 
@@ -398,11 +518,162 @@ internal static class TableHistory
 }
 
 /// <summary>
+/// What autovacuum's three triggers are computed from, for one table: its <c>pg_class</c> size facts, and each threshold
+/// and scale factor in force - the table's own storage parameter where it has one, the server's setting where it does not.
+/// </summary>
+/// <remarks>Init properties with PostgreSQL's defaults, so a unit test states only what its case is about.</remarks>
+internal sealed record AutovacuumInputs
+{
+    /// <summary><c>reltuples</c>: <c>-1</c> for a table never vacuumed or analysed, which counts as 0.</summary>
+    public double Reltuples { get; init; }
+
+    /// <summary><c>relpages</c>.</summary>
+    public long RelPages { get; init; }
+
+    /// <summary><c>relallfrozen</c> (PostgreSQL 18), or <see langword="null" /> before 18.</summary>
+    public long? RelAllFrozen { get; init; }
+
+    /// <summary><c>autovacuum_vacuum_threshold</c>.</summary>
+    public double VacuumThreshold { get; init; } = 50;
+
+    /// <summary><c>autovacuum_vacuum_scale_factor</c>.</summary>
+    public double VacuumScaleFactor { get; init; } = 0.2;
+
+    /// <summary>
+    /// <c>autovacuum_vacuum_max_threshold</c> (PostgreSQL 18; 100,000,000 by default), or <see langword="null" /> before 18 -
+    /// a negative value is no cap, as Postgres reads <c>-1</c>.
+    /// </summary>
+    public double? VacuumMaxThreshold { get; init; }
+
+    /// <summary><c>autovacuum_vacuum_insert_threshold</c>; <c>-1</c> switches the insert trigger off.</summary>
+    public double InsertThreshold { get; init; } = 1000;
+
+    /// <summary><c>autovacuum_vacuum_insert_scale_factor</c>.</summary>
+    public double InsertScaleFactor { get; init; } = 0.2;
+
+    /// <summary><c>autovacuum_analyze_threshold</c>.</summary>
+    public double AnalyzeThreshold { get; init; } = 50;
+
+    /// <summary><c>autovacuum_analyze_scale_factor</c>.</summary>
+    public double AnalyzeScaleFactor { get; init; } = 0.1;
+}
+
+/// <summary>Autovacuum's three triggers for one table: what each counter must pass, strictly, for it to act.</summary>
+/// <param name="Vacuum">Against <c>n_dead_tup</c>.</param>
+/// <param name="Insert">Against <c>n_ins_since_vacuum</c>, or <see langword="null" /> when the insert trigger is off.</param>
+/// <param name="Analyze">Against <c>n_mod_since_analyze</c>.</param>
+/// <param name="UnfrozenShare">The share of pages not all-frozen that scaled the insert trigger (1 before 18).</param>
+internal sealed record AutovacuumTriggers(double Vacuum, double? Insert, double Analyze, double UnfrozenShare);
+
+/// <summary>
 /// What T07 and T08 say about autovacuum for a table, and the remedy that fits its state: the server's
 /// switch, the table's own switch, or a scale factor.
 /// </summary>
 internal static class Autovacuum
 {
+    /// <summary>
+    /// The scale factors a remedy suggests, largest first: the next one below the scale factor in force is what it offers.
+    /// </summary>
+    internal static readonly IReadOnlyList<double> ScaleFactorLadder = [0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001];
+
+    /// <summary>
+    /// Autovacuum's three triggers as <c>relation_needs_vacanalyze</c> computes them (B0 §7a, proved live on 17 and 18 in
+    /// §7b) - the same arithmetic <c>HealthTableQueries.TablesSql</c> does in SQL, here so that every threshold can be
+    /// unit-tested against stated numbers.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>Dead rows: <c>threshold + scale_factor × reltuples</c>, capped on PostgreSQL 18 by
+    /// <c>autovacuum_vacuum_max_threshold</c> unless it is negative.</item>
+    /// <item>Inserts (13+): <c>threshold + scale_factor × reltuples</c>, and on 18 also times the share of pages that are
+    /// not all-frozen - <c>1 - relallfrozen / relpages</c>, used only when both are above zero and with
+    /// <c>relallfrozen</c> clamped to <c>relpages</c>. A negative threshold switches it off.</item>
+    /// <item>Analyze: <c>threshold + scale_factor × reltuples</c>.</item>
+    /// </list>
+    /// A <c>reltuples</c> below zero - never vacuumed or analysed, on 14 and later - counts as 0. Autovacuum acts when a
+    /// counter is strictly greater than its trigger (<see cref="AutovacuumUnit.Due" />).
+    /// </remarks>
+    public static AutovacuumTriggers Triggers(AutovacuumInputs inputs)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+
+        double tuples = Math.Max(inputs.Reltuples, 0);
+
+        double vacuum = inputs.VacuumThreshold + (inputs.VacuumScaleFactor * tuples);
+        if (inputs.VacuumMaxThreshold is { } cap && cap >= 0 && vacuum > cap)
+        {
+            vacuum = cap;
+        }
+
+        double unfrozen = inputs.RelPages > 0 && inputs.RelAllFrozen is > 0 and { } frozen
+            ? 1 - ((double) Math.Min(frozen, inputs.RelPages) / inputs.RelPages)
+            : 1;
+
+        double? insert = inputs.InsertThreshold >= 0
+            ? inputs.InsertThreshold + (inputs.InsertScaleFactor * tuples * unfrozen)
+            : null;
+
+        return new AutovacuumTriggers(vacuum, insert, inputs.AnalyzeThreshold + (inputs.AnalyzeScaleFactor * tuples), unfrozen);
+    }
+
+    /// <summary>
+    /// A trigger as a person reads it: whole rows, rounded half to even as Postgres' <c>round(float8)</c> rounds them.
+    /// </summary>
+    public static long Rounded(double trigger) => (long) Math.Round(trigger, MidpointRounding.ToEven);
+
+    /// <summary>
+    /// The scale factor a remedy suggests in place of <paramref name="current" />: the next rung of
+    /// <see cref="ScaleFactorLadder" /> below it, or <see langword="null" /> when it is already at or below the lowest - then
+    /// the scale factor is not what keeps autovacuum from the table.
+    /// </summary>
+    public static double? LowerScaleFactor(double current)
+    {
+        foreach (double rung in ScaleFactorLadder)
+        {
+            if (rung < current - 1e-9)
+            {
+                return rung;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A trigger in words, with where each part comes from: "1,050 (autovacuum_vacuum_threshold 50 + autovacuum_vacuum_scale_factor
+    /// 0.01 × ~100,000 rows; the scale factor is the table's own storage parameter)".
+    /// </summary>
+    /// <param name="unit">The decision.</param>
+    /// <param name="prefix">The parameters' prefix: <c>autovacuum_vacuum</c>, <c>autovacuum_vacuum_insert</c> or <c>autovacuum_analyze</c>.</param>
+    /// <param name="storageOptions">The table's own storage parameters, as <c>name=value</c>.</param>
+    /// <param name="partitioned">Whether the decision is one partition's, whose storage parameters are its own.</param>
+    /// <param name="cap">The dead-row trigger's cap, when it is the one in force.</param>
+    /// <param name="unfrozen">The insert trigger's unfrozen share, when it is below 1.</param>
+    public static string Explain(AutovacuumUnit unit, string prefix, IReadOnlyList<string> storageOptions, bool partitioned, double? cap = null, double? unfrozen = null)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(storageOptions);
+
+        IReadOnlyDictionary<string, string> own = StorageParameters.Parse(storageOptions);
+
+        string Source(string parameter) => partitioned
+            ? "the partition's"
+            : own.ContainsKey(parameter) ? "the table's own storage parameter" : "the server's setting";
+
+        string scaled = TableText.Count(Rounded(unit.Trigger))
+            + " (" + prefix + "_threshold " + Number(unit.Threshold) + ", " + Source(prefix + "_threshold")
+            + ", + " + prefix + "_scale_factor " + Number(unit.ScaleFactor) + ", " + Source(prefix + "_scale_factor")
+            + ", × " + TableText.Rows((long) unit.Tuples) + " rows (reltuples)"
+            + (unfrozen is { } share && share < 1 ? " × " + TableText.Percent(share) + " of its pages not all-frozen (PostgreSQL 18)" : string.Empty);
+
+        return cap is { } capped && unit.Trigger >= capped - 1e-9
+            ? scaled + ", capped at autovacuum_vacuum_max_threshold " + TableText.Count(capped) + ")"
+            : scaled + ")";
+    }
+
+    /// <summary>A setting's value as Postgres prints it: <c>0.2</c>, <c>50</c>.</summary>
+    internal static string Number(double value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// The remedy for a table autovacuum is not keeping up with: switch it back on for the table, or lower the scale
     /// factor - worded by the studio (<see cref="IHealthTableRemedies" />) - and nothing for a server whose
@@ -490,6 +761,217 @@ internal static class Autovacuum
 
         return partly + " No StoreOptions line the studio can suggest sets this table's autovacuum settings; a DBA's ALTER TABLE ... SET ("
             + parameter + " = " + value + ") does, and " + apply;
+    }
+}
+
+/// <summary>What keeps autovacuum from a table already past its trigger, as far as the sweep can tell (W5-V1 review).</summary>
+internal enum AutovacuumHindrance
+{
+    /// <summary>Nothing the sweep can see.</summary>
+    None,
+
+    /// <summary>
+    /// A session or a prepared transaction holds or waits for a lock autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> gives way to:
+    /// autovacuum skips a table it cannot lock at once.
+    /// </summary>
+    Locked,
+
+    /// <summary>Every autovacuum worker on the server is busy (T16) - or, for a role that cannot tell them apart, as many maintenance processes.</summary>
+    WorkersBusy,
+
+    /// <summary>Cost-based throttling - the table's own or the server's - makes each worker sleep more than it works.</summary>
+    Throttled,
+}
+
+/// <summary>
+/// Why a table past twice its own trigger is still not vacuumed or analysed, and the remedy that answers it (W5-V1 review):
+/// once a table is behind, a lower scale factor changes nothing - it is already past its trigger - so the remedy is for
+/// what keeps autovacuum away, and a scale factor is offered only where it would at least halve the trigger, so that the
+/// next pass starts sooner.
+/// </summary>
+internal static class AutovacuumHindrances
+{
+    /// <summary>The cost delay, in milliseconds, at and above which autovacuum counts as throttled (PostgreSQL 12's default is 2).</summary>
+    public const double ThrottledDelayMilliseconds = 10;
+
+    /// <summary>The cost limit at and below which autovacuum counts as throttled (the default is 200).</summary>
+    public const int ThrottledCostLimit = 100;
+
+    /// <summary>The evidence line of a lock autovacuum gives way to.</summary>
+    internal const string LockedLabel = "a lock on the table, held or waited for, that autovacuum gives way to";
+
+    /// <summary>
+    /// What keeps autovacuum from <paramref name="unit" />, in the order the evidence is surest. Never a held horizon: under
+    /// one autovacuum keeps running and dating its <c>last_autovacuum</c>, so a table is not behind for it - T14 says it
+    /// (W5-V1 review).
+    /// </summary>
+    /// <param name="table">The table.</param>
+    /// <param name="unit">The decision it is behind on.</param>
+    /// <param name="workers">The sweep's workers read, or <see langword="null" /> where the check did not read it.</param>
+    /// <param name="history">The database's samples: T16's saturated run.</param>
+    public static AutovacuumHindrance Of(TableFacts table, AutovacuumUnit unit, MaintenanceWorkersRow? workers, HealthHistoryView history)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(history);
+
+        if (unit.Locked)
+        {
+            return AutovacuumHindrance.Locked;
+        }
+
+        if (WorkersBusy(workers, history))
+        {
+            return AutovacuumHindrance.WorkersBusy;
+        }
+
+        return Throttle(table, workers) is not null ? AutovacuumHindrance.Throttled : AutovacuumHindrance.None;
+    }
+
+    /// <summary>Whether every worker is busy now, or was in T16's latest sample.</summary>
+    public static bool WorkersBusy(MaintenanceWorkersRow? workers, HealthHistoryView history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+
+        return (workers is { Autovacuum: true } read && new AutovacuumWorkersFacts(DateTimeOffset.MinValue, read, [], PostgresPlatform.SelfHosted).Saturated)
+            || AutovacuumWorkersCheck.SaturatedRun(history) > 0;
+    }
+
+    /// <summary>
+    /// The cost setting that throttles the table's workers - its own storage parameter over the server's setting - with its
+    /// value and Postgres' default, or <see langword="null" /> when neither is past the line.
+    /// </summary>
+    public static (string Parameter, string Current, string Suggested, bool TableOwn)? Throttle(TableFacts table, MaintenanceWorkersRow? workers)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        IReadOnlyDictionary<string, string> own = StorageParameters.Parse(table.Row.StorageOptions);
+        double? ownDelay = own.TryGetValue("autovacuum_vacuum_cost_delay", out string? delayText)
+            && double.TryParse(delayText, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDelay) && parsedDelay >= 0 ? parsedDelay : null;
+        int? ownLimit = own.TryGetValue("autovacuum_vacuum_cost_limit", out string? limitText)
+            && int.TryParse(limitText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedLimit) && parsedLimit > 0 ? parsedLimit : null;
+
+        double delay = ownDelay ?? workers?.CostDelayMilliseconds ?? 2;
+        int limit = ownLimit ?? workers?.CostLimit ?? 200;
+
+        if (delay >= ThrottledDelayMilliseconds)
+        {
+            return ("autovacuum_vacuum_cost_delay", Autovacuum.Number(delay), "2", ownDelay is not null);
+        }
+
+        return limit <= ThrottledCostLimit
+            ? ("autovacuum_vacuum_cost_limit", limit.ToString(CultureInfo.InvariantCulture), "200", ownLimit is not null)
+            : null;
+    }
+
+    /// <summary>The evidence line: what keeps autovacuum away.</summary>
+    public static string Label(AutovacuumHindrance hindrance, TableFacts table, MaintenanceWorkersRow? workers) => hindrance switch
+    {
+        AutovacuumHindrance.Locked => LockedLabel,
+        AutovacuumHindrance.WorkersBusy when workers is { CanReadAllStats: true } => "every autovacuum worker is busy (T16)",
+        AutovacuumHindrance.WorkersBusy => "at least as many maintenance processes as workers, manual runs included (T16)",
+        AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle =>
+            "cost-based throttling: " + throttle.Parameter + " = " + throttle.Current + (throttle.TableOwn ? ", the table's own storage parameter" : ", the server's setting"),
+        _ => "nothing the sweep can see",
+    };
+
+    /// <summary>The sentence the finding's "why" says about it.</summary>
+    public static string Sentence(AutovacuumHindrance hindrance, TableFacts table, MaintenanceWorkersRow? workers) => hindrance switch
+    {
+        AutovacuumHindrance.Locked =>
+            " A session - or a prepared transaction - holds or waits for a lock on it that autovacuum gives way to: autovacuum takes its "
+            + "SHARE UPDATE EXCLUSIVE lock only if it can have it at once, so it passes the table by while a conflicting lock is held, "
+            + "and while a stronger request waits in the queue - a long migration, a LOCK TABLE, a CREATE INDEX without CONCURRENTLY, an "
+            + "orphaned prepared transaction. Database › Sessions shows the sessions, and C07 a prepared transaction.",
+        AutovacuumHindrance.WorkersBusy when workers is { CanReadAllStats: true } =>
+            " Every autovacuum worker on the server is busy (T16), so a table past its trigger waits for one to come free, however far "
+            + "past it it goes.",
+        AutovacuumHindrance.WorkersBusy =>
+            " At least as many maintenance processes as autovacuum has workers are running on the server, manual runs included (T16) - "
+            + "this role cannot tell autovacuum's workers from a manual VACUUM - so a table past its trigger may be waiting for a "
+            + "worker to come free.",
+        AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle =>
+            " Autovacuum's cost-based throttling holds it back: " + throttle.Parameter + " = " + throttle.Current
+            + (throttle.TableOwn ? ", the table's own storage parameter," : ", the server's setting,")
+            + " makes each worker sleep more than it works on a table this size.",
+        _ =>
+            " Nothing the sweep can see explains it - no lock on the table, no shortage of workers (T16) and no throttling. "
+            + "Autovacuum's own log (log_autovacuum_min_duration) says what it did with the table, and when.",
+    };
+
+    /// <summary>
+    /// The remedy for <paramref name="hindrance" />: more workers - only where the count is of autovacuum's workers, which needs
+    /// <c>pg_read_all_stats</c> - or the cost setting back to Postgres' default; none for a lock, whose holder is somebody to
+    /// talk to rather than a setting to change.
+    /// </summary>
+    public static HealthRemedy? Remedy(
+        AutovacuumHindrance hindrance,
+        TableFacts table,
+        MaintenanceWorkersRow? workers,
+        PostgresPlatform platform,
+        HealthEvaluation evaluation)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(platform);
+        ArgumentNullException.ThrowIfNull(evaluation);
+
+        switch (hindrance)
+        {
+            case AutovacuumHindrance.WorkersBusy when workers is { CanReadAllStats: true } read:
+                string more = (read.MaxWorkers * 2).ToString(CultureInfo.InvariantCulture);
+                return ServerSettingRemedy.Build(
+                    platform,
+                    "autovacuum_max_workers",
+                    more,
+                    evaluation.Text,
+                    read.MaxWorkersContext,
+                    ":",
+                    where => "Twice the workers, so a table past its trigger is not left waiting for one; raise autovacuum_vacuum_cost_limit with "
+                        + "it, which the workers share. Set it in " + where + ".");
+
+            case AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle:
+                return throttle.TableOwn
+                    ? Autovacuum.Remedy(evaluation.TableRemedies, table, throttle.Parameter, throttle.Suggested,
+                        "Postgres' own default, so the table's workers are not throttled harder than every other table's.")
+                    : ServerSettingRemedy.Build(
+                        platform,
+                        throttle.Parameter,
+                        throttle.Suggested,
+                        evaluation.Text,
+                        "sighup",
+                        ":",
+                        where => "Postgres' own default, which a reload applies. Set it in " + where + ".");
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// The next scale factor down, offered only when the trigger it gives is at most half the one in force - the only thing a
+    /// lower scale factor can do for a table already past its trigger is make the next pass start sooner - or
+    /// <see langword="null" />.
+    /// </summary>
+    /// <param name="unit">The decision.</param>
+    /// <param name="share">The share of the table the scale part counts: 1, or 18's unfrozen share for the insert trigger.</param>
+    /// <param name="cap">PostgreSQL 18's cap on the dead-row trigger, or <see langword="null" />.</param>
+    public static (double ScaleFactor, double Trigger)? HalvingScaleFactor(AutovacuumUnit unit, double share, double? cap)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+
+        if (Autovacuum.LowerScaleFactor(unit.ScaleFactor) is not { } lower)
+        {
+            return null;
+        }
+
+        double trigger = unit.Threshold + (lower * unit.Tuples * share);
+
+        if (cap is { } limit and >= 0)
+        {
+            trigger = Math.Min(trigger, limit);
+        }
+
+        return trigger <= unit.Trigger / 2 ? (lower, trigger) : null;
     }
 }
 

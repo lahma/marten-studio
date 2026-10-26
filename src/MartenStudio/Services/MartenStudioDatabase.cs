@@ -1,5 +1,6 @@
 using Marten.Storage;
 
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Sources;
 
 using Npgsql;
@@ -40,8 +41,26 @@ internal sealed record MartenStudioDatabase(IMartenDatabase Database) : IStudioD
     public NpgsqlDataSource? DataSource => Database is PostgresqlDatabase { DataSource: { } dataSource } ? dataSource : null;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Metered, open to close, for the studio's cost line (<see cref="StudioConnectionMeter" />, W5-Q1) - as is every
+    /// connection MartenStudio's own reads take from a Marten database (<see cref="CreateConnection(IMartenDatabase, ConnectionUsage)" />).
+    /// </remarks>
     public NpgsqlConnection CreateConnection(StudioConnectionUsage usage) =>
-        Database.CreateConnection(usage == StudioConnectionUsage.Read ? ConnectionUsage.Read : ConnectionUsage.ReadWrite);
+        CreateConnection(Database, usage == StudioConnectionUsage.Read ? ConnectionUsage.Read : ConnectionUsage.ReadWrite);
+
+    /// <summary>
+    /// A new, unopened connection to <paramref name="database" />, metered for the studio's cost line - the one way
+    /// MartenStudio's own reads (documents, events, projections, the Query page, the schema reads, tenant discovery) take a
+    /// connection from a Marten database, so that every statement of theirs is counted (W5-Q1, backlog §C). A Marten
+    /// session the studio opens for a write or to steer the daemon takes its connection from Marten, and is not.
+    /// </summary>
+    /// <param name="database">The Marten database.</param>
+    /// <param name="usage">Which pool: Marten's read pool, where the database has one, or the primary.</param>
+    public static NpgsqlConnection CreateConnection(IMartenDatabase database, ConnectionUsage usage)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        return StudioConnectionMeter.Attach(database.CreateConnection(usage));
+    }
 
     /// <summary>The wrapper of <paramref name="database" />.</summary>
     public static MartenStudioDatabase Of(IMartenDatabase database)

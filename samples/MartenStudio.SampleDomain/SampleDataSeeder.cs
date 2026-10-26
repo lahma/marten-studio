@@ -64,6 +64,8 @@ public sealed class SampleDataSeeder : IInitialData
 
     private readonly ILogger logger;
 
+    private readonly bool grantConsoleRole;
+
     /// <summary>A seeder that reports what it skipped to <paramref name="logger" />.</summary>
     /// <param name="logger">
     /// Where the relational demo says it left a <c>quartz</c> or <c>legacy</c> schema alone because the
@@ -71,9 +73,14 @@ public sealed class SampleDataSeeder : IInitialData
     /// wants the line registers the seeder with <c>InitializeWith&lt;SampleDataSeeder&gt;()</c> so the
     /// container supplies one.
     /// </param>
-    public SampleDataSeeder(ILogger<SampleDataSeeder>? logger = null)
+    /// <param name="seeding">
+    /// What the host allowed beyond the store's own data (<see cref="SampleSeeding" />). Optional, and without it the
+    /// seeding grants <see cref="SampleConsoleRole" /> nothing: only the host knows whether the database is the demo's.
+    /// </param>
+    public SampleDataSeeder(ILogger<SampleDataSeeder>? logger = null, SampleSeeding? seeding = null)
     {
         this.logger = logger ?? (ILogger) NullLogger.Instance;
+        grantConsoleRole = seeding?.GrantConsoleRole ?? false;
     }
 
     /// <summary>How big <see cref="MediaAsset" />'s decoded payload is: base64 makes it about 2 MB.</summary>
@@ -93,7 +100,7 @@ public sealed class SampleDataSeeder : IInitialData
 
         await SeedDocumentsAsync(store, cancellation);
 
-        await ApplyRelationalDemoAsync(store, logger, cancellation);
+        await ApplyRelationalDemoAsync(store, logger, grantConsoleRole, cancellation);
     }
 
     /// <summary>
@@ -117,8 +124,13 @@ public sealed class SampleDataSeeder : IInitialData
     /// <c>mt_doc_customer</c> with <c>CASCADE</c> - Marten's cleaner does - which empties
     /// <c>legacy.customer_credit</c> through its foreign key. Running afterwards is what refills it.
     /// </para>
+    /// <para>
+    /// <b>The console role's grants only where the host allowed them</b> (<see cref="SampleSeeding.GrantConsoleRole" />):
+    /// the throwaway container, or a database <c>--allow-data-generation</c> names. Role membership is cluster-wide, so on
+    /// any other database of a server where an earlier start made the login a member, the grants would land too.
+    /// </para>
     /// </remarks>
-    private static async Task ApplyRelationalDemoAsync(IDocumentStore store, ILogger logger, CancellationToken cancellation)
+    private static async Task ApplyRelationalDemoAsync(IDocumentStore store, ILogger logger, bool grantConsoleRole, CancellationToken cancellation)
     {
         if (!string.Equals(store.Options.DatabaseSchemaName, SampleStore.DocumentSchema, StringComparison.Ordinal))
         {
@@ -129,6 +141,13 @@ public sealed class SampleDataSeeder : IInitialData
         await connection.OpenAsync(cancellation);
 
         await RelationalDemoSchema.ApplyAsync(connection, logger, cancellation);
+
+        // Wave 6: the studio's narrowed role reads the demo's schemas, which exist from here on (SampleConsoleRole) - on a
+        // database that is the demo's, and nowhere else.
+        if (grantConsoleRole)
+        {
+            await SampleConsoleRole.GrantAsync(connection, logger, cancellationToken: cancellation);
+        }
     }
 
     /// <summary>The seeded documents, behind <see cref="SeedMarker" />.</summary>

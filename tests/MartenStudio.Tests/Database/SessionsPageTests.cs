@@ -105,6 +105,33 @@ public class SessionsPageTests
         page.Markup.Should().Contain("idle in transaction").And.Contain("12 min");
     }
 
+    /// <summary>Issue #8 G9: the database's row and the budget to everybody the summary admits; the applications by name only past the gate.</summary>
+    [Fact]
+    public async Task Connections_by_application_show_the_database_row_to_all_and_the_names_only_through_the_gate()
+    {
+        await using (Fixture closed = await ReadyAsync(Closed))
+        {
+            var page = closed.Context.Render<Sessions>();
+            page.WaitForAssertion(() => page.FindAll(".ms-sessions-apps-table").Should().ContainSingle());
+
+            page.FindAll(".ms-sessions-apps-table tbody tr").Should().ContainSingle()
+                .Which.TextContent.Should().Contain("This database").And.Contain("12 min");
+            page.Find(".ms-sessions-budget").TextContent.Should().Contain("7 client sessions").And.Contain("100");
+            page.Find(".ms-sessions-apps-note").TextContent.Should().Contain("1 application connected");
+            page.Find(".ms-sessions-apps").TextContent.Should().Contain("State not visible").And.Contain("pg_read_all_stats");
+            page.Markup.Should().NotContain("billing-api");
+        }
+
+        await using Fixture open = await ReadyAsync(Open);
+        open.Sessions.Details = FakeSessionActivityService.DetailsFor();
+
+        var named = open.Context.Render<Sessions>();
+        named.WaitForAssertion(() => named.FindAll(".ms-sessions-apps-table tbody tr").Should().HaveCount(2));
+
+        named.FindAll(".ms-sessions-apps-table tbody tr")[0].TextContent.Should().Contain("billing-api");
+        named.FindAll(".ms-sessions-apps-note").Should().BeEmpty();
+    }
+
     [Fact]
     public async Task Through_the_gate_the_page_names_the_sessions_and_shows_their_statements()
     {
@@ -343,6 +370,9 @@ internal sealed class FakeSessionActivityService : ISessionActivityService
         OldestPrepared = TimeSpan.FromMinutes(30),
         MaxPreparedTransactions = 10,
         Pool = new SessionPoolSummary(true, 3, 7, 100, true),
+        Connections = new SessionApplicationCounts(null, 2, 1, 0, 1, 1, 0, TimeSpan.FromMinutes(12)),
+        Budget = new SessionConnectionBudget(100, 3, 7, false),
+        ApplicationCount = 1,
         Details = access,
         Statements = [new HealthStatement("select 1", [])],
     };
@@ -359,5 +389,7 @@ internal sealed class FakeSessionActivityService : ISessionActivityService
         ],
         Locks = [new LockDetailRow(4242, "a relation Marten does not own", null, "RowExclusiveLock", true, null)],
         Prepared = [new PreparedDetailRow("gid-orphan", "tx_owner", ReadAt.AddMinutes(-30), TimeSpan.FromMinutes(30))],
+        Applications = [new SessionApplicationCounts("billing-api", 2, 1, 0, 1, 1, 0, TimeSpan.FromMinutes(12))],
+        ApplicationCount = 1,
     };
 }

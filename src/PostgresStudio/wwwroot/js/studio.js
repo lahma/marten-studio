@@ -897,12 +897,14 @@
         return {};
     })();
 
-    // The health advisor's "mute in this browser" (H1): one JSON list in localStorage, and nowhere else - not
+    // The health advisor's "mute in this browser" (H1): one JSON object in localStorage, and nowhere else - not
     // the cookie martenStudio.prefs falls back to, because a mute is nothing the server needs on every request.
-    // The list holds the SHA-256 (lowercase hex) of each mute key, never the key itself: a key can name a tenant
-    // or a stream, and every script on this origin can read localStorage. The hashing is the circuit's
-    // (HealthMutes); this side only keeps what it is handed. Every access is in a try: a private window or
-    // blocked storage answers as "nothing muted", and the page is correct either way.
+    // It is {key, muted} (wave 6): "key" is this browser's random HMAC key as the host's Data Protection protected
+    // it, and "muted" the HMAC-SHA256 (lowercase hex) of each mute key under it - never a mute key itself, which can
+    // name a tenant or a stream, and never the HMAC key in a form this side could use, because every script on
+    // this origin can read localStorage. The keying and hashing are the circuit's (HealthMutes, HealthMuteKeys);
+    // this side only keeps what it is handed. Every access is in a try: a private window or blocked storage
+    // answers as "nothing muted", and the page is correct either way.
     window.martenStudio.health = window.martenStudio.health || {
         getMuted: function () {
             try {

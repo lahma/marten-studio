@@ -229,6 +229,12 @@ internal sealed class SessionActivityService : ISessionActivityService
             OldestPrepared = snapshot.Prepared.Count == 0 ? null : snapshot.Prepared.Max(static x => x.Age),
             MaxPreparedTransactions = snapshot.MaxPreparedTransactions,
             Pool = PoolOf(resolved),
+
+            // Issue #8 G9: the database's total row and the server's budget are database-wide; the applications are named
+            // only in the details, behind ViewDatabaseActivity.
+            Connections = snapshot.Connections?.Database,
+            Budget = snapshot.Connections?.ToBudget(),
+            ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
             Caveats = caveats,
             Details = details,
             Statements = snapshot.Statements,
@@ -340,6 +346,8 @@ internal sealed class SessionActivityService : ISessionActivityService
                 }),
             ],
             Prepared = [.. snapshot.Prepared.Select(static x => new PreparedDetailRow(x.Gid, x.Owner, x.Prepared, x.Age))],
+            Applications = snapshot.Connections?.Applications ?? [],
+            ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
             StatementsWithheld = withheld is null,
         };
 

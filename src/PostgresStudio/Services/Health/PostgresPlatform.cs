@@ -36,9 +36,18 @@ internal sealed record PostgresPlatformMarkers(
 /// <b>Only wording and mutes.</b> A platform never raises a finding and never decides a severity. It shapes three
 /// things: S01 says "community support ends; your provider's schedule may differ" instead of speaking as though the
 /// community's dates were the host's; R01's remedy names the place the provider lets a server setting be changed;
-/// and S02 stands down for a setting the provider documents as its own design (Neon's <c>fsync = off</c>). A server
-/// the detector does not recognise is <see cref="PostgresPlatformKind.SelfHosted" />, which is also the wording that
-/// is right for a provider the studio has never heard of: the setting is somebody's to change.
+/// and S02 stands down for a setting the provider documents as its own design (Neon's <c>fsync = off</c>). From W5-R2 it
+/// also says what does not apply: R02-R04 and the Replication page's sections where Aurora's storage layer, or a
+/// provider's own archiving, does the work (issue #8 A2). A server the detector does not recognise is
+/// <see cref="PostgresPlatformKind.SelfHosted" />, which is also the wording that is right for a provider the studio has
+/// never heard of: the setting is somebody's to change.
+/// </para>
+/// <para>
+/// <b>No marker a role short of a superuser can plant</b> (W5-R2-fix B3), because a platform silences findings: each server
+/// marker is fenced in <c>HealthServerQueries.Platform</c> - a setting read from <c>pg_settings</c>, which never lists a
+/// placeholder a session or a client made and refuses a database's or role's one to all but a superuser (and, as defence
+/// in depth, only from the server's own configuration), the Aurora function only in <c>pg_catalog</c>, Neon's role only
+/// with the attributes only a superuser grants.
 /// </para>
 /// <para>
 /// <b>Every marker is the provider's own, documented, and read without a privilege</b> (verified 2026-10-17; a marker
@@ -50,7 +59,7 @@ internal sealed record PostgresPlatformMarkers(
 /// RDS User Guide) and <c>rds.allowed_extensions</c> (same page, and the Aurora User Guide's <i>Working with extensions
 /// and foreign data wrappers</i>).</item>
 /// <item><b>Amazon Aurora</b>: the <c>aurora_version()</c> function, "returns the Aurora PostgreSQL version" (<i>aurora_version</i>,
-/// Aurora User Guide). Looked up in <c>pg_proc</c>, never called.</item>
+/// Aurora User Guide). Looked up in <c>pg_proc</c>, in <c>pg_catalog</c> only, never called.</item>
 /// <item><b>Azure</b>: the <c>azure.extensions</c> server parameter, "Run <c>SHOW azure.extensions;</c>" (<i>PostgreSQL
 /// extensions in Azure Database for PostgreSQL</i>, Microsoft Learn).</item>
 /// <item><b>Cloud SQL</b>: any of the <c>cloudsql.*</c> database flags (<c>cloudsql.iam_authentication</c>,
@@ -166,6 +175,50 @@ internal sealed record PostgresPlatform(PostgresPlatformKind Kind, string? Marke
 /// <param name="Platform">Who runs it.</param>
 internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNumber, string Version, PostgresPlatform Platform)
 {
+    /// <summary><c>pg_is_in_recovery()</c>: a standby, or an Aurora reader, answered.</summary>
+    public bool InRecovery { get; init; }
+
+    /// <summary><c>pg_postmaster_start_time()</c>: when the server - on Aurora, the instance - that answered started.</summary>
+    public DateTimeOffset? StartedAt { get; init; }
+
+    /// <summary>
+    /// Which instance answered (issue #8 A1): <c>aurora_db_instance_identifier()</c> on an Aurora release that has it, and
+    /// <see langword="null" /> everywhere else - a release before 13.7, 12.11, 11.16 or 10.21 included, whose instance is
+    /// unknown. The cluster's own name for one of its instances, not a session's, a role's or a client's, so it is
+    /// database-wide information (D29's <see cref="HealthGate.Database" />), never the activity gate's.
+    /// </summary>
+    public string? Instance { get; init; }
+
+    /// <summary><c>aurora_version()</c> on Aurora - <c>16.4.1</c>, or <c>4.2.2</c> on a release before 13.3 - else <see langword="null" />.</summary>
+    public string? AuroraVersion { get; init; }
+
+    /// <summary>Why Aurora's version and instance were not read on a server the detector calls Aurora, or <see langword="null" />.</summary>
+    public string? InstanceNotRead { get; init; }
+
+    /// <summary>
+    /// What the studio hands a host's <see cref="IPostgresCapacitySource" />, and the API (D31): the public shape of these
+    /// facts.
+    /// </summary>
+    public PostgresServerInfo ToServerInfo() => new()
+    {
+        VersionNumber = VersionNumber,
+        Version = Version,
+        Platform = Platform.Kind,
+        Instance = Instance,
+        InRecovery = InRecovery,
+        StartedAt = StartedAt,
+    };
+
+    /// <summary>
+    /// "instance studio-test-instance-2 (a reader), Aurora 16.4.1" - which server answered, for the Overviews, the Health
+    /// page and the Server page - or <see langword="null" /> on a platform that names no instance.
+    /// </summary>
+    public string? AnsweredBy => Platform.Kind != PostgresPlatformKind.AmazonAurora
+        ? null
+        : (Instance is { Length: > 0 } instance ? "instance " + instance : "an instance this Aurora release does not name")
+          + (InRecovery ? " (a reader)" : " (the writer)")
+          + (AuroraVersion is { Length: > 0 } aurora ? ", Aurora " + aurora : string.Empty);
+
     /// <summary>
     /// The major version: <c>17</c> for 17.4, and for a server older than 10 - which numbered its majors with two parts
     /// - the first part times a hundred plus the second (<c>906</c> for 9.6).
@@ -195,14 +248,8 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        IReadOnlyList<(int Number, string Version, PostgresPlatformMarkers Markers)> rows = await context.Sql
-            .QueryAsync(
-                HealthServerQueries.Platform(),
-                static reader => (
-                    reader.GetInt32(0),
-                    reader.GetString(1),
-                    new PostgresPlatformMarkers(reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetBoolean(6))),
-                cancellationToken)
+        IReadOnlyList<PlatformRow> rows = await context.Sql
+            .QueryAsync(HealthServerQueries.Platform(), MapPlatform, cancellationToken)
             .ConfigureAwait(false);
 
         if (rows.Count != 1)
@@ -210,8 +257,8 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
             throw new InvalidOperationException("The server's version and platform came back as " + rows.Count.ToString(CultureInfo.InvariantCulture) + " rows.");
         }
 
-        (int number, string version, PostgresPlatformMarkers markers) = rows[0];
-        PostgresPlatform platform = PostgresPlatform.Detect(markers, DataSourceEndpoints.Of(context.Target)?.Hosts ?? []);
+        PlatformRow row = rows[0];
+        PostgresPlatform platform = PostgresPlatform.Detect(row.Markers, DataSourceEndpoints.Of(context.Target)?.Hosts ?? []);
 
         ILogger? logger = context.Services.GetService<ILogger<PostgresPlatform>>();
         if (logger?.IsEnabled(LogLevel.Debug) == true)
@@ -219,8 +266,68 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
             logger.PostgresPlatformDetected(context.Settings.Text.Product, platform.Kind.ToString(), platform.Marker ?? "no provider marker", context.StoreKey, context.DatabaseId);
         }
 
-        return new PostgresServerFacts(context.Now, number, version, platform);
+        PostgresServerFacts facts = new(context.Now, row.Number, row.Version, platform)
+        {
+            InRecovery = row.InRecovery,
+            StartedAt = row.StartedAt,
+        };
+
+        return platform.Kind == PostgresPlatformKind.AmazonAurora
+            ? await WithAuroraInstanceAsync(context, facts, row.InstanceFunction, logger, cancellationToken).ConfigureAwait(false)
+            : facts;
     }
+
+    /// <summary>
+    /// <paramref name="facts" /> with Aurora's version and the instance that answered (A1), read by a statement of its own -
+    /// only on a server the detector calls Aurora, and the identifier only where its <c>pg_catalog</c> function exists. A
+    /// failure there is a value: the instance is unknown, and nothing else of the server facts depends on it.
+    /// </summary>
+    private static async Task<PostgresServerFacts> WithAuroraInstanceAsync(
+        HealthCheckContext context,
+        PostgresServerFacts facts,
+        bool identifier,
+        ILogger? logger,
+        CancellationToken cancellationToken)
+    {
+        var query = AuroraQueries.Instance(identifier);
+
+        try
+        {
+            IReadOnlyList<(string? Version, string? Instance)> rows = await context.Sql
+                .QueryAsync(query, static reader => (reader.IsDBNull(0) ? null : reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1)), cancellationToken)
+                .ConfigureAwait(false);
+
+            return rows.Count == 1
+                ? facts with { AuroraVersion = rows[0].Version, Instance = rows[0].Instance is { Length: > 0 } instance ? instance : null }
+                : facts with { InstanceNotRead = "Aurora's version and instance came back as " + rows.Count.ToString(CultureInfo.InvariantCulture) + " rows." };
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            if (logger?.IsEnabled(LogLevel.Debug) == true)
+            {
+                logger.LogDebug(exception, "{Product} could not read the Aurora instance of {DatabaseId}", context.Settings.Text.ProductName, context.DatabaseId);
+            }
+
+            PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
+
+            return facts with
+            {
+                InstanceNotRead = "Aurora's version and instance could not be read"
+                    + (postgres is null ? " (" + exception.GetType().Name + ")." : " (SQLSTATE " + postgres.SqlState + ")."),
+            };
+        }
+    }
+
+    private static PlatformRow MapPlatform(NpgsqlDataReader reader) => new(
+        reader.GetInt32(0),
+        reader.GetString(1),
+        new PostgresPlatformMarkers(reader.GetBoolean(2), reader.GetBoolean(3), reader.GetBoolean(4), reader.GetBoolean(5), reader.GetBoolean(6)),
+        reader.GetBoolean(7),
+        reader.IsDBNull(8) ? null : reader.GetFieldValue<DateTimeOffset>(8),
+        reader.GetBoolean(9));
+
+    /// <summary>One row of <see cref="HealthServerQueries.Platform" />.</summary>
+    private sealed record PlatformRow(int Number, string Version, PostgresPlatformMarkers Markers, bool InRecovery, DateTimeOffset? StartedAt, bool InstanceFunction);
 }
 
 /// <summary>Where a store database's data source connects: its hosts and ports, read from its connection string.</summary>

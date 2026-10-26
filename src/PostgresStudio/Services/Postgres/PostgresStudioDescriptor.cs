@@ -64,7 +64,7 @@ internal static class PostgresStudioDescriptor
             """,
     };
 
-    /// <summary>The sidebar: Overview and Query, the database section, Health and Activity.</summary>
+    /// <summary>The sidebar: Overview and Query, the database section, Health, Replication and Activity.</summary>
     private static IReadOnlyList<StudioNavSection> Navigation() =>
     [
         new("Data",
@@ -81,9 +81,21 @@ internal static class PostgresStudioDescriptor
         new("Operations",
         [
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+
+            // W5-Q1: the top statements by total time, after Health and before Maintenance (W5-index §4).
+            new("Statements", "statements", "statements", Title: "The top statements by total time, over the window the statement checks watched"),
+            new("Maintenance", "maintenance", "maintenance", Title: "Autovacuum's triggers, running maintenance, the freeze forecast and the horizon"),
+
+            // W5-CAP: the database's size, growth and largest tables, after Maintenance.
+            new("Storage", "storage", "storage", Title: "Database size, growth and the largest tables"),
+
+            // W5-R2: after Storage (W5-index §4).
+            new("Replication", "replication", "replication", Title: "Slots, standbys, the archiver, WAL, checkpoints and I/O"),
         ]),
         new("System",
         [
+            // W5-S2: the shared Server page, first in System (W5-index §4).
+            new("Server", "server", "server", Title: "Settings, extensions, the roles the studio reads as, and the security posture"),
             new("Activity", "activity", "list"),
         ]),
     ];

@@ -53,6 +53,28 @@ public class ReplicationSlotCheckTests
         verdict.Note.Should().Be("This server has no replication slots.");
     }
 
+    /// <summary>W5-AUR-fix F2: Aurora below logical WAL gives no position, which is a sentence and never a failure.</summary>
+    [Fact]
+    public void Without_a_WAL_position_R01_says_why_and_measures_nothing()
+    {
+        ReplicationSlotFacts none = Facts(Start, -1);
+        HealthVerdict quiet = Evaluate(none with { Slots = none.Slots with { PositionRead = false } });
+
+        quiet.Findings.Should().BeEmpty();
+        quiet.Note.Should().Be(
+            "This server has no replication slots. Aurora gives no WAL position below wal_level = logical (rds.logical_replication off), "
+            + "so no slot's retention is measured.");
+
+        ReplicationSlotFacts one = Facts(Start, -1, Slot("cdc", retained: null));
+        HealthVerdict unmeasured = Evaluate(one with { Slots = one.Slots with { PositionRead = false } });
+
+        unmeasured.Findings.Should().BeEmpty();
+        unmeasured.Note.Should().StartWith("1 replication slot on this server. Aurora gives no WAL position");
+
+        HealthVerdict reader = Evaluate(none with { Slots = none.Slots with { PositionRead = false, InRecovery = true } });
+        reader.Note.Should().Be("This server has no replication slots. An Aurora reader has no WAL position of its own, so no slot's retention is measured here.");
+    }
+
     [Fact]
     public void Slots_holding_little_are_quiet_and_the_note_says_how_much_the_most_is()
     {
@@ -71,7 +93,7 @@ public class ReplicationSlotCheckTests
         HealthFinding finding = Evaluate(Facts(Start.AddMinutes(10), -1, slot), history).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Subject.Should().Be("inactive");
+        finding.Variant.Should().Be("inactive");
         finding.Title.Should().Be("An inactive replication slot has held 3.0 GiB of WAL for 10 min or more");
         finding.Evidence.Should().Contain(new HealthEvidence("Held for at least", "10 min"));
         finding.Evidence.Should().Contain(new HealthEvidence("max_slot_wal_keep_size", "unlimited (-1, the default)"));
@@ -147,7 +169,7 @@ public class ReplicationSlotCheckTests
         HealthFinding finding = Evaluate(Facts(Start.AddMinutes(1), 100 * MiB, slot), history).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Subject.Should().Be("near-limit");
+        finding.Variant.Should().Be("near-limit");
         finding.Title.Should().Be("An inactive replication slot holds 85% of max_slot_wal_keep_size");
         finding.Evidence.Should().Contain(new HealthEvidence("max_slot_wal_keep_size", "100 MiB"));
         finding.Evidence.Should().Contain(new HealthEvidence("WAL that may still be written before the first is lost", "15.0 MiB"));
@@ -213,7 +235,7 @@ public class ReplicationSlotCheckTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Info);
-        finding.Subject.Should().Be("lost");
+        finding.Variant.Should().Be("lost");
         finding.Remedy.Should().BeNull("a lost slot's consumer is rebuilt, not reconfigured");
     }
 
@@ -230,8 +252,10 @@ public class ReplicationSlotCheckTests
             Slot("gone", null, walStatus: "lost"),
             Slot("fine", 1 * MiB, active: true)));
 
-        verdict.Findings.Select(static x => (x.Subject, x.Severity)).Should().Equal(
+        verdict.Findings.Select(static x => (x.Variant, x.Severity)).Should().Equal(
             ("near-limit", HealthSeverity.Critical), ("inactive", HealthSeverity.Warning), ("lost", HealthSeverity.Info));
+        verdict.Findings.Should().OnlyContain(static x => x.Subject == null, "a slot is never a subject: a subject is part of every visitor's mute key");
+        verdict.Findings.Select(static x => x.Key).Should().Equal("R01|near-limit", "R01|inactive", "R01|lost");
 
         HealthFinding near = verdict.Findings[0];
         near.Title.Should().Be("2 replication slots are about to lose WAL they still need");
@@ -273,7 +297,7 @@ public class ReplicationSlotCheckTests
 
         HealthVerdict verdict = Evaluate(Facts(Start, 100 * MiB, theirs, physical));
 
-        HealthFinding near = verdict.Findings.Single(static x => x.Subject == "near-limit");
+        HealthFinding near = verdict.Findings.Single(static x => x.Variant == "near-limit");
         near.Evidence.Should().Contain(new HealthEvidence("Slots past the line", "1 of 2 slots on this server"), "it is counted");
         near.Evidence.Single(static x => x.Gate == HealthGate.Activity).Value
             .Should().StartWith("a logical slot of another database on this server, inactive");
@@ -330,7 +354,7 @@ public class ReplicationSlotCheckTests
         HealthFinding finding = Evaluate(facts, history).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Subject.Should().Be("inactive");
+        finding.Variant.Should().Be("inactive");
         NamesNothingOfTheirs(finding);
     }
 
@@ -344,7 +368,7 @@ public class ReplicationSlotCheckTests
         HealthFinding finding = Evaluate(Facts(Start.AddMinutes(1), Cap, theirs), history).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Subject.Should().Be("near-limit");
+        finding.Variant.Should().Be("near-limit");
         NamesNothingOfTheirs(finding);
     }
 
