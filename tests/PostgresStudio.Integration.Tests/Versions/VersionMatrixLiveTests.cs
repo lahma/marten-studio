@@ -107,7 +107,7 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
 
         TestContext.Current.TestOutputHelper?.WriteLine("PostgreSQL {0} as {1}:\n{2}", server.ServerVersion, role, report);
 
-        (await server.SnapshotAsync()).Should().BeEquivalentTo(before, "a read path creates nothing, on any version");
+        MatrixServer.AssertUnchanged(before, await server.SnapshotAsync(), "a read path creates and drops nothing, on any version");
         Report(server, problems);
     }
 
@@ -132,7 +132,7 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
             }
         }
 
-        (await server.SnapshotAsync()).Should().BeEquivalentTo(before, "a read path creates nothing, on any version");
+        MatrixServer.AssertUnchanged(before, await server.SnapshotAsync(), "a read path creates and drops nothing, on any version");
         Report(server, problems);
     }
 
@@ -247,6 +247,24 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
     public void A_preview_is_told_by_its_tag(string image, bool preview)
     {
         new MatrixVersion(19, image).Preview.Should().Be(preview);
+    }
+
+    /// <summary>
+    /// The no-DDL assertion's anti-vacuity half, no database: it passes for the same objects, and refuses a fingerprint that
+    /// gained one or lost one, naming each - a role made and dropped beside the sweep is the "dropped" W5's CI saw.
+    /// </summary>
+    [Fact]
+    public void The_no_DDL_assertion_names_what_was_created_and_what_was_dropped()
+    {
+        HashSet<string> before = ["schema:store", "role:app", "role:s2_expiring_run"];
+        HashSet<string> after = ["schema:store", "role:app", "relation:store.t:r"];
+
+        MatrixServer.AssertUnchanged(before, new HashSet<string>(before, StringComparer.Ordinal), "nothing changed");
+
+        Action changed = () => MatrixServer.AssertUnchanged(before, after, "a read path creates and drops nothing");
+
+        changed.Should().Throw<Exception>().Which.Message.Should()
+            .Contain("created relation:store.t:r").And.Contain("dropped role:s2_expiring_run");
     }
 
     [Fact]

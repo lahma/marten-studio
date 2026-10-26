@@ -87,7 +87,7 @@ public class ServerFactsLiveTests(PostgresVersionMatrix matrix, PostgresFixture 
         posture.StatementsLoaded.Should().BeTrue("the matrix preloads pg_stat_statements");
         facts.Chips().Single(x => x.Name == "pg_stat_statements").Usable.Should().BeTrue();
 
-        (await server.SnapshotAsync(cancellationToken: Token)).Should().BeEquivalentTo(before, "a read path creates nothing");
+        MatrixServer.AssertUnchanged(before, await server.SnapshotAsync(cancellationToken: Token), "a read path creates and drops nothing");
     }
 
     /// <summary>

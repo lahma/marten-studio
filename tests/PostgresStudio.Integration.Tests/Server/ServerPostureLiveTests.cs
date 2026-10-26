@@ -19,8 +19,13 @@ namespace PostgresStudio.Integration.Tests.Server;
 /// <b>No Marten type</b>, so these live here (W5-index); MartenStudio's suite names each code as proven in this one.
 /// </para>
 /// <para>
-/// A login a test makes is named for the run (<see cref="PostgresVersionMatrix.RunId" />) and dropped in a <c>finally</c>,
-/// because the matrix's servers are shared by every class of the run. Nothing a test changes is the seeded fixtures'.
+/// <b>A login a test makes is made on a server of this class's own</b> (<see cref="RolesServerAsync" />), never on the
+/// matrix's shared one: a role is the cluster's, and <c>VersionMatrixLiveTests</c>' and <c>ServerFactsLiveTests</c>' no-DDL
+/// fingerprints list every role, so a login made before their sweep and dropped during it reads as an object the sweep
+/// dropped. W5's CI saw exactly that on 2026-10-26 - 95 objects before a sweep on 17 and 94 after, where a fresh 17 has 94 -
+/// and these logins were the only objects the assembly made and dropped on the shared 17. It is still named for the run
+/// (<see cref="PostgresVersionMatrix.RunId" />) and dropped in a <c>finally</c>. Nothing a test changes is the seeded
+/// fixtures'.
 /// </para>
 /// </remarks>
 public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
@@ -64,10 +69,10 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
     [PostgresFact]
     public async Task S04_a_member_of_pg_read_server_files_is_the_file_access_variant()
     {
-        MatrixServer server = await ServerAsync(17);
+        MatrixServer server = await RolesServerAsync();
         string role = "s2_files_" + PostgresVersionMatrix.RunId;
 
-        await server.ExecuteAsync("create role " + role + " login password '" + role + "'; grant pg_read_server_files to " + role, cancellationToken: Token);
+        await MakeLoginAsync(server, role, "create role " + role + " login password '" + role + "'; grant pg_read_server_files to " + role);
 
         try
         {
@@ -173,11 +178,11 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
     [HealthFires("S08")]
     public async Task S08_fires_for_a_login_whose_password_expires_in_three_days()
     {
-        MatrixServer server = await ServerAsync(17);
+        MatrixServer server = await RolesServerAsync();
         string role = "s2_expiring_" + PostgresVersionMatrix.RunId;
         string until = DateTimeOffset.UtcNow.AddDays(3).ToString("yyyy-MM-dd HH:mm:ss'+00'", CultureInfo.InvariantCulture);
 
-        await server.ExecuteAsync("create role " + role + " login password '" + role + "' valid until '" + until + "'", cancellationToken: Token);
+        await MakeLoginAsync(server, role, "create role " + role + " login password '" + role + "' valid until '" + until + "'");
 
         try
         {
@@ -218,14 +223,15 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
     [HealthFires("S10")]
     public async Task S09_and_S10_fire_for_a_login_whose_own_settings_switch_a_planner_method_off_and_start_read_only()
     {
-        MatrixServer server = await ServerAsync(17);
+        MatrixServer server = await RolesServerAsync();
         string role = "s2_settings_" + PostgresVersionMatrix.RunId;
 
-        await server.ExecuteAsync(
+        await MakeLoginAsync(
+            server,
+            role,
             "create role " + role + " login password '" + role + "';"
             + "alter role " + role + " set enable_seqscan = off;"
-            + "alter role " + role + " set default_transaction_read_only = on",
-            cancellationToken: Token);
+            + "alter role " + role + " set default_transaction_read_only = on");
 
         try
         {
@@ -348,6 +354,32 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
         MatrixServer server = await matrix.ServerAsync(major);
         server.SkipIfUnavailable();
         return server;
+    }
+
+    /// <summary>
+    /// The PostgreSQL 17 server the tests that make a login share, seeded like the matrix's and shared with no other class:
+    /// a role is the cluster's, and the matrix's fingerprint lists roles (<see cref="PostgresVersionMatrix.IsolatedServerAsync" />).
+    /// </summary>
+    private async Task<MatrixServer> RolesServerAsync()
+    {
+        MatrixServer server = await matrix.IsolatedServerAsync(17, "posture-roles");
+        server.SkipIfUnavailable();
+        return server;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="sql" />, which makes the login <paramref name="role" />, on <paramref name="server" /> - and checks
+    /// that the matrix's shared 17, which another class's sweep may be fingerprinting, did not get it.
+    /// </summary>
+    private async Task MakeLoginAsync(MatrixServer server, string role, string sql)
+    {
+        await server.ExecuteAsync(sql, cancellationToken: Token);
+
+        await using NpgsqlConnection shared = await (await ServerAsync(17)).OpenAsync(cancellationToken: Token);
+        await using NpgsqlCommand exists = new("select exists (select 1 from pg_catalog.pg_roles where rolname = @role)", shared);
+        exists.Parameters.AddWithValue("role", role);
+
+        (await exists.ExecuteScalarAsync(Token)).Should().Be(false, "the login is made on a server of this class's own, never on the matrix's shared one");
     }
 
     /// <summary>A connection string as a login a test made, to the seeded database.</summary>
