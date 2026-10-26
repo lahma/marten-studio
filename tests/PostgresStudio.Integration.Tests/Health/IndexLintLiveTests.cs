@@ -181,7 +181,16 @@ public class IndexLintLiveTests(PostgresFixture postgres)
             "create table ps_lint_quiet.events_2026_11 partition of ps_lint_quiet.events for values from ('2026-11-01 00:00+00') to ('2026-12-01 00:00+00')",
             "create table ps_lint_quiet.events_2026_12 partition of ps_lint_quiet.events for values from ('2026-12-01 00:00+00') to ('2027-01-01 00:00+00')",
             "create table ps_lint_quiet.events_default partition of ps_lint_quiet.events default");
-        await ExecuteAsync("analyze ps_lint_quiet.parent", "analyze ps_lint_quiet.child", "analyze ps_lint_quiet.events");
+
+        // T25 judges a dense index past its 64 MiB line - (id) INCLUDE (payload), whose leaf entries carry the payload: counted
+        // by the key alone it would read as some six times bloated (W5-B1 review F4 and F6).
+        await ExecuteAsync(
+            "create table ps_lint_quiet.ledger (id int primary key, payload text not null)",
+            "create index ledger_by_id_inc on ps_lint_quiet.ledger (id) include (payload)",
+            "insert into ps_lint_quiet.ledger select g, pg_catalog.repeat('p', 90) || g from pg_catalog.generate_series(1, 600000) g");
+        await ExecuteAsync("analyze ps_lint_quiet.parent", "analyze ps_lint_quiet.child", "analyze ps_lint_quiet.events", "analyze ps_lint_quiet.ledger");
+        (await ScalarAsync("select pg_catalog.pg_relation_size('ps_lint_quiet.ledger_by_id_inc'::pg_catalog.regclass)"))
+            .Should().BeGreaterThanOrEqualTo(BloatedIndexCheck.MinIndexBytes, "the dense index is one T25 judges");
 
         IReadOnlySet<string> before = await HealthSweepProbe.SnapshotAsync(postgres, schema);
 
@@ -228,6 +237,14 @@ public class IndexLintLiveTests(PostgresFixture postgres)
     private static IReadOnlyList<HealthReportFinding> OnTable(HealthReport report, string code, string tableKey) =>
         [.. report.Findings.Where(x => x.Code == code
             && (x.Finding.Subject == tableKey || x.Finding.Subject?.StartsWith(tableKey + ".", StringComparison.Ordinal) == true))];
+
+    /// <summary>One number the test reads for itself.</summary>
+    private async Task<long> ScalarAsync(string sql)
+    {
+        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        await using NpgsqlCommand command = new(sql, connection);
+        return Convert.ToInt64(await command.ExecuteScalarAsync(Token), System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <summary>Runs statements on one connection of the test's own, then flushes its statistics.</summary>
     private async Task ExecuteAsync(params string[] statements)

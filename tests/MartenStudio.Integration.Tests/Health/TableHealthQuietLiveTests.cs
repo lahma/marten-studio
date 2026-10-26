@@ -40,10 +40,13 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
     [HealthQuiet("T24")]
     public async Task The_seeded_sample_store_is_quiet_on_every_table_and_index_check()
     {
-        ManualClock clock = new(Start);
+        // A clock a week past the statistics' start and an ANALYZE to prove it from, so T01, T05 and T06 judge rather than
+        // withhold: their silence below means something (W5-B1 review F3).
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = await HostAsync(postgres, "health_tables_quiet", clock);
 
         await new SampleDataSeeder().Populate(host.Store, Token);
+        await ExecuteAsync(postgres, "analyze " + TableOf<Customer>(host.Store));
 
         HealthReport first = await ReportAsync(host);
         first.Findings.Should().NotContain(static x => TableCodes.Contains(x.Code), string.Join(" | ", first.Findings.Select(static x => x.Finding.Title)));
@@ -80,6 +83,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
             HealthCheckStatus status = HealthLiveHost.Status(second, code);
             status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} is quiet because it looked, not because it did not run: {1}", code, status.Problem);
             status.Statements.Should().NotBeEmpty("{0} read the catalog", code);
+        }
+
+        foreach (string code in (string[]) ["T01", "T05", "T06"])
+        {
+            (HealthLiveHost.Status(second, code).Note ?? string.Empty).Should().NotStartWith("Withheld:", "{0} judged usage over a covered window", code);
         }
 
         host.Logs.WarningsOrWorse.Should().BeEmpty("an expected state is never a warning");

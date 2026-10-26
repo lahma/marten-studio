@@ -199,7 +199,9 @@ one T01 reads, narrowed the same way for a database newer than the server's stat
 own counters were reset less than seven days ago is not judged either, and counted. **What changed in 0.5:** 0.4 made
 the finding Info while the counters were under a day old or had never been reset, and a Warning once the advisor's own
 samples had seen the index unscanned for a day (`MinCounterAge`). That is folded into the guard: the finding is a
-Warning over a covering window or nothing, and T05 keeps no samples of its own.
+Warning over a covering window or nothing, and T05 keeps no samples of its own - so it is never Info for its first day,
+and on PostgreSQL 15 or later a long-running database that was never reset, whose statistics record moments weeks old,
+can be a Warning from the first sweep. After a reset, a restore or a failover, T01, T05 and T06 say nothing for 7 days.
 
 On a **multi-host data source** the finding is Info always. Its reads may go to a standby, which counts its own
 index scans, and nothing read on the primary says anything about a standby's. The finding says to check
@@ -817,8 +819,17 @@ shown to a visitor the store policy passes for the database as a whole (`TenantI
 
 ## T15 Foreign key without a covering index
 
-**Warning.** A foreign key on a judged table of 8 MiB or more (its heap, from `relpages`) that no index covers. Studios:
-both.
+**Warning** (variant `uncovered`) or **Info** (variant `partly-covered`). Studios: both. Gate: Database. A foreign key on a
+judged table of 8 MiB or more (its heap, from `relpages`) that no index covers:
+
+- `uncovered` - no usable index leads with any of the key's columns: the lookup reads the whole table.
+- `partly-covered` - an index leads with some of them: the lookup reads the rows matching those and filters the rest,
+  which is narrower than the whole table and wider than an index on all of them. The evidence names the index.
+
+A column the table's own source adds to every key need not lead: a conjoined Marten document table's `ForeignKey<TRef>` to
+another conjoined type keys `(member, tenant_id)` and indexes the member alone (`TenancyScope.Global` by default), and that
+index covers it. A key into a document table no store shows the studio - a hidden type's, an orphan's - is not
+described at all, as the database browser drops it.
 
 Postgres creates an index for a primary key and a unique constraint, never for a foreign key. So every delete from the
 referenced table - and every update of its key - looks up the rows that point at it, and with no index that lookup reads
@@ -837,8 +848,11 @@ Catalog only: the keys and the indexes come from `pg_constraint` and `pg_index` 
 table locked for a schema change is left out for the sweep and counted, as every index check does. A library's table is
 exempt (index design is the library's). The remedy is `CREATE INDEX CONCURRENTLY ON ... (columns)` for the host's own
 table (`CREATE INDEX` on a partitioned one, where `CONCURRENTLY` is not allowed - or `ON ONLY` and each partition's);
-for a Marten document table whose key is on a duplicated field, `opts.Schema.For<T>().Duplicate(x => x.Member)`, which
-declares the column's index as `ForeignKey<TReference>(...)` does; and for a table Marten creates itself, nothing - its
+for a Marten document table whose key is on a duplicated field, `opts.Schema.For<T>().Duplicate(x => x.Member)` (with
+`notNull: true` where the field is declared NOT NULL, which a bare `Duplicate` would undo), which declares the column's
+index as `ForeignKey<TReference>(...)` does - or, for a conjoined key `ForeignKey<TRef>` made, that declaration with
+`indexConfiguration: i => i.TenancyScope = TenancyScope.PerTenant`, which indexes `(member, tenant_id)`; and for a table
+Marten creates itself, nothing - its
 next apply drops an index nobody declares. Marten's DCB tag tables (`mt_event_tag_<suffix>`) are the case in point: their
 primary key leads with `value`, so a delete of an event reads every tag table whole. marten#5694 declares
 `idx_mt_event_tag_<suffix>_seq_id` from Marten 9.51.0: on 9.51 or later an apply builds it, and the tag table is covered;
@@ -875,7 +889,8 @@ tenant-scoped prepared statement included. Only a custom plan prunes at plan tim
 Up to 18 the documented capacity is a floor - one backend measured about twice it (B0 §8b) - and the evidence says so;
 from PostgreSQL 19 the lock table keeps no such margin and `max_locks_per_transaction` defaults to 128, so a value carried
 over from an older release holds about half the locks it did. The evidence shows the formula with its numbers and the
-fast-path slots a backend has (16 up to 17; from 18 sized from `max_locks_per_transaction`, 64 at its default). The
+fast-path slots a backend has (16 up to 17; from 18 the smallest power of two at or above `max_locks_per_transaction`,
+at least 16 - 64 at its default, 128 at 100). The
 remedy is `max_locks_per_transaction`, sized from the formula (the smallest power of two that holds one such query
 within the line, and at least double the setting in force), which takes effect at the server's restart. Counted from the
 catalog, never by locking anything.
@@ -900,11 +915,15 @@ Read without a lock: the hierarchy through `pg_inherits` (never `pg_partition_tr
 `pg_partitioned_table`, and each bound through `pg_get_expr(relpartbound, 0)`. `pg_get_expr(relpartbound, relid)` opens
 the partition and queues behind a migration's `ACCESS EXCLUSIVE`, and `pg_get_partkeydef` behind one on the parent; with
 no relation, a bound - which holds no column reference - is deparsed without opening anything (measured on 14.24 and
-18.6, 2026-10-26). A `timestamp` key is read as UTC. The remedy is the next period's `CREATE TABLE ... PARTITION OF ...
-FOR VALUES FROM (...) TO (...)` for the host's own table - a calendar month (or several) where the newest partition spans
-whole months - and, for a Marten document table on `ByRollingRange(...)`, `await
+18.6, 2026-10-26). A `timestamp` key is read as UTC; a `timestamptz` range's month boundaries are looked for in the
+session's `TimeZone` (read with the bounds, lock-free), so a range cut at local midnights is still months - and where that
+zone is one the studio's host does not know, the caveat says the months were looked for in UTC. The remedy is the next
+period's `CREATE TABLE ... PARTITION OF ... FOR VALUES FROM (...) TO (...)` for the host's own table - a calendar month (or
+several) where the newest partition spans whole months - and, when the newest bound passed more than a period ago, it
+says to create each period up to now as well. For a Marten document table on `ByRollingRange(...)` it is `await
 store.Advanced.RollPartitionsForwardAsync(CancellationToken.None)` on a cadence shorter than one period (present at
-9.39.0 and 9.54.1); a static `ByRange()` is a configuration line the finding describes.
+9.39.0 and 9.54.1); on `ByExternallyManagedRangePartitions()` the same `CREATE TABLE`, since Marten's apply neither creates
+nor drops those partitions; a static `ByRange()` is a configuration line the finding describes.
 
 ## T25 Bloated index
 
@@ -912,8 +931,9 @@ store.Advanced.RollPartitionsForwardAsync(CancellationToken.None)` on a cadence 
 is mostly empty space, by a lock-free estimate from the catalog:
 
 - `issue-rule` - at least 10 times `reltuples × 64` bytes: the issue's own rule.
-- `key-width` - at least 4 times what its entries take packed: each entry an 8-byte tuple header and its keys aligned to
-  8 bytes, plus a 4-byte line pointer, at the index's fillfactor (90 by default). A fixed-width key counts its `attlen`, a
+- `key-width` - at least 4 times what its entries take packed: each entry an 8-byte tuple header and its columns - the
+  keys and any `INCLUDE` columns, which a leaf entry stores too - aligned to 8 bytes, plus a 4-byte line pointer, at the
+  index's fillfactor (90 by default). A fixed-width column counts its `attlen`, a
   variable-width one its `pg_stats.avg_width` where the reading role may read it and 32 bytes where not. The issue's rule
   misses narrow keys: a 95%-empty `int4` primary key measures 7.1 times its rule and 20 times this one.
 
@@ -930,10 +950,12 @@ and the definition, so the next apply sees no change.
 
 **Warning** at half the range, **Critical** at four fifths (T11's lines). Studios: both. A `smallint` or `integer` column
 of a judged table - a library's included - that a sequence feeds (an identity column, a `serial`, or a default that calls
-one, as `pg_depend` records it, never matched as text), or a `bigint` column fed by a `smallint` or `integer` sequence:
+one, as `pg_depend` records it, never matched as text), or a `bigint` column fed by a `smallint` or `integer` sequence or
+by one whose `MAXVALUE` is set below `bigint`'s:
 
 - `column` - the column's own range is the limit;
-- `sequence` - the sequence's `seqmax` is narrower than the column's (a `bigint` column on an `AS integer` sequence).
+- `sequence` - the sequence's `seqmax` is narrower than the column's (a `bigint` column on an `AS integer` sequence, or a
+  sequence capped by its own `MAXVALUE`).
 
 The estimate never reads the sequence, whose value is read only under a lock (B0 §3): it is the greater of the table's
 `reltuples` past the sequence's start - for a column a one-column unique index holds, whose values are distinct - and the
@@ -944,5 +966,6 @@ other. A cycling sequence, a descending one and one that starts below zero are n
 browser's Sequences list reads one sequence's value when asked, with the share of its column's range used and, from two
 reads, how long it has left. The remedy is `ALTER TABLE ... ALTER COLUMN ... TYPE bigint` - which rewrites the table under
 an `ACCESS EXCLUSIVE` lock - and `ALTER SEQUENCE ... AS bigint` where the sequence is narrower too (an identity column's
-follows its column), for the host's own table; Marten declares no such column (`mt_events.seq_id` is `bigint`; HiLo is
-T11's).
+follows its column), for the host's own table. A `MAXVALUE` set below the type's survives both, so the remedy lifts it:
+`ALTER TABLE ... ALTER COLUMN ... SET NO MAXVALUE` for an identity, `ALTER SEQUENCE ... [AS bigint] NO MAXVALUE`
+otherwise (measured on 14 and 18). Marten declares no such column (`mt_events.seq_id` is `bigint`; HiLo is T11's).

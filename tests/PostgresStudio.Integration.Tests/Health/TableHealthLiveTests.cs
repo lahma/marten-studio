@@ -348,6 +348,12 @@ public class TableHealthLiveTests(PostgresFixture postgres)
             status.Statements.Should().NotBeEmpty("{0} read the catalog", code);
         }
 
+        // The clock is a week on and the tables were analysed: the usage checks judged, they did not withhold (W5-B1 review F3).
+        foreach (string code in (string[]) ["T01", "T05", "T06"])
+        {
+            (second.Checks.Single(x => x.Code == code).Note ?? string.Empty).Should().NotStartWith("Withheld:", "{0} judged usage over a covered window", code);
+        }
+
         probe.StatementsObserved.Should().BePositive();
         probe.BeyondCatalogReads.Should().BeEmpty("a sweep locks nothing it lists (D27)");
         (await HealthSweepProbe.SnapshotAsync(postgres, schema)).Should().BeEquivalentTo(before, "a sweep writes nothing");

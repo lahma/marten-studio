@@ -274,7 +274,8 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
     /// and from 18 the smallest power of two at or above <c>max_locks_per_transaction</c> (64 on these servers, 128 on 19).
     /// </summary>
     private static readonly string FastPathProbe =
-        "select (select pg_catalog.count(*) from pg_catalog.pg_locks l where l.pid = pg_catalog.pg_backend_pid() and l.fastpath) > 16 where "
+        // Relation locks only: the transaction's own virtualxid lock is shown as fastpath too, and would make 16 read as 17.
+        "select (select pg_catalog.count(*) from pg_catalog.pg_locks l where l.pid = pg_catalog.pg_backend_pid() and l.fastpath and l.locktype = 'relation') > 16 where "
         + string.Join(
             " or ",
             new[]

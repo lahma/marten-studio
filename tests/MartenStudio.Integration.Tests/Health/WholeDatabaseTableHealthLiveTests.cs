@@ -442,7 +442,10 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
     [PostgresFact]
     public async Task The_seeded_samples_relational_schemas_raise_no_table_finding()
     {
-        ManualClock clock = new(Start);
+        // A clock a week past the statistics' start and an ANALYZE to prove it from, so T01, T05 and T06 judge rather than
+        // withhold: the demo's silence on them means something (W5-B1 review F3).
+        await fixture.ExecuteAsync("analyze " + SqlIdentifier.Qualify(Legacy, "departments"));
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = Host(clock);
 
         for (int minutes = 0; minutes < 12; minutes += 2)
@@ -478,6 +481,11 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         foreach (HealthCheckStatus status in report.Checks.Where(static x => x.Code.StartsWith('T') && x.Tier != HealthCostTier.Statements))
         {
             status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} has to run for its silence to mean anything: {1}", status.Code, status.Problem);
+        }
+
+        foreach (string code in (string[]) ["T01", "T05", "T06"])
+        {
+            (report.Checks.Single(x => x.Code == code).Note ?? string.Empty).Should().NotStartWith("Withheld:", "{0} judged usage over a covered window", code);
         }
     }
 
