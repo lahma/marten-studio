@@ -122,7 +122,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
     /// <summary>
     /// A plain relational table in the store's own schema - the host's, beside Marten - is judged like any of the store's:
-    /// T01 on its sequential scans, T05 on an index nothing scans, T07 on its dead rows, each with the migration statement
+    /// T01 on its sequential scans, T05 on an index nothing scans, T07 on its never-vacuumed inserts, each with the migration statement
     /// a DBA would put in the host's own migrations.
     /// </summary>
     [PostgresFact]
@@ -169,7 +169,10 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
         HealthReportFinding scans = About(report, "T01", key).Should().ContainSingle().Subject;
         HealthReportFinding unused = About(report, "T05", key).Should().ContainSingle().Subject;
-        HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
+        // G2 (W5-V1): a quarter dead is short of twice its own dead-row trigger (2 x 44,050 for 220,000 rows), so the table is
+        // behind on its 220,000 never-vacuumed inserts instead.
+        About(report, "T07", key).Should().NotContain(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant);
+        HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.InsertsVariant).Subject;
 
         foreach (HealthReportFinding finding in new[] { scans, unused, vacuum })
         {
