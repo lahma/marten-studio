@@ -84,6 +84,8 @@ internal static class PostgresStudioDescriptor
         ]),
         new("System",
         [
+            // W5-S2: the shared Server page, first in System (W5-index §4).
+            new("Server", "server", "server", Title: "Settings, extensions, the roles the studio reads as, and the security posture"),
             new("Activity", "activity", "list"),
         ]),
     ];

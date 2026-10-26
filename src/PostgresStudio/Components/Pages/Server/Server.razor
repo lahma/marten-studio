@@ -1,0 +1,527 @@
+@page "/postgres/server"
+@using PostgresStudio.Components.Pages.Health
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Server
+@using PostgresStudio.Services.Settings
+@implements IAsyncDisposable
+@inject IServerPageService ServerData
+@inject IHealthService Health
+@inject HealthMutes Mutes
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject IJSRuntime JsRuntime
+
+@*
+    System › Server (W5-S2, issue #8 G7): what the server is configured to do, what the studio can see of it, and whether the
+    way the application and the studio connect to it is safe - for the database the scope names, read through
+    IServerPageService.
+
+    One gate: everything here is the server's or the database's as a whole, shown to a visitor the store policy passes for the
+    database with no tenant (D29); nothing needs ViewDatabaseActivity. The security posture is the advisor's own findings
+    (S04-S10, K05-K08) from the visitor's Health report - this page judges nothing again.
+
+    Read once interactive (a prerender reads nothing), every HealthInterval while the page stays open, and on Refresh; the facts
+    are shared, so two visitors within an interval share one read.
+*@
+
+<PageTitle>Server</PageTitle>
+
+<div class="ms-page ms-s2">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Server</h1>
+        <div class="ms-s2-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-s2-lead">
+        What this server is configured to do, what the studio can see of it, and how safely the application and the studio
+        connect to it - read when this page opens, once per <code>HealthInterval</code> while it stays open, and on Refresh. It
+        changes nothing.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a @Descriptor.SourceLabel.ToLowerInvariant() and database in the header to see its server.</p>
+        </div>
+    }
+    else if (view.Refusal != ServerRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-s2-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <section class="ms-section ms-s2-server" aria-label="Server">
+            <h2 class="ms-section-title">Server</h2>
+            <dl class="ms-s2-facts">
+                <div class="ms-s2-fact">
+                    <dt>Version</dt>
+                    <dd>PostgreSQL @view.Server?.Version</dd>
+                </div>
+                <div class="ms-s2-fact">
+                    <dt>Platform</dt>
+                    <dd>
+                        @view.Server?.Platform.Name
+                        @if (view.Server?.Platform.Marker is { Length: > 0 } marker)
+                        {
+                            <span class="ms-s2-fact-note">@marker</span>
+                        }
+                    </dd>
+                </div>
+                <div class="ms-s2-fact">
+                    <dt>Data checksums</dt>
+                    <dd>
+                        @view.DataChecksums
+                        @if (view.DataChecksumsNote is { Length: > 0 } checksums)
+                        {
+                            <span class="ms-s2-fact-note">@checksums</span>
+                        }
+                    </dd>
+                </div>
+                <div class="ms-s2-fact">
+                    <dt>Up since</dt>
+                    <dd>
+                        @if (view.ServerStarted is { } started)
+                        {
+                            @State.FormatInSelectedTimeZone(started)
+                            @if (view.Uptime is { } uptime)
+                            {
+                                <span class="ms-s2-fact-note">up @SessionText.Duration(uptime)</span>
+                            }
+                        }
+                        else
+                        {
+                            <text>not read</text>
+                        }
+                    </dd>
+                </div>
+            </dl>
+
+            <h3 class="ms-s2-subtitle">What the studio can see</h3>
+            @if (view.ReadingRoleNote is { Length: > 0 } reading)
+            {
+                <p class="ms-s2-note ms-s2-reading">@reading</p>
+            }
+
+            @if (view.Grants.Count == 0)
+            {
+                <p class="ms-s2-note ms-s2-unavailable">@(view.GrantsNote ?? "The reading role's grants were not read.")</p>
+            }
+            else
+            {
+                <TableScroll Label="What the reading role holds">
+                    <table class="ms-table ms-s2-grants">
+                        <thead>
+                            <tr>
+                                <th>Privilege</th>
+                                <th>Held</th>
+                                <th>What it means</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (ServerGrantLine grant in view.Grants)
+                            {
+                                <tr class="ms-table-row" @key="grant.Name">
+                                    <td class="ms-table-cell ms-table-cell-mono">@grant.Name</td>
+                                    <td class="ms-table-cell">@(grant.Held ? "yes" : "no")</td>
+                                    <td class="ms-table-cell">@grant.Consequence</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </section>
+
+        <section class="ms-section ms-s2-settings" aria-label="Settings">
+            <h2 class="ms-section-title">Settings</h2>
+            @if (view.Settings.Count == 0)
+            {
+                <p class="ms-s2-note ms-s2-unavailable">@(view.SettingsNote ?? "The settings were not read.")</p>
+            }
+            else
+            {
+                <p class="ms-s2-note">
+                    As this @Settings.Text.SourceNoun's sessions run with them - a value set for its role, its database or in its
+                    connection string counts. Hover a value for where it changes on @view.Server?.Platform.Name.
+                </p>
+
+                @foreach (ServerSettingGroup group in view.Settings.Where(static x => x.Settings.Count > 0))
+                {
+                    <h3 class="ms-s2-subtitle" @key="group.Group">@group.Title</h3>
+                    <TableScroll Label="@(group.Title + " settings")">
+                        <table class="ms-table ms-s2-settings-table">
+                            <thead>
+                                <tr>
+                                    <th>Setting</th>
+                                    <th>Value</th>
+                                    <th>Set by</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (ServerSettingLine line in group.Settings)
+                                {
+                                    <tr class="@("ms-table-row ms-s2-setting ms-s2-setting-" + line.Row.State.ToString().ToLowerInvariant())" @key="line.Row.Name">
+                                        <td class="ms-table-cell ms-table-cell-mono">@line.Row.Name</td>
+                                        <td class="ms-table-cell ms-s2-value" title="@line.WhereItChanges">
+                                            @line.Value
+                                            @if (line.Row.Setting?.PendingRestart == true)
+                                            {
+                                                <span class="ms-chip ms-s2-pending" title="A change to it waits for the server to restart">pending restart</span>
+                                            }
+                                        </td>
+                                        <td class="ms-table-cell">@(line.SetBy ?? "–")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+            }
+        </section>
+
+        <section class="ms-section ms-s2-extensions" aria-label="Extensions">
+            <h2 class="ms-section-title">Extensions</h2>
+            @if (view.Extensions.Count == 0)
+            {
+                <p class="ms-s2-note ms-s2-unavailable">@(view.ExtensionsNote ?? "The extensions were not read.")</p>
+            }
+            else
+            {
+                @if (view.ExtensionsNote is { Length: > 0 } extensionsNote)
+                {
+                    <p class="ms-s2-note ms-s2-unavailable">@extensionsNote</p>
+                }
+
+                <ul class="ms-s2-chips">
+                    @foreach (ServerExtensionStatus chip in view.Extensions)
+                    {
+                        <li class="@("ms-s2-chip " + (chip.Usable ? "ms-s2-chip-usable" : "ms-s2-chip-blocked"))" @key="chip.Name">
+                            <span class="ms-s2-chip-name">@chip.Name</span>
+                            <span class="ms-s2-chip-state">@ChipState(chip)</span>
+                            @if (chip.Note is { Length: > 0 } note)
+                            {
+                                <span class="ms-s2-chip-note">@note</span>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="ms-section ms-s2-posture" aria-label="Security posture">
+            <h2 class="ms-section-title">Security posture</h2>
+            <p class="ms-s2-note">
+                The health advisor's own checks of how the application and the studio connect, as the Health page shows them to you.
+                <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">Open the Health page</a>
+            </p>
+
+            @if (postureError is { Length: > 0 })
+            {
+                <p class="ms-s2-note ms-s2-unavailable">@postureError</p>
+            }
+            else if (posture is { } report)
+            {
+                @if (report.Refusal != HealthRefusal.None)
+                {
+                    <p class="ms-s2-note ms-s2-unavailable">@report.Reason</p>
+                }
+                else
+                {
+                    (IReadOnlyList<HealthReportFinding> findings, IReadOnlyList<HealthCheckStatus> checks) = ServerPosture.Of(report);
+                    List<HealthReportFinding> shown = [.. findings.Where(x => !Mutes.IsMuted(x.MuteKey))];
+                    int muted = findings.Count - shown.Count;
+
+                    @foreach (HealthReportFinding finding in shown)
+                    {
+                        string severity = finding.Severity.ToString().ToLowerInvariant();
+
+                        <article class="@("ms-health-finding ms-s2-finding ms-health-finding-" + severity)" @key="finding.MuteKey" aria-label="@("Health finding " + finding.Code)">
+                            <header class="ms-health-finding-header">
+                                <span class="@HealthPresentation.ChipClass(finding.Severity)">@HealthPresentation.Label(finding.Severity)</span>
+                                <code class="ms-health-code">@finding.Code</code>
+                                <h3 class="ms-health-finding-title">@finding.Finding.Title</h3>
+                            </header>
+                            <p class="ms-health-why">@finding.Finding.WhyItMatters</p>
+                            @if (finding.Evidence.Count > 0)
+                            {
+                                <dl class="ms-health-evidence">
+                                    @foreach (HealthEvidence item in finding.Evidence)
+                                    {
+                                        <div class="ms-health-evidence-row">
+                                            <dt>@item.Label</dt>
+                                            <dd class="ms-mono">@item.Value</dd>
+                                        </div>
+                                    }
+                                </dl>
+                            }
+                            @if (finding.Finding.Remedy is { } remedy)
+                            {
+                                <div class="ms-health-remedy">
+                                    <div class="ms-health-remedy-header">
+                                        <span class="ms-health-remedy-title">@remedy.Heading</span>
+                                        <CopyButton Value="@remedy.Code" Label="@("Copy the remedy for " + finding.Code)" />
+                                    </div>
+                                    <pre class="ms-code ms-health-remedy-code"><code>@remedy.Code</code></pre>
+                                    @if (remedy.Explanation is { Length: > 0 } explanation)
+                                    {
+                                        <p class="ms-health-remedy-explanation">@explanation</p>
+                                    }
+                                </div>
+                            }
+                            <p class="ms-health-link">
+                                <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, how sure, and what was read</a>
+                            </p>
+                        </article>
+                    }
+
+                    @if (muted > 0)
+                    {
+                        <p class="ms-s2-note">@HealthPresentation.Count(muted, "finding") muted in this browser; the Health page lists them.</p>
+                    }
+
+                    @if (report.WithheldCount > 0)
+                    {
+                        <p class="ms-s2-note">@HealthPresentation.Withheld(report.WithheldCount, report.WithheldReason)</p>
+                    }
+
+                    @if (checks.Count > 0)
+                    {
+                        <TableScroll Label="Security posture checks">
+                            <table class="ms-table ms-s2-posture-checks">
+                                <thead>
+                                    <tr>
+                                        <th>Code</th>
+                                        <th>Check</th>
+                                        <th>Result</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (HealthCheckStatus check in checks)
+                                    {
+                                        <tr class="@("ms-table-row ms-health-check-" + check.Outcome.ToString().ToLowerInvariant())" @key="check.Code">
+                                            <td class="ms-table-cell ms-table-cell-mono"><a href="@check.DocsUrl" target="_blank" rel="noopener noreferrer">@check.Code</a></td>
+                                            <td class="ms-table-cell">@check.Title</td>
+                                            <td class="ms-table-cell">
+                                                <span class="ms-health-outcome">@HealthPresentation.OutcomeLabel(check.Outcome, check.FindingCount, check.FindingsWithheld)</span>
+                                                @if (check.Problem is { Length: > 0 } problem)
+                                                {
+                                                    <span class="ms-health-outcome-detail">@problem</span>
+                                                }
+                                                else if (check.Note is { Length: > 0 } checkNote)
+                                                {
+                                                    <span class="ms-health-outcome-detail">@checkNote</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </TableScroll>
+                    }
+                }
+            }
+        </section>
+
+        <ServerPlatformSlot />
+
+        <p class="ms-muted ms-s2-measured">Read @State.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />).</p>
+
+        @foreach (HealthStatement statement in view.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private StudioLiveUpdates? live;
+    private ServerPageView? view;
+    private HealthReport? posture;
+    private string? error;
+    private string? postureError;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+        Mutes.Changed += OnMutesChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+        CancellationToken token = lifetime.Token;
+
+        await State.EnsureInitializedAsync(token);
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await Mutes.LoadAsync(JsRuntime, token);
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, LoadAsync, token);
+    }
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        posture = null;
+        await LoadAsync();
+    }
+
+    private async Task OnMutesChangedAsync() => await InvokeAsync(StateHasChanged);
+
+    private async Task LoadAsync(CancellationToken poll = default)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            ServerPageView? read = scope is null ? null : await ServerData.GetAsync(scope, token);
+            HealthReport? report = null;
+            string? reportError = null;
+
+            if (scope is not null && read is { Refusal: ServerRefusal.None })
+            {
+                try
+                {
+                    report = await Health.GetReportAsync(scope, HealthReportRequest.Regular, token);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    reportError = "The health advisor's report could not be read: " + exception.Message;
+                }
+            }
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                view = read;
+                posture = report;
+                postureError = reportError;
+                error = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string ChipState(ServerExtensionStatus chip) => chip switch
+    {
+        { IsSetting: true } => chip.InstalledVersion ?? "not shown",
+        { InstalledVersion: { } installed } => "installed " + installed + (chip.AvailableVersion is { } available && available != installed ? " (server offers " + available + ")" : string.Empty),
+        { AvailableVersion: { } offered } => "not installed (" + offered + " available)",
+        _ => "not available",
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ScopeChanged -= OnScopeChangedAsync;
+        Mutes.Changed -= OnMutesChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

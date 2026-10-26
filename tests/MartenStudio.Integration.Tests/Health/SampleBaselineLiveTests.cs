@@ -18,6 +18,10 @@ namespace MartenStudio.Integration.Tests.Health;
 /// either. Every finding the advisor does show at start-up is written to the test's output - the server's
 /// (S02's <c>synchronous_commit</c> Info on a Testcontainers server) included - so a run says what a demo opens on.
 /// </para>
+/// <para>
+/// One server finding is asserted, on purpose (W5-S2): S04's Info, because the sample's store logs in to its throwaway
+/// server as that server's superuser - true of the demo, and Info because it is Development.
+/// </para>
 /// </remarks>
 public class SampleBaselineLiveTests(PostgresFixture postgres)
 {
@@ -43,5 +47,11 @@ public class SampleBaselineLiveTests(PostgresFixture postgres)
         {
             HealthLiveHost.Status(report, code).Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} has to run for its silence to mean anything", code);
         }
+
+        // W5-S2, deliberately: the sample's throwaway server, like the suite's, is a Testcontainers Postgres the store logs in
+        // to as its superuser, so S04 says so - as Info, because this is Development, where that is a reasonable choice.
+        HealthReportFinding superuser = report.Findings.Should().ContainSingle(x => x.Code == "S04").Subject;
+        superuser.Severity.Should().Be(HealthSeverity.Info);
+        superuser.Finding.Variant.Should().Be("superuser");
     }
 }

@@ -1270,6 +1270,12 @@ tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per
 tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
                                          the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
                                          server per major, started on first use (an assembly fixture)
+src/PostgresStudio/Components/Pages/Server/  System › Server: the server's facts, what the studio can see, the curated
+                                         settings, the extension chips, the security posture and the platform slot
+src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
+                                         (W5-index §4); never reaches main
+tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
+                                         14-18 as app and probe, and their no-lock, no-DDL reads
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

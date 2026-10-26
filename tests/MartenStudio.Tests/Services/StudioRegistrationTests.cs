@@ -28,6 +28,7 @@ using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
+using PostgresStudio.Services.Server;
 
 namespace MartenStudio.Tests.Services;
 
@@ -140,6 +141,9 @@ public class StudioRegistrationTests
         (typeof(ILinqQueryService), ServiceLifetime.Scoped, How.Type, typeof(LinqQueryService)),
         (typeof(RelationshipReads), ServiceLifetime.Scoped, How.Type, typeof(RelationshipReads)),
         (typeof(IRelationshipDataService), ServiceLifetime.Scoped, How.Type, typeof(RelationshipDataService)),
+        (typeof(IServerSettingsFactsReader), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsReader)),
+        (typeof(ServerSettingsFactsCache), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsCache)),
+        (typeof(IServerPageService), ServiceLifetime.Scoped, How.Type, typeof(ServerPageService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

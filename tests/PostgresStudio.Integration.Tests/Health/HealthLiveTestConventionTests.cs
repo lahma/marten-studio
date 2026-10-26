@@ -30,8 +30,16 @@ namespace PostgresStudio.Integration.Tests.Health;
 /// </remarks>
 public class HealthLiveTestConventionTests
 {
-    /// <summary>The checks this suite proves, through the table source, on a plain database.</summary>
-    internal static readonly string[] ProvenHere = ["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T12"];
+    /// <summary>
+    /// The checks this suite proves: through the table source on a plain database, and - from W5, whose live tests use no
+    /// Marten type and so live here - on servers and logins of their own (S04-S10, K05-K07: the version matrix, a TLS
+    /// server, a Kestrel host; <c>Server/</c>).
+    /// </summary>
+    internal static readonly string[] ProvenHere =
+    [
+        "T01", "T03", "T04", "T05", "T06", "T07", "T08", "T12",
+        "S04", "S05", "S06", "S07", "S08", "S09", "S10", "K05", "K06", "K07",
+    ];
 
     /// <summary>Every other shipped check, and why its live proof is the Marten suite's.</summary>
     internal static readonly IReadOnlyDictionary<string, string> ProvenElsewhere = new Dictionary<string, string>(StringComparer.Ordinal)

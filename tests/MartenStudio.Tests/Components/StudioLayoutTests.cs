@@ -318,7 +318,8 @@ public class StudioLayoutTests
         // information architecture is legible from the first version. This list grows one packet at a
         // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
         // in P7, Documents in P2, Query in P6, and the database browser's Tables in DB-4, which also
-        // moved Relationships out of Data and under it. Health heads Operations from H1 (0.4).
+        // moved Relationships out of Data and under it. Health heads Operations from H1 (0.4), and Server heads
+        // System from W5-S2.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
             .Should().Equal(
                 "Overview",
@@ -333,6 +334,7 @@ public class StudioLayoutTests
                 "Health",
                 "Projections",
                 "Schema",
+                "Server",
                 "Configuration",
                 "Activity");
 
@@ -363,6 +365,7 @@ public class StudioLayoutTests
             "health",
             "projections",
             "schema",
+            "server",
             "config",
             "activity");
     }
@@ -391,6 +394,7 @@ public class StudioLayoutTests
             "health",
             "projections",
             "schema",
+            "server",
             "config",
             "activity");
     }
@@ -550,7 +554,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(14, "every entry, Health (0.4) included");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(15, "every entry, Health (0.4) and Server (0.5) included");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

@@ -6,6 +6,7 @@ using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -163,5 +164,11 @@ internal static class StudioCoreRegistration
         // IRelationshipNodeSource, which the data service takes as optional - a studio with none draws plain tables.
         services.TryAddScoped<RelationshipReads>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
+
+        // W5-S2: the Server page. The facts are the database's, read once per HealthInterval for every circuit; what a visitor
+        // is shown of them is the circuit's.
+        services.TryAddSingleton<IServerSettingsFactsReader, ServerSettingsFactsReader>();
+        services.TryAddSingleton<ServerSettingsFactsCache>();
+        services.TryAddScoped<IServerPageService, ServerPageService>();
     }
 }

@@ -147,3 +147,120 @@ repaired, and the finding says since when it counts. A damaged page that is neve
 **Checksums off is a status line, not a finding.** Clusters made before PostgreSQL 18 have them off unless
 `initdb --data-checksums` was used, and turning them on takes a stopped server and `pg_checksums --enable`. That
 is a DBA's decision, not something the studio can weigh.
+
+## S04 Connecting as a superuser
+
+**Warning in Production, Info anywhere else.** Both studios. The role the data source logs in as - `session_user` on a
+connection of the store's or data source's own data source, before any `SET ROLE` - is one of three kinds, its variant
+(worst first):
+
+- **`superuser`**: `rolsuper`. It passes every permission check, so one SQL injection in the application, or one mistaken
+  statement, can read and change every database on the server, drop any table, read and write the server's files and run
+  programs on it (`COPY … PROGRAM`). No managed provider hands one out.
+- **`provider-admin`**: a member of `rds_superuser` (Amazon RDS and Aurora), `azure_pg_admin` (Azure), `cloudsqlsuperuser`
+  (Cloud SQL) or `neon_superuser` (Neon). It is never called a superuser: it is a provider admin role, the platform's
+  administrator, which creates roles and databases and can grant itself every monitoring role.
+- **`file-access`**: a member of `pg_read_server_files`, `pg_write_server_files` or `pg_execute_server_program`, which let
+  `COPY` read and write the server's files or run programs as the server's operating-system user.
+
+Membership is `MEMBER`, not `USAGE`: a role that may `SET ROLE` to one holds its power whether or not it inherits it. A
+role the application switches to later is not seen. The environment is read as K01 reads it, and a throwaway development
+server's superuser - the sample's, and every Testcontainers server's - is Info.
+
+There is no remedy line. The change is a role that owns the application's schema and nothing more, which is the DBA's to
+create and the data source's to log in as; the finding says so in words. `SqlConsoleRole` does not change what S04 sees.
+
+## S05 Connection without TLS
+
+**Warning in Production, Info anywhere else.** Both studios. `pg_stat_ssl` for the backend of a connection from the data
+source says `ssl = false`, and the connection came over TCP from another machine: `inet_client_addr()` is set and is not a
+loopback address (`127.0.0.0/8`, `::1`). A Unix-domain socket, which has no client address, and a loopback connection never
+leave the server's machine and are quiet.
+
+The connection is the data source's own, so it negotiates TLS exactly as the application's connections do. Without TLS,
+every statement, every document and event, and the login itself (where the server does not ask for SCRAM) cross the
+network in plain text.
+
+What to change, in the connection string the data source is built from - a client setting, not a server one:
+
+```text
+SSL Mode=VerifyFull
+```
+
+`VerifyFull` encrypts and checks that the server's certificate chains to a trusted authority and names the host; `Require`
+encrypts without checking either, which stops a listener but not an impostor. A server with `ssl = off` must be given a
+certificate first, which the finding says when it reads that setting.
+
+## S06 Anyone may create in an application schema
+
+**Warning**, one finding per schema. Both studios. `PUBLIC` - every role on the server, now and later - holds `CREATE` on
+one of the source's own schemas: a Marten store's schemas, or Postgres Studio's admitted `BrowsableSchemas`. It is read from
+the schema's ACL with `aclexplode`, or from its owner's default when it has none, which grants `PUBLIC` nothing. The finding
+names the schema, which is structure the source's own visitors are shown already.
+
+Any role can then put a table, a view, a function or an operator there, and one named like something the application calls
+unqualified, earlier on its `search_path`, is called in its place with the application's rights - the pattern of
+CVE-2018-1058.
+
+**Fires on 14, quiet on 15 and later, by default.** A cluster created on PostgreSQL 14 gives every database's `public`
+schema this grant; from 15 `initdb` makes `pg_database_owner` its owner and grants `PUBLIC` nothing (measured by B0: `t` on
+14, `f` on 17 and 18). A cluster upgraded from 14 keeps the grant.
+
+The remedy is words, because it is a privilege change and no remedy may be one: whoever owns the schema revokes `CREATE` on
+it from `PUBLIC`, and grants it to the roles that create objects there.
+
+## S07 Outdated extension
+
+**Info**, one finding per extension. Both studios. An extension installed in this database is at another version
+(`pg_extension.extversion`) than the one the server's files would install now (`pg_available_extensions.default_version`).
+
+A package upgrade on the server replaces an extension's library at once, and the SQL objects the extension created in each
+database stay at their old version until somebody updates them there: its functions, views and types are the old version's
+while the library behind them is the new one. An extension whose control file is gone (no default version) is not judged,
+and the status line names it.
+
+The remedy is words, because it is DDL: the extension's owner - or a superuser, or the platform's admin role - runs
+`ALTER EXTENSION … UPDATE` in this database after reading its release notes.
+
+## S08 Connecting role's password expires
+
+**Warning** within 30 days, **Critical** within 7 days and once it has passed. Both studios. No variant. The role the data
+source logs in as has a `VALID UNTIL` (`pg_roles.rolvaliduntil`). Seven days is PostgreSQL 19's default
+`password_expiration_warning_threshold`.
+
+Once the password has expired, Postgres refuses every new password login as that role. The connections already open go on
+working, but the pool can open no new one, so as connections are recycled, or the application restarts, it stops reaching
+the database.
+
+**It applies only if the role logs in with a password**; an IAM, Entra ID or certificate login ignores `VALID UNTIL`, and
+the studio cannot tell how the data source authenticates. The remedy is words: whoever administers the role gives it a
+later expiry or a new password (`ALTER ROLE … VALID UNTIL …`) - a DBA's change.
+
+## S09 Planner method switched off
+
+**Warning**, one finding per setting. Both studios. A `pg_settings` row whose name is `enable_…` reads `off` while its
+built-in value (`boot_val`) is `on`, read on a connection of the data source's own, so a value set for its role, its
+database or in its connection string counts. A switch a release ships off is never a finding.
+
+An `enable_*` switched off is a workaround for one query's plan applied to every query of every session it reaches: a query
+whose best plan needs that method gets a slower one, and nothing in the query or its plan's cost says why. The evidence is
+the setting and its `source`.
+
+The remedy follows the source: a server setting through the platform's own place for it (`enable_x = on`, or remove the
+line) when the server's configuration set it; words for a role's or a database's (`ALTER ROLE … RESET`,
+`ALTER DATABASE … RESET`), whose owner resets it there; and words for the connection string's startup options.
+
+## S10 Store connections cannot write
+
+Both studios. Two variants:
+
+- **`read-only`, Critical**: `default_transaction_read_only = on` as the data source's own sessions start with it, and its
+  `source` says who set it. A transaction that does not ask otherwise is read-only, and Marten never asks, so every
+  `SaveChanges`, append and projection write fails with `25006`. **On Azure Database for PostgreSQL** the server sets it
+  itself when its storage is about 95% used or has under 5 GiB free, so the remedy there is the platform's: grow the
+  storage, or turn on storage autogrow (Microsoft Learn, *Storage options in Azure Database for PostgreSQL*). Elsewhere it
+  is the server setting, or words for a role's, a database's or the connection's own.
+- **`standby`, Warning**: the connection the advisor opens for writing - the host a multi-host data source writes to -
+  answered `pg_is_in_recovery() = true`. A standby accepts no write. The remedy is the connection string's
+  `Target Session Attributes=read-write`, with every host of the cluster listed, so Npgsql opens connections only to the one
+  that writes. If the store only ever reads there, mute it.

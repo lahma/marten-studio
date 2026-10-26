@@ -246,6 +246,12 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not probe the collections for id '{Id}'"] = (Verdict.VisitorAction,
             "The find-by-id probe the visitor ran failed; per-collection probe failures inside it are Debug."),
 
+        // ---- W5-S2 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.ServerPosture.cs : 9440 ServerFactsReadFailed"] = (Verdict.Throttled,
+            "A section of the Server page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.ServerPosture.cs : 9440 PostgresStudioServerFactsReadFailed"] = (Verdict.Throttled,
+            "9440 in Postgres Studio's words: a section of the Server page's facts failed, re-read every HealthInterval."),
+
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),

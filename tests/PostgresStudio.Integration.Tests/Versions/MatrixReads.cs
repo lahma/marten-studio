@@ -91,7 +91,20 @@ internal static class MatrixReads
         new("sessions: snapshot", true, static (x, t) => x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t)),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
+
+        // ---- W5-S2: the Server page's facts - every section, as the read the page makes ----------------------------
+        new("server: settings, extensions, connection and grants", true, static async (x, t) => ServerClean(
+            await x.Services.GetRequiredService<PostgresStudio.Services.Server.IServerSettingsFactsReader>().ReadAsync(x.Resolved, t))),
     ];
+
+    /// <summary>Fails a Server page facts read any section of which failed: on every release each one reads.</summary>
+    private static void ServerClean(PostgresStudio.Services.Server.ServerSettingsFacts facts)
+    {
+        if (facts.Failures.Count > 0)
+        {
+            throw new InvalidOperationException("The server facts read failed: " + string.Join("; ", facts.Failures));
+        }
+    }
 
     /// <summary>Fails a by-name read that found nothing: the fixture made the object, so "nothing" is a read that did not read.</summary>
     private static void Found(object? value, string what)

@@ -991,7 +991,9 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         return new HealthRemedy(
             text.ShortTransactionCode,
             "The studio never ends another session. Find it from the application name on Database › Sessions; a server-wide "
-            + "idle_in_transaction_session_timeout or transaction_timeout (PostgreSQL 17) is the DBA's backstop.");
+            + "idle_in_transaction_session_timeout or transaction_timeout (PostgreSQL 17) is the DBA's backstop - but where a Marten "
+            + "HotCold daemon leads from a transaction, the first must be longer than its leader's idle stretch and the second unset "
+            + "for the store's role, or they end that leadership too (K08).");
     }
 
     private static HealthLink? LinkFor(HorizonHolder holder, bool hasAsyncShards) => holder.Kind switch
