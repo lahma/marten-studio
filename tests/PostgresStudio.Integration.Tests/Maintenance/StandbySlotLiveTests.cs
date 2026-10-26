@@ -47,7 +47,7 @@ public class StandbySlotLiveTests
             .WithName("ms-standby-primary-" + run)
             .WithReuse(false)
             .Build();
-        await primary.StartAsync(Token);
+        await StartAsync(primary, image);
 
         ExecResult trusted = await primary.ExecAsync(["sh", "-c", "echo 'host replication all all trust' >> \"$PGDATA/pg_hba.conf\""], Token);
         trusted.ExitCode.Should().Be(0, trusted.Stderr);
@@ -68,7 +68,7 @@ public class StandbySlotLiveTests
             .WithPortBinding(5432, true)
             .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted("pg_isready", "-h", "127.0.0.1", "-p", "5432"))
             .Build();
-        await standby.StartAsync(Token);
+        await StartAsync(standby, image);
 
         string standbyConnection = new NpgsqlConnectionStringBuilder
         {
@@ -132,6 +132,23 @@ public class StandbySlotLiveTests
         finding.Finding.Title.Should().StartWith("A standby, through a physical replication slot, has held back vacuum for ");
 
         await snapshot.RollbackAsync(Token);
+    }
+
+    /// <summary>
+    /// Starts a container of the pair - D19's rule, as <see cref="MatrixServer" /> applies it: an image that cannot be pulled or
+    /// started skips the test locally, with the <c>docker pull</c> line in the reason, and fails it on CI.
+    /// </summary>
+    private static async Task StartAsync(IContainer container, string image)
+    {
+        try
+        {
+            await container.StartAsync(Token);
+        }
+        catch (Exception exception) when (!DockerAvailability.OnContinuousIntegration && exception is not OperationCanceledException)
+        {
+            Assert.Skip("The standby pair could not start " + image + " here (" + exception.GetType().Name + ": " + exception.Message
+                + "); `docker pull " + image + "` makes it run. On CI this is a failure, not a skip.");
+        }
     }
 
     private static async Task RunAsync(string connectionString, params string[] statements)

@@ -34,6 +34,24 @@ internal interface IMaintenanceService
     Task<BloatMeasureResult> MeasureBloatAsync(StudioScope scope, string schema, string table, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// The database browser's gate, as the Maintenance page asks it which schemas a visitor is shown by name (D27): a seam over
+/// <see cref="DatabaseAccess.GateAsync" />, so a test can say what the gate answers (D12).
+/// </summary>
+internal interface IMaintenanceNameGate
+{
+    /// <summary>The gate for <paramref name="scope" />, as <see cref="DatabaseAccess.GateAsync" /> reads it.</summary>
+    Task<DatabaseGateRead> GateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken);
+}
+
+/// <summary>The gate a host's studio asks: <see cref="DatabaseAccess" />'s own.</summary>
+internal sealed class DatabaseAccessNameGate(DatabaseAccess access) : IMaintenanceNameGate
+{
+    /// <inheritdoc />
+    public Task<DatabaseGateRead> GateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken) =>
+        access.GateAsync(scope, resolved, cancellationToken);
+}
+
 /// <summary>One measure per database at once: the measure running now, by store and database.</summary>
 /// <remarks>
 /// A singleton, because a database is everybody's: two visitors pressing at once on one database get one measure - the same
@@ -113,7 +131,7 @@ internal sealed class MaintenanceService : IMaintenanceService
     private readonly StudioAuthorization authorization;
     private readonly IMaintenanceFacts facts;
     private readonly IHealthService health;
-    private readonly DatabaseAccess? access;
+    private readonly IMaintenanceNameGate? access;
     private readonly StudioActionLog audit;
     private readonly BloatMeasureFlights flights;
     private readonly ILogger<MaintenanceService> logger;
@@ -128,7 +146,7 @@ internal sealed class MaintenanceService : IMaintenanceService
         StudioActionLog audit,
         BloatMeasureFlights flights,
         ILogger<MaintenanceService> logger,
-        DatabaseAccess? access = null,
+        IMaintenanceNameGate? access = null,
         TimeProvider? time = null)
     {
         this.settings = settings;

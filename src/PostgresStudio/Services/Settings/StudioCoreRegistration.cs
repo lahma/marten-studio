@@ -150,6 +150,7 @@ internal static class StudioCoreRegistration
         // is the one bloat measure per database at once; what a visitor is shown of them is the circuit's.
         services.TryAddSingleton<IMaintenanceFacts, MaintenanceFactsReader>();
         services.TryAddSingleton<BloatMeasureFlights>();
+        services.TryAddScoped<IMaintenanceNameGate, DatabaseAccessNameGate>();
         services.TryAddScoped<IMaintenanceService, MaintenanceService>();
 
         // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
