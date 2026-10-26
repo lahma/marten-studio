@@ -36,6 +36,13 @@ internal sealed record RangeRunway(double Upper, double? Width, double Ahead)
 /// integer key without a time meaning is judged on its default partition alone. A <c>MAXVALUE</c> upper bound never runs out.
 /// </para>
 /// <para>
+/// <b>A range its source keeps ahead</b> (<see cref="StudioTable.RangePartitionsManaged" />: a Marten document table on
+/// <c>ByRollingRange(...)</c>, which provisions <c>periodsAhead</c> periods and always has a <c>DEFAULT</c> partition) is warned
+/// of only within one width: Marten's recommended <c>periodsAhead: 1</c> leaves the newest bound more than one width ahead
+/// whenever its roll-forward has run, so two widths would warn of it forever (orchestrator decision, W5-B1-rest). Every other
+/// range keeps the two-widths rule.
+/// </para>
+/// <para>
 /// <b>Read without a lock</b> (<see cref="PartitionQueries" />): the bounds through <c>pg_get_expr(relpartbound, 0)</c>, which
 /// opens no relation; a <c>timestamp</c> key is read as UTC.
 /// </para>
@@ -128,8 +135,10 @@ internal sealed class RangePartitionsCheck : HealthCheck<PartitionFacts>
 
             judged++;
 
+            // A range the source's own configuration keeps ahead (Marten's ByRollingRange, which always has a DEFAULT) is
+            // short only once its schedule has fallen behind: periodsAhead 1 always leaves more than one width.
             if (Runway(row, evaluation.Now) is { } runway
-                && (runway.WithinTwoWidths || (runway.Width is null && runway.Passed)))
+                && ((table.RangePartitionsManaged ? runway.WithinOneWidth : runway.WithinTwoWidths) || (runway.Width is null && runway.Passed)))
             {
                 bool critical = !row.HasDefault && runway.WithinOneWidth;
                 findings.Add(RunningOut(table, row, runway, critical, evaluation));

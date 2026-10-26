@@ -64,6 +64,47 @@ internal static class LegacyDemoData
         return rows;
     }
 
+    /// <summary>
+    /// The half-year partitions of <c>legacy.sensor_readings</c> after the script's two 2026 ones: every half through the end
+    /// of next year from <paramref name="today" />, plus the half after that - so the demo's newest bound is always more
+    /// than two partition-widths ahead and never ages into T20 (W5-B1-rest). Oldest first.
+    /// </summary>
+    /// <param name="today">The date the demo is applied on, in UTC.</param>
+    internal static IReadOnlyList<(string Name, DateOnly From, DateOnly To)> SensorReadingPartitions(DateOnly today)
+    {
+        List<(string, DateOnly, DateOnly)> halves = [];
+        DateOnly last = new(today.Year + 2, 7, 1);
+
+        for (DateOnly from = new(2027, 1, 1); from < last; from = from.AddMonths(6))
+        {
+            string name = "sensor_readings_" + from.Year.ToString(CultureInfo.InvariantCulture) + (from.Month == 1 ? "_h1" : "_h2");
+            halves.Add((name, from, from.AddMonths(6)));
+        }
+
+        return halves;
+    }
+
+    /// <summary>
+    /// Creates the partitions <see cref="SensorReadingPartitions" /> names that do not exist yet - <c>IF NOT EXISTS</c>, so a
+    /// later start only adds the halves the calendar has reached, and nothing is ever dropped. They stay empty: the seeded
+    /// readings are in 2026.
+    /// </summary>
+    internal static async Task EnsureSensorReadingPartitionsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        DateOnly today,
+        CancellationToken cancellationToken)
+    {
+        foreach ((string name, DateOnly from, DateOnly to) in SensorReadingPartitions(today))
+        {
+            // Names and bounds are built from integers alone; the schema and table are the demo's own constants.
+            string sql = "create table if not exists legacy." + name + " partition of legacy.sensor_readings for values from ('"
+                + from.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " 00:00:00+00') to ('"
+                + to.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + " 00:00:00+00')";
+            await ExecuteAsync(connection, transaction, sql, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private static async Task<int> SeedWhenEmptyAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,

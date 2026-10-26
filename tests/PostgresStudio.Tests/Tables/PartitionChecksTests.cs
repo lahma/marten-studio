@@ -77,6 +77,29 @@ public class PartitionChecksTests
     }
 
     [Fact]
+    public void A_range_its_source_keeps_ahead_is_warned_of_only_within_one_width_and_every_other_keeps_two()
+    {
+        StudioTable managed = Events with { RangePartitionsManaged = true };
+        static HealthVerdict Judge(StudioTable table, HealthPartitionedTableRow row) =>
+            new RangePartitionsCheck().Evaluate(new PartitionFacts(Now, [row], [table]), Evaluation());
+
+        // ByRollingRange(Month, periodsAhead: 1) on 2026-10-26: October and November, the newest bound 36 days ahead.
+        HealthPartitionedTableRow oneAhead = Monthly(new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), new(2026, 12, 1, 0, 0, 0, TimeSpan.Zero), hasDefault: true);
+        Judge(managed, oneAhead).Findings.Should().BeEmpty("Marten's recommended periodsAhead: 1 is always more than one width ahead once rolled");
+        Judge(Events, oneAhead).Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning, "a range nobody keeps ahead keeps P1's two widths");
+        Judge(Events, oneAhead with { HasDefault = false }).Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning);
+
+        // The roll-forward fell behind: November was never created, and October's bound is six days off.
+        HealthPartitionedTableRow behind = Monthly(new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero), new(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), hasDefault: true);
+        Judge(managed, behind).Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning, "the DEFAULT catches the rows");
+
+        // Ran out: Critical stays where it was - no DEFAULT and within one width, managed or not.
+        HealthPartitionedTableRow ranOut = Monthly(new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero), new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
+        Judge(managed, ranOut).Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Critical);
+        Judge(Events, ranOut).Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Critical);
+    }
+
+    [Fact]
     public void An_integer_key_is_judged_on_its_default_partition_alone_and_maxvalue_never_runs_out()
     {
         HealthPartitionedTableRow integers = Monthly(default, default) with

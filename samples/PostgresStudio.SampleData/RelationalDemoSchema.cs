@@ -269,6 +269,11 @@ public static class RelationalDemoSchema
         {
             await ExecuteScriptAsync(connection, transaction, LegacyScript, cancellationToken).ConfigureAwait(false);
 
+            // The range kept ahead of the calendar, so the demo's health page never shows T20 for it.
+            await LegacyDemoData.EnsureSensorReadingPartitionsAsync(
+                    connection, transaction, DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken)
+                .ConfigureAwait(false);
+
             rows += await LegacyDemoData.SeedAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         }
 
