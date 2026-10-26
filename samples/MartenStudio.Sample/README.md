@@ -17,7 +17,7 @@ Sign in at `/login` as `admin`, `ops` or `viewer` — the password is the user n
 | `--anonymous` | Maps the studio with `AllowAnonymous()` and draws a red banner. Never do this anywhere real. |
 | `--readonly` | Sets `MartenStudioOptions.ReadOnly`, which turns every mutating capability off. |
 | `--path /ops/marten` | Mounts the studio somewhere other than `/marten`, which exercises the sub-path re-rooting. |
-| `--allow-data-generation` | Maps the demo-data panel and the "make it unhealthy" switches outside `Development`. See below. |
+| `--allow-data-generation` | Maps the demo-data panel and the "make it unhealthy" switches outside `Development`. See below. It also lets startup run `drop schema … cascade` on `studio_sample` and `studio_sample_events` when another build seeded them or their rows carry no seed marker, and the cascade drops whatever in other schemas depends on them too. |
 
 ## Demo data
 
