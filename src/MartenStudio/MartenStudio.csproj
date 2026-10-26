@@ -58,7 +58,7 @@
     (Marten 9.40) it emits [assembly: JasperFx.Events.Aggregation.JasperFxSourceGeneratorApplied] into
     every assembly it processes, unconditionally, so a build at a newer Marten would put a JasperFx
     attribute on the shipped MartenStudio.dll and into the public API baseline with it, while a build
-    at the floor would not. Measured at 9.50.2 and again at 9.51.0 (JasperFx 2.91.0): that marker is the only file it writes for this
+    at the floor would not. Measured at 9.50.2, at 9.51.0 (JasperFx 2.91.0) and again at 9.54.1 (JasperFx 2.95.1): that marker is the only file it writes for this
     assembly, so nothing here relies on generated code. The marker is how the JasperFx runtime tells
     an assembly the generator processed from one it never saw (jasperfx#887); an assembly with no
     aggregate in it is not asked.
@@ -86,15 +86,15 @@
   </Target>
 
   <!--
-    The package is packed at the Marten floor and nowhere else. A nupkg packed against 9.51.0 would
-    say `Marten >= 9.51.0` and silently raise the floor of every host that takes it; the floor is a
+    The package is packed at the Marten floor and nowhere else. A nupkg packed against 9.54.1 would
+    say `Marten >= 9.54.1` and silently raise the floor of every host that takes it; the floor is a
     decision recorded in AGENTS.md, not a side effect of which leg of CI ran Pack. The build's Pack
     target refuses first and says why; this is the same refusal for a bare `dotnet pack`.
 
     Two checks, because the property is not what NuGet packs from. Pack writes the dependency range
     from project.assets.json - whatever the last restore wrote - so `dotnet test ...
-    -p:MartenStudioMartenVersion=9.51.0` followed by `dotnet pack` with no-restore or no-build would
-    pass a property-only check at the floor and still write `Marten >= 9.51.0`. So the guard also
+    -p:MartenStudioMartenVersion=9.54.1` followed by `dotnet pack` with no-restore or no-build would
+    pass a property-only check at the floor and still write `Marten >= 9.54.1`. So the guard also
     reads $(ProjectAssetsFile) and requires the library key "Marten/<floor>" in it, quotes included,
     so that a package whose name merely ends in Marten cannot satisfy it; a graph holds one version of
     a package, so the key's presence is the resolved version. The quotes are spelled \x22 in the
