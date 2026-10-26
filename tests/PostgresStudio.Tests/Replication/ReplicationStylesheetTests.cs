@@ -11,7 +11,7 @@ namespace PostgresStudio.Tests.Replication;
 public partial class ReplicationStylesheetTests
 {
     /// <summary>Where the section is: the part until it is folded, then <c>src/PostgresStudio/wwwroot/css/studio.css</c>.</summary>
-    private const string Stylesheet = "src/PostgresStudio/wwwroot/css/parts/r2.css";
+    private const string Stylesheet = "src/PostgresStudio/wwwroot/css/studio.css";
 
     private const string Header = "W5-R2 - Operations › Replication";
 

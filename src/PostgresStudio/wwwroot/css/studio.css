@@ -10823,3 +10823,972 @@ a.ms-schema-health-mark:focus-visible {
         margin: 0;
     }
 }
+
+/* ==========================================================================
+   W5-CAP. Storage: the database's size, its growth, and the largest tables
+
+   0.5's capacity packet (issue #8 G3). Appended to studio.css by the orchestrator in D26 order with the
+   other W5b parts; every selector is the page's own (ms-storage-), so nothing here re-declares an earlier
+   rule. Notes use the secondary text colour, not the muted one: UX-6 measured the muted grey below 4.5:1
+   on the surface.
+   ========================================================================== */
+
+.ms-storage-lead,
+.ms-storage-estimates {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-storage-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-storage-tile {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-storage-tile dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-storage-tile dd {
+    margin: 0;
+}
+
+.ms-storage-tile-value {
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-storage-tile-note {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-storage-heading {
+    margin: var(--ms-space-lg) 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-storage-withheld {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-storage-number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-storage-withheld-row td:first-child {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-storage-share {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    min-width: 12ch;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The share as a bar: its width is the table's share of the database, set on the element as a custom property. */
+.ms-storage-bar {
+    flex: 0 0 6rem;
+    height: 0.5rem;
+    border-radius: var(--ms-radius-full);
+    background: linear-gradient(
+        to right,
+        var(--ms-color-primary) 0 var(--ms-storage-share, 0%),
+        var(--ms-color-surface-alt) var(--ms-storage-share, 0%) 100%);
+    border: 1px solid var(--ms-color-border);
+}
+
+.ms-storage-measured {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+@media (max-width: 640px) {
+    .ms-storage-tiles {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ==========================================================================
+   W5-R2 - Operations › Replication: slots, standbys, the archiver, WAL,
+   checkpoints, pg_stat_io and tablespaces. Folded into studio.css by the
+   orchestrator in D26 order (W5-index §4); tokens only, every rule ms-.
+   ========================================================================== */
+
+.ms-repl-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-repl-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The counts: a row of five that wraps, one per line on a phone - Sessions' shape. */
+.ms-repl-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-repl-stat {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-repl-stat dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-stat dd {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-repl-stat-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-repl-note,
+.ms-repl-gate,
+.ms-repl-measured {
+    max-width: 80ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-refusal,
+.ms-repl-finding {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-repl-finding-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* A section that does not apply here, or is not on this release, reads as a
+   quiet line in its place - never as an error. */
+.ms-repl-unavailable {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-repl-not-checked {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-alert {
+    color: var(--ms-color-warning);
+}
+
+.ms-repl-section {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-repl-heading {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* Label-value pairs in two columns, one on a phone. */
+.ms-repl-facts {
+    display: grid;
+    grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-repl-facts dt {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-facts dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-repl-table td {
+    vertical-align: top;
+}
+
+.ms-repl-number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-repl-io-wal td {
+    background: var(--ms-color-surface);
+}
+
+@media (max-width: 640px) {
+    .ms-repl-stats,
+    .ms-repl-facts {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ==========================================================================
+   W5-S2 - System › Server: the server's facts, what the studio can see,
+   the curated settings, the extension chips and the security posture.
+   Folded into studio.css by the orchestrator in D26 order (W5-index §4);
+   tokens only, every rule ms-s2-.
+   ========================================================================== */
+
+.ms-s2-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-s2-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The server's facts: a row of four that wraps, one per line on a phone. */
+.ms-s2-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-s2-fact {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-s2-fact dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-s2-fact dd {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-s2-fact-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-s2-subtitle {
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-s2-note,
+.ms-s2-measured {
+    max-width: 80ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* A section that was not read reads as a quiet line in its place. */
+.ms-s2-unavailable {
+    color: var(--ms-color-text-muted);
+}
+
+/* A setting the role is not shown, or the release does not have, is a sentence in the value's place. */
+.ms-s2-setting-hidden .ms-s2-value,
+.ms-s2-setting-absent .ms-s2-value,
+.ms-s2-setting-needsversion .ms-s2-value {
+    color: var(--ms-color-text-muted);
+    font-style: italic;
+}
+
+.ms-s2-value {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-s2-pending {
+    margin-left: var(--ms-space-xs);
+    color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+}
+
+/* The extension chips: a wrapping list, each with its state and what stands in the way. */
+.ms-s2-chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-s2-chip {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-s2-chip-usable {
+    border-left-color: var(--ms-color-success);
+}
+
+.ms-s2-chip-blocked {
+    border-left-color: var(--ms-color-border-strong);
+}
+
+.ms-s2-chip-name {
+    font-family: var(--ms-font-mono);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-s2-chip-state {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-s2-chip-note {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-s2-finding {
+    margin-bottom: var(--ms-space-md);
+}
+
+@media (max-width: 640px) {
+    .ms-s2-facts,
+    .ms-s2-chips {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ==========================================================================================================================
+   W5-V1 - the Maintenance page: autovacuum's triggers against each table's counters, running maintenance, the workers, the
+   freeze forecast and the vacuum horizon. Every value is a design token; nothing here styles anything outside .ms-maint.
+   ========================================================================================================================== */
+
+.ms-maint-actions {
+    display: flex;
+    gap: var(--ms-space-sm);
+}
+
+.ms-maint-lead,
+.ms-maint-measured,
+.ms-maint-legend {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    margin: 0 0 var(--ms-space-md);
+    max-width: 72rem;
+}
+
+.ms-maint-name {
+    min-width: 12rem;
+}
+
+.ms-maint-partitions {
+    display: block;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-maint-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-maint-badge {
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-medium);
+    padding: 0 var(--ms-space-sm);
+    white-space: nowrap;
+}
+
+.ms-maint-badge-due {
+    background: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+}
+
+.ms-maint-badge-behind {
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-warning);
+}
+
+.ms-maint-badge-off {
+    background: var(--ms-color-danger-bg);
+    color: var(--ms-color-danger);
+}
+
+/* One decision: a bar of the counter against twice its trigger - the trigger marked at the middle - and the numbers. */
+.ms-maint-decision {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 9rem;
+}
+
+.ms-maint-bar {
+    position: relative;
+    display: block;
+    height: 0.5rem;
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-surface-alt);
+    border: 1px solid var(--ms-color-border);
+    overflow: hidden;
+}
+
+.ms-maint-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--ms-color-success);
+}
+
+.ms-maint-bar-due .ms-maint-bar-fill {
+    background: var(--ms-color-info);
+}
+
+.ms-maint-bar-behind .ms-maint-bar-fill {
+    background: var(--ms-color-warning);
+}
+
+.ms-maint-bar-trigger {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 2px;
+    background: var(--ms-color-text);
+}
+
+.ms-maint-against {
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-maint-when {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    white-space: nowrap;
+}
+
+.ms-maint-when > span {
+    display: block;
+}
+
+.ms-maint-overrides {
+    font-size: var(--ms-font-size-xs);
+    max-width: 16rem;
+    overflow-wrap: anywhere;
+}
+
+.ms-maint-subtitle {
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-semibold);
+    margin: var(--ms-space-md) 0 var(--ms-space-sm);
+}
+
+.ms-maint-bloat {
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    padding: var(--ms-space-md);
+    margin-top: var(--ms-space-md);
+}
+
+.ms-maint-bloat-refusal,
+.ms-maint-unseen {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-maint-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-maint-facts dt {
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-maint-facts dd {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-maint-alert {
+    color: var(--ms-color-warning);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-maint-horizon-title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-maint-oldest {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 40rem) {
+    .ms-maint-facts {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ==========================================================================
+   W5-Q1. Statements: the top statements of the database, by total time
+
+   0.5's statements packet (issue #8 G6, A5). Appended to studio.css by the orchestrator in D26 order with the
+   other W5c parts; every selector is the page's own (ms-stmts-), so nothing here re-declares an earlier rule.
+   Notes use the secondary text colour, not the muted one: UX-6 measured the muted grey below 4.5:1 on the
+   surface. The table sits in its TableScroll region (D25); its statement column wraps rather than widening it.
+   ========================================================================== */
+
+.ms-stmts-lead,
+.ms-stmts-window,
+.ms-stmts-basis,
+.ms-stmts-caveat,
+.ms-stmts-studio,
+.ms-stmts-withheld,
+.ms-stmts-gate {
+    max-width: 90ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stmts-window {
+    color: var(--ms-color-text);
+}
+
+.ms-stmts-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm) var(--ms-space-lg);
+    align-items: center;
+    margin: var(--ms-space-sm) 0 var(--ms-space-md);
+}
+
+.ms-stmts-choice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs);
+    align-items: center;
+}
+
+.ms-stmts-choice-label {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stmts-choice-button {
+    padding: 2px var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stmts-choice-button.ms-stmts-on {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+}
+
+.ms-stmts-number {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-stmts-share {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The share as a bar beside its percentage: the width is the statement's share of the window, set on the element as a
+   custom property. Inline, so the cell stays a table cell. */
+.ms-stmts-bar {
+    display: inline-block;
+    width: 4rem;
+    height: 0.5rem;
+    margin-right: var(--ms-space-xs);
+    vertical-align: middle;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-full);
+    background: linear-gradient(
+        to right,
+        var(--ms-color-primary) 0 var(--ms-stmts-share, 0%),
+        var(--ms-color-surface-alt) var(--ms-stmts-share, 0%) 100%);
+}
+
+.ms-stmts-group {
+    white-space: nowrap;
+}
+
+.ms-stmts-sort {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.ms-stmts-sort.ms-stmts-on {
+    color: var(--ms-color-primary);
+    text-decoration: underline;
+}
+
+.ms-stmts-statement {
+    min-width: 24ch;
+    max-width: 70ch;
+}
+
+.ms-stmts-text summary {
+    cursor: pointer;
+}
+
+.ms-stmts-text summary code {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    overflow-wrap: anywhere;
+}
+
+.ms-stmts-text pre {
+    margin: var(--ms-space-xs) 0 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    font-size: var(--ms-font-size-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-stmts-note,
+.ms-stmts-queryid {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-stmts-unwatched td {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-stmts-measured {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+@media (max-width: 640px) {
+    .ms-stmts-controls {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .ms-stmts-statement {
+        min-width: 16ch;
+    }
+}
+
+/* ==========================================================================
+   W5-AUR - Aurora: which instance answered (the Health page, both
+   Overviews, the Server page), the Server page's Aurora section and the
+   Replication page's Aurora replicas.
+   Folded into studio.css by the orchestrator in D26 order (W5-index §4);
+   tokens only, every rule ms-aur-.
+   ========================================================================== */
+
+/* "Answered by instance x (a reader), Aurora 16.4.1. Capacity 4.5 ACU ..." - one quiet line under a page's summary. */
+.ms-aur-answer {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-aur-answer-instance,
+.ms-aur-answer-capacity {
+    overflow-wrap: anywhere;
+}
+
+.ms-aur-answer-unknown {
+    color: var(--ms-color-text-muted);
+}
+
+/* The Health page's "the statistics look reset" line sits with the summary, not between the findings. */
+.ms-aur-reset {
+    margin: 0 0 var(--ms-space-md);
+}
+
+/* The section's two facts: answered by, and capacity - a row that wraps, one per line on a phone. */
+.ms-aur-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-aur-fact {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-aur-fact dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-aur-fact dd {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+    overflow-wrap: anywhere;
+}
+
+.ms-aur-fact-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-aur-subtitle {
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-aur-note,
+.ms-aur-replicas-note {
+    max-width: 80ch;
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-aur-unavailable,
+.ms-aur-withheld {
+    color: var(--ms-color-text-muted);
+}
+
+/* Numbers line up at the right, in tabular figures. */
+.ms-aur-number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-aur-instances,
+.ms-aur-waits,
+.ms-aur-dml,
+.ms-aur-sessions,
+.ms-aur-replicas {
+    width: 100%;
+}
+
+@media (max-width: 640px) {
+    .ms-aur-facts,
+    .ms-aur-answer {
+        grid-template-columns: minmax(0, 1fr);
+        flex-direction: column;
+    }
+}
+
+/* ==========================================================================
+   W5-B1. Database browser lints: the uncovered foreign key, the unpinned SECURITY DEFINER, sequence headroom
+
+   0.5's browser half of issue #8 G4. Appended to studio.css by the orchestrator in D26 order with the other W5c
+   parts; every selector is new (ms-db-fk-uncovered, ms-db-security-, ms-db-headroom), so nothing here re-declares
+   an earlier rule - the two badges are ms-db-badge-warning badges and only gain room to wrap. Notes use the
+   secondary text colour, not the muted one: UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-db-fk-uncovered,
+.ms-db-security-unpinned {
+    white-space: normal;
+    text-align: left;
+}
+
+.ms-db-security-note {
+    max-width: 80ch;
+    margin: 0 0 var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-warning);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-db-headroom {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    white-space: normal;
+}
+
+.ms-db-headroom-used {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-db-headroom-rate {
+    font-style: italic;
+}
+
+.ms-db-headroom-cycles {
+    color: var(--ms-color-warning);
+}
+
+@media (max-width: 640px) {
+    .ms-db-headroom {
+        justify-content: flex-start;
+    }
+}
+
+/* ==========================================================================
+   W5-API. The Health page's Snapshot menu, and Database > Sessions by application
+
+   0.5's diagnostics API packet (issue #8 G9 and the snapshot download, API design §4.3). Appended to studio.css by the
+   orchestrator in D26 order with the other W5 parts; every selector is this packet's own (ms-snapshot-, ms-sessions-apps,
+   ms-sessions-budget), so nothing here re-declares an earlier rule. Notes use the secondary text colour, not the muted one:
+   UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-snapshot-menu {
+    position: relative;
+    display: inline-flex;
+}
+
+.ms-snapshot-message {
+    align-self: center;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-snapshot-view {
+    position: fixed;
+    inset: 0 0 0 auto;
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    width: min(720px, 100vw);
+    max-width: 100vw;
+    box-sizing: border-box;
+    padding: var(--ms-space-md);
+    overflow-y: auto;
+    border-left: 1px solid var(--ms-color-border);
+    background: var(--ms-color-surface);
+    box-shadow: var(--ms-shadow-lg);
+}
+
+.ms-snapshot-view-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-snapshot-view-title {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-snapshot-view-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-snapshot-view-note {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-sessions-budget,
+.ms-sessions-apps-note {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-sessions-apps-table td,
+.ms-sessions-apps-table th[scope="row"] {
+    white-space: nowrap;
+}
+
+.ms-sessions-apps-table td + td,
+.ms-sessions-apps-total td {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.ms-sessions-apps-total {
+    border-top: 2px solid var(--ms-color-border);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+@media (max-width: 640px) {
+    .ms-snapshot-view {
+        width: 100vw;
+        padding: var(--ms-space-md) var(--ms-space-md);
+    }
+}

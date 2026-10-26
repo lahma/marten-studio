@@ -12,7 +12,7 @@ namespace PostgresStudio.Tests.Diagnostics;
 public partial class ApiStylesheetTests
 {
     /// <summary>Where the section is: the part until it is folded, then <c>src/PostgresStudio/wwwroot/css/studio.css</c>.</summary>
-    private const string Stylesheet = "src/PostgresStudio/wwwroot/css/parts/api.css";
+    private const string Stylesheet = "src/PostgresStudio/wwwroot/css/studio.css";
 
     private const string Header = "W5-API. The Health page's Snapshot menu, and Database > Sessions by application";
 

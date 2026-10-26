@@ -12,7 +12,7 @@ namespace PostgresStudio.Tests.Tables;
 public partial class B1StylesheetTests
 {
     /// <summary>Where the section is: the part until it is folded, then <c>src/PostgresStudio/wwwroot/css/studio.css</c>.</summary>
-    private const string Stylesheet = "src/PostgresStudio/wwwroot/css/parts/b1.css";
+    private const string Stylesheet = "src/PostgresStudio/wwwroot/css/studio.css";
 
     private const string Header = "W5-B1. Database browser lints";
 

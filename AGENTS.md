@@ -424,7 +424,7 @@ that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones 
 re-declares a few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
 `StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish` pins `UX-7`. 0.4.0 appended `HEALTH-1`,
 `HEALTH-2`, `HEALTH-4`, `HEALTH-3`, `EVENTS-4`, `QUERY-LINQ`, `PGV` and `UX-8` in that order, under the same rule;
-`StylesheetTests.QueryRefusal` pins `UX-8`.
+`StylesheetTests.QueryRefusal` pins `UX-8`. 0.5.0 appended the wave-5 sections W5-CAP, W5-R2, W5-S2, W5-V1, W5-Q1, W5-AUR, W5-B1 and W5-API in that order under the same rule; each section's own stylesheet test reads it out of studio.css by its header.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
 0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
@@ -1300,8 +1300,6 @@ src/PostgresStudio/Components/Pages/Server/  System › Server: the server's fac
                                          settings, the extension chips, the security posture and the platform slot
 tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
                                          14-18 as app and probe, and their no-lock, no-DDL reads
-src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
-                                         (W5-index §4); never reaches main
 src/PostgresStudio/Services/Aurora/       Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
                                          profile and its samples, the parameter reference, the host's capacity reader, and
                                          the Server page section's facts and per-visitor view
