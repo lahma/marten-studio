@@ -43,9 +43,12 @@ internal sealed record PublicSchemaCreateFacts(IReadOnlyList<string> OwnSchemas,
 [HealthCheck("S06", HealthArea.Server, HealthCostTier.Catalog, "Anyone may create in an application schema")]
 internal sealed class PublicSchemaCreateCheck : HealthCheck<PublicSchemaCreateFacts>
 {
-    /// <summary>What the status row says when the source's declarations - its own schemas - could not be read.</summary>
+    /// <summary>
+    /// What the status row says when the declarations naming the database's own schemas could not be read - in words that
+    /// are a Marten store's and a Postgres Studio source's alike.
+    /// </summary>
     internal const string DeclarationsUnread =
-        "The source's own schemas could not be read from its declarations, so whether PUBLIC may create in them is not checked.";
+        "Which schemas are this database's own could not be read, so whether PUBLIC may create in them is not checked.";
 
     /// <summary>
     /// The source's own schemas from its declarations - failing closed, as the database browser's classification does: a

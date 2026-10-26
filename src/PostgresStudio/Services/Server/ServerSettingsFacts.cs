@@ -110,10 +110,12 @@ internal static class ServerSettingSource
 {
     /// <summary>
     /// The source of <paramref name="setting" />'s <c>reset_val</c>: <c>client</c> when the connection string's
-    /// <c>Options</c> set it, or when the role or database entry Postgres would apply has another value (the startup option
-    /// won); that entry's own source when its value is the value; <c>default</c> with no entry and the built-in value;
-    /// otherwise <see langword="null" /> - the server's configuration, its command line or an environment variable, which the
-    /// read cannot tell apart.
+    /// <c>Options</c> set it; the role or database entry's own source when the entry Postgres would apply has the value;
+    /// <c>default</c> with no entry and the built-in value; otherwise <see langword="null" />, not known. That covers an
+    /// entry whose value is not the value with no startup option to explain it - a <c>PGOPTIONS</c> in the host's
+    /// environment, a pooler's startup parameters or an entry altered since the session began would each read so, and
+    /// calling any of them "client" would name a setter the read never saw - and the server's configuration, its command
+    /// line or an environment variable, which the read cannot tell apart.
     /// </summary>
     /// <param name="setting">The row, its <see cref="ServerSettingValue.Value" /> the <c>reset_val</c> and its source the entry's.</param>
     /// <param name="entryValue">The applied entry's value as <c>ALTER … SET</c> stored it, or <see langword="null" /> with no entry.</param>
@@ -133,8 +135,7 @@ internal static class ServerSettingSource
             return Same(entryValue, setting.Value, setting.Unit) switch
             {
                 true => setting.Source,
-                false => "client",
-                null => null,
+                _ => null,
             };
         }
 

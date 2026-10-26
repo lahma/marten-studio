@@ -403,7 +403,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
         "client" => "the connection itself: this data source's connection string sends it as a startup option",
         "session" => "the session that read it",
         "override" => "Postgres itself, which forces this value",
-        null => "not readable",
+        null => "not known",
         _ => source,
     };
 

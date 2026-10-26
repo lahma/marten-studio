@@ -224,8 +224,8 @@ so a value set for the store's role or database counts):
 
 **The leader's idle stretch is measured, not assumed** (`HotColdLeaderSessionLiveTests`, `DaemonTimeoutsLiveTests`, at
 Marten 9.39.0, 9.45.0 and the latest tested). With a transaction-scoped lock and its monitor on, from Weasel 9.34 (Marten
-9.39.1), whose Patched DistributedLock.Postgres 1.3.3 the check reads off the loaded assembly rather than from a version
-number, DistributedLock's keepalive runs in the leadership transaction about once a minute (61 s), the session idle in
+9.39.1), whose Patched DistributedLock.Postgres 1.3.3 the check reads off the assembly Weasel.Postgresql binds to, by its package
+version (both packages' assembly version is 1.0.0.0), DistributedLock's keepalive runs in the leadership transaction about once a minute (61 s), the session idle in
 between; with the upstream DistributedLock.Postgres 1.3.0 (Weasel 9.33, Marten 9.39.0) - and wherever the connection string
 sets Npgsql's `Keepalive` or `Multiplexing` -
 the monitor's `pg_sleep` keeps the session active once its first leadership poll has passed, so it is idle only about

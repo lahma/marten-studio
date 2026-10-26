@@ -127,19 +127,17 @@ public class DaemonTimeoutsCheckTests
 
     [Theory]
     [InlineData("1.3.3+425b94ad7888d7c275f7d3358e2f4cf8844c7206", null, null, true, "DistributedLock.Postgres 1.3.3 (loaded)")]
-    [InlineData("1.3.0+306be8b2524f953263acd0876abeabb9581bcf8a", null, "9.45.0", false, "DistributedLock.Postgres 1.3.0 (loaded)")]
-    [InlineData(null, "1.3.3.0", null, true, "assembly version 1.3.3.0")]
-    [InlineData(null, "1.0.0.0", "9.45.0", false, "assembly version 1.0.0.0")]
+    [InlineData("1.3.0+306be8b2524f953263acd0876abeabb9581bcf8a", "1.3.3+425b94ad7888d7c275f7d3358e2f4cf8844c7206", "9.45.0", false, "DistributedLock.Postgres 1.3.0 (loaded)")]
+    [InlineData(null, "1.3.3+425b94ad7888d7c275f7d3358e2f4cf8844c7206", "9.33.0", true, "DistributedLock.Postgres 1.3.3 (the one Weasel.Postgresql binds to)")]
+    [InlineData(null, "1.3.0+306be8b2524f953263acd0876abeabb9581bcf8a", "9.45.0", false, "DistributedLock.Postgres 1.3.0 (the one Weasel.Postgresql binds to)")]
+    [InlineData(null, "not a version", "9.34.0", true, "Weasel.Postgresql 9.34.0")]
     [InlineData(null, null, "9.34.0", true, "Weasel.Postgresql 9.34.0")]
     [InlineData(null, null, "9.33.0", false, "Weasel.Postgresql 9.33.0")]
     [InlineData(null, null, null, true, "taken for the keepalive")]
-    public void The_monitor_is_the_loaded_DistributedLocks_then_the_one_Weasel_references_then_Weasels_own_version(
-        string? loaded, string? referenced, string? weasel, bool keepalive, string basis)
+    public void The_monitor_is_the_loaded_DistributedLocks_then_the_one_Weasel_binds_to_then_Weasels_own_version(
+        string? loaded, string? bound, string? weasel, bool keepalive, string basis)
     {
-        LeaderLockMonitor monitor = LeaderLockMonitor.Of(
-            loaded,
-            referenced is null ? null : Version.Parse(referenced),
-            weasel is null ? null : Version.Parse(weasel));
+        LeaderLockMonitor monitor = LeaderLockMonitor.Of(loaded, bound, weasel is null ? null : Version.Parse(weasel));
 
         monitor.Keepalive.Should().Be(keepalive);
         monitor.Basis.Should().Contain(basis);
@@ -147,14 +145,34 @@ public class DaemonTimeoutsCheckTests
 
     /// <summary>
     /// The boundary is a patch release of the floor: Marten 9.39.0 runs Weasel 9.33 and the upstream DistributedLock 1.3.0,
-    /// 9.39.1 already Weasel 9.34 and the Patched 1.3.3 (weasel#614) - so this run's own answer follows the Marten it resolved.
+    /// 9.39.1 already Weasel 9.34 and the Patched 1.3.3 (weasel#614) - so this run's own answer follows the Marten it resolved,
+    /// and is DistributedLock's own, never the Weasel fallback. Run alone it must hold too, before anything has loaded
+    /// DistributedLock: that is the order in which its assembly version, <c>1.0.0.0</c> in both packages, once answered.
     /// </summary>
     [Fact]
     public void This_runs_monitor_is_the_keepalive_exactly_from_Marten_9_39_1()
     {
         Version marten = MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.Marten)!;
+        LeaderLockMonitor monitor = LeaderLockMonitor.Current;
 
-        LeaderLockMonitor.Current.Keepalive.Should().Be(marten >= new Version(9, 39, 1), LeaderLockMonitor.Current.Basis);
+        monitor.Keepalive.Should().Be(marten >= new Version(9, 39, 1), monitor.Basis);
+        monitor.Basis.Should().StartWith(LeaderLockMonitor.AssemblyName + " 1.3.", "the monitor is read off DistributedLock itself");
+    }
+
+    /// <summary>
+    /// The second source on its own, whatever is loaded: Weasel's load context binds its reference to the package this
+    /// process resolved, and its informational version - not its assembly version - names it.
+    /// </summary>
+    [Fact]
+    public void The_one_Weasel_binds_to_is_read_by_its_package_version()
+    {
+        Version marten = MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.Marten)!;
+
+        Version? bound = MartenStudio.Services.Configuration.MartenRuntime.ParseVersion(LeaderLockMonitor.BoundVersion());
+
+        bound.Should().NotBeNull();
+        (bound! >= LeaderLockMonitor.KeepaliveSince).Should().Be(marten >= new Version(9, 39, 1), "bound to " + bound);
+        LeaderLockMonitor.LoadedVersion().Should().NotBeNull("binding it loaded it into Weasel's own load context");
     }
 
     [Fact]

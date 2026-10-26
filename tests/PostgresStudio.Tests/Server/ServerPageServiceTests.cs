@@ -49,6 +49,8 @@ public class ServerPageServiceTests
         view.Refusal.Should().Be(ServerRefusal.StorePolicy);
         view.Reason.Should().Contain("PostgresStudioOptions.SourceAuthorizationPolicy").And.Contain("with no tenant selected");
         provider.GetRequiredService<ServerSettingsFactsCache>().ReadCount.Should().Be(0, "nothing of the server is read for a refused visitor");
+        // PostgresStudioResource carries no tenant to assert on; that the question is the tenant-less one is
+        // MartenStudio.Tests' ServerPageStorePolicyTests, through MartenStoreResource.TenantId.
         policy.Calls.Should().NotBeEmpty().And.OnlyContain(static x => x.Policy == "src" && x.Resource.Capability == null);
     }
 

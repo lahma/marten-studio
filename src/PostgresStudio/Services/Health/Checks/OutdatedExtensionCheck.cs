@@ -2,6 +2,8 @@ using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
 
+using Microsoft.Extensions.DependencyInjection;
+
 namespace PostgresStudio.Services.Health.Checks;
 
 /// <summary>What S07 reads.</summary>
@@ -53,12 +55,27 @@ internal sealed class OutdatedExtensionCheck : HealthCheck<OutdatedExtensionFact
             return new OutdatedExtensionFacts(extensions, new Dictionary<string, bool>(StringComparer.Ordinal));
         }
 
-        var query = ServerPostureQueries.UpdatePaths(candidates);
-        IReadOnlyList<(string Name, bool Updatable)> paths = await context.Sql
-            .QueryAsync(query, static reader => (reader.GetString(0), reader.GetBoolean(1)), cancellationToken)
-            .ConfigureAwait(false);
+        // Remembered by database, extension and both versions (ExtensionUpdatePaths): the function reads every update script
+        // from the server's disk, and its answer changes only with one of those four.
+        if (context.Services.GetService<ExtensionUpdatePaths>() is { } memo)
+        {
+            return new OutdatedExtensionFacts(
+                extensions,
+                await memo.GetAsync(context.StoreKey, context.DatabaseId, candidates, (misses, token) => ReadPathsAsync(context, misses, token), cancellationToken)
+                    .ConfigureAwait(false));
+        }
 
+        IReadOnlyList<(string Name, bool Updatable)> paths = await ReadPathsAsync(context, candidates, cancellationToken).ConfigureAwait(false);
         return new OutdatedExtensionFacts(extensions, paths.ToDictionary(static x => x.Name, static x => x.Updatable, StringComparer.Ordinal));
+    }
+
+    private static Task<IReadOnlyList<(string Name, bool Updatable)>> ReadPathsAsync(
+        HealthCheckContext context,
+        IReadOnlyList<(string Name, string Installed, string Target)> candidates,
+        CancellationToken cancellationToken)
+    {
+        var query = ServerPostureQueries.UpdatePaths(candidates);
+        return context.Sql.QueryAsync(query, static reader => (reader.GetString(0), reader.GetBoolean(1)), cancellationToken);
     }
 
     /// <inheritdoc />

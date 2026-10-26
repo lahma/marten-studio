@@ -71,7 +71,7 @@ internal sealed record DaemonTimeoutsFacts(
 /// <b>The leader's idle stretch, from what the daemon is configured to do and the DistributedLock it runs</b> - measured, never
 /// assumed (<c>HotColdLeaderSessionLiveTests</c>, <c>DaemonTimeoutsLiveTests</c>, at Marten 9.39.0, 9.45.0 and the latest
 /// tested). With a transaction-scoped lock and its monitor on: from Weasel 9.34 (Marten 9.39.1), whose Patched
-/// DistributedLock.Postgres 1.3.3 this reads off the loaded assembly (<see cref="LeaderLockMonitor" />), DistributedLock's
+/// DistributedLock.Postgres 1.3.3 this reads off the assembly Weasel binds to (<see cref="LeaderLockMonitor" />), DistributedLock's
 /// keepalive runs in the leadership transaction about once a minute, the session idle in between; with the upstream 1.3.0
 /// (Weasel 9.33, Marten 9.39.0) - or where the connection string sets Npgsql's
 /// <c>Keepalive</c> or <c>Multiplexing</c> - the monitor's <c>pg_sleep</c> keeps it active, idle only until its first

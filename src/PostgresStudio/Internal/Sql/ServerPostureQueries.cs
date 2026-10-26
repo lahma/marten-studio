@@ -30,8 +30,8 @@ namespace PostgresStudio.Internal.Sql;
 /// session of the data source starts with, and the role-and-database, role, database or global entry in
 /// <c>pg_db_role_setting</c> for the session's login (<c>session_user</c>, which <c>SET ROLE</c> does not change) that
 /// Postgres would apply, with that entry's own value. Whose value <c>reset_val</c> is, is then the caller's to decide
-/// (<c>ServerSettingSource</c>): the connection's startup options outrank every such entry, so an entry whose value is not
-/// <c>reset_val</c> lost to them.
+/// (<c>ServerSettingSource</c>): the connection's startup options outrank every such entry, and an entry whose value is not
+/// <c>reset_val</c>, with no startup option the connection string names to explain it, leaves the source not known.
 /// </para>
 /// <para>
 /// <b>Every value is a parameter.</b> A setting's or a role's name written as a literal is structure, as

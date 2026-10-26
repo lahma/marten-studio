@@ -191,5 +191,8 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton<IServerSettingsFactsReader, ServerSettingsFactsReader>();
         services.TryAddSingleton<ServerSettingsFactsCache>();
         services.TryAddScoped<IServerPageService, ServerPageService>();
+
+        // S07's update paths, remembered by database, extension and both versions across sweeps.
+        services.TryAddSingleton<ExtensionUpdatePaths>();
     }
 }
