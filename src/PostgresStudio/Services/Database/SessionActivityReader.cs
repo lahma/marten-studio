@@ -244,6 +244,17 @@ internal sealed class SessionActivitySnapshots
         return cache.GetAsync(key, token => ReadAsync(resolved, token), cancellationToken);
     }
 
+    /// <summary>
+    /// Whether <see cref="GetAsync" /> would be answered without a new read: a snapshot younger than the floor, or one being
+    /// read (the diagnostics API's question before it spends a fresh read, API design §3.4).
+    /// </summary>
+    /// <param name="resolved">The database.</param>
+    public bool IsCached(ResolvedSource resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        return cache.Holds(resolved.Source.Key + "|" + resolved.Target.Identity);
+    }
+
     private Task<SessionSnapshot> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref reads);

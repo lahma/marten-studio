@@ -182,6 +182,10 @@ public class StudioRegistrationTests
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),
         (typeof(DaemonAccessor), ServiceLifetime.Scoped, How.Type, typeof(DaemonAccessor)),
         (typeof(IProjectionDataService), ServiceLifetime.Scoped, How.Type, typeof(ProjectionDataService)),
+
+        // W5-API: the diagnostics API for the host's own code (D31) - added in 0.5, inert until host code calls it.
+        (typeof(PostgresStudio.Services.Diagnostics.FreshReadLimiter), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Diagnostics.FreshReadLimiter)),
+        (typeof(PostgresStudio.IPostgresDiagnostics), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Diagnostics.PostgresDiagnosticsService)),
     ];
 
     [Fact]

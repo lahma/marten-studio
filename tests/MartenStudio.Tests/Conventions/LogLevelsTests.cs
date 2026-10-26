@@ -297,6 +297,12 @@ public class LogLevelsTests
             "One of Aurora's own reads failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the sweep and the Server page re-read every HealthInterval."),
         ["src/PostgresStudio/Services/PostgresStudioLog.Aurora.cs : 9501 PostgresStudioAuroraReadFailed"] = (Verdict.Throttled,
             "9501 in Postgres Studio's words: one of Aurora's own reads failed, re-read every HealthInterval."),
+
+        // ---- W5-API ---------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Diagnostics.cs : 9251 DiagnosticsSectionFailed"] = (Verdict.Throttled,
+            "A section the diagnostics API was asked for failed by connection, an unexpected SQLSTATE or a reader that threw; a host polls, so Warning once per source, database and kind in ten minutes, and privilege and timeouts are Debug."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Diagnostics.cs : 9251 PostgresStudioDiagnosticsSectionFailed"] = (Verdict.Throttled,
+            "9251 in Postgres Studio's words: a section of a diagnostics snapshot failed, asked as often as the host polls."),
     };
 
     [Fact]

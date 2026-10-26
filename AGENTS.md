@@ -1323,6 +1323,8 @@ src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31)
                                          findings, checks and sections - namespace PostgresStudio, like the registration types
 src/PostgresStudio/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builders, read limiter and JSON
                                          writer, and the Health page's visitor download builder (W5-API)
+tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the host gate's sentinels, the JSON baselines, the
+                                         limiter and the sections from hand-built facts - no database
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

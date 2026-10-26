@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using System.Text.Unicode;
 
 namespace PostgresStudio.Services.Diagnostics;
 
@@ -28,8 +27,10 @@ namespace PostgresStudio.Services.Diagnostics;
 /// <see cref="SchemaVersion" />. The studio writes only its current version (<c>docs/diagnostics.md#snapshot-json</c>).
 /// </para>
 /// <para>
-/// Characters outside ASCII are written as they are; <c>&lt;</c>, <c>&gt;</c>, <c>&amp;</c> and quotes are escaped, so the text
-/// is safe to paste where HTML might read it.
+/// <b>Written to be read.</b> It is a file attached to a ticket, a page in the studio's JSON viewer, text on a clipboard - never
+/// markup the studio embeds in a page - so characters are written as they are, a time's <c>+00:00</c> and an apostrophe
+/// included, and only what JSON itself requires is escaped: quotes, backslashes and control characters. A host that puts the
+/// text into HTML encodes it there, as it would any text.
 /// </para>
 /// </remarks>
 internal static class DiagnosticsJson
@@ -43,7 +44,7 @@ internal static class DiagnosticsJson
     private static readonly JsonWriterOptions Options = new()
     {
         Indented = true,
-        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     /// <summary>The snapshot, as indented JSON.</summary>

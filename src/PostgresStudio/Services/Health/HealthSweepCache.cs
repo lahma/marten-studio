@@ -188,6 +188,26 @@ internal sealed class HealthSweepCache : IPerDatabaseState
     }
 
     /// <summary>
+    /// Whether <see cref="GetAsync" /> for this database and kind would be answered without starting a sweep: one running,
+    /// or one finished and still fresh. A lookup that starts nothing - what the diagnostics API asks before it spends one of
+    /// its two fresh reads (API design §3.4).
+    /// </summary>
+    /// <param name="storeKey">The source's key.</param>
+    /// <param name="databaseId">The database's identity.</param>
+    /// <param name="kind">Which kind.</param>
+    public bool IsFresh(string storeKey, string databaseId, HealthSweepKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        lock (gate)
+        {
+            return slots.TryGetValue(Key(storeKey, databaseId, kind), out Slot? slot)
+                && (slot.Running is not null || (slot.Completed is not null && Now - slot.CompletedAt < TimeToLive(kind)));
+        }
+    }
+
+    /// <summary>
     /// The last finished sweep of <paramref name="kind" /> for a database, or <see langword="null" />. A
     /// lookup, never a sweep.
     /// </summary>

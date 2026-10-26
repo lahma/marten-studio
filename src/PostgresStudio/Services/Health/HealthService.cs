@@ -359,6 +359,19 @@ internal sealed class HealthService : IHealthService
         storeKey + "|" + databaseId + "|" + finding.Key;
 
     /// <summary>
+    /// The gate a reader must pass to be shown <paramref name="finding" /> at all (D29): its check's, or - for a finding
+    /// about one tenant, which names it - <see cref="HealthGate.Activity" /> at least. The one rule the Health page's visitor
+    /// gate and the diagnostics API's host gate (<c>HostGate</c>, D31) both apply; a visitor also needs that tenant's store
+    /// policy, and the host needs nothing more.
+    /// </summary>
+    /// <param name="finding">The finding.</param>
+    internal static HealthGate RequiredGate(HealthFinding finding)
+    {
+        ArgumentNullException.ThrowIfNull(finding);
+        return finding.TenantId is not null && finding.Gate != HealthGate.Activity ? HealthGate.Activity : finding.Gate;
+    }
+
+    /// <summary>
     /// The key the studio-cost meter files this database under - read off an unopened connection's settings,
     /// which costs no I/O.
     /// </summary>
@@ -571,7 +584,7 @@ internal sealed class HealthService : IHealthService
         {
             foreach (HealthFinding finding in result.Findings)
             {
-                HealthGate required = finding.TenantId is not null && finding.Gate != HealthGate.Activity ? HealthGate.Activity : finding.Gate;
+                HealthGate required = RequiredGate(finding);
 
                 string? reason = !await gate.PassesAsync(required).ConfigureAwait(false)
                     ? gate.WhyNot(required)

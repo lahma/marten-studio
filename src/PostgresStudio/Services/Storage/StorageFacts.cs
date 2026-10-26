@@ -236,6 +236,14 @@ internal interface IStorageFacts
     /// </param>
     /// <param name="cancellationToken">Cancels this caller's wait.</param>
     Task<StorageFacts> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether <see cref="ReadAsync" /> would be answered without a new read - a recent read in hand, or one running - so the
+    /// diagnostics API spends a fresh read only on a miss (API design §3.4). <see langword="false" /> unless an implementation
+    /// knows better: the cautious answer is "it would read".
+    /// </summary>
+    /// <param name="resolved">The database.</param>
+    bool IsCached(ResolvedSource resolved) => false;
 }
 
 /// <summary>
@@ -308,9 +316,17 @@ internal sealed class StorageFactsReader : IStorageFacts
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        string key = "storage|" + resolved.Source.Key + "|" + resolved.Target.Identity;
-        return cache.GetAsync(key, token => ReadUncachedAsync(resolved, token), cancellationToken);
+        return cache.GetAsync(KeyOf(resolved), token => ReadUncachedAsync(resolved, token), cancellationToken);
     }
+
+    /// <inheritdoc />
+    public bool IsCached(ResolvedSource resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        return cache.Holds(KeyOf(resolved));
+    }
+
+    private static string KeyOf(ResolvedSource resolved) => "storage|" + resolved.Source.Key + "|" + resolved.Target.Identity;
 
     /// <summary>One read, past the cache.</summary>
     internal async Task<StorageFacts> ReadUncachedAsync(ResolvedSource resolved, CancellationToken cancellationToken)
