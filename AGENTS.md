@@ -1294,6 +1294,10 @@ tests/PostgresStudio.Tests/Replication/   R02-R04's evaluators at every edge, WA
                                          the per-visitor view and the page
 tests/PostgresStudio.Integration.Tests/Replication/  Live primary and standby pairs (17 and 18): R02-R04 fire and stay
                                          quiet, the page's facts, and Aurora's not-applicable sections
+src/PostgresStudio/Components/Pages/Server/  System › Server: the server's facts, what the studio can see, the curated
+                                         settings, the extension chips, the security posture and the platform slot
+tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
+                                         14-18 as app and probe, and their no-lock, no-DDL reads
 src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
                                          (W5-index §4); never reaches main
 ```

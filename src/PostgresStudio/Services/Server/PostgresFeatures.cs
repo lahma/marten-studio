@@ -85,6 +85,12 @@ internal enum PostgresFeature
     /// </summary>
     DatabaseStatsResetNullAfterCrash,
 
+    /// <summary>
+    /// <c>initdb</c> makes <c>pg_database_owner</c> the owner of <c>public</c> and grants <c>PUBLIC</c> no <c>CREATE</c> on it, in a
+    /// cluster created on 15 or later - one upgraded from 14 keeps 14's grant. B0 §6, S06 (<c>t</c> on 14, <c>f</c> on 17 and 18).
+    /// </summary>
+    PublicSchemaOwnedByDatabaseOwner,
+
     // ---- 16 -----------------------------------------------------------------------------------------------------------
 
     /// <summary>The <c>pg_stat_io</c> view. B0 §6 and G8.</summary>
@@ -136,6 +142,12 @@ internal enum PostgresFeature
 
     /// <summary><c>EXPLAIN (FORMAT JSON)</c>'s JIT <c>Generation</c> is an object (<c>Total</c>, <c>Deform</c>), a number before. B0 §6b.</summary>
     ExplainGenerationObject,
+
+    /// <summary>
+    /// The <c>transaction_timeout</c> setting: a transaction, idle or not, is ended once it has lasted this long. W5-S2: the
+    /// PostgreSQL 17 release notes ("Add server variable transaction_timeout"), and the matrix's catalog probe.
+    /// </summary>
+    TransactionTimeout,
 
     // ---- 18 -----------------------------------------------------------------------------------------------------------
 
@@ -285,6 +297,7 @@ internal static class PostgresFeatures
         new(PostgresFeature.StatementsJit, 150000),
         new(PostgresFeature.ForceNextFlush, 150000),
         new(PostgresFeature.DatabaseStatsResetNullAfterCrash, 150000),
+        new(PostgresFeature.PublicSchemaOwnedByDatabaseOwner, 150000),
 
         // 16
         new(PostgresFeature.PgStatIo, 160000),
@@ -302,6 +315,7 @@ internal static class PostgresFeatures
         new(PostgresFeature.WaitEventsView, 170000),
         new(PostgresFeature.MaintainRole, 170000),
         new(PostgresFeature.ExplainGenerationObject, 170000),
+        new(PostgresFeature.TransactionTimeout, 170000),
 
         // 18
         new(PostgresFeature.RelAllFrozen, 180000),

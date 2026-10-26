@@ -262,6 +262,12 @@ public class LogLevelsTests
         ["src/PostgresStudio/Services/PostgresStudioLog.Replication.cs : 9431 PostgresStudioTablespaceSizeFailed"] = (Verdict.VisitorAction,
             "9431 in Postgres Studio's words: a tablespace size the visitor asked for failed; one line per click."),
 
+        // ---- W5-S2 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.ServerPosture.cs : 9440 ServerFactsReadFailed"] = (Verdict.Throttled,
+            "A section of the Server page's facts failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.ServerPosture.cs : 9440 PostgresStudioServerFactsReadFailed"] = (Verdict.Throttled,
+            "9440 in Postgres Studio's words: a section of the Server page's facts failed, re-read every HealthInterval."),
+
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),

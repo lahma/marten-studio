@@ -5,8 +5,9 @@ They are shown to anybody the store policy lets see the scope they selected, bec
 Configuration page does not: its store card shows `AutoCreate`, its Events card both tracking switches, the
 daemon mode and the leadership lock's scope, and its Runtime card the host's environment name. The one exception
 is K04's host and port, which are evidence at the database-wide gate - the store policy for the database as a
-whole - because that is what the Configuration page asks before it lists a database's server and port. Back to the
-[index](../health.md).
+whole - because that is what the Configuration page asks before it lists a database's server and port. K05-K07 read
+the studio's own options the same way, in both studios. K08 is the one that reads the server too: three timeouts in
+`pg_settings`, a catalog read, so it is shown at the database-wide gate. Back to the [index](../health.md).
 
 ## K01 AutoCreate in Production
 
@@ -148,3 +149,101 @@ Tier 0, no I/O: the host and port are all it has to go on, so it is a likeness a
 port of its own choosing is not recognised. [C10](connections.md#c10-hotcold-daemon-behind-a-transaction-pooler-proven)
 tests the connection itself. Never raised for `Solo` (it takes no lock), `ExternallyManaged` (the lock is not
 Marten's) or a process that runs no daemon.
+
+## K05 SQL console without a narrowed role
+
+**Warning.** Both studios. `Capabilities.RunSql` is on, `ReadOnly` is off, and `SqlConsoleRole` is not set - so every
+statement typed into the console runs as the role the data source logs in as, the role that owns the application's tables.
+
+The console's read-only transaction stops writes, never reads (D13): whoever is granted `RunSql` reads every row that role
+can, in every schema, whatever `BrowsableSchemas` says. The role the console runs as is its real boundary. Like K01-K04 it
+reads only the studio's options, with no I/O, and is shown to anybody the scope admits; unlike them it runs in both studios,
+and names the option in the studio's own type (`MartenStudioOptions.SqlConsoleRole`, `PostgresStudioOptions.SqlConsoleRole`).
+`ReadOnly` mutes it.
+
+What to change:
+
+```csharp
+// In AddMartenStudio(options => ...): the role the SQL console and the database browser read as
+options.SqlConsoleRole = "studio_reader";
+```
+
+A role the data source's login is a member of, granted `SELECT` on what the console and the browser should read and nothing
+more; each statement switches to it with `SET LOCAL ROLE`. Creating it and granting it are a DBA's - the studio never runs
+either.
+
+## K06 Database browser open to every schema without a narrowed role
+
+**Warning.** Both studios. `Capabilities.BrowseDatabase` is on, `ReadOnly` is off, `BrowsableSchemas` contains `"*"`, and
+`SqlConsoleRole` is not set: event 9230's condition, now a finding too (D27). `"*"` admits every schema the reading role
+has `USAGE` on but Postgres' own and extensions', and without `SqlConsoleRole` the reading role is the data source's own
+login, so every table it may select from is browsable, row by row, by anyone granted `BrowseDatabase`.
+
+Event 9230 is said once at start-up whether or not the capability is on; K06 is raised only while it is, because only then
+does a visitor read through it. `ReadOnly` mutes it. The remedy is K05's: a `SqlConsoleRole`.
+
+## K07 Studio open to anonymous visitors with a capability on
+
+**Critical in Production, Warning anywhere else.** Both studios. The studio's pages are served to anybody - they carry
+`AllowAnonymous`, from the mapping's own `AllowAnonymous()` or a group above it, observed on the finished endpoints the
+start-up guard reads, the same fact the layout's banner draws - and at least one capability is on (and `ReadOnly` off).
+
+A studio served anonymously with every capability off is a read-only browser, which the banner says already; with one on,
+anyone who can reach its address can use it. A store or write policy, if the host set one, still decides what an anonymous
+visitor reaches. The environment is read as K01 reads it, and a host that names none is "anywhere else". A process that maps
+no studio says so in the status line.
+
+What to change:
+
+```csharp
+// Ask who the visitor is:
+app.MapMartenStudio().RequireAuthorization();
+
+// ...or keep it anonymous, with every capability off:
+options.Capabilities = new MartenStudioCapabilities();
+```
+
+## K08 Server timeouts end the daemon's leadership
+
+**Warning**, one finding per setting. Marten Studio only. This process runs the async daemon `HotCold`, and a server
+timeout the store's role is subject to ends the leader's session or transaction - and with it the leadership. Another node
+takes the lead and every projection the leader ran restarts there, over and over as each new leader is ended in turn.
+Three variants, read from the Server page's settings read (`pg_settings` on a connection of the store's own data source,
+so a value set for the store's role or database counts):
+
+- **`idle-in-transaction`**: the leadership lock is transaction-scoped (`Events.UseAdvisoryLockTransaction`, the default
+  at Marten 9.39 and 9.40) and `idle_in_transaction_session_timeout` is above zero and shorter than three times the
+  leader's idle stretch in its leadership transaction - or above zero at all with `Events.UseMonitoredAdvisoryLock` off,
+  when the leader is idle for as long as it leads. The studio's own read-only transaction sets this setting for itself, so
+  it is read as a new session starts with it.
+- **`transaction-timeout`**: the lock is transaction-scoped and `transaction_timeout` (PostgreSQL 17) is above zero. It
+  ends any transaction that has lasted that long, idle or not.
+- **`idle-session`**: the lock is session-scoped (the default from Marten 9.41) and `idle_session_timeout` is above zero
+  and shorter than three times the minute the lock connection sits idle between its monitor's statements - or above zero
+  at all with the monitor off.
+
+**The leader's idle stretch is measured, not assumed** (`HotColdLeaderSessionLiveTests`, `DaemonTimeoutsLiveTests`, at
+Marten 9.39 and the latest tested). With a transaction-scoped lock and its monitor on, at Weasel 9.45 (Marten 9.50 and
+later) DistributedLock's keepalive runs in the leadership transaction about once a minute (61 s), the session idle in
+between; at Weasel 9.33 (Marten 9.39) - and wherever the connection string sets Npgsql's `Keepalive` or `Multiplexing` -
+the monitor's `pg_sleep` keeps the session active once its first leadership poll has passed, so it is idle only about
+`LeadershipPollingTime` plus a second after taking the lead. Three times the stretch is C04's margin for a keepalive a
+loaded host runs late. A server `statement_timeout` shorter than that sleep's minute does not end it, and there is no
+variant for it: DistributedLock runs `SET LOCAL statement_timeout = 0` in the leadership transaction before it sleeps, so the
+leader kept its lock under a 10 s `statement_timeout` (measured at Marten 9.39).
+
+**C04, T14 and D01 advise `idle_in_transaction_session_timeout` as a backstop**, and each says the same: for a store whose
+HotCold daemon leads from a transaction, it must be longer than the leader's idle stretch, and `transaction_timeout` unset
+for the store's role.
+
+The remedy is in words for the timeout - whoever owns the store's role raises or unsets it for that role
+(`ALTER ROLE … SET … = 0`), so the application's other sessions keep the server's value - and a configuration line for
+the lock's scope:
+
+```csharp
+// In AddMarten(...): hold the leadership lock on its own session, which no transaction timeout ends.
+opts.Events.UseAdvisoryLockTransaction = false;
+```
+
+A session-scoped lock cannot work behind a transaction-mode pooler (K04), so there the timeout is what changes; and for
+`idle-session` the line is the other way round.

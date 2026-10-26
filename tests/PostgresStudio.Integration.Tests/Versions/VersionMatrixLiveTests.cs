@@ -285,6 +285,8 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         // A fresh server's database counters were never reset: 14's collector still stamped the time, 15 leaves it null.
         [PostgresFeature.DatabaseStatsResetNullAfterCrash] =
             "select d.stats_reset is null from pg_catalog.pg_stat_database d where d.datname = pg_catalog.current_database()",
+        [PostgresFeature.PublicSchemaOwnedByDatabaseOwner] =
+            "select n.nspowner = 'pg_database_owner'::pg_catalog.regrole from pg_catalog.pg_namespace n where n.nspname = 'public'",
         [PostgresFeature.PgStatIo] = Relation("pg_catalog.pg_stat_io"),
         [PostgresFeature.LastScanColumns] = Column("pg_catalog.pg_stat_all_tables", "last_seq_scan"),
         [PostgresFeature.NewPageUpdates] = Column("pg_catalog.pg_stat_all_tables", "n_tup_newpage_upd"),
@@ -297,6 +299,7 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         [PostgresFeature.StatementsSharedBlkTimeNames] = Column("public.pg_stat_statements", "shared_blk_read_time"),
         [PostgresFeature.WaitEventsView] = Relation("pg_catalog.pg_wait_events"),
         [PostgresFeature.MaintainRole] = Role("pg_maintain"),
+        [PostgresFeature.TransactionTimeout] = Setting("transaction_timeout"),
         [PostgresFeature.RelAllFrozen] = Column("pg_catalog.pg_class", "relallfrozen"),
         [PostgresFeature.VacuumMaxThreshold] = Setting("autovacuum_vacuum_max_threshold"),
         [PostgresFeature.PgStatIoBytes] = Column("pg_catalog.pg_stat_io", "read_bytes"),

@@ -29,6 +29,16 @@ public class HealthLiveTestConventionTests
         ["R02"] = "archive commands that fail, hang and succeed - Replication/ArchiverAndCheckpointLiveTests",
         ["R03"] = "a primary and standby pair on 17 and 18 - Replication/StandbyLagLiveTests",
         ["R04"] = "a tiny max_wal_size under bulk writes on 17 and 18 - Replication/ArchiverAndCheckpointLiveTests",
+        ["S04"] = "the matrix's superuser, app and a file-access login - Server/ServerPostureLiveTests",
+        ["S05"] = "TCP without TLS, and a server given a self-signed certificate - Server/ConnectionTlsLiveTests",
+        ["S06"] = "PUBLIC's CREATE on public on 14, none on 17 - Server/ServerPostureLiveTests",
+        ["S07"] = "pgstattuple installed at 1.4, then updated - Server/ServerPostureLiveTests",
+        ["S08"] = "a login whose password expires in three days - Server/ServerPostureLiveTests",
+        ["S09"] = "a login whose own settings switch enable_seqscan off - Server/ServerPostureLiveTests",
+        ["S10"] = "a login whose own settings start every transaction read-only - Server/ServerPostureLiveTests",
+        ["K05"] = "a live host's options with and without SqlConsoleRole - Server/ServerPostureLiveTests",
+        ["K06"] = "a live host's options with \"*\" and with and without SqlConsoleRole - Server/ServerPostureLiveTests",
+        ["K07"] = "a studio mapped on Kestrel, anonymous and authorized - Server/AnonymousStudioLiveTests",
     };
 
     [Fact]

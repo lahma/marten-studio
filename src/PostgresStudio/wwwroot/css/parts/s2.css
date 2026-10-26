@@ -1,0 +1,142 @@
+/* ==========================================================================
+   W5-S2 - System › Server: the server's facts, what the studio can see,
+   the curated settings, the extension chips and the security posture.
+   Folded into studio.css by the orchestrator in D26 order (W5-index §4);
+   tokens only, every rule ms-s2-.
+   ========================================================================== */
+
+.ms-s2-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-s2-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The server's facts: a row of four that wraps, one per line on a phone. */
+.ms-s2-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-s2-fact {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-s2-fact dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-s2-fact dd {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-s2-fact-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-s2-subtitle {
+    margin: var(--ms-space-md) 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-s2-note,
+.ms-s2-measured {
+    max-width: 80ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+/* A section that was not read reads as a quiet line in its place. */
+.ms-s2-unavailable {
+    color: var(--ms-color-text-muted);
+}
+
+/* A setting the role is not shown, or the release does not have, is a sentence in the value's place. */
+.ms-s2-setting-hidden .ms-s2-value,
+.ms-s2-setting-absent .ms-s2-value,
+.ms-s2-setting-needsversion .ms-s2-value {
+    color: var(--ms-color-text-muted);
+    font-style: italic;
+}
+
+.ms-s2-value {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-s2-pending {
+    margin-left: var(--ms-space-xs);
+    color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+}
+
+/* The extension chips: a wrapping list, each with its state and what stands in the way. */
+.ms-s2-chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-s2-chip {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 3px;
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-s2-chip-usable {
+    border-left-color: var(--ms-color-success);
+}
+
+.ms-s2-chip-blocked {
+    border-left-color: var(--ms-color-border-strong);
+}
+
+.ms-s2-chip-name {
+    font-family: var(--ms-font-mono);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-s2-chip-state {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-s2-chip-note {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-s2-finding {
+    margin-bottom: var(--ms-space-md);
+}
+
+@media (max-width: 640px) {
+    .ms-s2-facts,
+    .ms-s2-chips {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

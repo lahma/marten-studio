@@ -124,6 +124,10 @@ internal static class MatrixReads
             await x.Services.GetRequiredService<IReplicationFactsReader>().ReadAsync(x.Resolved, t))),
         new("replication: this database's tablespace size", false, static async (x, t) => Found(
             await x.Services.GetRequiredService<IReplicationFactsReader>().TablespaceSizeAsync(x.Resolved, "pg_default", t), "pg_default's size")),
+
+        // ---- W5-S2: the Server page's facts - every section, as the read the page makes ----------------------------
+        new("server: settings, extensions, connection and grants", true, static async (x, t) => ServerClean(
+            await x.Services.GetRequiredService<PostgresStudio.Services.Server.IServerSettingsFactsReader>().ReadAsync(x.Resolved, t))),
     ];
 
     /// <summary>
@@ -135,6 +139,15 @@ internal static class MatrixReads
         if (facts.Failures.Count > 0)
         {
             throw new InvalidOperationException("The replication facts read failed: " + string.Join("; ", facts.Failures));
+        }
+    }
+
+    /// <summary>Fails a Server page facts read any section of which failed: on every release each one reads.</summary>
+    private static void ServerClean(PostgresStudio.Services.Server.ServerSettingsFacts facts)
+    {
+        if (facts.Failures.Count > 0)
+        {
+            throw new InvalidOperationException("The server facts read failed: " + string.Join("; ", facts.Failures));
         }
     }
 

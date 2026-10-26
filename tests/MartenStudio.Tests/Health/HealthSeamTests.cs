@@ -234,7 +234,8 @@ public class HealthSeamTests
 
         registry.All.Select(static x => x.Info.CheckType).Should().BeEquivalentTo(
             MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
-        registry.All.Should().HaveCount(56, "the studio ships 56 checks: 0.4's 49, W5's D09 and C11, W5-V1's T16 and T24, and W5-R2's R02-R04");
+        registry.All.Should().HaveCount(67,
+            "the studio ships 67 checks: 0.4's 49, W5's D09 and C11, W5-V1's T16 and T24, W5-R2's R02-R04, and W5-S2's S04-S10 and K05-K08");
 
         HealthCheckRegistry.Describe(typeof(ScriptedLightUpCheck), MartenStudioRuntime.Current).Requires
             .Should().BeSameAs(RuntimeFeature.TransientFailureClassifier);

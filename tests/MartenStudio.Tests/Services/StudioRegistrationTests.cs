@@ -29,6 +29,7 @@ using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
 using PostgresStudio.Services.Replication;
+using PostgresStudio.Services.Server;
 
 namespace MartenStudio.Tests.Services;
 
@@ -153,6 +154,11 @@ public class StudioRegistrationTests
         (typeof(IReplicationFactsReader), ServiceLifetime.Singleton, How.Type, typeof(ReplicationFactsReader)),
         (typeof(ReplicationFactsCache), ServiceLifetime.Singleton, How.Type, typeof(ReplicationFactsCache)),
         (typeof(IReplicationService), ServiceLifetime.Scoped, How.Type, typeof(ReplicationService)),
+
+        // W5-S2: Server.
+        (typeof(IServerSettingsFactsReader), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsReader)),
+        (typeof(ServerSettingsFactsCache), ServiceLifetime.Singleton, How.Type, typeof(ServerSettingsFactsCache)),
+        (typeof(IServerPageService), ServiceLifetime.Scoped, How.Type, typeof(ServerPageService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

@@ -8,6 +8,7 @@ using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
 using PostgresStudio.Services.Replication;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 using PostgresStudio.Services.Storage;
 
@@ -183,5 +184,11 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton<IReplicationFactsReader, ReplicationFactsReader>();
         services.TryAddSingleton<ReplicationFactsCache>();
         services.TryAddScoped<IReplicationService, ReplicationService>();
+
+        // W5-S2: the Server page. The facts are the database's, read once per HealthInterval for every circuit; what a visitor
+        // is shown of them is the circuit's.
+        services.TryAddSingleton<IServerSettingsFactsReader, ServerSettingsFactsReader>();
+        services.TryAddSingleton<ServerSettingsFactsCache>();
+        services.TryAddScoped<IServerPageService, ServerPageService>();
     }
 }

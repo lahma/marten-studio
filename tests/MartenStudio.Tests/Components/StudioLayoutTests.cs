@@ -319,7 +319,7 @@ public class StudioLayoutTests
         // time - Projections joined it in P5, the four Events screens in P4, Schema and Configuration
         // in P7, Documents in P2, Query in P6, and the database browser's Tables in DB-4, which also
         // moved Relationships out of Data and under it. Health heads Operations from H1 (0.4), and Maintenance, Storage
-        // and Replication follow it from W5-V1, W5-CAP and W5-R2 (0.5).
+        // and Replication follow it from W5-V1, W5-CAP and W5-R2 (0.5); Server heads System from W5-S2.
         layout.TextOfAll(".ms-nav-link:not(.ms-nav-link-disabled) .ms-nav-link-text")
             .Should().Equal(
                 "Overview",
@@ -337,6 +337,7 @@ public class StudioLayoutTests
                 "Replication",
                 "Projections",
                 "Schema",
+                "Server",
                 "Configuration",
                 "Activity");
 
@@ -370,6 +371,7 @@ public class StudioLayoutTests
             "replication",
             "projections",
             "schema",
+            "server",
             "config",
             "activity");
     }
@@ -401,6 +403,7 @@ public class StudioLayoutTests
             "replication",
             "projections",
             "schema",
+            "server",
             "config",
             "activity");
     }
@@ -560,7 +563,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(17, "every entry, Health (0.4), Maintenance, Storage and Replication (0.5) included");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(18, "every entry, Health (0.4), Maintenance, Storage, Replication and Server (0.5) included");
         layout.Markup.Should().Contain(BodyMarker);
     }
 
