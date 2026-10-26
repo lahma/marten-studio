@@ -5,14 +5,13 @@ using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
-using PostgresStudio;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
-namespace MartenStudio.Integration.Tests.Versions;
+namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
 /// A PostgresStudio host over one matrix server, as one role, in one database: the studio's own services, resolved the way

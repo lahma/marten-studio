@@ -1245,9 +1245,9 @@ src/PostgresStudio/Services/Server/       The server facts every W5 packet uses:
                                          (PostgresFeatures), the reading role's grants and the "not checked"
                                          sentences (PostgresGrants), and server-setting remedies
 tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per platform and grant, the remedy kinds
-tests/MartenStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg), the
-                                         Aurora shim, MatrixReads and VersionMatrixLiveTests; Marten-free, so it
-                                         moves to tests/PostgresStudio.Integration.Tests whole (PS-5)
+tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
+                                         the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
+                                         server per major, started on first use (an assembly fixture)
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

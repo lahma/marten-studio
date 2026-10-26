@@ -1,4 +1,4 @@
-namespace MartenStudio.Integration.Tests.Versions;
+namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
 /// Amazon Aurora PostgreSQL's diagnostic functions, as plain SQL functions on a vanilla server: what a test needs to see

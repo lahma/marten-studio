@@ -6,7 +6,7 @@ using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Sources;
 
-namespace MartenStudio.Integration.Tests.Versions;
+namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>What one matrix read is handed: an open read-only transaction as the role under test, and the studio's host.</summary>
 /// <param name="Connection">A connection as the role, in a read-only transaction with <c>search_path</c> pinned to <c>pg_catalog</c>.</param>

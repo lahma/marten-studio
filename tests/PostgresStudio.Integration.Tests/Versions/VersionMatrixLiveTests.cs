@@ -7,7 +7,7 @@ using Npgsql;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Server;
 
-namespace MartenStudio.Integration.Tests.Versions;
+namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
 /// The studio's core reads on PostgreSQL 14 to 18, and on 19's release candidate as a preview: every health check ends

@@ -2,12 +2,11 @@ using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
-using PostgresStudio;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Server;
 
-namespace MartenStudio.Integration.Tests.Versions;
+namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
 /// A7's mechanism and the PostgreSQL 18 NOT NULL fix against real servers: the grant read answers for the role the reads

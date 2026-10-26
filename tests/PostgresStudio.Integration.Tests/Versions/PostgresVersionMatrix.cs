@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 
-using MartenStudio.Integration.Tests.Versions;
+using PostgresStudio.Integration.Tests.Versions;
 
 using Npgsql;
 
@@ -10,7 +10,7 @@ using Testcontainers.PostgreSql;
 // One matrix for the whole run, started lazily per major: a class that never asks for a server costs nothing.
 [assembly: AssemblyFixture(typeof(PostgresVersionMatrix))]
 
-namespace MartenStudio.Integration.Tests.Versions;
+namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>A login of the matrix servers, as B0's <c>setup.sql</c> made them.</summary>
 public enum MatrixRole
