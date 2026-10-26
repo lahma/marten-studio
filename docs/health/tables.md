@@ -888,7 +888,10 @@ column, judged by the newest partition's upper bound against now and the newest 
 - `running-out` - **Critical** when there is no `DEFAULT` partition and the bound has passed or is within one width of
   now: inserts for the next period then fail ("no partition of relation found for row"). **Warning** when it is ahead by
   fewer than two widths, or - with a `DEFAULT` partition, which catches the rows - when it has passed. A `MAXVALUE` bound
-  never runs out.
+  never runs out. A Marten document table on `ByRollingRange(...)` (Marten Studio) is warned of only within one width:
+  Marten provisions its periods ahead and always gives it a `DEFAULT` partition, and the recommended `periodsAhead: 1`
+  leaves the newest bound more than one width ahead whenever the roll-forward has run - so a finding means the
+  roll-forward has fallen behind.
 - `default-partition-rows` - **Warning** when the `DEFAULT` partition holds rows (`reltuples`, or `n_live_tup` where
   higher): rows no range took, read whole by every query for them, and blocking the creation of the range they belong to
   until they are moved out. A range on an integer key is judged on this alone.
