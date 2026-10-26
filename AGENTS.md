@@ -1880,9 +1880,9 @@ None of these can be done from this repository, and the first tag will fail with
 
 1. **nuget.org → Trusted Publishing → new policy.** Policy owner `lahma`; Repository Owner `lahma`;
    Repository `marten-studio`; Workflow File `publish.yml` (**filename only** — not `release.yml`, and not
-   the `.github/workflows/` path); Environment `nuget`. Since 2026-08-19 nuget.org lets a policy be scoped to
-   package ids; this repository's covers both `MartenStudio` and `PostgresStudio`, and lets the key push a package
-   id that does not exist yet (confirmed 2026-10-26).
+   the `.github/workflows/` path); Environment `nuget`. The policy is not limited to one package id: the key it
+   mints pushes both `MartenStudio` and `PostgresStudio`, including an id that does not exist yet (confirmed by the
+   policy owner, 2026-10-26).
 2. **GitHub → Settings → Environments → `nuget`**, with a deployment branch/tag policy of `v*`. This is the
    second claim the nuget.org policy matches on, and it is what keeps a workflow run from a branch out of
    the publishing path.
