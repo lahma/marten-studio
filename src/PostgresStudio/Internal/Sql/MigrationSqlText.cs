@@ -65,9 +65,10 @@ internal static partial class MigrationSqlText
             : null;
 
     /// <summary>
-    /// Whether <paramref name="name" /> may be printed inside text a person copies - a remedy's comment or line - as it
-    /// is: the names this builder quotes (<see cref="IsQuotable" />), the same rule a studio's configuration-line remedies
-    /// hold a catalog name to before naming it.
+    /// Whether <paramref name="name" /> may be printed inside text a person copies - a remedy's comment or line, the
+    /// database browser's Copy SELECT, Copy WHERE and row statements (<see cref="SqlLiteralText" />) - as it is: the names
+    /// this builder quotes (<see cref="IsQuotable" />), the same rule a studio's configuration-line remedies hold a catalog
+    /// name to before naming it.
     /// </summary>
     /// <param name="name">A schema, table or index name, as the catalog has it.</param>
     public static bool IsPrintableName(string? name) => IsQuotable(name);

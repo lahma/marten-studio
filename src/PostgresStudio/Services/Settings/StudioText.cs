@@ -184,6 +184,13 @@ internal sealed class StudioText
     public required string UnjudgedOldest { get; init; }
 
     /// <summary>
+    /// T07, T08: where a person sees which storage parameters the partitions of a Marten table differ on, said inside the
+    /// parentheses after "autovacuum may be switched off for some of them": MartenStudio's own Schema screen, or - for a
+    /// studio with no store's configuration to show - Marten Studio's, over the store that manages the table.
+    /// </summary>
+    public required string MartenTablePartitionParameters { get; init; }
+
+    /// <summary>
     /// MartenStudio's wording, exactly as the shared code wrote it before it was shared. Every member is either one of
     /// the constants it used, or that literal moved here.
     /// </summary>
@@ -255,5 +262,6 @@ internal sealed class StudioText
             " The oldest table in this database is not one the store declares - a legacy schema, another library's job store, "
             + "a document type the studio hides - and wraparound protection counts every table in the database, so it holds the "
             + "whole database back as surely as a Marten table would.",
+        MartenTablePartitionParameters = "the Schema screen's Tables tab shows which parameters the partitions differ on",
     };
 }

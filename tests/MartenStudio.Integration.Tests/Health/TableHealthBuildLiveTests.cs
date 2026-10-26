@@ -216,7 +216,8 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
         partly.AutovacuumOffForTable.Should().BeFalse("one partition of several is not the table");
         partly.Row.DifferingStorageOptions.Should().ContainSingle("the partitions disagree, and that is said by the parameter's name alone")
             .Which.Should().Be("autovacuum_enabled");
-        Autovacuum.State(partly, "autovacuum_vacuum_scale_factor", "0.02").Should().Contain("may be switched off for some");
+        Autovacuum.State(partly, "autovacuum_vacuum_scale_factor", "0.02", PostgresStudio.Services.Settings.StudioText.Marten)
+            .Should().Contain("may be switched off for some");
 
         await ExecuteAsync(postgres, [.. leaves.Select(static x => "alter table " + x + " set (autovacuum_enabled = false)")]);
 
@@ -224,7 +225,8 @@ public class TableHealthBuildLiveTests(PostgresFixture postgres)
         off.AutovacuumOffForTable.Should().BeTrue("every partition has it off, which is the partitioned table's whole storage");
         off.Row.DifferingStorageOptions.Should().BeEmpty();
         off.Row.PartitionLeaves.Should().Be(leaves.Count);
-        Autovacuum.State(off, "autovacuum_vacuum_scale_factor", "0.02").Should().Contain("on every partition");
+        Autovacuum.State(off, "autovacuum_vacuum_scale_factor", "0.02", PostgresStudio.Services.Settings.StudioText.Marten)
+            .Should().Contain("on every partition");
     }
 
     /// <summary>The qualified, quoted names of a partitioned table's partitions - the test's own read, never the studio's.</summary>

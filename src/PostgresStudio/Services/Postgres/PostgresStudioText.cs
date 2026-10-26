@@ -16,9 +16,10 @@ namespace PostgresStudio.Services.Postgres;
 /// studio, and which <see cref="StudioText.MartenStoreNotice" /> points at Marten Studio for.
 /// </para>
 /// <para>
-/// <b>Never a Marten word but the two that name Marten on purpose.</b> <c>PostgresStudioTextTests</c> holds every
+/// <b>Never a Marten word but the two that name Marten on purpose.</b> <c>PostgresStudioWordsTests</c> holds every
 /// sentence here to that: none says <c>MartenStudioOptions</c>, <c>StoreOptions</c>, "store" or a session API; only
-/// the <c>mt_</c> notices name Marten and Marten Studio.
+/// the <c>mt_</c> notices name Marten and Marten Studio, and only the one about a Marten table's partitions
+/// (<see cref="StudioText.MartenTablePartitionParameters" />) names the store whose <c>StoreOptions</c> declare it.
 /// </para>
 /// </remarks>
 internal static class PostgresStudioText
@@ -120,5 +121,8 @@ internal static class PostgresStudioText
             " The oldest table in this database is not one the studio judges - in a schema PostgresStudioOptions.BrowsableSchemas "
             + "does not admit, or beyond the largest tables a sweep reads - and wraparound protection counts every table in the "
             + "database, so it holds the whole database back as surely as one of these would.",
+        MartenTablePartitionParameters =
+            "each partition's pg_class.reloptions says which; Marten Studio's Schema screen, over the store whose StoreOptions "
+            + "declare this table, shows which parameters the partitions differ on",
     };
 }

@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Schema;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -427,9 +428,14 @@ internal static class Autovacuum
     }
 
     /// <summary>The sentence about the table's autovacuum state that a finding's "why" ends with, or nothing.</summary>
-    public static string State(TableFacts table, string parameter, string value)
+    /// <param name="table">The table.</param>
+    /// <param name="parameter">The scale factor's storage parameter.</param>
+    /// <param name="value">Its suggested value.</param>
+    /// <param name="text">The studio's words (<see cref="HealthEvaluation.Text" />): where a Marten table's partitions are compared.</param>
+    public static string State(TableFacts table, string parameter, string value, StudioText text)
     {
         ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(text);
 
         if (!table.Row.AutovacuumEnabled)
         {
@@ -456,14 +462,15 @@ internal static class Autovacuum
             };
         }
 
-        // Where a person sees which parameters differ: MartenStudio's Schema screen for its own tables, and the catalog for a
-        // relational table, which no Schema screen describes.
+        // Where a person sees which parameters differ: the catalog for a relational table, which no Schema screen describes,
+        // and for a Marten table the studio's own words - MartenStudio's Schema screen, or, in a studio over plain data
+        // sources, Marten Studio's over the store whose StoreOptions declare the table.
         string partly = table.Row.DifferingStorageOptions.Contains("autovacuum_enabled", StringComparer.OrdinalIgnoreCase)
             ? " Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off for some "
               + "of them ("
               + (table.Table.Kind == StudioTableKind.Relational
                   ? "each partition's pg_class.reloptions says which"
-                  : "the Schema screen's Tables tab shows which parameters the partitions differ on")
+                  : text.MartenTablePartitionParameters)
               + ")."
             : string.Empty;
 

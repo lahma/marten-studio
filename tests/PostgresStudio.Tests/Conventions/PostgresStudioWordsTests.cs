@@ -2,9 +2,12 @@ using System.Reflection;
 
 using Microsoft.Extensions.Logging;
 
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Tests.Conventions;
 
@@ -35,7 +38,14 @@ public class PostgresStudioWordsTests
     [
         nameof(StudioText.MartenDependencyDenial), nameof(StudioText.MartenInternalTitle), nameof(StudioText.MartenStoreNotice),
         nameof(StudioText.OwnerFilterMartenTitle), nameof(StudioText.OwnerFilterOtherTitle),
+        nameof(StudioText.MartenTablePartitionParameters),
     ];
+
+    /// <summary>
+    /// The one member that names <c>StoreOptions</c> on purpose: a Marten table's storage parameters are its store's
+    /// configuration, which Marten Studio's Schema screen compares and a plain data source does not have.
+    /// </summary>
+    private static readonly string[] NamesStoreOptionsOnPurpose = [nameof(StudioText.MartenTablePartitionParameters)];
 
     public static TheoryData<string> TextMembers() => [.. StringMembers()];
 
@@ -52,6 +62,11 @@ public class PostgresStudioWordsTests
 
         foreach (string word in MartenStudioNames)
         {
+            if (word == "StoreOptions" && NamesStoreOptionsOnPurpose.Contains(member))
+            {
+                continue;
+            }
+
             text.Should().NotContain(word, member + " is Postgres Studio's");
         }
 
@@ -65,6 +80,44 @@ public class PostgresStudioWordsTests
             }
         }
     }
+
+    /// <summary>
+    /// A Marten table whose partitions disagree on <c>autovacuum_enabled</c> (T07, T08) is pointed at Marten Studio's Schema
+    /// screen and its store's <c>StoreOptions</c> - Postgres Studio has no Schema screen of its own to send anybody to - and
+    /// a relational table, as in MartenStudio, at the catalog.
+    /// </summary>
+    [Theory]
+    [InlineData("DocumentTable", "mt_doc_order")]
+    [InlineData("EventTable", "mt_events")]
+    [InlineData("Bookkeeping", "mt_hilo")]
+    public void A_Marten_tables_differing_partitions_point_at_Marten_Studios_Schema_screen(string kindName, string name)
+    {
+        StudioTableKind kind = Enum.Parse<StudioTableKind>(kindName);
+        PostgresHealthTableSource.MartenKindOf(name).Should().Be(kind, "this is the kind Postgres Studio's table source gives it");
+
+        string said = Autovacuum.State(Partitioned(kind, name), "autovacuum_vacuum_scale_factor", "0.02", PostgresStudioText.Instance);
+
+        said.Should().Contain("may be switched off for some of them (each partition's pg_class.reloptions says which; Marten Studio's "
+            + "Schema screen, over the store whose StoreOptions declare this table, shows which parameters the partitions differ on).");
+        said.Should().NotContain("(the Schema screen's", "there is no Schema screen in Postgres Studio");
+    }
+
+    [Fact]
+    public void A_relational_tables_differing_partitions_point_at_the_catalog_in_either_studio()
+    {
+        foreach (StudioText text in new[] { PostgresStudioText.Instance, StudioText.Marten })
+        {
+            Autovacuum.State(Partitioned(StudioTableKind.Relational, "orders"), "autovacuum_vacuum_scale_factor", "0.02", text)
+                .Should().Be(" Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off "
+                    + "for some of them (each partition's pg_class.reloptions says which).");
+        }
+    }
+
+    private static TableFacts Partitioned(StudioTableKind kind, string name) =>
+        new(new StudioTable("public", name, kind, StudioTableOwnership.Library) { Library = "Marten" }, new HealthTableRow
+        {
+            Schema = "public", Table = name, Kind = "p", AutovacuumEnabled = true, DifferingStorageOptions = ["autovacuum_enabled"],
+        });
 
     [Fact]
     public void The_scan_sees_MartenStudios_words_in_MartenStudios_text()

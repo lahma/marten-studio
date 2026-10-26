@@ -100,7 +100,8 @@ public class RowLinksTests
 
         SqlLiteralText.WhereClause([new("bad\"name", "1")]).Should().BeNull("a name that cannot be quoted has no clause");
         SqlLiteralText.WhereClause([]).Should().BeNull();
-        SqlLiteralText.Literal("a\\b").Should().Be("'a\\b'", "a backslash is an ordinary character in a standard string");
+        SqlLiteralText.Literal("a\\b").Should().Be("E'a\\\\b'",
+            "a backslash is an ordinary character only under standard_conforming_strings, so an escape string carries it");
     }
 
     [Fact]

@@ -141,8 +141,35 @@ public class StudioTextPinTests
             " The oldest table in this database is not one the store declares - a legacy schema, another library's job store, "
             + "a document type the studio hides - and wraparound protection counts every table in the database, so it holds the "
             + "whole database back as surely as a Marten table would.");
+        Marten.MartenTablePartitionParameters.Should().Be("the Schema screen's Tables tab shows which parameters the partitions differ on");
 
         HealthEvaluation.At(DateTimeOffset.UnixEpoch).Text.Should().BeSameAs(Marten, "a unit test's evaluation is MartenStudio's");
+    }
+
+    /// <summary>
+    /// T07's and T08's sentence about a Marten table whose partitions disagree on <c>autovacuum_enabled</c>, composed from
+    /// <see cref="StudioText.MartenTablePartitionParameters" />, byte for byte as 0.4 wrote it - for every kind of Marten
+    /// table, since each says it.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(StudioTableKind.DocumentTable), "")]
+    [InlineData(nameof(StudioTableKind.EventTable), " No StoreOptions line")]
+    [InlineData(nameof(StudioTableKind.Projection), " No StoreOptions line")]
+    [InlineData(nameof(StudioTableKind.Bookkeeping), " No StoreOptions line")]
+    public void A_Marten_tables_differing_partitions_are_04s_sentence(string kindName, string continues)
+    {
+        StudioTable table = new("public", "mt_doc_order", Enum.Parse<StudioTableKind>(kindName), StudioTableOwnership.Owned);
+        TableFacts facts = new(table, new HealthTableRow
+        {
+            Schema = "public", Table = "mt_doc_order", Kind = "p", AutovacuumEnabled = true,
+            DifferingStorageOptions = ["autovacuum_enabled"],
+        });
+
+        string said = Autovacuum.State(facts, "autovacuum_vacuum_scale_factor", "0.02", Marten);
+
+        said.Should().StartWith(
+            " Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off for some of "
+            + "them (the Schema screen's Tables tab shows which parameters the partitions differ on)." + continues);
     }
 
     [Fact]
