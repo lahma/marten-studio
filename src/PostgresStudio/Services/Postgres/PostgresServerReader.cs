@@ -21,13 +21,13 @@ internal interface IPostgresServerReader
 {
     /// <summary>
     /// The server's version and platform for <paramref name="scope" />'s database - asked of the scope policy alone, as
-    /// S01's facts are (D29's <c>None</c> gate) - read once per database per circuit. Never throws but for cancellation
-    /// and a refused scope.
+    /// S01's facts are (D29's <c>None</c> gate). Never throws but for cancellation and a refused scope.
     /// </summary>
     /// <param name="scope">The visitor's scope.</param>
+    /// <param name="refresh">Read again whatever is remembered: the page's Refresh.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <exception cref="StudioNotAuthorizedException">The visitor may not have the scope.</exception>
-    Task<PostgresServerRead> ReadAsync(StudioScope scope, CancellationToken cancellationToken = default);
+    Task<PostgresServerRead> ReadAsync(StudioScope scope, bool refresh = false, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -37,8 +37,9 @@ internal interface IPostgresServerReader
 /// </summary>
 /// <remarks>
 /// Scoped: what it remembers is this circuit's, the way MartenStudio's store overview remembers a store's version. A
-/// failure is remembered too, so a page that polls does not ask an unreachable server again on every tick; event 9214,
-/// throttled across circuits.
+/// version read is remembered until the page asks for a refresh; a failure only for <c>HealthInterval</c>, so a page that
+/// polls does not ask an unreachable server again on every tick, and the server is asked again once it may be back -
+/// event 9214, throttled across circuits.
 /// </remarks>
 internal sealed class PostgresServerReader : IPostgresServerReader
 {
@@ -46,38 +47,58 @@ internal sealed class PostgresServerReader : IPostgresServerReader
     private readonly IStudioSettings settings;
     private readonly ILogger<PostgresServerReader> logger;
     private readonly StudioLogThrottle? throttle;
-    private readonly ConcurrentDictionary<string, PostgresServerRead> read = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TimeProvider timeProvider;
+    private readonly Func<IStudioDatabase, CancellationToken, Task<PostgresServerFacts>> readFacts;
+    private readonly ConcurrentDictionary<string, (PostgresServerRead Read, DateTimeOffset At)> read = new(StringComparer.OrdinalIgnoreCase);
 
     public PostgresServerReader(
         StudioSourceResolver resolver,
         IStudioSettings settings,
         ILogger<PostgresServerReader> logger,
-        StudioLogThrottle? throttle = null)
+        StudioLogThrottle? throttle = null,
+        TimeProvider? timeProvider = null)
+        : this(resolver, settings, logger, throttle, timeProvider, null)
+    {
+    }
+
+    /// <summary>A reader whose server read a test replaces.</summary>
+    internal PostgresServerReader(
+        StudioSourceResolver resolver,
+        IStudioSettings settings,
+        ILogger<PostgresServerReader> logger,
+        StudioLogThrottle? throttle,
+        TimeProvider? timeProvider,
+        Func<IStudioDatabase, CancellationToken, Task<PostgresServerFacts>>? readFacts)
     {
         this.resolver = resolver;
         this.settings = settings;
         this.logger = logger;
         this.throttle = throttle;
+        this.timeProvider = timeProvider ?? TimeProvider.System;
+        this.readFacts = readFacts ?? ReadAsync;
     }
 
     /// <inheritdoc />
-    public async Task<PostgresServerRead> ReadAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public async Task<PostgresServerRead> ReadAsync(StudioScope scope, bool refresh = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
         ResolvedSource resolved = await resolver.ResolveAsync(scope with { TenantId = null }, null, cancellationToken).ConfigureAwait(false);
         string key = resolved.Source.Key + "|" + resolved.Target.Identity;
+        DateTimeOffset now = timeProvider.GetUtcNow();
 
-        if (read.TryGetValue(key, out PostgresServerRead? known))
+        if (!refresh
+            && read.TryGetValue(key, out (PostgresServerRead Read, DateTimeOffset At) known)
+            && (known.Read.Facts is not null || now - known.At < settings.EffectiveHealthInterval))
         {
-            return known;
+            return known.Read;
         }
 
         PostgresServerRead answer;
 
         try
         {
-            answer = new PostgresServerRead(await ReadAsync(resolved.Target, cancellationToken).ConfigureAwait(false), null);
+            answer = new PostgresServerRead(await readFacts(resolved.Target, cancellationToken).ConfigureAwait(false), null);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -88,7 +109,7 @@ internal sealed class PostgresServerReader : IPostgresServerReader
             answer = new PostgresServerRead(null, "The server's version could not be read: " + exception.Message);
         }
 
-        read[key] = answer;
+        read[key] = (answer, now);
         return answer;
     }
 

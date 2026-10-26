@@ -457,7 +457,8 @@
             return;
         }
 
-        await LoadEverythingAsync();
+        // Refresh reads the server again too, a remembered failure included: it is the visitor asking for it.
+        await LoadEverythingAsync(refresh: true);
         await InvokeAsync(StateHasChanged);
     }
 
@@ -480,10 +481,10 @@
 
     private async Task OnHealthMutesChangedAsync() => await InvokeAsync(StateHasChanged);
 
-    private async Task LoadEverythingAsync()
+    private async Task LoadEverythingAsync(bool refresh = false)
     {
         await LoadActivityAsync();
-        await LoadAtHealthIntervalAsync();
+        await LoadAtHealthIntervalAsync(refresh);
     }
 
     /// <summary>The audit ring, filtered as the Activity page filters it, as far as the rows this list draws.</summary>
@@ -513,7 +514,7 @@
     /// others - and none of them landing once the selector has moved on to another scope. Asked on the first
     /// interactive render, on Refresh, on a scope change, and otherwise at <c>HealthInterval</c>, never more often.
     /// </summary>
-    private async Task LoadAtHealthIntervalAsync()
+    private async Task LoadAtHealthIntervalAsync(bool refresh = false)
     {
         StudioScope? scope = State.ActiveScope;
         if (scope is null || disposed)
@@ -524,7 +525,7 @@
         slowReadAt = DateTimeOffset.UtcNow;
         CancellationToken token = pageCancellation.Token;
 
-        (PostgresServerRead? readServer, serverError) = await ReadAsync(() => Server.ReadAsync(scope, token), server, serverError);
+        (PostgresServerRead? readServer, serverError) = await ReadAsync(() => Server.ReadAsync(scope, refresh, token), server, serverError);
         if (HasMovedOn(scope))
         {
             return;

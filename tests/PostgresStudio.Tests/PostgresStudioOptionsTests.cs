@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -48,7 +49,7 @@ public class PostgresStudioOptionsTests
         options.ExactCountThreshold.Should().Be(100_000);
         options.RefreshInterval.Should().Be(TimeSpan.FromSeconds(5));
         options.HealthInterval.Should().Be(TimeSpan.FromSeconds(60));
-        options.BrowsableSchemas.Should().Equal("public");
+        options.BrowsableSchemas.Should().BeEmpty("the default is applied after configuration, only when nothing named a schema");
         options.IncludeDefaultDataSource.Should().BeTrue();
         options.DataSources.Should().BeEmpty();
         options.DatabaseSources.Should().BeEmpty();
@@ -77,7 +78,36 @@ public class PostgresStudioOptionsTests
 
         options.DataSources.Select(static x => x.Name).Should().Equal("orders");
         options.DatabaseSources.Select(static x => x.Name).Should().Equal("tenants.v2");
-        options.BrowsableSchemas.Should().Equal("public", "qrtz");
+        options.BrowsableSchemas.Should().Equal(["qrtz"], "a list that names a schema replaces the default");
+    }
+
+    [Fact]
+    public void BrowsableSchemas_is_public_when_nothing_names_a_schema()
+    {
+        Resolve(static _ => { }).BrowsableSchemas.Should().Equal("public");
+    }
+
+    /// <summary>
+    /// Configuration binding appends to a list rather than replacing it, so a default written into the property would be
+    /// impossible to remove from appsettings. Applied after configuration instead, and only to an empty list.
+    /// </summary>
+    [Fact]
+    public void Bound_configuration_replaces_the_default_rather_than_adding_to_it()
+    {
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["PostgresStudio:BrowsableSchemas:0"] = "legacy",
+                ["PostgresStudio:BrowsableSchemas:1"] = "qrtz",
+            })
+            .Build();
+
+        ServiceCollection services = new();
+        services.AddPostgresStudio();
+        services.Configure<PostgresStudioOptions>(configuration.GetSection("PostgresStudio"));
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value.BrowsableSchemas.Should().Equal("legacy", "qrtz");
     }
 
     [Theory]
@@ -177,6 +207,19 @@ public class PostgresStudioOptionsTests
         settings.IsDocumentTypeVisible.Should().BeNull();
         settings.TrimmedPath.Should().Be("/postgres");
         settings.HasCustomPath.Should().BeFalse();
+    }
+
+    [Fact]
+    public void The_source_label_is_Source_once_a_named_source_exists_and_the_descriptors_otherwise()
+    {
+        IStudioSettings alone = PostgresStudioSettings.Of(new PostgresStudioOptions());
+        alone.SourceLabelOf(PostgresStudioDescriptor.Instance).Should().Be("Database");
+
+        IStudioSettings withDataSource = PostgresStudioSettings.Of(new PostgresStudioOptions().AddDataSource("reporting", static _ => null!));
+        withDataSource.SourceLabelOf(PostgresStudioDescriptor.Instance).Should().Be("Source");
+
+        IStudioSettings withHost = PostgresStudioSettings.Of(new PostgresStudioOptions().AddDatabaseSource("tenants", static _ => null!));
+        withHost.SourceLabelOf(PostgresStudioDescriptor.Instance).Should().Be("Source");
     }
 
     [Theory]

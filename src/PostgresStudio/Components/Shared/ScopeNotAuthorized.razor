@@ -1,5 +1,6 @@
 @using PostgresStudio.Services.Settings
 @inject StudioDescriptor Descriptor
+@inject IStudioSettings Settings
 
 @* What a page frame renders instead of the page when the visitor may not see the source the page would
    be about. Nothing is fetched to draw it, which is the point: the refusal happens before the page
@@ -19,7 +20,7 @@
             {
                 <text>You are not authorized to view the @Descriptor.SourceNoun <strong>@StoreName</strong>.</text>
             }
-            Pick another one from the @Descriptor.SourceLabel.ToLowerInvariant() list above.
+            Pick another one from the @Settings.SourceLabelOf(Descriptor).ToLowerInvariant() list above.
         </p>
     </div>
 </div>

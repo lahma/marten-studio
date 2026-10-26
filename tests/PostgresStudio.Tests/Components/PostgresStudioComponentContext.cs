@@ -66,7 +66,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor());
 
         // The real source provider and scope catalog over the one data source above.
-        Services.AddSingleton(new PostgresSourceRegistry(Services));
+        Services.AddSingleton(provider => new PostgresSourceRegistry(Services, provider));
         Services.AddSingleton<IStudioSourceProvider, PostgresStudioSourceProvider>();
         Services.AddSingleton<IStudioScopeCatalog, StudioScopeCatalog>();
 

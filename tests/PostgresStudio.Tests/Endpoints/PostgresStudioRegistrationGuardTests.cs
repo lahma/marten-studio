@@ -2,9 +2,12 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Options;
 
 using Npgsql;
 
+using PostgresStudio.Services.Health.Export;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
 
@@ -119,6 +122,51 @@ public class PostgresStudioRegistrationGuardTests
 
         services.Should().NotContain(static x => x.ServiceType == typeof(StudioDescriptor), "nothing of the refused studio is registered");
     }
+
+    /// <summary>
+    /// <c>MapPostgresStudio()</c> in an application that registered another studio is refused, saying which and why -
+    /// before it writes a path onto anybody's options. MartenStudio.Tests holds both directions with the real methods.
+    /// </summary>
+    [Fact]
+    public async Task MapPostgresStudio_in_an_application_that_registered_another_studio_is_refused()
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSingleton(new StudioRegistrationMarker("marten", "Marten Studio", "AddMartenStudio()"));
+        await using WebApplication app = builder.Build();
+
+        Action map = () => app.MapPostgresStudio();
+        Action pattern = () => app.MapPostgresStudio("/db");
+
+        map.Should().Throw<InvalidOperationException>().WithMessage(
+            "MapPostgresStudio() was called in an application that registered Marten Studio with AddMartenStudio(). "
+            + "Map the studio the application registered - app.MapMartenStudio() - or register Postgres Studio with "
+            + "AddPostgresStudio() in its place*");
+        pattern.Should().Throw<InvalidOperationException>().WithMessage("MapPostgresStudio() was called*");
+    }
+
+    [Fact]
+    public void The_health_check_export_is_registered_once_under_its_name()
+    {
+        ServiceCollection services = new();
+        services.AddPostgresStudio();
+        services.AddHealthChecks()
+            .AddPostgresStudio(tags: ["ready"])
+            .AddPostgresStudio("postgres-studio-live", failureStatus: HealthStatus.Degraded);
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        HealthCheckRegistration[] registrations = [.. provider.GetRequiredService<IOptions<HealthCheckServiceOptions>>().Value.Registrations];
+
+        registrations.Select(static x => x.Name).Should().Equal("postgres-studio", "postgres-studio-live");
+        registrations[0].Tags.Should().Equal("ready");
+        registrations[0].FailureStatus.Should().Be(HealthStatus.Unhealthy);
+        registrations[1].FailureStatus.Should().Be(HealthStatus.Degraded);
+        services.Count(static x => x.ServiceType == typeof(HealthExportRunner)).Should().Be(1, "two checks share one run per interval");
+
+        HealthCheck(registrations[0], provider).Should().BeOfType<StudioHealthCheck>();
+    }
+
+    private static IHealthCheck HealthCheck(HealthCheckRegistration registration, IServiceProvider provider) => registration.Factory(provider);
 
     [Fact]
     public void The_marker_is_PostgresStudios()

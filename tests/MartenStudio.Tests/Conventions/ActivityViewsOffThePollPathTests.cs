@@ -164,7 +164,7 @@ public class ActivityViewsOffThePollPathTests
 
         Regex.Matches(page, @"\.GetSummaryAsync\(").Should().ContainSingle("the summary is asked in one place");
 
-        int method = page.IndexOf("private async Task LoadAtHealthIntervalAsync()", StringComparison.Ordinal);
+        int method = page.IndexOf("private async Task LoadAtHealthIntervalAsync(", StringComparison.Ordinal);
         method.Should().BePositive();
         int next = page.IndexOf("private ", method + 1, StringComparison.Ordinal);
         page[method..next].Should().Contain(".GetSummaryAsync(", "that place is the health-interval load");
@@ -173,7 +173,7 @@ public class ActivityViewsOffThePollPathTests
         tick.Should().BePositive();
         string tickBody = page[tick..page.IndexOf("private ", tick + 1, StringComparison.Ordinal)];
         tickBody.IndexOf("EffectiveHealthInterval", StringComparison.Ordinal).Should().BePositive()
-            .And.BeLessThan(tickBody.IndexOf("LoadAtHealthIntervalAsync()", StringComparison.Ordinal), "the tick asks only once the interval has passed");
+            .And.BeLessThan(tickBody.IndexOf("LoadAtHealthIntervalAsync(", StringComparison.Ordinal), "the tick asks only once the interval has passed");
     }
 
     [Fact]

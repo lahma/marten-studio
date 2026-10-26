@@ -1,11 +1,9 @@
 using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
 
 using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
-using PostgresStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Health.Checks;
@@ -88,55 +86,20 @@ public static partial class MartenStudioServiceCollectionExtensions
             MartenStudioDescriptor.Instance,
             static provider => new MartenStudioSettings(provider.GetRequiredService<IOptions<MartenStudioOptions>>()));
 
+        // The options both studios share are validated by one chain (StudioOptionsValidation), in MartenStudio's names and
+        // with its sentences unchanged; MartenStudio's own validations sit between its parts, where they always were, so the
+        // failures an OptionsValidationException lists keep their order (pinned by MartenStudioOptionsTest).
         OptionsBuilder<MartenStudioOptions> optionsBuilder = services
             .AddOptions<MartenStudioOptions>()
-            .Validate(
-                static options => !string.IsNullOrWhiteSpace(options.Path) && options.Path.StartsWith('/'),
-                "MartenStudioOptions.Path must start with '/'")
-            .Validate(
-                static options => StudioPath.IsRoutable(options.Path),
-                "MartenStudioOptions.Path must be a simple URL path: it cannot contain '{', '}', '?', '#', '.' or '..' segments, or empty segments ('//')")
-            .Validate(
-                static options => options.DefaultPageSize >= 1 && options.DefaultPageSize <= options.MaxPageSize,
-                "MartenStudioOptions.DefaultPageSize must be between 1 and MaxPageSize")
-            .Validate(
-                static options => options.MaxPageSize >= 1 && options.MaxPageSize <= 5000,
-                "MartenStudioOptions.MaxPageSize must be between 1 and 5000: a larger page is a sequential scan rendered into a browser")
-            .Validate(
-                static options => options.QueryTimeout >= TimeSpan.FromSeconds(1) && options.QueryTimeout <= TimeSpan.FromMinutes(10),
-                "MartenStudioOptions.QueryTimeout must be between one second and ten minutes")
-            .Validate(
-                static options => options.MaxInlineDocumentBytes > 0 && options.MaxInlineDocumentBytes <= 64 * 1024 * 1024,
-                "MartenStudioOptions.MaxInlineDocumentBytes must be between 1 and 64 MiB")
-            .Validate(
-                static options => options.MaxSqlConsoleRows >= 1 && options.MaxSqlConsoleRows <= 10_000,
-                "MartenStudioOptions.MaxSqlConsoleRows must be between 1 and 10000")
-            .Validate(
-                static options => options.SqlConsoleRole is null || PostgresRoleName().IsMatch(options.SqlConsoleRole),
-                "MartenStudioOptions.SqlConsoleRole must be a plain Postgres identifier: it is written into SET LOCAL ROLE, where it cannot be a parameter")
-            .Validate(
-                static options => options.ExactCountThreshold >= 0,
-                "MartenStudioOptions.ExactCountThreshold cannot be negative")
-            .Validate(
-                static options => options.RefreshInterval >= TimeSpan.FromSeconds(1) && options.RefreshInterval <= TimeSpan.FromMinutes(5),
-                "MartenStudioOptions.RefreshInterval must be between one second and five minutes")
-            .Validate(
-                static options => options.HealthInterval >= TimeSpan.FromSeconds(15) && options.HealthInterval <= TimeSpan.FromHours(1),
-                "MartenStudioOptions.HealthInterval must be between fifteen seconds and one hour: several health checks scan the server's lock table and process array, and a page polls them no faster than this")
+            .ValidateSharedBounds(nameof(MartenStudioOptions), nameof(MartenStudioOptions.MaxInlineDocumentBytes), Shape)
             .Validate(
                 static options => options.RebuildShardTimeout >= TimeSpan.FromMinutes(1),
                 "MartenStudioOptions.RebuildShardTimeout must be at least one minute: it is the per-shard replay budget, and a rebuild that exceeds it stops with the projection's tables already emptied")
-            .Validate(
-                static options => options.Capabilities is not null,
-                "MartenStudioOptions.Capabilities cannot be null: use new MartenStudioCapabilities() for none, or MartenStudioCapabilities.All()")
+            .ValidateSharedCapabilities(nameof(MartenStudioOptions), nameof(MartenStudioCapabilities), Shape)
             .Validate(
                 static options => options.KnownTenantIds.All(static tenantId => !string.IsNullOrWhiteSpace(tenantId)),
                 "MartenStudioOptions.KnownTenantIds cannot contain an empty or whitespace tenant id")
-            .Validate(
-                static options => options.BrowsableSchemas.All(BrowsableSchemaMatcher.IsValidEntry),
-                "MartenStudioOptions.BrowsableSchemas entries must each be \"*\" or a Postgres schema name: not " +
-                "empty or whitespace, at most 63 bytes in UTF-8, and with no double quote (\") and no NUL - a " +
-                "name the studio could never quote is a name no schema it can read has");
+            .ValidateSharedSchemas(nameof(MartenStudioOptions), Shape);
 
         if (configure is not null)
         {
@@ -199,11 +162,18 @@ public static partial class MartenStudioServiceCollectionExtensions
         return services;
     }
 
-    /// <summary>
-    /// A Postgres role name as <c>SET LOCAL ROLE</c> will accept it. The console's role cannot be a
-    /// parameter - it is an identifier - so it is held to the shape of an unquoted identifier here, at
-    /// startup, rather than escaped later.
-    /// </summary>
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_$]{0,62}$", RegexOptions.CultureInvariant)]
-    private static partial Regex PostgresRoleName();
+    /// <summary>The options MartenStudio shares with every studio, as the shared validation reads them.</summary>
+    private static StudioOptionsShape Shape(MartenStudioOptions options) => new(
+        options.Path,
+        options.DefaultPageSize,
+        options.MaxPageSize,
+        options.QueryTimeout,
+        options.MaxInlineDocumentBytes,
+        options.MaxSqlConsoleRows,
+        options.SqlConsoleRole,
+        options.ExactCountThreshold,
+        options.RefreshInterval,
+        options.HealthInterval,
+        options.Capabilities is not null,
+        options.BrowsableSchemas);
 }

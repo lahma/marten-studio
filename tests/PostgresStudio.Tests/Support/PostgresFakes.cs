@@ -77,9 +77,12 @@ internal sealed class FakeServerReader : IPostgresServerReader
 {
     public List<StudioScope> Requests { get; } = [];
 
-    public Task<PostgresServerRead> ReadAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public List<bool> Refreshes { get; } = [];
+
+    public Task<PostgresServerRead> ReadAsync(StudioScope scope, bool refresh = false, CancellationToken cancellationToken = default)
     {
         Requests.Add(scope);
+        Refreshes.Add(refresh);
         return Task.FromResult(new PostgresServerRead(new PostgresServerFacts(DateTimeOffset.UnixEpoch, 170004, "17.4", PostgresPlatform.SelfHosted), null));
     }
 }

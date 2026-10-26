@@ -44,11 +44,25 @@ public class PostgresStudioFenceTests
     internal static bool IsMartenFamily(string name) =>
         MartenFamily.Any(prefix => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>The two projects fenced: the shared studio, and this test project.</summary>
-    public static TheoryData<string, string> Projects => new()
+    /// <summary>
+    /// The two projects fenced, the shared studio and this test project: each project file with what it must be seen to reference - so a reader that found nothing, or the wrong file,
+    /// fails rather than passing over an empty list: the shared studio names Npgsql and the assets pack itself, and this
+    /// project names the shared studio.
+    /// </summary>
+    public static TheoryData<string, string, string> ProjectFiles => new()
     {
-        { "src", Shared },
-        { "tests", TestProject },
+        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets" },
+        { "tests", TestProject, Shared + ",bunit" },
+    };
+
+    /// <summary>
+    /// Each restore graph with the libraries it must be seen to hold: both reach Npgsql and the assets pack - this project
+    /// through the shared studio - so a graph read that missed either is a graph read that read nothing.
+    /// </summary>
+    public static TheoryData<string, string, string> RestoreGraphs => new()
+    {
+        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets" },
+        { "tests", TestProject, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Shared },
     };
 
     [Fact]
@@ -127,16 +141,16 @@ public class PostgresStudioFenceTests
     }
 
     [Theory]
-    [MemberData(nameof(Projects))]
-    public void The_project_references_no_Marten_family_package_and_not_MartenStudio(string root, string project)
+    [MemberData(nameof(ProjectFiles))]
+    public void The_project_references_no_Marten_family_package_and_not_MartenStudio(string root, string project, string expected)
     {
         XDocument document = XDocument.Load(RepositoryRoot.Combine(root, project, project + ".csproj"));
 
         string[] packages = [.. References(document, "PackageReference")];
         string[] projects = [.. References(document, "ProjectReference")];
 
-        // Not vacuous: the reader sees the project's real references.
-        (packages.Length + projects.Length).Should().BePositive("the project file is read");
+        // Not vacuous: the reader sees the project's real references, the ones this project is known to name.
+        packages.Concat(projects).Should().Contain(expected.Split(','), "the project file is read");
 
         Offending(document).Should().BeEmpty(
             "the project names no Marten-family package and no project of MartenStudio's: "
@@ -163,8 +177,8 @@ public class PostgresStudioFenceTests
     /// assets file is NuGet's own record of the whole graph.
     /// </summary>
     [Theory]
-    [MemberData(nameof(Projects))]
-    public void What_the_project_restores_holds_no_Marten_family_library(string root, string project)
+    [MemberData(nameof(RestoreGraphs))]
+    public void What_the_project_restores_holds_no_Marten_family_library(string root, string project, string expected)
     {
         string assets = RepositoryRoot.Combine(root, project, "obj", "project.assets.json");
 
@@ -175,8 +189,8 @@ public class PostgresStudioFenceTests
 
         string[] libraries = [.. Libraries(File.ReadAllText(assets))];
 
-        // Not vacuous: the graph is read, and Npgsql is in it.
-        libraries.Should().Contain(static x => x.StartsWith("Npgsql/", StringComparison.OrdinalIgnoreCase), "the project restores Npgsql");
+        // Not vacuous: the graph is read, and the libraries this project is known to reach are in it.
+        libraries.Select(static x => x.Split('/')[0]).Should().Contain(expected.Split(','), "the project's restore graph is read");
 
         libraries.Where(static x => IsMartenFamily(x.Split('/')[0])).Should().BeEmpty(
             "the restore graph must not reach Marten, JasperFx or Weasel, or MartenStudio: " + string.Join(", ", libraries));

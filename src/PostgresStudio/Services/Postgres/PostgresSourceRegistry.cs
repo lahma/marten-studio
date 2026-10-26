@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,12 +20,23 @@ namespace PostgresStudio.Services.Postgres;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Lazy, like MartenStudio's store registry.</b> Constructed with the <see cref="IServiceCollection" /> at
-/// <c>AddPostgresStudio</c> time and scanned on first use, because <c>AddPostgresStudio()</c> may be called before
+/// <b>Lazy, like MartenStudio's store registry.</b> Holds the <see cref="IServiceCollection" /> captured at
+/// <c>AddPostgresStudio</c> time and scans it on first use, because <c>AddPostgresStudio()</c> may be called before
 /// <c>AddNpgsqlDataSource()</c>. Only a descriptor whose service type is exactly <see cref="NpgsqlDataSource" />, unkeyed,
 /// counts: <c>AddNpgsqlDataSource</c> also registers <c>DbDataSource</c> and a transient <c>NpgsqlConnection</c>, and
-/// neither is a source; and only a singleton, because resolving a scoped or transient one per circuit would build a pool
-/// per visitor (PS-0, E7: it registers factories only, so nothing here reads an instance off a descriptor).
+/// neither is a source (PS-0, E7: it registers factories only, so nothing here reads an instance off a descriptor). And
+/// the <b>last</b> such descriptor decides, because it is the one the container resolves: when it is a singleton the
+/// source is listed, and when it is scoped or transient it is not, whatever an earlier registration said - resolving it
+/// would build a pool per circuit, or per resolution (event 9300).
+/// </para>
+/// <para>
+/// <b>Built from the root container, once.</b> A singleton itself, it holds the application's root
+/// <see cref="IServiceProvider" />: the default data source is resolved from it, and a factory given to
+/// <c>AddDataSource</c> or <c>AddDatabaseSource</c> is called with it exactly once - under a lock per source, so two
+/// circuits asking at the same moment do not call it twice - and what it answers is kept for the process. Since that
+/// answer outlives every scope, the provider a factory is handed resolves a data source or a database source only when
+/// the container registers it as a singleton: a scoped or transient one is refused, and the source is unavailable with a
+/// sentence that says why, rather than one visitor's instance being kept for everybody.
 /// </para>
 /// <para>
 /// <b>Nothing connects.</b> Building a source is resolving it from the container or calling the host's factory once;
@@ -51,8 +64,9 @@ internal sealed class PostgresSourceRegistry
     internal const int MaxListedDatabases = 10_000;
 
     private readonly IServiceCollection services;
-    private readonly TimeProvider timeProvider;
+    private readonly IServiceProvider root;
     private readonly Lock gate = new();
+    private readonly ConcurrentDictionary<string, Lock> builds = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, StoreAvailability> failures = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, object> built = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, HostList> lists = new(StringComparer.OrdinalIgnoreCase);
@@ -61,21 +75,24 @@ internal sealed class PostgresSourceRegistry
     private DefaultScan? scanned;
     private long listGeneration;
 
-    public PostgresSourceRegistry(IServiceCollection services) : this(services, TimeProvider.System)
-    {
-    }
-
-    public PostgresSourceRegistry(IServiceCollection services, TimeProvider timeProvider)
+    /// <param name="services">The application's service collection, scanned on first use.</param>
+    /// <param name="root">The application's root service provider: what the default source and every factory resolve from.</param>
+    /// <param name="timeProvider">The clock behind every cache and timeout; the system's when <see langword="null" />.</param>
+    public PostgresSourceRegistry(IServiceCollection services, IServiceProvider root, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(root);
 
         this.services = services;
-        this.timeProvider = timeProvider;
+        this.root = root;
+        TimeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    /// <summary>The clock behind the caches and the host timeouts.</summary>
+    public TimeProvider TimeProvider { get; }
+
     /// <summary>
-    /// Every source, in order: <c>default</c> (when the container has a singleton unkeyed data source and
+    /// Every source, in order: <c>default</c> (when the container's last unkeyed data source is a singleton and
     /// <see cref="PostgresStudioOptions.IncludeDefaultDataSource" /> is on), then each <c>AddDataSource</c>, then each
     /// <c>AddDatabaseSource</c>, in call order (API design §3.7).
     /// </summary>
@@ -136,12 +153,10 @@ internal sealed class PostgresSourceRegistry
     /// <summary>The data source behind a <see cref="StudioSourceKind.DataSource" /> registration, or why there is none.</summary>
     /// <param name="registration">A registration this registry answered.</param>
     /// <param name="options">The studio's options.</param>
-    /// <param name="provider">The container to resolve from.</param>
     /// <param name="dataSource">The application's data source, when available.</param>
     public StoreAvailability TryResolveDataSource(
         StudioSourceRegistration registration,
         PostgresStudioOptions options,
-        IServiceProvider provider,
         [NotNullWhen(true)] out NpgsqlDataSource? dataSource)
     {
         ArgumentNullException.ThrowIfNull(registration);
@@ -153,13 +168,11 @@ internal sealed class PostgresSourceRegistry
         StoreAvailability availability = TryBuild(
             registration.Key,
             typeof(NpgsqlDataSource),
-            provider,
             isDefault
                 ? static services => services.GetRequiredService<NpgsqlDataSource>()
                 : definition?.DataSource is { } factory
                     ? services => factory(services) ?? throw new InvalidOperationException("The factory returned no data source.")
                     : null,
-            cache: !isDefault,
             out object? instance);
 
         dataSource = instance as NpgsqlDataSource;
@@ -169,12 +182,10 @@ internal sealed class PostgresSourceRegistry
     /// <summary>The host's database source behind a <see cref="StudioSourceKind.HostProvider" /> registration, or why there is none.</summary>
     /// <param name="registration">A registration this registry answered.</param>
     /// <param name="options">The studio's options.</param>
-    /// <param name="provider">The container to resolve from.</param>
     /// <param name="source">The host's source, when available.</param>
     public StoreAvailability TryResolveDatabaseSource(
         StudioSourceRegistration registration,
         PostgresStudioOptions options,
-        IServiceProvider provider,
         [NotNullWhen(true)] out IPostgresDatabaseSource? source)
     {
         ArgumentNullException.ThrowIfNull(registration);
@@ -185,11 +196,9 @@ internal sealed class PostgresSourceRegistry
         StoreAvailability availability = TryBuild(
             registration.Key,
             typeof(IPostgresDatabaseSource),
-            provider,
             definition?.DatabaseSource is { } factory
                 ? services => factory(services) ?? throw new InvalidOperationException("The factory returned no database source.")
                 : null,
-            cache: true,
             out object? instance);
 
         source = instance as IPostgresDatabaseSource;
@@ -206,7 +215,7 @@ internal sealed class PostgresSourceRegistry
     /// <param name="logger">Where names left out are counted (9301).</param>
     /// <param name="throttle">The studio's throttle, or <see langword="null" /> for a Warning every time.</param>
     /// <param name="cancellationToken">Cancels this caller's wait, never a listing other callers share.</param>
-    /// <exception cref="Exception">Whatever the host's listing threw, or a timeout; nothing is remembered then.</exception>
+    /// <exception cref="Exception">Whatever the host's listing threw, or a <see cref="TimeoutException" />; nothing is remembered then.</exception>
     public async ValueTask<IReadOnlyList<string>> ListAsync(
         string key,
         IPostgresDatabaseSource source,
@@ -223,7 +232,7 @@ internal sealed class PostgresSourceRegistry
         lock (gate)
         {
             long generation = listGeneration;
-            DateTimeOffset now = timeProvider.GetUtcNow();
+            DateTimeOffset now = TimeProvider.GetUtcNow();
 
             if (!lists.TryGetValue(key, out HostList? cached)
                 || cached.Generation != generation
@@ -262,7 +271,7 @@ internal sealed class PostgresSourceRegistry
         // cancel it for the others.
         await Task.Yield();
 
-        using CancellationTokenSource limit = new(timeout, timeProvider);
+        using CancellationTokenSource limit = new(timeout, TimeProvider);
 
         List<string> names = [];
         HashSet<string> seen = new(StringComparer.OrdinalIgnoreCase);
@@ -308,7 +317,7 @@ internal sealed class PostgresSourceRegistry
             // The host's listing ran out of time: a failure of the source, said as one - never a cancellation, which
             // every caller would read as its own page going away.
             throw new TimeoutException(
-                "The database source '" + key + "' did not list its databases within " + timeout.TotalSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " s.",
+                "The database source '" + key + "' did not list its databases within " + timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s.",
                 exception);
         }
 
@@ -318,7 +327,9 @@ internal sealed class PostgresSourceRegistry
 
         if (capped)
         {
-            Report(logger, throttle, key, 1, "the source listed more than " + MaxListedDatabases.ToString(System.Globalization.CultureInfo.InvariantCulture) + " databases, and the rest were not read");
+            // The list is not read past the cap - that is the cap's point - so how many more there were is not known: the
+            // count is the first name left out.
+            Report(logger, throttle, key, 1, "the source listed more than " + MaxListedDatabases.ToString(CultureInfo.InvariantCulture) + " databases, and the list was not read past the cap, so any more are not counted");
         }
 
         return names;
@@ -335,87 +346,78 @@ internal sealed class PostgresSourceRegistry
         logger.DatabaseNamesSkipped(level, count, key, reason);
     }
 
+    /// <summary>
+    /// Builds a source once: under its own lock, so concurrent first callers wait for the one call rather than making a
+    /// second, and kept for the process once it succeeded. A failure is remembered for ten seconds.
+    /// </summary>
     private StoreAvailability TryBuild(
         string key,
         Type serviceType,
-        IServiceProvider provider,
         Func<IServiceProvider, object>? build,
-        bool cache,
         out object? instance)
     {
-        ArgumentNullException.ThrowIfNull(provider);
-
         instance = null;
-
-        lock (gate)
-        {
-            if (cache && built.TryGetValue(key, out object? existing))
-            {
-                instance = existing;
-                return StoreAvailability.Available;
-            }
-
-            if (failures.TryGetValue(key, out StoreAvailability? failed)
-                && failed.At is { } failedAt
-                && timeProvider.GetUtcNow() - failedAt < FailureCacheWindow)
-            {
-                return failed;
-            }
-        }
 
         if (build is null)
         {
-            return StoreAvailability.Unavailable("No data source is registered under '" + key + "'.", timeProvider.GetUtcNow());
+            return StoreAvailability.Unavailable("No data source is registered under '" + key + "'.", TimeProvider.GetUtcNow());
         }
 
-        try
+        lock (builds.GetOrAdd(key, static _ => new Lock()))
         {
-            object created = build(provider);
-
             lock (gate)
             {
-                failures.Remove(key);
-
-                // A factory is called once (the options' promise): the first instance it answered is the one kept.
-                if (cache)
+                if (built.TryGetValue(key, out object? existing))
                 {
-                    if (built.TryGetValue(key, out object? raced))
-                    {
-                        created = raced;
-                    }
-                    else
-                    {
-                        built[key] = created;
-                    }
+                    instance = existing;
+                    return StoreAvailability.Available;
+                }
+
+                if (failures.TryGetValue(key, out StoreAvailability? failed)
+                    && failed.At is { } failedAt
+                    && TimeProvider.GetUtcNow() - failedAt < FailureCacheWindow)
+                {
+                    return failed;
                 }
             }
 
-            instance = created;
-            return StoreAvailability.Available;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            StoreAvailability unavailable = StoreAvailability.Unavailable(exception.Message, timeProvider.GetUtcNow());
-
-            lock (gate)
+            try
             {
-                failures[key] = unavailable;
+                object created = build(new SingletonServices(root, services));
+
+                lock (gate)
+                {
+                    failures.Remove(key);
+                    built[key] = created;
+                }
+
+                instance = created;
+                return StoreAvailability.Available;
             }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                StoreAvailability unavailable = StoreAvailability.Unavailable(exception.Message, TimeProvider.GetUtcNow());
 
-            // The failure cache expires every ten seconds and every polling page asks again, so the Warning is
-            // throttled across them, as MartenStudio's store registry throttles the same event (9210).
-            LogLevel level = StudioLogThrottle.LevelOrWarning(
-                provider.GetService<StudioLogThrottle>(),
-                "Store.Resolve",
-                key,
-                null,
-                StudioLogThrottle.KindOf(exception));
+                lock (gate)
+                {
+                    failures[key] = unavailable;
+                }
 
-            provider.GetService<ILoggerFactory>()?
-                .CreateLogger<PostgresSourceRegistry>()
-                .StoreUnavailable(level, key, serviceType.FullName ?? serviceType.Name, exception.Message);
+                // The failure cache expires every ten seconds and every polling page asks again, so the Warning is
+                // throttled across them, as MartenStudio's store registry throttles the same event (9210).
+                LogLevel level = StudioLogThrottle.LevelOrWarning(
+                    root.GetService<StudioLogThrottle>(),
+                    "Store.Resolve",
+                    key,
+                    null,
+                    StudioLogThrottle.KindOf(exception));
 
-            return unavailable;
+                root.GetService<ILoggerFactory>()?
+                    .CreateLogger<PostgresSourceRegistry>()
+                    .StoreUnavailable(level, key, serviceType.FullName ?? serviceType.Name, exception.Message);
+
+                return unavailable;
+            }
         }
     }
 
@@ -446,29 +448,13 @@ internal sealed class PostgresSourceRegistry
                 return raced;
             }
 
-            bool hasDefault = false;
-            ServiceLifetime? skipped = null;
+            // The last unkeyed registration is the one the container resolves, so it alone decides.
+            ServiceDescriptor? last = SingletonServices.Last(services, typeof(NpgsqlDataSource), keyed: false, key: null);
+            bool hasDefault = last is { Lifetime: ServiceLifetime.Singleton };
 
-            foreach (ServiceDescriptor descriptor in services)
+            if (last is { Lifetime: not ServiceLifetime.Singleton } skipped && logger?.IsEnabled(LogLevel.Information) == true)
             {
-                if (descriptor.ServiceType != typeof(NpgsqlDataSource) || descriptor.IsKeyedService)
-                {
-                    continue;
-                }
-
-                if (descriptor.Lifetime == ServiceLifetime.Singleton)
-                {
-                    hasDefault = true;
-                }
-                else
-                {
-                    skipped = descriptor.Lifetime;
-                }
-            }
-
-            if (!hasDefault && skipped is { } lifetime && logger?.IsEnabled(LogLevel.Information) == true)
-            {
-                logger.DataSourceLifetimeSkipped(lifetime.ToString());
+                logger.DataSourceLifetimeSkipped(skipped.Lifetime.ToString());
             }
 
             scanned = new DefaultScan(hasDefault);
@@ -476,9 +462,79 @@ internal sealed class PostgresSourceRegistry
         }
     }
 
-    /// <summary>What the scan found: whether the container holds a singleton unkeyed data source.</summary>
+    /// <summary>What the scan found: whether the container's last unkeyed data source is a singleton.</summary>
     private sealed record DefaultScan(bool HasDefault);
 
     /// <summary>One host's list, shared by every caller while it is fresh.</summary>
     private sealed record HostList(Task<IReadOnlyList<string>> Pending, DateTimeOffset ReadAt, long Generation);
+
+    /// <summary>
+    /// The root provider as a source's factory sees it: everything resolves as the container would resolve it, except a
+    /// data source or a database source the container does not register as a singleton, which is refused - because what
+    /// the factory answers is kept for the life of the process.
+    /// </summary>
+    private sealed class SingletonServices(IServiceProvider root, IServiceCollection services)
+        : IServiceProvider, IKeyedServiceProvider, ISupportRequiredService
+    {
+        public object? GetService(Type serviceType)
+        {
+            Require(serviceType, keyed: false, key: null);
+            return root.GetService(serviceType);
+        }
+
+        public object GetRequiredService(Type serviceType)
+        {
+            Require(serviceType, keyed: false, key: null);
+            return root.GetRequiredService(serviceType);
+        }
+
+        public object? GetKeyedService(Type serviceType, object? serviceKey)
+        {
+            Require(serviceType, keyed: true, serviceKey);
+            return root is IKeyedServiceProvider keyed
+                ? keyed.GetKeyedService(serviceType, serviceKey)
+                : throw new InvalidOperationException("The application's service provider does not support keyed services.");
+        }
+
+        public object GetRequiredKeyedService(Type serviceType, object? serviceKey)
+        {
+            Require(serviceType, keyed: true, serviceKey);
+            return root.GetRequiredKeyedService(serviceType, serviceKey);
+        }
+
+        /// <summary>The last descriptor of <paramref name="type" /> (with <paramref name="key" />), as the container would pick it.</summary>
+        public static ServiceDescriptor? Last(IServiceCollection services, Type type, bool keyed, object? key)
+        {
+            ServiceDescriptor? last = null;
+
+            foreach (ServiceDescriptor descriptor in services)
+            {
+                if (descriptor.ServiceType == type
+                    && descriptor.IsKeyedService == keyed
+                    && (!keyed || Equals(descriptor.ServiceKey, key)))
+                {
+                    last = descriptor;
+                }
+            }
+
+            return last;
+        }
+
+        private void Require(Type type, bool keyed, object? key)
+        {
+            if (!typeof(DbDataSource).IsAssignableFrom(type) && !typeof(IPostgresDatabaseSource).IsAssignableFrom(type))
+            {
+                return;
+            }
+
+            if (Last(services, type, keyed, key) is { Lifetime: not ServiceLifetime.Singleton } descriptor)
+            {
+                string registration = keyed ? " under the key '" + key + "'" : string.Empty;
+                throw new InvalidOperationException(
+                    type.Name + registration + " is registered as " + descriptor.Lifetime + ", and Postgres Studio keeps what a "
+                    + "source's factory answers for the life of the process: register it as a singleton, or the studio would hold "
+                    + "one scope's instance for every visitor.");
+            }
+        }
+    }
 }

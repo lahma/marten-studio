@@ -14,7 +14,7 @@ internal static class ConsoleExamples
     [
         (
             "The server and the database",
-            "select pg_catalog.version() as server, pg_catalog.current_database() as database, pg_catalog.current_user as role",
+            "select pg_catalog.version() as server, pg_catalog.current_database() as database, current_user as role",
             null),
         (
             "The largest tables, by Postgres' estimate",

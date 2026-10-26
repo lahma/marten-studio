@@ -85,6 +85,37 @@ internal static class StudioEndpointMapper
     private static readonly ConcurrentDictionary<string, (long Length, DateTimeOffset LastModified, EntityTagHeaderValue ETag)> ETagCache = new();
 
     /// <summary>
+    /// Refuses a <c>Map*Studio()</c> call for a studio other than the one this application registered: the shared services
+    /// it would map - settings, descriptor, sources - are the registered studio's, so <c>MapPostgresStudio()</c> in a
+    /// Marten Studio application would serve Marten Studio's pages under PostgresStudio's name, and the reverse. Asked
+    /// first, before a map call writes anything onto an options instance. An application that registered no studio at all
+    /// is left to fail as it always has, on the first service it lacks.
+    /// </summary>
+    /// <param name="builder">The host's endpoint route builder.</param>
+    /// <param name="expected">The studio the map call belongs to.</param>
+    /// <param name="mapMethod">The map call, as a host spells it: <c>MapPostgresStudio()</c>.</param>
+    /// <exception cref="InvalidOperationException">Another studio is registered.</exception>
+    internal static void RequireRegistered(IEndpointRouteBuilder builder, StudioRegistrationMarker expected, string mapMethod)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(expected);
+
+        if (builder.ServiceProvider.GetService<StudioRegistrationMarker>() is { } registered
+            && !string.Equals(registered.Key, expected.Key, StringComparison.Ordinal))
+        {
+            string registeredMap = registered.RegisteredBy.StartsWith("Add", StringComparison.Ordinal)
+                ? "Map" + registered.RegisteredBy[3..]
+                : registered.RegisteredBy;
+
+            throw new InvalidOperationException(
+                $"{mapMethod} was called in an application that registered {registered.ProductName} with {registered.RegisteredBy}. "
+                + $"Map the studio the application registered - app.{registeredMap} - or register {expected.ProductName} with "
+                + $"{expected.RegisteredBy} in its place: one studio per application, and the services a map call serves are the "
+                + "registered studio's.");
+        }
+    }
+
+    /// <summary>
     /// Maps the studio rooted at <typeparamref name="TRoot" /> under <see cref="IStudioSettings.TrimmedPath" />, with the
     /// endpoint markers the startup guard reads, and answers one builder that covers everything it mapped.
     /// </summary>

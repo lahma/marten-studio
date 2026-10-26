@@ -126,6 +126,13 @@ internal interface IStudioSettings
     Func<Type, bool>? IsDocumentTypeVisible { get; }
 
     /// <summary>
+    /// The source picker's label for this configuration, or <see langword="null" /> for the descriptor's own
+    /// (<see cref="StudioDescriptor.SourceLabel" />). PostgresStudio says "Source" once a host or <c>AddDataSource</c>
+    /// source exists, so the source picker and the database picker are never both called "Database".
+    /// </summary>
+    string? SourceLabel => null;
+
+    /// <summary>
     /// <paramref name="member" /> spelled the way a host's registration spells it: <c>MartenStudioOptions.ReadOnly</c>,
     /// <c>MartenStudioOptions.Capabilities.RunSql</c>.
     /// </summary>
@@ -148,6 +155,16 @@ internal static class StudioSettingsText
     {
         ArgumentNullException.ThrowIfNull(settings);
         return settings.OptionName("ReadOnly");
+    }
+
+    /// <summary>
+    /// The source picker's label: what <paramref name="settings" /> says for this configuration, or the descriptor's.
+    /// </summary>
+    public static string SourceLabelOf(this IStudioSettings settings, StudioDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
+        return settings.SourceLabel ?? descriptor.SourceLabel;
     }
 
     /// <summary>The one-line opt-in that turns every capability on: <c>MartenStudioCapabilities.All()</c>.</summary>

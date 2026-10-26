@@ -5,15 +5,16 @@
 @inject StudioState State
 @inject StudioAuthorization Authorization
 @inject StudioDescriptor Descriptor
+@inject IStudioSettings Settings
 
 <div class="ms-scope-selector">
     @if (State.AvailableStores.Count > 1)
     {
         <div class="ms-header-control">
-            <label class="ms-header-control-label" for="ms-store-select">@Descriptor.SourceLabel</label>
+            <label class="ms-header-control-label" for="ms-store-select">@SourceLabel</label>
             <select id="ms-store-select"
                     class="ms-select ms-header-select"
-                    aria-label="@Descriptor.SourceLabel"
+                    aria-label="@SourceLabel"
                     value="@State.ActiveScope?.StoreKey"
                     @onchange="OnStoreChangedAsync">
                 @foreach (StoreListing store in State.AvailableStores)
@@ -132,12 +133,15 @@
 
     @if (State.ActiveStoreUnavailableMessage is { Length: > 0 } unavailable)
     {
-        <span class="ms-scope-unavailable" role="status">@Descriptor.SourceLabel unavailable: @unavailable</span>
+        <span class="ms-scope-unavailable" role="status">@SourceLabel unavailable: @unavailable</span>
     }
 </div>
 
 @code
 {
+    /// <summary>The source picker's label: the descriptor's, or what this configuration says (PostgresStudio's "Source").</summary>
+    private string SourceLabel => Settings.SourceLabelOf(Descriptor);
+
     protected override async Task OnInitializedAsync()
     {
         State.ScopeChanged += OnScopeChanged;

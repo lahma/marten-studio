@@ -31,25 +31,23 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
 {
     private readonly IOptions<PostgresStudioOptions> options;
     private readonly PostgresSourceRegistry registry;
-    private readonly IServiceProvider services;
     private readonly ILogger<PostgresStudioSourceProvider> logger;
     private readonly StudioLogThrottle? throttle;
     private long generation;
 
     /// <remarks>
     /// <paramref name="throttle" /> is optional so that a test can build a provider by hand; the container always
-    /// supplies it.
+    /// supplies it. Nothing is resolved from the circuit's own scope: the registry builds every source from the root
+    /// container, once.
     /// </remarks>
     public PostgresStudioSourceProvider(
         IOptions<PostgresStudioOptions> options,
         PostgresSourceRegistry registry,
-        IServiceProvider services,
         ILogger<PostgresStudioSourceProvider> logger,
         StudioLogThrottle? throttle = null)
     {
         this.options = options;
         this.registry = registry;
-        this.services = services;
         this.logger = logger;
         this.throttle = throttle;
     }
@@ -74,7 +72,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
 
         if (known.Kind == StudioSourceKind.HostProvider)
         {
-            StoreAvailability listed = registry.TryResolveDatabaseSource(known, options.Value, services, out IPostgresDatabaseSource? host);
+            StoreAvailability listed = registry.TryResolveDatabaseSource(known, options.Value, out IPostgresDatabaseSource? host);
             if (listed.IsAvailable && host is not null)
             {
                 source = new PostgresHostSource(known, host, this);
@@ -83,7 +81,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
             return listed;
         }
 
-        StoreAvailability availability = registry.TryResolveDataSource(known, options.Value, services, out NpgsqlDataSource? dataSource);
+        StoreAvailability availability = registry.TryResolveDataSource(known, options.Value, out NpgsqlDataSource? dataSource);
         if (availability.IsAvailable && dataSource is not null)
         {
             source = new PostgresDataSourceSource(known, new DataSourceDatabase(known.Key, dataSource));
@@ -178,14 +176,14 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
     internal async ValueTask<NpgsqlDataSource?> OpenAsync(IPostgresDatabaseSource host, string key, string name, CancellationToken cancellationToken)
     {
         TimeSpan timeout = options.Value.QueryTimeout;
-        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        limit.CancelAfter(timeout);
+        using CancellationTokenSource timer = new(timeout, registry.TimeProvider);
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timer.Token);
 
         try
         {
             return await host.GetDataSourceAsync(name, limit.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && limit.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && timer.IsCancellationRequested)
         {
             throw new TimeoutException(
                 "The database source '" + key + "' did not hand over database '" + name + "' within "
@@ -289,7 +287,10 @@ internal sealed class PostgresHostSource : IStudioSource
         ValueTask.FromResult(TenantList.Unavailable);
 
     /// <inheritdoc />
-    /// <exception cref="KeyNotFoundException">The scope names a tenant, or the host no longer has the database.</exception>
+    /// <exception cref="KeyNotFoundException">
+    /// The scope names a tenant, names no database - never "the first one", whatever a policy said about an empty id - or
+    /// the host no longer has the database.
+    /// </exception>
     /// <exception cref="StudioStoreUnavailableException">The host could not hand the database over.</exception>
     public async ValueTask<ResolvedSource> CompleteAsync(
         StudioScope scope,
@@ -354,17 +355,37 @@ internal sealed class PostgresHostSource : IStudioSource
     }
 }
 
-/// <summary>PostgresStudio's one tenancy rule: there is none.</summary>
+/// <summary>What every PostgresStudio scope must say before it is completed.</summary>
 internal static class PostgresTenancy
 {
-    /// <summary>Refuses a scope that names a tenant, with the answer an unknown tenant gets.</summary>
-    /// <exception cref="KeyNotFoundException"><paramref name="scope" /> names a tenant.</exception>
+    /// <summary>
+    /// Refuses a scope that names a tenant, and one that names no database, with the answer an unknown one gets.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No tenant:</b> a plain source has none.
+    /// </para>
+    /// <para>
+    /// <b>A database, always.</b> The shared resolver matches an empty database id to a source's first database, and the
+    /// policy it asked first was asked about the empty id - so a handler that allows <c>""</c> (which the studio asks
+    /// only to list a source that would not build) would be answered with whichever database the source lists first,
+    /// one it refuses by name included. Every scope the studio builds names its database; one that does not is refused
+    /// here, for a host's database source and for a single data source alike (PostgresStudioResource's remarks).
+    /// </para>
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException"><paramref name="scope" /> names a tenant, or no database.</exception>
     public static void RefuseTenant(StudioScope scope, string sourceKey)
     {
         if (scope.TenantId is { } tenant)
         {
             throw new KeyNotFoundException(
                 "'" + tenant + "' is not a tenant of data source '" + sourceKey + "': Postgres Studio's sources have no tenants.");
+        }
+
+        if (string.IsNullOrEmpty(scope.DatabaseId))
+        {
+            throw new KeyNotFoundException(
+                "The scope names no database of data source '" + sourceKey + "': Postgres Studio resolves a database only by its name.");
         }
     }
 }

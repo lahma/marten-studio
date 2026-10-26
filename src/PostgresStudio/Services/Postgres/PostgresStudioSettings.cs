@@ -113,6 +113,14 @@ internal sealed class PostgresStudioSettings : IStudioSettings
         Value.BrowsableSchemas as IReadOnlyList<string> ?? [.. Value.BrowsableSchemas];
 
     /// <inheritdoc />
+    /// <remarks>
+    /// "Source" once <c>AddDataSource</c> or <c>AddDatabaseSource</c> named one - the only configurations with a source
+    /// picker, and the ones where a host source's database picker, "Database", sits beside it - and otherwise the
+    /// descriptor's "Database", which names the one data source in the unavailable and refusal sentences.
+    /// </remarks>
+    public string? SourceLabel => Value.DataSources.Count + Value.DatabaseSources.Count > 0 ? "Source" : null;
+
+    /// <inheritdoc />
     /// <remarks>Always <see langword="null" />: PostgresStudio has no document types, so none can be hidden.</remarks>
     public Func<Type, bool>? IsDocumentTypeVisible => null;
 

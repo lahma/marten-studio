@@ -121,10 +121,16 @@ public sealed class PostgresStudioOptions
     /// <summary>
     /// The Postgres schemas the database browser shows. Their structure - tables, columns, keys, indexes - is visible to
     /// anyone the source policy admits; their rows and definitions need <see cref="PostgresStudioCapabilities.BrowseDatabase" />
-    /// and the write policy. Holds <c>public</c> by default; call <c>Clear()</c> first to replace it. Each entry is an
-    /// exact schema name, compared case-sensitively as Postgres stores it, or <c>"*"</c>.
+    /// and the write policy. Each entry is an exact schema name, compared case-sensitively as Postgres stores it, or
+    /// <c>"*"</c>. When nothing names any schema it is <c>public</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>The default is applied last.</b> The list starts empty, and only when it is still empty after every configuration
+    /// - code and bound configuration alike - does the studio add <c>public</c>. So a list that names schemas replaces
+    /// the default rather than adding to it: <c>"BrowsableSchemas": ["legacy"]</c> in <c>appsettings.json</c> browses
+    /// <c>legacy</c> alone, and to keep <c>public</c> beside it, name it too.
+    /// </para>
     /// <para>
     /// <c>"*"</c> means every schema the studio's role has <c>USAGE</c> on, except the system schemas and the schemas an
     /// extension owns. A system schema is never browsable, even by exact name.
@@ -139,12 +145,13 @@ public sealed class PostgresStudioOptions
     /// Marten Studio, where its tenancy and soft deletes apply.
     /// </para>
     /// </remarks>
-    public IList<string> BrowsableSchemas { get; } = ["public"];
+    public IList<string> BrowsableSchemas { get; } = [];
 
     /// <summary>
     /// Whether the application's unkeyed <see cref="NpgsqlDataSource" /> - what <c>AddNpgsqlDataSource(connectionString)</c>
     /// or <c>AddSingleton(NpgsqlDataSource.Create(…))</c> registers - is listed as the source named <c>default</c>.
-    /// Only a singleton registration is: a scoped or transient one would build a pool per visitor.
+    /// The last unkeyed registration decides, because it is the one the container resolves, and only a singleton is
+    /// listed: a scoped or transient one would build a pool per visitor, or per resolution.
     /// </summary>
     public bool IncludeDefaultDataSource { get; set; } = true;
 
@@ -154,9 +161,16 @@ public sealed class PostgresStudioOptions
     /// somewhere else. Listed after <c>default</c>, in the order added.
     /// </summary>
     /// <remarks>
-    /// The factory is called once, when the source is first used, and its result is cached. It must return the
-    /// application's own instance: the studio never disposes it, and a factory that built a new data source would leak
-    /// a pool.
+    /// <para>
+    /// The factory is called once, when the source is first used - with the application's <b>root</b> service provider,
+    /// however many visitors ask at the same moment - and its result is kept for the life of the process. It must return
+    /// the application's own instance: the studio never disposes it, and a factory that built a new data source would
+    /// leak a pool.
+    /// </para>
+    /// <para>
+    /// <b>Singletons only.</b> Because the result is kept for the process, the provider the factory is handed refuses a
+    /// data source the container registers as scoped or transient, and the source is then unavailable, saying why.
+    /// </para>
     /// </remarks>
     /// <param name="name">
     /// The source's key, as the URL carries it: a letter or digit, then up to 63 letters, digits, <c>.</c>, <c>_</c> or
@@ -177,7 +191,9 @@ public sealed class PostgresStudioOptions
 
     /// <summary>
     /// Lists a host-supplied set of databases under <paramref name="name" />: per-tenant databases, say. Listed after the
-    /// data sources, in the order added. The factory is called once, and its result is never disposed by the studio.
+    /// data sources, in the order added. The factory is called once, with the application's root service provider, and
+    /// its result is kept for the process and never disposed by the studio; as for <see cref="AddDataSource" />, the
+    /// provider refuses a database source the container registers as scoped or transient.
     /// </summary>
     /// <param name="name">
     /// The source's key, as the URL carries it: the data-source key pattern, unique across every source, and not

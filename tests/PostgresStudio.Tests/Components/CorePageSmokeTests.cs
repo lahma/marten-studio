@@ -194,6 +194,24 @@ public class CorePageSmokeTests
         links.Should().Equal("Overview", "Query", "Tables", "Sessions", "Relationships", "Health", "Activity");
     }
 
+    /// <summary>
+    /// With a second source the source picker is drawn, and it reads "Source", so a host source's database picker beside
+    /// it is the only one called "Database".
+    /// </summary>
+    [Fact]
+    public async Task With_a_second_source_the_source_picker_reads_Source()
+    {
+        await using PostgresStudioComponentContext context = new();
+        context.Options.AddDataSource("reporting", _ => context.DataSource);
+        await context.ReadyAsync();
+
+        var selector = context.Render<ScopeSelector>();
+
+        selector.Find("label[for=ms-store-select]").TextContent.Should().Be("Source");
+        selector.Find("#ms-store-select").GetAttribute("aria-label").Should().Be("Source");
+        selector.FindAll("#ms-store-select option").Select(static x => x.TextContent.Trim()).Should().Equal("Default", "reporting");
+    }
+
     [Fact]
     public async Task On_Sessions_only_the_Sessions_entry_is_lit()
     {
