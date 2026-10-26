@@ -24,8 +24,8 @@ build output. You may (and should) run the build and the tests.
    A test that only asserts a method was called, a test with no assertion, a `Skip` with no reason, a
    `catch` that swallows, a `Task.Delay` standing in for a wait condition, an assertion loosened to make a
    failure pass — call each out by file and line.
-3. **AGENTS.md conformance.** Hard rules, design decisions, package budget, `async void`, layout tree,
-   generated workflows, the public API baseline (no `ComponentBase` types in it).
+3. **AGENTS.md conformance.** Hard rules, design decisions, package budget, `async void`, the layout tree
+   (`docs/maintainers/layout.md`), generated workflows, the public API baseline (no `ComponentBase` types in it).
 4. **Marten correctness.** Every metadata column is optional (`DisableInformationalFields` exists); soft
    delete, conjoined tenancy, archived events and subclass hierarchies each change what a query must say;
    the serializer is the store's; nothing uses internal `StoreOptions.Storage.AllDocumentMappings`; nothing

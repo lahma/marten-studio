@@ -14,8 +14,8 @@ committed change.
 
 1. **Read `AGENTS.md` at the repository root before anything else** (if it does not exist yet, read the
    approved plan the packet points at). It is the single source of truth: hard rules, numbered design
-   decisions, the package budget, the layout tree. `TreatWarningsAsErrors` is on and `CS1591` is an error
-   in `src/` — the compiler is the lint step.
+   decisions, the package budget, and where the layout tree (`docs/maintainers/layout.md`) is. `TreatWarningsAsErrors` is on and `CS1591` is
+   an error in `src/` — the compiler is the lint step.
 2. **Verify your base commit before writing.** Run `git log -1 --format=%H`; if it is not the sha in your
    packet, `git reset --hard <sha>` — never `git merge`.
 3. **The packet's "shared files — do not edit" list is absolute.** If your work needs a change to one of

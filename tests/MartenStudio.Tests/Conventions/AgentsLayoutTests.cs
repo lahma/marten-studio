@@ -3,11 +3,11 @@ using System.Text.RegularExpressions;
 namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
-/// Keeps the <c>## Layout</c> tree in <c>AGENTS.md</c> honest about the directories that actually exist.
+/// Keeps the layout tree in <c>docs/maintainers/layout.md</c> honest about the directories that actually exist.
 /// </summary>
 /// <remarks>
 /// <para>
-/// AGENTS.md is the single source of truth, and the layout tree is the part of it an agent reads before
+/// AGENTS.md points every agent at the layout tree, and the tree is what an agent reads before
 /// deciding where a new file goes. Nothing else in the repository reads that tree, so left unchecked it
 /// would drift the moment a directory is added - and an agent would confidently put the file somewhere
 /// that no longer exists, or fail to find something that does. The failure is silent in both directions,
@@ -15,7 +15,7 @@ namespace MartenStudio.Tests.Conventions;
 /// </para>
 /// <para>
 /// The contract is deliberately narrow and mechanical: inside the <c>```text</c> block under
-/// <c>## Layout</c>, the first whitespace-delimited token of a line is a directory entry when it ends in
+/// <c># Layout</c>, the first whitespace-delimited token of a line is a directory entry when it ends in
 /// <c>/</c>. The set of those entries must equal the set of directories on disk under <c>src/</c>,
 /// <c>samples/</c>, <c>tests/</c>, <c>build/</c> and <c>.claude/</c> - build output excluded. Files may be
 /// listed too and are ignored here; only directories are held to account, because they are the part that
@@ -42,16 +42,16 @@ public class AgentsLayoutTests
         var stale = documented.Except(onDisk).Order(StringComparer.Ordinal).ToArray();
 
         missing.Should().BeEmpty(
-            "AGENTS.md's ## Layout tree must name every directory that exists; add: " + string.Join(", ", missing));
+            "docs/maintainers/layout.md's tree must name every directory that exists; add: " + string.Join(", ", missing));
         stale.Should().BeEmpty(
-            "AGENTS.md's ## Layout tree names directories that do not exist; remove: " + string.Join(", ", stale));
+            "docs/maintainers/layout.md's tree names directories that do not exist; remove: " + string.Join(", ", stale));
     }
 
     [Fact]
     public void The_layout_section_is_a_single_text_fenced_block()
     {
         ExtractLayoutBlock().Should().NotBeNullOrWhiteSpace(
-            "the ## Layout heading must be followed by one ```text fenced block - that block is what this " +
+            "the # Layout heading must be followed by one ```text fenced block - that block is what this " +
             "test parses, and what a reader is expected to trust");
     }
 
@@ -105,11 +105,11 @@ public class AgentsLayoutTests
 
     private static string ExtractLayoutBlock()
     {
-        var agents = File.ReadAllText(RepositoryRoot.Combine("AGENTS.md")).Replace("\r\n", "\n");
+        var agents = File.ReadAllText(RepositoryRoot.Combine("docs", "maintainers", "layout.md")).Replace("\r\n", "\n");
 
         var match = Regex.Match(
             agents,
-            @"^##\s+Layout\s*$.*?^```text\s*$\n(?<block>.*?)^```\s*$",
+            @"^#\s+Layout\s*$.*?^```text\s*$\n(?<block>.*?)^```\s*$",
             RegexOptions.Multiline | RegexOptions.Singleline,
             TimeSpan.FromSeconds(5));
 

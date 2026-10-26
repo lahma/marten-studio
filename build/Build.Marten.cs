@@ -10,7 +10,7 @@ using Serilog;
 
 /// <summary>
 /// Which Marten the solution is restored, compiled and tested against - the floor the package ships
-/// with, or the newest 9.x CI also tests (AGENTS.md, <em>Package budget changes</em>, 2026-10-15).
+/// with, or the newest 9.x CI also tests (docs/maintainers/package-budget-changes.md, 2026-10-15).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -104,7 +104,7 @@ partial class Build
             $"floor ({MartenFloor}, MartenStudioMartenFloor in Directory.Packages.props). The nuspec would say " +
             $"'Marten >= {ResolvedMartenVersion}' and raise every host's floor. Run Pack without --marten-version " +
             "(and without MARTEN_VERSION in the environment), or raise the floor deliberately and record why in " +
-            "AGENTS.md, Package budget changes.");
+            "docs/maintainers/package-budget-changes.md.");
     }
 
     static string ReadPackagesProperty(XDocument props, string name)
