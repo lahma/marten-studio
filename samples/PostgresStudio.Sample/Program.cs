@@ -54,9 +54,11 @@ builder.Services.AddPostgresStudio(options =>
     // the SQL console. `All()` is the one-line, greppable opt-in; `ReadOnly` overrides it whatever it says.
     options.Capabilities = PostgresStudioCapabilities.All();
 
-    // `public` is browsable by default. These are the admin database's other schemas: Quartz.NET's job store, a legacy
-    // schema of catalog edge cases, and the application's own tables. "*" would open every schema the role can use -
-    // fine for a scratch database, not for a shared one.
+    // `public` is browsable only while nothing names a schema: a list replaces that default rather than adding to it, so
+    // `public` - where every tenant database keeps its tables - is named first. The others are the admin database's:
+    // Quartz.NET's job store, a legacy schema of catalog edge cases, and the application's own tables. "*" would open
+    // every schema the role can use - fine for a scratch database, not for a shared one.
+    options.BrowsableSchemas.Add("public");
     options.BrowsableSchemas.Add(RelationalDemoSchema.QuartzSchemaName);
     options.BrowsableSchemas.Add(RelationalDemoSchema.LegacySchemaName);
     options.BrowsableSchemas.Add(RelationalDemoSchema.SampleSchemaName);
