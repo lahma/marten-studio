@@ -74,25 +74,181 @@ internal sealed record ServerSettingsRead(IReadOnlyList<ServerSettingValue> Rows
         ArgumentNullException.ThrowIfNull(context);
 
         var query = ServerPostureQueries.Settings(ServerSettingsCatalog.Names, ServerSettingsCatalog.Patterns);
-        IReadOnlyList<ServerSettingValue> rows = await context.Sql
+        IReadOnlyList<(ServerSettingValue Setting, string? EntryValue)> rows = await context.Sql
             .QueryAsync(
                 query,
-                static reader => new ServerSettingValue(
-                    reader.GetString(0),
-                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
-                    reader.IsDBNull(2) ? null : reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3),
-                    !reader.IsDBNull(4) && reader.GetBoolean(4),
-                    reader.IsDBNull(5) ? null : reader.GetString(5),
-                    reader.IsDBNull(6) ? null : reader.GetString(6))
-                {
-                    StudioSet = !reader.IsDBNull(7) && reader.GetBoolean(7),
-                },
+                static reader => (
+                    new ServerSettingValue(
+                        reader.GetString(0),
+                        reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                        reader.IsDBNull(2) ? null : reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetString(3),
+                        !reader.IsDBNull(4) && reader.GetBoolean(4),
+                        reader.IsDBNull(5) ? null : reader.GetString(5),
+                        reader.IsDBNull(6) ? null : reader.GetString(6))
+                    {
+                        StudioSet = !reader.IsDBNull(7) && reader.GetBoolean(7),
+                    },
+                    reader.IsDBNull(8) ? null : reader.GetString(8)),
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return new ServerSettingsRead(rows);
+        IReadOnlySet<string> startup = ServerSettingSource.StartupOptions(context.Target.DataSource?.ConnectionString);
+
+        return new ServerSettingsRead([.. rows.Select(x => x.Setting.StudioSet
+            ? x.Setting with { Source = ServerSettingSource.Resolve(x.Setting, x.EntryValue, startup) }
+            : x.Setting)]);
     }
+}
+
+/// <summary>
+/// Who set a setting the studio's own read-only transaction sets for itself - whose <c>reset_val</c> the read takes - in
+/// the order Postgres applies them: the connection's startup options over a role-and-database, role, database or global
+/// entry, over the server's configuration and the default. Pure, for the unit tests.
+/// </summary>
+internal static class ServerSettingSource
+{
+    /// <summary>
+    /// The source of <paramref name="setting" />'s <c>reset_val</c>: <c>client</c> when the connection string's
+    /// <c>Options</c> set it, or when the role or database entry Postgres would apply has another value (the startup option
+    /// won); that entry's own source when its value is the value; <c>default</c> with no entry and the built-in value;
+    /// otherwise <see langword="null" /> - the server's configuration, its command line or an environment variable, which the
+    /// read cannot tell apart.
+    /// </summary>
+    /// <param name="setting">The row, its <see cref="ServerSettingValue.Value" /> the <c>reset_val</c> and its source the entry's.</param>
+    /// <param name="entryValue">The applied entry's value as <c>ALTER … SET</c> stored it, or <see langword="null" /> with no entry.</param>
+    /// <param name="startupOptions">The settings the connection string's <c>Options</c> name (<see cref="StartupOptions" />).</param>
+    public static string? Resolve(ServerSettingValue setting, string? entryValue, IReadOnlySet<string> startupOptions)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+        ArgumentNullException.ThrowIfNull(startupOptions);
+
+        if (startupOptions.Contains(setting.Name))
+        {
+            return "client";
+        }
+
+        if (entryValue is not null)
+        {
+            return Same(entryValue, setting.Value, setting.Unit) switch
+            {
+                true => setting.Source,
+                false => "client",
+                null => null,
+            };
+        }
+
+        return string.Equals(setting.Value, setting.BootValue, StringComparison.Ordinal) ? "default" : null;
+    }
+
+    /// <summary>
+    /// The settings an Npgsql connection string's <c>Options</c> set at start-up - <c>-c name=value</c>, <c>-cname=value</c>
+    /// or <c>--name=value</c>, a dash in a name read as an underscore - or none when it has no options or will not parse.
+    /// </summary>
+    public static IReadOnlySet<string> StartupOptions(string? connectionString)
+    {
+        HashSet<string> names = new(StringComparer.Ordinal);
+
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return names;
+        }
+
+        string? options;
+
+        try
+        {
+            options = new Npgsql.NpgsqlConnectionStringBuilder(connectionString).Options;
+        }
+        catch (ArgumentException)
+        {
+            return names;
+        }
+
+        if (string.IsNullOrWhiteSpace(options))
+        {
+            return names;
+        }
+
+        string[] tokens = options.Split((char[]) [' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
+
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            string token = tokens[i];
+            string? assignment = token switch
+            {
+                "-c" when i + 1 < tokens.Length => tokens[++i],
+                _ when token.StartsWith("--", StringComparison.Ordinal) => token[2..],
+                _ when token.StartsWith("-c", StringComparison.Ordinal) && token.Length > 2 => token[2..],
+                _ => null,
+            };
+
+            if (assignment is not null && assignment.IndexOf('=', StringComparison.Ordinal) is > 0 and var equals)
+            {
+                names.Add(assignment[..equals].Replace('-', '_').ToLowerInvariant());
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Whether an entry's value as written (<c>30s</c>, <c>'1min'</c>, <c>30000</c>) is the value <c>pg_settings</c> shows
+    /// in <paramref name="unit" /> - <see langword="null" /> when it cannot be told.
+    /// </summary>
+    internal static bool? Same(string written, string shown, string? unit)
+    {
+        string entry = written.Trim().Trim('\'', '"').Trim();
+
+        if (unit is null)
+        {
+            return string.Equals(entry, shown.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (Quantity(entry, unit) is not { } left || Quantity(shown.Trim(), unit) is not { } right)
+        {
+            return null;
+        }
+
+        return Math.Abs(left - right) <= Math.Max(1e-9, Math.Abs(right) * 1e-9);
+    }
+
+    /// <summary>A value in base units - microseconds for time, bytes for memory - with a bare number taken in <paramref name="unit" />.</summary>
+    private static double? Quantity(string text, string unit)
+    {
+        int end = 0;
+
+        while (end < text.Length && (char.IsAsciiDigit(text[end]) || text[end] is '.' or '-' or '+'))
+        {
+            end++;
+        }
+
+        if (!double.TryParse(text[..end], NumberStyles.Float, CultureInfo.InvariantCulture, out double number))
+        {
+            return null;
+        }
+
+        string suffix = text[end..].Trim();
+        return Scale(suffix.Length == 0 ? unit : suffix) is { } scale ? number * scale : null;
+    }
+
+    private static double? Scale(string unit) => unit switch
+    {
+        "us" => 1,
+        "ms" => 1_000,
+        "s" => 1_000_000,
+        "min" => 60_000_000,
+        "h" => 3_600_000_000,
+        "d" => 86_400_000_000,
+        "B" => 1,
+        "kB" => 1024,
+        "8kB" => 8192,
+        "16kB" => 16384,
+        "MB" => 1024d * 1024,
+        "GB" => 1024d * 1024 * 1024,
+        "TB" => 1024d * 1024 * 1024 * 1024,
+        _ => null,
+    };
 }
 
 /// <summary>How the connection the read ran on reached the server.</summary>
@@ -268,12 +424,45 @@ internal sealed record ServerExtensionsRead(IReadOnlyList<ServerExtensionRow> Ro
                         reader.GetBoolean(1),
                         reader.IsDBNull(2) ? null : reader.GetString(2),
                         reader.IsDBNull(3) ? null : reader.GetString(3),
-                        reader.IsDBNull(4) ? null : reader.GetBoolean(4)),
-                    reader.GetInt64(5)),
+                        PostgresGrants.KnownExtensions.TryGetValue(reader.GetString(0), out bool trusted) ? trusted : null),
+                    reader.GetInt64(4)),
                 cancellationToken)
             .ConfigureAwait(false);
 
         return new ServerExtensionsRead([.. rows.Select(static x => x.Row)], rows.Count > 0 ? rows[0].Total : 0);
+    }
+
+    /// <summary>
+    /// The chips' extensions that are not installed and whose trust the studio does not know
+    /// (<see cref="PostgresGrants.KnownExtensions" />) - the only ones the page asks <c>pg_available_extension_versions</c> about.
+    /// </summary>
+    public IReadOnlyList<string> TrustUnknown =>
+        [.. Rows.Where(static x => x.Named && x.InstalledVersion is null && x.DefaultVersion is not null && x.Trusted is null).Select(static x => x.Name)];
+
+    /// <summary>These rows with what <c>pg_available_extension_versions</c> said of their trust.</summary>
+    public ServerExtensionsRead WithTrust(IReadOnlyDictionary<string, bool> trusted)
+    {
+        ArgumentNullException.ThrowIfNull(trusted);
+        return this with { Rows = [.. Rows.Select(x => trusted.TryGetValue(x.Name, out bool value) ? x with { Trusted = value } : x)] };
+    }
+
+    /// <summary>The page's read of whether <paramref name="names" /> are trusted extensions - never the sweep's.</summary>
+    public static async Task<IReadOnlyDictionary<string, bool>> ReadTrustAsync(HealthCheckContext context, IReadOnlyCollection<string> names, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(names);
+
+        if (names.Count == 0)
+        {
+            return new Dictionary<string, bool>(StringComparer.Ordinal);
+        }
+
+        var query = ServerPostureQueries.ExtensionTrust(names);
+        IReadOnlyList<(string Name, bool Trusted)> rows = await context.Sql
+            .QueryAsync(query, static reader => (reader.GetString(0), !reader.IsDBNull(1) && reader.GetBoolean(1)), cancellationToken)
+            .ConfigureAwait(false);
+
+        return rows.ToDictionary(static x => x.Name, static x => x.Trusted, StringComparer.Ordinal);
     }
 }
 
@@ -572,6 +761,24 @@ internal sealed class ServerSettingsFactsReader : IServerSettingsFactsReader
         ServerRead<PostgresGrants> grants = await SectionAsync(context, "grants", PostgresGrants.SharedAsync, cancellationToken).ConfigureAwait(false);
         ServerRead<ServerSettingsRead> curated = await SectionAsync(context, "settings", ServerSettingsRead.SharedAsync, cancellationToken).ConfigureAwait(false);
         ServerRead<ServerExtensionsRead> extensions = await SectionAsync(context, "extensions", ServerExtensionsRead.SharedAsync, cancellationToken).ConfigureAwait(false);
+
+        // Whether a chip's extension is trusted, for the few the studio cannot word from what it knows - the page's read
+        // alone; the sweep's S07 never pays for pg_available_extension_versions.
+        if (extensions.Value is { TrustUnknown.Count: > 0 } unknown)
+        {
+            ServerRead<IReadOnlyDictionary<string, bool>> trust = await SectionAsync(
+                    context,
+                    "extension trust",
+                    x => ServerExtensionsRead.ReadTrustAsync(x, unknown.TrustUnknown, cancellationToken),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (trust.Value is { } trusted)
+            {
+                extensions = ServerRead<ServerExtensionsRead>.Of(unknown.WithTrust(trusted));
+            }
+        }
+
         ServerRead<ServerConnectionPosture> posture = await SectionAsync(context, "connection", ServerConnectionPosture.SharedAsync, cancellationToken).ConfigureAwait(false);
 
         return new ServerSettingsFacts(context.Now, server, grants, curated, extensions, posture, context.Sql.Statements);

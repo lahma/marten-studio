@@ -124,5 +124,8 @@ internal static class PostgresStudioText
         MartenTablePartitionParameters =
             "each partition's pg_class.reloptions says which; Marten Studio's Schema screen, over the store whose StoreOptions "
             + "declare this table, shows which parameters the partitions differ on",
+        LeaderTimeoutClause = string.Empty,
+        ReadOnlyWrites = "write the application makes",
+        ReadOnlyNeverAsks = "and most data access never asks",
     };
 }

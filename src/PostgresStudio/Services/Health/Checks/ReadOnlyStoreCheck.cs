@@ -17,7 +17,8 @@ internal sealed record ReadOnlyStoreFacts(ServerSettingValue? ReadOnly, bool InR
 /// <remarks>
 /// <para>
 /// <b><c>read-only</c>, Critical</b>: <c>default_transaction_read_only = on</c> as the source's own role sees it, which
-/// <c>pg_settings.source</c> says who set. Every <c>SaveChanges</c>, append and projection write fails with <c>25006</c>.
+/// <c>pg_settings.source</c> says who set. Every write that does not ask for a read-write transaction fails with <c>25006</c>
+/// (<see cref="Settings.StudioText.ReadOnlyWrites" /> says which in each studio's words).
 /// Azure Database for PostgreSQL sets it itself when a server runs short of storage, so there the remedy is storage rather
 /// than a setting (Microsoft Learn, <i>Storage options in Azure Database for PostgreSQL</i>, not re-read by this packet).
 /// </para>
@@ -68,10 +69,11 @@ internal sealed class ReadOnlyStoreCheck : HealthCheck<ReadOnlyStoreFacts>
                 Variant = "standby",
                 Title = "The server " + source + " write connection reaches is a standby",
                 WhyItMatters =
-                    "A standby replays the primary's WAL and accepts no write: every transaction there is read-only, so every SaveChanges, "
-                    + "append and projection write fails with 25006 \"cannot execute … in a read-only transaction\". If " + SourceWords.DataSource(evaluation.Text) + " "
+                    "A standby replays the primary's WAL and accepts no write: every transaction there is read-only, so every "
+                    + evaluation.Text.ReadOnlyWrites + " fails with 25006 \"cannot execute … in a read-only transaction\". If "
+                    + SourceWords.DataSource(evaluation.Text) + " "
                     + "should reach the primary, point it there - or list every host with Target Session Attributes, so Npgsql "
-                    + "picks the one that writes. If the store only ever reads here, mute this finding.",
+                    + "picks the one that writes. If the application only ever reads here, mute this finding.",
                 Evidence =
                 [
                     new("pg_is_in_recovery()", "true"),
@@ -129,8 +131,8 @@ internal sealed class ReadOnlyStoreCheck : HealthCheck<ReadOnlyStoreFacts>
             Variant = "read-only",
             Title = "Every transaction of " + source + " sessions starts read-only",
             WhyItMatters =
-                "With default_transaction_read_only = on, a transaction that does not ask otherwise is read-only - and Marten, like most "
-                + "data access, never asks: every SaveChanges, append and projection write fails with 25006 \"cannot execute … in a "
+                "With default_transaction_read_only = on, a transaction that does not ask otherwise is read-only - "
+                + text.ReadOnlyNeverAsks + ": every " + text.ReadOnlyWrites + " fails with 25006 \"cannot execute … in a "
                 + "read-only transaction\"." + whereSet
                 + (azure ? " On Azure the server itself sets it when its storage runs short, which is the first thing to check." : string.Empty),
             Evidence =

@@ -26,7 +26,8 @@ namespace MartenStudio.Integration.Tests.Health;
 /// <para>
 /// <b>Run at both Marten ends</b> (9.39 and the latest tested): the measurement writes what it saw with the Marten it ran on,
 /// and asserts the behaviour K08's stretch assumes for that Weasel - DistributedLock's keepalive about once a minute, the
-/// leader idle in between, at Weasel 9.45; 9.39's <c>pg_sleep</c> monitor, the leader active, below it.
+/// leader idle in between, from Weasel 9.34 (Marten 9.39.1); the upstream DistributedLock's <c>pg_sleep</c> monitor, the leader
+/// active, at Marten 9.39.0. Which one runs is read off the loaded DistributedLock (<c>LeaderLockMonitor</c>).
 /// </para>
 /// </remarks>
 public class DaemonTimeoutsLiveTests(PostgresFixture postgres)
@@ -75,7 +76,7 @@ public class DaemonTimeoutsLiveTests(PostgresFixture postgres)
 
     /// <summary>
     /// A real HotCold leader, its lock transaction-scoped and monitored, on a database that ends idle transactions after 20 s:
-    /// at Weasel 9.45 the leader sits idle about a minute between keepalives, so the server ends its session and K08 says it
+    /// with DistributedLock's keepalive (from Weasel 9.34) the leader sits idle about a minute between keepalives, so the server ends its session and K08 says it
     /// would; below it, the monitor's sleep keeps it active once it has taken the lead, so it keeps its session and K08 is
     /// quiet. Either way the test writes what it measured.
     /// </summary>
@@ -123,7 +124,7 @@ public class DaemonTimeoutsLiveTests(PostgresFixture postgres)
             bool fires = (await studio.ReportAsync()).Findings.Any(static x => x.Code == "K08");
 
             ended.Should().Be(ConnectionDaemonLiveTests.LeaderKeepsItsTransactionWithAKeepalive,
-                "at Weasel 9.45 the leader idles about a minute between keepalives; below it the monitor's sleep keeps it active");
+                "with the keepalive the leader idles about a minute between keepalives; with the pg_sleep monitor it stays active");
             fires.Should().Be(ended, "K08 raises exactly the timeout that ended the leader here");
         }
         finally
@@ -137,7 +138,8 @@ public class DaemonTimeoutsLiveTests(PostgresFixture postgres)
     /// monitor's sleep inside its savepoint harmlessly, or make DistributedLock report the lock lost? Measured: neither -
     /// DistributedLock.Postgres 1.3.0 runs <c>SET LOCAL statement_timeout = 0</c> before the sleep, so the server's timeout
     /// never reaches it, and the leader keeps its lock. So K08 has no <c>statement_timeout</c> variant. Asserted as measured, so
-    /// a DistributedLock that changes it says so. At Weasel 9.45 there is no sleep, and the test says so and skips.
+    /// a DistributedLock that changes it says so. With the keepalive (from Weasel 9.34) there is no sleep, and the test says so
+    /// and skips.
     /// </summary>
     [PostgresFact]
     public async Task A_statement_timeout_under_the_monitors_sleep_and_the_leaders_lock()

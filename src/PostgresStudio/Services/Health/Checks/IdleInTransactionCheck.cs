@@ -79,7 +79,8 @@ internal sealed record IdleInTransactionFacts(
 /// than raised; Marten's daemon lock ids are read too, so the row can say when it is the daemon's.
 /// </para>
 /// <para>
-/// <b>The leader is recognised by its leadership lock, never by its name.</b> At Weasel 9.45 (Marten 9.50.2) with the lock
+/// <b>The leader is recognised by its leadership lock, never by its name.</b> From Weasel 9.34 (Marten 9.39.1, Patched
+/// DistributedLock.Postgres 1.3.3; measured at Marten 9.45.0 and 9.50.2) with the lock
 /// transaction-scoped there is no <c>pg_sleep</c> monitor: the leader sits idle in its leadership transaction, holding a
 /// snapshot, until DistributedLock's keepalive runs in it about 61 s after the lock and every minute on (measured, CL3) -
 /// which reaches this check's minute. So a listed session that holds one of the store's daemon lock ids

@@ -146,6 +146,13 @@ public class StudioTextPinTests
             + "holds the whole database back as surely as one of these would.");
         Marten.MartenTablePartitionParameters.Should().Be("the Schema screen's Tables tab shows which parameters the partitions differ on");
 
+        // W5-S2: new in 0.5 - T14's timeout backstop and HotCold leader (K08), and S10's writes.
+        Marten.LeaderTimeoutClause.Should().Be(
+            " - but where a Marten HotCold daemon leads from a transaction, the first must be longer than its leader's idle stretch "
+            + "and the second unset for the store's role, or they end that leadership too (K08)");
+        Marten.ReadOnlyWrites.Should().Be("SaveChanges, append and projection write");
+        Marten.ReadOnlyNeverAsks.Should().Be("and Marten, like most data access, never asks");
+
         HealthEvaluation.At(DateTimeOffset.UnixEpoch).Text.Should().BeSameAs(Marten, "a unit test's evaluation is MartenStudio's");
     }
 
