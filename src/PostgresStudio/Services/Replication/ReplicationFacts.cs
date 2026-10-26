@@ -97,6 +97,12 @@ internal sealed record ReplicationRole(
 /// How long it took to replay it - null once the standby has caught up and nothing new arrives, so an idle primary never
 /// grows it (PostgreSQL's documentation of <c>pg_stat_replication</c>).
 /// </param>
+/// <param name="Physical">
+/// Whether it is a physical sender - a standby or a base backup, connected to no database - rather than a logical one of
+/// this database (a subscription, a change data capture connector). Only a physical sender is a standby R03 judges. A
+/// logical sender of another database is never a row at all: it is counted (<see cref="StandbySnapshot.OtherDatabases" />)
+/// and its names never leave the server (W5-R2-fix B1).
+/// </param>
 internal sealed record StandbyRow(
     string? ApplicationName,
     string? ClientAddress,
@@ -107,20 +113,27 @@ internal sealed record StandbyRow(
     long? SentBehindBytes,
     TimeSpan? WriteLag,
     TimeSpan? FlushLag,
-    TimeSpan? ReplayLag)
+    TimeSpan? ReplayLag,
+    bool Physical = true)
 {
     /// <summary>Whether the reading role may read its state and lag (<c>pg_read_all_stats</c>, or a sender of its own role).</summary>
     public bool Readable => State is not null;
 }
 
-/// <summary>The WAL senders of the server answering, most behind first.</summary>
-/// <param name="Total">How many there are, beyond the ones listed.</param>
-/// <param name="Rows">At most <see cref="ReplicationQueries.MaxStandbys" />, the readable ones first.</param>
+/// <summary>The WAL senders of the server answering: physical ones first, most behind first.</summary>
+/// <param name="Total">How many physical and this database's logical senders there are, beyond the ones listed.</param>
+/// <param name="Rows">At most <see cref="ReplicationQueries.MaxStandbys" />, physical and readable ones first.</param>
 /// <param name="ReadAt">When, by the studio's clock.</param>
-internal sealed record StandbySnapshot(long Total, IReadOnlyList<StandbyRow> Rows, DateTimeOffset ReadAt)
+/// <param name="OtherDatabases">
+/// Logical senders of other databases on this server: counted, never listed or named, never judged (W5-R2-fix B1).
+/// </param>
+internal sealed record StandbySnapshot(long Total, IReadOnlyList<StandbyRow> Rows, DateTimeOffset ReadAt, long OtherDatabases = 0)
 {
-    /// <summary>How many of the listed senders the reading role may not read.</summary>
-    public int Unreadable => Rows.Count(static x => !x.Readable);
+    /// <summary>How many of the listed physical senders the reading role may not read.</summary>
+    public int Unreadable => Physical.Count(static x => !x.Readable);
+
+    /// <summary>The physical senders: the standbys and base backups, which R03 judges.</summary>
+    public IReadOnlyList<StandbyRow> Physical => [.. Rows.Where(static x => x.Physical)];
 
     /// <summary>The sweep's one read of it.</summary>
     public static Task<StandbySnapshot> SharedAsync(HealthCheckContext context)
@@ -135,31 +148,34 @@ internal sealed record StandbySnapshot(long Total, IReadOnlyList<StandbyRow> Row
         ArgumentNullException.ThrowIfNull(context);
 
         var query = ReplicationQueries.Standbys();
-        IReadOnlyList<(long Total, StandbyRow? Row)> rows = await context.Sql
+        IReadOnlyList<(long Total, long Others, StandbyRow? Row)> rows = await context.Sql
             .QueryAsync(
                 query,
                 static reader => (
                     reader.GetInt64(0),
-                    reader.IsDBNull(1) && reader.IsDBNull(3) && reader.IsDBNull(4)
+                    reader.GetInt64(1),
+                    reader.IsDBNull(2)
                         ? null
                         : new StandbyRow(
-                            SessionReads.Text(reader, 1),
-                            SessionReads.Text(reader, 2),
                             SessionReads.Text(reader, 3),
                             SessionReads.Text(reader, 4),
                             SessionReads.Text(reader, 5),
-                            Bytes(reader, 6),
-                            Bytes(reader, 7),
-                            SessionReads.Seconds(reader, 8),
-                            SessionReads.Seconds(reader, 9),
-                            SessionReads.Seconds(reader, 10))),
+                            SessionReads.Text(reader, 6),
+                            SessionReads.Text(reader, 7),
+                            Bytes(reader, 8),
+                            Bytes(reader, 9),
+                            SessionReads.Seconds(reader, 10),
+                            SessionReads.Seconds(reader, 11),
+                            SessionReads.Seconds(reader, 12),
+                            reader.GetBoolean(2))),
                 cancellationToken)
             .ConfigureAwait(false);
 
         return new StandbySnapshot(
             rows.Count > 0 ? rows[0].Total : 0,
             [.. rows.Where(static x => x.Row is not null).Select(static x => x.Row!)],
-            context.Now);
+            context.Now,
+            rows.Count > 0 ? rows[0].Others : 0);
     }
 
     private static long? Bytes(NpgsqlDataReader reader, int ordinal) =>
@@ -287,6 +303,11 @@ internal sealed record ReplicationSettings(IReadOnlyDictionary<string, Replicati
 
     /// <summary><c>idle_replication_slot_timeout</c> (PostgreSQL 18+); zero when off.</summary>
     public TimeSpan? IdleSlotTimeout => Duration("idle_replication_slot_timeout");
+
+    /// <summary>
+    /// <c>recovery_min_apply_delay</c>: on a standby, how long replay is held back on purpose; zero when it is not.
+    /// </summary>
+    public TimeSpan? ApplyDelay => Duration("recovery_min_apply_delay");
 
     /// <summary>A size setting in bytes, from its value and its unit.</summary>
     public long? Bytes(string name) =>
@@ -468,24 +489,37 @@ internal sealed record ArchiverFacts(
 }
 
 /// <summary>
-/// How far the archiver is behind the WAL file being written, in segments: the segment the current file names less the
-/// last segment archived.
+/// Where the archiver stands against the WAL file being written: the segment being written, and - when the last file
+/// archived names a segment - how many segments the archiver is behind it.
 /// </summary>
-/// <param name="Segments">
-/// The distance in segments; when nothing has been archived yet (<see cref="NothingArchived" />), the current segment's
-/// number - every segment since the start of the WAL sequence, an upper bound the checks never size an alarm by.
+/// <remarks>
+/// <b>Two numbers, never one series</b> (W5-R2-fix B2). The segment being written is a position, and the distance is a
+/// difference; the advisor samples them apart (<c>replication.wal-segment</c> and <c>replication.archiver-backlog</c>), and
+/// writes a distance only when there is one, so that a failover, a statistics reset, a crash or a <c>.history</c> file
+/// archived last - each of which leaves no last segment for a moment - is never read as the distance jumping to the whole
+/// WAL sequence.
+/// </remarks>
+/// <param name="CurrentSegment">The number of the segment being written.</param>
+/// <param name="Distance">
+/// The segments from the last one archived to the one being written, or <see langword="null" /> when nothing archived
+/// names a segment (<see cref="NothingArchived" />).
 /// </param>
 /// <param name="SegmentBytes">One segment's size.</param>
-/// <param name="NothingArchived">
-/// Whether the last archived file is no segment - null, or a <c>.history</c>, <c>.partial</c> or <c>.backup</c> file - so
-/// "nothing archived yet" (W5-R2 addition 3).
-/// </param>
-internal sealed record ArchiveBacklog(long Segments, long SegmentBytes, bool NothingArchived)
+internal sealed record ArchiveBacklog(long CurrentSegment, long? Distance, long SegmentBytes)
 {
-    /// <summary>The distance in bytes.</summary>
-    public long Bytes => Segments * SegmentBytes;
+    /// <summary>
+    /// Whether the last archived file names no segment - none since the statistics began, or a <c>.history</c> file - so
+    /// "nothing archived yet" (W5-R2 addition 3). A <c>.partial</c> or <c>.backup</c> file names the segment it is of.
+    /// </summary>
+    public bool NothingArchived => Distance is null;
 
-    /// <summary>The backlog between two file names, or <see langword="null" /> when the current one is not a segment or the size is unknown.</summary>
+    /// <summary>The distance in bytes, or <see langword="null" />.</summary>
+    public long? Bytes => Distance * SegmentBytes;
+
+    /// <summary>
+    /// Where the archiver stands, from the last archived file and the file being written, or <see langword="null" /> when the
+    /// file being written is not a segment's or the size is unknown.
+    /// </summary>
     public static ArchiveBacklog? Measure(string? lastArchived, string? current, long? segmentBytes)
     {
         if (segmentBytes is not { } size || !WalFileName.TryParse(current, size, out WalSegment now))
@@ -493,9 +527,10 @@ internal sealed record ArchiveBacklog(long Segments, long SegmentBytes, bool Not
             return null;
         }
 
-        return WalFileName.TryParse(lastArchived, size, out WalSegment last)
-            ? new ArchiveBacklog(Math.Max(0L, (long) now.Number - (long) last.Number), size, false)
-            : new ArchiveBacklog((long) now.Number, size, true);
+        return new ArchiveBacklog(
+            (long) now.Number,
+            WalFileName.TryParseArchived(lastArchived, size, out WalSegment last) ? Math.Max(0L, (long) now.Number - (long) last.Number) : null,
+            size);
     }
 }
 
@@ -511,13 +546,41 @@ internal readonly record struct WalSegment(uint Timeline, ulong Number);
 /// </summary>
 /// <remarks>
 /// Parsed here rather than by <c>pg_split_walfile_name</c>, which only PostgreSQL 16 has and which raises on a name it
-/// does not take; a <c>.history</c>, <c>.partial</c> or <c>.backup</c> file - what the archiver archives at a promotion and
-/// a base backup - is simply not a segment.
+/// does not take. What the archiver also archives - a <c>.history</c> file at a promotion, a <c>.partial</c> segment of the
+/// old timeline, a base backup's <c>.backup</c> label - is read by <see cref="TryParseArchived" />: the last two name their
+/// segment in their first 24 digits, a history file names none.
 /// </remarks>
 internal static class WalFileName
 {
     /// <summary>4 GiB: what one "log" part of a file name spans.</summary>
     private const ulong LogSpan = 0x1_0000_0000UL;
+
+    /// <summary>
+    /// Parses a file the archiver archived: a segment, or a <c>.partial</c> (<c>000000010000000000000003.partial</c>) or a
+    /// <c>.backup</c> (<c>000000010000000000000002.00000028.backup</c>) file, by the segment its first 24 digits name. A
+    /// <c>.history</c> file names no segment.
+    /// </summary>
+    public static bool TryParseArchived(string? name, long segmentBytes, out WalSegment segment)
+    {
+        segment = default;
+
+        if (name is null || name.Length < 24)
+        {
+            return false;
+        }
+
+        if (name.Length == 24)
+        {
+            return TryParse(name, segmentBytes, out segment);
+        }
+
+        string suffix = name[24..];
+        bool partial = string.Equals(suffix, ".partial", StringComparison.Ordinal);
+        bool backup = suffix.Length == 16 && suffix[0] == '.' && suffix.EndsWith(".backup", StringComparison.Ordinal)
+            && uint.TryParse(suffix.AsSpan(1, 8), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out _);
+
+        return (partial || backup) && TryParse(name[..24], segmentBytes, out segment);
+    }
 
     /// <summary>Parses a segment's file name for a server whose segments are <paramref name="segmentBytes" /> long.</summary>
     public static bool TryParse(string? name, long segmentBytes, out WalSegment segment)
@@ -654,7 +717,11 @@ internal sealed record WalStatistics(
 /// <summary>How the checkpoint counters are counted on this release - the denominator of R04's requested share (B0 G8).</summary>
 internal enum CheckpointCounting
 {
-    /// <summary>Up to 16: <c>pg_stat_bgwriter.checkpoints_timed</c> and <c>checkpoints_req</c>; the share is <c>req / (timed + req)</c>.</summary>
+    /// <summary>
+    /// Up to 16: <c>pg_stat_bgwriter.checkpoints_timed</c> and <c>checkpoints_req</c>; the share is <c>req / (timed + req)</c>.
+    /// <c>checkpoints_timed</c> counts the checkpoints an idle server skipped too (B0 G8's table; the code increments it when a
+    /// timed checkpoint is due, before it is skipped), so idleness dilutes the share as on 17 (W5-R2-fix 10).
+    /// </summary>
     Bgwriter,
 
     /// <summary>
@@ -670,7 +737,7 @@ internal enum CheckpointCounting
 /// <summary>The checkpoint and background-writer counters, as this release keeps them.</summary>
 /// <param name="Source">The view the checkpoint counters came from: <c>pg_stat_bgwriter</c> or <c>pg_stat_checkpointer</c>.</param>
 /// <param name="Counting">How they are counted, and so the requested share's denominator.</param>
-/// <param name="Timed">Checkpoints at <c>checkpoint_timeout</c> (17+: skipped ones included).</param>
+/// <param name="Timed">Checkpoints at <c>checkpoint_timeout</c>, skipped ones included on every release.</param>
 /// <param name="Requested">Checkpoints requested - by WAL reaching <c>max_wal_size</c>, a <c>CHECKPOINT</c>, a base backup, ....</param>
 /// <param name="Done">Checkpoints that ran (PostgreSQL 18+).</param>
 /// <param name="RestartpointsTimed">A standby's timed restartpoints (17+).</param>

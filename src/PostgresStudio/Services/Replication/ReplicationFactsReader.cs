@@ -356,6 +356,7 @@ internal sealed class ReplicationFactsCache
 {
     private readonly IReplicationFactsReader reader;
     private readonly StudioSnapshotCache cache;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> measuring = new(StringComparer.Ordinal);
     private int reads;
 
     public ReplicationFactsCache(IReplicationFactsReader reader, IStudioSettings settings, TimeProvider? timeProvider = null)
@@ -386,4 +387,24 @@ internal sealed class ReplicationFactsCache
         Interlocked.Increment(ref reads);
         return reader.ReadAsync(resolved, cancellationToken);
     }
+
+    /// <summary>
+    /// Claims the one tablespace measurement this database may have running, for the whole process - every circuit's click is
+    /// the same directory walk (W5-R2-fix 13). <see langword="false" /> while another runs; release it with
+    /// <see cref="EndMeasuring" />.
+    /// </summary>
+    public bool TryBeginMeasuring(ResolvedSource resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        return measuring.TryAdd(Key(resolved), 0);
+    }
+
+    /// <summary>Releases the measurement <see cref="TryBeginMeasuring" /> claimed.</summary>
+    public void EndMeasuring(ResolvedSource resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+        measuring.TryRemove(Key(resolved), out _);
+    }
+
+    private static string Key(ResolvedSource resolved) => resolved.Source.Key + "|" + resolved.Target.Identity;
 }

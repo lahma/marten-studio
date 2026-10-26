@@ -80,6 +80,36 @@ public class ReplicationFactsTests
         ReplicationPlatform.CheckpointsNotApplicable(aurora).Should().Be(ReplicationPlatform.Aurora);
     }
 
+    // ---- B3: no platform marker a role short of a superuser can plant -------------------------
+
+    [Fact]
+    public void Every_server_marker_is_fenced_to_where_only_a_superuser_or_the_provider_can_put_it()
+    {
+        string sql = HealthServerQueries.Platform().Sql;
+
+        sql.Should().Contain("p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace",
+            "a public.aurora_version() a database owner made is not Aurora");
+        Regex.Matches(sql, @"s\.source in \('default', 'environment variable', 'configuration file', 'command line', 'override'\)")
+            .Should().HaveCount(3, "the RDS, Azure and Cloud SQL settings count only from the server's own configuration, never a SET");
+        sql.Should().Contain("r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin",
+            "Neon's role carries two attributes only a superuser grants before 16");
+    }
+
+    [Fact]
+    public void The_standby_read_names_only_physical_senders_and_this_databases_logical_ones()
+    {
+        string sql = ReplicationQueries.Standbys().Sql;
+
+        sql.Should().Contain("left join pg_catalog.pg_stat_activity a on a.pid = r.pid");
+        sql.Should().Contain("(a.pid is not null and a.datid is null) as physical", "a sender with no activity row is nobody's to name (fail closed)");
+        sql.Should().Contain("case when s.physical or s.this_database then s.application_name::text end as application_name");
+        sql.Should().Contain("case when s.physical or s.this_database then pg_catalog.host(s.client_addr) end as client_addr");
+        sql.Should().Contain("case when s.physical or s.this_database then s.usename::text end as usename");
+        sql.Should().Contain("select * from r where r.physical or r.this_database", "another database's logical sender is only counted");
+        sql.Should().Contain("greatest(pg_catalog.pg_last_wal_receive_lsn(), pg_catalog.pg_last_wal_replay_lsn())",
+            "a downstream standby is measured against everything a cascading one holds");
+    }
+
     // ---- The checkpoint and pg_stat_io shapes, per release -------------------------------------
 
     [Fact]
@@ -139,7 +169,10 @@ public class ReplicationFactsTests
         ];
 
         lists.Should().OnlyContain(static x => !x.Contains("_size(", StringComparison.Ordinal), "a list locks nothing it lists - no size function (D27)");
-        lists.Should().OnlyContain(static x => !Regex.IsMatch(x, @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b"));
+        lists.Where(static x => x != ReplicationQueries.Standbys().Sql)
+            .Should().OnlyContain(static x => !Regex.IsMatch(x, @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b"),
+                "only the standby read joins pg_stat_activity, for the senders' databases (B1), and never pg_locks or pg_prepared_xacts");
+        ReplicationQueries.Standbys().Sql.Should().NotMatchRegex(@"\b(from|join)\s+(pg_catalog\.)?pg_(locks|prepared_xacts)\b");
         ReplicationQueries.TablespaceSize("pg_default").Sql.Should().Contain("pg_catalog.pg_tablespace_size(t.oid)").And.Contain("@name");
     }
 

@@ -43,11 +43,13 @@ internal enum ReplicationRefusal
 internal sealed record StandbyView(string? Name, string? Client, string? User, StandbyRow Row);
 
 /// <summary>The standbys section.</summary>
-/// <param name="Total">How many WAL senders there are.</param>
-/// <param name="Unreadable">How many of them the reading role may not read.</param>
+/// <param name="Total">How many physical senders and logical senders of this database there are.</param>
+/// <param name="Unreadable">How many of the physical ones the reading role may not read.</param>
 /// <param name="NotChecked">The "not checked: this needs pg_read_all_stats" sentence, when any is unreadable.</param>
-/// <param name="Rows">The listed senders.</param>
-internal sealed record StandbysView(long Total, int Unreadable, string? NotChecked, IReadOnlyList<StandbyView> Rows);
+/// <param name="Rows">The listed senders: physical ones first, then this database's logical ones.</param>
+/// <param name="OtherDatabases">Logical senders of other databases: counted, never listed or named (W5-R2-fix B1).</param>
+/// <param name="Downstream">Whether this server is a standby, so the physical senders are cascading standbys R03 does not judge.</param>
+internal sealed record StandbysView(long Total, int Unreadable, string? NotChecked, IReadOnlyList<StandbyView> Rows, long OtherDatabases = 0, bool Downstream = false);
 
 /// <summary>One replication slot as this visitor is shown it.</summary>
 /// <param name="Description">
@@ -232,7 +234,6 @@ internal sealed class ReplicationService : IReplicationService
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<ReplicationService> logger;
     private readonly TableRowAuditLedger ledger = new();
-    private int measuring;
 
     public ReplicationService(
         IStudioSettings settings,
@@ -309,9 +310,11 @@ internal sealed class ReplicationService : IReplicationService
             return new TablespaceSize(tablespace, null, refused!.Reason);
         }
 
-        if (Interlocked.CompareExchange(ref measuring, 1, 0) != 0)
+        // One measurement at a time per database, for the whole process: pg_tablespace_size walks a directory, and every
+        // circuit's click is the same walk (W5-R2-fix 13).
+        if (!facts.TryBeginMeasuring(resolved))
         {
-            return new TablespaceSize(tablespace, null, "Another tablespace is being measured; one at a time.");
+            return new TablespaceSize(tablespace, null, "Another tablespace of this database is being measured; one at a time.");
         }
 
         try
@@ -347,7 +350,7 @@ internal sealed class ReplicationService : IReplicationService
         }
         finally
         {
-            Volatile.Write(ref measuring, 0);
+            facts.EndMeasuring(resolved);
         }
     }
 
@@ -379,7 +382,7 @@ internal sealed class ReplicationService : IReplicationService
                 ? ReplicationSectionView<SlotsView>.Of(Slots(slots, read.SlotStatistics.Value, replicationSettings, read.Server, names))
                 : ReplicationSectionView<SlotsView>.Without(read.Slots),
             Standbys = read.Standbys.Value is { } standbys
-                ? ReplicationSectionView<StandbysView>.Of(Standbys(standbys, names, platform, readsAs))
+                ? ReplicationSectionView<StandbysView>.Of(Standbys(standbys, names, platform, readsAs, read.Role.Value?.InRecovery == true))
                 : ReplicationSectionView<StandbysView>.Without(read.Standbys),
             Archiver = read.Archiver.Value is { } archiver
                 ? ReplicationSectionView<ArchiverView>.Of(Archiver(archiver, read.WalDirectory, names, withheld, platform, readsAs))
@@ -421,7 +424,13 @@ internal sealed class ReplicationService : IReplicationService
             slots.WalKeepBytes,
             idle,
             statistics?.HasStatistics == true,
-            [.. slots.Slots.Select(slot => new SlotView(Describe(slot, names), slot with { Name = string.Empty, Plugin = null, Database = null }, statistics?.For(slot.Name)))]);
+            [
+                .. slots.Slots.Select(slot => new SlotView(
+                    Describe(slot, names),
+                    slot with { Name = string.Empty, Plugin = null, Database = null },
+                    // Joined by name and then blanked, as the slot's own name is: the description is what may be shown (B1, 12).
+                    statistics?.For(slot.Name) is { } row ? row with { SlotName = string.Empty } : null)),
+            ]);
     }
 
     /// <summary>A slot as this visitor may be told it: R01's wording through the gate, its kind otherwise.</summary>
@@ -443,7 +452,7 @@ internal sealed class ReplicationService : IReplicationService
             + (slot.Temporary ? ", temporary" : string.Empty);
     }
 
-    private static StandbysView Standbys(StandbySnapshot standbys, bool names, PostgresPlatform platform, string readsAs)
+    private static StandbysView Standbys(StandbySnapshot standbys, bool names, PostgresPlatform platform, string readsAs, bool downstream)
     {
         string? notChecked = standbys.Unreadable > 0
             ? PostgresGrants.NotChecked(PostgresGrant.ReadAllStats, platform, readsAs)
@@ -461,7 +470,9 @@ internal sealed class ReplicationService : IReplicationService
                     names ? row.ClientAddress : null,
                     names ? row.User : null,
                     row with { ApplicationName = null, ClientAddress = null, User = null })),
-            ]);
+            ],
+            standbys.OtherDatabases,
+            downstream);
     }
 
     private static ArchiverView Archiver(

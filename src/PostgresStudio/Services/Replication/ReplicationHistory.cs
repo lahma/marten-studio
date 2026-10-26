@@ -25,8 +25,14 @@ internal static class ReplicationHistory
     /// <summary><c>pg_stat_archiver.archived_count</c> (R02).</summary>
     public const string ArchiverArchived = "replication.archiver-archived";
 
-    /// <summary>R02's backlog in segments: the distance from the last archived segment to the one being written.</summary>
+    /// <summary>
+    /// R02's backlog in segments: the distance from the last archived segment to the one being written - written only when
+    /// the last archived file names a segment, never a stand-in (W5-R2-fix B2).
+    /// </summary>
     public const string ArchiverBacklog = "replication.archiver-backlog";
+
+    /// <summary>The number of the segment being written (R02): what "nothing archived yet" is measured by.</summary>
+    public const string WalSegment = "replication.wal-segment";
 
     /// <summary>Timed checkpoints (R04).</summary>
     public const string CheckpointsTimed = "replication.checkpoints-timed";

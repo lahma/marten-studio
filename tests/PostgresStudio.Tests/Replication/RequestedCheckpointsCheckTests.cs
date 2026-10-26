@@ -127,7 +127,7 @@ public class RequestedCheckpointsCheckTests
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().Be("12 checkpoints in 20 min were requested rather than timed (75%)");
         finding.Evidence.Should().Contain(new HealthEvidence("Requested checkpoints", "12"));
-        finding.Evidence.Should().Contain(new HealthEvidence("Checkpoints counted (num_timed + num_requested)", "16"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Checkpoints counted (num_timed + num_requested, skipped ones included)", "16"));
         finding.Caveat.Should().Contain("skipped too");
 
         finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
@@ -145,6 +145,8 @@ public class RequestedCheckpointsCheckTests
         HealthFinding finding = Check.Evaluate(Facts(Counters(CheckpointCounting.Bgwriter, 2, 12), PostgresPlatformKind.AmazonRds), At(history)).Findings.Single();
 
         finding.Remedy!.Explanation.Should().EndWith("Set it in the instance's DB parameter group (Amazon RDS).");
+        finding.Caveat.Should().Contain("Up to PostgreSQL 16, checkpoints_timed counts the checkpoints an idle server skipped too",
+            "16 and older count skipped checkpoints as timed, as 17 does (W5-R2-fix 10)");
     }
 
     [Fact]

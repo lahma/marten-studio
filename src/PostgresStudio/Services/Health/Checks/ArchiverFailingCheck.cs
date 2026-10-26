@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using Npgsql;
+
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
@@ -12,7 +14,22 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <param name="Directory"><c>pg_wal</c>'s <c>.ready</c> count and size, or <see langword="null" /> without <c>pg_monitor</c>.</param>
 /// <param name="Grants">What the reading role holds, for the "not checked" sentence of the directory evidence.</param>
 /// <param name="Server">The server's version and platform.</param>
-internal sealed record ArchiverFailingFacts(ArchiverFacts Archiver, WalDirectoryFacts? Directory, PostgresGrants Grants, PostgresServerFacts Server);
+/// <param name="DirectoryProblem">
+/// Why <c>pg_wal</c> could not be read although the role may (a timeout, a refusal) - evidence only, never a reason not to
+/// judge (W5-R2-fix 4); <see langword="null" /> when it was read or not asked.
+/// </param>
+internal sealed record ArchiverFailingFacts(
+    ArchiverFacts Archiver,
+    WalDirectoryFacts? Directory,
+    PostgresGrants Grants,
+    PostgresServerFacts Server,
+    string? DirectoryProblem = null);
+
+/// <summary>R02's reading of a backlog: how many segments, and whether it grew across the window and stalled for an hour.</summary>
+/// <param name="Segments">The distance, or - with nothing archived yet - the segments written in the window.</param>
+/// <param name="Grew">Whether it grew across <see cref="ArchiverFailingCheck.BacklogWindow" /> of samples.</param>
+/// <param name="Stalled">Whether nothing was archived for <see cref="ArchiverFailingCheck.StalledFor" /> while it grew.</param>
+internal sealed record BacklogReading(long Segments, bool Grew, bool Stalled);
 
 /// <summary>
 /// R02: WAL archiving is failing, or has fallen behind (issue #8 G8 and the health-gap analysis's G02).
@@ -35,9 +52,12 @@ internal sealed record ArchiverFailingFacts(ArchiverFacts Archiver, WalDirectory
 /// <c>pg_walfile_name</c> cannot run in recovery.
 /// </para>
 /// <para>
-/// <b>Nothing archived yet</b> - the last archived file is null, or a <c>.history</c>, <c>.partial</c> or <c>.backup</c>
-/// file - leaves no segment to measure from, so the backlog is the segments the advisor has seen written in its window: a
-/// lower bound, and never sized by the whole WAL sequence the current file's number counts.
+/// <b>Nothing archived yet</b> - no last archived file, or a <c>.history</c> one (a <c>.partial</c> or <c>.backup</c> file
+/// names its segment, and is measured from) - leaves no segment to measure from. Then the backlog is the segments the
+/// server wrote in the advisor's window (<c>replication.wal-segment</c>'s gain), and only while the archiver archived
+/// nothing in that same window (<c>replication.archiver-archived</c>'s gain is zero): a lower bound, never sized by the
+/// whole WAL sequence. The distance (<c>replication.archiver-backlog</c>) is sampled only when there is one, so a failover,
+/// a statistics reset, a crash or a history file archived last is a gap in it, never a jump (W5-R2-fix B2).
 /// </para>
 /// <para>
 /// <b>Not applicable</b> (never run, listed) on Aurora, whose storage layer does the archiving, and on Amazon RDS, Azure
@@ -82,10 +102,33 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
 
         ArchiverFacts archiver = await ArchiverFacts.SharedAsync(context).ConfigureAwait(false);
         PostgresGrants grants = await PostgresGrants.SharedAsync(context).ConfigureAwait(false);
-        WalDirectoryFacts? directory = archiver.Archives ? await WalDirectoryFacts.SharedAsync(context).ConfigureAwait(false) : null;
 
-        return new ArchiverFailingFacts(archiver, directory, grants, server);
+        WalDirectoryFacts? directory = null;
+        string? problem = null;
+
+        if (archiver.Archives)
+        {
+            try
+            {
+                directory = await WalDirectoryFacts.SharedAsync(context).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (!cancellationToken.IsCancellationRequested && exception is PostgresException or TimeoutException or OperationCanceledException or NpgsqlException)
+            {
+                // Evidence, never the trigger: a pg_wal that cannot be listed in time (or at all) is said, and R02 still judges.
+                problem = DirectoryProblemText(exception);
+            }
+        }
+
+        return new ArchiverFailingFacts(archiver, directory, grants, server, problem);
     }
+
+    /// <summary>What the evidence says of a <c>pg_wal</c> read that failed.</summary>
+    internal static string DirectoryProblemText(Exception exception) =>
+        "could not be read"
+        + ((exception as PostgresException ?? exception.InnerException as PostgresException) is { } postgres
+            ? " (SQLSTATE " + postgres.SqlState + ")"
+            : PostgresFailure.IsTimeout(exception) || exception is OperationCanceledException ? " (it ran out of time)" : string.Empty)
+        + "; R02 judges the archiver's own counters regardless";
 
     /// <inheritdoc />
     public override IEnumerable<HealthSamplePart> Sample(ArchiverFailingFacts facts)
@@ -102,7 +145,13 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
 
         if (facts.Archiver.Backlog is { } backlog)
         {
-            yield return new HealthSamplePart(ReplicationHistory.ArchiverBacklog, backlog.Segments);
+            yield return new HealthSamplePart(ReplicationHistory.WalSegment, backlog.CurrentSegment);
+
+            // Only a real distance: a gap in the series where there is none, never a stand-in (B2).
+            if (backlog.Distance is { } distance)
+            {
+                yield return new HealthSamplePart(ReplicationHistory.ArchiverBacklog, distance);
+            }
         }
     }
 
@@ -138,14 +187,16 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
                 + (archiver.InRecovery ? " A standby is not judged for a backlog: pg_walfile_name cannot run in recovery." : string.Empty));
         }
 
-        (long segments, bool grew) = Measure(backlog, evaluation, BacklogWindow);
+        BacklogReading reading = Measure(archiver, backlog, evaluation);
+        long segments = reading.Segments;
+        bool large = segments >= BacklogSegments && segments * backlog.SegmentBytes >= BacklogWarningBytes;
 
-        if (segments >= BacklogSegments && segments * backlog.SegmentBytes >= BacklogWarningBytes && grew)
+        if (large && reading.Grew)
         {
-            return HealthVerdict.Of(Backlog(facts, backlog, segments, evaluation));
+            return HealthVerdict.Of(Backlog(facts, backlog, reading, evaluation));
         }
 
-        string watching = segments >= BacklogSegments && segments * backlog.SegmentBytes >= BacklogWarningBytes
+        string watching = large
             ? " It is " + SessionText.Count(segments, "segment") + " behind; the advisor raises it once that has grown across "
               + SessionText.Duration(BacklogWindow) + " of its samples."
             : string.Empty;
@@ -154,23 +205,42 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
     }
 
     /// <summary>
-    /// The backlog the checks judge, and whether it grew across <paramref name="span" /> of samples: the distance itself, or -
-    /// with nothing archived yet - the segments written since the window began, a lower bound.
+    /// The backlog R02 judges. With a last archived segment: the distance, grown across <see cref="BacklogWindow" /> of its own
+    /// samples, stalled when the last success is <see cref="StalledFor" /> old. With nothing archived yet: the segments the
+    /// server wrote in the window - only while the archiver archived nothing in that same window, since an archived file is a
+    /// working archiver - grown across <see cref="BacklogWindow" /> and stalled across <see cref="StalledFor" /> of samples.
     /// </summary>
-    internal static (long Segments, bool Grew) Measure(ArchiveBacklog backlog, HealthEvaluation evaluation, TimeSpan span)
+    internal static BacklogReading Measure(ArchiverFacts archiver, ArchiveBacklog backlog, HealthEvaluation evaluation)
     {
+        ArgumentNullException.ThrowIfNull(archiver);
         ArgumentNullException.ThrowIfNull(backlog);
         ArgumentNullException.ThrowIfNull(evaluation);
 
-        bool grew = ReplicationHistory.GrewOver(evaluation.History, ReplicationHistory.ArchiverBacklog, backlog.Segments, evaluation.Now, span);
-
-        if (!backlog.NothingArchived)
+        if (backlog.Distance is { } distance)
         {
-            return (backlog.Segments, grew);
+            TimeSpan? sinceSuccess = archiver.LastArchivedAgeAtRead is { } age ? SnapshotAge.At(age, archiver.ReadAt, evaluation) : null;
+
+            return new BacklogReading(
+                distance,
+                ReplicationHistory.GrewOver(evaluation.History, ReplicationHistory.ArchiverBacklog, distance, evaluation.Now, BacklogWindow),
+                sinceSuccess >= StalledFor);
         }
 
-        CounterWindow? window = ReplicationHistory.Window(evaluation.History, [(ReplicationHistory.ArchiverBacklog, backlog.Segments)], evaluation.Now);
-        return (window is null ? 0 : (long) window.Gains[0], grew);
+        CounterWindow? window = ReplicationHistory.Window(
+            evaluation.History,
+            [(ReplicationHistory.WalSegment, backlog.CurrentSegment), (ReplicationHistory.ArchiverArchived, archiver.ArchivedCount)],
+            evaluation.Now);
+
+        if (window is null || window.Gains[1] > 0)
+        {
+            return new BacklogReading(0, false, false);
+        }
+
+        bool grew = ReplicationHistory.GrewOver(evaluation.History, ReplicationHistory.WalSegment, backlog.CurrentSegment, evaluation.Now, BacklogWindow);
+        bool stalled = window.Span >= StalledFor
+            && ReplicationHistory.GrewOver(evaluation.History, ReplicationHistory.WalSegment, backlog.CurrentSegment, evaluation.Now, StalledFor);
+
+        return new BacklogReading((long) window.Gains[0], grew, stalled);
     }
 
     private static HealthFinding Failing(ArchiverFailingFacts facts, CounterWindow? failures, long rose, HealthEvaluation evaluation)
@@ -191,7 +261,7 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
 
         if (archiver.Backlog is { } backlog)
         {
-            evidence.Add(new HealthEvidence("Archiver behind", BacklogText(backlog, Measure(backlog, evaluation, BacklogWindow).Segments)));
+            evidence.Add(new HealthEvidence("Archiver behind", BacklogText(backlog, Measure(archiver, backlog, evaluation).Segments)));
         }
 
         evidence.AddRange(Settings(facts, evaluation.Text));
@@ -216,15 +286,12 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
         };
     }
 
-    private static HealthFinding Backlog(ArchiverFailingFacts facts, ArchiveBacklog backlog, long segments, HealthEvaluation evaluation)
+    private static HealthFinding Backlog(ArchiverFailingFacts facts, ArchiveBacklog backlog, BacklogReading reading, HealthEvaluation evaluation)
     {
         ArchiverFacts archiver = facts.Archiver;
+        long segments = reading.Segments;
         long bytes = segments * backlog.SegmentBytes;
-        TimeSpan? sinceSuccess = archiver.LastArchivedAgeAtRead is { } age ? SnapshotAge.At(age, archiver.ReadAt, evaluation) : null;
-        bool stalled = backlog.NothingArchived
-            ? ReplicationHistory.GrewOver(evaluation.History, ReplicationHistory.ArchiverBacklog, backlog.Segments, evaluation.Now, StalledFor)
-            : sinceSuccess >= StalledFor;
-        bool critical = (!backlog.NothingArchived && bytes >= BacklogCriticalBytes) || stalled;
+        bool critical = (!backlog.NothingArchived && bytes >= BacklogCriticalBytes) || reading.Stalled;
 
         List<HealthEvidence> evidence =
         [
@@ -287,14 +354,15 @@ internal sealed class ArchiverFailingCheck : HealthCheck<ArchiverFailingFacts>
             }
         }
 
-        yield return facts.Directory is { } directory
-            ? new HealthEvidence(
+        yield return facts switch
+        {
+            { Directory: { } directory } => new HealthEvidence(
                 "Waiting in pg_wal",
                 SessionText.Count(directory.ReadyFiles, "file") + " ready for the archiver; pg_wal holds "
-                + SessionText.Count(directory.Files, "file") + ", " + WalText.Bytes(directory.Bytes))
-            : new HealthEvidence(
-                "Waiting in pg_wal",
-                PostgresGrants.NotChecked(PostgresGrant.Monitor, facts.Server.Platform, facts.Grants.ReadsAs));
+                + SessionText.Count(directory.Files, "file") + ", " + WalText.Bytes(directory.Bytes)),
+            { DirectoryProblem: { } problem } => new HealthEvidence("Waiting in pg_wal", problem),
+            _ => new HealthEvidence("Waiting in pg_wal", PostgresGrants.NotChecked(PostgresGrant.Monitor, facts.Server.Platform, facts.Grants.ReadsAs)),
+        };
 
         yield return new HealthEvidence("Platform", facts.Server.Platform.Name);
     }

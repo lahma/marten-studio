@@ -83,6 +83,7 @@ internal static class ReplicationQueries
         "archive_mode", "archive_command", "archive_library", "archive_timeout", "wal_segment_size", "wal_level",
         "checkpoint_timeout", "max_wal_size", "min_wal_size", "checkpoint_completion_target",
         "max_wal_senders", "max_replication_slots", "hot_standby_feedback", "idle_replication_slot_timeout",
+        "recovery_min_apply_delay",
     ];
 
     private const string LsnDiff = "pg_catalog.pg_wal_lsn_diff";
@@ -120,29 +121,55 @@ internal static class ReplicationQueries
     /// "this role may read it", which a sender of the reading role's own is too.
     /// </para>
     /// <para>
-    /// <b>Bytes behind</b> are the server's own WAL position less the standby's replay position (on a cascading standby,
-    /// its own replay position), and <c>sent_lsn - replay_lsn</c> beside it: the first counts what was never sent as well.
+    /// <b>Bytes behind</b> are the server's own WAL position less the standby's replay position, and
+    /// <c>sent_lsn - replay_lsn</c> beside it: the first counts what was never sent as well. On a cascading standby the
+    /// position is the greater of what it has received and what it has replayed, so a downstream standby is measured
+    /// against everything this one holds.
+    /// </para>
+    /// <para>
+    /// <b>Physical, this database's logical, and everybody else's</b> (W5-R2-fix B1). A WAL sender is a physical standby (or a
+    /// base backup) when its <c>pg_stat_activity</c> row has no database, and a logical one - a subscription, a change data
+    /// capture connector, <c>pg_recvlogical</c> - when it has. A logical sender of another database is another database's -
+    /// a database-per-tenant store's other tenant, or another application's - so its application name, client address and
+    /// role are never read out of the server (nulled here, in the statement), and it is only counted: the second column.
+    /// A sender whose activity row is gone between the two reads is treated the same way (fail closed).
+    /// <c>pg_stat_activity</c>'s <c>pid</c>, <c>datid</c> and <c>datname</c> are shown to every role.
     /// </para>
     /// </remarks>
     public static HealthQuery Standbys() => new(
-        "with r as (\n" +
-        "  select r.application_name::text as application_name, pg_catalog.host(r.client_addr) as client_addr,\n" +
-        "         r.usename::text as usename, r.state::text as state, r.sync_state::text as sync_state,\n" +
-        "         case when pg_catalog.pg_is_in_recovery() then " + LsnDiff + "(pg_catalog.pg_last_wal_replay_lsn(), r.replay_lsn)\n" +
-        "              else " + LsnDiff + "(pg_catalog.pg_current_wal_lsn(), r.replay_lsn) end::float8 as behind,\n" +
-        "         " + LsnDiff + "(r.sent_lsn, r.replay_lsn)::float8 as sent_behind,\n" +
-        "         extract(epoch from r.write_lag)::float8 as write_lag,\n" +
-        "         extract(epoch from r.flush_lag)::float8 as flush_lag,\n" +
-        "         extract(epoch from r.replay_lag)::float8 as replay_lag\n" +
+        "with s as (\n" +
+        "  select r.*, (a.pid is not null and a.datid is null) as physical,\n" +
+        "         coalesce(a.datname = pg_catalog.current_database(), false) as this_database\n" +
         "    from pg_catalog.pg_stat_replication r\n" +
+        "    left join pg_catalog.pg_stat_activity a on a.pid = r.pid\n" +
         "),\n" +
-        "total as (select pg_catalog.count(*)::int8 as n from r)\n" +
-        "select t.n, x.application_name, x.client_addr, x.usename, x.state, x.sync_state,\n" +
+        "r as (\n" +
+        "  select s.physical, s.this_database,\n" +
+        "         case when s.physical or s.this_database then s.application_name::text end as application_name,\n" +
+        "         case when s.physical or s.this_database then pg_catalog.host(s.client_addr) end as client_addr,\n" +
+        "         case when s.physical or s.this_database then s.usename::text end as usename,\n" +
+        "         s.state::text as state, s.sync_state::text as sync_state,\n" +
+        "         case when pg_catalog.pg_is_in_recovery()\n" +
+        "              then " + LsnDiff + "(greatest(pg_catalog.pg_last_wal_receive_lsn(), pg_catalog.pg_last_wal_replay_lsn()), s.replay_lsn)\n" +
+        "              else " + LsnDiff + "(pg_catalog.pg_current_wal_lsn(), s.replay_lsn) end::float8 as behind,\n" +
+        "         " + LsnDiff + "(s.sent_lsn, s.replay_lsn)::float8 as sent_behind,\n" +
+        "         extract(epoch from s.write_lag)::float8 as write_lag,\n" +
+        "         extract(epoch from s.flush_lag)::float8 as flush_lag,\n" +
+        "         extract(epoch from s.replay_lag)::float8 as replay_lag\n" +
+        "    from s\n" +
+        "),\n" +
+        "total as (\n" +
+        "  select (pg_catalog.count(*) filter (where r.physical or r.this_database))::int8 as listed,\n" +
+        "         (pg_catalog.count(*) filter (where not r.physical and not r.this_database))::int8 as others\n" +
+        "    from r\n" +
+        ")\n" +
+        "select t.listed, t.others, x.physical, x.application_name, x.client_addr, x.usename, x.state, x.sync_state,\n" +
         "       x.behind, x.sent_behind, x.write_lag, x.flush_lag, x.replay_lag\n" +
         "  from total t\n" +
         "  left join lateral (\n" +
-        "    select * from r order by (r.state is null), r.behind desc nulls last, r.replay_lag desc nulls last, r.application_name\n" +
-        "    limit @limit) x on true",
+        "    select * from r where r.physical or r.this_database\n" +
+        "     order by (not r.physical), (r.state is null), r.behind desc nulls last, r.replay_lag desc nulls last, r.application_name\n" +
+        "     limit @limit) x on true",
         [Integer("limit", MaxStandbys)]);
 
     /// <summary>
@@ -208,8 +235,9 @@ internal static class ReplicationQueries
     /// </summary>
     public static HealthQuery WalDirectory() => new(
         "select (select pg_catalog.count(*) from pg_catalog.pg_ls_archive_statusdir() f where f.name like '%.ready')::int8 as ready,\n" +
-        "       (select pg_catalog.count(*) from pg_catalog.pg_ls_waldir() w)::int8 as files,\n" +
-        "       (select coalesce(pg_catalog.sum(w.size), 0) from pg_catalog.pg_ls_waldir() w)::int8 as bytes");
+        "       w.files, w.bytes\n" +
+        "  from (select pg_catalog.count(*)::int8 as files, coalesce(pg_catalog.sum(d.size), 0)::int8 as bytes\n" +
+        "          from pg_catalog.pg_ls_waldir() d) w");
 
     /// <summary>
     /// <c>pg_stat_wal</c> (PostgreSQL 14+), by name: records, full-page images, bytes and full WAL buffers on every

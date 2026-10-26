@@ -43,9 +43,30 @@ public class WalFileNameTests
     [InlineData("")]
     [InlineData(null)]
     [InlineData("00000001000000000000000G")]
-    public void A_history_partial_or_backup_file_is_not_a_segment(string? name)
+    public void A_history_partial_or_backup_file_is_not_a_segment_being_written(string? name)
     {
         WalFileName.TryParse(name, Segment16, out _).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("000000010000000000000003", 3ul)]
+    [InlineData("000000010000000000000003.partial", 3ul)]
+    [InlineData("000000010000000000000002.00000028.backup", 2ul)]
+    public void A_partial_or_backup_file_archived_names_the_segment_its_first_24_digits_name(string name, ulong number)
+    {
+        WalFileName.TryParseArchived(name, Segment16, out WalSegment segment).Should().BeTrue();
+        segment.Number.Should().Be(number);
+    }
+
+    [Theory]
+    [InlineData("00000002.history")]
+    [InlineData("000000010000000000000003.part")]
+    [InlineData("000000010000000000000002.0000002G.backup")]
+    [InlineData("000000010000000000000002.backup")]
+    [InlineData(null)]
+    public void A_history_file_or_anything_else_archived_names_no_segment(string? name)
+    {
+        WalFileName.TryParseArchived(name, Segment16, out _).Should().BeFalse();
     }
 
     [Fact]
@@ -54,7 +75,8 @@ public class WalFileNameTests
         // A promotion moves to timeline 2 and the numbering continues: segment 3 on 1, segment 5 on 2.
         ArchiveBacklog backlog = ArchiveBacklog.Measure("000000010000000000000003", "000000020000000000000005", Segment16)!;
 
-        backlog.Segments.Should().Be(2);
+        backlog.Distance.Should().Be(2);
+        backlog.CurrentSegment.Should().Be(5);
         backlog.NothingArchived.Should().BeFalse();
         backlog.Bytes.Should().Be(2 * Segment16);
     }
@@ -62,20 +84,29 @@ public class WalFileNameTests
     [Fact]
     public void Across_a_4_GiB_boundary_the_distance_is_continuous()
     {
-        ArchiveBacklog.Measure("0000000100000000000000FE", "000000010000000100000002", Segment16)!.Segments.Should().Be(4);
+        ArchiveBacklog.Measure("0000000100000000000000FE", "000000010000000100000002", Segment16)!.Distance.Should().Be(4);
+    }
+
+    [Fact]
+    public void A_partial_segment_archived_at_a_promotion_is_measured_from()
+    {
+        ArchiveBacklog backlog = ArchiveBacklog.Measure("000000010000000000000003.partial", "000000020000000000000004", Segment16)!;
+
+        backlog.NothingArchived.Should().BeFalse("the .partial file is segment 3 of the old timeline");
+        backlog.Distance.Should().Be(1);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData("00000002.history")]
-    [InlineData("000000010000000000000003.partial")]
-    [InlineData("000000010000000000000002.00000028.backup")]
-    public void Nothing_archived_yet_measures_from_the_start_and_says_so(string? lastArchived)
+    public void Nothing_archived_yet_has_no_distance_and_only_the_segment_being_written(string? lastArchived)
     {
         ArchiveBacklog backlog = ArchiveBacklog.Measure(lastArchived, Wal(70), Segment16)!;
 
         backlog.NothingArchived.Should().BeTrue();
-        backlog.Segments.Should().Be(70);
+        backlog.Distance.Should().BeNull("never a stand-in for a distance (W5-R2-fix B2)");
+        backlog.Bytes.Should().BeNull();
+        backlog.CurrentSegment.Should().Be(70);
     }
 
     [Fact]

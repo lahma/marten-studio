@@ -24,10 +24,13 @@ public class StandbyLagCheckTests
         name, "10.0.0.3", "replicator", readable ? "streaming" : null, readable ? "async" : null,
         readable ? behind : null, readable ? behind : null, null, null, readable ? replayLag : null);
 
-    private static HealthVerdict Evaluate(ReplicationRole role, params StandbyRow[] standbys)
+    private static HealthVerdict Evaluate(ReplicationRole role, params StandbyRow[] standbys) =>
+        Evaluate(role, null, null, 0, standbys);
+
+    private static HealthVerdict Evaluate(ReplicationRole role, HealthHistoryView? history, TimeSpan? delay, long otherDatabases, params StandbyRow[] standbys)
     {
-        StandbySnapshot? snapshot = role.InRecovery ? null : new StandbySnapshot(standbys.Length, standbys, Now);
-        HealthVerdict verdict = Check.Evaluate(new StandbyLagFacts(ServerOf(), role, snapshot, Grants()), At());
+        StandbySnapshot? snapshot = role.InRecovery ? null : new StandbySnapshot(standbys.Length, standbys, Now, otherDatabases);
+        HealthVerdict verdict = Check.Evaluate(new StandbyLagFacts(ServerOf(), role, snapshot, Grants(), role.InRecovery ? delay ?? TimeSpan.Zero : null), At(history));
 
         foreach (HealthFinding finding in verdict.Findings)
         {
@@ -120,14 +123,83 @@ public class StandbyLagCheckTests
             + "received less what it has replayed.");
     }
 
+    /// <summary>The standby's own unreplayed WAL, one sample <paramref name="minutesAgo" /> before now.</summary>
+    private static HealthHistoryView HeldBefore(double bytes, double minutesAgo = 1) =>
+        History((Now.AddMinutes(-minutesAgo), [(StandbyLagCheck.ReplayBehindSeries, bytes)]));
+
     [Fact]
-    public void On_a_standby_the_bytes_it_holds_and_the_age_of_its_last_replay_are_judged()
+    public void On_a_standby_the_age_of_its_last_replay_is_judged_once_it_has_held_WAL_on_two_samples()
     {
-        HealthFinding finding = Evaluate(Standby(13_254_232, TimeSpan.FromMinutes(6))).Findings.Should().ContainSingle().Subject;
+        HealthFinding finding = Evaluate(Standby(13_254_232, TimeSpan.FromMinutes(6)), HeldBefore(9_000_000), null, 0)
+            .Findings.Should().ContainSingle().Subject;
 
         finding.Variant.Should().Be("standby-view");
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Evidence.Should().Contain(new HealthEvidence("Measured on", "this standby: what it has received less what it has replayed"));
+        finding.Caveat.Should().Contain("two consecutive samples").And.Contain("16.0 MiB or more now");
+    }
+
+    [Fact]
+    public void On_a_standby_one_samples_record_in_flight_is_never_an_hours_lag()
+    {
+        // W5-R2-fix 7: the primary was idle for two hours, then one commit arrived - in flight on this one read.
+        HealthVerdict once = Evaluate(Standby(4096, TimeSpan.FromHours(2)));
+
+        once.Findings.Should().BeEmpty("an instant's bytes above zero below the floor are not lag until a second sample says so");
+        once.Note.Should().Contain("on this sample only");
+
+        Evaluate(Standby(4096, TimeSpan.FromHours(2)), HeldBefore(0), null, 0).Findings.Should().BeEmpty("the sample before held nothing");
+
+        Evaluate(Standby(4096, TimeSpan.FromHours(2)), HeldBefore(2048), null, 0).Findings.Should().ContainSingle()
+            .Which.Severity.Should().Be(HealthSeverity.Critical, "held on two consecutive samples, an hour behind");
+    }
+
+    [Fact]
+    public void On_a_standby_a_segments_worth_unreplayed_is_lag_at_once()
+    {
+        Evaluate(Standby(StandbyLagCheck.StandbyTimeFloorBytes, TimeSpan.FromMinutes(6))).Findings.Should().ContainSingle()
+            .Which.Severity.Should().Be(HealthSeverity.Warning, "16 MiB or more is judged on one sample");
+        Evaluate(Standby(StandbyLagCheck.StandbyTimeFloorBytes - 1, TimeSpan.FromMinutes(6))).Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_deliberately_delayed_standby_is_judged_only_beyond_its_delay()
+    {
+        TimeSpan delay = TimeSpan.FromHours(1);
+
+        // 65 minutes since the last replayed commit on a standby that waits an hour on purpose: 5 minutes beyond it.
+        HealthFinding finding = Evaluate(Standby(GiB * 4, TimeSpan.FromMinutes(65)), HeldBefore(GiB), delay, 0)
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning, "five minutes beyond the delay, and the WAL the delay holds is not judged");
+        finding.Evidence.Should().Contain(new HealthEvidence("Furthest behind in time", "5 min"));
+        finding.Evidence.Should().Contain(x => x.Label == "recovery_min_apply_delay" && x.Value.StartsWith("1 h 0 min: only the time beyond it is judged", StringComparison.Ordinal));
+
+        HealthVerdict within = Evaluate(Standby(GiB * 4, TimeSpan.FromMinutes(59)), HeldBefore(GiB), delay, 0);
+        within.Findings.Should().BeEmpty("within its own delay, four GiB held is the delay's by design");
+        within.Note.Should().Contain("beyond its 1 h 0 min recovery_min_apply_delay");
+    }
+
+    [Fact]
+    public void Logical_senders_are_not_standbys_and_another_databases_are_only_counted()
+    {
+        StandbyRow subscription = new("my_subscription", "10.0.0.9", "app", "streaming", null, GiB * 5, GiB * 5, null, null, TimeSpan.FromHours(3), Physical: false);
+
+        HealthVerdict verdict = Evaluate(Primary, null, null, 2, Row("dr", 0, null), subscription);
+
+        verdict.Findings.Should().BeEmpty("a logical sender of this database is not a standby, however far behind");
+        verdict.Note.Should().Contain("Not standbys, and not judged: 1 logical sender of this database and 2 logical senders of other databases on this server, never named.");
+
+        Evaluate(Primary, null, null, 3).Note.Should().Be(
+            "No standby streams from this server. Not standbys, and not judged: 3 logical senders of other databases on this server, never named.");
+    }
+
+    [Fact]
+    public void It_samples_a_standbys_own_unreplayed_WAL_and_nothing_on_a_primary()
+    {
+        Check.Sample(new StandbyLagFacts(ServerOf(), Standby(4096, TimeSpan.FromMinutes(1)), null, Grants(), TimeSpan.Zero))
+            .Select(static x => (x.Series, x.Value)).Should().Equal((StandbyLagCheck.ReplayBehindSeries, 4096d));
+        Check.Sample(new StandbyLagFacts(ServerOf(), Primary, new StandbySnapshot(0, [], Now), Grants())).Should().BeEmpty();
     }
 
     [Fact]

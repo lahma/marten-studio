@@ -65,14 +65,21 @@ internal static class HealthServerQueries
         "             else s.setting::int8 end\n" +
         "   from pg_catalog.pg_settings s where s.name = '" + name + "')";
 
+    /// <summary>
+    /// Where a provider's setting can come from: the server's own configuration, never a <c>SET</c> - a session's, a
+    /// database's (<c>ALTER DATABASE … SET</c>) or a role's (<c>ALTER ROLE … SET</c>) - nor the client's startup options,
+    /// which is where anybody who can connect or owns a database could put a placeholder of that name (W5-R2-fix B3).
+    /// </summary>
+    private const string ServerConfigured = "s.source in ('default', 'environment variable', 'configuration file', 'command line', 'override')";
+
     private static readonly HealthQuery PlatformQuery = new(
         "select pg_catalog.current_setting('server_version_num')::int4 as server_version_num,\n" +
         "       pg_catalog.current_setting('server_version') as server_version,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name in ('rds.extensions', 'rds.allowed_extensions')) as rds,\n" +
-        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version') as aurora,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions') as azure,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%') as cloud_sql,\n" +
-        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser') as neon");
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name in ('rds.extensions', 'rds.allowed_extensions') and " + ServerConfigured + ") as rds,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora,\n" +
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions' and " + ServerConfigured + ") as azure,\n" +
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%' and " + ServerConfigured + ") as cloud_sql,\n" +
+        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon");
 
     private static readonly HealthQuery ChecksumsQuery = new(
         "select pg_catalog.current_setting('data_checksums') = 'on' as enabled,\n" +
@@ -95,6 +102,26 @@ internal static class HealthServerQueries
     /// and Neon's <c>neon_superuser</c> role. Each one is an existence test against the catalog, so a marker that is
     /// absent - every one of them on a server of somebody's own - costs nothing and errs nowhere.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Fenced so that no role short of a superuser can plant one</b> (W5-R2-fix B3): a platform decides wording, a
+    /// stand-down (S02's <c>fsync</c> on Neon) and which checks are not applicable (R02-R04 on Aurora), so a planted
+    /// marker would silence findings with nothing logged.
+    /// </para>
+    /// <list type="bullet">
+    /// <item>A setting counts only from the server's own configuration (<c>source</c> in <c>default</c>, <c>environment
+    /// variable</c>, <c>configuration file</c>, <c>command line</c>, <c>override</c>): a placeholder of the same name made by
+    /// a session's <c>SET</c>, a database owner's <c>ALTER DATABASE … SET</c>, a role's own <c>ALTER ROLE … SET</c> or a
+    /// client's startup options shows up in <c>pg_settings</c> with another source.</item>
+    /// <item><c>aurora_version()</c> counts only in <c>pg_catalog</c>, where only a superuser may create a function. Not
+    /// also fenced to <c>oid &lt; 16384</c> (initdb's objects): a function an engine or a superuser adds after initdb -
+    /// the test shim among them - has a higher oid, and the namespace already keeps out every role but a superuser.</item>
+    /// <item><c>neon_superuser</c> counts only as Neon makes it - <c>NOLOGIN</c>, <c>REPLICATION</c> and <c>BYPASSRLS</c>
+    /// (<i>Manage roles</i>, Neon docs, read 2026-10-26) - two attributes only a superuser may grant before PostgreSQL 16,
+    /// and from 16 only a <c>CREATEROLE</c> role that holds both itself.</item>
+    /// <item>A host (<c>*.neon.tech</c>, <c>*.supabase.co</c>) is the data source's own connection string, the host's.</item>
+    /// </list>
+    /// </remarks>
     public static HealthQuery Platform() => PlatformQuery;
 
     /// <summary>

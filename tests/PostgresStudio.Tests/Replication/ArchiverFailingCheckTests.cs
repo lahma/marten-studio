@@ -187,24 +187,58 @@ public class ArchiverFailingCheckTests
         Evaluate(Behind(70, TimeSpan.FromMinutes(59)), Backlog((10, 50), (0, 70))).Findings.Should().ContainSingle().Which.Severity.Should().Be(HealthSeverity.Warning);
     }
 
-    [Fact]
-    public void Nothing_archived_yet_is_judged_by_what_was_written_while_watching()
-    {
-        // The series holds the current segment's number; the backlog is what it gained in the window - a lower bound.
-        ArchiverFacts never = Archiver(lastArchived: null, current: Wal(80));
+    /// <summary>The segment being written and the archived count, sampled (W5-R2-fix B2: never one series with the distance).</summary>
+    private static HealthHistoryView Written(params (double MinutesAgo, double Segment, double Archived)[] points) =>
+        History([.. points.Select(static x => (Now.AddMinutes(-x.MinutesAgo), new[] { (ReplicationHistory.WalSegment, x.Segment), (ReplicationHistory.ArchiverArchived, x.Archived) }))]);
 
-        HealthFinding finding = Evaluate(never, Backlog((15, 5), (0, 80))).Findings.Should().ContainSingle().Subject;
+    [Fact]
+    public void Nothing_archived_yet_is_judged_by_what_was_written_while_nothing_was_archived()
+    {
+        // The segment being written gained 75 in the window and the archiver archived nothing: a lower bound of 75 segments.
+        ArchiverFacts never = Archiver(lastArchived: null, archived: 0, current: Wal(80));
+
+        HealthFinding finding = Evaluate(never, Written((15, 5, 0), (0, 80, 0))).Findings.Should().ContainSingle().Subject;
 
         finding.Variant.Should().Be("backlog");
         finding.Severity.Should().Be(HealthSeverity.Warning, "the whole WAL sequence never sizes an alarm, and it has not grown for an hour");
         finding.Title.Should().StartWith("Nothing has been archived while 1.2 GiB of WAL was written");
         finding.Caveat.Should().Contain("a lower bound");
 
-        Evaluate(Archiver(lastArchived: null, current: Wal(5000)), Backlog((15, 4990), (0, 5000))).Findings.Should().BeEmpty(
+        Evaluate(Archiver(lastArchived: null, archived: 0, current: Wal(5000)), Written((15, 4990, 0), (0, 5000, 0))).Findings.Should().BeEmpty(
             "ten segments written while watching are not a backlog, whatever number the current segment has");
 
-        Evaluate(never, Backlog((61, 5), (30, 40), (0, 80))).Findings.Should().ContainSingle().Which.Severity.Should().Be(
+        Evaluate(never, Written((61, 5, 0), (30, 40, 0), (0, 80, 0))).Findings.Should().ContainSingle().Which.Severity.Should().Be(
             HealthSeverity.Critical, "grown across an hour of samples with nothing archived");
+    }
+
+    [Fact]
+    public void Nothing_archived_is_never_judged_while_the_archiver_archived_something_in_the_window()
+    {
+        // A history file archived at a promotion: nothing names a segment, but the archiver works (archived_count rose).
+        ArchiverFacts promoted = Archiver(lastArchived: "00000002.history", archived: 121, current: Wal(200));
+
+        HealthVerdict verdict = Evaluate(promoted, Written((15, 100, 120), (0, 200, 121)));
+
+        verdict.Findings.Should().BeEmpty("an archived file is a working archiver, whatever it named");
+    }
+
+    [Fact]
+    public void Distance_samples_followed_by_a_reset_or_a_history_file_archived_last_stay_quiet()
+    {
+        // B2: distance samples, then a read with no last segment. Before the fix one series held both the distance and the
+        // current segment's number, so this read looked like a backlog jumping to the whole WAL sequence.
+        HealthHistoryView history = History(
+            (Now.AddMinutes(-15), [(ReplicationHistory.ArchiverBacklog, 2), (ReplicationHistory.WalSegment, 150), (ReplicationHistory.ArchiverArchived, 148)]),
+            (Now.AddMinutes(-5), [(ReplicationHistory.ArchiverBacklog, 2), (ReplicationHistory.WalSegment, 190), (ReplicationHistory.ArchiverArchived, 188)]));
+
+        // pg_stat_reset_shared('archiver'), or a crash: no last archived file, and archived_count back at zero.
+        Evaluate(Archiver(lastArchived: null, archived: 0, current: Wal(200)), history).Findings.Should().BeEmpty();
+
+        // A promotion: the history file archived last, and the counter still counting.
+        Evaluate(Archiver(lastArchived: "00000002.history", archived: 189, current: Wal(200)), history).Findings.Should().BeEmpty();
+
+        // A .partial segment archived last is measured from: two segments behind is nothing.
+        Evaluate(Archiver(lastArchived: Wal(198) + ".partial", archived: 189, current: Wal(200)), history).Findings.Should().BeEmpty();
     }
 
     [Fact]
@@ -250,11 +284,29 @@ public class ArchiverFailingCheckTests
     }
 
     [Fact]
-    public void It_samples_its_three_counters_only_while_the_server_archives()
+    public void It_samples_the_counters_the_segment_and_a_distance_only_when_there_is_one()
     {
         Check.Sample(Facts(Behind(10))).Select(static x => (x.Series, x.Value)).Should().Equal(
-            (ReplicationHistory.ArchiverFailed, 0d), (ReplicationHistory.ArchiverArchived, 10d), (ReplicationHistory.ArchiverBacklog, 10d));
+            (ReplicationHistory.ArchiverFailed, 0d), (ReplicationHistory.ArchiverArchived, 10d),
+            (ReplicationHistory.WalSegment, 110d), (ReplicationHistory.ArchiverBacklog, 10d));
+
+        Check.Sample(Facts(Archiver(lastArchived: null, archived: 0, current: Wal(80)))).Select(static x => x.Series).Should().Equal(
+            [ReplicationHistory.ArchiverFailed, ReplicationHistory.ArchiverArchived, ReplicationHistory.WalSegment],
+            "with nothing archived there is no distance, and none is made up");
 
         Check.Sample(Facts(Behind(10) with { Settings = Archiving("off") })).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_pg_wal_that_could_not_be_read_is_said_in_the_evidence_and_R02_still_judges()
+    {
+        ArchiverFailingFacts facts = new(Archiver(lastArchived: null, failed: 1, lastFailedAt: Now), null, Grants("pg_monitor"), ServerOf(),
+            ArchiverFailingCheck.DirectoryProblemText(new Npgsql.PostgresException("canceling statement due to statement timeout", "ERROR", "ERROR", "57014")));
+
+        HealthFinding finding = Check.Evaluate(facts, At()).Findings.Should().ContainSingle().Subject;
+
+        finding.Variant.Should().Be("failing");
+        finding.Evidence.Single(static x => x.Label == "Waiting in pg_wal").Value
+            .Should().Be("could not be read (SQLSTATE 57014); R02 judges the archiver's own counters regardless");
     }
 }

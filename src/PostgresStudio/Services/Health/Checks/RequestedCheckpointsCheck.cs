@@ -29,8 +29,9 @@ internal sealed record RequestedCheckpointsFacts(
 /// </para>
 /// <para>
 /// <b>Two triggers, either fires.</b> The share (G8): requested over the denominator this release counts
-/// (<see cref="CheckpointCounting" />) - up to 16 timed plus requested, 17 the same though <c>num_timed</c> counts the
-/// checkpoints an idle server skipped too, so idleness dilutes it, and 18 <c>num_done</c> - at least
+/// (<see cref="CheckpointCounting" />) - up to 17 timed plus requested, though the timed count includes the checkpoints an
+/// idle server skipped (<c>checkpoints_timed</c> up to 16, <c>num_timed</c> on 17), so idleness dilutes it, and 18
+/// <c>num_done</c> - at least
 /// <see cref="ShareThreshold" /> over at least <see cref="MinimumCheckpoints" />. And, on every release (the health-gap
 /// analysis, addition 5): at least <see cref="MinimumCheckpoints" /> requested in the window, and more than the window
 /// over <c>checkpoint_timeout</c> - more requested checkpoints than timed ones could have run - which no skipped
@@ -232,7 +233,7 @@ internal sealed class RequestedCheckpointsCheck : HealthCheck<RequestedCheckpoin
     private static string Denominator(CheckpointCounting counting) => counting switch
     {
         CheckpointCounting.CheckpointerDone => "Checkpoints done (num_done)",
-        CheckpointCounting.CheckpointerWithSkipped => "Checkpoints counted (num_timed + num_requested)",
+        CheckpointCounting.CheckpointerWithSkipped => "Checkpoints counted (num_timed + num_requested, skipped ones included)",
         _ => "Checkpoints (checkpoints_timed + checkpoints_req)",
     };
 
@@ -260,6 +261,9 @@ internal sealed class RequestedCheckpointsCheck : HealthCheck<RequestedCheckpoin
         + "for, so a window with a backup in it counts those too."
         + checkpoints.Counting switch
         {
+            CheckpointCounting.Bgwriter =>
+                " Up to PostgreSQL 16, checkpoints_timed counts the checkpoints an idle server skipped too, so idle time dilutes the "
+                + "share; the second trigger - more requested checkpoints than checkpoint_timeout would have run - does not depend on it.",
             CheckpointCounting.CheckpointerWithSkipped =>
                 " On PostgreSQL 17, num_timed counts the checkpoints an idle server skipped too, so idle time dilutes the share; "
                 + "the second trigger - more requested checkpoints than checkpoint_timeout would have run - does not depend on it.",

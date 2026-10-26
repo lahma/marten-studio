@@ -205,12 +205,13 @@ on either of two triggers:
 
 1. **The share** (issue #8 G8): requested checkpoints are 20% or more of at least 10 checkpoints in the window. The
    denominator is the release's own count:
-   - up to PostgreSQL 16, `pg_stat_bgwriter`'s `checkpoints_timed + checkpoints_req`;
-   - on 17, `pg_stat_checkpointer`'s `num_timed + num_requested` - where `num_timed` counts the checkpoints an idle
-     server **skipped** too, so idle time dilutes the share;
+   - up to PostgreSQL 16, `pg_stat_bgwriter`'s `checkpoints_timed + checkpoints_req` - where `checkpoints_timed`
+     counts the checkpoints an idle server **skipped** too, so idle time dilutes the share;
+   - on 17, `pg_stat_checkpointer`'s `num_timed + num_requested`, with the same dilution: `num_timed` counts skipped
+     checkpoints too;
    - from 18, `num_done`, the checkpoints that ran.
 2. **More than the timeout allows**, on every release: at least 10 requested checkpoints in the window, and more than
-   the window divided by `checkpoint_timeout`. It does not depend on 17's skipped-inclusive `num_timed`.
+   the window divided by `checkpoint_timeout`. It does not depend on a timed count that includes skipped checkpoints.
 
 The remedy doubles `max_wal_size`, worded for the platform that runs the server (see
 [Server, Managed platforms](server.md#managed-platforms)); it costs `pg_wal` disk and a longer crash recovery.

@@ -227,6 +227,7 @@
             else if (standbys.Total == 0)
             {
                 <p class="ms-repl-note">No standby streams from this server.</p>
+                @OtherDatabases(standbys)
             }
             else
             {
@@ -234,11 +235,21 @@
                 {
                     <p class="ms-repl-note ms-repl-not-checked">@notChecked</p>
                 }
+                @if (standbys.Downstream)
+                {
+                    <p class="ms-repl-note ms-repl-downstream">
+                        These are downstream standbys, cascading from this one: each is measured against what this standby holds - the
+                        greater of what it has received and what it has replayed - and none of them is judged by the health advisor,
+                        which judges this standby's own replay.
+                    </p>
+                }
+                @OtherDatabases(standbys)
                 <TableScroll Label="Standbys streaming from this server">
                     <table class="ms-table ms-repl-table ms-repl-standbys">
                         <thead>
                             <tr>
                                 <th scope="col">Standby</th>
+                                <th scope="col">Kind</th>
                                 <th scope="col">Client</th>
                                 <th scope="col">State</th>
                                 <th scope="col">Sync</th>
@@ -255,6 +266,7 @@
                                 StandbyView standby = standbys.Rows[i];
                                 <tr @key="i">
                                     <td>@(standby.Name is { } name ? "'" + name + "'" + (standby.User is { } user ? " (role " + user + ")" : string.Empty) : "withheld")</td>
+                                    <td>@(standby.Row.Physical ? "physical" : "logical, this database's (not a standby; not judged)")</td>
                                     <td class="ms-mono">@(view.NamesShown ? standby.Client ?? "local socket" : "withheld")</td>
                                     <td>@(standby.Row.Readable ? standby.Row.State : "not readable")</td>
                                     <td>@(standby.Row.SyncState ?? "–")</td>
@@ -350,7 +362,7 @@
             {
                 <dl class="ms-repl-facts">
                     <dt>Timed</dt>
-                    <dd>@SessionText.Number(checkpoints.Totals.Timed)@(checkpoints.Totals.Counting == CheckpointCounting.CheckpointerWithSkipped ? " (skipped ones included)" : string.Empty)</dd>
+                    <dd>@SessionText.Number(checkpoints.Totals.Timed)@(checkpoints.Totals.Counting == CheckpointCounting.CheckpointerDone ? string.Empty : " (skipped ones included)")</dd>
                     <dt>Requested</dt>
                     <dd>@SessionText.Number(checkpoints.Totals.Requested)@(checkpoints.Totals.RequestedShare is { } share ? " (" + SessionText.Percent(share) + " since the counters were reset)" : string.Empty)</dd>
                     @if (checkpoints.Totals.Done is { } done)
@@ -651,6 +663,18 @@
         }
     }
 
+    /// <summary>The count of other databases' logical senders, which are never listed or named.</summary>
+    private static RenderFragment OtherDatabases(StandbysView standbys) => __builder =>
+    {
+        if (standbys.OtherDatabases > 0)
+        {
+            <p class="ms-repl-note ms-repl-other-databases">
+                @SessionText.Count(standbys.OtherDatabases, "logical sender") of other databases on this server
+                @(standbys.OtherDatabases == 1 ? "is" : "are") counted and never named: what they stream is another database's.
+            </p>
+        }
+    };
+
     private RenderFragment Unavailable(string? note) => __builder =>
     {
         <p class="ms-repl-note ms-repl-unavailable">@(note ?? "Not read.")</p>
@@ -696,8 +720,8 @@
     private static string BacklogText(ArchiveBacklog? backlog) => backlog switch
     {
         null => "not measured",
-        { NothingArchived: true } => "nothing archived yet",
-        _ => SessionText.Count(backlog.Segments, "segment") + " (" + WalText.Bytes(backlog.Bytes) + ")",
+        { Distance: { } distance, Bytes: { } bytes } => SessionText.Count(distance, "segment") + " (" + WalText.Bytes(bytes) + ")",
+        _ => "nothing archived yet",
     };
 
     private static string Bytes(long? value) => value is { } bytes ? WalText.Bytes(bytes) : "–";

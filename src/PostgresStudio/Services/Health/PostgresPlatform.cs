@@ -36,9 +36,16 @@ internal sealed record PostgresPlatformMarkers(
 /// <b>Only wording and mutes.</b> A platform never raises a finding and never decides a severity. It shapes three
 /// things: S01 says "community support ends; your provider's schedule may differ" instead of speaking as though the
 /// community's dates were the host's; R01's remedy names the place the provider lets a server setting be changed;
-/// and S02 stands down for a setting the provider documents as its own design (Neon's <c>fsync = off</c>). A server
-/// the detector does not recognise is <see cref="PostgresPlatformKind.SelfHosted" />, which is also the wording that
-/// is right for a provider the studio has never heard of: the setting is somebody's to change.
+/// and S02 stands down for a setting the provider documents as its own design (Neon's <c>fsync = off</c>). From W5-R2 it
+/// also says what does not apply: R02-R04 and the Replication page's sections where Aurora's storage layer, or a
+/// provider's own archiving, does the work (issue #8 A2). A server the detector does not recognise is
+/// <see cref="PostgresPlatformKind.SelfHosted" />, which is also the wording that is right for a provider the studio has
+/// never heard of: the setting is somebody's to change.
+/// </para>
+/// <para>
+/// <b>No marker a role short of a superuser can plant</b> (W5-R2-fix B3), because a platform silences findings: each server
+/// marker is fenced in <c>HealthServerQueries.Platform</c> - a setting only from the server's own configuration, the Aurora
+/// function only in <c>pg_catalog</c>, Neon's role only with the attributes only a superuser grants.
 /// </para>
 /// <para>
 /// <b>Every marker is the provider's own, documented, and read without a privilege</b> (verified 2026-10-17; a marker
@@ -50,7 +57,7 @@ internal sealed record PostgresPlatformMarkers(
 /// RDS User Guide) and <c>rds.allowed_extensions</c> (same page, and the Aurora User Guide's <i>Working with extensions
 /// and foreign data wrappers</i>).</item>
 /// <item><b>Amazon Aurora</b>: the <c>aurora_version()</c> function, "returns the Aurora PostgreSQL version" (<i>aurora_version</i>,
-/// Aurora User Guide). Looked up in <c>pg_proc</c>, never called.</item>
+/// Aurora User Guide). Looked up in <c>pg_proc</c>, in <c>pg_catalog</c> only, never called.</item>
 /// <item><b>Azure</b>: the <c>azure.extensions</c> server parameter, "Run <c>SHOW azure.extensions;</c>" (<i>PostgreSQL
 /// extensions in Azure Database for PostgreSQL</i>, Microsoft Learn).</item>
 /// <item><b>Cloud SQL</b>: any of the <c>cloudsql.*</c> database flags (<c>cloudsql.iam_authentication</c>,

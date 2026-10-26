@@ -102,6 +102,51 @@ public class ReplicationViewTests
     }
 
     [Fact]
+    public void Another_databases_logical_senders_are_counted_never_listed_or_named()
+    {
+        // W5-R2-fix B1: the read nulls their names in the statement and lists none of them; the facts carry only a count.
+        ReplicationFacts facts = Facts(standbys: [Standby()]) with
+        {
+            Standbys = ReplicationRead<StandbySnapshot>.Of(new StandbySnapshot(1, [Standby()], Now, OtherDatabases: 2)),
+        };
+
+        StandbysView standbys = Build(facts, names: true).Standbys.Value!;
+
+        standbys.OtherDatabases.Should().Be(2);
+        standbys.Rows.Should().ContainSingle().Which.Name.Should().Be("reporting");
+    }
+
+    [Fact]
+    public void A_this_databases_logical_sender_is_listed_as_logical_and_named_only_through_the_gate()
+    {
+        StandbyRow subscription = new("my_subscription", "10.0.0.9", "app", "streaming", null, 10, 10, null, null, null, Physical: false);
+        ReplicationFacts facts = Facts() with { Standbys = ReplicationRead<StandbySnapshot>.Of(new StandbySnapshot(1, [subscription], Now)) };
+
+        Build(facts, names: true).Standbys.Value!.Rows.Single().Should().Match<StandbyView>(static x => x.Name == "my_subscription" && !x.Row.Physical);
+        Build(facts, names: false).Standbys.Value!.Rows.Single().Name.Should().BeNull();
+    }
+
+    [Fact]
+    public void A_slots_statistics_carry_no_slot_name_past_the_view()
+    {
+        ReplicationView view = Build(Facts(), names: true);
+
+        view.Slots.Value!.Rows.Where(static x => x.Statistics is not null).Should().OnlyContain(static x => x.Statistics!.SlotName.Length == 0,
+            "the statistics are joined by name and blanked, as the slot's own name is (W5-R2-fix 12)");
+    }
+
+    [Fact]
+    public void On_a_standby_the_senders_are_downstream_and_not_judged()
+    {
+        ReplicationFacts facts = Facts(standbys: [Standby("cascade")]) with
+        {
+            Role = ReplicationRead<ReplicationRole>.Of(new ReplicationRole(true, "0/5000000", "0/5000000", 0, Now, TimeSpan.Zero, "not paused", Now)),
+        };
+
+        Build(facts, names: true).Standbys.Value!.Downstream.Should().BeTrue();
+    }
+
+    [Fact]
     public void Without_pg_read_all_stats_the_standbys_are_counted_and_not_checked()
     {
         StandbyRow unreadable = new("walreceiver", null, "postgres", null, null, null, null, null, null, null);
