@@ -1,5 +1,6 @@
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -94,6 +95,12 @@ internal sealed record StorageView
 
     /// <summary>Whether the server reports updates that went to another page (16+), for the column's note.</summary>
     public bool NewPageUpdatesRead { get; init; }
+
+    /// <summary>
+    /// Operations › Maintenance for this scope (W5-V1), where autovacuum's view of the same tables is - or <see langword="null" />
+    /// when the studio offers no such page (<see cref="MaintenanceLinks.ToMaintenance" />).
+    /// </summary>
+    public string? MaintenanceLink { get; init; }
 
     /// <summary>What the read ran, for "Show SQL".</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
@@ -296,6 +303,7 @@ internal sealed class StorageService : IStorageService
             Tables = tables,
             WithheldReason = withheldReason,
             NewPageUpdatesRead = read.NewPageUpdatesRead,
+            MaintenanceLink = MaintenanceLinks.ToMaintenance(settings, descriptor, scope),
             Statements = read.Statements,
         };
     }

@@ -189,6 +189,69 @@ public class StoragePageTests
         page.Markup.Should().Contain("ms-storage-bar");
     }
 
+    /// <summary>
+    /// W5b-int: Maintenance (W5-V1) has landed, so the page points at it for the same tables - the scope carried (D9), and only
+    /// while the studio's sidebar offers the page, which is what null-safe means for a studio without one.
+    /// </summary>
+    [Fact]
+    public async Task The_page_points_at_Maintenance_with_the_scope_and_only_while_the_studio_offers_it()
+    {
+        StudioScope scope = new("default", "localhost.marten", null);
+        StorageView view = await Service(Hiding()).ShowAsync(Facts(TimeSpan.FromDays(3)), scope, static () => Task.FromResult<DatabaseGate?>(Gate()));
+
+        view.MaintenanceLink.Should().Be("maintenance?store=default&db=localhost.marten");
+
+        FakeStorageService storage = new() { View = view };
+        await using (StudioComponentContext context = await ContextAsync(storage))
+        {
+            var page = context.Render<PostgresStudio.Components.Pages.Storage.Storage>();
+            page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+            AngleSharp.Dom.IElement link = page.Find(".ms-storage-estimates a");
+            link.TextContent.Should().Be("Maintenance");
+            link.GetAttribute("href").Should().Be("maintenance?store=default&db=localhost.marten");
+        }
+
+        PostgresStudio.Services.Settings.IStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions());
+        PostgresStudio.Services.Settings.StudioDescriptor marten = MartenStudioDescriptor.Instance;
+
+        PostgresStudio.Services.Maintenance.MaintenanceLinks.ToMaintenance(settings, marten, scope).Should().NotBeNull();
+        PostgresStudio.Services.Maintenance.MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: false), scope)
+            .Should().BeNull("a studio with no Maintenance entry is never linked to one");
+        PostgresStudio.Services.Maintenance.MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: true), scope)
+            .Should().BeNull("an entry the sidebar does not draw is not offered either");
+
+        static PostgresStudio.Services.Settings.StudioDescriptor Without(PostgresStudio.Services.Settings.StudioDescriptor descriptor, bool hide) => new()
+        {
+            Key = descriptor.Key,
+            ProductName = descriptor.ProductName,
+            PageAssemblies = descriptor.PageAssemblies,
+            HealthCheckAssemblies = descriptor.HealthCheckAssemblies,
+            Navigation =
+            [
+                .. descriptor.Navigation.Select(section => section with
+                {
+                    Items =
+                    [
+                        .. section.Items
+                            .Where(item => hide || item.Route != PostgresStudio.Services.Maintenance.MaintenanceLinks.Route)
+                            .Select(item => hide && item.Route == PostgresStudio.Services.Maintenance.MaintenanceLinks.Route ? item with { IsShown = static _ => false } : item),
+                    ],
+                }),
+            ],
+            OverviewComponent = descriptor.OverviewComponent,
+            QueryComponent = descriptor.QueryComponent,
+            SourceQueryParameter = descriptor.SourceQueryParameter,
+            SourceNoun = descriptor.SourceNoun,
+            SourceLabel = descriptor.SourceLabel,
+            ExposedContent = descriptor.ExposedContent,
+            CreateResource = descriptor.CreateResource,
+            Surface = descriptor.Surface,
+            Exposure = descriptor.Exposure,
+            Remedies = descriptor.Remedies,
+        };
+    }
+
     [Fact]
     public async Task Before_a_day_of_statistics_the_growth_tiles_say_how_long_so_far()
     {

@@ -115,6 +115,14 @@
             Sizes are the catalog's page counts, as of each table's last <code>VACUUM</code> or <code>ANALYZE</code>, so they lag
             the files - TOAST most of all. The exact size of one table is on its page in the database browser, which measures it
             when you open it.
+            @if (view.MaintenanceLink is { } maintenance)
+            {
+                @* W5b-int: Maintenance (W5-V1) landed, so the page points at it, and only while the studio offers it. *@
+                <span>
+                    What autovacuum makes of the same tables - their dead rows against its triggers, and their bloat, measured when
+                    you ask - is on <a href="@maintenance">Maintenance</a>.
+                </span>
+            }
         </p>
 
         <section class="ms-storage-section" aria-labelledby="ms-storage-largest">
