@@ -101,6 +101,11 @@ internal static class PostgresStudioText
         StudioCostCovers =
             "health checks, the SQL console, the database browser, Sessions, Maintenance, Storage, Replication, Server and the "
             + "relationship reads",
+        StatementsStudioRoles =
+            "Every read the studio makes here but these reads of pg_stat_statements runs as it - the health checks, the SQL "
+            + "console, the database browser, Sessions, the Maintenance, Storage, Replication and Server pages and the "
+            + "Relationships graph - and this page lists none of their statements. These reads run as the data source's own "
+            + "role, and are among the statements above when they rank among the ones kept.",
 
         ExamplesIntro = "Catalog reads that run against any database. Click one to load it.",
         ExamplesEmpty = "There is no example to offer.",

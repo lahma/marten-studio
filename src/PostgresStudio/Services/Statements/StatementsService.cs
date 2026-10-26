@@ -206,12 +206,21 @@ internal sealed record StatementsView
 internal interface IStatementsService
 {
     /// <summary>
-    /// The statements of the scope's database, for a visitor through the activity gate. Never throws but for cancellation; a
+    /// The statements of the scope's database, for a visitor through the activity gate - the statement sweep's read, run now
+    /// when the last one is more than five minutes old: the page's load and its Refresh. Never throws but for cancellation; a
     /// refusal or a failed read is a value.
     /// </summary>
     /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
     /// <param name="cancellationToken">Cancels this caller's wait.</param>
     Task<StatementsView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// As <see cref="GetAsync" />, behind the same gate, but from the last statement sweep that finished, however old - never
+    /// starting one: the page's poll (W5-Q1-fix F6). With none finished, <see cref="StatementsState.NotRun" />.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait.</param>
+    Task<StatementsView> GetLatestAsync(StudioScope scope, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -243,6 +252,12 @@ internal interface IStatementsService
 /// <c>ViewDatabaseActivity</c> and one event 9452; the page's interval reads and its Refresh repeat that signature and
 /// record nothing, as Database › Sessions' details do.
 /// </para>
+/// <para>
+/// <b>A poll never runs the checks</b> (W5-Q1-fix F6). <see cref="GetAsync" /> - the page's load and Refresh - runs a statement
+/// sweep when the last is more than five minutes old; <see cref="GetLatestAsync" /> - its interval read - shows the last one
+/// that finished and starts none, so a tab left open does not plan T02's statements every five minutes on nobody's behalf.
+/// Both pass the same gate first.
+/// </para>
 /// </remarks>
 internal sealed class StatementsService : IStatementsService
 {
@@ -254,6 +269,11 @@ internal sealed class StatementsService : IStatementsService
 
     /// <summary>What a statement whose text the extension did not return says.</summary>
     internal const string TextNotReturned = "Not read: pg_stat_statements did not return its text - it may have been evicted since its counters were read.";
+
+    /// <summary>What a poll says when no statement sweep has finished for the database, since a poll starts none.</summary>
+    internal const string NotRun =
+        "The statement checks have not finished a read of this database yet, and the page does not start one on its own: "
+        + "Refresh reads pg_stat_statements now.";
 
     /// <summary>What every statement says when this visitor's mask could not be read.</summary>
     internal const string TextsUnchecked =
@@ -305,7 +325,15 @@ internal sealed class StatementsService : IStatementsService
     internal int RecordedReads => ledger.Count;
 
     /// <inheritdoc />
-    public async Task<StatementsView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public Task<StatementsView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        GetCoreAsync(scope, run: true, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<StatementsView> GetLatestAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        GetCoreAsync(scope, run: false, cancellationToken);
+
+    /// <summary>The gate, then the facts: a sweep's, run when stale if <paramref name="run" />, the last finished one if not.</summary>
+    private async Task<StatementsView> GetCoreAsync(StudioScope scope, bool run, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -351,17 +379,29 @@ internal sealed class StatementsService : IStatementsService
             return Refuse(whole, DatabaseRefusal.WritePolicy, text.StatementsWritePolicyDenial);
         }
 
-        // 4. Only now anything about the database: the statement sweep's read, joined or taken while it is fresh.
+        // 4. Only now anything about the database: the statement sweep's read, joined or taken while it is fresh - or, for a
+        // poll, the last one that finished, which starts nothing.
         ResolvedSource database = resolved with { Scope = whole };
-        StatementFacts read;
+        StatementFacts? latest;
 
         try
         {
-            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
+            latest = run ? await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false) : facts.Latest(database);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return StatementsView.Refused(DatabaseRefusal.Unavailable, Failure(exception, resolved));
+        }
+
+        if (latest is not { } read)
+        {
+            return new StatementsView
+            {
+                State = StatementsState.NotRun,
+                Status = NotRun,
+                StudioCost = meter.Total(CostKey(resolved.Target)),
+                StudioCostText = StudioCostText(),
+            };
         }
 
         DatabaseGateRead? gate = read.Statements.Count == 0 ? null : await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
@@ -445,8 +485,9 @@ internal sealed class StatementsService : IStatementsService
         {
             StatementsState.NotInstalled when platform.Kind == PostgresPlatformKind.AmazonAurora =>
                 "pg_stat_statements is not installed in this database, so there is nothing to show. On " + platform.Name + " its library "
-                + "is loaded by default (it is in the DB cluster parameter group's shared_preload_libraries), so it needs only "
-                + "CREATE EXTENSION pg_stat_statements in this database: "
+                + "is \"typically\" loaded already, in AWS's word (shared_preload_libraries, in the DB cluster parameter group), so it "
+                + "usually needs only CREATE EXTENSION pg_stat_statements in this database - and where the parameter group leaves it "
+                + "out, it is added there and the cluster restarted. "
                 + ServerSettingsFacts.WhoCreates("pg_stat_statements", trusted: false, platform),
             StatementsState.NotInstalled =>
                 "pg_stat_statements is not installed in this database, so there is nothing to show. Its library must be in "
@@ -484,8 +525,9 @@ internal sealed class StatementsService : IStatementsService
               + "(pg_stat_statements_info.stats_reset), later for a statement it evicted and saw again"
             : "since its counters began, at a time this pg_stat_statements does not record (it is older than 1.9)";
 
-        return "Each statement's totals " + since + ". A window appears once the statement checks have run twice, five minutes "
-            + "apart, while this page or the Health page's statement checks are open.";
+        return "Each statement's totals " + since + ". A window appears once the statement checks have run twice: they run when "
+            + "this page is opened or refreshed, or the Health page's statement checks are run, and a run is reused for five "
+            + "minutes.";
     }
 
     /// <summary>What the statistics window says about the server's counters, when it bounds the window.</summary>
@@ -518,21 +560,30 @@ internal sealed class StatementsService : IStatementsService
 
         return "Read from pg_stat_statements as " + text.SourcePossessive + " own Postgres role, which holds that role's statements in "
             + "this database and only the ones that completed: another role's statements are not among them, and another "
-            + "application's are when it connects as the same role. Top-level statements only: a statement a function runs is "
-            + "inside its caller's time. The " + TableText.Count(read.Statements.Count) + " statements kept are the "
-            + TableText.Count(StatementReads.PageTop) + " with the most execution time since their counters began"
+            + "application's are when it connects as the same role. " + Nested(read) + " The "
+            + TableText.Count(read.Statements.Count) + " statements kept are the " + TableText.Count(StatementReads.PageTop)
+            + " with the most execution time per second since their counters began"
             + (read.StorageReads ? ", the " + TableText.Count(StatementReads.PageTop) + " with the most storage reads" : string.Empty)
             + " and the statement checks' own picks, of the " + TableText.Count(read.AllStatements) + " it holds." + evicted;
     }
 
+    /// <summary>What a statement a function runs counts as, for the installed extension's version.</summary>
+    private static string Nested(StatementFacts read) => read.FoldsNested
+        ? "pg_stat_statements " + read.ExtensionVersion + " has no toplevel column, so a statement a function runs is summed into "
+          + "its own row - its top-level and nested runs together, under pg_stat_statements.track = all - as well as counted inside "
+          + "its caller's time; ALTER EXTENSION pg_stat_statements UPDATE in this database keeps only top-level runs."
+        : "Top-level statements only: a statement a function runs is inside its caller's time.";
+
     /// <summary>What the studio's own line says beside its number: what the meter counts, and which of the studio's statements the list holds.</summary>
     internal string StudioCostText()
     {
+        // Which of the studio's statements this page can list depends on the role each read runs as: pg_stat_statements is
+        // read for the source's own role alone (D29), and the reads SqlConsoleRole narrows run as that role instead.
         string listed = settings.SqlConsoleRole is { Length: > 0 } role
-            ? "Of the studio's own statements, only its reads of pg_stat_statements are listed above: the rest run as SqlConsoleRole ("
-              + role + "), whose statements this page does not read."
-            : "Every statement the studio runs here is listed above among the others - it runs as " + settings.Text.SourcePossessive
-              + " own role - and none is left out.";
+            ? "SqlConsoleRole is " + role + ". " + settings.Text.StatementsStudioRoles
+            : "With no SqlConsoleRole set, every statement the studio runs here runs as " + settings.Text.SourcePossessive
+              + " own role, as the application's do, so the studio's statements are among those above when they rank among the "
+              + "ones kept, and not otherwise.";
 
         return "Counted from open to close of every connection the studio opens to this database (" + settings.Text.StudioCostCovers
             + "), over the last " + ((int) StudioDatabaseTime.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture)

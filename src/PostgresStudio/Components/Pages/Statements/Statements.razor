@@ -27,9 +27,10 @@
     is masked for the visitor, and a group that names a table in a schema they may not see is shown without it: both the
     service's to decide.
 
-    Read when the page becomes interactive and every HealthInterval while it stays open, and on Refresh. The statement sweep
-    behind it is kept for five minutes, single flight, whoever asks. There is no drill-in: a statement's plan, plan insights
-    and the hypothetical-index proof are 0.6's.
+    A statement sweep runs when the page becomes interactive and on Refresh, kept for five minutes, single flight, whoever
+    asks; every HealthInterval while the page stays open it shows the last sweep that finished and starts none
+    (GetLatestAsync), because a statement sweep plans statements (T02) and a tab left open must not (W5-Q1-fix F6). There is
+    no drill-in: a statement's plan, plan insights and the hypothetical-index proof are 0.6's.
 *@
 
 <PageTitle>Statements</PageTitle>
@@ -161,7 +162,7 @@
                             <tr @key="row.Key">
                                 <td class="ms-stmts-group">@row.Label</td>
                                 <td class="ms-stmts-number">@SessionText.Number(row.Statements)</td>
-                                <td class="ms-stmts-share">@Share(row.Share)</td>
+                                <td class="ms-stmts-share">@ShareCell(row.Share)</td>
                                 <td class="ms-stmts-number">@StatementWindows.Milliseconds(row.Counts.ExecMs)</td>
                                 <td class="ms-stmts-number">@TableText.Count(row.Counts.Calls)</td>
                                 <td class="ms-stmts-number">@TableText.Count(row.Counts.Rows)</td>
@@ -206,7 +207,7 @@
                         {
                             <tr @key="row.Key" class="@(row.Window is null ? "ms-stmts-unwatched" : null)">
                                 <td class="ms-stmts-group">@row.GroupLabel</td>
-                                <td class="ms-stmts-share">@Share(row.Share)</td>
+                                <td class="ms-stmts-share">@ShareCell(row.Share)</td>
                                 @if (row.Window is { } counts)
                                 {
                                     <td class="ms-stmts-number">@StatementWindows.Milliseconds(counts.ExecMs)</td>
@@ -312,8 +313,8 @@
         await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
     }
 
-    /// <summary>One poll, under the loop's token as well as the page's.</summary>
-    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
+    /// <summary>One poll, under the loop's token as well as the page's: the last sweep that finished, never a new one.</summary>
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken, run: false);
 
     private async Task RefreshAsync() => await LoadAsync();
 
@@ -328,7 +329,8 @@
         await LoadAsync();
     }
 
-    private async Task LoadAsync(CancellationToken poll = default)
+    /// <summary>A read: the statement sweep's, run when stale (<paramref name="run" />), or the last that finished (a poll).</summary>
+    private async Task LoadAsync(CancellationToken poll = default, bool run = true)
     {
         if (disposed)
         {
@@ -345,7 +347,9 @@
 
         try
         {
-            StatementsView? read = scope is null ? null : await StatementsData.GetAsync(scope, token);
+            StatementsView? read = scope is null ? null
+                : run ? await StatementsData.GetAsync(scope, token)
+                : await StatementsData.GetLatestAsync(scope, token);
 
             // A scope change while this was reading: the answer is about a database nobody is looking at.
             if (State.ActiveScope == scope)
@@ -399,7 +403,9 @@
         @if (shown.MeasuredAt is { } measured)
         {
             <p class="ms-stmts-measured">
-                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
+                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only. While
+                the page is open it shows the latest read and starts none of its own; Refresh reads again once the last read is
+                five minutes old.
             </p>
         }
     };
@@ -417,7 +423,22 @@
         + SessionText.Count(cost.Connections, "connection") + " to this database in the last "
         + ((int) cost.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes. " + covers;
 
-    private static string Share(double? share) => share is { } value ? TableText.Percent(value) : "–";
+    /// <summary>A share of the window's execution time: a bar and its percentage, or a dash when there is none.</summary>
+    private static RenderFragment ShareCell(double? share) => __builder =>
+    {
+        @if (share is { } value)
+        {
+            <span class="ms-stmts-bar" style="--ms-stmts-share: @Width(value)" aria-hidden="true"></span>
+            <span class="ms-stmts-share-value">@TableText.Percent(value)</span>
+        }
+        else
+        {
+            @("–")
+        }
+    };
+
+    private static string Width(double share) =>
+        Math.Clamp(share * 100, 0, 100).ToString("0.##", CultureInfo.InvariantCulture) + "%";
 
     /// <summary>The first line of a statement, cut, for the row's summary.</summary>
     private static string Summary(string text)

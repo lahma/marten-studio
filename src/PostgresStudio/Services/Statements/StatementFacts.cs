@@ -116,6 +116,12 @@ internal enum StatementsState
 
     /// <summary>The read failed for a reason nobody chose; <see cref="StatementFacts.Failure" /> says what the sweep said.</summary>
     Failed,
+
+    /// <summary>
+    /// A poll found no statement sweep finished for this database, and starts none (<see cref="IStatementFacts.Latest" />): the
+    /// page's Refresh runs one.
+    /// </summary>
+    NotRun,
 }
 
 /// <summary>
@@ -130,6 +136,12 @@ internal enum StatementsState
 /// database and kept for five minutes (<see cref="HealthSweepCache.DeeperTimeToLive" />) - so a Statements page open beside
 /// the Health page's statement checks costs the database nothing more, and the D29 fence is the read's: as the store's own
 /// role, <c>userid = current_user</c> and this database.
+/// </para>
+/// <para>
+/// <b>Run when somebody asks, never on a timer.</b> A sweep starts when the page is opened or refreshed
+/// (<see cref="IStatementFacts.ReadAsync" />); its polls read the last one that finished (<see cref="IStatementFacts.Latest" />)
+/// and start none, because a statement sweep plans statements (T02) and a tab left open must not do that every five minutes
+/// on nobody's behalf (W5-Q1-fix F6).
 /// </para>
 /// <para>
 /// <b>The window.</b> Once the statement history holds two samples of the database's total, the window is that run
@@ -160,6 +172,12 @@ internal sealed record StatementFacts
 
     /// <summary>The extension's installed version, when it is installed.</summary>
     public string? ExtensionVersion { get; init; }
+
+    /// <summary>
+    /// Whether a statement's nested executions are summed into its row, below extension 1.9 (<c>StatementExtension.FoldsNested</c>)
+    /// - rather than left out, as from 1.9, where only the top-level entries are read.
+    /// </summary>
+    public bool FoldsNested { get; init; }
 
     /// <summary>Who runs the server, when the sweep could read it.</summary>
     public PostgresPlatform? Platform { get; init; }
@@ -255,6 +273,7 @@ internal sealed record StatementFacts
                 _ => StatementsState.Read,
             },
             ExtensionVersion = outcome.Extension.Version,
+            FoldsNested = outcome.Extension.Supported && outcome.Extension.FoldsNested,
             Platform = outcome.Platform,
             Statistics = statistics,
         };
@@ -398,6 +417,14 @@ internal interface IStatementFacts
     /// <param name="resolved">The database, resolved with no tenant.</param>
     /// <param name="cancellationToken">Cancels this caller's wait, never the shared sweep.</param>
     Task<StatementFacts> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The facts of the last statement sweep that finished for the database <paramref name="resolved" /> names, however old,
+    /// or <see langword="null" /> when none has: a lookup that never starts a sweep - what an open page's poll reads, so that
+    /// nobody's tab left open runs the statement checks, and T02's plans, every five minutes on its own (W5-Q1-fix F6).
+    /// </summary>
+    /// <param name="resolved">The database, resolved with no tenant.</param>
+    StatementFacts? Latest(ResolvedSource resolved);
 }
 
 /// <summary>
@@ -416,6 +443,19 @@ internal sealed class StatementFactsReader(HealthSweepCache cache, HealthHistory
 
         HealthSweep sweep = await cache.GetAsync(resolved, HealthSweepKind.Statements, resolved.Scope.DatabaseId, cancellationToken).ConfigureAwait(false);
         return From(sweep, history.Read(sweep.StoreKey, HealthHistory.RingOf(sweep.DatabaseId, HealthSweepKind.Statements)), classifier);
+    }
+
+    /// <inheritdoc />
+    public StatementFacts? Latest(ResolvedSource resolved)
+    {
+        ArgumentNullException.ThrowIfNull(resolved);
+
+        // Filed by GetAsync under the source's key and the database's own identity, which is how it is looked up here.
+        HealthSweep? sweep = cache.Latest(resolved.Source.Key, resolved.Target.Identity, HealthSweepKind.Statements);
+
+        return sweep is null
+            ? null
+            : From(sweep, history.Read(sweep.StoreKey, HealthHistory.RingOf(sweep.DatabaseId, HealthSweepKind.Statements)), classifier);
     }
 
     /// <summary>The facts a statement sweep holds, with its history. Pure.</summary>

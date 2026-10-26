@@ -7,6 +7,8 @@ using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Query;
 
+using StatementCounterRow = PostgresStudio.Internal.Sql.StatementCounterRow;
+
 namespace MartenStudio.Tests.Health;
 
 /// <summary>
@@ -304,6 +306,31 @@ public class ExpensiveStatementsCheckTests
 
         parts[ExpensiveStatementsCheck.CallsSeries + "2"].Should().Be(10);
         parts[ExpensiveStatementsCheck.ExecSeries + "2"].Should().Be(5);
+    }
+
+    /// <summary>
+    /// W5-Q1-fix F1, the belt: two rows of one <c>queryid</c> - what pg_stat_statements 1.8 returns on a server of 14 or later
+    /// under <c>track = all</c>, before the counters statement folded them - are one statement, the first (higher-ranked) kept,
+    /// so the sample names each series once and the page keys each row once. Rows that are already one per statement are
+    /// returned as they are.
+    /// </summary>
+    [Fact]
+    public void Two_rows_of_one_queryid_are_one_statement()
+    {
+        StatementCounterRow top = new() { QueryId = 42, Calls = 10, TotalExecMs = 100 };
+        StatementCounterRow nested = new() { QueryId = 42, Calls = 7, TotalExecMs = 30 };
+        StatementCounterRow other = new() { QueryId = 43, Calls = 1, TotalExecMs = 1 };
+
+        IReadOnlyList<StatementCounterRow> once = StatementReads.OnePerStatement([top, nested, other]);
+        once.Should().Equal(top, other);
+
+        IReadOnlyList<StatementCounterRow> clean = [top, other];
+        StatementReads.OnePerStatement(clean).Should().BeSameAs(clean);
+
+        // What the belt protects: a queryid read twice is a series sampled twice, which the history refuses outright.
+        StatementRead twice = Read(Statement(42, "select 1", [], 10, 100), Statement(42, "select 1", [], 7, 30));
+        Check.Sample(new ExpensiveStatementFacts(twice, [], [])).GroupBy(static x => x.Series)
+            .Should().Contain(static x => x.Count() > 1, "this is the read the belt never lets through");
     }
 
     /// <summary>W5-Q1: a statement's series name is the same string instance every sweep, so a full ring holds numbers, not names.</summary>

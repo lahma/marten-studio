@@ -65,6 +65,22 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* The share as a bar beside its percentage: the width is the statement's share of the window, set on the element as a
+   custom property. Inline, so the cell stays a table cell. */
+.ms-stmts-bar {
+    display: inline-block;
+    width: 4rem;
+    height: 0.5rem;
+    margin-right: var(--ms-space-xs);
+    vertical-align: middle;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-full);
+    background: linear-gradient(
+        to right,
+        var(--ms-color-primary) 0 var(--ms-stmts-share, 0%),
+        var(--ms-color-surface-alt) var(--ms-stmts-share, 0%) 100%);
+}
+
 .ms-stmts-group {
     white-space: nowrap;
 }

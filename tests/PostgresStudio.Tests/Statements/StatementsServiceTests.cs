@@ -23,15 +23,23 @@ namespace PostgresStudio.Tests.Statements;
 /// </summary>
 public class StatementsServiceTests
 {
-    /// <summary>The facts read, counted: a refused visitor must never cause one.</summary>
-    private sealed class CountingFacts(StatementFacts facts) : IStatementFacts
+    /// <summary>The facts read, counted: a refused visitor must never cause one, and a poll never runs one.</summary>
+    private sealed class CountingFacts(StatementFacts facts, StatementFacts? latest = null) : IStatementFacts
     {
         public int Reads { get; private set; }
+
+        public int Lookups { get; private set; }
 
         public Task<StatementFacts> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken = default)
         {
             Reads++;
             return Task.FromResult(facts);
+        }
+
+        public StatementFacts? Latest(ResolvedSource resolved)
+        {
+            Lookups++;
+            return latest;
         }
     }
 
@@ -198,7 +206,7 @@ public class StatementsServiceTests
 
     [Theory]
     [InlineData(PostgresPlatformKind.SelfHosted, "postgresql.conf", "a superuser can run CREATE EXTENSION pg_stat_statements")]
-    [InlineData(PostgresPlatformKind.AmazonAurora, "loaded by default", "the master user (a member of rds_superuser) can run CREATE EXTENSION pg_stat_statements")]
+    [InlineData(PostgresPlatformKind.AmazonAurora, "is \"typically\" loaded already, in AWS's word", "the master user (a member of rds_superuser) can run CREATE EXTENSION pg_stat_statements")]
     public void The_extensions_status_names_who_can_fix_it_on_this_platform(PostgresPlatformKind kind, string where, string who)
     {
         StatementFacts facts = StatementFacts.Build(
@@ -236,5 +244,98 @@ public class StatementsServiceTests
             History(Sample(TimeSpan.FromMinutes(25), 1_000, (1, 10, 1_000)), Sample(TimeSpan.Zero, 2_000, (1, 20, 2_000))));
 
         StatementsService.WindowText(watched).Should().StartWith("Over the last 25 min the statement checks watched (2026-10-26 11:35 UTC to 2026-10-26 12:00 UTC)");
+    }
+
+    /// <summary>
+    /// W5-Q1-fix F6: the page's poll shows the last statement sweep that finished and never runs one - a sweep plans T02's
+    /// statements, and a tab left open must not do that every five minutes on nobody's behalf - behind the same gate.
+    /// </summary>
+    [Fact]
+    public async Task A_poll_shows_the_last_sweep_and_never_runs_one()
+    {
+        await using PostgresStudioComponentContext context = new();
+        context.WithAllCapabilities();
+        await context.ReadyAsync();
+
+        CountingFacts none = new(Some(), latest: null);
+        StatementsView notRun = await Service(context, none).GetLatestAsync(Scope, TestContext.Current.CancellationToken);
+
+        notRun.Refusal.Should().Be(DatabaseRefusal.None);
+        notRun.State.Should().Be(StatementsState.NotRun);
+        notRun.Status.Should().Be(StatementsService.NotRun);
+        notRun.Rows.Should().BeEmpty();
+        notRun.StudioCost.Should().NotBeNull("the studio's own line is the meter's, read or not");
+        (none.Reads, none.Lookups).Should().Be((0, 1), "a poll is a lookup, never a sweep");
+
+        CountingFacts some = new(Some(), latest: Some());
+        StatementsView shown = await Service(context, some).GetLatestAsync(Scope, TestContext.Current.CancellationToken);
+
+        shown.State.Should().Be(StatementsState.Read);
+        shown.Rows.Should().ContainSingle();
+        (some.Reads, some.Lookups).Should().Be((0, 1));
+    }
+
+    [Fact]
+    public async Task A_poll_is_gated_as_the_load_is_and_looks_nothing_up_for_a_refused_visitor()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        CountingFacts facts = new(Some(), latest: Some());
+
+        StatementsView view = await Service(context, facts).GetLatestAsync(Scope, TestContext.Current.CancellationToken);
+
+        view.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+        (facts.Reads, facts.Lookups).Should().Be((0, 0));
+    }
+
+    /// <summary>
+    /// W5-Q1-fix F2: which of the studio's own statements the page can list depends on the role each read runs as - with
+    /// SqlConsoleRole set, the reads it narrows are not among them and the rest are, when they rank; with none set, all of them
+    /// are, when they rank. Never "none is left out": only the statements kept are listed.
+    /// </summary>
+    [Fact]
+    public void The_studio_line_says_which_of_the_studios_reads_this_page_can_list()
+    {
+        StatementsService Of(string? role) => new(
+            new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions { SqlConsoleRole = role })),
+            null!, null!, null!, null!, null!, new StudioLogThrottle(TimeProvider.System), NullLogger<StatementsService>.Instance);
+
+        string narrowed = Of("studio_reader").StudioCostText();
+        narrowed.Should().Contain("SqlConsoleRole is studio_reader. " + PostgresStudioText.Instance.StatementsStudioRoles);
+        PostgresStudioText.Instance.StatementsStudioRoles.Should().Contain("but these reads of pg_stat_statements runs as it")
+            .And.Contain("when they rank among the ones kept");
+
+        string none = Of(null).StudioCostText();
+        none.Should().Contain("With no SqlConsoleRole set, every statement the studio runs here runs as the data source's own role")
+            .And.Contain("when they rank among the ones kept, and not otherwise");
+
+        foreach (string line in new[] { narrowed, none })
+        {
+            line.Should().NotContain("none is left out").And.NotContain("only its reads of pg_stat_statements are listed");
+        }
+
+        // MartenStudio's reads of Marten's own tables run as the store's role whatever SqlConsoleRole is, and it says so.
+        StudioText.Marten.StatementsStudioRoles.Should()
+            .Contain("The document, event and projection reads, tenant discovery")
+            .And.Contain("Marten's own sessions")
+            .And.Contain("run as the store's own role");
+    }
+
+    /// <summary>W5-Q1-fix F1: on pg_stat_statements 1.8 a statement's nested runs are in its row, and the caveat says so.</summary>
+    [Fact]
+    public void The_caveat_says_what_a_statement_a_function_runs_counts_as_for_the_installed_version()
+    {
+        StatementRead read = Read(null, Statement(1, "select 1", 1, 1));
+
+        StatementsService.Caveat(Facts(read), PostgresStudioText.Instance).Should()
+            .Contain("Top-level statements only").And.Contain("with the most execution time per second since their counters began");
+
+        StatementFacts old = StatementFacts.Build(
+            "default", "default", Now, Outcome(read with { Extension = new StatementExtension(140000, "public", "1.8") }), null,
+            HealthHistoryView.Empty, null, Tables, PostgresStatementClassifier.Instance);
+
+        old.FoldsNested.Should().BeTrue();
+        StatementsService.Caveat(old, PostgresStudioText.Instance).Should()
+            .Contain("pg_stat_statements 1.8 has no toplevel column, so a statement a function runs is summed into its own row")
+            .And.NotContain("Top-level statements only");
     }
 }

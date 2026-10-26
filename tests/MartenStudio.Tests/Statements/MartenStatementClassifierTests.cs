@@ -64,6 +64,11 @@ public class MartenStatementClassifierTests
     // HardDelete.cs 14 and SoftDelete.cs 16.
     [InlineData("delete from studio_sample.mt_doc_customer as d where d.id = $1", "delete · Customer")]
     [InlineData("update studio_sample.mt_doc_order as d set mt_deleted = $1, mt_deleted_at = now() where d.id = $2", "delete · Order")]
+    [InlineData("update studio_sample.mt_doc_order as d set mt_deleted = True, mt_deleted_at = now() where d.data ->> $1 = $2", "delete · Order")]
+    // UnSoftDelete.cs 16: an undelete sets the same column and is no delete, whether its NULL is recorded or normalised.
+    [InlineData("update studio_sample.mt_doc_order as d set mt_deleted = $1, mt_deleted_at = NULL where d.id = $2", "undelete · Order")]
+    [InlineData("update studio_sample.mt_doc_order as d set mt_deleted = $1, mt_deleted_at = $2 where d.id = $3", "undelete · Order")]
+    [InlineData("update studio_sample.mt_doc_order as d set mt_deleted = $1, mt_deleted_at = NULL where d.mt_deleted_at = now()", "undelete · Order")]
     // PostgresEventStoreDialect.cs 293, 325, 347 and 612: a rich append's stream, its strict identity, its version bump, its events.
     [InlineData("insert into studio_sample_events.mt_streams (id, type, version, timestamp, tenant_id) values ($1, $2, $3, now(), $4)", "event append")]
     [InlineData("with new_stream as (insert into studio_sample_events.mt_streams (id, type, version) values ($1, $2, $3) returning id) insert into studio_sample_events.mt_streams_identity (id) select id from new_stream", "event append")]

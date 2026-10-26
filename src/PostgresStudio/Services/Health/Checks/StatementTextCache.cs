@@ -15,10 +15,11 @@ namespace PostgresStudio.Services.Health.Checks;
 /// </para>
 /// <para>
 /// <b>Bounded, and only what was read.</b> At most <see cref="MaxPerDatabase" /> texts a database, each at most
-/// <see cref="HealthStatementQueries.MaxTextCharacters" /> characters; a database that would hold more starts again
-/// empty, which costs one text call. The bound is above what one sweep keeps (<see cref="HealthStatementQueries.MaxTexts" />,
-/// the checks' twenty and the Statements page's hundred, two hundred on Aurora - W5-Q1), so a sweep whose statements are the
-/// last one's never empties it. The bound is per database and not across them: a process holds up to
+/// <see cref="HealthStatementQueries.MaxTextCharacters" /> characters; a database that would hold more forgets every text
+/// the sweep remembering did not keep, and keeps the ones it did. The bound is above what one sweep keeps
+/// (<see cref="HealthStatementQueries.MaxTexts" />, the checks' twenty and the Statements page's hundred, two hundred on
+/// Aurora - W5-Q1), so the next sweep, whose statements are mostly this one's, finds them still held rather than paying for
+/// a whole text file again. The bound is per database and not across them: a process holds up to
 /// 256 × 4,096 characters (about 2 MB as UTF-16) for every database whose statement checks or Statements page have run, for
 /// its whole life - which grows with the deployment exactly as <see cref="HealthHistory" />'s rings do, and is said beside
 /// them. It holds only texts the checks already read for a visitor through the activity gate, in memory, for the life of
@@ -54,7 +55,14 @@ internal sealed class StatementTextCache
     }
 
     /// <summary>Remembers texts just read for this database.</summary>
-    public void Remember(string storeKey, string databaseId, IEnumerable<StatementTextRow> texts)
+    /// <param name="storeKey">The store.</param>
+    /// <param name="databaseId">The database.</param>
+    /// <param name="texts">The texts just read.</param>
+    /// <param name="kept">
+    /// Every statement the sweep kept, the texts it found here included: what is not forgotten when the database would hold
+    /// more than <see cref="MaxPerDatabase" />. <see langword="null" /> forgets everything then.
+    /// </param>
+    public void Remember(string storeKey, string databaseId, IEnumerable<StatementTextRow> texts, IReadOnlyCollection<long>? kept = null)
     {
         ArgumentNullException.ThrowIfNull(texts);
 
@@ -68,11 +76,24 @@ internal sealed class StatementTextCache
                 byDatabase[key] = held;
             }
 
+            HashSet<long>? keep = null;
+
             foreach (StatementTextRow text in texts)
             {
                 if (held.Count >= MaxPerDatabase && !held.ContainsKey(text.QueryId))
                 {
-                    held.Clear();
+                    keep ??= kept is null ? [] : [.. kept];
+
+                    foreach (long queryId in held.Keys.Where(x => !keep.Contains(x)).ToList())
+                    {
+                        held.Remove(queryId);
+                    }
+
+                    // More kept than the bound is more than one sweep keeps; nothing is held past it either way.
+                    if (held.Count >= MaxPerDatabase)
+                    {
+                        held.Clear();
+                    }
                 }
 
                 held[text.QueryId] = text;

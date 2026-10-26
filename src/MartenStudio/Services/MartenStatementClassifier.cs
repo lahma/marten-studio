@@ -32,7 +32,10 @@ namespace MartenStudio.Services;
 /// 611.</description></item>
 /// <item><description><b>delete.</b> <c>delete from {table} as d</c> (<c>src/Marten/Linq/SqlGeneration/HardDelete.cs</c> line
 /// 14), and a soft delete's <c>update {table} as d set mt_deleted = $1, mt_deleted_at = now()</c>
-/// (<c>SoftDelete.cs</c> line 16).</description></item>
+/// (<c>SoftDelete.cs</c> line 16), told by its <c>mt_deleted_at = now()</c>.</description></item>
+/// <item><description><b>undelete.</b> <c>update {table} as d set mt_deleted = $1, mt_deleted_at = NULL</c>
+/// (<c>src/Marten/Linq/SqlGeneration/UnSoftDelete.cs</c> line 16), which sets the same column and is no delete; its
+/// <c>NULL</c> may be recorded as a constant, <c>$2</c>.</description></item>
 /// <item><description><b>event append.</b> <c>insert into {schema}.mt_streams (…) values (</c>, its strict-identity
 /// <c>with new_stream as (insert into {schema}.mt_streams …) insert into {schema}.mt_streams_identity …</c>, a rich append's
 /// <c>update {schema}.mt_streams set version = … returning version</c>, <c>insert into {schema}.mt_events (</c> and a quick
@@ -149,7 +152,10 @@ internal sealed partial class MartenStatementClassifier : IStatementClassifier
                     : PostgresStatementClassifier.Of(verb, events);
 
             case "update" when target is { Kind: StudioTableKind.DocumentTable } document:
-                return Document(SoftDelete().IsMatch(text) ? "delete" : "update", document);
+                // A soft delete and an undelete both set mt_deleted; only the delete stamps mt_deleted_at with now().
+                return Document(
+                    !SoftDeleteFlag().IsMatch(text) ? "update" : DeletedNow().IsMatch(text) ? "delete" : "undelete",
+                    document);
 
             case "delete" when target is { Kind: StudioTableKind.EventTable } events:
                 return IsEvent(events, "mt_event_progression") ? ProjectionProgress : PostgresStatementClassifier.Of(verb, events);
@@ -256,9 +262,19 @@ internal sealed partial class MartenStatementClassifier : IStatementClassifier
     [GeneratedRegex(@"\bon\s+conflict\b[^;]*?\bdo\s+update\s+set\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex UpsertSet();
 
-    /// <summary>A soft delete's <c>set mt_deleted =</c>.</summary>
+    /// <summary>A soft delete's or an undelete's <c>set mt_deleted =</c>.</summary>
     [GeneratedRegex(@"\bset\s+""?mt_deleted""?\s*=", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
-    private static partial Regex SoftDelete();
+    private static partial Regex SoftDeleteFlag();
+
+    /// <summary>
+    /// A soft delete's <c>set mt_deleted = …, mt_deleted_at = now()</c>, which an undelete's <c>mt_deleted_at = NULL</c> is not -
+    /// in the set list, so a predicate on the column elsewhere does not count.
+    /// </summary>
+    [GeneratedRegex(
+        @"\bset\s+""?mt_deleted""?\s*=\s*[^,;]*,\s*""?mt_deleted_at""?\s*=\s*(?:""?pg_catalog""?\s*\.\s*)?""?now""?\s*\(\s*\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        matchTimeoutMilliseconds: 1000)]
+    private static partial Regex DeletedNow();
 
     /// <summary>A rich append's <c>set version =</c>.</summary>
     [GeneratedRegex(@"\bset\s+""?version""?\s*=", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]

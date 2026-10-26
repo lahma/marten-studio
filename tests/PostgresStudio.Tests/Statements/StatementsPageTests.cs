@@ -30,9 +30,17 @@ public class StatementsPageTests
     {
         public List<StudioScope> Reads { get; } = [];
 
+        public List<StudioScope> Polls { get; } = [];
+
         public Task<StatementsView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
         {
             Reads.Add(scope);
+            return Task.FromResult(view);
+        }
+
+        public Task<StatementsView> GetLatestAsync(StudioScope scope, CancellationToken cancellationToken = default)
+        {
+            Polls.Add(scope);
             return Task.FromResult(view);
         }
     }
@@ -89,6 +97,26 @@ public class StatementsPageTests
         service.Reads.Should().ContainSingle();
     }
 
+    /// <summary>
+    /// W5-Q1-fix F6: the load and Refresh may run a statement sweep (GetAsync); the page's polls only look at the last one
+    /// (GetLatestAsync), so a tab left open never plans T02's statements on nobody's behalf.
+    /// </summary>
+    [Fact]
+    public async Task The_load_and_Refresh_read_and_the_polls_only_look()
+    {
+        (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(Shown(ThreeStatements()));
+        await using PostgresStudioComponentContext owned = context;
+        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
+        context.Options.HealthInterval = TimeSpan.FromMilliseconds(20);
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => service.Polls.Should().HaveCountGreaterThanOrEqualTo(2), TimeSpan.FromSeconds(10));
+        service.Reads.Should().ContainSingle("only the load read; every interval since only looked");
+
+        await page.InvokeAsync(() => page.Find(".ms-stmts-actions button").Click());
+        page.WaitForAssertion(() => service.Reads.Should().HaveCount(2, "Refresh is a read, as the load is"));
+    }
+
     [Fact]
     public async Task A_policys_refusal_is_its_own_sentence()
     {
@@ -132,7 +160,8 @@ public class StatementsPageTests
 
         IReadOnlyList<IElement> rows = page.FindAll(".ms-stmts-table tbody tr");
         rows[0].QuerySelector(".ms-stmts-group")!.TextContent.Should().Be("select · public.orders");
-        rows[0].QuerySelector(".ms-stmts-share")!.TextContent.Should().Be("60%");
+        rows[0].QuerySelector(".ms-stmts-share-value")!.TextContent.Should().Be("60%");
+        rows[0].QuerySelector(".ms-stmts-bar")!.GetAttribute("style").Should().Be("--ms-stmts-share: 60%", "the share is a bar as well as a number");
         rows[0].QuerySelector("pre")!.TextContent.Should().Be("select * from public.orders where id = $1");
 
         IElement withheld = rows.Single(static x => x.TextContent.Contains("queryid 3", StringComparison.Ordinal));
@@ -141,7 +170,7 @@ public class StatementsPageTests
 
         page.Find(".ms-stmts-window").TextContent.Should().StartWith("Each statement's totals since its counters began");
         page.Find(".ms-stmts-caveat").TextContent.Should().Contain("as the data source's own Postgres role");
-        page.Find(".ms-stmts-studio").TextContent.Should().Contain("Every statement the studio runs here is listed above");
+        page.Find(".ms-stmts-studio").TextContent.Should().Contain("With no SqlConsoleRole set, every statement the studio runs here runs as");
 
         page.FindAll("a").Should().NotContain(static x => (x.GetAttribute("href") ?? string.Empty).Contains("statements/statement", StringComparison.Ordinal),
             "the drill-in is 0.6's: no statement links to a detail page");

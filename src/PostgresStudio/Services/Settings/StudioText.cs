@@ -156,6 +156,12 @@ internal sealed class StudioText
     /// </summary>
     public required string StudioCostCovers { get; init; }
 
+    /// <summary>
+    /// Which of the studio's reads run as <c>SqlConsoleRole</c> while it is set, and which as the source's own role - whose
+    /// statements alone the Statements page reads - in a sentence after "SqlConsoleRole is x.".
+    /// </summary>
+    public required string StatementsStudioRoles { get; init; }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Query and Relationships.
 
@@ -272,6 +278,14 @@ internal sealed class StudioText
         StudioCostCovers =
             "health checks, the SQL console, the database browser, the Query page, and the schema, relationship, document, event and "
             + "projection reads; a Marten session the studio opens to write or to steer the daemon is not counted",
+        StatementsStudioRoles =
+            "It is the role of the health checks (all but these reads of pg_stat_statements), the SQL console, the Query page, "
+            + "the database browser, Sessions, the Maintenance, Storage, Replication and Server pages, the Schema page's catalog "
+            + "reads, the Relationships graph and the Projections page's high-water explanation, and this page lists none of "
+            + "their statements. The document, event and projection reads, tenant discovery, the Relationships page's document "
+            + "counts, these reads of pg_stat_statements and Marten's own sessions - the studio's writes, and the Schema page's "
+            + "Check, Preview and DDL - run as the store's own role, and are among the statements above when they rank among "
+            + "the ones kept.",
 
         ExamplesIntro = "Built from this store's own aliases and tables. Click one to load it.",
         ExamplesEmpty = "This store has no document type to build an example from.",

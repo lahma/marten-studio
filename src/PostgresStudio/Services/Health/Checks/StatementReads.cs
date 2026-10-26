@@ -242,7 +242,7 @@ internal static partial class StatementReads
         JitCalls: JitShareCheck.MinCalls,
         Max: HealthStatementQueries.MaxTexts)
     {
-        TopByTotal = PageTop,
+        PageTopByLoad = PageTop,
         TopByStorage = PageTop,
     };
 
@@ -398,6 +398,10 @@ internal static partial class StatementReads
             return new StatementReadOutcome(StatementReadState.NothingRecorded, extension, null) { Platform = platform };
         }
 
+        // One row per statement: the counters statement already folds a queryid's entries below 1.9, and this is the belt -
+        // a page keyed by queryid and a history series named by it each fail outright on a second row.
+        rows = OnePerStatement(rows);
+
         IStudioTableSet set = await HealthTables.SetAsync(context).ConfigureAwait(false);
 
         // The texts the process already holds, and a call for the rest only: every text call costs the extension its
@@ -429,7 +433,7 @@ internal static partial class StatementReads
                 byId.TryAdd(text.QueryId, text);
             }
 
-            cache?.Remember(context.StoreKey, context.DatabaseId, texts);
+            cache?.Remember(context.StoreKey, context.DatabaseId, texts, kept: [.. rows.Select(static x => x.QueryId)]);
         }
 
         List<ObservedStatement> statements = new(rows.Count);
@@ -449,6 +453,34 @@ internal static partial class StatementReads
         };
 
         return new StatementReadOutcome(StatementReadState.Read, extension, read) { Platform = platform };
+    }
+
+    /// <summary>
+    /// <paramref name="rows" /> with each <c>queryid</c> once, its first row kept - the counters statement ranks them, so the
+    /// first is the one it ranked higher. The statement folds a <c>queryid</c>'s entries itself
+    /// (<see cref="StatementExtension.FoldsNested" />), so this changes nothing unless a server returns what it should not;
+    /// then it keeps one row rather than adding the two, which could count one execution twice. Pure.
+    /// </summary>
+    internal static IReadOnlyList<StatementCounterRow> OnePerStatement(IReadOnlyList<StatementCounterRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        HashSet<long> seen = new(rows.Count);
+        List<StatementCounterRow>? kept = null;
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (seen.Add(rows[i].QueryId))
+            {
+                kept?.Add(rows[i]);
+            }
+            else
+            {
+                kept ??= [.. rows.Take(i)];
+            }
+        }
+
+        return kept ?? rows;
     }
 
     /// <summary>
