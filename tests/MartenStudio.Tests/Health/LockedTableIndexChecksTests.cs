@@ -6,6 +6,7 @@ using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Tests.Health;
 
@@ -18,8 +19,8 @@ public class LockedTableIndexChecksTests
 {
     private const string OneLocked = "1 table was locked for a schema change and not judged this sweep.";
 
-    private static HashSet<string> Locked(params MartenTable[] tables) =>
-        new(tables.Select(static x => x.Key), StringComparer.OrdinalIgnoreCase);
+    private static HashSet<string> Locked(params StudioTable[] tables) =>
+        new(tables.Select(static x => x.Key), StringComparer.Ordinal);
 
     [Fact]
     public void The_note_is_a_count_and_never_a_name()
@@ -219,8 +220,60 @@ public class LockedTableIndexChecksTests
         _ = StatementPlanAdvice.Read(scans, statement, [], locked, Locked(doc));
         locked.Calls.Should().Be(0, "a locked table's indexes were not read, so the advisor would advise an index it may have");
 
-        new HealthIndexRead([], Locked(doc)).IsLocked(doc.Key.ToUpperInvariant()).Should().BeTrue("a key compares ignoring case, as the checks compare table keys");
+        new HealthIndexRead([], Locked(doc)).IsLocked(doc.Key).Should().BeTrue();
     }
+
+    /// <summary>
+    /// G1M keeps <c>"Orders"</c> and <c>orders</c> as two tables (Postgres compares names ordinally), so every key comparison
+    /// here is ordinal: T05 judges both instead of throwing on the second, and each index is told to its own table.
+    /// </summary>
+    [Fact]
+    public void Two_tables_whose_names_differ_only_in_case_are_two_tables_to_T05()
+    {
+        StudioTable upper = new("public", "Orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+        StudioTable lower = new("public", "orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+        HealthTableRow row = Row(Document<HealthOrderDoc>()) with { Inserts = 200_000 };
+
+        UnusedIndexFacts facts = new(
+            Now,
+            [Index(upper, CaseRow(upper, "upper_never")), Index(lower, CaseRow(lower, "lower_never"))],
+            [new TableFacts(upper, row with { Schema = "public", Table = "Orders" }), new TableFacts(lower, row with { Schema = "public", Table = "orders", Inserts = 10 })],
+            new DatabaseStatistics(Now.AddDays(-30), true, 2));
+
+        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(facts, Evaluation());
+
+        verdict.Findings.Should().ContainSingle("only \"Orders\" took enough writes - its index is not judged by orders' row, nor the other way")
+            .Which.Subject.Should().Be("public.Orders.upper_never");
+    }
+
+    /// <summary>A lock on <c>"Orders"</c> skips that table and never <c>orders</c>.</summary>
+    [Fact]
+    public void A_lock_on_one_of_two_case_variant_tables_skips_that_one_alone()
+    {
+        StudioTable upper = new("public", "Orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+        StudioTable lower = new("public", "orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+        HealthIndexRead read = new([], Locked(upper));
+
+        read.IsLocked(upper.Key).Should().BeTrue();
+        read.IsLocked(lower.Key).Should().BeFalse("\"Orders\" and orders are two tables");
+        HealthIndexRead.Empty.LockedTables.Should().BeEmpty();
+
+        IndexFacts lowerInvalid = Index(lower, CaseRow(lower, "lower_broken") with { IsValid = false });
+        new InvalidIndexCheck().Evaluate(new InvalidIndexFacts([lowerInvalid], []) { LockedTables = read.LockedTables }, Evaluation())
+            .Findings.Should().ContainSingle("a lock on \"Orders\" leaves orders judged").Which.Subject.Should().Be(lowerInvalid.Key);
+    }
+
+    private static HealthIndexRow CaseRow(StudioTable table, string name) => new()
+    {
+        Schema = table.Schema,
+        Table = table.Table,
+        Name = name,
+        Columns = ["id"],
+        KeyColumnCount = 1,
+        Bytes = 8 * 1024 * 1024,
+        Scans = 0,
+        ReferencedColumns = ["id"],
+    };
 
     private sealed class CountingAdvisor : IHealthPlanAdvisor
     {

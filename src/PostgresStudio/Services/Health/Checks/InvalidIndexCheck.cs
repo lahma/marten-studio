@@ -78,7 +78,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         List<string> building = [];
         HashSet<string> partitioned = new(
             facts.Tables.Where(static x => x.Row.IsPartitioned).Select(static x => x.Key),
-            StringComparer.OrdinalIgnoreCase);
+            StringComparer.Ordinal);
 
         foreach (IndexFacts index in facts.Indexes)
         {

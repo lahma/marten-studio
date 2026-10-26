@@ -594,7 +594,7 @@ internal static class StatementPlanAdvice
                 && advisor?.AdviseSequentialScan(
                     table,
                     scan.Filter,
-                    [.. indexes.Where(x => string.Equals(x.Table.Key, table.Key, StringComparison.OrdinalIgnoreCase))]) is { } advice)
+                    [.. indexes.Where(x => string.Equals(x.Table.Key, table.Key, StringComparison.Ordinal))]) is { } advice)
             {
                 unnamed |= advice.UnnamedMember;
 

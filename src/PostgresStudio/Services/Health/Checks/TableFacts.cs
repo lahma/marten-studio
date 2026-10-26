@@ -109,14 +109,15 @@ internal sealed record IndexFacts(StudioTable Table, HealthIndexRow Row, IndexOr
 /// <summary>The sweep's index read: the indexes it read, and the tables locked for a schema change it left out.</summary>
 /// <param name="Indexes">Every index on the judged tables but the locked ones.</param>
 /// <param name="LockedTables">
-/// The keys (<see cref="StudioTable.Key" />, compared ignoring case) of the judged tables somebody held or awaited
-/// <c>ACCESS EXCLUSIVE</c> on when the read ran: their indexes were not deparsed, so a check that judges a table by its
-/// indexes skips them this sweep and says how many (<see cref="HealthTables.LockedNote" />).
+/// The keys (<see cref="StudioTable.Key" />, compared ordinally, as Postgres compares names: <c>"Orders"</c> and
+/// <c>orders</c> are two tables) of the judged tables somebody held or awaited <c>ACCESS EXCLUSIVE</c> on when the read
+/// ran: their indexes were not deparsed, so a check that judges a table by its indexes skips them this sweep and says how
+/// many (<see cref="HealthTables.LockedNote" />).
 /// </param>
 internal sealed record HealthIndexRead(IReadOnlyList<IndexFacts> Indexes, IReadOnlySet<string> LockedTables)
 {
     /// <summary>No table to read about.</summary>
-    public static HealthIndexRead Empty { get; } = new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    public static HealthIndexRead Empty { get; } = new([], new HashSet<string>(StringComparer.Ordinal));
 
     /// <summary>
     /// The indexes of the locked tables, read but not deparsed: <see cref="HealthIndexRow.Definition" /> and
@@ -352,7 +353,8 @@ internal static class HealthTables
                 cancellationToken)
             .ConfigureAwait(false);
 
-        HashSet<string> locked = new(StringComparer.OrdinalIgnoreCase);
+        // Keyed as the table set keys its tables - ordinally - so a lock on "Orders" skips that table and never orders.
+        HashSet<string> locked = new(StringComparer.Ordinal);
         List<IndexFacts> facts = new(rows.Count);
         List<IndexFacts> undeparsed = [];
 

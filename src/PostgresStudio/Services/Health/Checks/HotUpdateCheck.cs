@@ -147,7 +147,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
     {
         foreach (IndexFacts index in indexes)
         {
-            if (!string.Equals(index.Table.Key, table.Key, StringComparison.OrdinalIgnoreCase)
+            if (!string.Equals(index.Table.Key, table.Key, StringComparison.Ordinal)
                 || !index.Row.IsValid
                 || (index.Row.ServerVersion >= SummarizingIndexesAllowHotFrom
                     && string.Equals(index.Row.AccessMethod, "brin", StringComparison.Ordinal)))

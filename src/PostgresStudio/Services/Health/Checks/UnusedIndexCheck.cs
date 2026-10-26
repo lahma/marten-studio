@@ -141,7 +141,8 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     /// <inheritdoc />
     public override HealthVerdict Evaluate(UnusedIndexFacts facts, HealthEvaluation evaluation)
     {
-        Dictionary<string, TableFacts> tables = facts.Tables.ToDictionary(static x => x.Key, StringComparer.OrdinalIgnoreCase);
+        // Ordinal, as the set keys its tables: "Orders" and orders are two tables, and ignoring case threw on the second.
+        Dictionary<string, TableFacts> tables = facts.Tables.ToDictionary(static x => x.Key, StringComparer.Ordinal);
         List<HealthFinding> findings = [];
 
         foreach (IndexFacts index in facts.Indexes)
