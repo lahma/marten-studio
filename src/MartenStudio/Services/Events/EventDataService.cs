@@ -1672,14 +1672,17 @@ internal sealed partial class EventDataService : IEventDataService
                     }
                 }
 
+                // Past every check, on a token of this operation's own (CommitAsync): a page that goes away now has not
+                // decided to abandon it, and the audit entry has to say how it ended.
                 if (perTenant)
                 {
-                    await MarkTenantEventAsSkippedAsync(resolved.Database, resolved.TenantId!, sequence, token).ConfigureAwait(false);
+                    await CommitAsync(committing => MarkTenantEventAsSkippedAsync(resolved.Database, resolved.TenantId!, sequence, committing))
+                        .ConfigureAwait(false);
 
                     return "marked as skipped in tenant " + resolved.TenantId;
                 }
 
-                await resolved.Database.MarkEventsAsSkipped([sequence], token).ConfigureAwait(false);
+                await CommitAsync(committing => resolved.Database.MarkEventsAsSkipped([sequence], committing)).ConfigureAwait(false);
 
                 return "marked as skipped";
             },
@@ -1851,8 +1854,12 @@ internal sealed partial class EventDataService : IEventDataService
 
                 long floor = RewindFloor(eventSequence);
 
-                await RewindToFloorAsync(
-                    daemon, projectionName, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, token).ConfigureAwait(false);
+                // Past every check, on a token of this operation's own (CommitAsync): the daemon stops the
+                // subscription's agents, has Marten rewrite their progression and only then restarts them, so a page
+                // that went away in between would leave them stopped - and unaudited.
+                await CommitAsync(committing => RewindToFloorAsync(
+                        daemon, projectionName, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, committing))
+                    .ConfigureAwait(false);
 
                 return floor == 0
                     ? "progression row removed, so the subscription replays from the first event"
@@ -1990,8 +1997,12 @@ internal sealed partial class EventDataService : IEventDataService
 
         long floor = RewindFloor(eventSequence);
 
-        await RewindTenantToFloorAsync(
-            daemon, agent.Name, agent.TenantId!, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, token).ConfigureAwait(false);
+        // Past every check, on a token of this operation's own (CommitAsync): JasperFx 2.91's rewindSubscriptionForTenantAsync
+        // stops the tenant's agents, awaits Marten's rewrite of their progression rows and only then restarts them, so the
+        // page's token cancelled in between would leave that tenant's projection stopped.
+        await CommitAsync(committing => RewindTenantToFloorAsync(
+                daemon, agent.Name, agent.TenantId!, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, committing))
+            .ConfigureAwait(false);
 
         string tenant = " in tenant " + agent.TenantId;
 
@@ -2246,6 +2257,54 @@ internal sealed partial class EventDataService : IEventDataService
 
     /// <summary>What event 9320 names as the tenant of a store-global rewind.</summary>
     private const string AllTenants = "(all tenants)";
+
+    /// <summary>
+    /// Runs an operation's commit - its Marten or daemon call, once every check has passed - on a token of the operation's
+    /// own rather than the page's, as compaction does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The page's token is cancelled when the page is disposed - a closed tab, a navigation, a dropped circuit - and that
+    /// is not a decision to abandon something a person confirmed in a dialog. Cancelled part-way, a rewind is the worst
+    /// case: JasperFx stops the subscription's agents, awaits Marten's rewrite of their progression and only then restarts
+    /// them (<c>rewindSubscriptionForTenantAsync</c> and the store-global <c>RewindSubscriptionAsync</c>, read at JasperFx
+    /// <c>v2.91.0</c>), so a cancellation in between leaves the projection stopped. Either way <see cref="MutateAsync" />
+    /// writes no audit entry for a cancellation, so nothing would say how it ended. The token here is never cancelled; every
+    /// statement is still bounded by its own command timeout.
+    /// </para>
+    /// <para>
+    /// A cancellation that surfaces from inside all the same - a daemon that is itself shutting down - was not the
+    /// visitor's, and the operation may be partly done: it is rethrown as a failure, which <see cref="MutateAsync" /> audits
+    /// like any other.
+    /// </para>
+    /// </remarks>
+    private async Task CommitAsync(Func<CancellationToken, Task> commit)
+    {
+        if (CommitStarting is { } starting)
+        {
+            await starting().ConfigureAwait(false);
+        }
+
+        using var committing = new CancellationTokenSource();
+
+        try
+        {
+            await commit(committing.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException cancelled)
+        {
+            throw new InvalidOperationException(
+                "It was cancelled from inside Marten or the async daemon after it had started, so it may be partly done: "
+                + cancelled.Message,
+                cancelled);
+        }
+    }
+
+    /// <summary>
+    /// A test's hook, run once every check of a skip or a rewind has passed and just before its commit - the point from
+    /// which the page's token no longer counts (<see cref="CommitAsync" />). Always <see langword="null" /> outside a test.
+    /// </summary>
+    internal Func<Task>? CommitStarting { get; set; }
 
     /// <summary>
     /// The shape of every mutating call: capability, then scope with the write policy, then the
