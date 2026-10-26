@@ -197,9 +197,17 @@ internal sealed class StudioState
     /// carry.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Silently rather than loudly: the values arrive from a <c>change</c> event, and a browser that names
     /// something it was not offered is either a stale tab or someone probing. Neither deserves an error
     /// message that says which of the three was wrong.
+    /// </para>
+    /// <para>
+    /// <b>A database named with a new store is kept</b> when the new store lists it, so a pasted link to another
+    /// store's database reopens that database (D9) rather than the store's first. A name the new store does not list
+    /// falls back to its first database, as any unknown name does; the scope selector names none when the visitor
+    /// picks another store, so picking one always opens its first.
+    /// </para>
     /// </remarks>
     public async Task SetScopeAsync(
         string? storeKey,
@@ -219,7 +227,6 @@ internal sealed class StudioState
         if (storeChanged)
         {
             AvailableDatabases = await catalog.ListDatabasesAsync(store.Key, cancellationToken).ConfigureAwait(false);
-            databaseId = null;
         }
 
         string resolvedDatabaseId = PickDatabase(databaseId ?? (storeChanged ? null : previous?.DatabaseId));
