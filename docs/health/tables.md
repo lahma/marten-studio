@@ -300,8 +300,9 @@ both. Variants:
   tables, so the parent's statistics, which a query across partitions plans from, exist only once somebody runs
   `ANALYZE` on it.
 - `since-restart` - one database-level **Info** while the statistics window says autovacuum's counters began
-  again (a crash, a point-in-time recovery, a failover, `pg_upgrade`, a reset) and the tables of at least 10,000
-  estimated rows that have not been analysed since hold at least half of the judged tables' estimated rows. It
+  again (a crash, a point-in-time recovery, a failover, `pg_upgrade`, a reset) less than a day ago - the day the
+  checks that judge rates per day wait for - and the tables of at least 10,000 estimated rows that have not been
+  analysed since hold at least half of the judged tables' estimated rows. It
   names the largest few, says that rows that died before are invisible to autovacuum - and to T07 - until each
   table crosses its trigger again, clears itself once they are analysed, and points at `vacuumdb --all
   --analyze-only`, the manual's own post-upgrade step. It is shown even while other checks withhold verdicts that

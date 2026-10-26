@@ -634,6 +634,102 @@ public class MaintenanceChecksTests
         StaleStatisticsCheck.SinceRestart(new StatisticsFacts(Now, [big, other, small])).Should().BeNull("no reset, nothing to say");
     }
 
+    // ---- since-restart wired to W5-CAP's statistics window (W5b-int) ----------------------------------------------------
+
+    /// <summary>A statistics window measured at <see cref="TableCheckBuilders.Now" /> that has counted for <paramref name="counted" />.</summary>
+    private static StatisticsWindow Window(TimeSpan counted, StatisticsResetReason reason, bool looksReset = false) => new()
+    {
+        MeasuredAt = Now,
+        Since = Now - counted,
+        Basis = StatisticsBasis.DatabaseReset,
+        Reason = reason,
+        LooksReset = looksReset,
+    };
+
+    /// <summary>A large table last analysed two days ago, and a small one: the large one holds nearly every row.</summary>
+    private static TableFacts[] RestartTables() =>
+    [
+        Table(Document<HealthOrderDoc>(), row => row with { EstimatedRows = 500_000, LastAnalyze = null, LastAutoanalyze = Now.AddDays(-2) }),
+        Table(EventTable("mt_streams"), row => row with { EstimatedRows = 5_000, LastAnalyze = null, LastAutoanalyze = Now.AddDays(-9) }),
+    ];
+
+    private static HealthFinding? SinceRestartOf(HealthVerdict verdict) =>
+        verdict.Findings.SingleOrDefault(static x => x.Variant == StaleStatisticsCheck.SinceRestartVariant);
+
+    /// <summary>
+    /// The window half: the counters began again (any reason but <see cref="StatisticsResetReason.None" />) and have counted for
+    /// less than a day, or look reset - not only in the one sweep <see cref="StatisticsWindow.LooksReset" /> is true for, so the
+    /// finding holds from one sweep to the next.
+    /// </summary>
+    [Fact]
+    public void The_window_says_the_counters_began_again_while_it_is_under_a_day_old_and_says_why()
+    {
+        StatisticsRestart restart = StaleStatisticsCheck.RestartOf(Window(TimeSpan.FromHours(3), StatisticsResetReason.Crash))!;
+
+        restart.Since.Should().Be(Now.AddHours(-3));
+        restart.Reason.Should().Be("a restart without the statistics: a crash, an immediate shutdown or a restore");
+
+        StaleStatisticsCheck.RestartOf(Window(TimeSpan.FromHours(3), StatisticsResetReason.Failover)).Should().NotBeNull(
+            "a sweep after the one that first saw the reset: LooksReset is gone, the window is still young");
+        StaleStatisticsCheck.RestartOf(Window(TimeSpan.FromHours(23), StatisticsResetReason.ManualReset))!.Reason.Should().Be("a statistics reset");
+        StaleStatisticsCheck.RestartOf(Window(TimeSpan.FromDays(3), StatisticsResetReason.Failover, looksReset: true)).Should().NotBeNull(
+            "a window that looks reset is not continuous, however old its start reads");
+
+        StaleStatisticsCheck.RestartOf(Window(TimeSpan.FromHours(3), StatisticsResetReason.None)).Should().BeNull(
+            "the counters have counted through the server's last restart");
+        StaleStatisticsCheck.RestartOf(Window(StaleStatisticsCheck.RestartWindow, StatisticsResetReason.Crash)).Should().BeNull(
+            "a day of counting: the checks that judge rates per day judge again, and there is no quiet left to explain");
+        StaleStatisticsCheck.RestartOf(null).Should().BeNull("no window was read");
+
+        Enum.GetValues<StatisticsResetReason>().Where(static x => x != StatisticsResetReason.None)
+            .Select(StaleStatisticsCheck.RestartReason).Should().OnlyHaveUniqueItems("each reason has words of its own");
+    }
+
+    /// <summary>The evaluator half: the window the sweep hands every evaluator at the database-wide gate.</summary>
+    [Fact]
+    public void Evaluate_takes_the_restart_from_the_sweeps_window_and_drops_it_once_a_day_has_counted()
+    {
+        StatisticsFacts facts = new(Now, RestartTables());
+        StaleStatisticsCheck check = new();
+
+        HealthFinding finding = SinceRestartOf(check.Evaluate(facts, Evaluation() with { Statistics = Window(TimeSpan.FromHours(2), StatisticsResetReason.ManualReset) }))!;
+        finding.Should().NotBeNull();
+        finding.Title.Should().Contain("began again at 2026-10-15 07:00 UTC (a statistics reset)");
+
+        SinceRestartOf(check.Evaluate(facts, Evaluation() with { Statistics = Window(TimeSpan.FromHours(2) + TimeSpan.FromMinutes(11), StatisticsResetReason.ManualReset) }))
+            .Should().NotBeNull("the same window eleven minutes on, in the next sweeps: it holds");
+        SinceRestartOf(check.Evaluate(facts, Evaluation() with { Statistics = Window(TimeSpan.FromDays(1) + TimeSpan.FromMinutes(1), StatisticsResetReason.ManualReset) }))
+            .Should().BeNull("a day of statistics has counted");
+        SinceRestartOf(check.Evaluate(facts, Evaluation() with { Statistics = Window(TimeSpan.FromHours(2), StatisticsResetReason.None) }))
+            .Should().BeNull("nothing began again");
+        SinceRestartOf(check.Evaluate(facts, Evaluation())).Should().BeNull("no window and no reading: nothing to say");
+    }
+
+    /// <summary>
+    /// Outside a sweep that computed one, the evaluator computes the window from the reading its gatherer took
+    /// (<see cref="StatisticsFacts.Statistics" />) and the history, as CAP's contract has it do.
+    /// </summary>
+    [Fact]
+    public void Evaluate_computes_the_window_from_its_own_reading_when_the_sweep_handed_it_none()
+    {
+        StatisticsReading reset = new()
+        {
+            ReadAt = Now,
+            DatabaseReset = Now.AddHours(-2),
+            SharedReset = Now.AddDays(-60),
+            ArchiverReset = Now.AddDays(-60),
+            ServerStartedAt = Now.AddDays(-30),
+        };
+
+        HealthFinding finding = SinceRestartOf(new StaleStatisticsCheck().Evaluate(new StatisticsFacts(Now, RestartTables()) { Statistics = reset }, Evaluation()))!;
+        finding.Should().NotBeNull("pg_stat_reset() two hours ago, on a server up for a month");
+        finding.Title.Should().Contain("began again at 2026-10-15 07:00 UTC");
+
+        StatisticsReading counting = reset with { DatabaseReset = null };
+        SinceRestartOf(new StaleStatisticsCheck().Evaluate(new StatisticsFacts(Now, RestartTables()) { Statistics = counting }, Evaluation()))
+            .Should().BeNull("the counters have counted since before the server's start, through its clean restarts");
+    }
+
     [Fact]
     public void Sampling_writes_the_swept_marker_and_a_flag_only_for_the_tables_whose_statistics_are_wrong()
     {

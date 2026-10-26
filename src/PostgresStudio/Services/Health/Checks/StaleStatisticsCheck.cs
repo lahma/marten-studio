@@ -18,9 +18,18 @@ internal sealed record StatisticsRestart(DateTimeOffset Since, string Reason);
 /// <param name="ReadAt">When they were read.</param>
 /// <param name="Tables">The judged tables that exist.</param>
 /// <param name="Restart">
-/// When and why the counters began again, while the statistics window says they look reset - or <see langword="null" />.
+/// When and why the counters began again, as a test states it - or <see langword="null" />, and then the evaluator takes it
+/// from the statistics window (<see cref="StaleStatisticsCheck.RestartOf" />).
 /// </param>
-internal sealed record StatisticsFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFacts> Tables, StatisticsRestart? Restart = null);
+internal sealed record StatisticsFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFacts> Tables, StatisticsRestart? Restart = null)
+{
+    /// <summary>
+    /// The sweep's one read of the statistics window's signals (<see cref="StatisticsWindow.ReadingAsync" />, W5-CAP), from which
+    /// the evaluator computes the window when the sweep did not hand it one - or <see langword="null" /> when it could not be
+    /// read, which costs only <c>since-restart</c>.
+    /// </summary>
+    public StatisticsReading? Statistics { get; init; }
+}
 
 /// <summary>Why a table's statistics are wrong.</summary>
 internal enum StatisticsProblem
@@ -62,8 +71,9 @@ internal enum StatisticsProblem
 /// never modified enough for autovacuum to analyse it. A partitioned parent nobody has analysed is Info alone, because
 /// autovacuum never analyses a partitioned table (B0 §8c).</item>
 /// <item><b><c>since-restart</c></b>: one database-level Info while the statistics window says the counters began again
-/// (a crash, a failover, <c>pg_upgrade</c>, a reset), and the tables of at least <see cref="RestartMinRows" /> estimated rows
-/// not analysed since hold at least half the judged rows: what explains a quiet T07.</item>
+/// (a crash, a failover, <c>pg_upgrade</c>, a reset) less than <see cref="RestartWindow" /> ago, and the tables of at least
+/// <see cref="RestartMinRows" /> estimated rows not analysed since hold at least half the judged rows: what explains a quiet
+/// T07. The window is CAP's <see cref="StatisticsWindow" />, read once per sweep (<see cref="RestartOf" />).</item>
 /// </list>
 /// <para>
 /// <b>Held, not glimpsed</b>, like T07: right after a bulk load every table looks like this until autovacuum's next pass,
@@ -96,6 +106,16 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
     /// <summary>How many of the unanalysed tables <c>since-restart</c> names.</summary>
     public const int RestartNamed = 5;
 
+    /// <summary>
+    /// How long after the counters began again <c>since-restart</c> is said: a day, the window the checks that judge rates per
+    /// day wait for (<see cref="StatisticsWindow.CoversADay" />) - the quiet it explains.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="StatisticsWindow.LooksReset" />, which is true for the one sweep that first sees a reset: the finding is
+    /// shown for as long as the window is that young, across sweeps, and clears earlier once the tables are analysed.
+    /// </remarks>
+    public static readonly TimeSpan RestartWindow = StatisticsWindow.Day;
+
     /// <summary>How long ago the last analyze must have been for statistics to count as stale.</summary>
     public static readonly TimeSpan StaleAfter = TimeSpan.FromHours(1);
 
@@ -113,9 +133,24 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // since-restart's input is the statistics window's (W5-CAP's StatisticsWindow), which this packet does not have
-        // yet: until it is wired here, the variant is judged on what a test states and never in a sweep.
-        return new StatisticsFacts(context.Now, await HealthTables.TablesAsync(context).ConfigureAwait(false));
+        IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
+
+        // since-restart's input: the statistics window's signals, the sweep's one read shared with C08 and C11. The sweep
+        // computes the window from them after its gatherers and hands it to Evaluate (HealthEvaluation.Statistics).
+        StatisticsReading? statistics;
+
+        try
+        {
+            statistics = await StatisticsWindow.ReadingAsync(context).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A failure there costs only since-restart: the tables' own verdicts stand on the table read, and the window's
+            // failure is C11's row to show, with its reason.
+            statistics = null;
+        }
+
+        return new StatisticsFacts(context.Now, tables) { Statistics = statistics };
     }
 
     /// <inheritdoc />
@@ -205,7 +240,13 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
             findings.Add(Finding(table, problem, held, evaluation));
         }
 
-        if (SinceRestart(facts) is { } restart)
+        // The statistics window: the sweep's, or - outside a sweep that computed one - from this check's own reading and the
+        // history, as CAP's contract has an evaluator do.
+        StatisticsWindow? window = evaluation.Statistics
+            ?? (facts.Statistics is { } reading ? StatisticsWindow.Compute(reading, evaluation.History) : null);
+        StatisticsFacts judged = facts.Restart is null && RestartOf(window) is { } began ? facts with { Restart = began } : facts;
+
+        if (SinceRestart(judged) is { } restart)
         {
             findings.Add(restart);
         }
@@ -221,6 +262,30 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
               + " whose statistics are behind: a finding needs that to hold for " + TableText.Span(PersistFor)
               + ", because autovacuum analyses a freshly loaded table within a minute or two.");
     }
+
+    /// <summary>
+    /// When and why the counters began again, from the statistics window - or <see langword="null" /> while it says they have
+    /// counted through the server's last restart (<see cref="StatisticsResetReason.None" />), once they have counted for
+    /// <see cref="RestartWindow" /> without looking reset, or when there is no window.
+    /// </summary>
+    /// <param name="window">The sweep's window (<see cref="HealthEvaluation.Statistics" />), or one computed from the reading.</param>
+    internal static StatisticsRestart? RestartOf(StatisticsWindow? window) =>
+        window is { } began && began.Reason != StatisticsResetReason.None && !began.Covers(RestartWindow)
+            ? new StatisticsRestart(began.Since, RestartReason(began.Reason))
+            : null;
+
+    /// <summary>A reason, for the finding's parenthesis: "Autovacuum's counters began again at … (a crash …)".</summary>
+    internal static string RestartReason(StatisticsResetReason reason) => reason switch
+    {
+        StatisticsResetReason.ServerStarted => "the server's start, which kept no statistics or was its first",
+        StatisticsResetReason.ManualReset => "a statistics reset",
+        StatisticsResetReason.Crash => "a restart without the statistics: a crash, an immediate shutdown or a restore",
+        StatisticsResetReason.Restore => "a point-in-time recovery or a restore from a base backup",
+        StatisticsResetReason.Failover => "a failover to another server",
+        StatisticsResetReason.FreshCluster => "a new cluster: pg_upgrade, initdb or a restore from a dump",
+        StatisticsResetReason.OtherInstance => "another instance answering",
+        _ => "a reset nothing read explains",
+    };
 
     /// <summary>
     /// The <c>since-restart</c> finding, or <see langword="null" />: the counters began again, and the large tables nothing has
