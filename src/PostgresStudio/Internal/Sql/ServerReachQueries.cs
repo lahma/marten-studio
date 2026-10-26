@@ -59,7 +59,8 @@ internal static class ServerReachQueries
     /// One row per role in <see cref="Roles" />, in that order: the reading role (<c>current_user</c>, under the session's
     /// <c>SET LOCAL ROLE</c>), whether it is a superuser, the role's name, whether it exists on this server, whether the
     /// reading role holds it, and the login role the connection authenticated as (<c>session_user</c>) - the role a statement
-    /// read as the application's own runs as.
+    /// read as the application's own runs as while <c>SqlConsoleRole</c> is set (with none set, it runs as <c>current_user</c>
+    /// here; <c>PostgresGrants.RoleOf</c>).
     /// </summary>
     /// <remarks>
     /// <para>

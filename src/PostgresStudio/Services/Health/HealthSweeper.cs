@@ -550,7 +550,7 @@ internal sealed class HealthSweeper
             PostgresGrants grants = await PostgresGrants.SharedAsync(context).ConfigureAwait(false);
             PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
 
-            return problem with { Reason = PostgresGrants.Refused(server.Platform, grants.RoleOf(asApplicationRole)) };
+            return problem with { Reason = PostgresGrants.Refused(server.Platform, grants.RoleOf(asApplicationRole, settings.SqlConsoleRole)) };
         }
         catch (Exception exception)
         {

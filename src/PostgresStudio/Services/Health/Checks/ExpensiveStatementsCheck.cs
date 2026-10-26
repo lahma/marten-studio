@@ -557,18 +557,20 @@ internal static class StatementPlanAdvice
     /// <param name="indexes">The indexes on the judged tables, as the sweep read them.</param>
     /// <param name="advisor">What the studio can say about a whole-table read of one of its tables, or <see langword="null" />.</param>
     /// <param name="lockedTables">
-    /// The tables locked for a schema change when the indexes were read, or <see langword="null" />: the advisor is not asked
-    /// about a whole-table read of one, whose indexes it did not see.
+    /// The tables locked for a schema change when the indexes were read (<see cref="HealthIndexRead.LockedTables" />): the
+    /// advisor is not asked about a whole-table read of one, whose indexes it did not see. Required, so that no caller can
+    /// read a locked table as one with no index on the member it filters on.
     /// </param>
     public static Reading Read(
         IReadOnlyList<ExplainPlanScan> scans,
         ObservedStatement statement,
         IReadOnlyList<IndexFacts> indexes,
         IHealthPlanAdvisor? advisor,
-        IReadOnlySet<string>? lockedTables = null)
+        IReadOnlySet<string> lockedTables)
     {
         ArgumentNullException.ThrowIfNull(scans);
         ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(lockedTables);
         ArgumentNullException.ThrowIfNull(indexes);
 
         List<string> described = [];
@@ -588,7 +590,7 @@ internal static class StatementPlanAdvice
             string how = scan.Index is { } index ? scan.NodeType + " using " + index + " on " + table.Table : scan.NodeType + " on " + table.Table;
 
             if (scan.NodeType.Equals("Seq Scan", StringComparison.Ordinal)
-                && lockedTables?.Contains(table.Key) != true
+                && !lockedTables.Contains(table.Key)
                 && advisor?.AdviseSequentialScan(
                     table,
                     scan.Filter,

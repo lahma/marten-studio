@@ -22,6 +22,12 @@ internal sealed record UnusedIndexFacts(
 {
     /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
     public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+
+    /// <summary>
+    /// The locked tables' indexes, read undeparsed (<see cref="HealthIndexRead.LockedIndexes" />): sampled, so their
+    /// "unscanned since" clock runs through the lock, and never judged.
+    /// </summary>
+    public IReadOnlyList<IndexFacts> LockedIndexes { get; init; } = [];
 }
 
 /// <summary>
@@ -77,6 +83,7 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
         return new UnusedIndexFacts(context.Now, read.Indexes, tables, DatabaseStatistics.Of(tables), IsMultiHost(context))
         {
             LockedTables = read.LockedTables,
+            LockedIndexes = read.LockedIndexes,
         };
     }
 
@@ -117,14 +124,12 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     /// <inheritdoc />
     public override IEnumerable<HealthSamplePart> Sample(UnusedIndexFacts facts)
     {
-        // A sweep that could not read a locked table's indexes would read as "scanned" for each of them and reset its
-        // clock, so it is not counted as a sweep at all: it says nothing either way, for every index (TableHistory.HeldSince).
-        if (facts.LockedTables.Count == 0)
-        {
-            yield return new HealthSamplePart(SweptSeries, 1);
-        }
+        // Every sweep counts, a locked table or not: whether an index is unscanned needs its scans, size, validity and
+        // origin, none of which the deparse gives, so a locked table's indexes are sampled from their undeparsed rows and
+        // their clock runs through the lock - and a table locked in every sweep starves nobody's (TableHistory.HeldSince).
+        yield return new HealthSamplePart(SweptSeries, 1);
 
-        foreach (IndexFacts index in facts.Indexes)
+        foreach (IndexFacts index in facts.Indexes.Concat(facts.LockedIndexes))
         {
             if (IsUnscanned(index))
             {

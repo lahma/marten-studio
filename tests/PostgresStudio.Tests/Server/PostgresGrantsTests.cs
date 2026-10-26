@@ -115,22 +115,38 @@ public class PostgresGrantsTests
 
     /// <summary>
     /// The role a refusal names: <c>SqlConsoleRole</c>'s (<see cref="PostgresGrants.ReadsAs" />) for a statement read as it,
-    /// the login (<see cref="PostgresGrants.LoginRole" />) for one read as the application's own role.
+    /// the login (<see cref="PostgresGrants.LoginRole" />) for one read as the application's own role while a console role
+    /// is set.
     /// </summary>
     [Theory]
     [InlineData(false, "console_role")]
     [InlineData(true, "console_login")]
-    public void A_refusal_names_the_role_the_statement_ran_as(bool asApplicationRole, string role)
+    public void With_a_console_role_set_a_refusal_names_the_role_the_statement_ran_as(bool asApplicationRole, string role)
     {
         PostgresGrants grants = new("console_role", false, []) { LoginRole = "console_login" };
 
-        grants.RoleOf(asApplicationRole).Should().Be(role);
+        grants.RoleOf(asApplicationRole, sqlConsoleRole: "console_role").Should().Be(role);
+    }
+
+    /// <summary>
+    /// With no console role the two sessions are one, so the application-role read ran as this read's <c>current_user</c> -
+    /// even where it differs from the login, as for a login whose sessions start under another role.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Without_a_console_role_the_reading_role_is_named_whichever_session(bool asApplicationRole)
+    {
+        PostgresGrants grants = new("app_owner", false, []) { LoginRole = "app_login" };
+
+        grants.RoleOf(asApplicationRole, sqlConsoleRole: null).Should().Be("app_owner");
+        grants.RoleOf(asApplicationRole, sqlConsoleRole: " ").Should().Be("app_owner");
     }
 
     [Fact]
     public void Without_a_login_read_the_reading_role_is_named()
     {
-        new PostgresGrants("app", false, []).RoleOf(asApplicationRole: true).Should().Be("app");
+        new PostgresGrants("app", false, []).RoleOf(asApplicationRole: true, sqlConsoleRole: "console_role").Should().Be("app");
     }
 
     /// <summary>The runner's mark, which a shared read's exception carries to every check that asked for it.</summary>

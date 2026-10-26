@@ -296,15 +296,6 @@ internal static class MartenTables
         return await HealthTables.TablesAsync(context, set).ConfigureAwait(false);
     }
 
-    /// <summary>Every index on the judged tables, read once per sweep like <see cref="TablesAsync" />.</summary>
-    public static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-
-        IStudioTableSet set = await JudgedSetAsync(context).ConfigureAwait(false);
-        return await HealthTables.IndexesAsync(context, set).ConfigureAwait(false);
-    }
-
     /// <summary>The sweep's judged set when the studio registered its table source, and the declared set otherwise.</summary>
     private static async Task<IStudioTableSet> JudgedSetAsync(HealthCheckContext context) =>
         context.Services.GetService(typeof(IHealthTableSource)) is not null
