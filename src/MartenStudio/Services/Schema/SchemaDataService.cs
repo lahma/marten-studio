@@ -421,7 +421,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
         string[] schemas = SchemaNames(resolved);
 
-        ClassificationRead classification = await ClassifyAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+        ClassificationRead classification = await ClassifyAsync(resolved, cancellationToken).ConfigureAwait(false);
         if (!classification.Succeeded)
         {
             return SchemaTables.Unavailable(classification.Failure);
@@ -542,7 +542,7 @@ internal sealed class SchemaDataService : ISchemaDataService
                 return SchemaIndexes.Unavailable(own.Failure ?? "The store's configuration could not be read.");
             }
 
-            ClassificationRead classification = await ClassifyAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            ClassificationRead classification = await ClassifyAsync(resolved, cancellationToken).ConfigureAwait(false);
             if (!classification.Succeeded)
             {
                 return SchemaIndexes.Unavailable(classification.Failure);
@@ -676,7 +676,7 @@ internal sealed class SchemaDataService : ISchemaDataService
             string[] schemas = [.. declarations.Schemas];
             HashSet<string> storeSchemas = new(schemas, StringComparer.Ordinal);
 
-            ClassificationRead classification = await ClassifyAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            ClassificationRead classification = await ClassifyAsync(resolved, cancellationToken).ConfigureAwait(false);
 
             DatabaseGate? gate = null;
             string? gateFailure = classification.Failure;
@@ -1049,7 +1049,6 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// tenant (AGENTS.md D27), as the browser shows another store's key.
     /// </remarks>
     private async Task<ClassificationRead> ClassifyAsync(
-        StudioScope scope,
         ResolvedScope resolved,
         CancellationToken cancellationToken)
     {
@@ -1123,11 +1122,14 @@ internal sealed class SchemaDataService : ISchemaDataService
             return new ClassificationRead(SchemaClassification.Complete(classifier), null);
         }
 
+        // Asked about the resolved database by its own identity, never the visitor's spelling of it (D29, H1): an empty
+        // ?db= or one in another case is the same database, and a policy that keys on the identity must be asked about it.
+        string databaseId = resolved.Database.Id.Identity;
         List<UnreadableStore> named = new(unreadable.Count);
         foreach ((string key, string problem, string detail) in unreadable)
         {
             bool mayKnow = await authorization
-                .IsAuthorizedAsync(new StudioScope(key, scope.DatabaseId, null), capability: null, cancellationToken)
+                .IsAuthorizedAsync(new StudioScope(key, databaseId, null), capability: null, cancellationToken)
                 .ConfigureAwait(false);
 
             named.Add(mayKnow ? new UnreadableStore(key, problem, detail) : new UnreadableStore(null, problem, null));

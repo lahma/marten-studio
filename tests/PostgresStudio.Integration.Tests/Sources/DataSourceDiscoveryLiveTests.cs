@@ -150,15 +150,20 @@ public class DataSourceDiscoveryLiveTests(DataSourceDiscoveryLiveTests.Fixture d
         // exist, so a refusal cannot be used to enumerate them (StudioNotAuthorizedException).
         IDatabaseObjectService objects = alice.Get<IDatabaseObjectService>();
         DatabaseBrowserOverview overview = await objects.GetOverviewAsync(tenantB, Token);
-        (overview.Refusal, overview.Reason).Should().Be((DatabaseRefusal.Unavailable, NotAuthorized));
+        // Labelled as the policy's refusal (H1), and still the same answer a database that does not exist would get.
+        (overview.Refusal, overview.Reason).Should().Be((DatabaseRefusal.ScopeRefused, NotAuthorized));
         overview.Schemas.Should().BeEmpty();
 
         DatabaseObjectList list = await objects.ListAsync(tenantB, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, "public"), Token);
-        (list.Refusal, list.Reason).Should().Be((DatabaseRefusal.Unavailable, NotAuthorized));
+        (list.Refusal, list.Reason).Should().Be((DatabaseRefusal.ScopeRefused, NotAuthorized));
         list.Items.Should().BeEmpty();
 
         DatabaseObjectDetail detail = await objects.GetObjectAsync(tenantB, "public", "b_only", Token);
-        (detail.Refusal, detail.Reason).Should().Be((DatabaseRefusal.Unavailable, NotAuthorized));
+        (detail.Refusal, detail.Reason).Should().Be((DatabaseRefusal.ScopeRefused, NotAuthorized));
+
+        // And a database the policy refuses that does not exist at all reads exactly the same (non-enumeration).
+        DatabaseObjectDetail ghost = await objects.GetObjectAsync(new StudioScope("tenants", "tenant_z", null), "public", "b_only", Token);
+        (ghost.Refusal, ghost.Reason).Should().Be((detail.Refusal, detail.Reason));
         detail.Columns.Should().BeEmpty();
 
         // Rows and Sessions name the policy that refused.

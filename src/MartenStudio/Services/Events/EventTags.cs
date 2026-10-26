@@ -329,7 +329,7 @@ internal static class EventTagValues
             return false;
         }
 
-        error = $"'{trimmed}' is not a {simpleType.Name}, which is what this tag type holds.";
+        error = $"'{PostgresStudio.Services.StudioLogValue.Cap(trimmed)}' is not a {simpleType.Name}, which is what this tag type holds.";
         return false;
     }
 

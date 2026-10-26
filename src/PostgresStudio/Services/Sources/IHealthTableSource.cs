@@ -113,6 +113,14 @@ internal interface IStudioTableSet
     /// </summary>
     string? Coverage { get; }
 
+    /// <summary>
+    /// <see cref="Coverage" /> counted over the source's own schemas alone - the ones every visitor the checks' gate admits
+    /// may see - for a visitor the database browser keeps out of the rest (G1M F6, H1): what a schema only
+    /// <c>BrowsableSchemas</c> admits holds is the browser's to show, its count included. The same as
+    /// <see cref="Coverage" /> for a set that reads no schema beyond the source's own, which is the default.
+    /// </summary>
+    string? OwnSchemasCoverage => Coverage;
+
     /// <summary>The table at <paramref name="schema" />.<paramref name="table" />, or <see langword="null" />.</summary>
     StudioTable? Find(string schema, string table);
 

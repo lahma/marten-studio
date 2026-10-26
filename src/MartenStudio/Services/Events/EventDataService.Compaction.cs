@@ -17,6 +17,14 @@ internal sealed partial class EventDataService
     /// <summary>The action name the audit ring records a compaction under.</summary>
     internal const string CompactStreamAction = "Compact stream";
 
+    /// <summary>
+    /// What a compaction cancelled from inside after its save began says, before the cancellation's own words: it is one
+    /// transaction, so it either committed whole or rolled back - and which, only the stream can say.
+    /// </summary>
+    internal const string CompactionCancelledInside =
+        "The compaction was cancelled from inside Marten after its save had begun. It is one transaction, so it either "
+        + "committed whole or rolled back; reload the stream to see which: ";
+
     /// <inheritdoc />
     public async Task<CompactionPlan> DescribeCompactionAsync(
         StudioScope scope,
@@ -138,19 +146,22 @@ internal sealed partial class EventDataService
                     throw new InvalidOperationException(cutoff);
                 }
 
-                // 4. Past the confirmation, on a token of this operation's own, as the schema apply does. It is
-                //    one transaction, so a cancelled compaction would roll back cleanly - but a closed tab or a
-                //    dropped circuit is not a decision to abandon something somebody typed a stream id to
-                //    start, and an audit entry that reads "cancelled" leaves the operator asking whether it
-                //    committed. The session's own Timeout (QueryTimeout) still bounds every statement.
-                using var compacting = new CancellationTokenSource();
-
+                // 4. Past the confirmation, on a token of this operation's own (CommitAsync), as the skip and the
+                //    rewind are. It is one transaction, so a cancelled compaction rolls back cleanly - but a closed
+                //    tab or a dropped circuit is not a decision to abandon something somebody typed a stream id to
+                //    start. And a cancellation that surfaces from inside all the same - Marten, Npgsql or the host
+                //    shutting down - is not the visitor's: CommitAsync turns it into a failure, which MutateAsync
+                //    audits like any other (hard rule 5: on failure as well as on success). As an
+                //    OperationCanceledException it was let through unaudited, and nothing said how the compaction the
+                //    visitor confirmed had ended (H1). The session's own Timeout (QueryTimeout) still bounds every
+                //    statement.
                 await using (IDocumentSession session = OpenWriteSession(resolved))
                 {
                     try
                     {
-                        await StreamCompactionInvoker
-                            .CompactAsync(session, aggregate.Type, parsed.Value!, expectedVersion, compacting.Token)
+                        await CommitAsync(
+                                committing => StreamCompactionInvoker.CompactAsync(session, aggregate.Type, parsed.Value!, expectedVersion, committing),
+                                CompactionCancelledInside)
                             .ConfigureAwait(false);
                     }
                     catch (Exception exception) when (TagTableRefusal(exception) is { } refusal)
@@ -168,10 +179,11 @@ internal sealed partial class EventDataService
                 //    neither: the save returned, so it is "saved, not confirmed", never a plain failure. On the
                 //    primary: an asynchronous standby can still hold the old compacted_version, which would
                 //    read as "nothing was compacted" with the events already deleted.
+                // Not on the page's token either: the save has returned, and what it did is what the audit must say.
                 StreamState after;
                 try
                 {
-                    after = await ReadStreamOnPrimaryAsync(resolved.Scope, target, compacting.Token).ConfigureAwait(false);
+                    after = await ReadStreamOnPrimaryAsync(resolved.Scope, target, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception exception)
                 {

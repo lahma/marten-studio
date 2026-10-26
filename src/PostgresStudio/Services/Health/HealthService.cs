@@ -266,6 +266,9 @@ internal sealed class HealthService : IHealthService
         Task<StatementScreen>? screenRead = null;
         Task<StatementScreen> Screen() => screenRead ??= StatementScreenAsync(BrowserGate);
 
+        // A Tables-area result's coverage, as this visitor may read it (G1M F6, H1).
+        results = await AsVisitorReadsAsync(results, BrowserGate).ConfigureAwait(false);
+
         (List<HealthReportFinding> findings, int withheld, IReadOnlyList<string> reasons) =
             await ShowAsync(results, gate, storeKey, databaseId, audit: true, Screen, BrowserGate).ConfigureAwait(false);
 
@@ -414,9 +417,16 @@ internal sealed class HealthService : IHealthService
 
         // No screen: a cached read resolves no scope, so a statement's text cannot be masked for this visitor and is
         // withheld (fail closed). The Health page itself goes through GetReportAsync, which masks it. No browser gate
-        // either, for the same reason: a finding about a table outside the store's own schemas is counted as withheld.
+        // either, for the same reason: a finding about a table outside the store's own schemas is counted as withheld, and a
+        // coverage sentence counts the store's own schemas alone (G1M F6, H1).
         (List<HealthReportFinding> findings, int withheld, _) = await ShowAsync(
-                sweep.Results.Where(wanted), gate, sweep.StoreKey, sweep.DatabaseId, audit, screen: null, browserGate: null)
+                await AsVisitorReadsAsync([.. sweep.Results.Where(wanted)], browserGate: null).ConfigureAwait(false),
+                gate,
+                sweep.StoreKey,
+                sweep.DatabaseId,
+                audit,
+                screen: null,
+                browserGate: null)
             .ConfigureAwait(false);
 
         return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))], withheld);
@@ -687,6 +697,36 @@ internal sealed class HealthService : IHealthService
         }
 
         return (shown, withheld, reasons);
+    }
+
+    /// <summary>
+    /// <paramref name="results" /> as this visitor reads them: a Tables-area result whose coverage would count tables in
+    /// schemas only <c>BrowsableSchemas</c> admits (<see cref="HealthCheckResult.WithinOwnSchemas" />) is read as it is only
+    /// past the database browser's gate, and as its own-schemas reading otherwise - so the count of what those schemas hold
+    /// is shown to exactly the visitors the browser shows them to (G1M F6, H1, D27).
+    /// </summary>
+    /// <remarks>
+    /// The gate is read at most once, and only when a result has two readings. Past it means open (<see cref="DatabaseGate.IsOpen" />):
+    /// the capability on and both policies passing, which admits every schema the sweep's statement admits - the same
+    /// rule, <c>BrowsableSchemaMatcher</c>'s. No gate, or one that cannot be read, is the own-schemas reading (fail closed).
+    /// </remarks>
+    /// <param name="results">The checks' results.</param>
+    /// <param name="browserGate">This visitor's browser gate, read on first use; <see langword="null" /> for none.</param>
+    internal static async Task<List<HealthCheckResult>> AsVisitorReadsAsync(
+        IReadOnlyList<HealthCheckResult> results,
+        Func<Task<DatabaseGateRead?>>? browserGate)
+    {
+        ArgumentNullException.ThrowIfNull(results);
+
+        if (!results.Any(static x => x.WithinOwnSchemas is not null))
+        {
+            return [.. results];
+        }
+
+        DatabaseGateRead? read = browserGate is null ? null : await browserGate().ConfigureAwait(false);
+        bool open = read is { Succeeded: true } && read.Gate.IsOpen;
+
+        return open ? [.. results] : [.. results.Select(static x => x.WithinOwnSchemas ?? x)];
     }
 
     /// <summary>

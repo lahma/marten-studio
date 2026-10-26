@@ -110,17 +110,32 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
         }
 
         int total = rows.Count == 0 ? 0 : rows[0].Total;
+        int listedOwn = rows.Count(x => own.Contains(x.Schema));
 
-        string? coverage = total > rows.Count
-            ? "the " + rows.Count.ToString("N0", CultureInfo.InvariantCulture) + " largest of "
-              + total.ToString("N0", CultureInfo.InvariantCulture) + " tables by estimated size (a sweep judges at most "
-              + cap.ToString("N0", CultureInfo.InvariantCulture) + ")"
-            : null;
+        // A row built by hand says nothing of the source's own schemas: when every row it listed is in one, so is every
+        // table it counted.
+        int ownTotal = rows.Count == 0 ? 0 : rows[0].OwnTotal ?? (listedOwn == rows.Count ? total : listedOwn);
+
+        string? coverage = total > rows.Count ? CoverageOf(rows.Count, total, cap, ownSchemasOnly: false) : null;
+
+        // What a visitor the database browser keeps out of every schema only "*" admits is told: the same sentence over the
+        // source's own schemas, which tells nothing of what the others hold - not even how many tables (G1M F6, H1).
+        string? ownCoverage = ownTotal == total && listedOwn == rows.Count
+            ? coverage
+            : ownTotal > listedOwn ? CoverageOf(listedOwn, ownTotal, cap, ownSchemasOnly: true) : null;
 
         return new RelationalTableSet(
             [.. tables.OrderBy(static x => x.Schema, StringComparer.Ordinal).ThenBy(static x => x.Table, StringComparer.Ordinal)],
-            coverage);
+            coverage,
+            ownCoverage);
     }
+
+    /// <summary>"the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)", over the own schemas or every one.</summary>
+    private static string CoverageOf(int judged, int total, int cap, bool ownSchemasOnly) =>
+        "the " + judged.ToString("N0", CultureInfo.InvariantCulture) + " largest of "
+        + total.ToString("N0", CultureInfo.InvariantCulture) + " tables"
+        + (ownSchemasOnly ? " in the data source's own schemas" : string.Empty)
+        + " by estimated size (a sweep judges at most " + cap.ToString("N0", CultureInfo.InvariantCulture) + ")";
 
     /// <summary>What a Marten table is, by its name alone - no store is registered to say more.</summary>
     /// <param name="table">An <c>mt_</c> table's name.</param>
@@ -139,10 +154,11 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
     {
         private readonly Dictionary<string, StudioTable> byKey;
 
-        public RelationalTableSet(IReadOnlyList<StudioTable> tables, string? coverage)
+        public RelationalTableSet(IReadOnlyList<StudioTable> tables, string? coverage, string? ownSchemasCoverage)
         {
             Tables = tables;
             Coverage = coverage;
+            OwnSchemasCoverage = ownSchemasCoverage;
             byKey = new Dictionary<string, StudioTable>(StringComparer.Ordinal);
 
             foreach (StudioTable table in tables)
@@ -154,6 +170,8 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
         public IReadOnlyList<StudioTable> Tables { get; }
 
         public string? Coverage { get; }
+
+        public string? OwnSchemasCoverage { get; }
 
         public StudioTable? Find(string schema, string table) =>
             byKey.TryGetValue(schema + "\u001f" + table, out StudioTable? found) ? found : null;

@@ -24,6 +24,7 @@ using Npgsql;
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Integration.Tests.Projections;
 
@@ -272,6 +273,62 @@ public class MultiDatabaseDaemonLiveTests(PostgresFixture postgres) : IAsyncLife
         // is how "it read the selected database" is told apart from "it read the main one twice".
         views[PrimaryIdentifier].HighWaterMark.Should().BeGreaterThan(views[SecondaryIdentifier].HighWaterMark);
         views[SecondaryIdentifier].HighWaterMark.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// H1, item 4: the projections read is cached by the store's registered key and the database's identity, as the other
+    /// caches key it - never by the visitor's spelling. Two spellings of one database share one entry, so a write's
+    /// invalidation reaches whatever either one read; two databases never share one, so neither is answered with the
+    /// other's progress.
+    /// </summary>
+    [PostgresFact]
+    public async Task Two_spellings_of_one_database_share_one_projections_entry_and_two_databases_never_do()
+    {
+        IReadOnlyList<IMartenDatabase> databases = await Store.Storage.AllDatabases();
+        databases.Should().HaveCount(2);
+
+        // A cache that keeps what it is handed for the length of the test, registered before the studio's own.
+        StudioSnapshotCache cache = new(TimeProvider.System, TimeSpan.FromMinutes(10));
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(Store);
+        services.AddSingleton(host!.Services.GetRequiredService<MartenCoordinator>());
+        services.AddSingleton(cache);
+        services.AddAuthorization();
+        services.AddSingleton<AuthenticationStateProvider, AnonymousAuthenticationStateProvider>();
+        services.AddMartenStudio(static options => options.DiscoverTenantIds = false);
+
+        await using ServiceProvider studio = services.BuildServiceProvider();
+        studio.GetRequiredService<StudioSnapshotCache>().Should().BeSameAs(cache, "the premise: the studio reads through this cache");
+
+        async Task<ProjectionsView> ReadThroughAsync(StudioScope scope)
+        {
+            using IServiceScope circuit = studio.CreateScope();
+            return await circuit.ServiceProvider.GetRequiredService<IProjectionDataService>().GetProjectionsAsync(scope, Token);
+        }
+
+        string first = databases[0].Id.Identity;
+        string second = databases[1].Id.Identity;
+        string key = MartenStoreRegistry.DefaultStoreKey + "|" + first + "||projections";
+
+        ProjectionsView named = await ReadThroughAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey, first, null));
+        cache.Count.Should().Be(1);
+        cache.Holds(key).Should().BeTrue("keyed by the registered key and the database's identity");
+
+        ProjectionsView spelled = await ReadThroughAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey.ToUpperInvariant(), first.ToUpperInvariant(), null));
+        cache.Count.Should().Be(1, "another spelling of the same store and database is the same entry");
+        spelled.DatabaseId.Should().Be(named.DatabaseId);
+        spelled.HighWaterMark.Should().Be(named.HighWaterMark);
+
+        await ReadThroughAsync(new StudioScope(MartenStoreRegistry.DefaultStoreKey, second, null));
+        cache.Count.Should().Be(2, "another database is an entry of its own");
+        cache.Holds(MartenStoreRegistry.DefaultStoreKey + "|" + second + "||projections").Should().BeTrue();
+
+        // The invalidation a write makes reaches the entry whichever spelling read it.
+        cache.InvalidatePrefix(MartenStoreRegistry.DefaultStoreKey + "|" + first + "|");
+        cache.Holds(key).Should().BeFalse();
+        cache.Count.Should().Be(1);
     }
 
     /// <summary>
