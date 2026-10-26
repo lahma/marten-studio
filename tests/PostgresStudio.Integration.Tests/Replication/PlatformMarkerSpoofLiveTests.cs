@@ -23,6 +23,9 @@ public class PlatformMarkerSpoofLiveTests
 {
     private const string Database = "spoof_r2";
 
+    /// <summary>The detector statement's marker columns.</summary>
+    private static readonly string[] MarkerColumns = ["rds", "aurora", "azure", "cloud_sql", "neon"];
+
     public static TheoryData<string> Images => ["postgres:14.24-alpine", "postgres:17.11-alpine", "postgres:18.6-alpine"];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
@@ -106,6 +109,44 @@ public class PlatformMarkerSpoofLiveTests
         TestContext.Current.TestOutputHelper?.WriteLine("placeholders the owner's session sees: {0}", string.Join(", ", settings));
 
         accepted.Should().Contain("public.aurora_version() (by the database owner)", "the plant the brief names is one Postgres accepts");
+
+        // A placeholder anybody may set for their own connection - SET in the session, or -c in the startup options - never
+        // reaches the studio's connection; and even run in such a session, the detector's own statement does not count it.
+        string[] markers = await MarkersInASessionThatSetThemAsync(asOwner);
+        TestContext.Current.TestOutputHelper?.WriteLine("markers the detector's statement reads in a session that SET them itself: {0}", markers.Length == 0 ? "none" : string.Join(", ", markers));
+        markers.Should().BeEmpty("a session's SET and a client's startup option are not the server's configuration");
+    }
+
+    /// <summary>
+    /// Runs the detector's own statement in a connection whose startup options set <c>cloudsql.iam_authentication</c> and
+    /// which then SETs <c>rds.extensions</c> and <c>azure.extensions</c> itself, and returns the markers it reported.
+    /// </summary>
+    private static async Task<string[]> MarkersInASessionThatSetThemAsync(string connectionString)
+    {
+        NpgsqlConnectionStringBuilder builder = new(connectionString) { Options = "-c cloudsql.iam_authentication=on" };
+
+        await using NpgsqlConnection connection = new(builder.ConnectionString);
+        await connection.OpenAsync(Token);
+
+        await using (NpgsqlCommand set = new("set \"rds.extensions\" = 'pg_stat_statements'; set \"azure.extensions\" = 'pg_stat_statements'", connection))
+        {
+            await set.ExecuteNonQueryAsync(Token);
+        }
+
+        await using NpgsqlCommand seen = new("select pg_catalog.current_setting('cloudsql.iam_authentication', true), pg_catalog.current_setting('rds.extensions', true)", connection);
+        await using (NpgsqlDataReader reader = await seen.ExecuteReaderAsync(Token))
+        {
+            await reader.ReadAsync(Token);
+            reader.GetString(0).Should().Be("on", "the startup option took");
+            reader.GetString(1).Should().Be("pg_stat_statements", "the SET took");
+        }
+
+        var query = HealthServerQueries.Platform();
+        await using NpgsqlCommand detect = new(query.Sql, connection);
+        await using NpgsqlDataReader markers = await detect.ExecuteReaderAsync(Token);
+        await markers.ReadAsync(Token);
+
+        return [.. MarkerColumns.Where(name => markers.GetBoolean(markers.GetOrdinal(name)))];
     }
 
     private static string OwnerOf(ReplicationServer server, string user, string password)
