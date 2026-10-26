@@ -964,10 +964,18 @@ src/MartenStudio/Components/             MartenStudioApp (the root component) an
 src/MartenStudio/Internal/               the duplicated-field enumeration, and the Marten SQL builders below
 src/MartenStudio/Services/               store registry, scope resolver, tenant discovery, the source provider,
                                          descriptor, settings and links, and the bridges onto the shared seams
-samples/                                 Demo host and demo domain; never packed
+samples/                                 Demo hosts and their demo data; never packed
 samples/MartenStudio.Sample/             The sample ASP.NET Core host (D18) - README snippet regions
 samples/MartenStudio.SampleDomain/       The demo domain, shared with the integration tests; deliberately
                                          does NOT reference MartenStudio (D17)
+samples/PostgresStudio.SampleData/       The demo data with no Marten in it, shared by both samples and the integration
+                                         tests: Quartz.NET's job store (vendored, Apache-2.0), the "legacy" catalog
+                                         edge-case schema, studio_sample.app_settings, and the tenant databases with
+                                         their directory - all idempotent. References no studio (D17)
+samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), no Marten: an admin database and three
+                                         tenant databases through its own IPostgresDatabaseSource - README snippet regions
+samples/PostgresStudio.Sample/Auth/      Cookie auth, the three demo users, the studio policy and the per-capability one
+samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5211
 tests/                                   Both test projects match *.Tests, so one Test run covers both
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
@@ -1044,9 +1052,6 @@ tests/MartenStudio.Tests/Query/            Composer, guard, export, saved querie
 tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
 samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
                                          truncation, the word lists and the run marker
-samples/MartenStudio.SampleDomain/Relational/  Non-Marten demo schemas beside the store: Quartz.NET's job
-                                         store (vendored, Apache-2.0), the "legacy" catalog edge-case
-                                         schema, studio_sample.app_settings, and their idempotent seeding
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag; and the
                                          "make it unhealthy" switches, their board, endpoints and panel
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in; the
