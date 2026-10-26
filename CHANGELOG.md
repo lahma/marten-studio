@@ -82,6 +82,53 @@
   nothing at Debug, not Warning. A scope change that names a tenant the new store or database does not list keeps
   the previous tenant only when the new store lists it too, and otherwise opens all tenants; before, it carried the
   previous store's tenant over unchecked.
+- PostgreSQL 14 is the documented floor, and 14 to 18 are supported, each tested by a version matrix that also runs
+  PostgreSQL 19's release candidate as a preview (`docs/postgres-versions.md`). A server below 14 is still read; S01's
+  finding and the Overview's server line in both studios say it is below the supported floor (14). S01 knows
+  PostgreSQL 19 and says its dates are planned until postgresql.org lists them.
+- The database browser's Constraints tab no longer lists a `…_not_null` constraint of kind "Other" for every NOT NULL
+  column on PostgreSQL 18, which stores NOT NULL in `pg_constraint` (the Columns tab already says which columns are
+  NOT NULL), and on 17 and later the Types list no longer shows a domain's NOT NULL as one of its constraints (the
+  domain's NOT NULL flag already says it).
+- "Not checked" names who was refused and who can grant it: a health check Postgres refuses a privilege (42501) names
+  the role it ran as (`SqlConsoleRole`, or the store's own login for the statement checks), leaves what was refused to
+  Postgres' own words, says a table, schema or sequence is its owner's to grant and a statistics view is covered by
+  `pg_monitor`, and names who can grant that on the platform the server runs on. A role counts as holding
+  `pg_monitor` or `pg_read_all_stats` only when it has their privileges, not as a `NOINHERIT` or `INHERIT FALSE`
+  member. The studio never suggests a `GRANT` to paste.
+- The index checks (T03–T06) no longer wait behind a migration: while a table is locked for a schema change they judge
+  every other table and say how many they left out, and T02's index advice skips that table; they used to wait out
+  the lock timeout.
+- MartenStudio's table checks (T01–T08, T10–T14, and T02/T22/T23 behind Run statement checks) now judge every ordinary
+  and partitioned table in the store's own schemas and - while `Capabilities.BrowseDatabase` is on - in the schemas
+  `BrowsableSchemas` admits, not only the tables the store declares (issue #8, G1). A table the store declares is
+  judged exactly as before. The host's own relational table beside the store is judged by every rule, with remedies
+  that are migration SQL "for your own migrations - the studio never runs this", never a `StoreOptions` line. A
+  recognised library's table (`qrtz_*`, `wolverine_*`, `__EFMigrationsHistory`, `VersionInfo`, an `mt_` table no
+  store declares) is exempt from the index-design rules (T01, T04, T05) only, and its vacuum, statistics and rebuild
+  remedies say the library's design is left alone. A table in a schema only `BrowsableSchemas` admits is judged by
+  every rule, gets migration SQL for its upkeep only, and is shown only past the database browser's gate for that
+  schema. This is host-visible: a store sharing its database with a job store or a legacy schema may see new findings
+  about those tables.
+- What a sweep leaves out is said in every table finding's caveat and check row, as counts, never names: "Judged:
+  another registered Marten store's tables are not judged here", and past 2,000 tables "Judged: the store's 40
+  declared tables and the 1,960 largest of 3,412 other tables by estimated size (a sweep judges at most 2,000)". While
+  any document type may be hidden, no table named like a document table is read at all. If another store's
+  configuration cannot be read, the sweep judges the declared tables alone and says so.
+- T12 and T13 call the judged tables "tables the studio judges" rather than "Marten tables", and T01's and T03's notes
+  for an empty store say "No table the studio judges".
+- New check **D09 Event sequence and daemon progression disagree** (Critical), in three variants: `mark-ahead` and
+  `shard-ahead`, where the high-water mark or a registered shard is ahead of what the event sequence has handed out,
+  so new events take numbers the daemon has already passed (judged only for a store with an async projection or
+  subscription); and `sequence-behind`, where the sequence is behind the highest committed event, so the next append
+  fails on `mt_events`' primary key (judged for any store with events). These are what a sequence reset, a restore
+  from mixed points in time or a logical-replication cut-over leaves behind. The remedies are the projections screen's
+  Correct progression (Marten's `TryCorrectProgressInDatabaseAsync`) for a mark ahead - and once that has done all it
+  can after a `RESTART`, a DBA's `setval` moving the sequence on by one, because the next event appended would
+  otherwise be treated as processed; a rebuild (which empties the projection's tables first) or a rewind to the
+  highest number handed out for a lone shard; and a DBA's `setval` for the sequence. It is not checked under
+  `UseTenantPartitionedEvents`. The high-water read adds one backward primary-key probe of `mt_events` and reads the
+  sequence's `last_value`.
 
 # 0.4.0
 

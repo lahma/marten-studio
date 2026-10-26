@@ -581,6 +581,14 @@ second is the opt-in ASP.NET Core health check, which runs with no visitor at al
 databases, no policy - and is acceptable only because it reports codes, outcomes, severities and counts, never a
 name, a tenant, a statement or anything Postgres said: the host's own endpoint is its only gate (`docs/health.md`,
 `docs/security.md`).
+**Whole-database table scope.** MartenStudio's table checks judge every table of the store's own schemas and - while
+`BrowseDatabase` is on - of the schemas `BrowsableSchemas` admits, the store's declarations laid over one catalog list
+(`MartenHealthTableSource`, issue #8 G1). A declared table keeps its kind, origins and `StoreOptions` remedies, Marten's
+event and bookkeeping tables staying the store's own; an undeclared one is the host's (migration SQL), a recognised
+library's (exempt from the index-design rules only) or somebody else's, and one outside the store's schemas carries
+`GatedSchemas`. Another registered store's tables are left out, because a visitor-less sweep cannot ask its policy; so,
+while any type may be hidden, is every table named like a document table. The coverage sentence says what was left
+out, in counts.
 
 ## Package budget
 
@@ -1391,6 +1399,13 @@ There are seven kinds of test, in two projects:
    `PgVectorLiveTests` starts `pgvector/pgvector:0.8.1-pg17` (`PgVectorServerFixture.Image`), pinned by
    tag to the pgvector release whose defaults the studio quotes; an image that cannot be pulled skips that
    class locally, with the `docker pull` command in the reason, and fails the run on CI (D19's rule).
+   `PostgresVersionMatrix` (`tests/PostgresStudio.Integration.Tests/Versions/`, an assembly fixture) starts one
+   never-reused server per major on first use - `postgres:14.24-alpine` to `18.6-alpine`, and `19rc1-alpine` as a
+   preview leg that reports and never fails a run - with `pg_stat_statements` preloaded and B0's
+   `app`/`probe`/`stats`/`mon` roles; `VersionMatrixLiveTests` runs the shared studio's regular and statement checks,
+   every `MatrixReads` read, the held-lock read and the gate table on each (MartenStudio's checks are not in the
+   matrix). Six containers, about 30 s for the folder with the images local, plus a ~110 MB pull per image on a cold
+   CI runner. A W5 packet appends its facts reads to `MatrixReads`.
    Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19).
