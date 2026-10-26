@@ -117,6 +117,23 @@ internal sealed record StorageFacts
     /// <summary>What the source's set leaves out (<see cref="IStudioTableSet.Coverage" />), or <see langword="null" /> for every table.</summary>
     public string? Coverage { get; init; }
 
+    /// <summary>
+    /// How many of <see cref="TableCount" /> sit in the source's own schemas (no <see cref="StudioTable.GatedSchemas" />): the
+    /// count a visitor the database browser keeps out of every other schema is told, because how many tables a schema only
+    /// <c>BrowsableSchemas</c> admits holds is the browser's to show (G1M F6, H1b).
+    /// </summary>
+    public int OwnSchemasTableCount { get; init; }
+
+    /// <summary>
+    /// <see cref="Coverage" /> counted over the source's own schemas alone (<see cref="IStudioTableSet.OwnSchemasCoverage" />):
+    /// the sentence that visitor reads. The same as <see cref="Coverage" /> for a set that reads no other schema.
+    /// </summary>
+    public string? OwnSchemasCoverage { get; init; }
+
+    /// <summary>Whether the own-schemas reading says less than the whole one - and a visitor's view must choose between them.</summary>
+    public bool HasOwnSchemasReading =>
+        OwnSchemasTableCount != TableCount || !string.Equals(OwnSchemasCoverage, Coverage, StringComparison.Ordinal);
+
     /// <summary>Why no table was read, when none could be - the studio has no table source - or <see langword="null" />.</summary>
     public string? TablesNotRead { get; init; }
 
@@ -208,6 +225,8 @@ internal sealed record StorageFacts
             GrowthBytesPerDay = growth,
             TableCount = set?.Tables.Count ?? 0,
             Coverage = set?.Coverage,
+            OwnSchemasTableCount = set?.Tables.Count(static x => x.GatedSchemas.Count == 0) ?? 0,
+            OwnSchemasCoverage = set?.OwnSchemasCoverage,
             TablesNotRead = set is null ? HealthTables.NoSource : null,
             LargestTables =
             [

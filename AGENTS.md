@@ -252,6 +252,8 @@ call, against the same resource with the capability name attached. `ReadOnly` an
 of all three. A startup guard refuses a mapping that answered none of it, because "I forgot to add
 `RequireAuthorization`" must not be a silent state. Postgres Studio has the same three layers and the same guard, with
 `SourceAuthorizationPolicy` asked about a `PostgresStudioResource` in place of the store policy (D30).
+Known limit: under a policy refusing by registered name, a case variant tells a refused source or database from a missing
+one, as matching ignores case.
 
 **D6 — Reads are raw parameterised SQL, writes go through a Marten session.** The studio only knows
 document types as runtime `Type`s, so a generic `session.Query<T>()` is not available to it; reads are

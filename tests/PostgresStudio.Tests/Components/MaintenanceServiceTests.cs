@@ -1,8 +1,12 @@
+using Bunit;
+
 using Microsoft.Extensions.DependencyInjection;
 
+using PostgresStudio.Components.Pages.Maintenance;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Sources;
@@ -20,7 +24,7 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
 
     private static readonly StudioScope Scope = new("default", "default", null);
 
-    private static CancellationToken Token => TestContext.Current.CancellationToken;
+    private static CancellationToken Token => Xunit.TestContext.Current.CancellationToken;
 
     private readonly PostgresStudioComponentContext context = new();
     private readonly FakeFacts facts = new();
@@ -104,6 +108,104 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
         view.Running.Rows.Should().ContainSingle().Which.Table.Should().Be("quartz.qrtz_triggers");
         view.Running.Unnamed.Should().Be(0);
     }
+
+    /// <summary>
+    /// H1b (G1M F6, Option A): the judged set's coverage counts tables in schemas only <c>BrowsableSchemas</c> admits, and how
+    /// many tables those hold is the database browser's to show. So the page's "Judged: …" and the sentence T14's note ends
+    /// with read the whole count only past the browser's gate (<c>DatabaseGate.IsOpen</c>), and the source's own schemas'
+    /// alone for a gate that is shut or cannot be read - the rule the Health page follows.
+    /// </summary>
+    [Theory]
+    [InlineData(GateState.Open, true)]
+    [InlineData(GateState.Closed, false)]
+    [InlineData(GateState.Unreadable, false)]
+    public async Task The_coverage_and_T14s_note_count_the_other_schemas_only_past_the_browsers_gate(GateState state, bool whole)
+    {
+        gate.State = state;
+        facts.Value = Covered(Facts([Table("public", "orders"), Table("quartz", "qrtz_triggers", gated: true)]));
+
+        MaintenanceView view = await Service().GetAsync(Scope, Token);
+
+        view.Coverage.Should().Be(whole ? WholeCoverage : OwnCoverage);
+        view.Horizon.Finding.Should().BeNull();
+        view.Horizon.Note.Should().Be(Quiet(whole ? WholeCoverage : OwnCoverage));
+        gate.Reads.Should().Be(1, "the gate is read once per view, for the names and the coverage alike");
+    }
+
+    /// <summary>With one reading - nothing judged beyond the source's own schemas - the gate is never read for the coverage.</summary>
+    [Fact]
+    public async Task With_one_reading_the_coverage_reads_no_gate()
+    {
+        gate.State = GateState.Open;
+        facts.Value = Facts([Table("public", "orders")]) with
+        {
+            Coverage = OwnCoverage,
+            OwnSchemasCoverage = OwnCoverage,
+            Horizon = T14(Quiet(OwnCoverage)),
+        };
+
+        MaintenanceView view = await Service().GetAsync(Scope, Token);
+
+        view.Coverage.Should().Be(OwnCoverage);
+        view.Horizon.Note.Should().Be(Quiet(OwnCoverage));
+        gate.Reads.Should().Be(0);
+    }
+
+    /// <summary>The page, over the real service: what a visitor past the gate reads, and what one short of it does.</summary>
+    [Theory]
+    [InlineData(GateState.Open, true)]
+    [InlineData(GateState.Closed, false)]
+    public async Task The_page_draws_the_coverage_this_visitor_may_read(GateState state, bool whole)
+    {
+        gate.State = state;
+        facts.Value = Covered(Facts([Table("public", "orders"), Table("quartz", "qrtz_triggers", gated: true)]));
+
+        await using PostgresStudioComponentContext page = await new PostgresStudioComponentContext(services =>
+            services.AddSingleton<IMaintenanceService>(provider => ActivatorUtilities.CreateInstance<MaintenanceService>(
+                provider,
+                ActivatorUtilities.CreateInstance<StudioSourceResolver>(provider),
+                (IMaintenanceFacts) facts,
+                (IMaintenanceNameGate) gate,
+                flights))).ReadyAsync();
+
+        var rendered = page.Render<Maintenance>();
+        rendered.WaitForAssertion(() => rendered.FindAll(".ms-maint-horizon").Should().ContainSingle());
+
+        rendered.Find(".ms-maint-triggers").TextContent.Should().Contain("Judged: " + (whole ? WholeCoverage : OwnCoverage) + ".");
+        rendered.Find(".ms-maint-horizon").TextContent.Should().Contain(Quiet(whole ? WholeCoverage : OwnCoverage));
+
+        if (!whole)
+        {
+            rendered.Markup.Should().NotContain("3,412").And.NotContain("a sweep judges at most",
+                "nothing on the page counts what the schemas only BrowsableSchemas admits hold");
+        }
+    }
+
+    /// <summary>What the set leaves out, over every admitted schema.</summary>
+    private const string WholeCoverage = "the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)";
+
+    /// <summary>The same, over the source's own schemas alone.</summary>
+    private const string OwnCoverage = "the 1 largest of 10 tables in the data source's own schemas by estimated size";
+
+    private static string Quiet(string coverage) => "Nothing holds the vacuum horizon back. Judged: " + coverage + ".";
+
+    /// <summary><paramref name="facts" /> with a set that read beyond the source's own schemas, and T14's two readings.</summary>
+    private static MaintenanceFacts Covered(MaintenanceFacts facts) => facts with
+    {
+        Coverage = WholeCoverage,
+        OwnSchemasCoverage = OwnCoverage,
+        Horizon = T14(Quiet(WholeCoverage)) with { WithinOwnSchemas = T14(Quiet(OwnCoverage)) },
+    };
+
+    /// <summary>T14's quiet result, with <paramref name="note" />.</summary>
+    private static HealthCheckResult T14(string note) => new(
+        new HealthCheckInfo("T14", HealthArea.Tables, HealthCostTier.Catalog, HealthGate.Database, "Vacuum held back", null, typeof(object)),
+        HealthCheckOutcome.Checked,
+        [],
+        note,
+        null,
+        [],
+        TimeSpan.Zero);
 
     [Fact]
     public async Task A_table_the_page_does_not_judge_is_refused_its_measure_under_BrowseDatabase()
@@ -231,8 +333,13 @@ public sealed class MaintenanceServiceTests : IAsyncDisposable
     {
         public GateState State { get; set; } = GateState.Closed;
 
+        /// <summary>How many times the gate was read.</summary>
+        public int Reads { get; private set; }
+
         public Task<DatabaseGateRead> GateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken)
         {
+            Reads++;
+
             if (State == GateState.Unreadable)
             {
                 throw new InvalidOperationException("The schema list could not be read.");

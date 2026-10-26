@@ -127,6 +127,46 @@ public class SqlConsoleReachTests
     }
 
     /// <summary>
+    /// H1, item 2 (D29): the question that lifts the nested-read rules names the store and database the scope resolved to -
+    /// the registered key and the database's identity - never the visitor's spelling. A handler that refuses <c>RunSql</c>
+    /// on the store by the name it was promised is not passed by <c>?store=DEFAULT</c> and no <c>?db=</c>: before, it was,
+    /// and the subquery went to the database.
+    /// </summary>
+    [Fact]
+    public async Task The_question_that_lifts_the_nested_read_rules_names_the_registered_key_and_the_databases_identity()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        harness.Policies.Allow(static resource =>
+            resource.Capability != nameof(StudioCapability.RunSql) || resource.StoreName != MartenStoreRegistry.DefaultStoreKey);
+
+        MartenQueryResult result = await harness.Queries.RunMartenQueryAsync(
+            new StudioScope("DEFAULT", string.Empty, null),
+            new MartenQueryRequest(Harness.Alias, "where id in (select id from public.mt_doc_somebodyelse)"),
+            Token);
+
+        result.Rejection.Should().NotBeNull("the policy refuses RunSql on the store it was asked about by its own name");
+
+        harness.Policies.Calls.Where(static x => x.Resource.Capability == nameof(StudioCapability.RunSql)).Should()
+            .NotBeEmpty()
+            .And.OnlyContain(x => x.Resource.StoreName == MartenStoreRegistry.DefaultStoreKey && x.Resource.DatabaseIdentifier == harness.Database);
+    }
+
+    /// <summary>H1, item 1: an alias the visitor typed reaches the refusal - thrown, audited and logged whole - escaped and bounded.</summary>
+    [Fact]
+    public async Task An_alias_that_names_nothing_is_refused_with_the_visitors_text_escaped()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        const string Hostile = "no\r\nsuch\u001b[2J";
+
+        Func<Task> running = () => harness.Queries.RunMartenQueryAsync(harness.Scope(null), new MartenQueryRequest(Hostile, "where 1 = 1"), Token);
+
+        string message = (await running.Should().ThrowAsync<KeyNotFoundException>()).Which.Message;
+
+        message.Should().Contain("'" + StudioLogValue.Cap(Hostile) + "'").And.NotContain("\r").And.NotContain("\u001b");
+        harness.Ring.GetLatest().Should().Contain(x => x.Message == message, "the refusal is audited in the same words");
+    }
+
+    /// <summary>
     /// The anti-vacuity half: with the database as a whole allowed, the same clause is not refused by the
     /// guard - it goes on to the connection nothing listens at.
     /// </summary>

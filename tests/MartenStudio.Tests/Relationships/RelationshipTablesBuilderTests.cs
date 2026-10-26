@@ -6,6 +6,7 @@ using MartenStudio.Tests.Database;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Relationships;
+using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Tests.Relationships;
 
@@ -173,6 +174,52 @@ public class RelationshipTablesBuilderTests
         ]);
 
         graph.VisibleSchemas.Should().NotContain(["legacy", "quartz"]);
+    }
+
+    /// <summary>
+    /// H1, item 9 (the second-pass review's finding R1): a key only the configuration declares, into another store's hidden
+    /// type - or into Marten's bookkeeping - in a schema this visitor is not shown, is dropped as its physical half is, and
+    /// not counted among "keys into schemas you are not shown": a hidden type's keys are absent from every list (D27), and
+    /// the count said one was there. A declared key into an ordinary table in that schema is still counted.
+    /// </summary>
+    [Fact]
+    public void A_declared_key_into_a_hidden_type_in_a_withheld_schema_is_dropped_and_not_counted()
+    {
+        SchemaDeclarations Declarations(params MartenDeclaredObject[] objects) =>
+            new([objects[0].Schema], [], new HashSet<string>(), new HashSet<string>(), new HashSet<string>())
+            {
+                Objects = objects.ToDictionary(static x => x.Key, StringComparer.OrdinalIgnoreCase),
+            };
+
+        DatabaseObjectClassifier classifier = new(
+            [
+                new StoreDeclarations("default", Declarations(new MartenDeclaredObject(Doc, CustomerTable, MartenObjectKind.DocumentTable, "dbcustomer"))),
+                new StoreDeclarations("vault", Declarations(new MartenDeclaredObject("secrets", "mt_doc_vaultsecret", MartenObjectKind.DocumentTable, Visible: false))),
+            ],
+            hidesDocumentTypes: true);
+
+        // Short of the browser's gate: the store's own schema only, "secrets" withheld.
+        DatabaseGate gate = new([Doc], DatabaseTestStores.LiveSchemas(), ["secrets"], capabilityEnabled: false, readOnly: false, authorized: null, classifier);
+
+        RelationshipNodeSet nodes = new(
+            [new RelationshipNode("dbcustomer", "DbCustomer", 0, DocumentCount.Unknown, false, []) { Schema = Doc, Table = CustomerTable }],
+            [],
+            [Doc]);
+
+        RelationshipDeclaredKey To(string table) =>
+            new("dbcustomer", "fk_" + table, ["ref_id"], ["id"], "NoAction") { LinkedSchema = "secrets", LinkedTable = table };
+
+        RelationshipGraph graph = RelationshipGraphBuilder.Build(
+            nodes,
+            [To("mt_doc_vaultsecret"), To("mt_hilo"), To("ledger")],
+            [],
+            ReadAt,
+            new RelationshipDatabaseView(gate, []));
+
+        graph.Withheld.Should().ContainSingle("only the key into the ordinary table is one into a schema this visitor is not shown")
+            .Which.Should().Be(new WithheldForeignKey("dbcustomer", VisibleEndIsTarget: false));
+        graph.Unmatched.Should().BeEmpty();
+        graph.Edges.Should().BeEmpty();
     }
 
     [Fact]

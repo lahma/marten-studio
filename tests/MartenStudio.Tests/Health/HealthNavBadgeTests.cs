@@ -160,9 +160,14 @@ public class HealthNavBadgeTests
             FakeProjectionDataService projections = new();
             projections.WithProjection("OrderSummary");
 
+            StudioAuthorization authorization = MartenSpine.Authorization(Options.Create(new MartenStudioOptions()), new TestStoreAuthorizationService(), users);
+            FakeStudioSourceProvider sources = new FakeStudioSourceProvider().WithSource("default", harness.Scope.DatabaseId);
+
             NavIndicatorService service = new(
                 state,
-                MartenSpine.Authorization(Options.Create(new MartenStudioOptions()), new TestStoreAuthorizationService(), users),
+                authorization,
+                sources.Resolver(authorization),
+                sources,
                 [new MartenNavIndicatorContributor(events, projections)],
                 new StudioSnapshotCache(),
                 NullLogger<NavIndicatorService>.Instance,

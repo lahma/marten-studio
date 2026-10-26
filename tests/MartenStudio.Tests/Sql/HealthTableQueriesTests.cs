@@ -264,7 +264,9 @@ public partial class HealthTableQueriesTests
 
         query.Sql.Should().NotContain("studio").And.NotContain("quartz").And.NotContain("mt_doc_order").And.Contain("limit @cap");
         query.Parameters.Select(static x => x.ParameterName).Should().BeEquivalentTo(
-            ["names", "everything", "cap", "system", "skip_documents", "document_prefix", "declared_schemas", "declared_tables"]);
+            ["names", "everything", "cap", "system", "skip_documents", "document_prefix", "declared_schemas", "declared_tables", "own"]);
+        query.Parameters.Single(static x => x.ParameterName == "own").Value.Should().BeEquivalentTo(
+            (string[]) ["studio", "quartz"], "with no own schemas named, the second total counts every named schema (G1M F6, H1)");
         query.Parameters.Single(static x => x.ParameterName == "declared_schemas").Value.Should().BeEquivalentTo(TargetSchemas);
         query.Parameters.Single(static x => x.ParameterName == "declared_tables").Value.Should().BeEquivalentTo(TargetTables);
         query.Parameters.Single(static x => x.ParameterName == "skip_documents").Value.Should().Be(true);

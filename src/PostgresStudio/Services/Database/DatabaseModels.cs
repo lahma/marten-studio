@@ -176,6 +176,19 @@ internal enum DatabaseRefusal
     /// partitions or inheritance children are in such a schema: its rows, though not its structure.
     /// </summary>
     WithheldDependency,
+
+    /// <summary>
+    /// The store policy refused this visitor the scope the address names - the store, database and tenant as asked -
+    /// so nothing of it is shown, its own structure included (H1). Unlike <see cref="StorePolicy" />, which is the policy
+    /// refusing the database as a whole while the visitor's own scope still shows its structure.
+    /// </summary>
+    /// <remarks>
+    /// <b>It enumerates nothing.</b> The policy is asked before the store or the database is looked up
+    /// (<c>DatabaseAccess.FindStoreAsync</c>, the shared resolver), so a scope it refuses gets this label and the same sentence whether or not the store and the database
+    /// exist. A scope the policy passes and that names nothing is <see cref="NotFound" />, and the resolver's own sentence
+    /// already says so: the label is taken from the same answer the sentence is, and says nothing the sentence does not.
+    /// </remarks>
+    ScopeRefused,
 }
 
 /// <summary>Whose an object is, and what that lets the page link to.</summary>

@@ -253,6 +253,104 @@ public class WholeDatabaseTableSetTests
             + "; another registered Marten store's tables are not judged here", "the other store shares the document schema");
     }
 
+    /// <summary>
+    /// G1M F6, H1: the coverage counts what the statement could list in every admitted schema, so a visitor the database
+    /// browser keeps out of the ones only <c>BrowsableSchemas</c> admits is given the same sentence counted over the
+    /// store's own schemas alone - the global cut restricted to them is their own largest - and the statement says how
+    /// many of its total those hold (<c>@own</c>).
+    /// </summary>
+    [Fact]
+    public void A_visitor_kept_out_of_the_other_schemas_is_told_only_what_the_stores_own_hold()
+    {
+        using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        using DocumentStore store = Store();
+        int declared = MartenTables.Read(Context(store, Options(), services)).Tables.Count;
+
+        // The three largest of ten, four of them in the store's own schema; the second is the one of those listed.
+        (MartenDatabaseTableSet set, MartenTableScope scope) = Build(
+            Options(),
+            [
+                Row(Legacy, "big_one", 900, total: 10) with { OwnTotal = 4 },
+                Row(StoreSchema, "own_one", 800, total: 10) with { OwnTotal = 4 },
+                Row(Legacy, "big_two", 700, total: 10) with { OwnTotal = 4 },
+            ],
+            tableCap: declared + 3);
+
+        scope.ReadsBeyondOwnSchemas.Should().BeTrue();
+
+        string cap = (declared + 3).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        set.Coverage.Should().Be(
+            "the store's " + declared + " declared tables and the 3 largest of 10 other tables by estimated size (a sweep judges at most "
+            + cap + "); another registered Marten store's tables are not judged here");
+        set.OwnSchemasCoverage.Should().Be(
+            "the store's " + declared + " declared tables and the 1 largest of 4 other tables in its own schemas by estimated size; "
+            + "another registered Marten store's tables are not judged here",
+            "nothing of what legacy holds - not even how many tables - is in the sentence its gate's refusers read; with the cap "
+            + "in it, the cap less the declared and the one own table would be the two judged in legacy (H1b)");
+        set.OwnSchemasCoverage.Should().NotContain("a sweep judges at most", "no number in the own reading adds up to the gated count");
+
+        HealthTableQueries.UndeclaredTables(scope.Names, scope.Everything, scope.Declared, scope.SkipDocumentTables, scope.Cap, own: scope.StoreSchemas)
+            .Parameters.Single(static x => x.ParameterName == "own").Value.Should().BeEquivalentTo(scope.StoreSchemas.ToArray());
+
+        // With the browser closed nothing beyond the store's own is read, and there is one reading for every visitor.
+        (MartenDatabaseTableSet closed, MartenTableScope closedScope) = Build(
+            Options(browse: false), [Row(StoreSchema, "own_one", 800, total: 9) with { OwnTotal = 9 }], tableCap: declared + 1);
+        closedScope.ReadsBeyondOwnSchemas.Should().BeFalse();
+        closed.OwnSchemasCoverage.Should().Be(closed.Coverage);
+    }
+
+    /// <summary>
+    /// G1M F6, H1: "another registered Marten store's tables are not judged here" is said only for a table that is that
+    /// store's alone. Two stores sharing a schema share the tables both declare - the same document type, <c>mt_hilo</c> - and
+    /// those are judged here as the swept store's; and a hidden type's table is absent from every list, so it never makes
+    /// the sentence say that something is left out.
+    /// </summary>
+    [Fact]
+    public void Another_store_is_said_to_be_left_out_only_for_a_table_that_is_its_alone_and_visible()
+    {
+        // The same document types in the same schema: every table it declares is the swept store's too.
+        MartenTableScope twin = BuildWith(Options(), static () => DocumentStore.For(options =>
+        {
+            options.Connection(SqlTestStore.Unreachable);
+            options.DatabaseSchemaName = StoreSchema;
+            options.Events.DatabaseSchemaName = EventSchema;
+            options.Schema.For<HealthOrderDoc>();
+            options.Schema.For<HealthIntDoc>();
+        }));
+
+        twin.OtherStoresDeclareHere.Should().BeFalse("a table the swept store declares is judged here, whoever else declares it");
+        twin.OtherStoresDeclareInOwnSchemas.Should().BeFalse();
+
+        // Its only table of its own a hidden type's, in a schema the read admits; its event tables are the swept store's.
+        MartenStudioOptions hiding = Options();
+        hiding.IsDocumentTypeVisible = static type => type != typeof(HealthOrderDoc);
+
+        MartenTableScope hidden = BuildWith(hiding, static () => DocumentStore.For(options =>
+        {
+            options.Connection(SqlTestStore.Unreachable);
+            options.DatabaseSchemaName = Legacy;
+            options.Events.DatabaseSchemaName = EventSchema;
+            options.Schema.For<HealthOrderDoc>();
+        }));
+
+        hidden.OtherStoresDeclareHere.Should().BeFalse("a hidden type's table is never said to be there (D27)");
+
+        // The anti-vacuity half: the fixture's other store has a visible table of its own in the shared schema.
+        Build(Options(), []).Scope.OtherStoresDeclareHere.Should().BeTrue();
+    }
+
+    /// <summary>The scope a sweep would read with, the swept store's and <paramref name="other" />'s declarations read.</summary>
+    private static MartenTableScope BuildWith(MartenStudioOptions options, Func<DocumentStore> other)
+    {
+        using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        using DocumentStore store = Store();
+        using DocumentStore second = other();
+
+        MartenTableSet declared = MartenTables.Read(Context(store, options, services));
+        DatabaseObjectClassifier classifier = Classifier(options, ("default", store), ("other", second));
+        return MartenTableScope.For(declared, classifier, MartenStudioSettings.Of(options), "default", MartenHealthTableSource.TableCap);
+    }
+
     [Fact]
     public void Another_stores_tables_are_left_out_and_the_coverage_says_so_without_naming_them()
     {

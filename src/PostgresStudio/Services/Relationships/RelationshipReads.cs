@@ -268,15 +268,29 @@ internal sealed class RelationshipReads
 
     /// <summary>
     /// A failure as the page shows it, Postgres' own words masked through the visitor's gate when it was read
-    /// (<see cref="PostgresErrorText" />); before it was, what failed was the scope or the gate itself.
+    /// (<see cref="PostgresErrorText" />) - and withheld, with only the SQLSTATE said, when it was not: a scope that
+    /// failed to resolve in the database (a dynamic tenancy's list, tenant discovery), or a key read after the gate could
+    /// not be read, can carry a schema's name, and with no gate there is nothing to mask it with (D27's rule for the Schema
+    /// screen; H1). The studio's own sentences - a refused scope, one that names nothing - are said as they are.
     /// </summary>
     internal static string Describe(Exception exception, DatabaseGate? gate)
     {
+        if (gate is null && exception is PostgresException withheld)
+        {
+            return withheld.SqlState + ": Postgres refused a read. Its own words are withheld: the schemas they may name "
+                + "could not be checked for you.";
+        }
+
         string message = exception switch
         {
             PostgresException postgres => $"{postgres.SqlState}: {postgres.MessageText}",
             NpgsqlException => "The database could not be reached: " + exception.Message,
-            _ => exception.Message,
+
+            // The studio's own sentences, which put whatever they quote through StudioLogValue already.
+            KeyNotFoundException or StudioNotAuthorizedException or StudioStoreUnavailableException => exception.Message,
+
+            // Anything else may be a host's words - its IPostgresDatabaseSource's list threw it - and is escaped and bounded (H1b).
+            _ => StudioLogValue.CapText(exception.Message),
         };
 
         return gate is null ? message : PostgresErrorText.Redact(message, gate.WithheldSchemas) ?? message;

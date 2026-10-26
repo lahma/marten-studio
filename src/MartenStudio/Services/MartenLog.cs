@@ -23,7 +23,8 @@ internal static partial class MartenLog
     // Wave 6: 9206, 9207 and 9209 name the user, whose name is the host's identity's and can be shaped by a visitor, and the
     // scope, so a site writes them only through the wrappers below, which escape and bound both (StudioLogValue.Cap) as the
     // shared audit dispatchers do; the generated templates are the *Raw methods, which RefusalLogValuesTests lets nothing
-    // but these wrappers call.
+    // but these wrappers call. H1: 9207's projection and 9209's operation and target too - a shard a circuit names reaches
+    // 9209 before the daemon has looked it up.
 
     [LoggerMessage(EventId = 9206, Level = LogLevel.Information, Message = "Marten Studio user {User} applied schema changes to store {StoreKey}, database {DatabaseId}: {Summary}")]
     public static partial void SchemaChangeAppliedRaw(this ILogger logger, string user, string storeKey, string databaseId, string summary);
@@ -44,17 +45,27 @@ internal static partial class MartenLog
         logger.SchemaChangeAppliedRaw(user, storeKey, databaseId, summary);
     }
 
-    /// <summary>9207, with the user's name and the scope escaped and bounded.</summary>
+    /// <summary>9207, with the user's name, the projection and the scope escaped and bounded.</summary>
     public static void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId)
     {
-        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        (user, projection, storeKey, databaseId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(projection), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
         logger.ProjectionRebuildStartedRaw(user, projection, storeKey, databaseId);
     }
 
-    /// <summary>9209, with the user's name and the scope escaped and bounded.</summary>
+    /// <summary>9209, with the user's name, the operation, its target and the scope escaped and bounded.</summary>
+    /// <remarks>
+    /// The target is what the circuit named: a shard an agent control was asked for is the visitor's text until the daemon
+    /// has looked it up, and the line is written before it does - so it is bounded and escaped like the scope (H1).
+    /// </remarks>
     public static void DaemonControlRequested(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId)
     {
-        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        (user, operation, target, storeKey, databaseId) = (
+            StudioLogValue.Cap(user),
+            StudioLogValue.Cap(operation),
+            StudioLogValue.Cap(target),
+            StudioLogValue.Cap(storeKey),
+            StudioLogValue.Cap(databaseId));
         logger.DaemonControlRequestedRaw(user, operation, target, storeKey, databaseId);
     }
 

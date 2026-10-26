@@ -78,6 +78,20 @@ internal interface INavIndicatorService
 /// nobody could read: a visitor who may not see a database learns nothing from the difference.
 /// </para>
 /// <para>
+/// <b>Asked, and cached, by the names a policy knows</b> (D29, H1b). The policy is asked about the scope as it is spelt
+/// and again by the registered key and the database's own identity, as <see cref="StudioSourceResolver" /> asks it, and the
+/// entry is keyed on those names. Keyed and asked by the spelling, one visitor's answer for <c>?store=DEFAULT</c> was every
+/// later visitor's who spelt it so - one whose question by the registered names a policy refuses included - and a link with
+/// no <c>?db=</c> was an entry of its own that a write's invalidation by the identity never reached.
+/// </para>
+/// <para>
+/// <b>Named once a minute, asked every time.</b> Which registered names a spelling stands for is found by resolving the
+/// scope, which enumerates the source's databases - on a master-table or sharded tenancy a read of its lookup table - so the
+/// answer is a fact about the source this circuit remembers for <see cref="NamingTimeToLive" />, and reads again when the
+/// scope selector's refresh moves <see cref="IStudioSourceProvider.Generation" />, as the health glance remembers where a
+/// tenant is. The policy's two questions are this visitor's, and asked on every call.
+/// </para>
+/// <para>
 /// The contributors' answer goes through <see cref="StudioSnapshotCache" /> under one key (plan D10): the navigation
 /// is on every page, so without it a studio open in five tabs would run each contributor's reads once per tab per
 /// interval. The cache's time-to-live is about a second, well under the polling interval, so a badge is never more
@@ -95,36 +109,52 @@ internal interface INavIndicatorService
 /// </remarks>
 internal sealed class NavIndicatorService : INavIndicatorService
 {
+    /// <summary>How long this circuit trusts which registered names a spelling stands for before resolving it again.</summary>
+    internal static readonly TimeSpan NamingTimeToLive = TimeSpan.FromMinutes(1);
+
     private readonly StudioState state;
     private readonly StudioAuthorization authorization;
+    private readonly StudioSourceResolver resolver;
+    private readonly IStudioSourceProvider sources;
     private readonly IReadOnlyList<INavIndicatorContributor> contributors;
     private readonly StudioSnapshotCache cache;
     private readonly ILogger<NavIndicatorService> logger;
     private readonly IHealthService? health;
     private readonly StudioProduct product;
+    private readonly TimeProvider time;
+
+    /// <summary>The last spelling this circuit resolved, and the registered names it stands for.</summary>
+    private Naming? naming;
 
     /// <remarks>
-    /// <paramref name="health" /> and <paramref name="settings" /> are optional so that a test of the contributed
-    /// badges can build this by hand; the container always supplies both.
+    /// <paramref name="health" />, <paramref name="settings" /> and <paramref name="timeProvider" /> are optional so that a
+    /// test of the contributed badges can build this by hand; the container always supplies the first two.
+    /// <paramref name="resolver" /> must be over <paramref name="sources" />, as the container's circuit-scoped ones are.
     /// </remarks>
     public NavIndicatorService(
         StudioState state,
         StudioAuthorization authorization,
+        StudioSourceResolver resolver,
+        IStudioSourceProvider sources,
         IEnumerable<INavIndicatorContributor> contributors,
         StudioSnapshotCache cache,
         ILogger<NavIndicatorService> logger,
         IHealthService? health = null,
-        IStudioSettings? settings = null)
+        IStudioSettings? settings = null,
+        TimeProvider? timeProvider = null)
     {
         product = StudioText.Of(settings).Product;
         ArgumentNullException.ThrowIfNull(contributors);
 
         this.state = state;
         this.authorization = authorization;
+        this.resolver = resolver;
+        this.sources = sources;
         this.contributors = [.. contributors];
         this.cache = cache;
         this.logger = logger;
         this.health = health;
+        time = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -139,16 +169,20 @@ internal sealed class NavIndicatorService : INavIndicatorService
         try
         {
             // Before the cache, never inside it: a hit skips the factory, and the factory is where the contributors'
-            // services would have resolved the scope and applied the policies.
-            if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
+            // services would have resolved the scope and applied the policies. Asked by the spelling and by the registered
+            // key and the database's identity, and the entry keyed on the latter: a visitor's answer is then only ever handed
+            // to one whose question by those names passed too (D29, H1b).
+            if (await NamedAsync(scope, cancellationToken).ConfigureAwait(false) is not { } named)
             {
                 return NavIndicators.None;
             }
 
             NavIndicators indicators = await cache
-                .GetAsync(CacheKey(scope), token => ReadUncachedAsync(scope, token), cancellationToken)
+                .GetAsync(CacheKey(named), token => ReadUncachedAsync(named, token), cancellationToken)
                 .ConfigureAwait(false);
 
+            // The glance is read outside the cache and through its own gates, with the circuit's own scope: its stamp is what
+            // the Critical toast compares with the scope the sidebar is on.
             return health is null
                 ? indicators
                 : indicators with { Health = await GlanceAsync(health, scope, cancellationToken).ConfigureAwait(false) };
@@ -220,9 +254,55 @@ internal sealed class NavIndicatorService : INavIndicatorService
     }
 
     /// <summary>
-    /// One key per scope, and the same shape the other services use so the cache's prefix invalidation
-    /// reaches it when anything in that scope is changed.
+    /// <paramref name="scope" /> by the registered key and the database's identity (<see cref="StudioSourceResolver.Named" />),
+    /// with the store policy asked about both spellings - or <see langword="null" /> when either is refused.
     /// </summary>
-    private static string CacheKey(StudioScope scope) =>
-        scope.StoreKey + "|" + scope.DatabaseId + "|" + (scope.TenantId ?? string.Empty) + "|nav-indicators";
+    /// <remarks>
+    /// The first time, or once <see cref="NamingTimeToLive" /> has passed or the provider's generation has moved, the scope is
+    /// resolved - which asks both questions itself - and what it named is remembered. Otherwise the two questions are asked
+    /// here, in the resolver's order, and nothing is enumerated. Throws what resolving throws but a refusal: a scope that names
+    /// nothing is the caller's failure to log.
+    /// </remarks>
+    private async Task<StudioScope?> NamedAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        long generation = sources.Generation;
+
+        if (naming is { } known && known.Spelled == scope && known.Generation == generation && now - known.ReadAt < NamingTimeToLive)
+        {
+            if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            return known.Named == scope || await authorization.IsAuthorizedAsync(known.Named, capability: null, cancellationToken).ConfigureAwait(false)
+                ? known.Named
+                : null;
+        }
+
+        try
+        {
+            ResolvedSource resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+            StudioScope named = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target);
+
+            naming = new Naming(scope, named, generation, now);
+            return named;
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A spelling of a scope, the registered names it stood for when it was resolved, and when that was.</summary>
+    private sealed record Naming(StudioScope Spelled, StudioScope Named, long Generation, DateTimeOffset ReadAt);
+
+    /// <summary>
+    /// One key per scope, by the registered key and the database's identity (<paramref name="named" />) - the shape the other
+    /// services key on, so the cache's prefix invalidation reaches it when anything in that database is changed: a projection
+    /// write invalidates <c>Key|Identity|</c> (MartenStudio's <c>ProjectionDataService</c>), every tenant's entry with it.
+    /// </summary>
+    /// <param name="named">The scope as <see cref="StudioSourceResolver.Named" /> spells it.</param>
+    internal static string CacheKey(StudioScope named) =>
+        named.StoreKey + "|" + named.DatabaseId + "|" + (named.TenantId ?? string.Empty) + "|nav-indicators";
 }

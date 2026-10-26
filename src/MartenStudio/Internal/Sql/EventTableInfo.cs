@@ -2,6 +2,7 @@ using JasperFx.Events;
 
 using NpgsqlTypes;
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 
 namespace MartenStudio.Internal.Sql;
 
@@ -141,7 +142,7 @@ internal sealed record EventTableInfo
 
         return Guid.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture, out var guid)
             ? IdParseResult.Ok(guid)
-            : IdParseResult.Failed($"'{trimmed}' is not a GUID, and this store's streams are identified by GUID.");
+            : IdParseResult.Failed($"'{StudioLogValue.Cap(trimmed)}' is not a GUID, and this store's streams are identified by GUID.");
     }
 
     private static bool Contains(IReadOnlyCollection<string> columns, string column)

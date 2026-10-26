@@ -68,7 +68,8 @@ internal sealed class MartenHealthTableSource : IHealthTableSource
                 .Shared(
                     UndeclaredTablesKey,
                     token => context.Sql.QueryAsync(
-                        HealthTableQueries.UndeclaredTables(scope.Names, scope.Everything, scope.Declared, scope.SkipDocumentTables, scope.Cap),
+                        HealthTableQueries.UndeclaredTables(
+                            scope.Names, scope.Everything, scope.Declared, scope.SkipDocumentTables, scope.Cap, own: scope.StoreSchemas),
                         HealthTableQueries.ReadRelationalTable,
                         token))
                 .ConfigureAwait(false)

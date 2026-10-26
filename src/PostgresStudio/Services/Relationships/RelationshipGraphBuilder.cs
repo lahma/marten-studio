@@ -457,19 +457,22 @@ internal static class RelationshipGraphBuilder
                     continue;
                 }
 
-                if (!canSee(linkedSchema))
-                {
-                    withheld.Add(new WithheldForeignKey(source.Alias, VisibleEndIsTarget: false));
-                    continue;
-                }
-
                 // Classified without being registered: a key only the configuration declares says nothing
                 // about whether its table exists, and a node for a table that is not there would be a
-                // box on the picture for nothing.
+                // box on the picture for nothing. And classified before it is counted as withheld, as a
+                // physical key is: hidden is hidden in every schema, so a key into another store's hidden type
+                // - or into Marten's bookkeeping - in a schema this visitor is not shown is dropped, never
+                // counted (H1: it was counted, where the same key's physical half was dropped).
                 End end = Resolve(linkedSchema, linkedTable, register: false);
 
                 if (end.Kind is EndKind.Hidden or EndKind.Bookkeeping)
                 {
+                    continue;
+                }
+
+                if (!canSee(linkedSchema))
+                {
+                    withheld.Add(new WithheldForeignKey(source.Alias, VisibleEndIsTarget: false));
                     continue;
                 }
 

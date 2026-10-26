@@ -16,6 +16,7 @@ using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Services.Query;
 
@@ -182,9 +183,10 @@ internal sealed class QueryService : IQueryService
         {
             // An alias that is not there - or one the host's IsDocumentTypeVisible hides - is a failed run,
             // not a silent one: typing an alias into the URL is exactly how somebody looks for a collection
-            // they were not offered.
+            // they were not offered. Both names are the visitor's text, so they go into the sentence - which is
+            // thrown, audited and logged whole - escaped and bounded (H1).
             string missing =
-                $"Marten store '{scope.StoreKey}' has no visible document type with alias '{request.Alias}'.";
+                $"Marten store '{StudioLogValue.Cap(scope.StoreKey)}' has no visible document type with alias '{StudioLogValue.Cap(request.Alias)}'.";
 
             audit.Record(MartenQueryAction, target, succeeded: false, missing, null, scope);
             logger.SqlRejected(StudioProduct.MartenStudio, user, scope.StoreKey, scope.DatabaseId, missing, clause);
@@ -202,7 +204,10 @@ internal sealed class QueryService : IQueryService
         // a statement of its own, balanced brackets, a placeable tail, and the function denylist - holds
         // either way. The read-only transaction below is the second boundary, not a replacement for this
         // one: it refuses writes, and an advisory lock or a `setval` is not a write.
-        bool mayRunSql = await MayRunSqlAsync(scope, cancellationToken).ConfigureAwait(false);
+        // Asked about the store and database the scope resolved to, by the registered key and the database's own identity,
+        // never the visitor's spelling (D29, H1): this answer lifts a guard, and the console's own run asks by those names.
+        bool mayRunSql = await MayRunSqlAsync(StudioSourceResolver.Named(scope, resolved.Source, resolved.Target), cancellationToken)
+            .ConfigureAwait(false);
         SqlGuardResult clauseGuard = QuerySqlComposer.CheckClause(request.WhereClause, mayRunSql);
 
         if (!clauseGuard.Allowed)
