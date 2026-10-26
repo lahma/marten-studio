@@ -8,11 +8,20 @@ namespace PostgresStudio.Services;
 // for MartenStudio, exactly as it always was, and PostgresStudioLog's for Postgres Studio (whose remarks say why there are
 // two). An event whose level is a parameter has no dispatcher: its site calls both forms itself, because LogLevelsTests
 // follows the level from the call. None of these is a [LoggerMessage], so this class still declares each id once.
+//
+// Wave 6: the audit and refusal dispatchers (9200-9205, 9235, 9236, 9245) are the one way a site writes those events, and
+// each takes every value a visitor could have shaped - the user's name, the scope the address asked for, a target, a reason,
+// a statement - through StudioLogValue: escaped and bounded, so a refused ?store= cannot write a log line of any length or a
+// second, forged one. Constants (an action's name, a capability, an option, a policy's name) go as they are.
+// RefusalLogValuesTests holds every site to the dispatchers and every dispatcher to the caps.
 internal static partial class StudioLog
 {
     /// <summary>9200 in the studio's own words.</summary>
     public static void ActionPerformed(this ILogger logger, StudioProduct product, string user, string action, string target, string storeKey, string databaseId, string tenantId, string outcome)
     {
+        (user, target, storeKey, databaseId, tenantId, outcome) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(target), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.Cap(tenantId), StudioLogValue.CapText(outcome));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioActionPerformed(user, action, target, storeKey, databaseId, outcome);
@@ -26,6 +35,9 @@ internal static partial class StudioLog
     /// <summary>9201 in the studio's own words.</summary>
     public static void ActionFailed(this ILogger logger, StudioProduct product, string user, string action, string target, string storeKey, string databaseId, string tenantId, string? reason)
     {
+        (user, target, storeKey, databaseId, tenantId, reason) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(target), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.Cap(tenantId), StudioLogValue.CapText(reason));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioActionFailed(user, action, target, storeKey, databaseId, reason);
@@ -39,6 +51,8 @@ internal static partial class StudioLog
     /// <summary>9202 in the studio's own words.</summary>
     public static void CapabilityDenied(this ILogger logger, StudioProduct product, string user, string capability, string option)
     {
+        user = StudioLogValue.Cap(user);
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioCapabilityDenied(user, capability, option);
@@ -52,6 +66,9 @@ internal static partial class StudioLog
     /// <summary>9203 in the studio's own words.</summary>
     public static void ScopeAuthorizationDenied(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, string tenantId, string policy)
     {
+        (user, storeKey, databaseId, tenantId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.Cap(tenantId));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioScopeAuthorizationDenied(user, storeKey, databaseId, policy);
@@ -65,6 +82,9 @@ internal static partial class StudioLog
     /// <summary>9204 in the studio's own words.</summary>
     public static void SqlExecuted(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, long elapsedMilliseconds, int rowCount, string sql)
     {
+        (user, storeKey, databaseId, sql) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.CapText(sql));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioSqlExecuted(user, storeKey, databaseId, elapsedMilliseconds, rowCount, sql);
@@ -78,6 +98,9 @@ internal static partial class StudioLog
     /// <summary>9205 in the studio's own words.</summary>
     public static void SqlRejected(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, string reason, string sql)
     {
+        (user, storeKey, databaseId, reason, sql) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.CapText(reason), StudioLogValue.CapText(sql));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioSqlRejected(user, storeKey, databaseId, reason, sql);
@@ -104,6 +127,9 @@ internal static partial class StudioLog
     /// <summary>9235 in the studio's own words.</summary>
     public static void TableRowsRead(this ILogger logger, StudioProduct product, string user, string action, string relation, string storeKey, string databaseId, string filter, string sort)
     {
+        (user, relation, storeKey, databaseId, filter, sort) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(relation), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.CapText(filter), StudioLogValue.CapText(sort));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioTableRowsRead(user, action, relation, storeKey, databaseId, filter, sort);
@@ -117,6 +143,9 @@ internal static partial class StudioLog
     /// <summary>9236 in the studio's own words.</summary>
     public static void TableRowOpened(this ILogger logger, StudioProduct product, string user, string action, string relation, string storeKey, string databaseId, string key)
     {
+        (user, relation, storeKey, databaseId, key) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(relation), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.CapText(key));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioTableRowOpened(user, action, relation, storeKey, databaseId, key);
@@ -130,6 +159,8 @@ internal static partial class StudioLog
     /// <summary>9245 in the studio's own words.</summary>
     public static void SessionDetailsRead(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, int sessions, int locks, int prepared)
     {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioSessionDetailsRead(user, storeKey, databaseId, sessions, locks, prepared);
