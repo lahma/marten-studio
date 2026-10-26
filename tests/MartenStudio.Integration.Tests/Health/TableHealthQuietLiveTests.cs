@@ -16,7 +16,7 @@ namespace MartenStudio.Integration.Tests.Health;
 /// </summary>
 public class TableHealthQuietLiveTests(PostgresFixture postgres)
 {
-    private static readonly string[] TableCodes = ["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12"];
+    private static readonly string[] TableCodes = ["T01", "T03", "T04", "T05", "T06", "T07", "T08", "T09", "T10", "T11", "T12", "T16", "T24"];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -36,6 +36,8 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
     [HealthQuiet("T10")]
     [HealthQuiet("T11")]
     [HealthQuiet("T12")]
+    [HealthQuiet("T16")]
+    [HealthQuiet("T24")]
     public async Task The_seeded_sample_store_is_quiet_on_every_table_and_index_check()
     {
         ManualClock clock = new(Start);

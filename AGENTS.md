@@ -1276,6 +1276,9 @@ src/PostgresStudio/Components/Pages/Maintenance/  The Maintenance page: autovacu
                                          maintenance, the workers, the freeze forecast and the vacuum horizon
 src/PostgresStudio/wwwroot/css/parts/    W5 CSS parts, one per packet: folded into studio.css in D26 order, then
                                          deleted, by the orchestrator - parts/ never reaches main
+tests/PostgresStudio.Integration.Tests/Maintenance/  Live Postgres on autovacuum servers of their own: T07 against
+                                         each table's triggers, T08, T16, T24, S02, the bloat measure, C06's VACUUM
+                                         at the head and T14's standby through a slot
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
