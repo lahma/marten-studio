@@ -124,11 +124,14 @@
   fails on `mt_events`' primary key (judged for any store with events). These are what a sequence reset, a restore
   from mixed points in time or a logical-replication cut-over leaves behind. The remedies are the projections screen's
   Correct progression (Marten's `TryCorrectProgressInDatabaseAsync`) for a mark ahead - and once that has done all it
-  can after a `RESTART`, a DBA's `setval` moving the sequence on by one, because the next event appended would
-  otherwise be treated as processed; a rebuild (which empties the projection's tables first) or a rewind to the
-  highest number handed out for a lone shard; and a DBA's `setval` for the sequence. It is not checked under
-  `UseTenantPartitionedEvents`. The high-water read adds one backward primary-key probe of `mt_events` and reads the
-  sequence's `last_value`.
+  can after a `RESTART`, a DBA's `setval` to the greater of the mark and `max(seq_id)`, made only while the sequence
+  still reads `is_called = false`, because the next event appended would otherwise be treated as processed (where the
+  events already reach the mark, the sequence-behind repair does both: one repair, not two); a rebuild (which empties
+  the projection's tables first) or a rewind to the lower of the mark and the highest number handed out for a lone
+  shard; and a DBA's `setval` to the greater of `max(seq_id)` and the mark for the sequence. Each `setval` is shown as a
+  statement that reads its target when it runs and only moves the sequence forward, so pasting it later is as safe as
+  running it at once. It is not checked under `UseTenantPartitionedEvents`. The high-water read adds one backward
+  primary-key probe of `mt_events`, and reads the sequence's `last_value` and `is_called` once.
 
 # 0.4.0
 
