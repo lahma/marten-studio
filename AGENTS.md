@@ -1435,7 +1435,9 @@ There are seven kinds of test, in two projects:
    `app`/`probe`/`stats`/`mon` roles; `VersionMatrixLiveTests` runs the shared studio's regular and statement checks,
    every `MatrixReads` read, the held-lock read and the gate table on each (MartenStudio's checks are not in the
    matrix). Six containers, about 30 s for the folder with the images local, plus a ~110 MB pull per image on a cold
-   CI runner. A W5 packet appends its facts reads to `MatrixReads`.
+   CI runner. A W5 packet appends its facts reads to `MatrixReads`. A test that creates, grants or alters a role on the
+   matrix takes `PostgresVersionMatrix.IsolatedServerAsync`, never `ServerAsync`: roles are the cluster's, and the
+   matrix's no-DDL fingerprint lists them.
    Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19).
