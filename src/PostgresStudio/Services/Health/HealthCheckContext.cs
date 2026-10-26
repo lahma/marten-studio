@@ -230,6 +230,28 @@ internal sealed class HealthSweepMemo
         return false;
     }
 
+    /// <summary>
+    /// Every shared read of the sweep that finished with an answer, by key - what the sweep keeps beside its results so that
+    /// a page's facts read (the Maintenance page's, W5-V1) reuses the sweep's reads rather than reading again (W5 §2.3).
+    /// </summary>
+    internal IReadOnlyDictionary<string, object> Completed()
+    {
+        Dictionary<string, object> completed = new(StringComparer.Ordinal);
+
+        lock (gate)
+        {
+            foreach ((string key, Entry entry) in entries)
+            {
+                if (entry.Work is { IsValueCreated: true } work && work.Value.IsCompletedSuccessfully && work.Value.Result is { } answer)
+                {
+                    completed[key] = answer;
+                }
+            }
+        }
+
+        return completed;
+    }
+
     /// <summary>The shared read for <paramref name="key" />: started by the first caller, awaited by every one.</summary>
     public async Task<T> GetAsync<T>(string key, HealthSqlRunner caller, Func<CancellationToken, Task<T>> read, CancellationToken sweepToken)
     {

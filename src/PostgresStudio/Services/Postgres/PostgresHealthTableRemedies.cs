@@ -163,6 +163,21 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
             : null;
     }
 
+    // ---- W5-V1 ---------------------------------------------------------------------------------------------------------
+
+    /// <inheritdoc />
+    public HealthRemedy? ReenableToastAutovacuum(StudioTable table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        return IsRelational(table) && MigrationSqlText.ResetToastStorageParameter(table.Schema, table.Table, "autovacuum_enabled") is { } sql
+            ? HealthRemedy.ForMigration(
+                sql,
+                "Switches autovacuum back on for the table's TOAST table, which holds its large values: RESET returns "
+                + "toast.autovacuum_enabled to the server's setting. On a partitioned table, reset it on each partition.")
+            : null;
+    }
+
     /// <summary>
     /// Whether a migration statement fits <paramref name="table" /> at all: a relational table that is not named like
     /// Marten's, whose configuration would undo it.

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using Npgsql;
 
 using NpgsqlTypes;
@@ -165,8 +167,142 @@ internal sealed record HealthTableRow
     /// <summary>The server's <c>server_version_num</c>.</summary>
     public int ServerVersion { get; init; } = 170_000;
 
+    /// <summary>
+    /// <c>idx_tup_fetch</c>: the live rows index scans fetched - which, beside <see cref="SequentialRowsRead" />, says a
+    /// table whose statistics never existed is read (T08's <c>never-analysed</c>, issue #8 G2).
+    /// </summary>
+    public long? IndexRowsFetched { get; init; }
+
+    /// <summary>
+    /// Autovacuum's dead-row decision (<c>n_dead_tup</c> against its trigger) for the table - or, for a partitioned table,
+    /// for the partition furthest past its own - or <see langword="null" /> when the statistics collector has no row.
+    /// </summary>
+    public AutovacuumUnit? Vacuum { get; init; }
+
+    /// <summary>
+    /// Autovacuum's insert decision (<c>n_ins_since_vacuum</c> against its trigger), likewise - or <see langword="null" />
+    /// also when the insert trigger is switched off (<c>autovacuum_vacuum_insert_threshold = -1</c>).
+    /// </summary>
+    public AutovacuumUnit? Insert { get; init; }
+
+    /// <summary>Autovacuum's analyze decision (<c>n_mod_since_analyze</c> against its trigger), likewise.</summary>
+    public AutovacuumUnit? Analyze { get; init; }
+
+    /// <summary>
+    /// <c>autovacuum_vacuum_max_threshold</c> as it applies to the table (its storage parameter, else the setting) on
+    /// PostgreSQL 18 and later - the cap on the dead-row trigger - or <see langword="null" /> where it does not exist or is
+    /// <c>-1</c>; for a partitioned table, the furthest-behind partition's.
+    /// </summary>
+    public double? VacuumMaxThreshold { get; init; }
+
+    /// <summary>
+    /// The share of the table's pages not all-frozen (<c>1 - relallfrozen / relpages</c>, PostgreSQL 18), which scales the
+    /// insert trigger there; 1 before 18 and while nothing is frozen. The insert decision's own partition for a partitioned
+    /// table.
+    /// </summary>
+    public double UnfrozenShare { get; init; } = 1;
+
+    /// <summary>How many of its leaves - itself, for an ordinary table - have more dead rows than their vacuum trigger.</summary>
+    public int PastVacuumTrigger { get; init; }
+
+    /// <summary>How many of its leaves have more inserts since their last vacuum than their insert trigger.</summary>
+    public int PastInsertTrigger { get; init; }
+
+    /// <summary>How many of its leaves have more modifications since their last analyze than their analyze trigger.</summary>
+    public int PastAnalyzeTrigger { get; init; }
+
+    /// <summary>How many of its leaves - itself, for an ordinary table - have <c>autovacuum_enabled = false</c>. Never their names.</summary>
+    public int AutovacuumOffLeaves { get; init; }
+
+    /// <summary>How many of its leaves' TOAST tables have <c>autovacuum_enabled = false</c> (<c>toast.autovacuum_enabled</c>).</summary>
+    public int ToastAutovacuumOffLeaves { get; init; }
+
+    /// <summary>How many of its leaves have never been analysed (<c>reltuples &lt; 0</c>, no analyze of either kind).</summary>
+    public int UnanalyzedLeaves { get; init; }
+
+    /// <summary>The live rows (<c>n_live_tup</c>) of those leaves.</summary>
+    public long UnanalyzedLiveRows { get; init; }
+
+    /// <summary>The rows read from those leaves since the counters began (<c>seq_tup_read + idx_tup_fetch</c>).</summary>
+    public long UnanalyzedRowsRead { get; init; }
+
+    /// <summary>
+    /// A partitioned table's own <c>reltuples</c> - <c>-1</c> until somebody runs <c>ANALYZE</c> on the parent itself,
+    /// which autovacuum never does (B0 §8c) - or <see langword="null" /> for an ordinary table.
+    /// </summary>
+    public long? ParentEstimatedRows { get; init; }
+
+    /// <summary>The TOAST table's storage parameters (<c>toast.autovacuum_enabled</c> and the rest), for an ordinary table.</summary>
+    public IReadOnlyList<string> ToastStorageOptions { get; init; } = [];
+
+    /// <summary><c>vacuum_count</c>, summed over the partitions.</summary>
+    public long? VacuumCount { get; init; }
+
+    /// <summary><c>autovacuum_count</c>, summed over the partitions.</summary>
+    public long? AutovacuumCount { get; init; }
+
+    /// <summary><c>analyze_count</c>, summed over the partitions.</summary>
+    public long? AnalyzeCount { get; init; }
+
+    /// <summary><c>autoanalyze_count</c>, summed over the partitions.</summary>
+    public long? AutoanalyzeCount { get; init; }
+
+    /// <summary>
+    /// <c>total_vacuum_time</c> plus <c>total_autovacuum_time</c> in milliseconds, summed over the partitions (PostgreSQL 18),
+    /// or <see langword="null" /> before 18.
+    /// </summary>
+    public double? TotalVacuumMilliseconds { get; init; }
+
+    /// <summary><c>total_analyze_time</c> plus <c>total_autoanalyze_time</c>, likewise.</summary>
+    public double? TotalAnalyzeMilliseconds { get; init; }
+
+    /// <summary>The server's <c>track_counts</c>: without it autovacuum has nothing to decide by.</summary>
+    public bool TrackCounts { get; init; } = true;
+
+    /// <summary>
+    /// How many <c>VACUUM</c>s running in this database the reading role cannot see the table of
+    /// (<c>pg_stat_progress_vacuum.relid</c> null): every autovacuum, without <c>pg_read_all_stats</c> (B0 §7c), so "not
+    /// being vacuumed now" cannot be told while there is one.
+    /// </summary>
+    public int UnseenVacuums { get; init; }
+
     /// <summary>The key the history and the findings name this table by.</summary>
     public string Key => Schema + "." + Table;
+}
+
+/// <summary>
+/// One of autovacuum's three decisions about one table, as <c>relation_needs_vacanalyze</c> makes it (B0 §7a, proved live in
+/// §7b): a counter against a trigger, compared strictly (<c>&gt;</c>).
+/// </summary>
+/// <remarks>
+/// For a partitioned table it is the decision about the leaf partition whose counter is furthest past twice its own trigger
+/// - autovacuum judges each partition alone and never the parent - and that partition is never named.
+/// </remarks>
+internal sealed record AutovacuumUnit
+{
+    /// <summary><c>n_dead_tup</c>, <c>n_ins_since_vacuum</c> or <c>n_mod_since_analyze</c>.</summary>
+    public long Counter { get; init; }
+
+    /// <summary>The trigger the counter must pass: <c>threshold + scale_factor × reltuples</c>, with 18's cap and unfrozen share.</summary>
+    public double Trigger { get; init; }
+
+    /// <summary>The base threshold in force: the table's storage parameter, else the server's setting.</summary>
+    public double Threshold { get; init; }
+
+    /// <summary>The scale factor in force, likewise.</summary>
+    public double ScaleFactor { get; init; }
+
+    /// <summary>The <c>reltuples</c> the trigger scales by - <c>-1</c> (never vacuumed or analysed) counted as 0.</summary>
+    public double Tuples { get; init; }
+
+    /// <summary>The unit's own latest vacuum of either kind (for the two vacuum decisions) or analyze (for the third).</summary>
+    public DateTimeOffset? Last { get; init; }
+
+    /// <summary>Whether <c>pg_stat_progress_vacuum</c> names the unit: a <c>VACUUM</c> of it is running now.</summary>
+    public bool Running { get; init; }
+
+    /// <summary>Whether autovacuum would act now: the counter strictly past the trigger.</summary>
+    public bool Due => Counter > Trigger;
 }
 
 /// <summary>One index on a Marten table - what <see cref="HealthTableQueries.Indexes" /> reads.</summary>
@@ -333,8 +469,27 @@ internal static class HealthTableQueries
     /// <summary>
     /// The listed tables, rolled up: sizes from <c>relpages</c>, the collector's counters summed over the
     /// partitions, the latest maintenance times, the oldest transaction-id age, the storage parameters, and
-    /// the database-wide facts the evaluators need beside each row.
+    /// the database-wide facts the evaluators need beside each row - and autovacuum's own three decisions about each
+    /// table (issue #8 G2).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The triggers are autovacuum's own</b> (B0 §7a, proved against autovacuum itself in §7b): for every ordinary table
+    /// and every leaf partition, the dead-row trigger <c>threshold + scale_factor × reltuples</c> - capped on PostgreSQL 18
+    /// by <c>autovacuum_vacuum_max_threshold</c> - the insert trigger <c>threshold + scale_factor × reltuples</c>, scaled
+    /// on 18 by the share of pages not all-frozen, and the analyze trigger, each from the table's own storage parameter
+    /// where it has one and the server's setting where it does not, with <c>reltuples = -1</c> counted as 0.
+    /// <c>relallfrozen</c> and the cap are read through <c>to_jsonb(c)</c> and <c>pg_settings</c>, so one text runs on 14
+    /// to 19. A partitioned table is judged by its leaves, as autovacuum judges them: each decision is the leaf's whose
+    /// counter is furthest past twice its own trigger, and the counts say how many leaves are past theirs.
+    /// <c>Autovacuum.Triggers</c> is the same arithmetic in C#, which the unit tests hold to B0's numbers.
+    /// </para>
+    /// <para>
+    /// <b>What runs now</b> is <c>pg_stat_progress_vacuum</c> of this database by <c>relid</c>, which a role without
+    /// <c>pg_read_all_stats</c> sees null for every <c>VACUUM</c> it did not run - autovacuum's on its own tables included
+    /// (B0 §7c) - so the count of those comes back beside each row. Every read here is the catalog's or shared memory's.
+    /// </para>
+    /// </remarks>
     internal const string TablesSql =
         """
         with recursive listed as (
@@ -386,7 +541,16 @@ internal static class HealthTableQueries
                        case when d.relkind = 'r' then pg_catalog.age(d.relfrozenxid) end,
                        case when toast.oid is not null then pg_catalog.age(toast.relfrozenxid) end)) as xid_age,
                    pg_catalog.count(*) filter (where d.relkind = 'r') as leaves,
-                   pg_catalog.max(s.n_live_tup) filter (where d.relkind = 'r') as largest_leaf
+                   pg_catalog.max(s.n_live_tup) filter (where d.relkind = 'r') as largest_leaf,
+                   pg_catalog.sum(s.idx_tup_fetch) as idx_fetch,
+                   pg_catalog.sum(s.vacuum_count) as vacuum_count,
+                   pg_catalog.sum(s.autovacuum_count) as autovacuum_count,
+                   pg_catalog.sum(s.analyze_count) as analyze_count,
+                   pg_catalog.sum(s.autoanalyze_count) as autoanalyze_count,
+                   pg_catalog.sum((pg_catalog.to_jsonb(s) ->> 'total_vacuum_time')::float8
+                                  + (pg_catalog.to_jsonb(s) ->> 'total_autovacuum_time')::float8) as vacuum_ms,
+                   pg_catalog.sum((pg_catalog.to_jsonb(s) ->> 'total_analyze_time')::float8
+                                  + (pg_catalog.to_jsonb(s) ->> 'total_autoanalyze_time')::float8) as analyze_ms
             from tree t
             join pg_catalog.pg_class d on d.oid = t.relid
             left join pg_catalog.pg_class toast on toast.oid = d.reltoastrelid
@@ -455,6 +619,11 @@ internal static class HealthTableQueries
             from tree_invalid v
             group by v.root
         ),
+        vacuums as (
+            select p.relid
+            from pg_catalog.pg_stat_progress_vacuum p
+            where p.datid = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
+        ),
         settings as (
             select pg_catalog.current_setting('block_size')::bigint as block_size,
                    (select db.stats_reset
@@ -464,7 +633,131 @@ internal static class HealthTableQueries
                    pg_catalog.current_setting('max_parallel_workers_per_gather')::int as parallel_workers,
                    (select pg_catalog.count(*) from builds b where b.relid is null)::int as unseen_builds,
                    pg_catalog.current_setting('autovacuum_freeze_max_age')::bigint as freeze_max_age,
-                   pg_catalog.current_setting('server_version_num')::int as server_version
+                   pg_catalog.current_setting('server_version_num')::int as server_version,
+                   pg_catalog.current_setting('track_counts')::boolean as track_counts,
+                   pg_catalog.current_setting('autovacuum_vacuum_threshold')::float8 as vac_threshold,
+                   pg_catalog.current_setting('autovacuum_vacuum_scale_factor')::float8 as vac_scale,
+                   (select ps.setting::float8 from pg_catalog.pg_settings ps where ps.name = 'autovacuum_vacuum_max_threshold') as vac_max,
+                   pg_catalog.current_setting('autovacuum_vacuum_insert_threshold')::float8 as ins_threshold,
+                   pg_catalog.current_setting('autovacuum_vacuum_insert_scale_factor')::float8 as ins_scale,
+                   pg_catalog.current_setting('autovacuum_analyze_threshold')::float8 as anl_threshold,
+                   pg_catalog.current_setting('autovacuum_analyze_scale_factor')::float8 as anl_scale,
+                   (select pg_catalog.count(*) from vacuums v where v.relid is null)::int as unseen_vacuums
+        ),
+        units (root, relid) as (
+            select l.oid, l.oid
+            from listed l
+            where l.relkind = 'r'
+            union all
+            select t.root, t.relid
+            from tree t
+            join pg_catalog.pg_class d on d.oid = t.relid
+            where d.relkind = 'r'
+        ),
+        judged as (
+            select u.root,
+                   s.relid is not null as counted,
+                   coalesce(s.n_dead_tup, 0) as dead,
+                   coalesce(s.n_ins_since_vacuum, 0) as inserted,
+                   coalesce(s.n_mod_since_analyze, 0) as modified,
+                   coalesce(s.n_live_tup, 0) as live,
+                   coalesce(s.seq_tup_read, 0) + coalesce(s.idx_tup_fetch, 0) as rows_read,
+                   d.reltuples < 0 and s.last_analyze is null and s.last_autoanalyze is null as unanalyzed,
+                   coalesce(ro.enabled, 'true')::boolean as enabled,
+                   coalesce(tro.enabled, 'true')::boolean as toast_enabled,
+                   greatest(s.last_vacuum, s.last_autovacuum) as vacuumed,
+                   greatest(s.last_analyze, s.last_autoanalyze) as analyzed,
+                   exists (select 1 from vacuums v where v.relid = u.relid) as running,
+                   z.tuples,
+                   z.unfrozen,
+                   e.vt, e.vsf, e.vmax, e.it, e.isf, e.at, e.asf,
+                   case when e.vmax >= 0 then least(e.vt + e.vsf * z.tuples, e.vmax) else e.vt + e.vsf * z.tuples end as vac_trigger,
+                   case when e.it >= 0 then e.it + e.isf * z.tuples * z.unfrozen end as ins_trigger,
+                   e.at + e.asf * z.tuples as anl_trigger
+            from units u
+            join pg_catalog.pg_class d on d.oid = u.relid
+            left join pg_catalog.pg_class toast on toast.oid = d.reltoastrelid
+            left join pg_catalog.pg_stat_user_tables s on s.relid = u.relid
+            cross join settings st
+            cross join lateral (
+                select pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_enabled') as enabled,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_vacuum_threshold'))::float8 as vt,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_vacuum_scale_factor'))::float8 as vsf,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_vacuum_max_threshold'))::float8 as vmax,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_vacuum_insert_threshold'))::float8 as it,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_vacuum_insert_scale_factor'))::float8 as isf,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_analyze_threshold'))::float8 as at,
+                       (pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_analyze_scale_factor'))::float8 as asf
+                from pg_catalog.pg_options_to_table(d.reloptions) as x
+            ) ro
+            cross join lateral (
+                select pg_catalog.max(x.option_value) filter (where x.option_name = 'autovacuum_enabled') as enabled
+                from pg_catalog.pg_options_to_table(toast.reloptions) as x
+            ) tro
+            cross join lateral (
+                select greatest(d.reltuples, 0)::float8 as tuples,
+                       case when d.relpages > 0 and coalesce((pg_catalog.to_jsonb(d) ->> 'relallfrozen')::int4, 0) > 0
+                            then 1 - least((pg_catalog.to_jsonb(d) ->> 'relallfrozen')::float8, d.relpages::float8) / d.relpages
+                            else 1 end as unfrozen
+            ) z
+            cross join lateral (
+                select coalesce(ro.vt, st.vac_threshold) as vt,
+                       coalesce(ro.vsf, st.vac_scale) as vsf,
+                       coalesce(ro.vmax, st.vac_max, -1) as vmax,
+                       coalesce(ro.it, st.ins_threshold) as it,
+                       coalesce(ro.isf, st.ins_scale) as isf,
+                       coalesce(ro.at, st.anl_threshold) as at,
+                       coalesce(ro.asf, st.anl_scale) as asf
+            ) e
+        ),
+        unit_json as (
+            select j.root,
+                   j.dead - 2 * j.vac_trigger as vacuum_excess,
+                   j.inserted - 2 * j.ins_trigger as insert_excess,
+                   j.modified - 2 * j.anl_trigger as analyze_excess,
+                   j.dead / nullif(j.vac_trigger, 0) as vacuum_ratio,
+                   j.inserted / nullif(j.ins_trigger, 0) as insert_ratio,
+                   j.modified / nullif(j.anl_trigger, 0) as analyze_ratio,
+                   case when j.counted then pg_catalog.jsonb_build_object(
+                       'counter', j.dead, 'trigger', j.vac_trigger, 'threshold', j.vt, 'scale', j.vsf, 'tuples', j.tuples,
+                       'last', extract(epoch from j.vacuumed), 'running', j.running,
+                       'max', case when j.vmax >= 0 then j.vmax end) end as vacuum_unit,
+                   case when j.counted and j.ins_trigger is not null then pg_catalog.jsonb_build_object(
+                       'counter', j.inserted, 'trigger', j.ins_trigger, 'threshold', j.it, 'scale', j.isf, 'tuples', j.tuples,
+                       'last', extract(epoch from j.vacuumed), 'running', j.running, 'unfrozen', j.unfrozen) end as insert_unit,
+                   case when j.counted then pg_catalog.jsonb_build_object(
+                       'counter', j.modified, 'trigger', j.anl_trigger, 'threshold', j.at, 'scale', j.asf, 'tuples', j.tuples,
+                       'last', extract(epoch from j.analyzed), 'running', false) end as analyze_unit
+            from judged j
+        ),
+        worst_vacuum as (
+            select distinct on (w.root) w.root, w.vacuum_unit
+            from unit_json w
+            order by w.root, w.vacuum_excess >= 0 desc, case when w.vacuum_excess >= 0 then w.vacuum_excess end desc nulls last, w.vacuum_ratio desc nulls last
+        ),
+        worst_insert as (
+            select distinct on (w.root) w.root, w.insert_unit
+            from unit_json w
+            where w.insert_unit is not null
+            order by w.root, w.insert_excess >= 0 desc, case when w.insert_excess >= 0 then w.insert_excess end desc nulls last, w.insert_ratio desc nulls last
+        ),
+        worst_analyze as (
+            select distinct on (w.root) w.root, w.analyze_unit
+            from unit_json w
+            order by w.root, w.analyze_excess >= 0 desc, case when w.analyze_excess >= 0 then w.analyze_excess end desc nulls last, w.analyze_ratio desc nulls last
+        ),
+        unit_counts as (
+            select j.root,
+                   pg_catalog.count(*) filter (where j.dead > j.vac_trigger)::int as past_vacuum,
+                   pg_catalog.count(*) filter (where j.inserted > j.ins_trigger)::int as past_insert,
+                   pg_catalog.count(*) filter (where j.modified > j.anl_trigger)::int as past_analyze,
+                   pg_catalog.count(*) filter (where not j.enabled)::int as autovacuum_off,
+                   pg_catalog.count(*) filter (where not j.toast_enabled)::int as toast_autovacuum_off,
+                   pg_catalog.count(*) filter (where j.unanalyzed)::int as unanalyzed,
+                   coalesce(pg_catalog.sum(j.live) filter (where j.unanalyzed), 0)::bigint as unanalyzed_live,
+                   coalesce(pg_catalog.sum(j.rows_read) filter (where j.unanalyzed), 0)::bigint as unanalyzed_read
+            from judged j
+            group by j.root
         )
         select l.nspname::text,
                l.relname::text,
@@ -514,7 +807,31 @@ internal static class HealthTableQueries
                (select b.phase
                 from builds b
                 where b.relid = l.oid or b.relid in (select t.relid from tree t where t.root = l.oid)
-                limit 1)
+                limit 1),
+               case when l.relkind = 'p' then r.idx_fetch::bigint else s.idx_tup_fetch end,
+               wv.vacuum_unit::text,
+               wi.insert_unit::text,
+               wa.analyze_unit::text,
+               coalesce(uc.past_vacuum, 0),
+               coalesce(uc.past_insert, 0),
+               coalesce(uc.past_analyze, 0),
+               coalesce(uc.autovacuum_off, 0),
+               coalesce(uc.toast_autovacuum_off, 0),
+               coalesce(uc.unanalyzed, 0),
+               coalesce(uc.unanalyzed_live, 0),
+               coalesce(uc.unanalyzed_read, 0),
+               case when l.relkind = 'p' then l.reltuples::bigint end,
+               case when l.relkind = 'p' then '{}'::text[] else coalesce(lt.reloptions, '{}'::text[]) end,
+               case when l.relkind = 'p' then r.vacuum_count::bigint else s.vacuum_count end,
+               case when l.relkind = 'p' then r.autovacuum_count::bigint else s.autovacuum_count end,
+               case when l.relkind = 'p' then r.analyze_count::bigint else s.analyze_count end,
+               case when l.relkind = 'p' then r.autoanalyze_count::bigint else s.autoanalyze_count end,
+               case when l.relkind = 'p' then r.vacuum_ms
+                    else (pg_catalog.to_jsonb(s) ->> 'total_vacuum_time')::float8 + (pg_catalog.to_jsonb(s) ->> 'total_autovacuum_time')::float8 end,
+               case when l.relkind = 'p' then r.analyze_ms
+                    else (pg_catalog.to_jsonb(s) ->> 'total_analyze_time')::float8 + (pg_catalog.to_jsonb(s) ->> 'total_autoanalyze_time')::float8 end,
+               st.track_counts,
+               st.unseen_vacuums
         from listed l
         cross join settings st
         left join pg_catalog.pg_class lt on lt.oid = l.reltoastrelid
@@ -522,6 +839,10 @@ internal static class HealthTableQueries
         left join invalid_rolled ir on ir.root = l.oid
         left join options_rolled orl on orl.root = l.oid
         left join pg_catalog.pg_stat_user_tables s on s.relid = l.oid
+        left join worst_vacuum wv on wv.root = l.oid
+        left join worst_insert wi on wi.root = l.oid
+        left join worst_analyze wa on wa.root = l.oid
+        left join unit_counts uc on uc.root = l.oid
         order by 1, 2
         """;
 
@@ -1115,7 +1436,80 @@ internal static class HealthTableQueries
             ServerVersion = reader.GetInt32(33),
             BuildingPartitionIndexes = reader.GetInt32(34),
             TreeBuildPhase = reader.IsDBNull(35) ? null : reader.GetString(35),
+            IndexRowsFetched = NullableInt64(reader, 36),
+            Vacuum = Unit(reader, 37),
+            Insert = Unit(reader, 38),
+            Analyze = Unit(reader, 39),
+            VacuumMaxThreshold = UnitNumber(reader, 37, "max"),
+            UnfrozenShare = UnitNumber(reader, 38, "unfrozen") ?? 1,
+            PastVacuumTrigger = reader.GetInt32(40),
+            PastInsertTrigger = reader.GetInt32(41),
+            PastAnalyzeTrigger = reader.GetInt32(42),
+            AutovacuumOffLeaves = reader.GetInt32(43),
+            ToastAutovacuumOffLeaves = reader.GetInt32(44),
+            UnanalyzedLeaves = reader.GetInt32(45),
+            UnanalyzedLiveRows = reader.GetInt64(46),
+            UnanalyzedRowsRead = reader.GetInt64(47),
+            ParentEstimatedRows = NullableInt64(reader, 48),
+            ToastStorageOptions = reader.IsDBNull(49) ? [] : reader.GetFieldValue<string[]>(49),
+            VacuumCount = NullableInt64(reader, 50),
+            AutovacuumCount = NullableInt64(reader, 51),
+            AnalyzeCount = NullableInt64(reader, 52),
+            AutoanalyzeCount = NullableInt64(reader, 53),
+            TotalVacuumMilliseconds = reader.IsDBNull(54) ? null : reader.GetDouble(54),
+            TotalAnalyzeMilliseconds = reader.IsDBNull(55) ? null : reader.GetDouble(55),
+            TrackCounts = reader.IsDBNull(56) || reader.GetBoolean(56),
+            UnseenVacuums = reader.GetInt32(57),
         };
+    }
+
+    /// <summary>One of <see cref="TablesSql" />'s autovacuum decisions, from the <c>jsonb</c> object it builds, or <see langword="null" />.</summary>
+    private static AutovacuumUnit? Unit(NpgsqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) ? null : ParseUnit(reader.GetString(ordinal));
+
+    /// <summary>
+    /// A decision as <see cref="TablesSql" /> writes it: <c>counter</c>, <c>trigger</c>, <c>threshold</c>, <c>scale</c>,
+    /// <c>tuples</c>, <c>last</c> (epoch seconds, or null) and <c>running</c>.
+    /// </summary>
+    internal static AutovacuumUnit ParseUnit(string json)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+
+        return new AutovacuumUnit
+        {
+            Counter = (long) Number(root, "counter"),
+            Trigger = Number(root, "trigger"),
+            Threshold = Number(root, "threshold"),
+            ScaleFactor = Number(root, "scale"),
+            Tuples = Number(root, "tuples"),
+            Last = root.TryGetProperty("last", out JsonElement last) && last.ValueKind == JsonValueKind.Number
+                ? DateTimeOffset.UnixEpoch.AddTicks((long) Math.Round(last.GetDouble() * TimeSpan.TicksPerSecond))
+                : null,
+            Running = root.TryGetProperty("running", out JsonElement running) && running.ValueKind == JsonValueKind.True,
+        };
+
+        static double Number(JsonElement element, string name) =>
+            element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number
+                ? value.GetDouble()
+                : 0;
+    }
+
+    /// <summary>One number of a decision's object - <c>max</c>, <c>unfrozen</c> - or <see langword="null" /> when it is absent or null.</summary>
+    private static double? UnitNumber(NpgsqlDataReader reader, int ordinal, string name)
+    {
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        using JsonDocument document = JsonDocument.Parse(reader.GetString(ordinal));
+
+        return document.RootElement.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetDouble()
+            : null;
     }
 
     /// <summary>Maps one row of <see cref="IndexesSql" />.</summary>

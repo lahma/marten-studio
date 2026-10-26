@@ -95,6 +95,16 @@ internal interface IHealthTableRemedies
     /// <param name="value">Its suggested value, as SQL spells it.</param>
     /// <param name="explanation">What the setting changes, in words that hold for any source.</param>
     HealthRemedy? AutovacuumSetting(StudioTable table, string parameter, string value, string explanation);
+
+    // ---- W5-V1 ---------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// T24: switching autovacuum back on for a table's TOAST table, whose own storage parameter
+    /// (<c>toast.autovacuum_enabled = false</c>) switched it off - which Marten's <c>StorageParameter</c> does not manage
+    /// (<c>toast.*</c> parameters are not supported, its own documentation says), so for a Marten table it is words, never a line.
+    /// </summary>
+    /// <param name="table">The table whose TOAST table it is.</param>
+    HealthRemedy? ReenableToastAutovacuum(StudioTable table);
 }
 
 /// <summary>

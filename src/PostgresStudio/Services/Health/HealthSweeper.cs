@@ -158,8 +158,30 @@ internal sealed record HealthSweep(
     TimeSpan Duration,
     IReadOnlyList<HealthCheckResult> Results)
 {
+    private static readonly IReadOnlyDictionary<string, object> NoShared = new Dictionary<string, object>();
+
     /// <summary>Every finding of every check.</summary>
     public IEnumerable<HealthFinding> Findings => Results.SelectMany(static x => x.Findings);
+
+    /// <summary>
+    /// The sweep's shared reads that finished with an answer, by key (<see cref="HealthCheckContext.Shared{T}" />): gate-free
+    /// facts about the database, which a page's facts read takes rather than reading again (W5 §2.3; the Maintenance page).
+    /// Who is shown what of them is the page's view's decision, as a finding's is the report's.
+    /// </summary>
+    public IReadOnlyDictionary<string, object> Shared { get; init; } = NoShared;
+
+    /// <summary>The shared read under <paramref name="key" />, when the sweep finished it as a <typeparamref name="T" />.</summary>
+    public bool TryShared<T>(string key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
+    {
+        if (Shared.TryGetValue(key, out object? found) && found is T typed)
+        {
+            value = typed;
+            return true;
+        }
+
+        value = default;
+        return false;
+    }
 }
 
 /// <summary>
@@ -325,6 +347,7 @@ internal sealed class HealthSweeper
         Gathered[] gathered = new Gathered[run.Length];
         Dictionary<string, double> sample = new(StringComparer.Ordinal);
         Dictionary<string, HealthGate> sampleGates = new(StringComparer.Ordinal);
+        Dictionary<string, HealthGate> remembered = new(StringComparer.Ordinal);
 
         foreach (int index in Enumerable.Range(0, run.Length).OrderBy(i => run[i].Info.Tier))
         {
@@ -343,7 +366,7 @@ internal sealed class HealthSweeper
 
         if (kind is HealthSweepKind.Regular or HealthSweepKind.Statements)
         {
-            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, interval / 2);
+            history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, interval / 2, remembered);
         }
 
         HealthHistoryView view = history.Read(storeKey, ring);
@@ -373,7 +396,12 @@ internal sealed class HealthSweeper
         List<HealthCheckResult> results =
             [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage))];
 
-        return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results);
+        // A regular sweep keeps its shared reads for the pages that reuse them (W5-V1): the deeper and statement tiers'
+        // reads are gated, and a page's gate-free facts read never takes them.
+        return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results)
+        {
+            Shared = kind == HealthSweepKind.Regular ? memo.Completed() : new Dictionary<string, object>(),
+        };
 
         async Task<Gathered> GatherAsync(HealthCheckDescriptor descriptor)
         {
@@ -399,7 +427,7 @@ internal sealed class HealthSweeper
                 // Checked whole before any of it is kept, so a check that breaks the rule leaves no part behind.
                 List<HealthSamplePart> parts = [.. descriptor.Check.Sample(facts)];
                 HashSet<string> own = new(StringComparer.Ordinal);
-                List<string> twice = [.. parts.Select(static x => x.Series).Where(series => sample.ContainsKey(series) || !own.Add(series))];
+                List<string> twice = [.. parts.Select(static x => x.Series).Where(series => sample.ContainsKey(series) || remembered.ContainsKey(series) || !own.Add(series))];
 
                 if (twice.Count > 0)
                 {
@@ -414,10 +442,18 @@ internal sealed class HealthSweeper
 
                 foreach (HealthSamplePart part in parts)
                 {
-                    sample[part.Series] = part.Value;
-
                     // The writer's gate, or a stricter one the part names - never a looser one.
-                    sampleGates[part.Series] = part.Gate > info.Gate ? part.Gate : info.Gate;
+                    HealthGate written = part.Gate > info.Gate ? part.Gate : info.Gate;
+
+                    // A sighting goes to the first-seen map, never into the sample (W5-V1).
+                    if (part.Remembered)
+                    {
+                        remembered[part.Series] = written;
+                        continue;
+                    }
+
+                    sample[part.Series] = part.Value;
+                    sampleGates[part.Series] = written;
                 }
 
                 return new Gathered(descriptor, facts, HealthCheckOutcome.Checked, null, null, sql.Statements, checkStarted);

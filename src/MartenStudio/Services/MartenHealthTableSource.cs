@@ -413,6 +413,21 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
             + ") on the table, which no Marten apply resets unless the apply rebuilds the table (a changed partition scheme "
             + "copies it out and back): Marten manages only the storage parameters it declares.");
     }
+
+    // ---- W5-V1 ---------------------------------------------------------------------------------------------------------
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Words for a table a store declares: Marten's <c>StorageParameter</c> does not manage <c>toast.*</c> parameters (its own
+    /// documentation, <c>MartenRegistry.StorageParameter</c> at V9.54.1), so no line sets one - T24 says what a DBA's
+    /// <c>ALTER TABLE ... RESET (toast.autovacuum_enabled)</c> does. A table no store declares gets the migration statement.
+    /// </remarks>
+    public HealthRemedy? ReenableToastAutovacuum(StudioTable table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        return !table.IsDeclaredByStore ? Upkeep(table, Migration.ReenableToastAutovacuum(table)) : null;
+    }
 }
 
 /// <summary>

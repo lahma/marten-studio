@@ -13,6 +13,7 @@ using static MartenStudio.Integration.Tests.Health.TableHealthLive;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Integration.Tests.Health;
@@ -71,7 +72,8 @@ public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
         HealthReport report = await ReportAsync(host);
 
         string key = SchemaKey.For(extended, ThingsTable);
-        HealthReportFinding finding = Of(report, "T07").Should().ContainSingle().Subject;
+        // G2 (W5-V1): never vacuumed since its load, the table is behind on its inserts too; this is the dead-row finding.
+        HealthReportFinding finding = Of(report, "T07").Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
 
         finding.Finding.Subject.Should().Be(key);
         finding.Evidence.Should().Contain(new HealthEvidence("Table", "the Marten-managed table " + key));
@@ -228,7 +230,7 @@ public class ExtendedTableHealthLiveTests(PostgresFixture postgres)
 
         if (admitted)
         {
-            Of(report, "T07").Should().ContainSingle(x => x.Finding.Subject == key);
+            Of(report, "T07").Should().ContainSingle(x => x.Finding.Subject == key && x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant);
             row.FindingsWithheld.Should().BeFalse();
             return;
         }

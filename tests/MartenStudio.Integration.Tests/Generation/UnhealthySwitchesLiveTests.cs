@@ -204,9 +204,11 @@ public class UnhealthySwitchesLiveTests(PostgresFixture postgres)
             "pg_stat_user_tables to count the dead rows");
 
         HealthReport report = await host.ReportAsync();
-        HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "T07").Subject;
+        // G2 (W5-V1): judged against its own triggers the table is behind on its 30,000 never-vacuumed inserts too, and a
+        // table behind with autovacuum switched off for it is Critical.
+        HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "T07" && x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
         finding.Finding.Subject.Should().Be(table);
-        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Severity.Should().Be(HealthSeverity.Critical);
         report.Findings.Should().NotContain(static x => x.Code == "T08", "the switch analyses the table, so its statistics are current");
 
         (await rig.Board.TurnOffAsync(UnhealthySwitchKind.BloatedTable)).Should().BeTrue();
@@ -245,13 +247,15 @@ public class UnhealthySwitchesLiveTests(PostgresFixture postgres)
         (await LiveRowsAsync(database)).Should().Be(BloatedTableSwitch.Rows, "every row the switch inserted is live once");
         (await DeadRowsAsync(database)).Should().Be(BloatedTableSwitch.Rows, "and every one was updated once, leaving one dead version");
 
-        HealthReportFinding finding = (await host.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "T07").Subject;
-        finding.Finding.Title.Should().StartWith("50% of ", "half the table is dead rows");
+        // G2 (W5-V1): T07 counts the dead rows against the table's own trigger, 50 + 0.2 x reltuples - so a trigger of 6,050
+        // is the 30,000 rows counted once; counted twice, it would be 12,050.
+        HealthReportFinding finding = (await host.ReportAsync()).Findings.Should().ContainSingle(static x => x.Code == "T07" && x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
+        finding.Finding.Title.Should().Contain(" has 30,000 dead rows, ", "every row was updated once");
         finding.Finding.Title.Should().EndWith(
-            " is dead rows, and it has never been vacuumed",
+            " and has never been vacuumed",
             "the switch has just recreated the table with autovacuum off for it - and the title is a sentence, not \"last vacuumed never\"");
-        finding.Evidence.Should().Contain(new HealthEvidence("Live rows", "30,000"));
-        finding.Evidence.Should().Contain(new HealthEvidence("Dead rows", "30,000 (50%)"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Dead rows", "30,000"));
+        finding.Evidence.Single(static x => x.Label == "Its dead-row trigger").Value.Should().StartWith("6,050 (", "reltuples is the 30,000 rows, once");
     }
 
     // ---- Pool hog: C01 -------------------------------------------------------------------------------------

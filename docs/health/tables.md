@@ -217,40 +217,98 @@ The columns an index reads are Postgres' own record of them (`pg_depend`). A BRI
 PostgreSQL 16 and later, where a summarizing index no longer blocks HOT, and counted before 16, where it does.
 Event-store tables are not judged: `mt_dcb_tag_version`'s fillfactor is E08's.
 
+## Autovacuum's own triggers (T07, T08, T16, T24)
+
+Since 0.5, T07 and T08 judge each table the way autovacuum decides about it (issue #8, G2), and the
+[Maintenance page](#the-maintenance-page) draws the same numbers. Autovacuum acts on a table when a counter is
+**strictly past** its trigger:
+
+| Decision | Counter | Trigger |
+|---|---|---|
+| vacuum | `n_dead_tup` | `autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × reltuples`, capped on PostgreSQL 18 by `autovacuum_vacuum_max_threshold` |
+| vacuum (inserts, 13+) | `n_ins_since_vacuum` | `autovacuum_vacuum_insert_threshold + autovacuum_vacuum_insert_scale_factor × reltuples`, and on 18 also × the share of pages not all-frozen (`1 - relallfrozen / relpages`); a threshold of `-1` switches it off |
+| analyze | `n_mod_since_analyze` | `autovacuum_analyze_threshold + autovacuum_analyze_scale_factor × reltuples` |
+
+Each threshold and scale factor is the table's own storage parameter where it has one and the server's setting
+where it does not; `reltuples = -1` (never vacuumed or analysed) counts as 0. Both formulas were proved against
+autovacuum itself on 17 and 18, with the comparison strict: the same 3,500 appends to an append-only table
+trigger autovacuum on 18, whose unfrozen share brings its insert trigger down to 2,577, and not on 17, where it
+is 7,494. `relallfrozen` and the cap are read through `to_jsonb` and `pg_settings`, so one lock-free statement
+runs on 14 to 19. A partitioned table is judged by its partitions, as autovacuum judges them: each decision is
+the partition's whose counter is furthest past twice its own trigger, never named, and the counts say how many
+partitions are past theirs.
+
+**Counters read just after a manual `VACUUM` can be inflated.** A backend's pending counts reach the statistics
+after its `VACUUM` reset them (PostgreSQL 15 and later flush at most once a second, when the backend is idle), so a
+table vacuumed by hand a moment ago can show its inserts or dead rows again. Every finding's caveat says so.
+
 ## T07 Vacuum falling behind
 
-**Warning.** More than 20% of a Marten table is dead rows, at least 10,000 of them, and it was last vacuumed
-(by hand or by autovacuum) more than a day ago or never - held for ten minutes of samples.
+**Warning; Critical** past ten times the trigger, or with autovacuum switched off for the table or the server and
+the table behind. Behind means a counter at least **10,000 past twice its trigger**, the last vacuum of either
+kind more than **an hour** ago or never, and the table **not being vacuumed now** - held for ten minutes of
+samples, unless autovacuum is switched off for the table or the server, when there is nothing to wait for. The
+fixed 20% dead and one-day rules of 0.4 are gone: a table tuned to `scale_factor 0.01` is caught long before it
+is a fifth dead. Studios: both.
 
-A dead row is an old version an update or a delete left behind; only vacuum makes its space reusable, and until
-it runs every scan reads it. For a document table:
+Variants:
+
+- `dead-rows` - `n_dead_tup` against the dead-row trigger;
+- `inserts` - `n_ins_since_vacuum` against the insert trigger, which an append-only table such as `mt_events` or
+  a library's history table depends on: it is the pass that sets the visibility map index-only scans read and
+  freezes pages early, so the anti-wraparound vacuum that comes for every table later is cheap.
+
+A finding's key is `T07|<variant>|<table>`, so the two kinds of finding about one table mute apart (0.4's
+`T07|<table>` keys, and their mutes, reset once).
+
+**"Not being vacuumed now"** is `pg_stat_progress_vacuum.relid`. A role without `pg_read_all_stats` sees only the
+process id and database of a `VACUUM` it did not run - autovacuum's on its own tables included - so while such a
+one runs in the database, the finding still speaks, and its caveat says it may be under way now and which grant
+would tell (`pg_read_all_stats`, and who can grant it on this platform).
+
+The remedy is a scale factor that would have triggered it sooner: the next rung below the one in force
+(0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001), with the explanation naming the trigger now and at the new
+value. For a document table:
 
 ```csharp
-opts.Schema.For<Order>().StorageParameter("autovacuum_vacuum_scale_factor", 0.02);   // Marten 9.47+
+opts.Schema.For<Order>().StorageParameter("autovacuum_vacuum_scale_factor", 0.005);   // Marten 9.47+
 ```
 
-so autovacuum runs at 2% dead rather than 20%. On a table autovacuum is switched off for, the remedy is
-`StorageParameter("autovacuum_enabled", true)`; with the server's `autovacuum = off` it is a DBA's. A
-partitioned table counts as switched off when every partition is; when its partitions disagree, the finding
-says autovacuum may be off for some of them. A DBA's `ALTER TABLE ... SET (...)` on a table is not reset by an
-apply unless the apply rebuilds the table, as a changed partition scheme does. A long-running transaction stops
-vacuum removing dead rows even when it runs - see the connections checks.
+For an `inserts` finding it is `autovacuum_vacuum_insert_scale_factor`; a host's own relational table gets the
+`ALTER TABLE ... SET (...)` for its migrations. A scale factor already at 0.001 is not the answer, and the
+finding says what is: workers busy elsewhere (T16), the cost limit, or a transaction holding the horizon (T14).
+On a table autovacuum is switched off for, the remedy is `StorageParameter("autovacuum_enabled", true)`; with the
+server's `autovacuum = off` it is a DBA's (S02). A DBA's `ALTER TABLE ... SET (...)` on a table is not reset by an
+apply unless the apply rebuilds the table, as a changed partition scheme does.
 
 ## T08 Never analysed, or stale statistics
 
-**Warning.** A Marten table with at least 1,000 live rows that has never been analysed (`reltuples = -1`), or
-whose `n_mod_since_analyze` is at least 10,000 and more than a fifth of `reltuples`, with no analyze in a day -
-held for ten minutes of samples.
+**Warning** (Info for the two cases below), held for ten minutes of samples unless autovacuum is off. Studios:
+both. Variants:
 
-The planner chooses every plan from these statistics, and the studio's `~` counts are `reltuples`: both are
-wrong until the table is analysed. For a document table:
+- `stale` - `n_mod_since_analyze` at least **10,000 past twice the table's own analyze trigger**, with no
+  analyze of either kind in **an hour**. The remedy is the next rung of `autovacuum_analyze_scale_factor`; a
+  DBA's `ANALYZE` fixes the statistics now, and the parameter keeps them fixed.
+- `never-analysed` - `reltuples = -1` and no analyze of either kind, with at least **1,000 live rows - or 1,000
+  rows read since the counters began** (`seq_tup_read + idx_tup_fetch`). The second half is the shape every
+  table has after `pg_upgrade` from 14-17, which carries no statistics over: `n_live_tup` is 0, and autovacuum
+  analyses a table only after enough modifications, so a read-mostly table is planned on defaults indefinitely.
+  The remedy is in words, for whoever runs the server: `vacuumdb --all --analyze-in-stages` (17 and before), or
+  on 18 `vacuumdb --all --analyze-in-stages --missing-stats-only` followed by `vacuumdb --all --analyze-only` -
+  or the table's own `ANALYZE`. A partitioned table is flagged for its partitions that were never analysed, and -
+  as **Info**, with nothing to wait for - when the parent itself never was: autovacuum does not analyse partitioned
+  tables, so the parent's statistics, which a query across partitions plans from, exist only once somebody runs
+  `ANALYZE` on it.
+- `since-restart` - one database-level **Info** while the statistics window says autovacuum's counters began
+  again (a crash, a point-in-time recovery, a failover, `pg_upgrade`, a reset) and the tables of at least 10,000
+  estimated rows that have not been analysed since hold at least half of the judged tables' estimated rows. It
+  names the largest few, says that rows that died before are invisible to autovacuum - and to T07 - until each
+  table crosses its trigger again, clears itself once they are analysed, and points at `vacuumdb --all
+  --analyze-only`, the manual's own post-upgrade step. It is shown even while other checks withhold verdicts that
+  depend on the counters, because it is what explains their quiet.
 
-```csharp
-opts.Schema.For<Order>().StorageParameter("autovacuum_analyze_scale_factor", 0.05);   // Marten 9.47+
-```
-
-A DBA's `ANALYZE` fixes the statistics now; the parameter keeps them fixed. A partitioned table is judged by its
-partitions' own statistics, because autovacuum never analyses a partitioned parent.
+The planner chooses every plan from these statistics, and the studio's `~` counts are `reltuples`: both are wrong
+until the table is analysed. A partitioned table is otherwise judged by its partitions' own statistics.
 
 ## T09 Large documents
 
@@ -382,7 +440,12 @@ that one is further back:
 | A session's open transaction or snapshot | `pg_stat_activity.backend_xid`, `backend_xmin` | this database's tables |
 | A prepared transaction | `pg_prepared_xacts` | this database's tables |
 | A replication slot | `pg_replication_slots.xmin` (every table), `catalog_xmin` (the system catalogs) | every database |
-| A standby's `hot_standby_feedback` | `pg_stat_replication.backend_xmin` | every database |
+| A standby's `hot_standby_feedback` | `pg_stat_replication.backend_xmin` - only for a standby that streams without a slot | every database |
+
+A standby that streams through a replication slot sends its feedback to the **slot's `xmin`**, and its own row in
+`pg_stat_replication` then shows no `backend_xmin` - for `pg_monitor` too (measured by B0). So T14 reads it from the
+slot, and words an active physical slot as "a standby, through a physical replication slot", with the slot's name in
+the gated evidence.
 
 A session or a prepared transaction in *another* database, and a logical slot's `catalog_xmin`, hold back only the
 system catalogs - but every database's `datfrozenxid` counts the shared ones, so they stop every database's freeze.
@@ -437,7 +500,17 @@ and how many of them sit in tables vacuumed since the holder began - rows vacuum
   prepared transaction or a long writer pins at its own id; and a transaction in *another* database holds this
   database's tables the same way, through the snapshots sessions here take while it runs. Among holders equally far
   back the one that owns its id is named, and the daemon's leader is never named over another holder. A slot is read
-  in another statement, so it is never matched, and is judged as its own holder.
+  in another statement, so its age is never matched; its raw `xmin` is (`xmin::text`, 0.5): a slot whose `xmin` or
+  `catalog_xmin` is exactly a writer's own `backend_xid` is behind that writer, which is the one named.
+- **Honest time beyond the ring** (0.5). Every holder with an identity of its own - a writer's process id, backend
+  start and transaction id; a slot's name and `xmin`; a standby's WAL-sender process id and `xmin` - is remembered
+  in a per-database first-seen map that outlives the 60-sample ring, at T14's gate and never shown (only a hash of
+  the identity is kept). A hold is then at least as old as the first sweep that saw that very identity, worded "at
+  least 3 h (the advisor has seen it hold this horizon, unchanged, that long)": the bound a writer whose timings are
+  withheld, or a slot or a standby with no `inactive_since`, could not have before. A slot or a standby is dated so only
+  once it holds at least a thousand transactions back - one whose `xmin` stays put because nothing hands out ids holds
+  nothing back, however long. The map is bounded (512 holders per database, the one seen longest ago going first)
+  and goes with the database's history; a holder no sweep in the ring's window saw is forgotten.
 - **Who it is** - the process id, role, application, client and connection time of a session, a prepared
   transaction's gid and owner, a slot's name, plugin and database, a standby's address - is evidence behind
   `MartenStudioOptions.Capabilities.ViewDatabaseActivity`. The kind and the age are shown at the database-wide gate.
@@ -632,3 +705,71 @@ and nobody else's (`ConfigureNpgsqlDataSourceBuilder` is on `StoreOptions` at Ma
 `NpgsqlConnectionStringBuilder.Options` passes `-c` settings to each connection at Npgsql 9.0.4). A data source the
 host builds itself (`UseNpgsqlDataSource`) takes the same `Options` on its own builder. To keep JIT for the occasional
 long query, a DBA can raise `jit_above_cost` for the store's role instead.
+
+## T16 Autovacuum workers saturated
+
+**Warning** when every autovacuum worker on the server has been busy in **three samples running** - so a table that
+crosses its trigger now waits for one to come free, however far past it it goes (T07). Studios: both. The server's
+`autovacuum = off` is S02's, and T16 then says only that no worker runs.
+
+How busy they are is counted as the reading role can count them:
+
+- **With `pg_read_all_stats`** (or `pg_monitor`): the rows of `pg_stat_activity` with `backend_type =
+  'autovacuum worker'`, server-wide, against `autovacuum_max_workers` - held on PostgreSQL 18 to
+  `autovacuum_worker_slots`.
+- **Without it**, a role is shown nothing of autovacuum's processes but their process ids in the progress views -
+  even on its own tables - so the count is every process running a `VACUUM` or an `ANALYZE` on the server
+  (`pg_stat_progress_vacuum` and `pg_stat_progress_analyze`, whose `datid` every role sees). That is at least the busy
+  workers, manual `VACUUM`s included, and the finding says so.
+
+The remedy is `autovacuum_max_workers` - twice the workers - through the platform's own place for a server setting.
+Before PostgreSQL 18 it needs a restart; on 18 it changes with a reload, but only up to `autovacuum_worker_slots`,
+which itself needs a restart. More workers share the same `autovacuum_vacuum_cost_limit`, so raising the count alone
+spreads the same I/O budget thinner: raise the cost limit with it where the hardware allows.
+
+T16 also keeps the history the Maintenance page dates progress by: each running command's blocks done, sampled by
+process id and relation number - numbers only, never a name.
+
+## T24 Autovacuum switched off for a table
+
+**Warning; Critical** once the table's oldest transaction-id age - its own, its TOAST table's and its partitions'
+`age(relfrozenxid)`, the age T12 reads - is past half of `autovacuum_freeze_max_age`. Studios: both.
+
+A table, its TOAST table (`toast.autovacuum_enabled`) or some of its partitions have the storage parameter
+`autovacuum_enabled = false`: autovacuum leaves it alone - dead rows are never cleared, statistics never refreshed,
+the visibility map never set - and the only vacuum that still comes is the forced anti-wraparound one, which scans the
+whole table at once and cannot be cancelled. A table switched off for a bulk load is a common one to forget to switch
+back. Partitions are counted, never named.
+
+The remedy switches it back on: for a document table `opts.Schema.For<Order>().StorageParameter("autovacuum_enabled",
+true);` (Marten 9.47+), and for a host's own relational table `ALTER TABLE ... SET (autovacuum_enabled = true)` for its
+migrations. A TOAST table's setting has no `StoreOptions` line - Marten's `StorageParameter` does not manage `toast.*`
+parameters - so for a Marten table it is a DBA's `ALTER TABLE ... RESET (toast.autovacuum_enabled)`, and for a host's
+own table that statement for its migrations.
+
+## The Maintenance page
+
+**Operations › Maintenance** (both studios) shows what autovacuum makes of each table, and reads nothing the health
+sweep did not: its facts are the regular sweep's own reads, once per `HealthInterval` for everybody watching. It is
+shown to a visitor the store policy passes for the database as a whole (`TenantId = null`).
+
+- **Triggers** - every judged table, worst first: dead rows against the vacuum trigger, inserts against the insert
+  trigger, changes against the analyze trigger, as bars of each counter against twice its trigger; the last vacuum and
+  analyze of each kind; the table's own `autovacuum_*` and `toast.*` overrides; badges for *due*, *behind* and
+  *autovacuum off*; and on PostgreSQL 18 the time spent vacuuming and analysing (`total_*vacuum_time`). A partitioned
+  table shows its partition furthest behind. A table in a schema outside the source's own is listed only past the
+  database browser's gate for that schema, and counted otherwise; a hidden document type's table is never in the set.
+- **Running now** - with `pg_read_all_stats`, every `VACUUM`, `ANALYZE`, index build and `CLUSTER` in this database:
+  its phase, blocks and (PostgreSQL 17+) indexes, whether it is autovacuum's and why, and an ETA at the rate its blocks
+  went between T16's samples. Without it, the commands the role cannot see the table of are counted, with the grant
+  that would show them.
+- **Workers** - `autovacuum_max_workers`, how many are busy (as T16 counts them), `autovacuum_naptime`.
+- **Freeze forecast** - T12's and T13's own facts and samples: the oldest ages against the forced-freeze and
+  write-refusal lines, and the time to each at the history's rate.
+- **Vacuum horizon** - T14's finding, its names behind the activity gate as on the Health page.
+- **Measure bloat** - one table at a time, on demand: `pgstattuple_approx` for the heap and `pgstatindex`,
+  `pgstatginindex` or `pgstathashindex` for each index, in a read-only transaction as `SqlConsoleRole` under
+  `QueryTimeout`, one measure per database at once. It needs the `pgstattuple` extension (not trusted: a superuser or
+  the platform's administrator installs it) and `pg_stat_scan_tables` (in `pg_monitor`); without either it says which,
+  and who can grant or install it. It is never part of a sweep or a list - it reads the table, under an
+  `AccessShareLock` - and every press is audited as "Measure bloat", with the table and nothing else.

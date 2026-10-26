@@ -107,8 +107,17 @@ public class HealthServerQueriesTests
         string sql = HealthServerQueries.ReplicationSlots().Sql;
 
         sql.Should().Contain("(s.database is null or s.database = pg_catalog.current_database()) as this_database");
-        sql.Should().Contain("r.total, r.this_database\n  from server v left join slots r on true",
-            "the reader maps this_database at ordinal 19, after every column it already read");
+        sql.Should().Contain("r.total, r.this_database, r.xmin, r.catalog_xmin\n  from server v left join slots r on true",
+            "the reader maps this_database at ordinal 19, after every column it already read, and the raw xmins after it (W5-V1)");
+    }
+
+    /// <summary>W5-V1: the raw xmins, so T14 sees a slot pinned at exactly a writer's own transaction id as behind it.</summary>
+    [Fact]
+    public void The_slot_read_carries_each_xmin_raw_for_T14_to_match_by_id()
+    {
+        string sql = HealthServerQueries.ReplicationSlots().Sql;
+
+        sql.Should().Contain("s.xmin::text as xmin").And.Contain("s.catalog_xmin::text as catalog_xmin");
     }
 
     [Fact]
@@ -121,13 +130,17 @@ public class HealthServerQueriesTests
     }
 
     [Fact]
-    public void The_settings_read_asks_for_its_six_settings_and_every_pending_restart_and_never_a_sizing_one()
+    public void The_settings_read_asks_for_its_eight_settings_and_every_pending_restart_and_never_a_sizing_one()
     {
         HealthQuery query = HealthServerQueries.Settings(DangerousSettingsCheck.Watched);
 
         query.Sql.Should().Contain("where s.name = any(@names) or s.pending_restart");
         ((string[]) query.Parameters.Single(static x => x.ParameterName == "names").Value!)
-            .Should().BeEquivalentTo(["track_counts", "fsync", "full_page_writes", "zero_damaged_pages", "ignore_checksum_failure", "synchronous_commit"]);
+            .Should().BeEquivalentTo(
+            [
+                "track_counts", "fsync", "full_page_writes", "zero_damaged_pages", "ignore_checksum_failure", "synchronous_commit",
+                "autovacuum", "track_activities",
+            ]);
 
         DangerousSettingsCheck.Watched.Should().NotContain(["shared_buffers", "work_mem", "random_page_cost", "effective_cache_size", "maintenance_work_mem"],
             "advice computed from the server's memory cries wolf (R1 §D)");

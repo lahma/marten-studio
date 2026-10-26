@@ -246,6 +246,12 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not probe the collections for id '{Id}'"] = (Verdict.VisitorAction,
             "The find-by-id probe the visitor ran failed; per-collection probe failures inside it are Debug."),
 
+        // ---- W5-V1 ------------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
+            "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Maintenance.cs : 9420 PostgresStudioBloatMeasureFailed"] = (Verdict.VisitorAction,
+            "9420 in Postgres Studio's words: a bloat measure the visitor pressed failed after its gates passed; one line per press."),
+
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),

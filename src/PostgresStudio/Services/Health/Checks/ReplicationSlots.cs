@@ -57,6 +57,15 @@ internal sealed record ReplicationSlot(
     bool ThisDatabase)
 {
     /// <summary>
+    /// Its <c>xmin</c> as the raw 32-bit transaction id (<c>xmin::text</c>), or <see langword="null" /> - for T14, which
+    /// matches it to a writer's own transaction id: a slot pinned at exactly that id is behind that writer (W5-V1).
+    /// </summary>
+    public long? Xmin { get; init; }
+
+    /// <summary>Its <c>catalog_xmin</c> as the raw transaction id, likewise.</summary>
+    public long? CatalogXmin { get; init; }
+
+    /// <summary>
     /// Whether Postgres has given up on it: <c>wal_status = 'lost'</c>, an invalidation reason (17+), or a recovery
     /// conflict (16+). Such a slot holds no WAL and cannot be used again.
     /// </summary>
@@ -178,7 +187,11 @@ internal sealed record ReplicationSlotSnapshot(
                 reader.IsDBNull(17) ? null : reader.GetBoolean(17),
 
                 // Fail closed: a row whose flag did not come back is somebody else's.
-                !reader.IsDBNull(19) && reader.GetBoolean(19));
+                !reader.IsDBNull(19) && reader.GetBoolean(19))
+            {
+                Xmin = RawXid(reader, 20),
+                CatalogXmin = RawXid(reader, 21),
+            };
 
         return new Row(
             reader.GetInt32(0),
@@ -190,6 +203,12 @@ internal sealed record ReplicationSlotSnapshot(
     }
 
     private static string? NullableString(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+
+    /// <summary>A transaction id read as text (<c>xid::text</c>), or <see langword="null" />.</summary>
+    internal static long? RawXid(NpgsqlDataReader reader, int ordinal) =>
+        reader.IsDBNull(ordinal) || !long.TryParse(reader.GetString(ordinal), NumberStyles.None, CultureInfo.InvariantCulture, out long xid)
+            ? null
+            : xid;
 
     private sealed record Row(int ServerVersion, bool InRecovery, long? MaxSlotWalKeepBytes, long? WalKeepBytes, long Total, ReplicationSlot? Slot);
 }

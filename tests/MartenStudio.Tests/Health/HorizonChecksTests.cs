@@ -871,7 +871,8 @@ public class HorizonChecksTests
             Horizon([.. HorizonHolder.From(slot, 0), standby], database: static x => x with { XidCounter = 5_000_000 }), Evaluation(counter));
 
         quiet.Findings.Should().BeEmpty("the counter passed their ids over an hour ago, which dates whoever was handed them - not the slot");
-        quiet.Note.Should().Contain("the oldest holder is a physical replication slot, 1,500,000 transactions back - for how long is not known: "
+        // W5-V1 (B0 §4): an active physical slot's xmin is the standby streaming from it, so it is worded as that standby.
+        quiet.Note.Should().Contain("the oldest holder is a standby, through a physical replication slot, 1,500,000 transactions back - for how long is not known: "
             + "Postgres records no time for it");
 
         HealthFinding finding = Single(
@@ -880,12 +881,13 @@ public class HorizonChecksTests
             counter);
 
         finding.Severity.Should().Be(HealthSeverity.Warning, "the forced freeze cannot get past it");
-        finding.Title.Should().Be("A replication slot holds back vacuum by 210 million transactions");
+        finding.Title.Should().Be("A standby, through a physical replication slot, holds back vacuum by 210 million transactions");
         finding.Evidence.Should().Contain(static x => x.Label == "Held for" && x.Value.Contains("cannot date it", StringComparison.Ordinal));
         finding.Evidence.Should().NotContain(static x => x.Label == "Oldest holder of all", "the slot binds, and is the oldest itself");
         finding.Evidence.Should().Contain(new HealthEvidence("Holders found", "1 replication slot, 1 standby"));
         finding.Caveat.Should().NotContain("samples of the transaction-id counter");
-        finding.Evidence.Single(static x => x.Label == "Who it is").Value.Should().Be("slot 'standby_a', active");
+        finding.Evidence.Single(static x => x.Label == "Who it is").Value.Should().Be(
+            "a standby, through slot 'standby_a' (physical, active): the standby streaming from it sends its oldest snapshot here as the slot's xmin");
     }
 
     /// <summary>

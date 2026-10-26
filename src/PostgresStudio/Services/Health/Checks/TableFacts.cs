@@ -517,11 +517,162 @@ internal static class TableHistory
 }
 
 /// <summary>
+/// What autovacuum's three triggers are computed from, for one table: its <c>pg_class</c> size facts, and each threshold
+/// and scale factor in force - the table's own storage parameter where it has one, the server's setting where it does not.
+/// </summary>
+/// <remarks>Init properties with PostgreSQL's defaults, so a unit test states only what its case is about.</remarks>
+internal sealed record AutovacuumInputs
+{
+    /// <summary><c>reltuples</c>: <c>-1</c> for a table never vacuumed or analysed, which counts as 0.</summary>
+    public double Reltuples { get; init; }
+
+    /// <summary><c>relpages</c>.</summary>
+    public long RelPages { get; init; }
+
+    /// <summary><c>relallfrozen</c> (PostgreSQL 18), or <see langword="null" /> before 18.</summary>
+    public long? RelAllFrozen { get; init; }
+
+    /// <summary><c>autovacuum_vacuum_threshold</c>.</summary>
+    public double VacuumThreshold { get; init; } = 50;
+
+    /// <summary><c>autovacuum_vacuum_scale_factor</c>.</summary>
+    public double VacuumScaleFactor { get; init; } = 0.2;
+
+    /// <summary>
+    /// <c>autovacuum_vacuum_max_threshold</c> (PostgreSQL 18; 100,000,000 by default), or <see langword="null" /> before 18 -
+    /// a negative value is no cap, as Postgres reads <c>-1</c>.
+    /// </summary>
+    public double? VacuumMaxThreshold { get; init; }
+
+    /// <summary><c>autovacuum_vacuum_insert_threshold</c>; <c>-1</c> switches the insert trigger off.</summary>
+    public double InsertThreshold { get; init; } = 1000;
+
+    /// <summary><c>autovacuum_vacuum_insert_scale_factor</c>.</summary>
+    public double InsertScaleFactor { get; init; } = 0.2;
+
+    /// <summary><c>autovacuum_analyze_threshold</c>.</summary>
+    public double AnalyzeThreshold { get; init; } = 50;
+
+    /// <summary><c>autovacuum_analyze_scale_factor</c>.</summary>
+    public double AnalyzeScaleFactor { get; init; } = 0.1;
+}
+
+/// <summary>Autovacuum's three triggers for one table: what each counter must pass, strictly, for it to act.</summary>
+/// <param name="Vacuum">Against <c>n_dead_tup</c>.</param>
+/// <param name="Insert">Against <c>n_ins_since_vacuum</c>, or <see langword="null" /> when the insert trigger is off.</param>
+/// <param name="Analyze">Against <c>n_mod_since_analyze</c>.</param>
+/// <param name="UnfrozenShare">The share of pages not all-frozen that scaled the insert trigger (1 before 18).</param>
+internal sealed record AutovacuumTriggers(double Vacuum, double? Insert, double Analyze, double UnfrozenShare);
+
+/// <summary>
 /// What T07 and T08 say about autovacuum for a table, and the remedy that fits its state: the server's
 /// switch, the table's own switch, or a scale factor.
 /// </summary>
 internal static class Autovacuum
 {
+    /// <summary>
+    /// The scale factors a remedy suggests, largest first: the next one below the scale factor in force is what it offers.
+    /// </summary>
+    internal static readonly IReadOnlyList<double> ScaleFactorLadder = [0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001];
+
+    /// <summary>
+    /// Autovacuum's three triggers as <c>relation_needs_vacanalyze</c> computes them (B0 §7a, proved live on 17 and 18 in
+    /// §7b) - the same arithmetic <c>HealthTableQueries.TablesSql</c> does in SQL, here so that every threshold can be
+    /// unit-tested against stated numbers.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>Dead rows: <c>threshold + scale_factor × reltuples</c>, capped on PostgreSQL 18 by
+    /// <c>autovacuum_vacuum_max_threshold</c> unless it is negative.</item>
+    /// <item>Inserts (13+): <c>threshold + scale_factor × reltuples</c>, and on 18 also times the share of pages that are
+    /// not all-frozen - <c>1 - relallfrozen / relpages</c>, used only when both are above zero and with
+    /// <c>relallfrozen</c> clamped to <c>relpages</c>. A negative threshold switches it off.</item>
+    /// <item>Analyze: <c>threshold + scale_factor × reltuples</c>.</item>
+    /// </list>
+    /// A <c>reltuples</c> below zero - never vacuumed or analysed, on 14 and later - counts as 0. Autovacuum acts when a
+    /// counter is strictly greater than its trigger (<see cref="AutovacuumUnit.Due" />).
+    /// </remarks>
+    public static AutovacuumTriggers Triggers(AutovacuumInputs inputs)
+    {
+        ArgumentNullException.ThrowIfNull(inputs);
+
+        double tuples = Math.Max(inputs.Reltuples, 0);
+
+        double vacuum = inputs.VacuumThreshold + (inputs.VacuumScaleFactor * tuples);
+        if (inputs.VacuumMaxThreshold is { } cap && cap >= 0 && vacuum > cap)
+        {
+            vacuum = cap;
+        }
+
+        double unfrozen = inputs.RelPages > 0 && inputs.RelAllFrozen is > 0 and { } frozen
+            ? 1 - ((double) Math.Min(frozen, inputs.RelPages) / inputs.RelPages)
+            : 1;
+
+        double? insert = inputs.InsertThreshold >= 0
+            ? inputs.InsertThreshold + (inputs.InsertScaleFactor * tuples * unfrozen)
+            : null;
+
+        return new AutovacuumTriggers(vacuum, insert, inputs.AnalyzeThreshold + (inputs.AnalyzeScaleFactor * tuples), unfrozen);
+    }
+
+    /// <summary>
+    /// A trigger as a person reads it: whole rows, rounded half to even as Postgres' <c>round(float8)</c> rounds them.
+    /// </summary>
+    public static long Rounded(double trigger) => (long) Math.Round(trigger, MidpointRounding.ToEven);
+
+    /// <summary>
+    /// The scale factor a remedy suggests in place of <paramref name="current" />: the next rung of
+    /// <see cref="ScaleFactorLadder" /> below it, or <see langword="null" /> when it is already at or below the lowest - then
+    /// the scale factor is not what keeps autovacuum from the table.
+    /// </summary>
+    public static double? LowerScaleFactor(double current)
+    {
+        foreach (double rung in ScaleFactorLadder)
+        {
+            if (rung < current - 1e-9)
+            {
+                return rung;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A trigger in words, with where each part comes from: "1,050 (autovacuum_vacuum_threshold 50 + autovacuum_vacuum_scale_factor
+    /// 0.01 × ~100,000 rows; the scale factor is the table's own storage parameter)".
+    /// </summary>
+    /// <param name="unit">The decision.</param>
+    /// <param name="prefix">The parameters' prefix: <c>autovacuum_vacuum</c>, <c>autovacuum_vacuum_insert</c> or <c>autovacuum_analyze</c>.</param>
+    /// <param name="storageOptions">The table's own storage parameters, as <c>name=value</c>.</param>
+    /// <param name="partitioned">Whether the decision is one partition's, whose storage parameters are its own.</param>
+    /// <param name="cap">The dead-row trigger's cap, when it is the one in force.</param>
+    /// <param name="unfrozen">The insert trigger's unfrozen share, when it is below 1.</param>
+    public static string Explain(AutovacuumUnit unit, string prefix, IReadOnlyList<string> storageOptions, bool partitioned, double? cap = null, double? unfrozen = null)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(storageOptions);
+
+        IReadOnlyDictionary<string, string> own = StorageParameters.Parse(storageOptions);
+
+        string Source(string parameter) => partitioned
+            ? "the partition's"
+            : own.ContainsKey(parameter) ? "the table's own storage parameter" : "the server's setting";
+
+        string scaled = TableText.Count(Rounded(unit.Trigger))
+            + " (" + prefix + "_threshold " + Number(unit.Threshold) + ", " + Source(prefix + "_threshold")
+            + ", + " + prefix + "_scale_factor " + Number(unit.ScaleFactor) + ", " + Source(prefix + "_scale_factor")
+            + ", × " + TableText.Rows((long) unit.Tuples) + " rows (reltuples)"
+            + (unfrozen is { } share && share < 1 ? " × " + TableText.Percent(share) + " of its pages not all-frozen (PostgreSQL 18)" : string.Empty);
+
+        return cap is { } capped && unit.Trigger >= capped - 1e-9
+            ? scaled + ", capped at autovacuum_vacuum_max_threshold " + TableText.Count(capped) + ")"
+            : scaled + ")";
+    }
+
+    /// <summary>A setting's value as Postgres prints it: <c>0.2</c>, <c>50</c>.</summary>
+    internal static string Number(double value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// The remedy for a table autovacuum is not keeping up with: switch it back on for the table, or lower the scale
     /// factor - worded by the studio (<see cref="IHealthTableRemedies" />) - and nothing for a server whose

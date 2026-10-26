@@ -189,7 +189,8 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
         await InsertAsync(postgres, table, 24_000);
         await ExecuteAsync(postgres, "delete from " + table + " where (data ->> 'Rank')::int % 2 = 0");
 
-        HealthReportFinding finding = Of(await ReportAsync(host), "T07").Should().ContainSingle().Subject;
+        // G2 (W5-V1): never vacuumed since its 24,000 inserts, the table is behind on those too; this is the dead-row finding.
+        HealthReportFinding finding = Of(await ReportAsync(host), "T07").Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
 
         finding.Finding.Subject.Should().Be(KeyOf<HealthScanThing>(host.Store));
         finding.Finding.WhyItMatters.Should().Contain("switched off for this table");
