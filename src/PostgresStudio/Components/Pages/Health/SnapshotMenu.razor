@@ -96,7 +96,7 @@
         {
             // The page services answer a failure as a value; anything that still escapes is a bug, and its words are not
             // the visitor's to read - the server log has it, once per click.
-            Logger.LogWarning(exception, "The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built", scope.StoreKey, scope.DatabaseId);
+            Logger.LogWarning(exception, "The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
             message = "The snapshot could not be built; the server log has why.";
             return null;
         }
