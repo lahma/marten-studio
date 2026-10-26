@@ -52,8 +52,9 @@ internal sealed record BacklogReading(long Segments, bool Grew, bool Stalled);
 /// <c>pg_walfile_name</c> cannot run in recovery.
 /// </para>
 /// <para>
-/// <b>Nothing archived yet</b> - no last archived file, or a <c>.history</c> one (a <c>.partial</c> or <c>.backup</c> file
-/// names its segment, and is measured from) - leaves no segment to measure from. Then the backlog is the segments the
+/// <b>Nothing archived yet</b> - no last archived file, a <c>.history</c> one, or a <c>.backup</c> label, whose digits are
+/// the backup's start segment and which is archived before the stop segment (a <c>.partial</c> file names its segment, and
+/// is measured from; W5-R2-fix2 2) - leaves no segment to measure from. Then the backlog is the segments the
 /// server wrote in the advisor's window (<c>replication.wal-segment</c>'s gain), and only while the archiver archived
 /// nothing in that same window (<c>replication.archiver-archived</c>'s gain is zero): a lower bound, never sized by the
 /// whole WAL sequence. The distance (<c>replication.archiver-backlog</c>) is sampled only when there is one, so a failover,

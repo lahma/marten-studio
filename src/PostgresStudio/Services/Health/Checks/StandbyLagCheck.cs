@@ -3,6 +3,7 @@ using System.Globalization;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Health.Checks;
 
@@ -42,18 +43,22 @@ internal sealed record StandbyLagReading(string Replica, long? BehindBytes, Time
 /// <c>pg_monitor</c>): any other role sees a sender's process id, role and application name and nothing else, and the check
 /// is "not checked", naming the grant. A physical slot's <c>restart_lsn</c> is no substitute - it tracks flush, and read 0
 /// while replay was 13 MB behind. <b>On a standby</b> - <c>standby-view</c>, when the data source answered in recovery (a
-/// multi-host data source that reaches one) - received less replayed WAL is exact and needs no grant, and the age of the last
-/// replayed commit is the time; but an idle primary sends nothing, so that age grows with no lag at all, and an instant's
-/// in-flight record is no lag either. So the time is judged only while the standby has held WAL it has not replayed on two
-/// consecutive samples (<c>replication.standby-replay-behind</c>), or holds <see cref="StandbyTimeFloorBytes" /> or more
-/// now (W5-R2-fix 7). A paused replay (<c>pg_wal_replay_pause()</c>, 14+) is <c>paused</c>, a Warning of its own: somebody
-/// stopped it, and it falls further behind until somebody resumes it.
+/// multi-host data source that reaches one) - received less replayed WAL is exact and needs no grant. The <i>time</i> is not
+/// the age of the last replayed commit, which grows with no lag at all on an idle primary, behind a long writer that has not
+/// committed (a freeze <c>VACUUM</c>), and on a delayed standby, whose last commit is the one before a quiet night: each
+/// sweep samples what the standby has received (<c>replication.standby-received</c>), and the time behind is the age of the
+/// oldest sample whose position replay has still not reached - the WAL received by then is unreplayed now (W5-R2-fix2 1, 3).
+/// It is a lower bound, exact to within a sample. With no earlier sample, or none that replay has passed while the bound is
+/// still under <see cref="WarningTime" />, the time is "not judged yet". A paused replay (<c>pg_wal_replay_pause()</c>, 14+)
+/// is <c>paused</c>, a Warning of its own: somebody stopped it, and it falls further behind until somebody resumes it.
 /// </para>
 /// <para>
 /// <b>A delayed standby</b> (<c>recovery_min_apply_delay</c>) holds back replay on purpose. On the standby the delay is read,
-/// and only the time beyond it is judged - its bytes are the delay's by design, and are shown, not judged. From the primary
-/// the delay cannot be seen (it is the standby's setting), so its <c>replay_lag</c> includes it, which the caveat says
-/// (W5-R2-fix 6).
+/// and the time judged is the time beyond it: a healthy one replays what it received a delay ago, so it fires only when WAL
+/// received more than the delay and <see cref="WarningTime" /> ago is still unreplayed - which needs samples that reach back
+/// that far (<see cref="HealthHistory.Capacity" /> of them, an hour at the default interval). Its bytes are the delay's by
+/// design, and are shown, not judged. From the primary the delay cannot be seen (it is the standby's setting), so its
+/// <c>replay_lag</c> and bytes include it: a known limit, which the caveat says (W5-R2-fix 6).
 /// </para>
 /// <para>
 /// <b>Physical senders only</b> (W5-R2-fix B1): a logical sender - a subscription, a change data capture connector - is
@@ -88,13 +93,10 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
     public const string ThisServer = "this server";
 
     /// <summary>
-    /// On a standby, holding this much WAL unreplayed - a segment's worth - is lag at once; below it, only on two consecutive
-    /// samples: 16 MiB.
+    /// What a standby has received (<c>pg_last_wal_receive_lsn()</c>, as a number), sampled so a later sweep can tell how long
+    /// WAL it received has stayed unreplayed (W5-R2-fix2 1).
     /// </summary>
-    public const long StandbyTimeFloorBytes = 16L << 20;
-
-    /// <summary>A standby's own unreplayed WAL, sampled so the next sweep knows whether it held some before.</summary>
-    public const string ReplayBehindSeries = "replication.standby-replay-behind";
+    public const string ReceivedSeries = "replication.standby-received";
 
     /// <inheritdoc />
     public override async Task<StandbyLagFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
@@ -126,9 +128,9 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
     {
         ArgumentNullException.ThrowIfNull(facts);
 
-        if (facts.Role is { InRecovery: true, ReplayBehindBytes: { } bytes })
+        if (facts.Role is { InRecovery: true, ReceivePosition: { } received })
         {
-            yield return new HealthSamplePart(ReplayBehindSeries, bytes);
+            yield return new HealthSamplePart(ReceivedSeries, received);
         }
     }
 
@@ -284,8 +286,10 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             "Read in pg_stat_replication at " + standbys.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
             + ": the bytes are this server's WAL position less the standby's replay position, and the time is the standby's own "
             + "replay_lag, which is empty once it has caught up and nothing new arrives - so an idle primary never makes it grow. "
-            + "A standby that delays replay on purpose (recovery_min_apply_delay) shows that delay here as lag: the delay is the "
-            + "standby's own setting, which cannot be read from the primary. Standbys are named only with ViewDatabaseActivity.",
+            + "A known limit: a standby that delays replay on purpose (recovery_min_apply_delay) shows that delay here as lag - "
+            + "an hour's delay reads as Critical - because the delay is the standby's own setting, which cannot be read from the "
+            + "primary; a data source that reaches the standby judges it there, beyond its delay. Standbys are named only with "
+            + "ViewDatabaseActivity.",
             [new HealthEvidence("Measured on", "the primary, in pg_stat_replication"), new HealthEvidence("Platform", facts.Server.Platform.Name)]);
 
         string? note = Join(Join(unreadable, capped), others);
@@ -313,17 +317,26 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
         long? bytes = role.ReplayBehindBytes;
         TimeSpan? age = role.ReplayAgeAtRead is { } read ? SnapshotAge.At(read, role.ReadAt, evaluation) : null;
         TimeSpan delay = facts.ApplyDelay is { } applyDelay && applyDelay > TimeSpan.Zero ? applyDelay : TimeSpan.Zero;
-        bool heldBefore = HeldBefore(evaluation.History, role.ReadAt);
-        bool timeJudged = bytes > 0 && (heldBefore || bytes >= StandbyTimeFloorBytes);
-        TimeSpan? beyondDelay = age is { } a && delay > TimeSpan.Zero ? (a > delay ? a - delay : TimeSpan.Zero) : age;
+        ReplayStall? stall = role.ReplayPosition is { } replayed ? Stall(evaluation.History, replayed, role.ReadAt) : null;
+        TimeSpan? unreplayedFor = bytes > 0 ? stall?.UnreplayedFor(role.ReadAt) : null;
+        TimeSpan? beyondDelay = unreplayedFor is { } behindFor ? (behindFor > delay ? behindFor - delay : TimeSpan.Zero) : null;
+        bool timeJudged = beyondDelay is { } beyond && (!stall!.SinceBeforeTheSamples || beyond >= WarningTime);
 
         List<HealthEvidence> context =
         [
-            new("Measured on", "this standby: what it has received less what it has replayed"),
+            new("Measured on", "this standby: what it has received less what it has replayed, and how long WAL it received has gone unreplayed"),
             new("Received up to", role.ReceiveLsn ?? "nothing by streaming"),
             new("Replayed up to", role.ReplayLsn ?? "not readable"),
+            new("Unreplayed since", stall switch
+            {
+                null => "not measured: the replay position was not readable",
+                { Samples: 0 } => "not measured yet: no earlier sample of what it received",
+                { Since: { } since } when bytes > 0 => since.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+                    + (stall.SinceBeforeTheSamples ? " or earlier: the advisor's samples begin there" : string.Empty),
+                _ => "nothing the advisor's samples saw it receive is unreplayed",
+            }),
             new("Last replayed commit", role.LastReplayAt is { } at
-                ? at.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + (age is { } ago ? ", " + SessionText.Duration(ago) + " ago" : string.Empty)
+                ? at.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + (age is { } ago ? ", " + SessionText.Duration(ago) + " ago" : string.Empty) + " - shown, never judged"
                 : "none yet"),
             new("Replay", role.PauseState ?? (PostgresFeatures.Has(PostgresFeature.WalReplayPauseState, facts.Server.VersionNumber) ? "not read" : PostgresFeatures.Needs(PostgresFeature.WalReplayPauseState))),
             new("recovery_min_apply_delay", facts.ApplyDelay is null ? "not readable" : delay == TimeSpan.Zero ? "0 (replay is not delayed)" : SessionText.Duration(delay) + ": only the time beyond it is judged, and the WAL it holds is not"),
@@ -332,16 +345,23 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
 
         string caveat =
             "Read at " + role.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + " on the standby the data source "
-            + "reached. The time is the age of the last replayed commit, which grows on an idle primary with no lag at all, so it "
-            + "is judged only while the standby has held WAL it has not replayed on two consecutive samples, or holds "
-            + WalText.Bytes(StandbyTimeFloorBytes) + " or more now - an instant's record in flight is not lag - or while replay is paused.";
+            + "reached. The time is how long WAL this standby received has gone unreplayed: each sweep samples what it has received, "
+            + "and the time is the age of the oldest sample whose position replay has still not reached - at least that long, exact "
+            + "to within a sample. The age of the last replayed commit is never the time: it grows with no lag at all on an idle "
+            + "primary, behind a long transaction that has not committed, and on a delayed standby after a quiet spell."
+            + (delay > TimeSpan.Zero
+                ? " With recovery_min_apply_delay set, the time judged is the time beyond the delay, so it needs samples that reach "
+                  + "back further than the delay: " + SampleSpan(evaluation.Text) + "."
+                : string.Empty);
 
         if (role.IsPaused)
         {
             List<HealthEvidence> evidence =
             [
                 new("Behind in WAL", bytes is { } b ? WalText.Bytes(b) : "not measured"),
-                new("Behind in time", age is { } pausedFor ? SessionText.Duration(pausedFor) + " since the last replayed commit" : "not measured"),
+                new("Behind in time", unreplayedFor is { } pausedFor
+                    ? "WAL received " + SessionText.Duration(pausedFor) + " ago" + (stall!.SinceBeforeTheSamples ? " or earlier" : string.Empty) + " is not replayed"
+                    : "not measured"),
                 .. context,
             ];
 
@@ -361,20 +381,27 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             });
         }
 
+        string? detail = string.Join("; ", new[]
+        {
+            timeJudged && stall!.SinceBeforeTheSamples ? "at least: WAL received when the advisor's samples begin is not replayed yet" : null,
+            delay > TimeSpan.Zero ? "the time beyond its " + SessionText.Duration(delay) + " recovery_min_apply_delay" : null,
+            delay > TimeSpan.Zero && bytes is { } held ? WalText.Bytes(held) + " received and held by the delay" : null,
+        }.Where(static x => x is not null));
+
         StandbyLagReading reading = new(
             ThisServer,
             delay > TimeSpan.Zero ? null : bytes,
             timeJudged ? beyondDelay : null,
-            delay > TimeSpan.Zero && bytes is { } held ? WalText.Bytes(held) + " received and held by recovery_min_apply_delay" : null);
+            detail.Length == 0 ? null : detail);
 
         HealthFinding? finding = Finding(
             "standby-view",
             [reading],
             1,
             "This standby has received WAL it has not replayed, so what is read from it is behind the primary - by the bytes "
-            + "it holds and, while it holds them, by the age of the last commit it replayed. If it is the failover target, "
-            + "that is what a failover has to replay first. The usual causes are a disk or CPU that cannot keep up, or a long "
-            + "query here that replay waits for (max_standby_streaming_delay).",
+            + "it holds and by how long it has held them. If it is the failover target, that is what a failover has to replay "
+            + "first. The usual causes are a disk or CPU that cannot keep up, or a long query here that replay waits for "
+            + "(max_standby_streaming_delay).",
             caveat,
             context);
 
@@ -383,27 +410,96 @@ internal sealed class StandbyLagCheck : HealthCheck<StandbyLagFacts>
             : HealthVerdict.Quiet(bytes is null
                 ? "This server is a standby that receives nothing by streaming, so its replay lag is not measured."
                 : "This server is a standby, " + WalText.Bytes(bytes.Value) + " behind what it has received"
-                  + (timeJudged && beyondDelay is { } behindFor ? " and " + SessionText.Duration(behindFor) + " behind in time" : string.Empty)
-                  + (delay > TimeSpan.Zero ? ", beyond its " + SessionText.Duration(delay) + " recovery_min_apply_delay." : ".")
-                  + (bytes > 0 && !timeJudged ? " It holds WAL it has not replayed on this sample only; the time is judged once it has on two." : string.Empty));
+                  + (bytes > 0 ? TimeNote(stall, unreplayedFor, beyondDelay, timeJudged, delay, role.ReadAt, evaluation.Text) : ".")
+                  + (bytes == 0 && delay > TimeSpan.Zero ? " Its recovery_min_apply_delay is " + SessionText.Duration(delay) + "." : string.Empty));
     }
 
-    /// <summary>Whether the sample before <paramref name="readAt" /> found the standby holding WAL it had not replayed.</summary>
-    internal static bool HeldBefore(HealthHistoryView history, DateTimeOffset readAt)
+    /// <summary>How far back the advisor's samples reach, and what sets it.</summary>
+    private static string SampleSpan(StudioText text) =>
+        "the advisor keeps " + SessionText.Number(HealthHistory.Capacity) + " samples, an hour at the default "
+        + text.OptionName("HealthInterval") + " of one minute";
+
+    /// <summary>What a quiet standby's status row says of the time, so "not judged yet" is never silence.</summary>
+    private static string TimeNote(ReplayStall? stall, TimeSpan? unreplayedFor, TimeSpan? beyondDelay, bool timeJudged, TimeSpan delay, DateTimeOffset readAt, StudioText text)
+    {
+        string delayed = delay > TimeSpan.Zero ? " recovery_min_apply_delay is " + SessionText.Duration(delay) + "." : string.Empty;
+
+        if (stall is null)
+        {
+            return "; its replay position was not readable, so the time is not judged." + delayed;
+        }
+
+        if (stall.Samples == 0)
+        {
+            return "; the time is not judged yet: it is measured against what the advisor sees it receive, from the next sample on." + delayed;
+        }
+
+        if (stall.Since is null)
+        {
+            return "; replay has reached everything it had received at the advisor's last sample, "
+                + SessionText.Duration(readAt - stall.PassedAt!.Value) + " ago, so it is not behind in time." + delayed;
+        }
+
+        if (!timeJudged)
+        {
+            return "; replay has reached nothing the advisor's samples saw it receive over the " + SessionText.Duration(readAt - stall.Oldest!.Value)
+                + " they cover, so the time is not judged yet"
+                + (delay > TimeSpan.Zero
+                    ? ": with a recovery_min_apply_delay of " + SessionText.Duration(delay) + ", it is judged once the samples reach back more than "
+                      + SessionText.Duration(delay + WarningTime) + " (" + SampleSpan(text) + ")."
+                    : ".");
+        }
+
+        return ", and WAL it received " + SessionText.Duration(unreplayedFor!.Value) + " ago is not replayed yet"
+            + (delay > TimeSpan.Zero ? ", " + SessionText.Duration(beyondDelay!.Value) + " beyond its " + SessionText.Duration(delay) + " recovery_min_apply_delay." : ".");
+    }
+
+    /// <summary>
+    /// Where replay stands against the advisor's samples of what the standby had received (<see cref="ReceivedSeries" />),
+    /// taken before this read.
+    /// </summary>
+    /// <param name="Since">
+    /// When the oldest sample whose position replay has not reached was taken - the WAL received by then is still unreplayed -
+    /// or <see langword="null" /> when replay has reached the newest sample's.
+    /// </param>
+    /// <param name="PassedAt">When the newest sample replay has reached was taken, or <see langword="null" /> for none.</param>
+    /// <param name="Samples">How many earlier samples there are.</param>
+    /// <param name="Oldest">When the oldest of them was taken.</param>
+    internal sealed record ReplayStall(DateTimeOffset? Since, DateTimeOffset? PassedAt, int Samples, DateTimeOffset? Oldest)
+    {
+        /// <summary>
+        /// Whether replay has reached no sampled position at all, so the WAL may have gone unreplayed since before the samples
+        /// begin: <see cref="UnreplayedFor" /> is then a bound set by how far back they reach.
+        /// </summary>
+        public bool SinceBeforeTheSamples => Since is not null && PassedAt is null;
+
+        /// <summary>How long WAL received has gone unreplayed - at least - or <see langword="null" /> when nothing has.</summary>
+        public TimeSpan? UnreplayedFor(DateTimeOffset readAt) => Since is { } since ? readAt - since : null;
+    }
+
+    /// <summary>Reads <see cref="ReplayStall" /> from <paramref name="history" /> for a standby replayed up to <paramref name="replayed" />.</summary>
+    internal static ReplayStall Stall(HealthHistoryView history, ulong replayed, DateTimeOffset readAt)
     {
         ArgumentNullException.ThrowIfNull(history);
 
-        IReadOnlyList<(DateTimeOffset At, double Value)> points = history.Trend(ReplayBehindSeries).Points;
+        List<(DateTimeOffset At, double Value)> points = [.. history.Trend(ReceivedSeries).Points.Where(x => x.At < readAt).OrderBy(static x => x.At)];
+        DateTimeOffset? since = null;
+        DateTimeOffset? passed = null;
 
         for (int i = points.Count - 1; i >= 0; i--)
         {
-            if (points[i].At < readAt)
+            if (points[i].Value > replayed)
             {
-                return points[i].Value > 0;
+                since = points[i].At;
+            }
+            else
+            {
+                passed = points[i].At;
+                break;
             }
         }
 
-        return false;
+        return new ReplayStall(since, passed, points.Count, points.Count == 0 ? null : points[0].At);
     }
 
     private static StandbyLagReading Reading(StandbyRow row) => new(
