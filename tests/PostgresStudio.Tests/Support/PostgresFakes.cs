@@ -125,10 +125,13 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
 {
     public List<(StudioScope Scope, SqlConsoleRequest Request)> Runs { get; } = [];
 
+    /// <summary>What the next run returns, or <see langword="null" /> for an empty result.</summary>
+    public SqlConsoleResult? Next { get; set; }
+
     public Task<SqlConsoleResult> RunSqlAsync(StudioScope scope, SqlConsoleRequest request, CancellationToken cancellationToken = default)
     {
         Runs.Add((scope, request));
-        return Task.FromResult(new SqlConsoleResult([], [], false, 500, TimeSpan.Zero, [], null, null));
+        return Task.FromResult(Next ?? new SqlConsoleResult([], [], false, 500, TimeSpan.Zero, [], null, null));
     }
 }
 

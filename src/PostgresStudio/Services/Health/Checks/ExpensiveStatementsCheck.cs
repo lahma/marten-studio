@@ -394,7 +394,11 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         }
     }
 
-    private static string RefusalText(StatementPlanRefusal refusal) => refusal switch
+    /// <summary>
+    /// Why a recorded statement is not planned, in words: T02's Plan evidence, and the Statements page's drill-in (X1), which
+    /// refuses exactly what T02 refuses.
+    /// </summary>
+    internal static string RefusalText(StatementPlanRefusal refusal) => refusal switch
     {
         StatementPlanRefusal.Truncated =>
             "Not planned: its text is longer than the " + TableText.Count(HealthStatementQueries.MaxTextCharacters) + " characters the studio reads.",

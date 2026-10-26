@@ -6,6 +6,7 @@ using MartenStudio.Tests.Conventions;
 
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Tests.Health;
 
@@ -16,6 +17,11 @@ namespace MartenStudio.Tests.Health;
 /// code is registered; and the table's canonical rendering - the stable columns, not the wording - is a reviewed Verify
 /// baseline, so editing or deleting a row is a reviewed change under hard rule 7's process.
 /// </summary>
+/// <remarks>
+/// From 0.6 (X1b) the table also holds the plan insights' codes (<see cref="PlanInsights" />): area <c>Plans</c>, letter
+/// <c>P</c>, a registry of their own because an insight is about one plan a visitor asked for and not a check a sweep runs,
+/// and run by both studios. They are "registered" here exactly as a check is, under the same rules.
+/// </remarks>
 public class HealthCodesTests
 {
     /// <summary>The header the parser looks for. The table is the first one in the file with exactly these columns.</summary>
@@ -41,10 +47,13 @@ public class HealthCodesTests
         string Since,
         string? Retired);
 
-    /// <summary>One registered check, as the table must describe it.</summary>
-    internal sealed record RegisteredCode(string Code, string Title, HealthArea Area, IReadOnlyList<string> Variants, string Studios, string Link);
+    /// <summary>One registered check, or plan insight, as the table must describe it.</summary>
+    internal sealed record RegisteredCode(string Code, string Title, string Area, IReadOnlyList<string> Variants, string Studios, string Link);
 
-    /// <summary>Every check either studio registers: <c>both</c> when Postgres Studio runs it too, <c>Marten</c> otherwise.</summary>
+    /// <summary>
+    /// Every check either studio registers - <c>both</c> when Postgres Studio runs it too, <c>Marten</c> otherwise - and every
+    /// plan insight, which both studios evaluate wherever they draw a plan.
+    /// </summary>
     internal static IReadOnlyList<RegisteredCode> Registered()
     {
         HealthCheckRegistry marten = new(MartenStudioDescriptor.Instance);
@@ -52,26 +61,31 @@ public class HealthCodesTests
         HashSet<string> inMarten = [.. marten.All.Select(static x => x.Info.Code)];
         HashSet<string> inPostgres = [.. postgres.All.Select(static x => x.Info.Code)];
 
-        return
-        [
-            .. marten.All.Concat(postgres.All)
-                .Select(static x => x.Info)
-                .DistinctBy(static x => x.Code)
-                .OrderBy(static x => x.Code, StringComparer.Ordinal)
-                .Select(x => new RegisteredCode(
-                    x.Code,
-                    x.Title,
-                    x.Area,
-                    x.Variants,
-                    (inMarten.Contains(x.Code), inPostgres.Contains(x.Code)) switch
-                    {
-                        (true, true) => "both",
-                        (true, false) => "Marten",
-                        _ => "Postgres",
-                    },
-                    HealthCheckInfo.AreaFileName(x.Area) + "#" + x.DocsAnchor)),
-        ];
+        IEnumerable<RegisteredCode> checks = marten.All.Concat(postgres.All)
+            .Select(static x => x.Info)
+            .DistinctBy(static x => x.Code)
+            .Select(x => new RegisteredCode(
+                x.Code,
+                x.Title,
+                x.Area.ToString(),
+                x.Variants,
+                (inMarten.Contains(x.Code), inPostgres.Contains(x.Code)) switch
+                {
+                    (true, true) => "both",
+                    (true, false) => "Marten",
+                    _ => "Postgres",
+                },
+                HealthCheckInfo.AreaFileName(x.Area) + "#" + x.DocsAnchor));
+
+        IEnumerable<RegisteredCode> insights = PlanInsights.All.Select(static x => new RegisteredCode(
+            x.Code, x.Title, PlanInsights.Area, [], "both", PlanInsights.DocsFileName + "#" + x.DocsAnchor));
+
+        return [.. checks.Concat(insights).OrderBy(static x => x.Code, StringComparer.Ordinal)];
     }
+
+    /// <summary>The area a code's letter names: a health area's, or <c>Plans</c> for a plan insight's <c>P</c>.</summary>
+    internal static string? AreaOf(char letter) =>
+        HealthCheckRegistry.AreaOf(letter)?.ToString() ?? (letter == PlanInsights.Letter ? PlanInsights.Area : null);
 
     /// <summary>The rows of the first table under <see cref="Header" /> outside a code fence.</summary>
     internal static IReadOnlyList<CodeRow> Parse(string markdown)
@@ -186,7 +200,7 @@ public class HealthCodesTests
                 problems.Add(check.Code + " is marked retired in " + row.Retired + " and is still registered; a retired code is never reassigned.");
             }
 
-            if (row.Area != check.Area.ToString())
+            if (row.Area != check.Area)
             {
                 problems.Add(check.Code + "'s row says area " + row.Area + "; the check's is " + check.Area + ".");
             }
@@ -219,7 +233,7 @@ public class HealthCodesTests
                 problems.Add(row.Code + " has a row and is neither registered nor marked retired.");
             }
 
-            if (HealthCheckRegistry.AreaOf(row.Code[0])?.ToString() != row.Area)
+            if (AreaOf(row.Code[0]) != row.Area)
             {
                 problems.Add(row.Code + "'s letter does not name area " + row.Area + "; a code never moves area.");
             }
@@ -292,6 +306,17 @@ public class HealthCodesTests
     }
 
     [Fact]
+    public void The_plan_insights_rows_are_the_insights_and_no_health_check_takes_their_letter()
+    {
+        IReadOnlyList<CodeRow> rows = Table();
+
+        rows.Where(static x => x.Area == PlanInsights.Area).Select(static x => x.Code)
+            .Should().Equal(PlanInsights.All.Select(static x => x.Code), "every plan insight has its row, in code order");
+        rows.Where(static x => x.Area == PlanInsights.Area).Should().OnlyContain(static x => x.Link.StartsWith("plans.md#", StringComparison.Ordinal));
+        HealthCheckRegistry.AreaOf(PlanInsights.Letter).Should().BeNull("a health check never takes a P code");
+    }
+
+    [Fact]
     public Task The_tables_stable_columns_are_the_reviewed_baseline() =>
         Verify(Canonical(Table()), extension: "txt")
             .UseDirectory("../Verify")
@@ -310,7 +335,7 @@ public class HealthCodesTests
 
     private const string GoodRow = "| [T03](tables.md#t03-invalid-index) | Invalid index | Tables | `index`, `partitions` | `index`: index | both | 0.4 | - |";
 
-    private static readonly RegisteredCode T03 = new("T03", "Invalid index", HealthArea.Tables, ["index", "partitions"], "both", "tables.md#t03-invalid-index");
+    private static readonly RegisteredCode T03 = new("T03", "Invalid index", nameof(HealthArea.Tables), ["index", "partitions"], "both", "tables.md#t03-invalid-index");
 
     [Fact]
     public void The_parser_reads_the_first_table_and_ignores_a_fenced_one_and_a_later_one()

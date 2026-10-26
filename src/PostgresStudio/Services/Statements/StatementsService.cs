@@ -4,6 +4,7 @@ using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -221,6 +222,16 @@ internal interface IStatementsService
     /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
     /// <param name="cancellationToken">Cancels this caller's wait.</param>
     Task<StatementsView> GetLatestAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The drill-in (X1): one statement the statement sweep read, as this visitor may see it, and its generic plan - planned
+    /// now, behind the same gate as the page, and audited. Never throws but for cancellation; a refusal, a statement with no
+    /// plan and a plan Postgres refused are values.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped, because a statement belongs to no tenant.</param>
+    /// <param name="queryId">The statement's <c>queryid</c>.</param>
+    /// <param name="cancellationToken">Cancels the plan.</param>
+    Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -258,11 +269,32 @@ internal interface IStatementsService
 /// that finished and starts none, so a tab left open does not plan T02's statements every five minutes on nobody's behalf.
 /// Both pass the same gate first.
 /// </para>
+/// <para>
+/// <b>The drill-in (X1).</b> <see cref="PlanAsync" /> passes the same gate, finds the statement among those the statement sweep
+/// read, and plans it only when this visitor may read its text and T02 would plan it: never a text withheld at read or by the
+/// visitor's mask, never a write or a locking read, never a cut text. The plan is the generic plan, planned as
+/// <c>SqlConsoleRole</c> under the visitor's own <c>search_path</c> (<see cref="StatementPlanReader" />); a plan that reads a
+/// table in a schema the visitor may not see, or a table the statement rules withhold, is not shown; every other plan is masked
+/// as the text is. Each plan is one Activity entry, naming the <c>queryid</c> and never the text.
+/// </para>
 /// </remarks>
 internal sealed class StatementsService : IStatementsService
 {
     /// <summary>What the audit ring calls reading the Statements page.</summary>
     internal const string Action = "Read database statements";
+
+    /// <summary>What the audit ring calls the drill-in's plan of a statement (X1).</summary>
+    internal const string PlanAction = "Plan database statement";
+
+    /// <summary>What the drill-in says of a <c>queryid</c> the statement sweep did not read.</summary>
+    internal const string NotAmong =
+        "This statement is not among the ones the statement checks read for this database - the most expensive "
+        + "statements of its role, and the checks' own picks. It may have dropped out since the link was made, or been "
+        + "evicted from pg_stat_statements.";
+
+    /// <summary>What the drill-in says of a plan that reads a table in a schema the visitor may not see.</summary>
+    internal const string PlanReadsWithheldSchema =
+        "Not shown: its plan reads a table in a schema you may not see - through a view, or a function with a SQL-standard body.";
 
     /// <summary>What the audit ring says was read.</summary>
     internal const string Target = "top statements by execution time (pg_stat_statements)";
@@ -295,6 +327,8 @@ internal sealed class StatementsService : IStatementsService
     private readonly ILogger<StatementsService> logger;
     private readonly DatabaseAccess? access;
     private readonly StudioDatabaseTime meter;
+    private readonly StatementPlanReader planner;
+    private readonly TimeProvider timeProvider;
     private readonly TableRowAuditLedger ledger = new();
 
     public StatementsService(
@@ -307,7 +341,9 @@ internal sealed class StatementsService : IStatementsService
         StudioLogThrottle throttle,
         ILogger<StatementsService> logger,
         DatabaseAccess? access = null,
-        StudioDatabaseTime? meter = null)
+        StudioDatabaseTime? meter = null,
+        StatementPlanReader? planner = null,
+        TimeProvider? timeProvider = null)
     {
         this.settings = settings;
         this.capabilities = capabilities;
@@ -319,6 +355,8 @@ internal sealed class StatementsService : IStatementsService
         this.logger = logger;
         this.access = access;
         this.meter = meter ?? StudioDatabaseTime.Shared;
+        this.planner = planner ?? new StatementPlanReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<StatementPlanReader>.Instance);
+        this.timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>How many first reads this circuit has recorded, for a test.</summary>
@@ -337,14 +375,66 @@ internal sealed class StatementsService : IStatementsService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return refused ?? StatementsView.Refused(DatabaseRefusal.Unavailable, "The database could not be resolved.");
+        }
+
+        // 4. Only now anything about the database: the statement sweep's read, joined or taken while it is fresh - or, for a
+        // poll, the last one that finished, which starts nothing.
+        StatementFacts? latest;
+
+        try
+        {
+            latest = run ? await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false) : facts.Latest(database);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return StatementsView.Refused(DatabaseRefusal.Unavailable, Failure(exception, database));
+        }
+
+        if (latest is not { } read)
+        {
+            return new StatementsView
+            {
+                State = StatementsState.NotRun,
+                Status = NotRun,
+                StudioCost = meter.Total(CostKey(database.Target)),
+                StudioCostText = StudioCostText(),
+            };
+        }
+
+        DatabaseGateRead? gate = read.Statements.Count == 0 ? null : await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+
+        StatementsView view = Show(read, gate) with
+        {
+            StudioCost = meter.Total(CostKey(database.Target)),
+        };
+
+        if (read.State == StatementsState.Read)
+        {
+            await RecordFirstReadAsync(whole, read).ConfigureAwait(false);
+        }
+
+        return view;
+    }
+
+    /// <summary>
+    /// The page's gate, in its order (the remarks): the capability, the scope resolved with no tenant, then the store policy and
+    /// the write policy of the store and database it resolved to. A refusal, or the database resolved for the whole of it.
+    /// </summary>
+    private async Task<(StatementsView? Refused, ResolvedSource? Database, StudioScope Whole)> PassAsync(StudioScope scope, CancellationToken cancellationToken)
+    {
         StudioScope asked = scope with { TenantId = null };
         StudioText text = settings.Text;
 
         // 1. The capability, before anybody is asked who is asking.
         if (!capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
         {
-            return Refuse(asked, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
-                capabilities.ReadOnly ? text.StatementsReadOnlyDenial : text.StatementsCapabilityDenial);
+            return (Refuse(asked, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
+                capabilities.ReadOnly ? text.StatementsReadOnlyDenial : text.StatementsCapabilityDenial), null, asked);
         }
 
         // 2. The scope, resolved with no tenant: the store policy, which the resolver asks before it looks anything up.
@@ -356,11 +446,11 @@ internal sealed class StatementsService : IStatementsService
         }
         catch (StudioNotAuthorizedException)
         {
-            return Refuse(asked, DatabaseRefusal.StorePolicy, text.StatementsStorePolicyDenial);
+            return (Refuse(asked, DatabaseRefusal.StorePolicy, text.StatementsStorePolicyDenial), null, asked);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
-            return StatementsView.Refused(DatabaseRefusal.Unavailable, exception.Message);
+            return (StatementsView.Refused(DatabaseRefusal.Unavailable, exception.Message), null, asked);
         }
 
         // 3. The two policies, of the store and database it resolved to, by their own names (D29).
@@ -371,52 +461,155 @@ internal sealed class StatementsService : IStatementsService
 
         if (!samePlace && !await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false))
         {
-            return Refuse(whole, DatabaseRefusal.StorePolicy, text.StatementsStorePolicyDenial);
+            return (Refuse(whole, DatabaseRefusal.StorePolicy, text.StatementsStorePolicyDenial), null, whole);
         }
 
         if (!await authorization.IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity, cancellationToken).ConfigureAwait(false))
         {
-            return Refuse(whole, DatabaseRefusal.WritePolicy, text.StatementsWritePolicyDenial);
+            return (Refuse(whole, DatabaseRefusal.WritePolicy, text.StatementsWritePolicyDenial), null, whole);
         }
 
-        // 4. Only now anything about the database: the statement sweep's read, joined or taken while it is fresh - or, for a
-        // poll, the last one that finished, which starts nothing.
-        ResolvedSource database = resolved with { Scope = whole };
-        StatementFacts? latest;
+        return (null, resolved with { Scope = whole }, whole);
+    }
+
+    /// <inheritdoc />
+    public async Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // 1-3. The page's own gate: nothing is read, and nothing planned, for a visitor short of it.
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return StatementPlanView.Refused(queryId, refused?.Refusal ?? DatabaseRefusal.Unavailable, refused?.Reason ?? "The database could not be resolved.");
+        }
+
+        // 4. The statement, among those the statement sweep read - its read, joined or taken while fresh, as the page's load.
+        StatementFacts read;
 
         try
         {
-            latest = run ? await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false) : facts.Latest(database);
+            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return StatementsView.Refused(DatabaseRefusal.Unavailable, Failure(exception, resolved));
+            return StatementPlanView.Refused(queryId, DatabaseRefusal.Unavailable, Failure(exception, database));
         }
 
-        if (latest is not { } read)
+        StudioText text = settings.Text;
+
+        if (read.State != StatementsState.Read)
         {
-            return new StatementsView
-            {
-                State = StatementsState.NotRun,
-                Status = NotRun,
-                StudioCost = meter.Total(CostKey(resolved.Target)),
-                StudioCostText = StudioCostText(),
-            };
+            return new StatementPlanView { QueryId = queryId, NoPlan = Status(read, text) ?? NotAmong };
         }
 
-        DatabaseGateRead? gate = read.Statements.Count == 0 ? null : await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
-
-        StatementsView view = Show(read, gate) with
+        if (!read.Statements.Any(x => x.QueryId == queryId))
         {
-            StudioCost = meter.Total(CostKey(resolved.Target)),
+            return new StatementPlanView { QueryId = queryId, NoPlan = NotAmong };
+        }
+
+        // 5. As this visitor may see it: the text through their mask, which also decides whether a plan of it may be shown.
+        DatabaseGateRead? gate = await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        StatementFact fact = read.Statements.First(x => x.QueryId == queryId);
+        StatementRowView row = Show(read, gate).Rows.First(x => x.QueryId == queryId);
+
+        StatementPlanView view = new() { QueryId = queryId, Statement = row };
+
+        if (fact.Text is not { } statementText || row.Text is null || screen.Withheld is not { } withheld)
+        {
+            return view with { NoPlan = ExpensiveStatementsCheck.NotPlannedWithheld };
+        }
+
+        StatementPlanRefusal refusal = HealthStatementQueries.Refusal(statementText, fact.TextTruncated);
+
+        if (refusal != StatementPlanRefusal.None)
+        {
+            return view with { NoPlan = ExpensiveStatementsCheck.RefusalText(refusal) };
+        }
+
+        // 6. The plan, as SqlConsoleRole under the visitor's search_path; audited, planned or not.
+        string target = "queryid " + queryId.ToString(CultureInfo.InvariantCulture);
+        StatementPlanRead planned;
+
+        try
+        {
+            planned = await planner.ReadAsync(database.Target, queryId, statementText, fact.TextTruncated, withheld, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            string failed = PostgresFailure.IsConnectionFailure(exception)
+                ? "Not planned: the studio could not connect to this database."
+                : "Not planned: the plan failed (" + exception.GetType().Name + ").";
+
+            audit.Record(PlanAction, target, succeeded: false, failed, StudioCapability.ViewDatabaseActivity, whole);
+            return view with { NoPlan = failed };
+        }
+
+        if (planned.Json is not { } json)
+        {
+            audit.Record(PlanAction, target, succeeded: false, planned.NotPlanned, StudioCapability.ViewDatabaseActivity, whole);
+            return view with { NoPlan = planned.NotPlanned, Statements = planned.Statements };
+        }
+
+        // 7. Shown only when it reads nothing the visitor may not see - and then masked as the text is.
+        if (WithheldPlan(json, screen, withheld) is { } withholding)
+        {
+            audit.Record(PlanAction, target, succeeded: true, "Planned, and not shown: it reads what this visitor may not see.", StudioCapability.ViewDatabaseActivity, whole);
+            return view with { NoPlan = withholding, Statements = planned.Statements };
+        }
+
+        QueryPlanRead parsed = QueryPlanReader.Read(json, name => PostgresErrorText.Redact(name, withheld) ?? name);
+
+        audit.Record(
+            PlanAction,
+            target,
+            succeeded: true,
+            parsed.Plan is { } plan ? "Planned: " + TableText.Count(plan.NodeCount) + (plan.NodeCount == 1 ? " node." : " nodes.") : parsed.Failure,
+            StudioCapability.ViewDatabaseActivity,
+            whole);
+
+        return view with
+        {
+            Plan = parsed.Plan,
+            NoPlan = parsed.Failure,
+            Caveat = ExpensiveStatementsCheck.GenericPlanCaveat(text).Trim(),
+            PlannedAt = timeProvider.GetUtcNow(),
+            Statements = planned.Statements,
         };
+    }
 
-        if (read.State == StatementsState.Read)
+    /// <summary>
+    /// Why a plan may not be shown to the visitor <paramref name="screen" /> describes, or <see langword="null" />: it reads a
+    /// table in a schema they may not see (its schema, under <c>VERBOSE</c>), or a name in it is one the statement rules withhold
+    /// - a hidden type's table, a document table no store declares while types may be hidden, a store they may not see. Pure.
+    /// </summary>
+    internal static string? WithheldPlan(string json, StatementScreen screen, IReadOnlySet<string> withheld)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        ArgumentNullException.ThrowIfNull(screen);
+        ArgumentNullException.ThrowIfNull(withheld);
+
+        IReadOnlyList<(string? Schema, string Relation)> relations = QueryPlanReader.Relations(json);
+
+        if (relations.Any(x => x.Schema is { } schema && withheld.Contains(schema)))
         {
-            await RecordFirstReadAsync(whole, read).ConfigureAwait(false);
+            return PlanReadsWithheldSchema;
         }
 
-        return view;
+        // Every name the plan prints - its relations, qualified, and the rest of its text - under the statement's own rules.
+        string names = string.Join("\n", relations.Select(static x => x.Schema is { } schema ? schema + "." + x.Relation : x.Relation)) + "\n" + json;
+
+        return SessionQueryText.WithholdingNote(names, screen) switch
+        {
+            null => null,
+            SessionQueryText.HiddenTypeNote => "Not shown: its plan reads the table of a document type the studio does not show.",
+            SessionQueryText.UndeclaredTableNote =>
+                "Not shown: its plan reads a Marten document table no registered store declares, which may be a document type the studio does not show.",
+            SessionQueryText.RefusedStoreNote => "Not shown: its plan reads a document table of a registered Marten store your account may not see.",
+            { } note => "Not shown. " + note,
+        };
     }
 
     /// <summary>

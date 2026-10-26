@@ -43,6 +43,9 @@ public class SnapshotMenuTests
             Latest++;
             return Task.FromResult(StatementsView.Refused(DatabaseRefusal.CapabilityOff, StatementsRefusal));
         }
+
+        public Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The Snapshot menu never plans a statement.");
     }
 
     private sealed class FakeServer : IServerPageService

@@ -28,8 +28,18 @@ internal enum QueryMode
 }
 
 /// <summary>What the SQL console was asked to run.</summary>
-/// <param name="Statement">The statement as typed. Never rewritten before it is sent.</param>
-internal sealed record SqlConsoleRequest(string Statement);
+/// <param name="Statement">
+/// The statement as typed. Never rewritten before it is sent - but for <see cref="Explain" />, which puts
+/// <c>EXPLAIN (… FORMAT JSON)</c> in front of it once the guard has let it through.
+/// </param>
+internal sealed record SqlConsoleRequest(string Statement)
+{
+    /// <summary>
+    /// Whether to run it as typed, plan it, or plan and run it (<c>EXPLAIN ANALYZE</c>, K1) - the console's Explain buttons
+    /// (X1). <see cref="SqlExplain.None" /> by default.
+    /// </summary>
+    public SqlExplain Explain { get; init; }
+}
 
 /// <summary>
 /// What the SQL console came back with, including the two ways it can refuse before Postgres sees
@@ -55,6 +65,15 @@ internal sealed record SqlConsoleResult(
 {
     /// <summary>Whether the statement ran and Postgres was happy with it.</summary>
     public bool Succeeded => Error is null && Rejection is null;
+
+    /// <summary>
+    /// The plan, whole, when the statement was an <c>EXPLAIN (FORMAT JSON)</c> - typed, or asked for by an Explain button -
+    /// for the plan view (X1). The grid's cell of it is capped; this is not.
+    /// </summary>
+    public string? PlanJson { get; init; }
+
+    /// <summary>Why a plan the statement returned is not drawn - it is larger than the studio draws - or <see langword="null" />.</summary>
+    public string? PlanUnavailable { get; init; }
 
     /// <summary>The result of a statement the guard refused.</summary>
     public static SqlConsoleResult Refused(SqlRejection rejection, int rowLimit) =>

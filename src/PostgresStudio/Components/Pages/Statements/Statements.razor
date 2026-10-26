@@ -8,6 +8,7 @@
 @using PostgresStudio.Services.Settings
 @using PostgresStudio.Services.Sources
 @using PostgresStudio.Services.Statements
+@using PostgresStudio.Components.Pages.Query
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @implements IAsyncDisposable
@@ -15,6 +16,7 @@
 @inject StudioState State
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     Statements (W5-Q1, issue #8 G6 and A5): where this database's time goes, statement by statement - the statements
@@ -29,8 +31,12 @@
 
     A statement sweep runs when the page becomes interactive and on Refresh, kept for five minutes, single flight, whoever
     asks; every HealthInterval while the page stays open it shows the last sweep that finished and starts none
-    (GetLatestAsync), because a statement sweep plans statements (T02) and a tab left open must not (W5-Q1-fix F6). There is
-    no drill-in: a statement's plan, plan insights and the hypothetical-index proof are 0.6's.
+    (GetLatestAsync), because a statement sweep plans statements (T02) and a tab left open must not (W5-Q1-fix F6).
+
+    The drill-in (X1): ?queryid= opens one statement - its text as the visitor may read it, its counters, and its generic plan
+    as a tree with the plan insights under it (PlanView). It plans when it opens and on "Plan again", never on the page's poll,
+    behind the page's own gate, and the service decides whether a plan may be shown and masks it (IStatementsService.PlanAsync).
+    The link is D9's: the queryid and the scope in the query string reopen the same statement.
 *@
 
 <PageTitle>Statements</PageTitle>
@@ -92,6 +98,11 @@
     }
     else
     {
+        @if (QueryId is { } drilled)
+        {
+            @Drill(drilled)
+        }
+
         <p class="ms-stmts-window">@view.WindowText</p>
 
         @if (view.Basis is { Length: > 0 } basis)
@@ -252,7 +263,13 @@
                                         <p class="ms-stmts-note">@parallel</p>
                                     }
 
-                                    <p class="ms-stmts-queryid">queryid @row.Key</p>
+                                    <p class="ms-stmts-queryid">
+                                        queryid @row.Key
+                                        @if (row.Text is { Length: > 0 })
+                                        {
+                                            <a class="ms-plan-open" href="@StatementLinks.ToStatement(Settings, Descriptor, State.ActiveScope, row.QueryId)">Plan</a>
+                                        }
+                                    </p>
                                 </td>
                             </tr>
                         }
@@ -285,10 +302,32 @@
     private StatementSort sort = StatementSort.TotalTime;
     private bool groups;
 
+    // The drill-in (X1): the plan on screen, the queryid it was planned for, and whether one is being planned.
+    private StatementPlanView? plan;
+    private long? plannedFor;
+    private bool planning;
+    private string? planError;
+
+    /// <summary>The drill-in's statement, as the query string carries it (D9).</summary>
+    [SupplyParameterFromQuery(Name = StatementLinks.QueryIdParameter)]
+    public string? QueryIdParameter { get; set; }
+
+    private long? QueryId => StatementLinks.ParseQueryId(QueryIdParameter);
+
     protected override void OnInitialized()
     {
         // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
         State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // A Plan link on this page, or Back and Forward between two statements: a new queryid in the same page instance.
+        // Before the first render there is no circuit to plan for; OnAfterRenderAsync plans then.
+        if (interactive && !disposed && QueryId != plannedFor)
+        {
+            await LoadPlanAsync();
+        }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -309,6 +348,16 @@
             return;
         }
 
+        if (QueryId is not null && QueryId != plannedFor)
+        {
+            await LoadPlanAsync();
+
+            if (disposed)
+            {
+                return;
+            }
+        }
+
         live = LiveFactory.Create();
         await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
     }
@@ -326,8 +375,150 @@
         }
 
         view = null;
+        plan = null;
+        plannedFor = null;
         await LoadAsync();
+
+        if (QueryId is not null)
+        {
+            await LoadPlanAsync();
+        }
     }
+
+    private async Task PlanAgainAsync() => await LoadPlanAsync();
+
+    /// <summary>
+    /// The drill-in's plan of the statement the address names - or nothing, when it names none. Never from a poll: a plan is
+    /// asked for when the drill-in opens and on Plan again, and each is one Activity entry.
+    /// </summary>
+    private async Task LoadPlanAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        // Read before anything is awaited: once the page is disposed, the source is gone with it.
+        CancellationToken token = lifetime.Token;
+        long? queryId = QueryId;
+        StudioScope? scope = State.ActiveScope;
+        plannedFor = queryId;
+
+        if (queryId is not { } id || scope is null)
+        {
+            plan = null;
+            planError = null;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        planning = true;
+        planError = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StatementPlanView read = await StatementsData.PlanAsync(scope, id, token);
+
+            // The address or the scope moved while it planned: the plan is of something nobody is looking at.
+            if (QueryId == id && State.ActiveScope == scope)
+            {
+                plan = read;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page: a plan that failed out of sight is a drill-in that silently shows nothing.
+            planError = exception.Message;
+        }
+        finally
+        {
+            planning = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>The drill-in: one statement as the visitor may read it, and its plan.</summary>
+    private RenderFragment Drill(long queryId) => __builder =>
+    {
+        string id = queryId.ToString(CultureInfo.InvariantCulture);
+
+        <section class="ms-plan-drill" aria-labelledby="ms-plan-drill-title">
+            <div class="ms-plan-drill-header">
+                <h2 class="ms-plan-drill-title" id="ms-plan-drill-title">Statement <span class="ms-mono">@id</span></h2>
+                <div class="ms-plan-drill-actions">
+                    <button type="button" class="ms-button ms-plan-drill-again" @onclick="PlanAgainAsync" disabled="@planning">Plan again</button>
+                    <a class="ms-button ms-plan-drill-close" href="@StatementLinks.ToStatements(Settings, Descriptor, State.ActiveScope)">All statements</a>
+                </div>
+            </div>
+
+            @if (planError is { Length: > 0 } failed)
+            {
+                <ErrorAlert Message="@failed" OnRetry="PlanAgainAsync" />
+            }
+            else if (plan is not { } shown || shown.QueryId != queryId)
+            {
+                <LoadingSpinner />
+            }
+            else if (shown.Refusal != DatabaseRefusal.None)
+            {
+                <div class="ms-alert ms-alert-warning ms-plan-drill-refusal" role="status">
+                    <div class="ms-alert-content">
+                        <p>@shown.Reason</p>
+                    </div>
+                </div>
+            }
+            else
+            {
+                @if (shown.Statement is { } row)
+                {
+                    @if (row.Text is { Length: > 0 } text)
+                    {
+                        <pre class="ms-mono ms-plan-drill-text">@text</pre>
+                    }
+
+                    @if (row.TextNote is { Length: > 0 } note)
+                    {
+                        <p class="ms-stmts-note">@note</p>
+                    }
+
+                    @if (row.Window is { } counts)
+                    {
+                        <p class="ms-plan-drill-counts">
+                            @TableText.Count(counts.Calls) calls, @StatementWindows.Milliseconds(counts.ExecMs) of execution
+                            @(counts.MeanMs is { } mean ? "(" + StatementWindows.Milliseconds(mean) + " a call)" : string.Empty),
+                            @TableText.Count(counts.Rows) rows, over the window above.
+                        </p>
+                    }
+                }
+
+                @if (shown.Plan is { } tree)
+                {
+                    <PlanView Plan="tree" Caption="@shown.Caveat" Label="@("The generic plan of statement " + id)" />
+                }
+                else if (shown.NoPlan is { Length: > 0 } why)
+                {
+                    <p class="ms-plan-drill-none" role="note">@why</p>
+                }
+
+                @foreach (HealthStatement statement in shown.Statements)
+                {
+                    <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+                }
+
+                @if (shown.PlannedAt is { } planned)
+                {
+                    <p class="ms-plan-drill-measured">
+                        Planned @State.FormatInSelectedTimeZone(planned) (<TimeAgo Timestamp="planned" />), as the console's role, and
+                        recorded in the Activity log.
+                    </p>
+                }
+            }
+        </section>
+    };
 
     /// <summary>A read: the statement sweep's, run when stale (<paramref name="run" />), or the last that finished (a poll).</summary>
     private async Task LoadAsync(CancellationToken poll = default, bool run = true)

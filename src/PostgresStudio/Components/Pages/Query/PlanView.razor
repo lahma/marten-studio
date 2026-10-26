@@ -1,0 +1,471 @@
+@using System.Globalization
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Health.Checks
+@using PostgresStudio.Services.Query
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+
+@*
+    X1: a plan as a hand-rolled tree, and under it X1b's insights - for every place the studio shows a plan: the SQL
+    console's Explain buttons and a typed EXPLAIN (FORMAT JSON), Query Mode A's plan, LINQ mode's, and the Statements page's
+    drill-in. No third-party viewer (hard rule 3: PEV2 is Vue and Bootstrap); every class is ms-plan-, in studio.css's X1
+    section.
+
+    Two ways in. Json is EXPLAIN's own text, read here with QueryPlanReader and offered whole as raw JSON below the tree - the
+    console's and Mode A's plans, RunSql output that D27 leaves unmasked. Plan is a plan a service read already, masked for
+    the visitor - the Statements drill-in's, whose raw JSON is never handed to the page.
+
+    The tree sits in a labelled scroll region (D25): a deep plan is wide, and scrolls sideways rather than squeezing its
+    labels. Nothing here links within the page: under the studio-rooted <base href>, a fragment link navigates to the
+    studio's front page, so an insight names its node and the node carries the insight's code.
+*@
+
+<div class="ms-plan">
+    @if (read?.Plan is not { } plan)
+    {
+        <p class="ms-muted ms-plan-unreadable">@(read?.Failure ?? "There is no plan.")</p>
+    }
+    else
+    {
+        <p class="ms-plan-summary">
+            <span class="ms-plan-summary-item">@(plan.Analyzed ? "EXPLAIN ANALYZE" : "EXPLAIN")</span>
+            @if (plan.Root.TotalCost is { } cost)
+            {
+                <span class="ms-plan-summary-item">estimated cost @Number(cost)</span>
+            }
+            @if (plan.PlanningMs is { } planning)
+            {
+                <span class="ms-plan-summary-item">planned in @Milliseconds(planning)</span>
+            }
+            @if (plan.ExecutionMs is { } execution)
+            {
+                <span class="ms-plan-summary-item">ran in @Milliseconds(execution)</span>
+            }
+            <span class="ms-plan-summary-item">@NodeCount(plan)</span>
+        </p>
+
+        @if (!string.IsNullOrWhiteSpace(Caption))
+        {
+            <p class="ms-plan-caption">@Caption</p>
+        }
+
+        @if (plan.Statements > 1)
+        {
+            <p class="ms-plan-caption">Postgres planned @plan.Statements.ToString(CultureInfo.InvariantCulture) statements for this one (a rewrite rule); the first is drawn.</p>
+        }
+
+        <p class="ms-plan-legend">
+            @(plan.Timed
+                ? "Each node's bar is its share of the plan's time - its own, less the nodes below it."
+                : "Each node's bar is its share of the plan's estimated cost - its own, less the nodes below it.")
+            @(plan.Analyzed ? " Rows are per loop, as Postgres counts them." : " Rows are the planner's estimates.")
+        </p>
+
+        <TableScroll Label="@Label">
+            <ul class="ms-plan-tree">
+                @NodeView(plan.Root)
+            </ul>
+        </TableScroll>
+
+        @if (plan.Triggers.Count > 0)
+        {
+            <ul class="ms-plan-triggers" aria-label="Triggers">
+                @for (int i = 0; i < plan.Triggers.Count; i++)
+                {
+                    PlanTrigger trigger = plan.Triggers[i];
+                    <li class="ms-plan-trigger" @key="i">
+                        Trigger <code>@trigger.Name</code>@(trigger.Relation is { } on ? " on " + on : string.Empty):
+                        @(trigger.Calls is { } calls ? TableText.Count(calls) + " calls" : string.Empty)
+                        @(trigger.TimeMs is { } time ? ", " + Milliseconds(time) : string.Empty)
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (plan.JitFunctions is { } functions)
+        {
+            <p class="ms-plan-caption">JIT compiled @TableText.Count(functions) functions@(plan.JitMs is { } jit ? " in " + Milliseconds(jit) : string.Empty).</p>
+        }
+
+        <section class="ms-plan-insights" aria-label="Plan insights">
+            <h3 class="ms-plan-insights-title">Plan insights</h3>
+
+            @if (insights.Count == 0)
+            {
+                <p class="ms-muted ms-plan-insights-none">
+                    @(plan.Analyzed ? "None of the plan insights fired on this plan." : "None of the plan insights a plain plan can be judged by fired on it.")
+                </p>
+            }
+            else
+            {
+                <ul class="ms-plan-insight-list">
+                    @for (int i = 0; i < insights.Count; i++)
+                    {
+                        PlanInsightFinding finding = insights[i];
+                        <li class="ms-plan-insight @SeverityClass(finding.Insight.Severity)" @key="i">
+                            <p class="ms-plan-insight-head">
+                                <a class="ms-plan-insight-code" href="@finding.Insight.DocsUrl" target="_blank" rel="noopener noreferrer">@finding.Insight.Code</a>
+                                <span class="ms-plan-insight-title">@finding.Insight.Title</span>
+                                <span class="ms-plan-insight-severity">@finding.Insight.Severity</span>
+                            </p>
+                            <p class="ms-plan-insight-message">@finding.Message</p>
+                            <p class="ms-plan-insight-remedy">@finding.Remedy</p>
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (notJudged.Count > 0)
+            {
+                <p class="ms-plan-not-judged">
+                    Not judged without EXPLAIN ANALYZE, which only the SQL console runs:
+                    @string.Join(", ", notJudged.Select(static x => x.Code + " " + x.Title)).
+                </p>
+            }
+        </section>
+    }
+
+    @if (Plan is null && !string.IsNullOrWhiteSpace(Json))
+    {
+        <details class="ms-plan-raw">
+            <summary>The plan as Postgres printed it (JSON)</summary>
+            <JsonView Json="@Json" Label="Query plan JSON" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="@DownloadFileName" />
+        </details>
+    }
+</div>
+
+@code {
+    /// <summary>The most nodes drawn; a larger plan says how many more there are, and its raw JSON has them all.</summary>
+    internal const int MaxDrawnNodes = 400;
+
+    private QueryPlanRead? read;
+    private IReadOnlyList<PlanInsightFinding> insights = [];
+    private IReadOnlyList<PlanInsightInfo> notJudged = [];
+    private Dictionary<int, List<string>> flags = [];
+    private string? readJson;
+    private QueryPlan? readPlan;
+
+    /// <summary>The plan as <c>EXPLAIN (FORMAT JSON)</c> printed it - read here, and offered whole as raw JSON.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>
+    /// A plan a service already read, and masked for this visitor - the Statements drill-in's. <see cref="object" /> because the
+    /// Razor SDK emits every component as public and a public parameter cannot have an internal type. Wins over
+    /// <see cref="Json" />, and no raw JSON is offered for it.
+    /// </summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    /// <summary>A line under the summary: what kind of plan this is, and what it can and cannot say.</summary>
+    [Parameter]
+    public string? Caption { get; set; }
+
+    /// <summary>The tree region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Query plan";
+
+    /// <summary>The raw JSON's download name.</summary>
+    [Parameter]
+    public string DownloadFileName { get; set; } = "plan.json";
+
+    protected override void OnParametersSet()
+    {
+        if (Plan is QueryPlan given)
+        {
+            if (!ReferenceEquals(given, readPlan))
+            {
+                readPlan = given;
+                readJson = null;
+                Evaluate(QueryPlanRead.Of(given));
+            }
+
+            return;
+        }
+
+        if (read is null || readPlan is not null || !string.Equals(Json, readJson, StringComparison.Ordinal))
+        {
+            readPlan = null;
+            readJson = Json;
+            Evaluate(QueryPlanReader.Read(Json));
+        }
+    }
+
+    private void Evaluate(QueryPlanRead next)
+    {
+        read = next;
+
+        if (next.Plan is { } plan)
+        {
+            insights = PlanInsights.Evaluate(plan, Settings.Text);
+            notJudged = PlanInsights.NotJudged(plan);
+            flags = insights
+                .GroupBy(static x => x.NodeId)
+                .ToDictionary(static x => x.Key, static x => x.Select(static f => f.Insight.Code).Distinct(StringComparer.Ordinal).ToList());
+        }
+        else
+        {
+            insights = [];
+            notJudged = [];
+            flags = [];
+        }
+    }
+
+    private RenderFragment NodeView(PlanNode node) => __builder =>
+    {
+        <li class="ms-plan-item" @key="node.Id">
+            <div class="ms-plan-node @(node.NeverExecuted ? "ms-plan-node-idle" : null)">
+                <p class="ms-plan-node-head">
+                    @if (node.SubplanName is { } subplan)
+                    {
+                        <span class="ms-plan-subplan">@subplan</span>
+                    }
+                    else if (node.ParentRelationship is "InitPlan" or "SubPlan")
+                    {
+                        <span class="ms-plan-subplan">@node.ParentRelationship</span>
+                    }
+                    <span class="ms-plan-node-type">@node.Label</span>
+                    @if (node.Target is { } target)
+                    {
+                        <span class="ms-plan-node-target">@target</span>
+                    }
+                    @if (node.Disabled == true)
+                    {
+                        <span class="ms-chip ms-chip-warning ms-plan-chip" title="A planner setting (enable_*) disabled this kind of node, and the planner used it anyway.">disabled</span>
+                    }
+                    @if (node.NeverExecuted)
+                    {
+                        <span class="ms-chip ms-plan-chip">never executed</span>
+                    }
+                    @if (flags.TryGetValue(node.Id, out List<string>? codes))
+                    {
+                        @foreach (string code in codes)
+                        {
+                            string current = code;
+                            <span class="ms-chip ms-chip-warning ms-plan-chip ms-plan-node-flag" @key="current">@current</span>
+                        }
+                    }
+                </p>
+
+                @if (Share(node) is { } share)
+                {
+                    <p class="ms-plan-share">
+                        <span class="ms-plan-bar" style="--ms-plan-share: @Width(share.Value)" aria-hidden="true"></span>
+                        <span class="ms-plan-share-value">@TableText.Percent(share.Value) of @share.Of</span>
+                    </p>
+                }
+
+                <p class="ms-plan-facts">
+                    @{ IReadOnlyList<string> facts = Facts(node); }
+                    @for (int i = 0; i < facts.Count; i++)
+                    {
+                        <span class="ms-plan-fact" @key="i">@facts[i]</span>
+                    }
+                </p>
+
+                @if (Details(node) is { Count: > 0 } details)
+                {
+                    <details class="ms-plan-details">
+                        <summary>Details</summary>
+                        <dl class="ms-plan-detail-list">
+                            @for (int i = 0; i < details.Count; i++)
+                            {
+                                (string Term, string Value) detail = details[i];
+                                <div class="ms-plan-detail" @key="i">
+                                    <dt>@detail.Term</dt>
+                                    <dd><code class="ms-plan-detail-value">@detail.Value</code></dd>
+                                </div>
+                            }
+                        </dl>
+                    </details>
+                }
+            </div>
+
+            @if (node.Children.Any(static x => x.Id < MaxDrawnNodes))
+            {
+                <ul class="ms-plan-children">
+                    @foreach (PlanNode child in node.Children.Where(static x => x.Id < MaxDrawnNodes))
+                    {
+                        @NodeView(child)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    /// <summary>The node's share of the plan's time, when it was analyzed with timing, or else of its cost.</summary>
+    private static (double Value, string Of)? Share(PlanNode node) =>
+        node.TimeShare is { } time ? (time, "time")
+        : node.CostShare is { } cost ? (cost, "cost")
+        : null;
+
+    /// <summary>The node's numbers in a line: rows, cost, time, buffers, I/O, and PostgreSQL 18's keys where printed.</summary>
+    internal static IReadOnlyList<string> Facts(PlanNode node)
+    {
+        List<string> facts = [];
+
+        if (node.PlanRows is { } planned)
+        {
+            facts.Add("~" + TableText.Count(planned) + " rows estimated");
+        }
+
+        if (node.ActualRows is { } rows && node.ActualLoops is { } loops && loops > 0)
+        {
+            facts.Add(TableText.Count(rows) + " rows returned" + (loops > 1 ? " × " + TableText.Count(loops) + " loops" : string.Empty));
+        }
+
+        if (node.StartupCost is { } startup && node.TotalCost is { } total)
+        {
+            facts.Add("cost " + Number(startup) + "..." + Number(total));
+        }
+
+        if (node.ExclusiveMs is { } own)
+        {
+            facts.Add(Milliseconds(own) + " of its own");
+        }
+
+        if (node.Buffers is { } buffers)
+        {
+            facts.Add(Buffers(buffers));
+        }
+
+        if (node.IoReadMs is not null || node.IoWriteMs is not null)
+        {
+            facts.Add("I/O read " + Milliseconds(node.IoReadMs ?? 0) + ", write " + Milliseconds(node.IoWriteMs ?? 0));
+        }
+
+        if (node.IndexSearches is { } searches)
+        {
+            facts.Add(TableText.Count(searches) + " index " + (searches == 1 ? "search" : "searches"));
+        }
+
+        if (node.Storage is { } storage)
+        {
+            facts.Add("kept in " + storage.ToLowerInvariant() + (node.MaximumStorageKb is { } most ? ", at most " + Kilobytes(most) : string.Empty));
+        }
+
+        return facts;
+    }
+
+    /// <summary>Buffers in words: only the counters above zero, or "no blocks touched".</summary>
+    internal static string Buffers(PlanBuffers buffers)
+    {
+        List<string> parts = [];
+
+        Part("shared hit", buffers.SharedHit);
+        Part("read", buffers.SharedRead);
+        Part("dirtied", buffers.SharedDirtied);
+        Part("written", buffers.SharedWritten);
+        Part("local hit", buffers.LocalHit);
+        Part("local read", buffers.LocalRead);
+        Part("local dirtied", buffers.LocalDirtied);
+        Part("local written", buffers.LocalWritten);
+        Part("temp read", buffers.TempRead);
+        Part("temp written", buffers.TempWritten);
+
+        return parts.Count == 0 ? "no blocks touched" : "buffers: " + string.Join(", ", parts);
+
+        void Part(string name, long blocks)
+        {
+            if (blocks > 0)
+            {
+                parts.Add(name + " " + TableText.Count(blocks));
+            }
+        }
+    }
+
+    /// <summary>Everything else the node printed, by Postgres' own name for it.</summary>
+    internal static IReadOnlyList<(string Term, string Value)> Details(PlanNode node)
+    {
+        List<(string Term, string Value)> details = [];
+
+        Text("Filter", node.Filter);
+        Count("Rows removed by filter", node.RowsRemovedByFilter);
+        Text("Index condition", node.IndexCondition);
+        Text("Recheck condition", node.RecheckCondition);
+        Count("Rows removed by recheck", node.RowsRemovedByIndexRecheck);
+        Text("Hash condition", node.HashCondition);
+        Text("Merge condition", node.MergeCondition);
+        Text("Join filter", node.JoinFilter);
+        Count("Rows removed by join filter", node.RowsRemovedByJoinFilter);
+        Text("One-time filter", node.OneTimeFilter);
+        Text("Sort key", node.SortKey.Count > 0 ? string.Join(", ", node.SortKey) : null);
+        Text("Group key", node.GroupKey.Count > 0 ? string.Join(", ", node.GroupKey) : null);
+        Text("Sort", node.SortMethod is { } method
+            ? method + (node.SortSpaceUsedKb is { } used ? ", " + Kilobytes(used) + (node.SortSpaceType is { } type ? " of " + type.ToLowerInvariant() : string.Empty) : string.Empty)
+            : null);
+        Text("Workers' sort", node.WorkerSortDiskKb is { } workers ? "on disk, up to " + Kilobytes(workers) + " each" : null);
+        Text("Hash", node.HashBuckets is not null || node.HashBatches is not null
+            ? string.Join(", ", new[]
+            {
+                node.HashBuckets is { } buckets ? TableText.Count(buckets) + " buckets" : null,
+                node.HashBatches is { } batches ? TableText.Count(batches) + " batches" + (node.OriginalHashBatches is { } original && original != batches ? " (" + TableText.Count(original) + " planned)" : string.Empty) : null,
+                node.PeakMemoryKb is { } peak ? Kilobytes(peak) + " at its peak" : null,
+            }.Where(static x => x is not null))
+            : null);
+        Text("Hash aggregate", node.HashAggBatches is not null || node.DiskUsageKb is not null
+            ? (node.HashAggBatches is { } aggregated ? TableText.Count(aggregated) + " batches" : string.Empty)
+              + (node.DiskUsageKb is { } disk ? (node.HashAggBatches is null ? string.Empty : ", ") + Kilobytes(disk) + " on disk" : string.Empty)
+            : null);
+        Text("Heap pages", node.ExactHeapBlocks is not null || node.LossyHeapBlocks is not null
+            ? TableText.Count(node.ExactHeapBlocks ?? 0) + " exact, " + TableText.Count(node.LossyHeapBlocks ?? 0) + " lossy"
+            : null);
+        Text("Workers", node.WorkersPlanned is { } plannedWorkers
+            ? TableText.Count(plannedWorkers) + " planned" + (node.WorkersLaunched is { } launched ? ", " + TableText.Count(launched) + " launched" : string.Empty)
+            : null);
+        Text("Strategy", node.Strategy);
+        Text("Join type", node.JoinType);
+        Count("Row width (bytes)", node.PlanWidth);
+
+        return details;
+
+        void Text(string term, string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                details.Add((term, value));
+            }
+        }
+
+        void Count(string term, double? value)
+        {
+            if (value is { } number)
+            {
+                details.Add((term, TableText.Count(number)));
+            }
+        }
+    }
+
+    private static string NodeCount(QueryPlan plan)
+    {
+        string nodes = plan.NodeCount.ToString("N0", CultureInfo.InvariantCulture) + (plan.NodeCount == 1 ? " node" : " nodes");
+
+        if (plan.NodeCount > MaxDrawnNodes)
+        {
+            nodes += ", the first " + MaxDrawnNodes.ToString(CultureInfo.InvariantCulture) + " drawn";
+        }
+
+        return plan.Truncated ? nodes + " read of a larger plan" : nodes;
+    }
+
+    private static string SeverityClass(HealthSeverity severity) => severity switch
+    {
+        HealthSeverity.Critical => "ms-plan-insight-critical",
+        HealthSeverity.Warning => "ms-plan-insight-warning",
+        _ => "ms-plan-insight-info",
+    };
+
+    private static string Width(double share) =>
+        Math.Clamp(share * 100, 0, 100).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+
+    private static string Number(double value) => value.ToString("#,0.00", CultureInfo.InvariantCulture);
+
+    private static string Milliseconds(double ms) =>
+        ms < 1 ? ms.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+        : ms < 1000 ? ms.ToString("0.#", CultureInfo.InvariantCulture) + " ms"
+        : (ms / 1000).ToString("0.##", CultureInfo.InvariantCulture) + " s";
+
+    private static string Kilobytes(double kb) => TableText.Bytes((long) Math.Round(kb * 1024));
+}

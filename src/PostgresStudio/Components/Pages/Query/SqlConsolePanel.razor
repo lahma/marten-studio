@@ -67,6 +67,8 @@
                      ErrorPosition="Current.ErrorPosition"
                      Status="@Current.Status"
                      OnRun="RunAsync"
+                     OnExplain="ExplainAsync"
+                     OnExplainAnalyze="ExplainAnalyzeAsync"
                      OnCancel="CancelAsync"
                      OnSave="SaveAsync" />
 
@@ -74,6 +76,8 @@
             One statement at a time, inside <code>BEGIN; SET TRANSACTION READ ONLY</code> with
             a statement timeout, and the transaction is always rolled back. The row cap stops
             the reader; no <code>limit</code> is ever appended to what you typed.
+            Explain plans the statement and draws the plan; Explain analyze runs it, in the same
+            read-only transaction, and draws what it did.
         </p>
 
         @if (Current.Result is { } result)
@@ -82,10 +86,12 @@
                         DurationMilliseconds="result.Duration.TotalMilliseconds"
                         Truncated="result.Truncated"
                         Sql="@Current.Text"
-                        PlanUnavailable="Run an EXPLAIN statement to see a plan here."
+                        Plan="@result.PlanJson"
+                        PlanFirst="true"
+                        PlanUnavailable="@(result.PlanUnavailable ?? NoPlan)"
                         Messages="@result.Notices" />
 
-            @if (result.Succeeded)
+            @if (result.Succeeded && result.PlanJson is null)
             {
                 <div class="ms-query-toolbar ms-query-export">
                     <button type="button" class="ms-btn ms-btn-sm" @onclick="ExportJsonAsync">Export JSON</button>
@@ -115,6 +121,10 @@
         "The SQL console runs whatever it is given inside a read-only transaction with a statement " +
         "timeout, and it can read every table the connection's role can reach. Grant it only to people " +
         "you would give psql to.";
+
+    /// <summary>What the Plan tab says when the statement was not an <c>EXPLAIN (FORMAT JSON)</c>.</summary>
+    internal const string NoPlan =
+        "Explain or Explain analyze draws this statement's plan here - as does an EXPLAIN you type with FORMAT JSON among its options.";
 
     private readonly CancellationTokenSource lifetime = new();
     private readonly SqlConsoleSession ownSession = new();
@@ -279,7 +289,15 @@
         }
     }
 
-    private async Task RunAsync(string text)
+    private Task RunAsync(string text) => RunAsync(text, SqlExplain.None);
+
+    /// <summary>Explain: the statement's plan, planned and never run (X1).</summary>
+    private Task ExplainAsync(string text) => RunAsync(text, SqlExplain.Plan);
+
+    /// <summary>Explain analyze: the statement run under EXPLAIN ANALYZE, inside the console's read-only transaction (K1).</summary>
+    private Task ExplainAnalyzeAsync(string text) => RunAsync(text, SqlExplain.Analyze);
+
+    private async Task RunAsync(string text, SqlExplain explain)
     {
         SqlConsoleSession session = Current;
         session.Text = text;
@@ -300,7 +318,7 @@
 
         try
         {
-            SqlConsoleResult result = await SqlConsole.RunSqlAsync(scope, new SqlConsoleRequest(session.Text), cts.Token);
+            SqlConsoleResult result = await SqlConsole.RunSqlAsync(scope, new SqlConsoleRequest(session.Text) { Explain = explain }, cts.Token);
 
             session.Result = result;
 
@@ -313,12 +331,19 @@
             {
                 session.Error = Describe(error);
 
-                // Postgres counts from one; the editor's caret convention is zero-based.
-                session.ErrorPosition = error.Position > 0 ? error.Position - 1 : -1;
+                // Postgres counts from one, in the statement it was sent; the editor's caret convention is zero-based, in
+                // the statement as typed - which an Explain button sent behind a prefix of its own.
+                int position = error.Position - 1 - Prefix(explain).Length;
+                session.ErrorPosition = error.Position > 0 && position >= 0 ? position : -1;
             }
             else
             {
-                session.Status = Summary(result.Rows.Count, result.Duration);
+                session.Status = explain switch
+                {
+                    SqlExplain.Plan => "Planned in " + Milliseconds(result.Duration) + "; nothing ran.",
+                    SqlExplain.Analyze => "Ran under EXPLAIN ANALYZE in " + Milliseconds(result.Duration) + ", and rolled back.",
+                    _ => Summary(result.Rows.Count, result.Duration),
+                };
 
                 await OnRan.InvokeAsync(session.Text);
             }
@@ -474,8 +499,13 @@
     }
 
     private static string Summary(int rows, TimeSpan duration) =>
-        rows.ToString(CultureInfo.InvariantCulture) + " rows in " +
+        rows.ToString(CultureInfo.InvariantCulture) + " rows in " + Milliseconds(duration);
+
+    private static string Milliseconds(TimeSpan duration) =>
         duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
+
+    /// <summary>What an Explain button put in front of the statement, which a Postgres error's position counts.</summary>
+    private static string Prefix(SqlExplain explain) => ExplainStatements.Wrap(string.Empty, explain);
 
     private string Describe(SqlError error)
     {

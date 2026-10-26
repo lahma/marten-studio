@@ -489,6 +489,7 @@ internal sealed class QueryService : IQueryService
                     QuerySqlComposer.Explain(composed.Statement, json: true),
                     ExplainAction,
                     composed.Bind,
+                    SqlExplain.None,
                     cancellationToken)
                 .ConfigureAwait(false);
 
@@ -502,7 +503,14 @@ internal sealed class QueryService : IQueryService
                 return new ExplainResult(null, null, error, null);
             }
 
-            string? plan = result.Rows.Count > 0 && result.Rows[0].Count > 0 ? result.Rows[0][0].Text : null;
+            // The plan whole, as the console keeps it for a plan view (X1) - never the grid's cell of it, which is capped at
+            // 4 KB and cut a plan of any size into JSON nothing could read.
+            if (result.PlanUnavailable is { } tooLarge)
+            {
+                return ExplainResult.Unavailable(tooLarge);
+            }
+
+            string? plan = result.PlanJson;
 
             return new ExplainResult(null, plan, null, plan is null ? "Postgres returned no plan." : null);
         }

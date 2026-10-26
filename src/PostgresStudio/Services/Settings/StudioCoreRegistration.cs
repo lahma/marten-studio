@@ -215,6 +215,9 @@ internal static class StudioCoreRegistration
         // minutes for every circuit - grouped by the studio's IStatementClassifier, which each Add*Studio registers; what a
         // visitor is shown of them, and which first read this circuit has audited, are the circuit's.
         services.TryAddSingleton<IStatementFacts, StatementFactsReader>();
+        // X1: the drill-in's planner - stateless, its plans the visitor's own, run as SqlConsoleRole on a connection of each
+        // plan's own - and the per-visitor service it answers to.
+        services.TryAddSingleton<StatementPlanReader>();
         services.TryAddScoped<IStatementsService, StatementsService>();
 
         // W5-API: the Health page's Snapshot menu. The circuit's, because it asks each page's service as this visitor; it never

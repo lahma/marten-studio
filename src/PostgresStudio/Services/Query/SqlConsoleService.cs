@@ -55,6 +55,14 @@ internal sealed class SqlConsoleService : ISqlConsoleService
     internal const string SqlRefusedMessage =
         "Your account may not run SQL against this database as a whole, and the SQL console is not limited to one tenant.";
 
+    /// <summary>The reason an Explain button gives for a statement that is an <c>EXPLAIN</c> already.</summary>
+    internal const string AlreadyExplainReason = "AlreadyExplain";
+
+    /// <summary>What an Explain button says of a statement that is an <c>EXPLAIN</c> already.</summary>
+    internal const string AlreadyExplainMessage =
+        "This statement is an EXPLAIN already. Run sends it as it is - with FORMAT JSON among its options it is drawn as a "
+        + "plan - and the Explain buttons explain a statement that is not one.";
+
     private const string Unknown = "(unknown)";
 
     private readonly StudioSourceResolver resolver;
@@ -89,7 +97,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
 
-        return await ExecuteAsync(scope, request.Statement, RunSqlAction, null, cancellationToken).ConfigureAwait(false);
+        return await ExecuteAsync(scope, request.Statement, RunSqlAction, null, request.Explain, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -144,13 +152,31 @@ internal sealed class SqlConsoleService : ISqlConsoleService
     /// <summary>
     /// The gate, and then the statement. Everything that reaches Postgres through the console path goes through here.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The guard reads what was typed; the console sends the plan statement.</b> The guard checks
+    /// <paramref name="statement" /> itself, so a refusal points at the editor's own characters; a statement that is an
+    /// <c>EXPLAIN</c> already is refused for an Explain button, and every other one the guard lets through is sent with
+    /// <see cref="ExplainStatements" />' prefix in front of it. The audit's target and event 9204 or 9205 carry the statement
+    /// as sent - what ran is what is recorded.
+    /// </para>
+    /// <para>
+    /// <b><c>EXPLAIN ANALYZE</c> is a <c>RunSql</c> run like any other (K1).</b> It runs the statement, which is why it is the
+    /// console's alone, behind the same capability, the same write policy and the same read-only transaction under the same
+    /// <c>statement_timeout</c>: a write the guard did not spot comes back as <c>25006</c> and changes nothing.
+    /// </para>
+    /// </remarks>
     /// <param name="scope">The scope the statement runs in; its tenant is ignored, never applied (<see cref="SqlScope" />).</param>
-    /// <param name="statement">The statement, exactly as it will be sent.</param>
+    /// <param name="statement">The statement as typed - and, unless <paramref name="explain" /> asks otherwise, exactly as sent.</param>
     /// <param name="action">What the audit ring calls it.</param>
     /// <param name="bind">
     /// Binds the statement's parameters, when it has any. The console itself never does - what somebody typed is sent
     /// verbatim - but a plan fetched for a statement a studio composed has to bind the very same values its read
     /// bound, or it would be planning a different statement.
+    /// </param>
+    /// <param name="explain">
+    /// As typed (<see cref="SqlExplain.None" />: every studio screen's own statement), planned, or planned and run - the
+    /// console's Explain buttons (X1).
     /// </param>
     /// <param name="cancellationToken">The token.</param>
     /// <exception cref="StudioCapabilityDeniedException"><c>RunSql</c> is off, or the studio is read-only. Nothing is sent.</exception>
@@ -160,11 +186,15 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         string statement,
         string action,
         Action<NpgsqlCommand>? bind,
+        SqlExplain explain,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        string target = Target(statement);
+        string sent = explain == SqlExplain.None || string.IsNullOrWhiteSpace(statement)
+            ? statement
+            : ExplainStatements.Wrap(statement, explain);
+        string target = Target(sent);
         string user = UserName();
 
         // 1. The capability. Refused before anything is resolved, and recorded either way.
@@ -175,7 +205,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioCapabilityDeniedException denied)
         {
             audit.RecordCapabilityDenied(denied, action, target);
-            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, statement);
+            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
             throw;
         }
 
@@ -196,24 +226,28 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
             logger.SqlRejected(
-                settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", statement);
+                settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
             throw;
         }
 
-        // 3. The advisory guard. Not the security boundary - the transaction below is - but it is what turns
-        //    "delete from …" into a sentence instead of a SQLSTATE.
+        // 3. The advisory guard, over the statement as typed. Not the security boundary - the transaction below is - but it
+        //    is what turns "delete from …" into a sentence instead of a SQLSTATE.
         SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
-        if (!guard.Allowed)
-        {
-            SqlRejection rejection = SqlRejection.FromGuard(guard);
+        SqlRejection? refused = !guard.Allowed
+            ? SqlRejection.FromGuard(guard)
+            : explain != SqlExplain.None && string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase)
+                ? new SqlRejection(AlreadyExplainReason, AlreadyExplainMessage, guard.Token, guard.Position)
+                : null;
 
+        if (refused is { } rejection)
+        {
             audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, statement);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, sent);
 
             return SqlConsoleResult.Refused(rejection, settings.MaxSqlConsoleRows);
         }
 
-        return await RunAsync(resolved, sqlScope, statement, action, user, bind, cancellationToken).ConfigureAwait(false);
+        return await RunAsync(resolved, sqlScope, sent, action, user, bind, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqlConsoleResult> RunAsync(
@@ -282,7 +316,11 @@ internal sealed class SqlConsoleService : ISqlConsoleService
                 result.Duration,
                 notices,
                 result.Error,
-                null);
+                null)
+            {
+                PlanJson = result.Plan,
+                PlanUnavailable = result.PlanCharacters is { } characters ? QueryPlanReader.TooLarge(characters) : null,
+            };
         }
         catch (Exception exception) when (exception is (NpgsqlException and not PostgresException) or SocketException)
         {

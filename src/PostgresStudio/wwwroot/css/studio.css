@@ -11802,3 +11802,338 @@ a.ms-schema-health-mark:focus-visible {
         padding: var(--ms-space-md) var(--ms-space-md);
     }
 }
+
+/* ==========================================================================
+   X1. The plan view: a plan as a tree, its insights, and the Statements drill-in
+
+   0.6's plan view packet (X1 and X1b). Appended to studio.css in D26 order; every selector is this packet's own (ms-plan-),
+   so nothing here re-declares an earlier rule. The tree sits in a TableScroll region (D25) at its natural width and scrolls
+   sideways rather than squeezing a deep plan's labels; each node is at most a phone's width, so a shallow plan fits one. A
+   node's bar is its share of the plan's time, or of its cost. Notes use the secondary text colour, not the muted one: UX-6
+   measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-plan {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-plan-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-summary-item:first-child {
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-caption,
+.ms-plan-legend,
+.ms-plan-not-judged,
+.ms-plan-unreadable,
+.ms-plan-insights-none {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-tree,
+.ms-plan-children,
+.ms-plan-triggers,
+.ms-plan-insight-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-plan-tree {
+    min-width: max-content;
+    padding: var(--ms-space-sm);
+}
+
+.ms-plan-children {
+    margin-left: var(--ms-space-md);
+    padding-left: var(--ms-space-md);
+    border-left: 1px solid var(--ms-color-border-strong);
+}
+
+.ms-plan-item {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-plan-tree > .ms-plan-item:first-child {
+    margin-top: 0;
+}
+
+.ms-plan-node {
+    max-width: min(72ch, 85vw);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-node-idle {
+    border-style: dashed;
+}
+
+.ms-plan-node-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0;
+}
+
+.ms-plan-subplan {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ms-plan-node-type {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-node-target {
+    min-width: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-chip {
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-share {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-bar {
+    position: relative;
+    flex: 0 0 8rem;
+    height: 0.375rem;
+    overflow: hidden;
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-plan-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--ms-plan-share, 0%);
+    background: var(--ms-color-primary);
+}
+
+.ms-plan-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-details {
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-details > summary,
+.ms-plan-raw > summary {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    cursor: pointer;
+}
+
+.ms-plan-detail-list {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: var(--ms-space-xs) 0 0;
+}
+
+.ms-plan-detail {
+    display: contents;
+}
+
+.ms-plan-detail dt {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-plan-detail dd {
+    min-width: 0;
+    margin: 0;
+}
+
+.ms-plan-detail-value {
+    font-family: var(--ms-font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-trigger {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-insights {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-insights-title {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-plan-insight-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-insight {
+    max-width: 90ch;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-insight-warning {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-plan-insight-critical {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-plan-insight-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0;
+}
+
+.ms-plan-insight-code {
+    font-family: var(--ms-font-mono);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-insight-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-insight-severity {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+}
+
+.ms-plan-insight-message,
+.ms-plan-insight-remedy {
+    margin: var(--ms-space-xs) 0 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-insight-remedy {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-drill {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin-bottom: var(--ms-space-lg);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-drill-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-drill-title {
+    margin: 0;
+    font-size: var(--ms-font-size-xl);
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-drill-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-drill-text {
+    margin: 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-drill-counts,
+.ms-plan-drill-none,
+.ms-plan-drill-measured {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-open {
+    margin-left: var(--ms-space-sm);
+}
+
+@media (max-width: 640px) {
+    .ms-plan-drill {
+        padding: var(--ms-space-sm);
+    }
+
+    .ms-plan-drill-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .ms-plan-children {
+        margin-left: var(--ms-space-xs);
+        padding-left: var(--ms-space-sm);
+    }
+
+    .ms-plan-bar {
+        flex-basis: 5rem;
+    }
+}
