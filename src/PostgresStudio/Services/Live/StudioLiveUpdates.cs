@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
+using PostgresStudio.Services.Settings;
+
 namespace PostgresStudio.Services.Live;
 
 /// <summary>
@@ -49,6 +51,7 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     private readonly IJSRuntime jsRuntime;
     private readonly ILogger<StudioLiveUpdates> logger;
     private readonly StudioLogThrottle? throttle;
+    private readonly StudioProduct product;
 
     /// <summary>
     /// What the browser-side watcher list is keyed on for this instance.
@@ -71,13 +74,19 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
 
     /// <remarks>
     /// <paramref name="throttle" /> is optional so that a test can build a loop by hand; the factory
-    /// always hands the container's over, and without one a failing handler is simply a Warning.
+    /// always hands the container's over, and without one a failing handler is simply a Warning. So is
+    /// <paramref name="product" />, the studio whose words the loop logs in.
     /// </remarks>
-    public StudioLiveUpdates(IJSRuntime jsRuntime, ILogger<StudioLiveUpdates> logger, StudioLogThrottle? throttle = null)
+    public StudioLiveUpdates(
+        IJSRuntime jsRuntime,
+        ILogger<StudioLiveUpdates> logger,
+        StudioLogThrottle? throttle = null,
+        StudioProduct product = StudioProduct.MartenStudio)
     {
         this.jsRuntime = jsRuntime;
         this.logger = logger;
         this.throttle = throttle;
+        this.product = product;
     }
 
     /// <summary>
@@ -243,7 +252,14 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
             LastError = exception;
             TickCount++;
 
-            logger.LogDebug(exception, "A Marten Studio live update failed");
+            if (product == StudioProduct.PostgresStudio)
+            {
+                logger.LogDebug(exception, "A Postgres Studio live update failed");
+            }
+            else
+            {
+                logger.LogDebug(exception, "A Marten Studio live update failed");
+            }
 
             Func<Exception, Task>? failed = Failed;
             if (failed is not null)
@@ -258,7 +274,15 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
                     // failing: event 9220, a Warning once per kind of failure per window.
                     LogLevel level = StudioLogThrottle.LevelOrWarning(
                         throttle, "LiveUpdates.FailedHandler", null, null, StudioLogThrottle.KindOf(handlerFailure));
-                    logger.LiveUpdateHandlerFailed(level, handlerFailure);
+
+                    if (product == StudioProduct.PostgresStudio)
+                    {
+                        logger.PostgresStudioLiveUpdateHandlerFailed(level, handlerFailure);
+                    }
+                    else
+                    {
+                        logger.LiveUpdateHandlerFailed(level, handlerFailure);
+                    }
                 }
             }
         }

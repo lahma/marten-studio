@@ -344,6 +344,7 @@ internal sealed class HealthSweeper
                 {
                     TableRemedies = tableRemedies,
                     PlanAdvisor = planAdvisor,
+                    Text = settings.Text,
                 };
                 evaluations[gate] = evaluation;
             }
@@ -592,7 +593,14 @@ internal sealed class HealthSweeper
             // An expected state: the page says so, and the log only for whoever turned Debug on.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
+                }
             }
 
             return;
@@ -601,7 +609,15 @@ internal sealed class HealthSweeper
         // A database that will not take a connection is one problem, told once - not once per check.
         string site = PostgresFailure.IsConnectionFailure(exception) ? "Health.Connection" : "Health.Check." + info.Code;
         LogLevel level = throttle.WarningOrDebug(site, storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        logger.HealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
+
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioHealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
+        }
+        else
+        {
+            logger.HealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
+        }
     }
 
     /// <summary>What one gatherer left for the evaluation phase.</summary>

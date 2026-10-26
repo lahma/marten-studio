@@ -1,5 +1,6 @@
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.Logging;
@@ -114,8 +115,16 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(
-                exception, "Marten Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+            if (reads.Product == StudioProduct.PostgresStudio)
+            {
+                logger.LogWarning(
+                    exception, "Postgres Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+            }
+            else
+            {
+                logger.LogWarning(
+                    exception, "Marten Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+            }
 
             return RelationshipGraph.Failed(RelationshipReads.Describe(exception, gate), readAt);
         }

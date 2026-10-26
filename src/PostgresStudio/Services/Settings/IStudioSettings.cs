@@ -35,6 +35,13 @@ internal interface IStudioSettings
     /// <summary>The public capabilities type's name: <c>MartenStudioCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
     string CapabilitiesTypeName { get; }
 
+    /// <summary>
+    /// Every sentence the shared studio says in this studio's own words (<see cref="StudioText" />): MartenStudio's is
+    /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. No default: a studio that forgot to say would
+    /// otherwise speak another's words.
+    /// </summary>
+    StudioText Text { get; }
+
     /// <summary>The browser title.</summary>
     string Title { get; }
 

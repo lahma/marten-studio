@@ -216,7 +216,7 @@ internal sealed record PostgresServerFacts(DateTimeOffset ReadAt, int VersionNum
         ILogger? logger = context.Services.GetService<ILogger<PostgresPlatform>>();
         if (logger?.IsEnabled(LogLevel.Debug) == true)
         {
-            logger.PostgresPlatformDetected(platform.Kind.ToString(), platform.Marker ?? "no provider marker", context.StoreKey, context.DatabaseId);
+            logger.PostgresPlatformDetected(context.Settings.Text.Product, platform.Kind.ToString(), platform.Marker ?? "no provider marker", context.StoreKey, context.DatabaseId);
         }
 
         return new PostgresServerFacts(context.Now, number, version, platform);

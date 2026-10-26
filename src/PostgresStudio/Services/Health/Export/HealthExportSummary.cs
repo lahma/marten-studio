@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Health.Export;
@@ -208,33 +209,41 @@ internal sealed record HealthExportSummary
     }
 
     /// <summary>A host that added the health check and not the studio itself.</summary>
-    public static HealthExportSummary NotRegistered(DateTimeOffset measuredAt) => new()
+    /// <param name="measuredAt">When the run began.</param>
+    /// <param name="text">The words of the studio whose health check this is.</param>
+    public static HealthExportSummary NotRegistered(DateTimeOffset measuredAt, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = "Marten Studio's services are not registered: call services.AddMartenStudio() as well as AddHealthChecks().AddMartenStudio()",
+        Problem = text.ProductName + "'s services are not registered: call services." + text.RegistrationMethod
+            + "() as well as AddHealthChecks()." + text.RegistrationMethod + "()",
     };
 
-    /// <summary>A host whose container holds no Marten store the studio would list.</summary>
-    public static HealthExportSummary NoStores(DateTimeOffset measuredAt) => new()
+    /// <summary>A host whose container holds no source the studio would list.</summary>
+    /// <param name="measuredAt">When the run began.</param>
+    /// <param name="text">The studio's words.</param>
+    public static HealthExportSummary NoStores(DateTimeOffset measuredAt, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = "Marten Studio found no Marten store to check",
+        Problem = text.ProductName + " found no " + text.SourceNoun + " to check",
     };
 
     /// <summary>A run the application's stopping cut short: nothing it found is reported half-way.</summary>
-    public static HealthExportSummary Stopping(DateTimeOffset measuredAt) => new()
+    /// <param name="measuredAt">When the run began.</param>
+    /// <param name="text">The studio's words.</param>
+    public static HealthExportSummary Stopping(DateTimeOffset measuredAt, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = "The application is stopping, so Marten Studio did not finish checking",
+        Problem = "The application is stopping, so " + text.ProductName + " did not finish checking",
     };
 
     /// <summary>A run that failed in the studio itself. The exception's type is named; its words never are.</summary>
     /// <param name="measuredAt">When the run began.</param>
     /// <param name="exceptionType">The exception's type name, which carries no data.</param>
-    public static HealthExportSummary Broken(DateTimeOffset measuredAt, string exceptionType) => new()
+    /// <param name="text">The studio's words.</param>
+    public static HealthExportSummary Broken(DateTimeOffset measuredAt, string exceptionType, StudioText text) => new()
     {
         MeasuredAt = measuredAt,
-        Problem = "Marten Studio could not check: its health export failed with " + exceptionType + ", logged as event 9270",
+        Problem = text.ProductName + " could not check: its health export failed with " + exceptionType + ", logged as event 9270",
     };
 
     /// <summary>

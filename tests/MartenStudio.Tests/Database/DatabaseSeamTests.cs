@@ -68,7 +68,7 @@ public class DatabaseSeamTests
     [Fact]
     public void A_source_with_no_advisory_locks_of_its_own_names_none_as_Martens_and_still_names_relations()
     {
-        SessionLockLabels labels = SessionLockLabels.RelationsOnly("default", DatabaseTestStores.Classifier());
+        SessionLockLabels labels = SessionLockLabels.RelationsOnly("default", DatabaseTestStores.Classifier(), SessionLockWording.Marten);
 
         labels.DaemonLockIds.Should().BeEmpty();
         labels.Advisory(4004).Kind.Should().Be(LockTargetKind.OtherAdvisoryLock, "Marten's default apply-changes id is nobody's here");

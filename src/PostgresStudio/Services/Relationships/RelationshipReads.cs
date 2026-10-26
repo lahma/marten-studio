@@ -67,6 +67,9 @@ internal sealed class RelationshipReads
     /// <summary>The command timeout a catalog estimate runs under: the studio's query timeout, at least a second.</summary>
     internal int CommandTimeoutSeconds => Math.Max(1, (int) settings.QueryTimeout.TotalSeconds);
 
+    /// <summary>The studio whose words the relationship reads' log lines are in.</summary>
+    internal StudioProduct Product => settings.Text.Product;
+
     /// <summary>
     /// A little past the server-side <c>statement_timeout</c>, which is what should fire: it produces 57014 with a
     /// message, where a client-side timeout only breaks the connection.
@@ -121,7 +124,14 @@ internal sealed class RelationshipReads
             // catalog read reports, and it is not a studio fault worth a Warning of its own.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
+                if (Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio drew the relationships of {StoreKey} without tables", scope.StoreKey);
+                }
             }
 
             return (null, DatabaseAccess.CatalogFailure(exception, known));
@@ -187,7 +197,14 @@ internal sealed class RelationshipReads
                 // on the screen.
                 if (logger.IsEnabled(LogLevel.Debug))
                 {
-                    logger.LogDebug(exception, "Marten Studio read the relationships of the store's own schemas only");
+                    if (Product == StudioProduct.PostgresStudio)
+                    {
+                        logger.LogDebug(exception, "Postgres Studio read the relationships of the browsable schemas only");
+                    }
+                    else
+                    {
+                        logger.LogDebug(exception, "Marten Studio read the relationships of the store's own schemas only");
+                    }
                 }
             }
         }

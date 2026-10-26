@@ -42,11 +42,22 @@
         </div>
     </div>
 
+    @if (Settings.Text.Product == StudioProduct.MartenStudio)
+    {
     <p class="ms-health-lead">
         What the advisor sees in this database: the store's configuration and the database's own statistics, read
         only while this page or the Overview is open, once per <code>HealthInterval</code> for everybody watching.
         It changes nothing, and every remedy is a line for the host's own <code>StoreOptions</code> - never DDL.
     </p>
+    }
+    else
+    {
+        <p class="ms-health-lead">
+            What the advisor sees in this database: the database's own statistics, read only while this page or the
+            Overview is open, once per <code>HealthInterval</code> for everybody watching. It changes nothing. A remedy is
+            a server setting, or SQL for whoever owns the schema to put in a migration - the studio never runs it.
+        </p>
+    }
 
     @if (!interactive || (loading && report is null))
     {
@@ -437,7 +448,7 @@
             {
                 <div class="ms-health-remedy">
                     <div class="ms-health-remedy-header">
-                        <span class="ms-health-remedy-title">What to change</span>
+                        <span class="ms-health-remedy-title">@(remedy.IsMigration ? HealthRemedy.MigrationHeading : "What to change")</span>
                         @if (remedy.Requires is { } feature)
                         {
                             <span class="@(finding.RemedyAvailable ? "ms-health-requirement" : "ms-health-requirement ms-health-requirement-missing")">

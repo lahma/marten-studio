@@ -74,6 +74,7 @@ internal static class MartenHealthContext
             {
                 TableRemedies = MartenHealthRemedyProvider.Instance,
                 PlanAdvisor = MartenStatementPlanAdvisor.Instance,
+                Text = StudioText.Marten,
             };
     }
 }

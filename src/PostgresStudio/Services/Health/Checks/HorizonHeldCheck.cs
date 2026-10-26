@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -693,7 +694,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             WhyItMatters = WhyItMatters(held, leader, facts, chosen.HoldsTables, chosen.Behind.Count > 0),
             Evidence = evidence,
             Caveat = string.Join(" ", caveat),
-            Remedy = RemedyFor(held, leader, facts.LeaderLockInTransaction),
+            Remedy = RemedyFor(held, leader, facts.LeaderLockInTransaction, evaluation.Text),
             Link = LinkFor(held, facts.HasAsyncShards),
         });
     }
@@ -958,7 +959,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         return why;
     }
 
-    private static HealthRemedy? RemedyFor(HorizonHolder holder, bool leader, bool leaderLockInTransaction)
+    private static HealthRemedy? RemedyFor(HorizonHolder holder, bool leader, bool leaderLockInTransaction, StudioText text)
     {
         if (holder.Kind != HealthHorizonHolderKind.Session)
         {
@@ -988,12 +989,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         }
 
         return new HealthRemedy(
-            """
-            // Keep transactions short, and end what you begin:
-            await using var session = store.LightweightSession();
-            // ... work ...
-            await session.SaveChangesAsync(cancellationToken);
-            """,
+            text.ShortTransactionCode,
             "The studio never ends another session. Find it from the application name on Database › Sessions; a server-wide "
             + "idle_in_transaction_session_timeout or transaction_timeout (PostgreSQL 17) is the DBA's backstop.");
     }

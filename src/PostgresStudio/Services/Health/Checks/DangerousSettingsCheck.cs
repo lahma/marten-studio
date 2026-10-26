@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -139,7 +140,8 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 + "vacuumed except to stop transaction-id wraparound: every document Marten upserts leaves a dead row version that is "
                 + "never cleared, its tables bloat, the planner's statistics go stale, and the studio's own table checks - and its "
                 + "~ estimated counts - have nothing to read.",
-                "track_counts = on"));
+                "track_counts = on",
+                evaluation.Text));
         }
 
         foreach ((string name, string bad, string title, string why) in ProductionOnly)
@@ -171,10 +173,11 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                     HealthSeverity.Info,
                     name + " = " + setting.Value + " on " + facts.Platform.Name + ", whose storage manages durability itself",
                     "On a server's own disk this would be Critical: " + why + " " + facts.Platform.Name + " replaces Postgres's storage with "
-                    + "its own, and the provider manages durability - Marten Studio cannot verify this setting's meaning on "
+                    + "its own, and the provider manages durability - " + evaluation.Text.ProductName + " cannot verify this setting's meaning on "
                     + facts.Platform.Name + ", so it reports the value rather than judging it. The provider's documentation, or its support, "
                     + "is where to confirm it.",
-                    name + " = " + (bad == "off" ? "on" : "off")) with
+                    name + " = " + (bad == "off" ? "on" : "off"),
+                    evaluation.Text) with
                 {
                     Remedy = null,
                 });
@@ -182,7 +185,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 continue;
             }
 
-            findings.Add(Setting(facts, setting, HealthSeverity.Critical, title, why, name + " = " + (bad == "off" ? "on" : "off")));
+            findings.Add(Setting(facts, setting, HealthSeverity.Critical, title, why, name + " = " + (bad == "off" ? "on" : "off"), evaluation.Text));
         }
 
         if (Is(facts.Find("synchronous_commit"), "off") is { } synchronous)
@@ -195,7 +198,8 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 "A commit returns before its WAL is flushed, so a crash of the server - not of the application - loses the last few "
                 + "hundred milliseconds of transactions the application was told had committed. For an event store that is events "
                 + "an async projection or a subscriber may already have acted on. It never corrupts the database; it only forgets.",
-                "synchronous_commit = on"));
+                "synchronous_commit = on",
+                evaluation.Text));
         }
         else if (facts.Find("synchronous_commit") is { } other && !string.Equals(other.Value, "on", StringComparison.OrdinalIgnoreCase))
         {
@@ -309,7 +313,8 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
         HealthSeverity severity,
         string title,
         string why,
-        string line)
+        string line,
+        StudioText text)
     {
         List<HealthEvidence> evidence =
         [
@@ -329,7 +334,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
             Evidence = evidence,
             Caveat = Caveat(facts),
             Remedy = new HealthRemedy(
-                "# A server setting, not a StoreOptions one:\n" + line,
+                "# " + text.ServerSettingComment + ":\n" + line,
                 Where(setting.Source, facts.Platform)),
         };
     }

@@ -743,7 +743,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
             if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
             {
-                string reason = DatabaseGate.SchemaDenial(schema, entries);
+                string reason = DatabaseGate.SchemaDenial(schema, entries, settings.Text);
                 audit.Record(action, target, succeeded: false, reason, StudioCapability.BrowseDatabase, scope with { TenantId = null });
 
                 return Route.Refused(DatabaseRefusal.SchemaNotBrowsable, reason);

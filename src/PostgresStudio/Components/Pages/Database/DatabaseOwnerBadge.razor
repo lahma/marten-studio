@@ -3,6 +3,7 @@
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @inject IStudioLinks Links
+@inject IStudioSettings Settings
 @inject StudioState State
 
 @*
@@ -18,7 +19,7 @@
 
 @if (Ownership is { } owner)
 {
-    string title = DatabasePresentation.OwnerTitle(owner);
+    string title = DatabasePresentation.OwnerTitle(owner, Settings.Text);
     string? href = DatabaseLinks.ToWhereItLives(Links, State.ActiveScope, owner);
 
     // Where the studio has no screen to send a Marten object to (IStudioLinks answers null), the badge is the

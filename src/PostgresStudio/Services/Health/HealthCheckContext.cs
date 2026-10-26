@@ -163,12 +163,19 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     /// <summary>What the studio can say about a sequential scan of one of its tables (T02), or <see langword="null" />.</summary>
     public IHealthPlanAdvisor? PlanAdvisor { get; init; }
 
-    /// <summary>An evaluation at <paramref name="now" />, for a unit test.</summary>
+    /// <summary>
+    /// The studio's own words for a finding (<see cref="IStudioSettings.Text" />) - an option it names, a remedy that is
+    /// code, the tables it judges. The sweep sets it from its settings; there is no default to forget.
+    /// </summary>
+    public required StudioText Text { get; init; }
+
+    /// <summary>An evaluation at <paramref name="now" />, for a unit test - in MartenStudio's words unless it says otherwise.</summary>
     /// <param name="now">When.</param>
     /// <param name="runtime">The runtime, or <see langword="null" /> for none (<see cref="NoStudioRuntime" />).</param>
     /// <param name="history">The history, or none.</param>
-    public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null) =>
-        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty);
+    /// <param name="text">The studio's words, or <see langword="null" /> for MartenStudio's.</param>
+    public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null, StudioText? text = null) =>
+        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? StudioText.Marten };
 }
 
 /// <summary>

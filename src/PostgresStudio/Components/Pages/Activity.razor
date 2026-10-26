@@ -1,7 +1,9 @@
 @page "/postgres/activity"
 @using PostgresStudio.Services
+@using PostgresStudio.Services.Settings
 @using PostgresStudio.Components.Shared
 @implements IDisposable
+@inject IStudioSettings Settings
 @inject StudioActionLog ActionLog
 @inject StudioState State
 @inject StudioAuthorization Authorization
@@ -16,7 +18,7 @@
     </div>
 
     <p class="ms-muted">
-        The most recent @StudioActionLogService.MaxEntries actions taken through Marten Studio in this
+        The most recent @StudioActionLogService.MaxEntries actions taken through @Settings.ProductName in this
         process, newest first. The ring is in memory and goes away with the process - the durable record
         is in this application's own log, under event ids 9200-9211.
     </p>
@@ -27,7 +29,7 @@
             <p class="ms-empty-title">Nothing to show</p>
             <p class="ms-empty-description">
                 @(string.IsNullOrWhiteSpace(filter)
-                    ? "No one has changed anything through Marten Studio since this process started."
+                    ? "No one has changed anything through " + Settings.ProductName + " since this process started."
                     : "No recorded action matches that filter.")
             </p>
         </div>

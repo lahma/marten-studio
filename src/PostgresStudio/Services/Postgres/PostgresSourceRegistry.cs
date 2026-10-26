@@ -414,7 +414,7 @@ internal sealed class PostgresSourceRegistry
 
                 root.GetService<ILoggerFactory>()?
                     .CreateLogger<PostgresSourceRegistry>()
-                    .StoreUnavailable(level, key, serviceType.FullName ?? serviceType.Name, exception.Message);
+                    .PostgresStudioStoreUnavailable(level, key, serviceType.FullName ?? serviceType.Name, exception.Message);
 
                 return unavailable;
             }

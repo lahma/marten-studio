@@ -108,7 +108,8 @@ internal sealed class PreparedTransactionCheck : HealthCheck<PreparedTransaction
             Evidence = evidence,
             Caveat =
                 "Read in pg_prepared_xacts, for this database, at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
-                + ". Its global identifier and owner are shown only with MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+                + ". Its global identifier and owner are shown only with "
+                + evaluation.Text.OptionName("Capabilities.ViewDatabaseActivity") + ".",
             Remedy = null,
             Link = SessionEvidence.SessionsLink,
         });

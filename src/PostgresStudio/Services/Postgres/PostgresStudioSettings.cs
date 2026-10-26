@@ -48,6 +48,9 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public string CapabilitiesTypeName => nameof(PostgresStudioCapabilities);
 
     /// <inheritdoc />
+    public StudioText Text => PostgresStudioText.Instance;
+
+    /// <inheritdoc />
     public string Title => Value.Title;
 
     /// <inheritdoc />

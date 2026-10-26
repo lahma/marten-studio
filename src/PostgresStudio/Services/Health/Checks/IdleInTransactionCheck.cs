@@ -224,15 +224,10 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
                 + "and never finished it: a session that was never disposed, an exception path that skipped SaveChangesAsync, a "
                 + "debugger paused at a breakpoint." + harmlessNote + leaderNote,
             Evidence = evidence,
-            Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, SessionEvidence.StatementsOnSessionsPage),
+            Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, evaluation.Text.StatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
             Remedy = new HealthRemedy(
-                """
-                // Dispose every session on every path, and end what it began:
-                await using var session = store.LightweightSession();
-                // ... work ...
-                await session.SaveChangesAsync(cancellationToken);
-                """,
+                evaluation.Text.EndWhatYouBeginCode,
                 "The studio never ends another session. Find the code path from the application name and the time it went idle; "
                 + "a server-wide idle_in_transaction_session_timeout is the DBA's backstop. With the HotCold leadership lock "
                 + "transaction-scoped (Events.UseAdvisoryLockTransaction, the default at Marten 9.39 and 9.40) it can also end the "

@@ -147,7 +147,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         }
         catch (StudioNotAuthorizedException)
         {
-            return SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
+            return SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, settings.Text.SessionsStorePolicyDenial);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
@@ -159,7 +159,7 @@ internal sealed class SessionActivityService : ISessionActivityService
 
         if (!await StorePolicyPassesAsync(asked, whole, cancellationToken).ConfigureAwait(false))
         {
-            return SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
+            return SessionActivitySummary.Refused(DatabaseRefusal.StorePolicy, settings.Text.SessionsStorePolicyDenial);
         }
 
         SessionDetailsAccess details = await AccessAsync(whole, cancellationToken).ConfigureAwait(false);
@@ -252,8 +252,8 @@ internal sealed class SessionActivityService : ISessionActivityService
             audit.RecordCapabilityDenied(denied, DetailsAction, DetailsTarget);
 
             return denied.Reason == CapabilityDenialReason.ReadOnly
-                ? SessionActivityDetails.Refused(DatabaseRefusal.ReadOnly, ReadOnlyDenial)
-                : SessionActivityDetails.Refused(DatabaseRefusal.CapabilityOff, CapabilityDenial);
+                ? SessionActivityDetails.Refused(DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial)
+                : SessionActivityDetails.Refused(DatabaseRefusal.CapabilityOff, settings.Text.SessionsCapabilityDenial);
         }
 
         // 2. The scope, resolved with no tenant: the store policy, which the resolver asks before it looks anything up -
@@ -267,7 +267,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         catch (StudioNotAuthorizedException)
         {
             audit.RecordScopeDenied(asked, DatabaseAccess.StorePolicyName(settings), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
-            return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
+            return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, settings.Text.SessionsStorePolicyDenial);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
@@ -282,13 +282,13 @@ internal sealed class SessionActivityService : ISessionActivityService
         if (!await StorePolicyPassesAsync(asked, whole, cancellationToken).ConfigureAwait(false))
         {
             audit.RecordScopeDenied(whole, DatabaseAccess.StorePolicyName(settings), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
-            return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, StorePolicyDenial);
+            return SessionActivityDetails.Refused(DatabaseRefusal.StorePolicy, settings.Text.SessionsStorePolicyDenial);
         }
 
         if (!await authorization.IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity, cancellationToken).ConfigureAwait(false))
         {
             audit.RecordScopeDenied(whole, DatabaseAccess.WritePolicyName(settings), DetailsAction, DetailsTarget, StudioCapability.ViewDatabaseActivity);
-            return SessionActivityDetails.Refused(DatabaseRefusal.WritePolicy, WritePolicyDenial);
+            return SessionActivityDetails.Refused(DatabaseRefusal.WritePolicy, settings.Text.SessionsWritePolicyDenial);
         }
 
         // 4. Only now anything about the database.
@@ -375,13 +375,13 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             // Nobody is asked about a capability the process does not have.
             return capabilities.ReadOnly
-                ? new SessionDetailsAccess(false, true, null, DatabaseRefusal.ReadOnly, ReadOnlyDenial)
-                : new SessionDetailsAccess(false, false, null, DatabaseRefusal.CapabilityOff, CapabilityDenial);
+                ? new SessionDetailsAccess(false, true, null, DatabaseRefusal.ReadOnly, settings.Text.SessionsReadOnlyDenial)
+                : new SessionDetailsAccess(false, false, null, DatabaseRefusal.CapabilityOff, settings.Text.SessionsCapabilityDenial);
         }
 
         return await authorization.IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity, cancellationToken).ConfigureAwait(false)
             ? new SessionDetailsAccess(true, false, true, DatabaseRefusal.None, null)
-            : new SessionDetailsAccess(true, false, false, DatabaseRefusal.WritePolicy, WritePolicyDenial);
+            : new SessionDetailsAccess(true, false, false, DatabaseRefusal.WritePolicy, settings.Text.SessionsWritePolicyDenial);
     }
 
     /// <summary>
@@ -400,7 +400,14 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio could not read the schema gate to mask the statements of {DatabaseId}", resolved.Target.Identity);
+                }
             }
 
             return StatementScreen.Unchecked(hidesDocumentTypes);
@@ -423,7 +430,14 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio could not classify the relations of {DatabaseId}", resolved.Target.Identity);
+                }
             }
 
             return null;
@@ -470,6 +484,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         if (logger.IsEnabled(LogLevel.Information))
         {
             logger.SessionDetailsRead(
+                settings.Text.Product,
                 await authorization.UserNameAsync().ConfigureAwait(false),
                 storeKey,
                 databaseId,
@@ -540,14 +555,28 @@ internal sealed class SessionActivityService : ISessionActivityService
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio did not read the sessions of {DatabaseId}: {Reason}", databaseId, expected);
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio did not read the sessions of {DatabaseId}: {Reason}", databaseId, expected);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio did not read the sessions of {DatabaseId}: {Reason}", databaseId, expected);
+                }
             }
 
             return expected;
         }
 
         LogLevel level = throttle.WarningOrDebug("Sessions.Read", storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        logger.SessionActivityReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioSessionActivityReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        }
+        else
+        {
+            logger.SessionActivityReadFailed(level, exception, storeKey, databaseId, postgres?.SqlState);
+        }
 
         return PostgresFailure.IsConnectionFailure(exception)
             ? "The studio could not connect to this database."

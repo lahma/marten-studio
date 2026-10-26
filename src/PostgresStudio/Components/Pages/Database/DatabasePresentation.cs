@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Schema;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Components.Pages.Database;
 
@@ -162,9 +163,12 @@ internal static class DatabasePresentation
     }
 
     /// <summary>What an owner means, for the badge's tooltip.</summary>
-    public static string OwnerTitle(DatabaseObjectOwnership ownership)
+    /// <param name="ownership">Whose the object is.</param>
+    /// <param name="text">The studio's words for what the <c>mt_</c> rule calls Marten's own.</param>
+    public static string OwnerTitle(DatabaseObjectOwnership ownership, StudioText text)
     {
         ArgumentNullException.ThrowIfNull(ownership);
+        ArgumentNullException.ThrowIfNull(text);
 
         return ownership.Owner switch
         {
@@ -174,8 +178,7 @@ internal static class DatabasePresentation
                 "Part of Marten's event store. Its rows are browsed in Streams, the Feed and Projections.",
             DatabaseObjectOwner.MartenProjectionOrExtended =>
                 "Relational data Marten manages for this application - a flat-table projection or an extended schema object. Its rows are browsable here.",
-            DatabaseObjectOwner.MartenInfrastructure =>
-                "Marten's own bookkeeping. It is described on the Schema screen and never browsed raw.",
+            DatabaseObjectOwner.MartenInfrastructure => text.MartenInternalTitle,
             _ when ownership.RecognisedAs is { } hint =>
                 "Recognised by name as " + hint + ". A guess from the name, not something the database says.",
             _ => "Not Marten's: this application's own, or another library's.",

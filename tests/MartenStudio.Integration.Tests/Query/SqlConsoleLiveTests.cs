@@ -174,7 +174,7 @@ public class SqlConsoleLiveTests(PostgresFixture fixture) : IAsyncLifetime
         result.Succeeded.Should().BeFalse();
         result.Error!.SqlState.Should().Be(QuerySqlErrors.QueryCanceled);
 
-        QuerySqlErrors.Describe(result.Error, TimeSpan.FromSeconds(1))
+        QuerySqlErrors.Describe(result.Error, TimeSpan.FromSeconds(1), PostgresStudio.Services.Settings.StudioText.Marten)
             .Should().Contain("timed out after 1 s");
     }
 

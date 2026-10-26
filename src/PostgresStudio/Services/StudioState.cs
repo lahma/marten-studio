@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.AspNetCore.Http;
@@ -35,19 +36,29 @@ internal sealed class StudioState
 
     private readonly IStudioScopeCatalog catalog;
     private readonly ILogger<StudioState> logger;
+    private readonly StudioProduct product;
 
     private string selectedTheme = "system";
     private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
     private long preferenceVersion;
     private bool initialized;
 
+    /// <param name="catalog">The sources, databases and tenants this visitor may see.</param>
+    /// <param name="logger">Where a page's failed scope-change handler goes.</param>
+    /// <param name="httpContextAccessor">The request that opened the circuit, for the remembered preferences.</param>
+    /// <param name="settings">
+    /// The studio's settings, whose words that line is logged in - optional so that a test can build the state by hand;
+    /// the container always supplies them (<see cref="StudioText.Of" />).
+    /// </param>
     public StudioState(
         IStudioScopeCatalog catalog,
         ILogger<StudioState> logger,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpContextAccessor httpContextAccessor,
+        IStudioSettings? settings = null)
     {
         this.catalog = catalog;
         this.logger = logger;
+        product = StudioText.Of(settings).Product;
 
         HttpContext? httpContext = httpContextAccessor.HttpContext;
         if (httpContext is null)
@@ -252,7 +263,14 @@ internal sealed class StudioState
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                logger.LogError(exception, "A Marten Studio page failed to handle a scope change");
+                if (product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogError(exception, "A Postgres Studio page failed to handle a scope change");
+                }
+                else
+                {
+                    logger.LogError(exception, "A Marten Studio page failed to handle a scope change");
+                }
             }
         }
     }

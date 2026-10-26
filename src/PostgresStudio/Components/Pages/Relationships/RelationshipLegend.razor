@@ -1,3 +1,5 @@
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
 @*
     What the line styles on the diagram mean - only the ones it actually draws. The swatches are the same
     CSS the diagram uses, so a legend can never drift from the picture it explains.
@@ -37,12 +39,12 @@
 
     private IReadOnlyCollection<string> Shown => Styles ?? DocumentStyles;
 
-    private static RenderFragment Describe(string style) => style switch
+    private RenderFragment Describe(string style) => style switch
     {
         "both" => @<text>Declared and enforced - <code>StoreOptions</code> declares the key and Postgres has the constraint.</text>,
         "declared" => @<text>Declared only - configured, never applied. Nothing is enforcing it.</text>,
         "physical" => @<text>In the database only - Marten does not know about it, and an apply would drop it.</text>,
-        "table" => @<text>A key on a table Marten does not map - enforced by Postgres.</text>,
+        "table" => @<text>@Settings.Text.RelationshipTableKey</text>,
         "notvalid" => @<text>NOT VALID - Postgres checks new rows but never checked the ones already there.</text>,
         _ => @<text>@style</text>,
     };

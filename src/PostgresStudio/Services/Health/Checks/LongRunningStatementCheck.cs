@@ -123,10 +123,9 @@ internal sealed class LongRunningStatementCheck : HealthCheck<LongRunningFacts>
             WhyItMatters =
                 "A statement that runs this long holds its locks and its snapshot for as long as it runs: vacuum cannot clean up "
                 + "behind it anywhere in the database, and anything that needs a stronger lock on the same tables - a schema apply, "
-                + "a rebuild's truncate - queues behind it. In a Marten store it is most often a query over a large document table "
-                + "with no index for its filter, a projection rebuild's batch, or a report somebody started by hand.",
+                + "a rebuild's truncate - queues behind it. " + evaluation.Text.LongStatementCause,
             Evidence = evidence,
-            Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, SessionEvidence.StatementsOnSessionsPage),
+            Caveat = SessionEvidence.Caveat(facts.Visibility, facts.ReadAt, evaluation.Text.StatementsOnSessionsPage),
             Link = SessionEvidence.SessionsLink,
             Remedy = new HealthRemedy(
                 """

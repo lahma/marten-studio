@@ -84,10 +84,10 @@
                                     <span class="ms-rail-badge-count" title="@CountTitle(schema)">@DatabasePresentation.Number(CountFor(schema))</span>
                                 </a>
                                 <span class="ms-rail-flags">
-                                    @if (schema.IsStoreSchema)
+                                    @if (schema.IsStoreSchema && Settings.Text.OwnSchemaFlag is { } flag)
                                     {
                                         <span class="ms-rail-flag ms-db-flag-marten"
-                                              title="Declared by this Marten store. Its structure is shown whether or not Capabilities.BrowseDatabase is on.">M</span>
+                                              title="@Settings.Text.OwnSchemaFlagTitle">@flag</span>
                                     }
                                 </span>
                             </div>
@@ -398,7 +398,7 @@
                                 <span class="ms-rail-flags">
                                     @if (relation.Ownership.IsMarten)
                                     {
-                                        <span class="ms-rail-flag ms-db-flag-marten" title="@DatabasePresentation.OwnerTitle(relation.Ownership)">M</span>
+                                        <span class="ms-rail-flag ms-db-flag-marten" title="@DatabasePresentation.OwnerTitle(relation.Ownership, Settings.Text)">M</span>
                                     }
                                     <button type="button"
                                             class="ms-rail-action @(pinned ? "ms-rail-action-on" : null)"

@@ -196,7 +196,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
     internal void ListFailed(string key, Exception exception)
     {
         LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, "Store.Databases", key, null, StudioLogThrottle.KindOf(exception));
-        logger.StoreDatabasesUnreadable(level, exception, key);
+        logger.PostgresStudioStoreDatabasesUnreadable(level, exception, key);
     }
 
     /// <summary>Logs a host-listed database that could not be opened during a sweep, at Debug: the sweep counts it.</summary>

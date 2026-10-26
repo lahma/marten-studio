@@ -48,9 +48,9 @@
             @if (State.ActiveScope is null && !loading)
             {
                 <div class="ms-empty">
-                    <p class="ms-empty-title">No Marten store to show</p>
+                    <p class="ms-empty-title">No @Descriptor.SourceNoun to show</p>
                     <p class="ms-empty-description">
-                        This application registered no Marten store that you are authorized to see.
+                        This application registered no @Descriptor.SourceNoun that you are authorized to see.
                     </p>
                 </div>
             }
@@ -65,6 +65,17 @@
             else
             {
                 <DatabaseAccessNotice Model="overview?.Access" />
+
+                @* A studio that is not the place to read Marten's documents says where that place is, once, when the
+                   list holds an object the mt_ rule calls Marten's: its rows are never read here (design R2). *@
+                @if (Settings.Text.MartenStoreNotice is { } martenNotice && list is { Counts.Marten: > 0 })
+                {
+                    <div class="ms-alert ms-alert-info ms-db-marten-notice" role="note">
+                        <div class="ms-alert-content">
+                            <p class="ms-muted">@martenNotice</p>
+                        </div>
+                    </div>
+                }
 
                 <nav class="ms-tabs ms-db-kind-tabs" aria-label="Kinds of object">
                     @foreach (DatabaseObjectCategory category in DatabasePresentation.Categories)
@@ -83,6 +94,8 @@
                 </nav>
 
                 <div class="ms-doc-toolbar ms-db-toolbar">
+                    @if (ShowsOwnerFilter)
+                    {
                     <div class="ms-segmented ms-db-owner-filter" role="group" aria-label="Whose objects to show">
                         @foreach (DatabaseOwnerFilter owner in OwnerFilters)
                         {
@@ -99,6 +112,7 @@
                             </button>
                         }
                     </div>
+                    }
 
                     <DatabaseNameFilter Value="@Filter"
                                         Placeholder="@($"Filter {DatabasePresentation.CategoryLabel(Category).ToLowerInvariant()} by name")"
@@ -449,12 +463,20 @@
         _ => "All",
     };
 
-    private static string OwnerTitle(DatabaseOwnerFilter owner) => owner switch
+    private string OwnerTitle(DatabaseOwnerFilter owner) => owner switch
     {
-        DatabaseOwnerFilter.Marten => "Only what Marten owns: document tables, the event store, projections and its own bookkeeping",
-        DatabaseOwnerFilter.Other => "Only what Marten does not own: this application's own objects, and other libraries'",
+        DatabaseOwnerFilter.Marten => Settings.Text.OwnerFilterMartenTitle,
+        DatabaseOwnerFilter.Other => Settings.Text.OwnerFilterOtherTitle,
         _ => "Everything",
     };
+
+    /// <summary>
+    /// Whether the owner filter is drawn: always in MartenStudio, and in a studio over plain data sources only when the
+    /// list holds something the mt_ rule calls Marten's - or a link asked for one side - since otherwise every object is
+    /// "Other" and the filter has nothing to tell apart.
+    /// </summary>
+    private bool ShowsOwnerFilter =>
+        Settings.Text.Product == StudioProduct.MartenStudio || Owner != DatabaseOwnerFilter.All || list is { Counts.Marten: > 0 };
 
     private string OwnerCount(DatabaseOwnerFilter owner)
     {

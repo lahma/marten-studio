@@ -67,9 +67,44 @@ internal sealed record HealthStatement(string Sql, IReadOnlyList<string> Paramet
 /// host runs (<see cref="IStudioRuntime" />). A feature can only come from the studio's probe table, so a remedy
 /// cannot claim a version the probe does not check.
 /// </para>
+/// <para>
+/// <b>The one exception is a relational table's migration SQL</b> (<see cref="ForMigration" />, issue #8 G12). A table
+/// the host's own migrations own has no configuration that reconciles it, so the reason above does not hold - and
+/// without DDL a plain data source's index and storage findings would have no remedy at all. Such a remedy is marked
+/// <see cref="IsMigration" />, drawn under "For your own migrations - the studio never runs this", and only ever made by
+/// a studio's <c>IHealthTableRemedies</c> for a <c>Relational</c> table, from SQL built under <c>Internal/Sql</c>.
+/// </para>
 /// </remarks>
 internal sealed record HealthRemedy
 {
+    /// <summary>What a migration remedy says of itself, after its own explanation.</summary>
+    public const string HandOverNote =
+        "It is text for whoever owns the schema to put in a migration; the studio never runs it.";
+
+    /// <summary>The heading a migration remedy is drawn under.</summary>
+    public const string MigrationHeading = "For your own migrations - the studio never runs this";
+
+    /// <summary>
+    /// A remedy that is SQL for the host's own migrations - <c>ALTER TABLE ... SET (...)</c>,
+    /// <c>CREATE INDEX CONCURRENTLY ...</c> - which the DDL rule of the constructor does not apply to.
+    /// </summary>
+    /// <param name="sql">The statement, built under <c>Internal/Sql</c> with every identifier quoted.</param>
+    /// <param name="explanation">What it changes and what it costs; <see cref="HandOverNote" /> is added after it.</param>
+    public static HealthRemedy ForMigration(string sql, string explanation)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sql);
+        ArgumentException.ThrowIfNullOrWhiteSpace(explanation);
+
+        return new HealthRemedy(sql, explanation + " " + HandOverNote, isMigration: true);
+    }
+
+    private HealthRemedy(string code, string explanation, bool isMigration)
+    {
+        Code = code;
+        Explanation = explanation;
+        IsMigration = isMigration;
+    }
+
     /// <param name="code">The line, or lines, to paste.</param>
     /// <param name="explanation">What it changes, and what it costs.</param>
     /// <param name="requires">The newer-than-floor feature the line needs, or <see langword="null" />.</param>
@@ -98,6 +133,11 @@ internal sealed record HealthRemedy
 
     /// <summary>The newer-than-floor feature the line needs, or <see langword="null" />.</summary>
     public StudioFeatureRequirement? Requires { get; }
+
+    /// <summary>
+    /// Whether it is SQL for the host's own migrations (<see cref="ForMigration" />) rather than a configuration line.
+    /// </summary>
+    public bool IsMigration { get; }
 }
 
 /// <summary>What a remedy may not be.</summary>

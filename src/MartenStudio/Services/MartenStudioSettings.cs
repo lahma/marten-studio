@@ -45,6 +45,9 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public string CapabilitiesTypeName => nameof(MartenStudioCapabilities);
 
     /// <inheritdoc />
+    public StudioText Text => StudioText.Marten;
+
+    /// <inheritdoc />
     public string Title => Value.Title;
 
     /// <inheritdoc />

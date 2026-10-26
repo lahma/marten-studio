@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Query;
 
@@ -29,8 +30,13 @@ internal static class QuerySqlErrors
     public const string InsufficientPrivilege = "42501";
 
     /// <summary>The headline for <paramref name="error" />, or <see langword="null" /> when the raw message says it all.</summary>
-    public static string? Describe(SqlError? error, TimeSpan statementTimeout)
+    /// <param name="error">What Postgres said.</param>
+    /// <param name="statementTimeout">The <c>statement_timeout</c> the statement ran under.</param>
+    /// <param name="text">The studio's words, for the option a sentence names.</param>
+    public static string? Describe(SqlError? error, TimeSpan statementTimeout, StudioText text)
     {
+        ArgumentNullException.ThrowIfNull(text);
+
         if (error is null)
         {
             return null;
@@ -44,12 +50,12 @@ internal static class QuerySqlErrors
             QueryCanceled =>
                 "Statement timed out after " +
                 statementTimeout.TotalSeconds.ToString("0.##", CultureInfo.InvariantCulture) +
-                " s. MartenStudioOptions.QueryTimeout is what sets that.",
+                " s. " + text.OptionName("QueryTimeout") + " is what sets that.",
             LockNotAvailable =>
                 "Gave up waiting for a lock. The console never queues behind a migration on purpose.",
             InsufficientPrivilege =>
                 "The role this statement ran as may not read that. " +
-                "MartenStudioOptions.SqlConsoleRole is what narrows it.",
+                text.OptionName("SqlConsoleRole") + " is what narrows it.",
             _ => null,
         };
     }

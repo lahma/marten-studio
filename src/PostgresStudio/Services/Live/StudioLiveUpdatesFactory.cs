@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
+using PostgresStudio.Services.Settings;
+
 namespace PostgresStudio.Services.Live;
 
 /// <summary>
@@ -27,21 +29,27 @@ internal sealed class StudioLiveUpdatesFactory
     private readonly IJSRuntime jsRuntime;
     private readonly ILoggerFactory loggerFactory;
     private readonly StudioLogThrottle? throttle;
+    private readonly StudioProduct product;
 
     /// <remarks>
-    /// <paramref name="throttle" /> is optional so that a component test's container, which registers
-    /// this factory without the rest of the studio, still resolves it.
+    /// <paramref name="throttle" /> and <paramref name="settings" /> are optional so that a component test's
+    /// container, which registers this factory without the rest of the studio, still resolves it.
     /// </remarks>
-    public StudioLiveUpdatesFactory(IJSRuntime jsRuntime, ILoggerFactory loggerFactory, StudioLogThrottle? throttle = null)
+    public StudioLiveUpdatesFactory(
+        IJSRuntime jsRuntime,
+        ILoggerFactory loggerFactory,
+        StudioLogThrottle? throttle = null,
+        IStudioSettings? settings = null)
     {
         this.jsRuntime = jsRuntime;
         this.loggerFactory = loggerFactory;
         this.throttle = throttle;
+        product = StudioText.Of(settings).Product;
     }
 
     /// <summary>
     /// A polling loop for one page. The caller disposes it from its own <c>DisposeAsync</c>.
     /// </summary>
     public StudioLiveUpdates Create() =>
-        new(jsRuntime, loggerFactory.CreateLogger<StudioLiveUpdates>(), throttle);
+        new(jsRuntime, loggerFactory.CreateLogger<StudioLiveUpdates>(), throttle, product);
 }

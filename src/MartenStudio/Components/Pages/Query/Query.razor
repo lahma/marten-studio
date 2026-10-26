@@ -915,7 +915,7 @@
 
     private string Describe(SqlError error)
     {
-        string? headline = QuerySqlErrors.Describe(error, Settings.QueryTimeout);
+        string? headline = QuerySqlErrors.Describe(error, Settings.QueryTimeout, Settings.Text);
 
         return headline is null
             ? QuerySqlErrors.Summarize(error)

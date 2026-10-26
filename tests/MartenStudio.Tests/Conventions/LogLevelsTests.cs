@@ -168,6 +168,33 @@ public class LogLevelsTests
             "A read of a database's sessions failed by connection or an unexpected SQLSTATE; privilege and timeouts are Debug, and the Sessions page re-reads every HealthInterval."),
         ["src/PostgresStudio/Services/Postgres/PostgresLog.cs : 9301 DatabaseNamesSkipped"] = (Verdict.Throttled,
             "A host's database source listed names PostgresStudio left out (invalid, duplicate, another source's, past the cap); the list is read again every minute in every circuit that looks."),
+        // ---- PostgresStudioLog: the same shared events in Postgres Studio's words, filed as StudioLog's are -----------
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9202 PostgresStudioCapabilityDenied"] = (Verdict.Refusal,
+            "9202 in Postgres Studio's words: a capability refusal reaches the service only when a client drives a control the page disabled or hid."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9203 PostgresStudioScopeAuthorizationDenied"] = (Verdict.Refusal,
+            "9203 in Postgres Studio's words: a policy refusal on a query run or a database-browser read; listings are filtered and log nothing."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9230 PostgresStudioDatabaseBrowserOpenToEverySchemaWithoutRole"] = (Verdict.Configuration,
+            "9230 in Postgres Studio's words: BrowsableSchemas contains \"*\" and SqlConsoleRole is unset. Once per host start."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9210 PostgresStudioStoreUnavailable"] = (Verdict.Throttled,
+            "9210 in Postgres Studio's words: a registered data source will not resolve; the registry's ten-second cache expires under every polling page."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9214 PostgresStudioPostgresVersionUnreadable"] = (Verdict.Throttled,
+            "9214 in Postgres Studio's words: a source's server version could not be read; the Overview asks it in every circuit."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9213 PostgresStudioStoreDatabasesUnreadable"] = (Verdict.Throttled,
+            "9213 in Postgres Studio's words: a source's databases could not be listed, on every scope listing in every circuit."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9219 PostgresStudioTenantDiscoveryFailed"] = (Verdict.Throttled,
+            "9219 in Postgres Studio's words: tenant discovery failed, asked on every scope change in every circuit."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9220 PostgresStudioLiveUpdateHandlerFailed"] = (Verdict.Throttled,
+            "9220 in Postgres Studio's words: a page's refresh-failure handler threw, on a loop that runs every RefreshInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9221 PostgresStudioTenantPolicyFailed"] = (Verdict.Throttled,
+            "9221 in Postgres Studio's words: the source policy threw while the header asked which tenants to list, on every scope change."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9222 PostgresStudioHealthCheckFailed"] = (Verdict.Throttled,
+            "9222 in Postgres Studio's words: a health check failed other than by an expected state, re-checked at HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9237 PostgresStudioTableRowReadFailed"] = (Verdict.Throttled,
+            "9237 in Postgres Studio's words: a row read failed by connection or an unexpected SQLSTATE, and page turns repeat it."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9246 PostgresStudioSessionActivityReadFailed"] = (Verdict.Throttled,
+            "9246 in Postgres Studio's words: a sessions read failed by connection or an unexpected SQLSTATE, re-read every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.cs : 9270 PostgresStudioHealthExportFailed"] = (Verdict.Throttled,
+            "9270 in Postgres Studio's words: the opt-in health export failed in the studio itself, probed every few seconds."),
         ["src/PostgresStudio/Services/StudioLog.Export.cs : 9270 HealthExportFailed"] = (Verdict.Throttled,
             "The opt-in health export failed in the studio itself and reports Degraded; an orchestrator probes the health endpoint every few seconds, and the run repeats every HealthInterval."),
 
@@ -180,6 +207,8 @@ public class LogLevelsTests
             "A pause, resume or store-wide correction the visitor pressed is refused because the store's databases cannot be enumerated."),
         ["src/PostgresStudio/Services/Relationships/RelationshipDataService.cs : Marten Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
             "The relationships screen's load failed on a catalog read; not polled."),
+        ["src/PostgresStudio/Services/Relationships/RelationshipDataService.cs : Postgres Studio could not read the relationships of {StoreKey}"] = (Verdict.VisitorAction,
+            "The same line in Postgres Studio's words: the relationships screen's load failed on a catalog read; not polled."),
         ["src/MartenStudio/Services/MartenRelationshipNodeSource.cs : Marten Studio could not read what references '{Id}' of '{Alias}'"] = (Verdict.VisitorAction,
             "A document detail's referenced-by panel failed as a whole; the per-edge counts inside it are Debug."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not create a schema migration for database {DatabaseId}"] = (Verdict.VisitorAction,
@@ -220,6 +249,8 @@ public class LogLevelsTests
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),
+        ["src/PostgresStudio/Services/StudioState.cs : A Postgres Studio page failed to handle a scope change"] = (Verdict.Fault,
+            "The same line in Postgres Studio's words: a page's scope-change handler threw, and it can show another scope's data."),
         ["src/MartenStudio/Services/Projections/StudioOperationTracker.cs : Marten Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
             "A rebuild the visitor started failed after tearing the projection's tables down; they stay empty until rebuilt."),
     };
@@ -489,6 +520,7 @@ public class LogLevelsTests
     private static readonly string[] EventFiles =
     [
         "src/PostgresStudio/Services/StudioLog.cs",
+        "src/PostgresStudio/Services/PostgresStudioLog.cs",
         "src/MartenStudio/Services/MartenLog.cs",
     ];
 

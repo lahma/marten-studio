@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 using PostgresStudio.Services.Health.Export;
+using PostgresStudio.Services.Postgres;
 
 namespace PostgresStudio;
 
@@ -67,8 +68,10 @@ public static class PostgresStudioHealthChecksBuilderExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
         // One runner per process however many registrations name it, so a liveness and a readiness check over the same
-        // studio still cost one run per interval between them.
-        builder.Services.TryAddSingleton<HealthExportRunner>();
+        // studio still cost one run per interval between them. Built with Postgres Studio's words, which are the ones it
+        // says "call services.AddPostgresStudio()" in when the studio itself was never added.
+        builder.Services.TryAddSingleton(static services =>
+            ActivatorUtilities.CreateInstance<HealthExportRunner>(services, PostgresStudioText.Instance));
 
         return builder.Add(new HealthCheckRegistration(
             name,

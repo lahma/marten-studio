@@ -104,7 +104,7 @@ internal sealed class PostgresServerReader : IPostgresServerReader
         {
             LogLevel level = StudioLogThrottle.LevelOrWarning(
                 throttle, "Store.PostgresVersion", resolved.Source.Key, resolved.Target.Identity, StudioLogThrottle.KindOf(exception));
-            logger.PostgresVersionUnreadable(level, exception, resolved.Source.Key);
+            logger.PostgresStudioPostgresVersionUnreadable(level, exception, resolved.Source.Key);
 
             answer = new PostgresServerRead(null, "The server's version could not be read: " + exception.Message);
         }

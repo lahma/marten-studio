@@ -110,6 +110,7 @@ internal sealed class HealthExportRunner
     private readonly ILogger logger;
     private readonly StudioLogThrottle? throttle;
     private readonly CancellationToken stopping;
+    private readonly StudioText registeredText;
     private readonly Lock gate = new();
 
     private Task<HealthExportSummary>? running;
@@ -123,16 +124,23 @@ internal sealed class HealthExportRunner
     /// <param name="logger">Where a failure of the export itself goes.</param>
     /// <param name="throttle">The studio's log throttle, which <c>AddMartenStudio()</c> registers.</param>
     /// <param name="lifetime">The host's lifetime, whose stopping ends a run in flight.</param>
+    /// <param name="registeredText">
+    /// The words of the studio whose <c>AddHealthChecks().Add*Studio()</c> registered this runner, for the one sentence
+    /// said when that studio's own services are missing: MartenStudio's when <see langword="null" />, which is what its
+    /// registration leaves it. A studio that registers the runner itself hands its own.
+    /// </param>
     public HealthExportRunner(
         IServiceProvider services,
         TimeProvider? timeProvider = null,
         HealthExportLimits? limits = null,
         ILogger<HealthExportRunner>? logger = null,
         StudioLogThrottle? throttle = null,
-        IHostApplicationLifetime? lifetime = null)
+        IHostApplicationLifetime? lifetime = null,
+        StudioText? registeredText = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        this.registeredText = registeredText ?? StudioText.Marten;
         this.services = services;
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.limits = limits ?? HealthExportLimits.Default;
@@ -143,6 +151,27 @@ internal sealed class HealthExportRunner
 
     /// <summary>How many runs have started, for a test and for nothing else.</summary>
     internal int RunCount => Volatile.Read(ref runCount);
+
+    /// <summary>
+    /// The words the export's own sentences and its 9270 are in: the studio's settings' when they are registered, and
+    /// otherwise those of the studio whose health-check registration made this runner (<c>registeredText</c>) - which
+    /// is the only one that can name the <c>Add*Studio()</c> call a host forgot.
+    /// </summary>
+    internal StudioText Text
+    {
+        get
+        {
+            try
+            {
+                return services.GetService<IStudioSettings>()?.Text ?? registeredText;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // Options that fail validation are the run's to report; the words do not depend on them.
+                return registeredText;
+            }
+        }
+    }
 
     /// <summary>
     /// How long a result is held before a probe starts the next run: the studio's <c>EffectiveHealthInterval</c>,
@@ -215,7 +244,15 @@ internal sealed class HealthExportRunner
     internal void ReportFailure(Exception exception)
     {
         LogLevel level = StudioLogThrottle.LevelOrWarning(throttle, "Health.Export", null, null, StudioLogThrottle.KindOf(exception));
-        logger.HealthExportFailed(level, exception);
+
+        if (Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioHealthExportFailed(level, exception);
+        }
+        else
+        {
+            logger.HealthExportFailed(level, exception);
+        }
     }
 
     /// <summary>
@@ -247,7 +284,7 @@ internal sealed class HealthExportRunner
             // A fault in the studio itself. The endpoint is told the exception's type and nothing it said: its
             // message could name a schema, a table or a connection, and the endpoint has no visitor to ask.
             ReportFailure(exception);
-            summary = HealthExportSummary.Broken(started, exception.GetType().Name);
+            summary = HealthExportSummary.Broken(started, exception.GetType().Name, Text);
         }
 
         lock (gate)
@@ -268,7 +305,7 @@ internal sealed class HealthExportRunner
 
         if (sweeper is null || settings is null)
         {
-            return HealthExportSummary.NotRegistered(started);
+            return HealthExportSummary.NotRegistered(started, Text);
         }
 
         // The source provider is a circuit's service - it caches discovered tenants per circuit - and a run has no circuit,
@@ -277,12 +314,12 @@ internal sealed class HealthExportRunner
 
         if (scope.ServiceProvider.GetService<IStudioSourceProvider>() is not { } sources)
         {
-            return HealthExportSummary.NotRegistered(started);
+            return HealthExportSummary.NotRegistered(started, settings.Text);
         }
 
         if (sources.Registrations().Count == 0)
         {
-            return HealthExportSummary.NoStores(started);
+            return HealthExportSummary.NoStores(started, settings.Text);
         }
 
         // The run's own budget, on top of each sweep's (one interval each), so that a store of many slow databases
@@ -359,7 +396,7 @@ internal sealed class HealthExportRunner
 
         // A run the application's stopping cut short is said as that, not as databases that were slow.
         return stopping.IsCancellationRequested
-            ? HealthExportSummary.Stopping(started)
+            ? HealthExportSummary.Stopping(started, settings.Text)
             : HealthExportSummary.From(started, sweeps, skipped, timedOut, notReached, notEnumerated, unnamed);
     }
 }
