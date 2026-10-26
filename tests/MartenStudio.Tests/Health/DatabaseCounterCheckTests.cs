@@ -246,6 +246,52 @@ public class DatabaseCounterCheckTests
         verdict.Note.Should().Contain("Per day since 2026-10-13 09:05 UTC: 1.5 deadlocks and 0 bytes of temporary files.");
     }
 
+    // ---- a window that could not be read (CAP-fix item 2) ---------------------------------------------------------------
+
+    private const string NotRead = "the statistics window could not be read (SQLSTATE 42501)";
+
+    /// <summary>C08 with no window: the reading failed, and the facts say why.</summary>
+    private static HealthVerdict EvaluateUnwindowed(params (int Minute, Counters Counters)[] samples)
+    {
+        HealthHistoryView history = new([.. samples.Select(static x => Sample(x.Minute, x.Counters))]);
+        (int minute, Counters last) = samples[^1];
+
+        DatabaseCounterFacts facts = new(
+            Start.AddMinutes(minute), last.Commits, last.Rollbacks, last.Deadlocks, last.TempFiles, last.TempBytes, last.StatsReset ?? Reset, last.Studio)
+        {
+            StatisticsNotRead = NotRead,
+        };
+
+        return new DatabaseCounterCheck().Evaluate(facts, HealthEvaluation.At(facts.ReadAt, history: history));
+    }
+
+    [Fact]
+    public void Without_a_window_one_sample_still_watches_and_says_the_rates_per_day_were_not_checked()
+    {
+        HealthVerdict verdict = EvaluateUnwindowed((0, new Counters(100, 0, TempFiles: 900, TempBytes: 500 * GiB)));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().StartWith("Watching").And.EndWith(" The rates per day were not checked: " + NotRead + ".");
+    }
+
+    [Fact]
+    public void Without_a_window_a_quiet_hour_is_still_quiet_and_says_the_rates_per_day_were_not_checked()
+    {
+        HealthVerdict verdict = EvaluateUnwindowed((0, new Counters(1_000, 10)), (5, new Counters(1_200, 12)));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().StartWith("No deadlock").And.EndWith("The rates per day were not checked: " + NotRead + ".");
+    }
+
+    [Fact]
+    public void Without_a_window_the_hours_findings_stand_and_the_status_row_says_what_was_not_checked()
+    {
+        HealthVerdict verdict = EvaluateUnwindowed((0, new Counters(1_000, 10, Deadlocks: 4)), (5, new Counters(1_200, 12, Deadlocks: 5)));
+
+        verdict.Findings.Should().ContainSingle().Which.Subject.Should().Be("deadlocks", "the hour's rules read nothing of the window");
+        verdict.Note.Should().Be("The rates per day were not checked: " + NotRead + ".");
+    }
+
     [Fact]
     public void A_studio_count_the_server_has_not_caught_up_with_never_makes_the_rollbacks_negative()
     {

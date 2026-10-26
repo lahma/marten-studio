@@ -306,23 +306,39 @@ were last reset. Both studios run it.
 The one place every rate per day - C08's and C11's, and the Storage page's growth - asks since when this database's
 counters have counted, and whether they were reset:
 
-- **Since** is the latest of `pg_stat_database.stats_reset` and the shared views' `stats_reset` (`pg_stat_bgwriter` up
-  to PostgreSQL 16, `pg_stat_checkpointer` from 17, and `pg_stat_archiver`). From 15, `pg_stat_database.stats_reset`
-  stays null through a crash that zeroes every counter, while the shared views' times move on a crash on 14 and 17
-  alike, so the latest of them is never later than the counters began.
+- **Since** is the later of `pg_stat_database.stats_reset` and the earlier of the two shared views' `stats_reset`
+  (`pg_stat_bgwriter` up to PostgreSQL 16 or `pg_stat_checkpointer` from 17, and `pg_stat_archiver`):
+  `max(database, min(shared, archiver))`. From 15, `pg_stat_database.stats_reset` stays null through a crash that
+  zeroes every counter, while a crash, a restore and a first start stamp both shared views at one instant on 14 and 17
+  alike. A `pg_stat_reset_shared()` of one view - `'archiver'` to clear its failure count, `'bgwriter'` - moves only
+  that view and leaves the database's counters alone, so it never moves **Since**.
 - **A clean restart is not a reset.** 14 and 15+ keep their statistics across a clean shutdown and start; a crash, an
   immediate shutdown or a restore discards them. So the server's start (`pg_postmaster_start_time()`) moving counts
   only together with a counter going down or a reset time moving.
-- **Reset**, for the one check that first sees it, when against the previous check: the timeline went up
-  (`pg_control_checkpoint().timeline_id`; a promotion is read once the new timeline has had a checkpoint), the cluster's
-  system identifier or major version changed (`pg_upgrade`, a restore from a dump), the server restarted without its
-  statistics, a reset time moved, or `xact_commit` or `blks_read` went down. After a failover the window starts at the
-  promoted server's start; after a counter went down with nothing to say when, at the check that saw it.
-- A `pg_stat_reset_shared()` of one view, seen live with this database's counters still climbing, is not a reset of the
-  window. Seen only after the fact - by a process that started since - it is taken as one, which errs towards a
-  shorter window.
+- **Reset**, for the one check that first sees it, when against the previous check: another server took over (the
+  timeline went up - `pg_control_checkpoint().timeline_id`, which shows a promotion once the new timeline has had a
+  checkpoint - on a server that started at another time, or the server answering started before the last check with its
+  counters down), the cluster's system identifier or major version changed (`pg_upgrade`, a restore from a dump), the
+  server restarted without its statistics, a reset time moved, or `xact_commit` or `blks_read` went down. After a
+  failover the window starts at the promoted server's reset times; after a counter went down with nothing to say when,
+  at the check that saw it.
+- **A standby keeps its window.** From PostgreSQL 15 a standby keeps its statistics through a clean restart in
+  recovery and through its own promotion, its reset times those of its first start from the base backup; 14 discards
+  them at every start of a standby and stamps the times anew (measured on 14.24, 17.11 and 18.6). So neither the watched
+  server's own promotion nor a standby following a promotion upstream is a reset. A promoted server counts the rows it
+  writes only from its promotion, while its reads count from its first start, so growth just after a failover reads
+  low, never high.
+- A reset of both shared views at once with this database's counters still climbing - PostgreSQL 17's argument-less
+  `pg_stat_reset_shared()` - is not a reset of the window when it is seen live. Seen only after the fact, by a process
+  that started since, it reads like a backend's crash and the window begins at it: the shorter side.
+- The Storage page, which reads the window without adding to the history, stops calling the statistics reset once
+  they have counted for a day.
 - The page and each finding say where **Since** came from and what the counters' start looks like: the server's start,
-  a reset, a crash, a restore, a failover, a new cluster, or nothing at all.
+  a reset, a crash, a restore, a failover, a new cluster (only when the system identifier or major version is seen to
+  change), or nothing at all.
+- When the window cannot be read - a platform that refuses one of its functions - C11 is not checked, C08's status row
+  says its rates per day were not checked, and the Storage page shows its sizes and tables with growth "not available"
+  and why.
 
 Known limit: from PostgreSQL 15 a database created after the shared views were last reset reads as having counted
 since then, because its own `stats_reset` is null and no view an unprivileged role can read says when it was created. Its

@@ -168,7 +168,7 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     /// computes it once, after its gatherers, whenever one of them read its signals (<see cref="StatisticsWindow.ReadingAsync" />),
     /// and hands it only to an evaluator at or above <see cref="HealthGate.Database" />, the gate its series are written at.
     /// <see langword="null" /> when no gatherer read it, and in a unit test that does not set it - an evaluator then computes it
-    /// from its own facts and <see cref="History" /> (<see cref="StatisticsWindow.Compute" />).
+    /// from its own facts and <see cref="History" /> (<see cref="StatisticsWindow.Compute(StatisticsReading, HealthHistoryView)" />).
     /// </summary>
     public StatisticsWindow? Statistics { get; init; }
 

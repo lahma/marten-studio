@@ -31,7 +31,12 @@ public class StatisticsWindowCrashLiveTests
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    public static TheoryData<string> Images => ["postgres:14.24-alpine", "postgres:17.11-alpine"];
+    /// <summary>How long the container is given to exit once its postmaster is sent <c>SIGQUIT</c>; it takes well under a second.</summary>
+    private static readonly TimeSpan ExitBudget = TimeSpan.FromSeconds(60);
+
+    /// <summary>The matrix's own pins for 14, the last major whose collector stamps the database's reset, and 17.</summary>
+    public static TheoryData<string> Images =>
+        [.. Versions.PostgresVersionMatrix.Versions.Where(static x => x.Major is 14 or 17).Select(static x => x.Image)];
 
     [PostgresTheory]
     [MemberData(nameof(Images))]
@@ -78,7 +83,20 @@ public class StatisticsWindowCrashLiveTests
                 // The container went down under the exec; its exit is what is waited for next.
             }
 
-            await container.GetExitCodeAsync(Token);
+            using (CancellationTokenSource exit = CancellationTokenSource.CreateLinkedTokenSource(Token))
+            {
+                exit.CancelAfter(ExitBudget);
+
+                try
+                {
+                    await container.GetExitCodeAsync(exit.Token);
+                }
+                catch (OperationCanceledException) when (!Token.IsCancellationRequested)
+                {
+                    Assert.Fail(image + " did not exit within " + ExitBudget + " of its postmaster being sent SIGQUIT.");
+                }
+            }
+
             DateTimeOffset restarting = DateTimeOffset.UtcNow;
             await container.StartAsync(Token);
 

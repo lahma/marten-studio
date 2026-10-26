@@ -131,7 +131,8 @@ public class StoragePageTests
         });
 
         view.Tables.Select(static x => x.Name).Should().Equal(["orders", null, "qrtz_triggers"], "largest first, the hidden type's table absent");
-        view.Tables[1].Should().Match<StorageTableView>(static x => x.Schema == null && x.Link == null && x.Owner == null && x.TotalBytes == 66L << 20);
+        view.Tables[1].Should().Match<StorageTableView>(static x =>
+            x.Schema == null && x.Link == null && x.Owner == null && x.Ownership == null && x.TotalBytes == 66L << 20);
         view.Tables[2].Owner.Should().Be("Quartz.NET");
         view.WithheldReason.Should().Be(
             "1 table is shown without its name: it sits in a schema the database browser does not show you (it needs "
@@ -183,6 +184,8 @@ public class StoragePageTests
 
         string[] firstCells = [.. page.FindAll(".ms-storage-table tbody tr td:first-child").Select(static x => x.TextContent.Trim())];
         firstCells.Should().Equal("public.orders", WithheldNames.Token, "quartz.qrtz_triggers");
+        string[] owners = [.. page.FindAll(".ms-storage-table tbody tr td:nth-child(2)").Select(static x => x.TextContent.Trim())];
+        owners.Should().Equal(["application", WithheldNames.Token, "Quartz.NET"], "a withheld table's ownership would say what kind of schema it sits in");
         page.Markup.Should().NotContain("salaries").And.NotContain("mt_doc_hiddendocument").And.NotContain("HiddenDocument");
         page.Find(".ms-storage-withheld").TextContent.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
         page.Find(".ms-storage-table tbody tr td:first-child a").GetAttribute("href").Should().Contain("database/object").And.Contain("name=orders");
@@ -269,6 +272,44 @@ public class StoragePageTests
         values[1].Should().Be("–");
         values[2].Should().Be("–");
         page.TextOfAll(".ms-storage-tile-note")[1].Should().Be("needs a day of statistics: 5 h so far");
+    }
+
+    [Fact]
+    public async Task A_window_that_could_not_be_read_still_shows_the_sizes_and_the_tables_and_says_why_growth_is_missing()
+    {
+        StorageFacts unwindowed = StorageFacts.Build(
+            "default",
+            "localhost.marten",
+            Now,
+            window: null,
+            new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: 170_011),
+            new Set([Orders]),
+            [Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000, inserts: 120_000, deletes: 20_000)])
+            with { WindowNotRead = "the statistics window could not be read (SQLSTATE 42501)" };
+
+        unwindowed.GrowthBytesPerDay.Should().BeNull("no window, no rate");
+
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(unwindowed, new StudioScope("default", "localhost.marten", null),
+                static () => Task.FromResult<DatabaseGate?>(Gate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<PostgresStudio.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        string[] values = [.. page.TextOfAll(".ms-storage-tile-value")];
+        values[0].Should().Be("400 MiB");
+        values[1].Should().Be("–");
+        values[2].Should().Be("–");
+        values[3].Should().Be("–");
+
+        string[] notes = [.. page.TextOfAll(".ms-storage-tile-note")];
+        notes[1].Should().Be("not available: the statistics window could not be read (SQLSTATE 42501)");
+        notes[3].Should().Be("Not available: the statistics window could not be read (SQLSTATE 42501).");
+        page.FindAll(".ms-storage-table tbody tr").Should().ContainSingle("the tables are read without the window");
+        page.FindAll(".ms-error-alert").Should().BeEmpty("a missing window is a note, not a failed page");
     }
 
     [Fact]

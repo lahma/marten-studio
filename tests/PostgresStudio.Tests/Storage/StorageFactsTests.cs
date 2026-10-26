@@ -66,7 +66,20 @@ public class StorageFactsTests
             [Row("orders", heap: 400_000, inserts: 2_000, deletes: 0)]);
 
         (facts.GrowthBytesPerDay is not null).Should().Be(shown);
-        (facts.LargestTables.Single().GrowthBytesPerDay(facts.Window) is not null).Should().Be(shown);
+        (facts.LargestTables.Single().GrowthBytesPerDay(facts.Window!) is not null).Should().Be(shown);
+    }
+
+    [Fact]
+    public void Without_a_window_the_sizes_and_the_tables_stand_and_there_is_no_growth()
+    {
+        StorageFacts facts = StorageFacts.Build("default", "db", Now, window: null, Database, Set(Table("orders")),
+            [Row("orders", heap: 400_000, inserts: 2_000, deletes: 0)]);
+
+        facts.Window.Should().BeNull();
+        facts.MeasuredAt.Should().Be(Now);
+        facts.GrowthBytesPerDay.Should().BeNull("growth is a rate over the window");
+        facts.DatabaseBytes.Should().Be(10_000_000);
+        facts.LargestTables.Should().ContainSingle().Which.Table.Table.Should().Be("orders");
     }
 
     [Fact]
@@ -214,6 +227,7 @@ public class StorageFactsTests
         StatisticsWindowQueries.CheckpointerSql.Should().Contain("pg_catalog.pg_stat_checkpointer").And.NotContain("pg_stat_bgwriter");
         StatisticsWindowQueries.BgwriterSql.Should().Contain("pg_catalog.pg_stat_bgwriter").And.NotContain("pg_stat_checkpointer");
         StatisticsWindowQueries.BgwriterSql.Should().Contain("has_function_privilege('pg_catalog.pg_control_checkpoint()', 'execute')");
+        StatisticsWindowQueries.CheckpointerSql.Should().Contain("pg_catalog.pg_is_in_recovery()", "a standby's timeline follows its upstream's");
     }
 
     private static StudioTable Table(string name) => new("store", name, StudioTableKind.Relational, StudioTableOwnership.Owned);

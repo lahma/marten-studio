@@ -20,8 +20,8 @@ internal enum StatisticsBasis
     ServerReset = 1,
 
     /// <summary>
-    /// The server's own start (<c>pg_postmaster_start_time()</c>): after a failover, whose promoted server's counters began
-    /// when it started, whatever its reset times say (B0's promoted standby).
+    /// The server's own start (<c>pg_postmaster_start_time()</c>), when no reset time could be read. Frozen at its number: a
+    /// history written before CAP-fix may carry it for a failover, which now starts at the promoted server's reset times.
     /// </summary>
     ServerStart = 2,
 
@@ -46,10 +46,10 @@ internal enum StatisticsBasis
 /// <remarks>
 /// <para>
 /// <b>What can be told apart, and from what.</b> One read can only say whether the counters began at the server's start, after
-/// it, or before it (<see cref="ServerStarted" />, <see cref="ManualReset" />, <see cref="None" />), and whether most tables
-/// were never analysed (<see cref="FreshCluster" />). The rest needs a previous sample to compare with: a timeline that went
-/// up, a server that started after the last sample or was already running at it, a system identifier or a major version that
-/// changed, another instance answering. From SQL, a crash and a restore from a base backup that replays without promoting look
+/// it, or before it (<see cref="ServerStarted" />, <see cref="ManualReset" />, <see cref="None" />). The rest needs a previous
+/// sample to compare with: a timeline that went up on a server that is no longer a standby, a server that started after the
+/// last sample or was already running at it, a system identifier or a major version that changed, another instance
+/// answering. From SQL, a crash and a restore from a base backup that replays without promoting look
 /// the same, and are both <see cref="Crash" />.
 /// </para>
 /// </remarks>
@@ -60,7 +60,7 @@ internal enum StatisticsResetReason
 
     /// <summary>
     /// They began when this server started: its first start, or a start that kept no statistics - a crash, an immediate
-    /// shutdown, a restore or a promotion. One read cannot tell which; a sample from before the start can.
+    /// shutdown, a restore, or on 14 any start of a standby. One read cannot tell which; a sample from before the start can.
     /// </summary>
     ServerStarted = 1,
 
@@ -83,15 +83,18 @@ internal enum StatisticsResetReason
     Restore = 4,
 
     /// <summary>
-    /// Another server took over: the timeline went up on a server that was already running at the last sample (a standby was
-    /// promoted), or the server answering started before the last sample and its counters went down.
+    /// Another server took over: the server answering started before the last sample and its counters went down or a reset
+    /// time moved, or the timeline went up on a server that was not the one watched - started at another time, or out of
+    /// recovery with its counters lower. The watched server's own promotion is none: its counters go on (measured on 14, 17
+    /// and 18). The window then starts at the promoted server's reset times, which from 15 date from its first start as a
+    /// standby, since it keeps its statistics through a clean restart in recovery.
     /// </summary>
     Failover = 5,
 
     /// <summary>
     /// A new cluster: <c>pg_upgrade</c> (which before PostgreSQL 18 carries no statistics), <c>initdb</c>, or a restore from a dump -
-    /// the system identifier or the major version changed, or the counters began at the server's start with most tables never
-    /// analysed.
+    /// seen as the system identifier or the major version changing since the last check. Never from one read: tables nobody has
+    /// analysed yet are what a store with many empty collections has too.
     /// </summary>
     FreshCluster = 6,
 
@@ -137,6 +140,12 @@ internal sealed record StatisticsReading
     public long? SystemIdentifier { get; init; }
 
     /// <summary>
+    /// <c>pg_is_in_recovery()</c>: a standby, whose timeline moves when it follows a promotion upstream without any of its own
+    /// counters being reset - so in recovery, an unchanged start is enough to call a new timeline the same server's.
+    /// </summary>
+    public bool InRecovery { get; init; }
+
+    /// <summary>
     /// The instance that answered, on a platform that names one - the single place issue #8 A1 (W5-AUR) adds Aurora's
     /// <c>aurora_db_instance_identifier()</c>. Null everywhere else, and then never compared.
     /// </summary>
@@ -154,7 +163,10 @@ internal sealed record StatisticsReading
     /// <summary>The ordinary tables outside the system schemas.</summary>
     public int Tables { get; init; }
 
-    /// <summary>How many of <see cref="Tables" /> were never analysed (<c>reltuples &lt; 0</c>, PostgreSQL 14+).</summary>
+    /// <summary>
+    /// How many of <see cref="Tables" /> were never analysed (<c>reltuples &lt; 0</c>, PostgreSQL 14+) - for a check that words a
+    /// never-analysed majority itself; the window's own reason never rests on it.
+    /// </summary>
     public int UnanalysedTables { get; init; }
 
     /// <summary>Which shared view <see cref="SharedReset" /> is: <c>pg_stat_checkpointer</c> from 17, <c>pg_stat_bgwriter</c> below.</summary>
@@ -167,24 +179,29 @@ internal sealed record StatisticsReading
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The contract.</b> <see cref="Since" /> is when the counters began, read from the server: the latest of
-/// <c>pg_stat_database.stats_reset</c> and the shared views' <c>stats_reset</c> (<c>pg_stat_bgwriter</c> up to 16,
-/// <c>pg_stat_checkpointer</c> from 17, <c>pg_stat_archiver</c>), the server's start after a failover, or the sample that saw a
-/// counter go down; <see cref="Length" /> is from then to <see cref="MeasuredAt" />. <see cref="LooksReset" /> is set for the
+/// <b>The contract.</b> <see cref="Since" /> is when the counters began, read from the server: the later of
+/// <c>pg_stat_database.stats_reset</c> and the earlier of the two shared views' <c>stats_reset</c> (<c>pg_stat_bgwriter</c> up to
+/// 16 or <c>pg_stat_checkpointer</c> from 17, and <c>pg_stat_archiver</c>) - <c>max(database, min(shared, archiver))</c> - the
+/// server's start where no reset time can be read, or the sample that saw a counter go down; <see cref="Length" /> is from then to
+/// <see cref="MeasuredAt" />. <see cref="LooksReset" /> is set for the
 /// sweep in which a reset is first seen - the instance, the cluster, the timeline, the server's start or a reset time changed,
 /// or a tracked counter (<c>xact_commit</c>, <c>blks_read</c>) went down since the previous sample - with
 /// <see cref="Reason" /> saying what it looks like; a verdict that needs a long window gives none while it is set, or until
 /// <see cref="Covers" /> says the window is long enough, whichever is later.
 /// </para>
 /// <para>
-/// <b>Why the latest, and not <c>pg_stat_database.stats_reset</c> alone.</b> From 15 that column stays null through a crash
-/// that zeroes every counter (<see cref="PostgresFeature.DatabaseStatsResetNullAfterCrash" />, B0 G4), so on its own it would
-/// say a crashed database's counters had counted since the beginning. The shared views' times move on a crash on 14 and 17
-/// alike. The latest of them is never later than the counters began - so a window is never claimed longer than it is - and
-/// the one case it is later is known and handled: a <c>pg_stat_reset_shared()</c> of one view moves its time without touching
-/// this database's counters, so one seen live, with the counters still climbing and nothing else moved, is not a reset of
-/// this window, and the window carries on. Seen only after the fact - in a process that started since - it is taken as one,
-/// which errs towards a shorter window.
+/// <b>Why not <c>pg_stat_database.stats_reset</c> alone, nor the latest of every reset.</b> From 15 that column stays null
+/// through a crash that zeroes every counter (<see cref="PostgresFeature.DatabaseStatsResetNullAfterCrash" />, B0 G4), so on
+/// its own it would say a crashed database's counters had counted since the beginning; the shared views' times move on a crash
+/// on 14 and 17 alike. But a <c>pg_stat_reset_shared()</c> of one view - <c>'archiver'</c> to clear a failure count,
+/// <c>'bgwriter'</c> - moves that view's time and leaves this database's counters alone, so the latest of every reset would let
+/// one such reset, read by a process started after it, shorten the window and inflate every rate over it (counters since
+/// January, an archiver reset in June: twice the rate). A crash, a restore and a first start stamp both shared views at one
+/// instant, so the earlier of the two is never earlier than the last of those, and the database's own reset - which only
+/// <c>pg_stat_reset()</c>, a table's reset or 14's crash moves - is taken whenever it is later. Seen live, a reset of a shared view
+/// with this database's counters still climbing is not a reset of the window either. What remains: 17's argument-less
+/// <c>pg_stat_reset_shared()</c> resets every shared view at once and reads, after the fact, like a backend's crash - the window
+/// then begins at it, the shorter side.
 /// </para>
 /// <para>
 /// <b>A clean restart is not a reset.</b> Both 14 and 15+ keep their statistics across a clean shutdown and start (B0 G4: the
@@ -194,12 +211,22 @@ internal sealed record StatisticsReading
 /// no supported version.)
 /// </para>
 /// <para>
+/// <b>A standby, and a failover.</b> Measured on 14.24, 17.11 and 18.6 (CAP-fix): from 15 a standby keeps its statistics through
+/// a clean restart in recovery, with or without a restartpoint between, and through its promotion, its reset times those of
+/// its first start from the base backup; 14 discards them at every standby start and stamps the times anew. So the watched
+/// server's own promotion is no reset, nor is a standby following one upstream; and when another server takes over, the window
+/// starts at that server's reset times, never at its start, which on 15+ may be a later restart its counters went on through.
+/// Residual: a promoted server counts the rows it writes only from its promotion - replayed rows are not counted - while its
+/// reads count from its first start, so growth just after a failover reads low, never high.
+/// </para>
+/// <para>
 /// <b>The history carries it.</b> The sweep computes the window once, after its gatherers, against the previous sample of the
-/// database's history (<see cref="Compute" />), writes it back as <c>stats.</c> series (<see cref="Sample" />), and hands it to
+/// database's history (<see cref="Compute(StatisticsReading, HealthHistoryView)" />), writes it back as <c>stats.</c> series (<see cref="Sample" />), and hands it to
 /// every evaluator at or above the database-wide gate in <see cref="HealthEvaluation.Statistics" />. So a window shortened by a
-/// counter drop or a failover stays shortened from one sweep to the next for as long as the history runs unbroken, and a
+/// counter drop stays shortened from one sweep to the next for as long as the history runs unbroken, and a
 /// process that starts afresh reads it from the server again - the later bound. Anything outside a sweep (the Storage facts)
-/// computes it against the same history without writing to it.
+/// computes it against the same history without writing to it, through <c>Compute(reading, history, recorded: false)</c>: its
+/// counter drop is anchored on the last sample rather than the read, and it stops looking reset once its window is a day long.
 /// </para>
 /// <para>
 /// <b>Clocks.</b> <see cref="Since" /> and the reset times are the server's; <see cref="MeasuredAt" /> is the studio's, as every
@@ -330,7 +357,7 @@ internal sealed record StatisticsWindow
         StatisticsBasis.DatabaseReset => "pg_stat_database.stats_reset",
         StatisticsBasis.ServerReset => SharedView + ".stats_reset",
         StatisticsBasis.ArchiverReset => "pg_stat_archiver.stats_reset",
-        StatisticsBasis.ServerStart => "the server's start (pg_postmaster_start_time()), after a failover",
+        StatisticsBasis.ServerStart => "the server's start (pg_postmaster_start_time()), with no reset time to read",
         StatisticsBasis.CounterDrop => "the check that saw the counters go down, which no reset time explained",
         _ => "nothing: no reset time and no start time could be read",
     };
@@ -369,7 +396,31 @@ internal sealed record StatisticsWindow
     /// </summary>
     /// <param name="reading">This read.</param>
     /// <param name="history">The database's samples. Any taken at or after <see cref="StatisticsReading.ReadAt" /> are ignored.</param>
-    public static StatisticsWindow Compute(StatisticsReading reading, HealthHistoryView history)
+    public static StatisticsWindow Compute(StatisticsReading reading, HealthHistoryView history) => Compute(reading, history, recorded: true);
+
+    /// <summary>
+    /// <see cref="Compute(StatisticsReading, HealthHistoryView)" /> for a read whose window is never written to the history -
+    /// the Storage facts - when <paramref name="recorded" /> is <see langword="false" />.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A read that writes nothing compares with the same last sample every time, so it would see the same reset for as long as
+    /// no sweep runs. Two things are therefore different for it. A counter drop starts its window at that last sample's time,
+    /// which does not move, rather than at the read, which would keep the window at nothing forever. And once its window is a
+    /// day long it no longer looks reset: whatever was seen happened at least that long ago.
+    /// </para>
+    /// </remarks>
+    /// <param name="reading">This read.</param>
+    /// <param name="history">The database's samples. Any taken at or after <see cref="StatisticsReading.ReadAt" /> are ignored.</param>
+    /// <param name="recorded">Whether this window is written to the history as a sweep's is (<see cref="Sample" />).</param>
+    public static StatisticsWindow Compute(StatisticsReading reading, HealthHistoryView history, bool recorded)
+    {
+        StatisticsWindow window = ComputeCore(reading, history, recorded);
+
+        return !recorded && window.LooksReset && window.Length >= Day ? window with { LooksReset = false } : window;
+    }
+
+    private static StatisticsWindow ComputeCore(StatisticsReading reading, HealthHistoryView history, bool recorded)
     {
         ArgumentNullException.ThrowIfNull(reading);
         ArgumentNullException.ThrowIfNull(history);
@@ -395,23 +446,29 @@ internal sealed record StatisticsWindow
 
         if (Transition(previous, reading) is not { } seen)
         {
-            // Continuous: the window the previous sample carried, which a counter drop or a failover may have shortened -
+            // Continuous: the window the previous sample carried, which a counter drop may have shortened -
             // or, after a reset of one shared view this database's counters went on through, kept.
             return Carried(previous, window) ?? window;
         }
 
+        // A failover starts the window at the promoted server's own reset times, never at its start: from 15 a standby keeps its
+        // statistics through a clean restart in recovery and through its promotion, so its counters began when it was first
+        // started from the base backup - which is what those times say - while 14 discards them at every standby start and
+        // stamps the times anew then (measured on 14.24, 17.11 and 18.6, CAP-fix).
         DateTimeOffset since = raw;
         StatisticsBasis basis = rawBasis;
 
-        if (seen.Reason == StatisticsResetReason.Failover && reading.ServerStartedAt is { } started && started > raw)
+        if (seen.Reason == StatisticsResetReason.Unexplained)
         {
-            since = started;
-            basis = StatisticsBasis.ServerStart;
-        }
-        else if (seen.Reason == StatisticsResetReason.Unexplained && reading.ReadAt > raw)
-        {
-            since = reading.ReadAt;
-            basis = StatisticsBasis.CounterDrop;
+            // The later bound for a sweep, which writes it into its sample and carries it; for a read that writes nothing, the
+            // last sample's time, which is the same on every read.
+            DateTimeOffset seenBy = recorded ? reading.ReadAt : previous.At;
+
+            if (seenBy > raw)
+            {
+                since = seenBy;
+                basis = StatisticsBasis.CounterDrop;
+            }
         }
 
         return window with { Since = since, Basis = basis, Reason = seen.Reason, LooksReset = true, Signal = seen.Signal };
@@ -488,6 +545,21 @@ internal sealed record StatisticsWindow
     }
 
     /// <summary>
+    /// Why the window could not be read, for a page or a status row - "the statistics window could not be read (SQLSTATE 0A000)":
+    /// the studio's words and a SQLSTATE, never Postgres' own, which is drawn for every visitor of the database. C11's row, which
+    /// runs the same statement in a sweep, shows the same failure with its own reason.
+    /// </summary>
+    internal static string NotRead(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
+
+        return "the statistics window could not be read"
+            + (postgres is not null ? " (SQLSTATE " + postgres.SqlState + ")" : " (" + exception.GetType().Name + ")");
+    }
+
+    /// <summary>
     /// The instance that answered, from the server facts - <see langword="null" /> until W5-AUR reads Aurora's
     /// <c>aurora_db_instance_identifier()</c> there (A1). The one place the window takes it from.
     /// </summary>
@@ -517,6 +589,7 @@ internal sealed record StatisticsWindow
             BlocksHit = reader.GetInt64(9),
             Tables = reader.GetInt32(10),
             UnanalysedTables = reader.GetInt32(11),
+            InRecovery = reader.GetBoolean(12),
         };
     }
 
@@ -524,7 +597,7 @@ internal sealed record StatisticsWindow
     internal static string Describe(StatisticsResetReason reason) => reason switch
     {
         StatisticsResetReason.ServerStarted =>
-            "when the server started - its first start, or a start that kept no statistics (a crash, an immediate shutdown, a restore or a promotion)",
+            "when the server started - its first start, or a start that kept no statistics (a crash, an immediate shutdown, a restore, or on 14 a standby's start)",
         StatisticsResetReason.ManualReset =>
             "when they were reset - pg_stat_reset(), pg_stat_reset_shared() or one table's counters - or, on PostgreSQL 14, when "
             + "the database was first used after the server started",
@@ -550,29 +623,33 @@ internal sealed record StatisticsWindow
     private const long SystemMask = (1L << 52) - 1;
 
     /// <summary>
-    /// The latest reset time and which it was - or, with none, the server's start, or nothing at all.
+    /// When the server's statistics say this database's counters began: <c>max(database reset, min(shared reset, archiver
+    /// reset))</c>, and which it was - or, with no reset time at all, the server's start, or nothing.
     /// </summary>
+    /// <remarks>
+    /// The earlier of the two shared views', because a crash, a restore and a first start stamp both at one instant, while a
+    /// <c>pg_stat_reset_shared()</c> of one view - <c>'archiver'</c> to clear a failure count, <c>'bgwriter'</c> - moves only that
+    /// one and leaves this database's counters alone. Taking the later of them would let such a reset, read by a process that
+    /// started after it, shorten the window and inflate every rate over it.
+    /// </remarks>
     private static (DateTimeOffset Since, StatisticsBasis Basis) RawSince(StatisticsReading reading)
     {
-        DateTimeOffset? latest = null;
-        StatisticsBasis basis = StatisticsBasis.Unknown;
-
-        void Consider(DateTimeOffset? at, StatisticsBasis kind)
+        (DateTimeOffset At, StatisticsBasis Basis)? server = (reading.SharedReset, reading.ArchiverReset) switch
         {
-            if (at is { } value && (latest is null || value > latest.Value))
-            {
-                latest = value;
-                basis = kind;
-            }
+            ({ } shared, { } archiver) => archiver < shared ? (archiver, StatisticsBasis.ArchiverReset) : (shared, StatisticsBasis.ServerReset),
+            ({ } shared, null) => (shared, StatisticsBasis.ServerReset),
+            (null, { } archiver) => (archiver, StatisticsBasis.ArchiverReset),
+            _ => null,
+        };
+
+        if (reading.DatabaseReset is { } database && (server is null || database > server.Value.At))
+        {
+            return (database, StatisticsBasis.DatabaseReset);
         }
 
-        Consider(reading.DatabaseReset, StatisticsBasis.DatabaseReset);
-        Consider(reading.SharedReset, StatisticsBasis.ServerReset);
-        Consider(reading.ArchiverReset, StatisticsBasis.ArchiverReset);
-
-        if (latest is { } since)
+        if (server is { } since)
         {
-            return (since, basis);
+            return since;
         }
 
         return reading.ServerStartedAt is { } started
@@ -595,9 +672,9 @@ internal sealed record StatisticsWindow
 
         if (since <= started + StartGrace)
         {
-            return reading.Tables > 0 && reading.UnanalysedTables * 2 > reading.Tables
-                ? StatisticsResetReason.FreshCluster
-                : StatisticsResetReason.ServerStarted;
+            // Never a new cluster on one read: a store with many tables nobody has written yet looks the same as pg_upgrade's.
+            // That is said only when the system identifier or the major version is seen to change.
+            return StatisticsResetReason.ServerStarted;
         }
 
         // Later than the start: a reset - a backend's crash, which reinitialises every shared view at one moment while the
@@ -671,8 +748,19 @@ internal sealed record StatisticsWindow
 
         DateTimeOffset? wasStart = was.TryGetValue(ServerStartSeries, out double s) ? FromSeconds(s) : null;
 
-        // 3. The timeline: a promotion, or a recovery that ended in one.
-        if (current.Timeline is { } timeline && was.TryGetValue(TimelineSeries, out double wasTimeline) && (int) wasTimeline != timeline)
+        bool dropped = current.Commits < Value(was, CommitsSeries, current.Commits)
+            || current.BlocksRead < Value(was, BlocksReadSeries, current.BlocksRead);
+
+        // 3. The timeline: another server promoted, or a recovery that ended in a promotion. Not the watched server's own: a
+        //    standby that, never restarted, follows a promotion upstream (still in recovery) or is itself promoted (out of it)
+        //    went on counting through it - measured on 14.24, 17.11 and 18.6 (CAP-fix) - and on 14 and 17
+        //    pg_control_checkpoint() shows the new timeline only from the first checkpoint after the promotion, by when the
+        //    server may be out of recovery with nothing else changed. Out of recovery its counters must not have gone down
+        //    either: they are what tells a different server, started the same second, apart.
+        bool sameServer = current.ServerStartedAt is { } running && wasStart is { } startedBefore && Near(running, startedBefore, Unmoved)
+            && (current.InRecovery || !dropped);
+
+        if (!sameServer && current.Timeline is { } timeline && was.TryGetValue(TimelineSeries, out double wasTimeline) && (int) wasTimeline != timeline)
         {
             string moved = "the timeline went from " + ((int) wasTimeline).ToString(CultureInfo.InvariantCulture) + " to "
                 + timeline.ToString(CultureInfo.InvariantCulture);
@@ -681,9 +769,6 @@ internal sealed record StatisticsWindow
                 ? (StatisticsResetReason.Restore, moved + " and the server started after the last check")
                 : (StatisticsResetReason.Failover, moved + " on a server that was already running at the last check");
         }
-
-        bool dropped = current.Commits < Value(was, CommitsSeries, current.Commits)
-            || current.BlocksRead < Value(was, BlocksReadSeries, current.BlocksRead);
 
         bool databaseMoved = Moved(was, DatabaseResetSeries, current.DatabaseReset);
         bool sharedMoved = Moved(was, SharedResetSeries, current.SharedReset);

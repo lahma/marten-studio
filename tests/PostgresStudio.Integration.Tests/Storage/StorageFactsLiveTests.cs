@@ -82,9 +82,12 @@ public class StorageFactsLiveTests(PostgresVersionMatrix matrix)
             hot.NewPageShare.Should().BeNull("14 has no n_tup_newpage_upd, and the statement still runs");
         }
 
-        facts.Window.CoversADay.Should().BeFalse("the matrix server started minutes ago");
+        facts.Window.Should().NotBeNull(facts.WindowNotRead);
+        StatisticsWindow window = facts.Window!;
+        window.CoversADay.Should().BeFalse("the matrix server started minutes ago");
+        facts.WindowNotRead.Should().BeNull();
         facts.GrowthBytesPerDay.Should().BeNull();
-        facts.LargestTables.Should().OnlyContain(x => x.GrowthBytesPerDay(facts.Window) == null);
+        facts.LargestTables.Should().OnlyContain(x => x.GrowthBytesPerDay(window) == null);
         facts.Statements.Should().NotBeEmpty();
 
         StorageView view = await ViewAsync(host);
@@ -126,6 +129,45 @@ public class StorageFactsLiveTests(PostgresVersionMatrix matrix)
         TestContext.Current.TestOutputHelper?.WriteLine("PostgreSQL {0}: the Storage facts behind the lock in {1:0} ms", server.ServerVersion, clock.Elapsed.TotalMilliseconds);
 
         await held.RollbackAsync(Token);
+    }
+
+    /// <summary>
+    /// CAP-fix item 2: a window statement that fails - here because this database's <c>pg_postmaster_start_time()</c> is
+    /// revoked from <c>PUBLIC</c>, which the statement does not guard - costs the growth and the rates per day, never the page:
+    /// the sizes and the tables are still read, the growth says why it is missing, C08's per-day rules say they were not checked,
+    /// and C11 reports the failure with its reason.
+    /// </summary>
+    [PostgresTheory]
+    [MemberData(nameof(Legs))]
+    public async Task A_window_that_cannot_be_read_costs_the_growth_and_not_the_sizes_or_the_tables(int major)
+    {
+        (MatrixServer server, string database) = await SeededAsync(matrix, major, "cap_storage_nowindow");
+        await StorageLive.ExecuteAsync(
+            server.ConnectionString(MatrixRole.Superuser, database),
+            "revoke execute on function pg_catalog.pg_postmaster_start_time() from public");
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+        StorageFacts facts = await ((StorageFactsReader) host.Services.GetRequiredService<IStorageFacts>()).ReadUncachedAsync(host.Resolved, Token);
+
+        facts.Window.Should().BeNull();
+        facts.WindowNotRead.Should().Be("the statistics window could not be read (SQLSTATE 42501)");
+        facts.DatabaseBytes.Should().BePositive("the size is read by a statement of its own");
+        facts.LargestTables.Select(static x => x.Table.Table).Should().Contain(["docs", "toasty", "hot"]);
+        facts.GrowthBytesPerDay.Should().BeNull();
+
+        StorageView view = await ViewAsync(host);
+        view.Refusal.Should().Be(DatabaseRefusal.None, view.Reason);
+        view.Tables.Should().Contain(static x => x.Name == "docs");
+        view.GrowthPending.Should().Be("not available: the statistics window could not be read (SQLSTATE 42501)");
+
+        HealthSweep sweep = await host.Sweeper.SweepAsync(host.Resolved, HealthSweepKind.Regular, Token);
+        HealthCheckResult c08 = sweep.Results.Single(static x => x.Check.Code == "C08");
+        HealthCheckResult c11 = sweep.Results.Single(static x => x.Check.Code == "C11");
+
+        c08.Outcome.Should().Be(HealthCheckOutcome.Checked, c08.Problem?.Reason);
+        c08.Note.Should().Contain("The rates per day were not checked: the statistics window could not be read (SQLSTATE 42501).");
+        c11.Outcome.Should().NotBe(HealthCheckOutcome.Checked, "C11 is nothing but the window");
+        c11.Problem.Should().NotBeNull();
     }
 
     /// <summary>The page's view, through the real service in a scope of the host's own, as a circuit would ask it.</summary>
