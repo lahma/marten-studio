@@ -45,10 +45,16 @@ public class ProgressionAheadOfSequenceCheckTests
 
     private static DaemonShardRow Shard(string name, long position) => new(name, position, Now);
 
+    /// <summary>The database the facts were read from, by the studio's identity for it: a store's own name by default.</summary>
+    private const string Database = "Marten";
+
     private static HealthVerdict Evaluate(HighWaterReading reading, DaemonCheckConfiguration? configuration = null, params DaemonShardRow[] shards) =>
         new ProgressionAheadOfSequenceCheck().Evaluate(
-            new ProgressionAheadFacts(configuration ?? DaemonConfiguration(), reading, shards),
+            new ProgressionAheadFacts(configuration ?? DaemonConfiguration(), reading, shards, Database),
             HealthEvaluation.At(Now));
+
+    private static HealthRemedy MarkAheadRemedyOf(HealthVerdict verdict) =>
+        verdict.Findings.Should().ContainSingle(static x => x.Variant == "mark-ahead").Subject.Remedy!;
 
     [Fact]
     public void A_healthy_store_whose_sequence_is_ahead_of_everything_is_quiet()
@@ -166,17 +172,21 @@ public class ProgressionAheadOfSequenceCheckTests
             .Findings.Should().ContainSingle().Subject;
 
         done.Variant.Should().Be("mark-ahead");
-        done.Remedy!.Kind.Should().Be(HealthRemedyKind.Configuration);
+        done.Remedy!.Kind.Should().Be(HealthRemedyKind.Repair, "a DBA's one-off statement, which the studio never runs");
+        done.Remedy.Heading.Should().Be(HealthRemedy.RepairHeading);
         done.Remedy.Code.Should().NotContain("TryCorrectProgressInDatabaseAsync", "the correction has nothing left to do")
             .And.NotContain("setval it to 1", "a number from the sweep, pasted later, could wind the sequence back")
-            .And.StartWith("-- A DBA's repair, with appends stopped, and only while mt_events_sequence still reads is_called = false:\n"
+            .And.StartWith("-- With appends stopped, and only while mt_events_sequence still reads is_called = false:\n"
                 + "-- setval it to the greater of the high-water mark and max(seq_id) of mt_events, both read when this runs.\n")
             .And.EndWith(HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: true)!)
             .And.NotContain("rewind", "no shard is past the mark");
         done.Remedy.Code.Should().EndWith("\n  and not q.is_called;", "the same guard as the words");
         done.Remedy.Explanation.Should().StartWith("Correct progression has done what it can")
             .And.Contain("the next event appended takes 1, which the daemon treats as already processed")
-            .And.Contain("It does nothing once anything has drawn from the sequence");
+            .And.Contain("It does nothing once anything has drawn from the sequence")
+            .And.Contain("Run it in the database this finding is about - Marten, as the studio names it - and in no other")
+            .And.EndWith(HealthRemedy.RepairHandOverNote);
+        done.Link.Should().BeNull("a repair that needs no projection screen does not send anybody to its buttons");
 
         // Above last_value, the correction still acts, and is what is offered.
         Evaluate(Reading(0, mark: 50, highest: null, lastValue: 1)).Findings.Should().ContainSingle()
@@ -201,12 +211,88 @@ public class ProgressionAheadOfSequenceCheckTests
         HealthRemedy done = verdict.Findings.Single(static x => x.Variant == "mark-ahead").Remedy!;
 
         behind.Code.Should().EndWith(repair);
-        done.Code.Should().StartWith("-- One repair for both of D09's findings, with appends stopped:")
+        done.Code.Should().StartWith("-- One repair for both of D09's findings, with appends stopped - not Correct progression:")
             .And.EndWith(repair, "the same statement as the sequence-behind finding's")
             .And.NotContain("not q.is_called", "the sequence-behind repair is not limited to a sequence nothing has drawn from");
-        done.Explanation.Should().Contain("The events already reach " + highest.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            + ", at or past the mark").And.Contain("one repair, not two");
-        behind.Explanation.Should().Contain("a mark-ahead finding D09 reports beside this one needs no second repair for the mark");
+        done.Explanation.Should().StartWith("Correct progression has done what it can", "the mark is at last_value: it would do nothing")
+            .And.Contain("The events reach " + highest.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", at or past the mark")
+            .And.Contain("one repair for both findings, not two");
+        behind.Explanation.Should().Contain("a mark-ahead finding beside this one needs nothing more for the mark - and not Correct progression");
+        new[] { behind, done }.Should().OnlyContain(static x => x.Kind == HealthRemedyKind.Repair);
+    }
+
+    /// <summary>
+    /// Every state a mark ahead can be in, and the remedy each one gets (the G1M-fix2 delta review's blocker): the sequence
+    /// behind the events decides first - Marten's correction would move progression back below events the daemon has
+    /// already processed - then whether the correction can still act. The commonest state, a RESTART under a table full of
+    /// events, is the second row: the correction would act, and must not be offered.
+    /// </summary>
+    [Theory]
+    [InlineData(0L, 50L, null, 1L, "Correction", "a RESTART over an empty table: the correction acts")]
+    [InlineData(0L, 50L, null, null, "Correction", "last_value not read: the correction is taken to act")]
+    [InlineData(10L, 50L, 10L, 10L, "Correction", "a called sequence below the mark, the events below it too")]
+    [InlineData(0L, 30L, 30L, 1L, "OneRepair", "a RESTART under the events: the correction would act, and do harm")]
+    [InlineData(0L, 30L, 30L, null, "OneRepair", "last_value not read, the sequence behind the events")]
+    [InlineData(10L, 50L, 20L, 10L, "OneRepair", "a called sequence below the mark and below the events")]
+    [InlineData(0L, 1L, 30L, 1L, "OneRepair", "the correction done, the events past the mark")]
+    [InlineData(0L, 1L, 1L, 1L, "OneRepair", "the correction done, the events up to the mark")]
+    [InlineData(0L, 1L, null, 1L, "GuardedRepair", "the correction done, no event at or past the mark")]
+    public void Each_state_of_a_mark_ahead_gets_its_own_remedy(long allocated, long mark, long? highest, long? lastValue, string expected, string state)
+    {
+        bool corrects = lastValue is not { } value || mark > value;
+        bool behind = highest is { } committed && committed >= allocated + 1;
+        ProgressionAheadOfSequenceCheck.RemedyFor(corrects, behind).Should().Be(Enum.Parse<MarkAheadRemedy>(expected), state);
+
+        HealthVerdict verdict = Evaluate(Reading(allocated, mark, highest, lastValue), null, Shard("DailySales:All", mark));
+        HealthRemedy remedy = MarkAheadRemedyOf(verdict);
+        verdict.Findings.Any(static x => x.Variant == "sequence-behind").Should().Be(behind, state);
+
+        switch (Enum.Parse<MarkAheadRemedy>(expected))
+        {
+            case MarkAheadRemedy.Correction:
+                remedy.Kind.Should().Be(HealthRemedyKind.Configuration, state);
+                remedy.Code.Should().Contain("await store.Advanced.TryCorrectProgressInDatabaseAsync(cancellationToken);", state);
+                break;
+
+            case MarkAheadRemedy.OneRepair:
+                remedy.Kind.Should().Be(HealthRemedyKind.Repair, state);
+                remedy.Code.Should().StartWith("-- One repair for both of D09's findings", state)
+                    .And.NotContain("TryCorrectProgressInDatabaseAsync", state)
+                    .And.EndWith(HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: false)!, state);
+                remedy.Explanation.Should().StartWith(corrects ? "Do not run Correct progression here" : "Correct progression has done what it can", state)
+                    .And.Contain("one repair for both findings, not two", state);
+                break;
+
+            default:
+                remedy.Kind.Should().Be(HealthRemedyKind.Repair, state);
+                remedy.Code.Should().EndWith(HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: true)!, state)
+                    .And.NotContain("TryCorrectProgressInDatabaseAsync", state);
+                break;
+        }
+    }
+
+    [Theory]
+    [InlineData(true, false, "Correction")]
+    [InlineData(true, true, "OneRepair")]
+    [InlineData(false, true, "OneRepair")]
+    [InlineData(false, false, "GuardedRepair")]
+    public void The_sequence_behind_the_events_decides_before_whether_the_correction_can_act(bool corrects, bool behind, string expected)
+    {
+        ProgressionAheadOfSequenceCheck.RemedyFor(corrects, behind).Should().Be(Enum.Parse<MarkAheadRemedy>(expected));
+    }
+
+    [Fact]
+    public void A_repair_names_the_database_it_runs_in_by_the_studios_identity_and_never_a_connection_string()
+    {
+        HealthRemedy named = MarkAheadRemedyOf(new ProgressionAheadOfSequenceCheck().Evaluate(
+            new ProgressionAheadFacts(DaemonConfiguration(), Reading(0, mark: 30, highest: 30, lastValue: 1), [], "tenant_db_7"),
+            HealthEvaluation.At(Now)));
+        named.Explanation.Should().Contain("Run it in the database this finding is about - tenant_db_7, as the studio names it - and in no other");
+
+        HealthRemedy unnamed = MarkAheadRemedyOf(new ProgressionAheadOfSequenceCheck().Evaluate(
+            new ProgressionAheadFacts(DaemonConfiguration(), Reading(0, mark: 30, highest: 30, lastValue: 1), [], string.Empty),
+            HealthEvaluation.At(Now)));
+        unnamed.Explanation.Should().Contain("Run it in the database this finding is about, and in no other");
     }
 
     /// <summary>
@@ -226,14 +312,21 @@ public class ProgressionAheadOfSequenceCheckTests
         done.Remedy!.Code.Should().Contain(HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: true)!)
             .And.EndWith(
                 "\n-- Then, for the shard past the mark, which no sequence repair brings back: rebuild its projection\n"
-                + "-- on the projections screen (Capabilities.RebuildProjections), or rewind the subscription to 0.");
+                + "-- on the projections screen (Capabilities.RebuildProjections), or rewind the subscription to 1.",
+                "the rewind follows the repair, which leaves the sequence at the mark at least - so the floor is the mark");
         done.Remedy.Explanation.Should().Contain("Past the mark itself: DailySales:All at 80.", "a shard at the mark is not past it")
-            .And.Contain("from 1 - so events appended since the reset at or below 0 are not replayed by it");
+            .And.Contain("from 2 - so events appended since the reset at or below 1 are not replayed by it")
+            .And.Contain("A floor below what a subscription has already processed repeats its side effects");
+        done.Link!.Route.Should().Be("projections", "the rebuild and the rewind are on the projections screen");
 
-        Evaluate(Reading(0, mark: 1, highest: 30, lastValue: 1), null, Shard("DailySales:All", 80), Shard("ShipmentTracker:All", 90))
-            .Findings.Single(static x => x.Variant == "mark-ahead").Remedy!.Code
-            .Should().EndWith("rebuild their projections\n-- on the projections screen (Capabilities.RebuildProjections), or rewind each "
-                + "subscription to 0.", "the one repair still leaves the shards past the mark");
+        // The commonest state, the review's: mark 30, a RESTART, events 1 to 30. Before the repair the sequence has handed
+        // out nothing, and a rewind to 0 would replay 1 to 30 to a shard that has processed them; after it, the floor is 30.
+        HealthRemedy one = MarkAheadRemedyOf(Evaluate(
+            Reading(0, mark: 30, highest: 30, lastValue: 1), null, Shard("DailySales:All", 80), Shard("ShipmentTracker:All", 90)));
+        one.Code.Should().EndWith("rebuild their projections\n-- on the projections screen (Capabilities.RebuildProjections), or rewind each "
+            + "subscription to 30.", "the one repair still leaves the shards past the mark");
+        one.Explanation.Should().Contain("Past the mark itself: DailySales:All at 80, ShipmentTracker:All at 90.")
+            .And.Contain("so the floor is the mark: 30.");
     }
 
     [Fact]
@@ -315,14 +408,17 @@ public class ProgressionAheadOfSequenceCheckTests
         finding.Subject.Should().Be("studio_events.mt_events_sequence");
         finding.Title.Should().Be("The event sequence is behind the events: it hands out 1 next, and mt_events already holds events up to 50");
         finding.WhyItMatters.Should().Contain("unique violation (23505)");
-        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Configuration, "a setval is no DDL, and no migration either");
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Repair, "a setval is a DBA's one-off statement: no configuration line, and no migration");
+        finding.Remedy.Heading.Should().Be("A one-off repair, run by hand - the studio never runs this");
         finding.Remedy.Code.Should().Be(
-            "-- A DBA's repair, not a StoreOptions line, with appends stopped: move mt_events_sequence past the highest\n"
-            + "-- seq_id in mt_events, and past the high-water mark where that is further on - both read when this runs.\n"
-            + "-- It never moves the sequence back.\n"
+            "-- With appends stopped: move mt_events_sequence past the highest seq_id in mt_events, and past the\n"
+            + "-- high-water mark where that is further on - both read when this runs. It never moves the sequence back.\n"
             + HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: false));
         finding.Remedy.Code.Should().NotContain("50", "the numbers are read when the statement runs, never pasted from the sweep");
-        finding.Remedy.Explanation.Should().Contain("running it later is as safe as running it now");
+        finding.Remedy.Explanation.Should().Contain("running it later than this sweep is as safe as running it now")
+            .And.Contain("Run it in the database this finding is about - Marten, as the studio names it")
+            .And.EndWith(" " + HealthRemedy.RepairHandOverNote);
+        finding.Remedy.Explanation!.Split(HealthRemedy.RepairHandOverNote).Should().HaveCount(2, "the hand-over note is said once");
 
         Evaluate(Reading(49, mark: null, highest: 50)).Findings.Should().ContainSingle("the next number, 50, is one mt_events holds");
         Evaluate(Reading(50, mark: null, highest: 50)).Findings.Should().BeEmpty("the next number, 51, is free");
@@ -335,10 +431,14 @@ public class ProgressionAheadOfSequenceCheckTests
 
         verdict.Findings.Select(static x => x.Subject).Should().BeEquivalentTo(["studio_events.mt_events_sequence", "HighWaterMark"]);
         verdict.Findings.Should().OnlyContain(static x => x.Severity == HealthSeverity.Critical);
-        verdict.Findings.Single(static x => x.Subject == "HighWaterMark").Remedy!.Explanation
-            .Should().Contain("If D09 also reports the sequence behind the events, run that repair instead",
-                "the correction moves progression to the sequence, which has to be past the events")
-            .And.Contain("A shard still past the mark after that repair is D09's shard-ahead finding");
+        // The commonest state: Marten's correction would act, and would move progression back to the sequence's last_value,
+        // below events the daemon has already processed - so it is not offered, and the one repair is.
+        HealthFinding ahead = verdict.Findings.Single(static x => x.Subject == "HighWaterMark");
+        ahead.Remedy!.Code.Should().NotContain("TryCorrectProgressInDatabaseAsync").And.StartWith("-- One repair for both of D09's findings");
+        ahead.Remedy.Explanation.Should().StartWith("Do not run Correct progression here. Marten's correction would set the high-water "
+            + "mark and every shard back to the sequence's last_value, and every event above it up to the mark - events the daemon "
+            + "has already processed - would be processed again.");
+        ahead.Link.Should().BeNull("nothing past the mark needs the projections screen, whose Correct progression it says not to press");
     }
 
     [Fact]

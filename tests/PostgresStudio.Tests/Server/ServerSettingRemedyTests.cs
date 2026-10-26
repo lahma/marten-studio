@@ -91,7 +91,7 @@ public class ServerSettingRemedyTests
     }
 
     [Fact]
-    public void Only_a_configuration_line_is_refused_DDL()
+    public void Only_a_configuration_line_and_a_repair_are_refused_DDL()
     {
         FluentActions.Invoking(static () => new HealthRemedy("ALTER TABLE x SET (fillfactor = 80);"))
             .Should().Throw<ArgumentException>().WithMessage("*never DDL*");
@@ -101,6 +101,49 @@ public class ServerSettingRemedyTests
         HealthRemedy.ForManagedPlatform("Create a parameter group with max_connections = 400.", null).Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
     }
 
+    /// <summary>
+    /// A one-off repair (W5-G1M-fix3) puts data right - D09's <c>setval</c> - and is held to the configuration line's DDL
+    /// rule as well as every kind's privilege rule: a repair that changed the schema would be schema no configuration
+    /// declares.
+    /// </summary>
+    [Theory]
+    [InlineData("-- With appends stopped:\nCREATE INDEX ON \"public\".\"x\" (y);")]
+    [InlineData("select 1;\nalter sequence \"public\".\"s\" restart")]
+    [InlineData("DROP TABLE \"public\".\"x\";")]
+    [InlineData("truncate \"public\".\"mt_events\"")]
+    [InlineData("vacuum \"public\".\"x\"")]
+    [InlineData("comment on table \"public\".\"x\" is 'y'")]
+    public void A_repair_is_refused_DDL(string code)
+    {
+        FluentActions.Invoking(() => HealthRemedy.ForRepair(code, "Puts it right."))
+            .Should().Throw<ArgumentException>().WithMessage("*never DDL*");
+    }
+
+    [Theory]
+    [InlineData("grant usage on schema \"public\" to app")]
+    [InlineData("select 1;\nREVOKE ALL ON SCHEMA \"public\" FROM PUBLIC")]
+    public void A_repair_is_never_a_privilege_change(string code)
+    {
+        FluentActions.Invoking(() => HealthRemedy.ForRepair(code, "Puts it right."))
+            .Should().Throw<ArgumentException>().WithMessage("*never a privilege change*");
+    }
+
+    [Fact]
+    public void A_repair_is_a_statement_that_puts_data_right_said_to_be_one_the_studio_never_runs()
+    {
+        HealthRemedy repair = HealthRemedy.ForRepair(
+            "-- With appends stopped:\nselect pg_catalog.setval('\"public\".\"mt_events_sequence\"', t.target)\nfrom (values (31)) as t(target);",
+            "Moves the sequence past the events.");
+
+        repair.Kind.Should().Be(HealthRemedyKind.Repair);
+        repair.Heading.Should().Be(HealthRemedy.RepairHeading).And.Be("A one-off repair, run by hand - the studio never runs this");
+        repair.Explanation.Should().Be("Moves the sequence past the events. " + HealthRemedy.RepairHandOverNote);
+        HealthRemedy.RepairHandOverNote.Should().Be("It is a statement for whoever runs this database to run once, by hand; the studio never runs it.");
+        repair.Requires.Should().BeNull("a repair is SQL, which no library version gates");
+
+        FluentActions.Invoking(static () => HealthRemedy.ForRepair("select 1;", " ")).Should().Throw<ArgumentException>("a repair says what it does");
+    }
+
     [Fact]
     public void Each_kind_has_its_value_and_heading()
     {
@@ -108,10 +151,13 @@ public class ServerSettingRemedyTests
         ((int) HealthRemedyKind.Migration).Should().Be(1);
         ((int) HealthRemedyKind.ServerSetting).Should().Be(2);
         ((int) HealthRemedyKind.ManagedPlatform).Should().Be(3);
+        ((int) HealthRemedyKind.Repair).Should().Be(4);
+        Enum.GetValues<HealthRemedyKind>().Should().HaveCount(5, "an addition is visibly one");
 
         new HealthRemedy("opts.Schema.For<Order>().FillFactor(80);").Heading.Should().Be("What to change");
         HealthRemedy.ForMigration("ALTER TABLE \"public\".\"x\" SET (fillfactor = 80);", "Leaves room.").Heading
             .Should().Be("For your own migrations - the studio never runs this");
         HealthRemedy.ForManagedPlatform("Raise the maximum capacity.", null).Heading.Should().Be("What to change");
+        HealthRemedy.ForRepair("select 1;", "Nothing.").Heading.Should().Be("A one-off repair, run by hand - the studio never runs this");
     }
 }
