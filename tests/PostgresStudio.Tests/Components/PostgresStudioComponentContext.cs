@@ -169,8 +169,6 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         return this;
     }
 
-    public new Task DisposeComponentsAsync() => Renderer.Dispatcher.InvokeAsync(base.DisposeComponentsAsync);
-
     protected override void Dispose(bool disposing)
     {
         base.Dispose(disposing);

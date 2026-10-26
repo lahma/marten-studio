@@ -38,7 +38,7 @@
   -->
   <PropertyGroup Label="Marten version">
     <MartenStudioMartenFloor>9.39.0</MartenStudioMartenFloor>
-    <MartenStudioMartenLatest>9.54.1</MartenStudioMartenLatest>
+    <MartenStudioMartenLatest>9.54.2</MartenStudioMartenLatest>
     <MartenStudioMartenVersion Condition="'$(MartenStudioMartenVersion)' == ''">$(MartenStudioMartenFloor)</MartenStudioMartenVersion>
   </PropertyGroup>
 
@@ -113,7 +113,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Test - MartenStudio.Tests (no Docker)">
-    <PackageVersion Include="bunit" Version="2.11.3" />
+    <PackageVersion Include="bunit" Version="2.13.3" />
     <!--
       PINNED AT 32.0.0 ON PURPOSE. Verify.XunitV3 33.x depends on xunit.v3.extensibility.core
       4.0.1; 32.0.0 is the last release that depends on 3.2.2, which is where xunit.v3 is held.
