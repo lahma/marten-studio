@@ -203,8 +203,15 @@ public class TableHealthLiveTests(PostgresFixture postgres)
 
         foreach (string table in new[] { "orders", "qrtz_triggers" })
         {
-            HealthReportFinding finding = OnTable(report, "T07", schema + "." + table).Should().ContainSingle(
-                "{0} is judged on vacuum whoever owns its index design", table).Subject;
+            IReadOnlyList<HealthReportFinding> findings = OnTable(report, "T07", schema + "." + table);
+
+            // G2 (W5-V1): judged against its own triggers, a table never vacuumed since 24,000 inserts is behind on those too.
+            findings.Select(static x => x.Finding.Variant).Should().BeEquivalentTo(
+                [VacuumBehindCheck.DeadRowsVariant, VacuumBehindCheck.InsertsVariant],
+                "{0} is judged on vacuum whoever owns its index design", table);
+
+            HealthReportFinding finding = findings.Single(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant);
+            finding.Severity.Should().Be(HealthSeverity.Critical, "autovacuum is switched off for a table behind");
             finding.Finding.WhyItMatters.Should().Contain("switched off for this table");
             finding.Finding.Remedy!.Code.Should().Be($"ALTER TABLE \"ps_health_t07\".\"{table}\" RESET (autovacuum_enabled);");
         }

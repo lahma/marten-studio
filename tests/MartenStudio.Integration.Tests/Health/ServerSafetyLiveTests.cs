@@ -294,7 +294,7 @@ public class ServerSafetyLiveTests(ServerSafetyServerFixture server) : IClassFix
 
         report.Findings.Should().NotContain(static x => x.Code == "S02");
         ConnectionsLiveHost.Status(report, "S02").Note.Should().Be(
-            "track_counts, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
+            "track_counts, autovacuum, track_activities, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
             + "synchronous_commit is on, and nothing waits for a restart.",
             "every watched setting was read, and each is at its safe value");
     }

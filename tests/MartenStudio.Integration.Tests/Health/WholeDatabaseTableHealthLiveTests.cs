@@ -169,7 +169,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
         HealthReportFinding scans = About(report, "T01", key).Should().ContainSingle().Subject;
         HealthReportFinding unused = About(report, "T05", key).Should().ContainSingle().Subject;
-        HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle().Subject;
+        HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
 
         foreach (HealthReportFinding finding in new[] { scans, unused, vacuum })
         {
@@ -233,7 +233,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
             (await RedundantOnTableAsync(host, Quartz, "qrtz_g1m_history")).Should().Contain("g1m_eh_sched",
                 "the redundancy is really there: only the library exemption keeps it out of T04");
 
-            HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle().Subject;
+            HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant).Subject;
             vacuum.Finding.GatedSchemas.Should().Equal([Quartz], "quartz is not one of the store's own schemas (D29)");
             vacuum.Evidence.Should().Contain(new HealthEvidence("Table", "the Quartz.NET table " + key));
             vacuum.Finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
@@ -309,10 +309,11 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
                 shown = await ReportAsync(host);
             }
 
-            About(shown, "T07", SchemaKey.For(Sample, "mt_doc_healthsecretthing")).Should().ContainSingle("the hidden type's table really is half dead")
+            About(shown, "T07", SchemaKey.For(Sample, "mt_doc_healthsecretthing")).Should().ContainSingle(static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant, "the hidden type's table really is half dead")
                 .Which.Finding.Remedy!.Code.Should().Contain("opts.Schema.For<HealthSecretThing>()", "a declared table keeps its StoreOptions line");
 
             HealthReportFinding stray = About(shown, "T07", SchemaKey.For(Sample, "mt_doc_g1m_orphan")).Should().ContainSingle(
+                static x => x.Finding.Variant == VacuumBehindCheck.DeadRowsVariant,
                 "with nothing hidden, an undeclared document table is judged as Marten's").Subject;
             stray.Finding.DocumentTypes.Should().BeEmpty("it is never named as a document type");
             stray.Finding.Remedy.Should().BeNull("no store declares it, so no statement or line is offered for it");

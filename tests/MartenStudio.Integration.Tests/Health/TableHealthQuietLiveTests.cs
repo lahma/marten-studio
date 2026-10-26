@@ -50,9 +50,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
         // memo, so the whole area is nine statements - G1M's one catalog list of the tables beside the store, those two,
         // T10's pg_stats read for the soft-deleted Order, T11's mt_hilo existence check and one-row read for the int-id
         // Invoice, and H9's three: the wraparound read T12, T13 and T14 share, T14's holders read and the replication slots
-        // read it shares with R01. It was eight before the table checks judged the whole database (issue #8, G1).
+        // read it shares with R01. It was eight before the table checks judged the whole database (issue #8, G1), and nine
+        // before W5-V1's T16, whose three are the workers read, the progress read the Maintenance page shares, and the
+        // sweep's one server-facts read, which T16 is the first table check to ask for (T24 shares the table read).
         first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
-            .Distinct(StringComparer.Ordinal).Should().HaveCount(9, "the regular table checks' whole catalog cost on the sample store");
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(12, "the regular table checks' whole catalog cost on the sample store");
 
         await using (IQuerySession session = host.Store.QuerySession())
         {
