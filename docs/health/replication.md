@@ -74,6 +74,11 @@ the ages of its `xmin` and `catalog_xmin`, and with its kind, plugin and databas
 name. A logical slot holds back vacuum of the system catalogs, and a physical one with a standby's feedback holds
 back vacuum everywhere; that horizon is T14's finding.
 
+Variants: `near-limit` (the Critical), `inactive` (the Warning) and `lost` (the Info), one finding of each at most, about
+every slot of its kind on the server. None has a subject - a slot's name is never part of a finding's key, which every
+visitor's mute is made of. Until 0.5 the kind was the finding's subject; its key (`R01|inactive`) is the same either way.
+Both studios run it.
+
 **History.** Every slot the read returns - another database's too, at most 200, most WAL first - adds
 `replication.slot-idle-retained:<slot>` to the database's samples: the WAL it held while inactive, and zero while
 a consumer was connected or once it was lost. So a slot that was connected in between breaks the 10-minute run

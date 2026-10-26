@@ -175,9 +175,11 @@ public class SchemaHealthColumnsPageTests
         schema.Indexes = Indexes();
         health.Cached =
         [
-            Cached("T03", HealthSeverity.Critical, "studio.mt_doc_customer.mt_doc_customer_idx_name"),
+            Cached("T03", HealthSeverity.Critical, "studio.mt_doc_customer.mt_doc_customer_idx_name", "index"),
             Cached("T04", HealthSeverity.Warning, "studio.mt_doc_customer.mt_doc_customer_idx_email"),
-            Cached("T03", HealthSeverity.Critical, "studio.mt_doc_customer#partitions"),
+
+            // T03's partitions variant names its table, never an index: no row on this tab is its (API design §1.10).
+            Cached("T03", HealthSeverity.Critical, "studio.mt_doc_customer", "partitions"),
         ];
 
         context.Navigate("/marten/schema?tab=indexes");
@@ -225,9 +227,9 @@ public class SchemaHealthColumnsPageTests
         page.FindAll(".ms-schema-health-mark").Should().BeEmpty();
     }
 
-    private static HealthReportFinding Cached(string code, HealthSeverity severity, string subject)
+    private static HealthReportFinding Cached(string code, HealthSeverity severity, string subject, string? variant = null)
     {
-        HealthFinding finding = FakeHealthService.Finding(code, severity, code + " about " + subject, HealthArea.Tables, subject);
+        HealthFinding finding = FakeHealthService.Finding(code, severity, code + " about " + subject, HealthArea.Tables, subject) with { Variant = variant };
 
         return new HealthReportFinding(
             finding,

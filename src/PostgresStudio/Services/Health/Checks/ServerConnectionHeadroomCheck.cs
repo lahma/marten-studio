@@ -63,9 +63,15 @@ internal sealed record ServerConnectionHeadroomFacts(
 /// the text it always was. A capacity reading, on any platform, is evidence.
 /// </para>
 /// </remarks>
-[HealthCheck("C03", HealthArea.Connections, HealthCostTier.Catalog, "Server connection headroom", Variants = ["server", "role", "database"])]
+[HealthCheck("C03", HealthArea.Connections, HealthCostTier.Catalog, "Server connection headroom", Variants = [ServerVariant, RoleVariant, DatabaseVariant])]
 internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnectionHeadroomFacts>
 {
+    /// <summary>
+    /// The variant of a finding about the server's own <c>max_connections</c>. Unset until the API packet's split, when every
+    /// finding of a check that lists variants names one (its key moved from <c>C03</c> to <c>C03|server</c>).
+    /// </summary>
+    public const string ServerVariant = "server";
+
     /// <summary>The variant of a finding about the login role's own limit.</summary>
     public const string RoleVariant = "role";
 
@@ -158,6 +164,7 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
         return new HealthFinding
         {
             Code = "C03",
+            Variant = ServerVariant,
             Severity = critical ? HealthSeverity.Critical : HealthSeverity.Warning,
             Title = critical
                 ? "The server has almost no connections left"

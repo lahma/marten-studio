@@ -422,7 +422,7 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
         HealthFinding finding = Findings(await host.SweepAsync(), "D02").Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Critical);
-        finding.Subject.Should().Be("no-daemon");
+        finding.Variant.Should().Be("no-daemon");
     }
 
     /// <summary>
@@ -461,7 +461,7 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
         HealthReport report = await host.ReportAsync();
 
         HealthReportFinding finding = report.Findings.Single(x => x.Code == "D02");
-        finding.Finding.Subject.Should().Be("lock-held-idle");
+        finding.Finding.Variant.Should().Be("lock-held-idle");
 
         HealthEvidence named = finding.Evidence.Single(x => x.Label == "Lock holder 1");
         if (activity)

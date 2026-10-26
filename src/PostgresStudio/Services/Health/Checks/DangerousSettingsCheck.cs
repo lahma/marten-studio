@@ -92,10 +92,22 @@ internal sealed record DangerousSettingsFacts(
 /// <b>Not read is not safe.</b> A watched setting with no row - hidden from the role, or absent from the server - is named
 /// in the status row as not judged, rather than counted among the ones at their safe values.
 /// </para>
+/// <para>
+/// <b>Two kinds of finding, each a variant</b> (API design §1.10): <see cref="SettingVariant" />, one per watched setting at
+/// a dangerous value, whose subject is the setting; and <see cref="PendingRestartVariant" />, one for every setting that waits
+/// for a restart together, with no subject.
+/// </para>
 /// </remarks>
-[HealthCheck("S02", HealthArea.Server, HealthCostTier.Catalog, "Settings that blind or endanger the store")]
+[HealthCheck("S02", HealthArea.Server, HealthCostTier.Catalog, "Settings that blind or endanger the store",
+    Variants = [SettingVariant, PendingRestartVariant])]
 internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFacts>
 {
+    /// <summary>The variant of a finding about one watched setting; its subject is the setting's name.</summary>
+    internal const string SettingVariant = "setting";
+
+    /// <summary>The variant of the finding about settings that wait for the server to restart.</summary>
+    internal const string PendingRestartVariant = "pending-restart";
+
     /// <summary>The settings S02 reads, and no others.</summary>
     public static readonly IReadOnlyList<string> Watched =
     [
@@ -269,7 +281,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
             {
                 Code = "S02",
                 Severity = HealthSeverity.Info,
-                Subject = "pending-restart",
+                Variant = PendingRestartVariant,
                 Title = pending.Count == 1
                     ? "A changed setting waits for the server to restart"
                     : SessionText.Number(pending.Count) + " changed settings wait for the server to restart",
@@ -374,6 +386,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
         {
             Code = "S02",
             Severity = severity,
+            Variant = SettingVariant,
             Subject = setting.Name,
             Title = title,
             WhyItMatters = why,

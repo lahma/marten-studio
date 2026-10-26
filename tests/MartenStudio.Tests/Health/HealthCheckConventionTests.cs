@@ -116,7 +116,11 @@ public class HealthCheckConventionTests
         HealthCheckRegistry.Describe(typeof(VariantsCheck)).Variants.Should().Equal("deadlocks", "temp-files");
     }
 
-    /// <summary>The anti-vacuity half of the finding rule: a variant the check does not list is refused, and so is one on a check that lists none.</summary>
+    /// <summary>
+    /// The anti-vacuity half of the finding rule: a variant the check does not list is refused, so is one on a check that lists
+    /// none, and so is a finding with no variant from a check that lists its kinds - all or nothing, so a host reads a null
+    /// variant as "this check has one kind of finding".
+    /// </summary>
     [Fact]
     public void A_finding_of_a_variant_its_check_does_not_list_is_refused()
     {
@@ -124,7 +128,9 @@ public class HealthCheckConventionTests
         HealthCheckInfo none = HealthCheckRegistry.Describe(typeof(WellFormedCheck));
 
         HealthCheckRegistry.FindingProblems(variants, Finding("K86", "temp-files")).Should().BeEmpty();
-        HealthCheckRegistry.FindingProblems(variants, Finding("K86", null)).Should().BeEmpty("a finding with no variant is the shape every check has today");
+        HealthCheckRegistry.FindingProblems(none, Finding("K85", null)).Should().BeEmpty("a check with one kind of finding names none");
+        HealthCheckRegistry.FindingProblems(variants, Finding("K86", null)).Should().ContainSingle()
+            .Which.Should().Contain("no variant").And.Contain("deadlocks, temp-files");
         HealthCheckRegistry.FindingProblems(variants, Finding("K86", "rollbacks")).Should().ContainSingle()
             .Which.Should().Contain("not one of its variants (deadlocks, temp-files)");
         HealthCheckRegistry.FindingProblems(none, Finding("K85", "deadlocks")).Should().ContainSingle()

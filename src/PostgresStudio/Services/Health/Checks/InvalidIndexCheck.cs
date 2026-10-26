@@ -51,10 +51,21 @@ internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IRea
 /// child index with <c>42P07</c>. There the finding says, in words, that a DBA drops the leftover index on the
 /// partition first - and names no partition: a partition is named after its tenant.
 /// </para>
+/// <para>
+/// <b>Two kinds of finding, each a variant</b> (API design §1.10): <see cref="IndexVariant" />, whose subject is the invalid
+/// index, and <see cref="PartitionsVariant" />, whose subject is the table whose partitions carry invalid indexes - until
+/// 0.5 the subject <c>table#partitions</c>, a kind and an object at once.
+/// </para>
 /// </remarks>
-[HealthCheck("T03", HealthArea.Tables, HealthCostTier.Catalog, "Invalid index")]
+[HealthCheck("T03", HealthArea.Tables, HealthCostTier.Catalog, "Invalid index", Variants = [IndexVariant, PartitionsVariant])]
 internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 {
+    /// <summary>The variant of a finding about one invalid index; its subject is the index.</summary>
+    internal const string IndexVariant = "index";
+
+    /// <summary>The variant of a finding about the invalid indexes on a table's partitions; its subject is the table.</summary>
+    internal const string PartitionsVariant = "partitions";
+
     /// <summary>What a partitioned table's invalid index needs instead of a re-apply.</summary>
     internal const string PartitionedInWords =
         " On a partitioned table a re-apply cannot resume the build: Weasel reads only the partitioned table's own indexes, "
@@ -198,6 +209,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         {
             Code = "T03",
             Severity = severity,
+            Variant = IndexVariant,
             Subject = index.Key,
             DocumentTypes = table.DocumentTypes,
             GatedSchemas = table.GatedSchemas,
@@ -240,7 +252,8 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         {
             Code = "T03",
             Severity = severity,
-            Subject = table.Key + "#partitions",
+            Variant = PartitionsVariant,
+            Subject = table.Key,
             DocumentTypes = table.Table.DocumentTypes,
             GatedSchemas = table.Table.GatedSchemas,
             Title = indexes + " on the partitions of " + table.Key + (count == 1 ? " is" : " are") + " invalid",

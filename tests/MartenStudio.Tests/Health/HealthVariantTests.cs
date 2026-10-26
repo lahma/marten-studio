@@ -30,22 +30,32 @@ public class HealthVariantTests
     }
 
     [Fact]
-    public void No_shipped_finding_sets_a_variant_so_no_mute_key_moves()
+    public void The_split_moves_a_kind_out_of_the_subject_and_a_kind_with_no_object_keeps_its_key()
     {
-        // The five checks whose subject still carries a kind (C08, R01, S02, D02, T03) keep their keys until the API packet
-        // splits them; this is S02's pending-restart finding, keyed as it always was.
+        // The API packet's split (C08, R01, S02, D02, T03): S02's pending-restart finding is about no one setting, so its kind
+        // moved from the subject to the variant and its key - code, then the variant - is the one it always had. A setting's
+        // finding gained the variant "setting" and keeps the setting as its subject, so its key moved (W5-API's mute-key note).
         HealthVerdict verdict = new DangerousSettingsCheck().Evaluate(
             new DangerousSettingsFacts(
                 DateTimeOffset.UnixEpoch,
-                [new ServerSetting("shared_buffers", "16384", "configuration file", true)],
-                1,
+                [
+                    new ServerSetting("shared_buffers", "16384", "configuration file", true),
+                    new ServerSetting("fsync", "off", "configuration file", false),
+                ],
+                2,
                 "Production",
                 PostgresPlatform.SelfHosted),
             HealthEvaluation.At(DateTimeOffset.UnixEpoch));
 
-        HealthFinding pending = verdict.ShouldBeWellFormedFor<DangerousSettingsCheck>().Findings.Single(static x => x.Subject == "pending-restart");
-        pending.Variant.Should().BeNull();
+        IReadOnlyList<HealthFinding> findings = verdict.ShouldBeWellFormedFor<DangerousSettingsCheck>().Findings;
+
+        HealthFinding pending = findings.Single(static x => x.Variant == "pending-restart");
+        pending.Subject.Should().BeNull();
         pending.Key.Should().Be("S02|pending-restart");
+
+        HealthFinding fsync = findings.Single(static x => x.Variant == "setting");
+        fsync.Subject.Should().Be("fsync");
+        fsync.Key.Should().Be("S02|setting|fsync");
     }
 
     [Fact]
@@ -54,7 +64,17 @@ public class HealthVariantTests
         HealthVerdict verdict = HealthVerdict.Of(Finding("deadlocks", null) with { Code = "S02" });
 
         FluentActions.Invoking(() => verdict.ShouldBeWellFormedFor<DangerousSettingsCheck>())
-            .Should().Throw<Exception>().WithMessage("*lists no variants*");
+            .Should().Throw<Exception>().WithMessage("*not one of its variants*");
+    }
+
+    [Fact]
+    public void The_evaluator_helper_catches_a_finding_with_no_variant_from_a_check_that_lists_its_kinds()
+    {
+        // All or nothing (HealthCheckAttribute.Variants): a host reads a null variant as "the check has one kind".
+        HealthVerdict verdict = HealthVerdict.Of(Finding(null, "fsync") with { Code = "S02" });
+
+        FluentActions.Invoking(() => verdict.ShouldBeWellFormedFor<DangerousSettingsCheck>())
+            .Should().Throw<Exception>().WithMessage("*no variant*");
     }
 
     [Fact]

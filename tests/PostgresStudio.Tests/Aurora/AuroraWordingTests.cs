@@ -42,7 +42,7 @@ public class AuroraWordingTests
                 .Evaluate(new ServerConnectionHeadroomFacts(Limits(), Aurora, Acu(16, minimum: minimum), 100), At())
                 .Findings.Single();
 
-            finding.Variant.Should().BeNull("the server's own finding keeps its key until the API packet's split");
+            finding.Variant.Should().Be("server", "the API packet's split names the server's own finding's kind, as the role's and the database's are");
             finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
             finding.Remedy.Code.Should().Be("Raise the cluster's maximum capacity (now 16 ACU)", "max_connections 100 is below the 2,000 cap a low minimum sets");
             finding.Remedy.Explanation.Should().StartWith("On Aurora Serverless v2 max_connections follows the maximum capacity:")

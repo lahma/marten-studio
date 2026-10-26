@@ -73,10 +73,25 @@ internal sealed record DatabaseCounterFacts(
 /// stays below it - and a deadlock finding adds the window's deadlocks per day to its evidence. Nothing per day is said
 /// while the window is under a day or looks reset.
 /// </para>
+/// <para>
+/// <b>Three kinds of finding, each a variant</b> (API design §1.10): <see cref="DeadlocksVariant" />,
+/// <see cref="RollbacksVariant" /> and <see cref="TempFilesVariant" />, at most one of each, about the database as a whole -
+/// so none has a subject.
+/// </para>
 /// </remarks>
-[HealthCheck("C08", HealthArea.Connections, HealthCostTier.Catalog, "Deadlocks, rollbacks and temp spills")]
+[HealthCheck("C08", HealthArea.Connections, HealthCostTier.Catalog, "Deadlocks, rollbacks and temp spills",
+    Variants = [DeadlocksVariant, RollbacksVariant, TempFilesVariant])]
 internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
 {
+    /// <summary>The variant of a finding about deadlocks.</summary>
+    internal const string DeadlocksVariant = "deadlocks";
+
+    /// <summary>The variant of a finding about the share of transactions rolled back.</summary>
+    internal const string RollbacksVariant = "rollbacks";
+
+    /// <summary>The variant of a finding about sorts and hashes spilling to temporary files.</summary>
+    internal const string TempFilesVariant = "temp-files";
+
     /// <summary>At least this many bytes of temporary files a day over the statistics window is a Warning (G5): 1 GiB.</summary>
     internal const long TempBytesPerDayWarning = 1L << 30;
 
@@ -237,7 +252,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             findings.Add(new HealthFinding
             {
                 Code = "C08",
-                Subject = "deadlocks",
+                Variant = DeadlocksVariant,
                 Severity = HealthSeverity.Warning,
                 Title = SessionText.Count(deadlocks, "deadlock") + " in the last " + SessionText.Duration(span),
                 WhyItMatters =
@@ -256,7 +271,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             findings.Add(new HealthFinding
             {
                 Code = "C08",
-                Subject = "rollbacks",
+                Variant = RollbacksVariant,
                 Severity = HealthSeverity.Warning,
                 Title = SessionText.Percent(share) + " of this database's transactions rolled back in the last " + SessionText.Duration(span),
                 WhyItMatters =
@@ -275,8 +290,8 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             });
         }
 
-        // The hour's Info, unless the day's Warning already speaks for the temp files: one finding per subject.
-        if (tempFiles > 0 && !findings.Any(static x => x.Subject == "temp-files"))
+        // The hour's Info, unless the day's Warning already speaks for the temp files: one finding per variant.
+        if (tempFiles > 0 && !findings.Any(static x => x.Variant == TempFilesVariant))
         {
             List<HealthEvidence> evidence =
             [
@@ -293,7 +308,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             findings.Add(new HealthFinding
             {
                 Code = "C08",
-                Subject = "temp-files",
+                Variant = TempFilesVariant,
                 Severity = HealthSeverity.Info,
                 Title = "Statements wrote " + SessionText.Count(tempFiles, "temporary file") + " to disk in the last " + SessionText.Duration(span),
                 WhyItMatters =
@@ -315,12 +330,12 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
 
         // Deadlocks, rollbacks, temp files: the order the page has always drawn them in.
         return new HealthVerdict(
-            [.. findings.OrderBy(static x => Array.IndexOf(SubjectOrder, x.Subject))],
+            [.. findings.OrderBy(static x => Array.IndexOf(VariantOrder, x.Variant))],
             facts.StatisticsNotRead is { } notRead ? NotChecked(notRead) : null);
     }
 
     /// <summary>The order C08's findings are listed in, whichever rule found them.</summary>
-    private static readonly string?[] SubjectOrder = ["deadlocks", "rollbacks", "temp-files"];
+    private static readonly string?[] VariantOrder = [DeadlocksVariant, RollbacksVariant, TempFilesVariant];
 
     /// <summary>
     /// The per-day Warning (G5): at least <see cref="TempBytesPerDayWarning" /> of temporary files a day over the statistics
@@ -347,7 +362,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         return new HealthFinding
         {
             Code = "C08",
-            Subject = "temp-files",
+            Variant = TempFilesVariant,
             Severity = HealthSeverity.Warning,
             Title = "Statements write " + Bytes((long) day.TempBytes) + " of temporary files a day " + day.Window.SinceText,
             WhyItMatters =

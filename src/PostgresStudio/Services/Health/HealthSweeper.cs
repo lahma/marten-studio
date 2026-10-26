@@ -578,7 +578,7 @@ internal sealed class HealthSweeper
                 if (HealthCheckRegistry.FindingProblems(info, finding) is { Count: > 0 } variant)
                 {
                     throw new HealthSweepRuleException(
-                        $"One of {info.Code}'s findings is of a variant the check does not list; a variant is frozen per code.",
+                        $"One of {info.Code}'s findings is of a variant the check does not list, or names none while the check lists its kinds; a variant is frozen per code.",
                         variant[0]);
                 }
 

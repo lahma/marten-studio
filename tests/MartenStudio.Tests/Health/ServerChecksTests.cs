@@ -190,6 +190,7 @@ public class ServerChecksTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Code.Should().Be("S02");
+        finding.Variant.Should().Be("setting");
         finding.Subject.Should().Be("autovacuum");
         finding.Severity.Should().Be(HealthSeverity.Critical);
         finding.Title.Should().Be("Autovacuum is switched off for the whole server (autovacuum = off)");
@@ -350,7 +351,8 @@ public class ServerChecksTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Info);
-        finding.Subject.Should().Be("pending-restart");
+        finding.Variant.Should().Be("pending-restart");
+        finding.Subject.Should().BeNull("the finding is about every setting that waits, and names them in its evidence");
         finding.Title.Should().Be("2 changed settings wait for the server to restart");
         finding.Evidence.Should().Contain(new HealthEvidence("Waiting for a restart", "max_connections, shared_buffers"));
         finding.Remedy.Should().BeNull();

@@ -60,10 +60,11 @@ public class DatabaseCounterLiveTests(PostgresFixture postgres)
         HealthReport second = await host.ReportAsync();
 
         HealthReportFinding[] findings = [.. second.Findings.Where(static x => x.Code == "C08")];
-        findings.Select(static x => x.Finding.Subject).Should().BeEquivalentTo(["deadlocks", "rollbacks", "temp-files"]);
-        findings.Single(static x => x.Finding.Subject == "deadlocks").Severity.Should().Be(HealthSeverity.Warning);
-        findings.Single(static x => x.Finding.Subject == "rollbacks").Severity.Should().Be(HealthSeverity.Warning);
-        findings.Single(static x => x.Finding.Subject == "temp-files").Severity.Should().Be(HealthSeverity.Info);
+        findings.Select(static x => x.Finding.Variant).Should().BeEquivalentTo(["deadlocks", "rollbacks", "temp-files"]);
+        findings.Should().OnlyContain(static x => x.Finding.Subject == null, "each is about the database as a whole");
+        findings.Single(static x => x.Finding.Variant == "deadlocks").Severity.Should().Be(HealthSeverity.Warning);
+        findings.Single(static x => x.Finding.Variant == "rollbacks").Severity.Should().Be(HealthSeverity.Warning);
+        findings.Single(static x => x.Finding.Variant == "temp-files").Severity.Should().Be(HealthSeverity.Info);
         findings.Should().OnlyContain(static x => x.Finding.Caveat!.Contains("statistics", StringComparison.Ordinal));
     }
 
@@ -118,7 +119,7 @@ public class DatabaseCounterLiveTests(PostgresFixture postgres)
 
         HealthReport report = await host.ReportAsync();
 
-        HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "C08" && x.Finding.Subject == "temp-files").Subject;
+        HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "C08" && x.Finding.Variant == "temp-files").Subject;
         finding.Severity.Should().Be(HealthSeverity.Warning, "at least a gibibyte a day over the window (G5)");
         finding.Finding.Title.Should().StartWith("Statements write ").And.Contain(" of temporary files a day since ");
         finding.Finding.Evidence.Select(static x => x.Label).Should().Contain(["Written a day", "Window", "Counting since"]);

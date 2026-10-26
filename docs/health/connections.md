@@ -183,7 +183,7 @@ database's "too many connections for database", while `max_connections` still ha
 
 `-1`, the default, is no limit. Neither limit is enforced against a superuser, so a superuser login is judged against
 the server alone (S04's `superuser` variant is the problem there). The finding names the nearest of the three; the
-server's own finding keeps the key it always had (its variant is unset until the API's split). This process's pool
+server's own finding is the `server` variant (from 0.5's split, its key is `C03|server` rather than `C03`). This process's pool
 ceiling - C01's `Maximum Pool Size` - is compared with the role's limit: "this process alone may open 100 connections
 as role app, which may open 50", in the role finding's evidence and the quiet row. The remedy for a role or database
 limit is a `Maximum Pool Size` that keeps one process under the limit's warning line; raising the limit itself
@@ -333,8 +333,9 @@ by how long they have counted - once that window is at least a day long and the 
 - Nothing per day is said while the window is under a day, or in the check in which the counters first look reset; the
   status row says how long the window has counted so far.
 
-The kinds of finding are `deadlocks`, `rollbacks` and `temp-files`, as before. Each finding says when the statistics
-were last reset. Both studios run it.
+Variants: `deadlocks`, `rollbacks`, `temp-files` - at most one finding of each, about the database as a whole, so none has
+a subject. Until 0.5 the kind was the finding's subject; a finding's key (`C08|deadlocks`) is the same either way. Each
+finding says when the statistics were last reset. Both studios run it.
 
 **On Aurora** a temp-file finding says where the files go: "In Aurora PostgreSQL, these files share local storage with
 other log files" (*Managing temporary files with PostgreSQL*, Aurora User Guide), not the cluster volume, and "The local
