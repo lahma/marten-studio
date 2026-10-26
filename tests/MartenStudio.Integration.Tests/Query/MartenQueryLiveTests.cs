@@ -124,6 +124,11 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
     /// is what makes the EXPLAIN on the same page a plan for the same statement rather than for a
     /// lookalike.
     /// </summary>
+    /// <remarks>
+    /// Since wave 6 the log carries the statement through <see cref="StudioLogValue.CapText" /> - its line breaks
+    /// escaped, so a statement cannot write a second, forged log line - and the comparison applies the same escaping to
+    /// what the page shows. The statement is far below the cap, so nothing of it is cut.
+    /// </remarks>
     [PostgresFact]
     public async Task The_sql_the_page_shows_is_the_statement_that_was_sent()
     {
@@ -133,10 +138,11 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             harness.Scope, new MartenQueryRequest(alias, "where data ->> 'Name' = 'Alice'"), Token);
 
         result.Succeeded.Should().BeTrue();
+        result.GeneratedSql.Length.Should().BeLessThan(StudioLogValue.MaxTextLength, "a statement below the cap is logged whole");
 
         harness.Logs.Should().Contain(
-            x => x.EventId == 9204 && x.Message.Contains(result.GeneratedSql, StringComparison.Ordinal),
-            "9204 carries the statement the studio actually executed");
+            x => x.EventId == 9204 && x.Message.Contains(StudioLogValue.CapText(result.GeneratedSql)!, StringComparison.Ordinal),
+            "9204 carries the statement the studio actually executed, escaped as every logged value is");
 
         result.Plan!.HasPlan.Should().BeTrue(
             result.Plan.UnavailableReason ?? "EXPLAIN planned the same text, with the same values bound");
