@@ -1319,6 +1319,10 @@ tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a
                                          matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
 tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
                                          sequence headroom and the lint statements' D27 shape - no database
+src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
+                                         findings, checks and sections - namespace PostgresStudio, like the registration types
+src/PostgresStudio/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builders, read limiter and JSON
+                                         writer, and the Health page's visitor download builder (W5-API)
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

@@ -218,12 +218,25 @@ public class CoreFenceTests
         problems.Should().BeEmpty(string.Join(Environment.NewLine, problems));
     }
 
-    /// <summary>The namespace a file's folder gives under <paramref name="root" />.</summary>
+    /// <summary>
+    /// The namespace a file's folder gives under <paramref name="root" /> - except the diagnostics read model's folder, whose
+    /// public types live in the root namespace beside the registration types (API design API8, D31): a host writes
+    /// <c>using PostgresStudio;</c> and nothing more.
+    /// </summary>
     private static string FolderNamespace(string root, string pathBelowRoot)
     {
         int slash = pathBelowRoot.LastIndexOf('/');
+
+        if (slash >= 0 && string.Equals(pathBelowRoot[..slash], PublicReadModelFolder, StringComparison.Ordinal))
+        {
+            return root;
+        }
+
         return slash < 0 ? root : root + "." + pathBelowRoot[..slash].Replace('/', '.');
     }
+
+    /// <summary>The one folder below the shared studio's root whose files declare the root namespace: the public read model.</summary>
+    private const string PublicReadModelFolder = "Diagnostics";
 
     /// <summary>
     /// No type is declared on both sides at the same place in the namespace tree - <c>MartenStudio.X.T</c> beside

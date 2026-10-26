@@ -257,6 +257,7 @@ internal sealed class HealthSweeper
     private readonly TimeProvider timeProvider;
     private readonly IStudioRuntime runtime;
     private readonly IHealthStatementObserver? observer;
+    private readonly HealthDatabaseBound? bound;
 
     public HealthSweeper(
         HealthCheckRegistry registry,
@@ -267,7 +268,8 @@ internal sealed class HealthSweeper
         ILogger<HealthSweeper> logger,
         TimeProvider? timeProvider = null,
         IStudioRuntime? runtime = null,
-        IHealthStatementObserver? observer = null)
+        IHealthStatementObserver? observer = null,
+        HealthDatabaseBound? bound = null)
     {
         this.registry = registry;
         this.history = history;
@@ -278,6 +280,7 @@ internal sealed class HealthSweeper
         this.timeProvider = timeProvider ?? TimeProvider.System;
         this.runtime = runtime ?? NoStudioRuntime.Instance;
         this.observer = observer;
+        this.bound = bound;
     }
 
     /// <summary>
@@ -320,6 +323,10 @@ internal sealed class HealthSweeper
         string databaseId = resolved.Target.Identity;
         IReadOnlySet<HealthCostTier> tiers = TiersOf(kind);
         TimeSpan interval = settings.EffectiveHealthInterval;
+
+        // The database is used now, so its history and texts are kept, and the least recently used past the bound's capacity
+        // forgets its own (API design §3.5) - before this sweep writes anything.
+        bound?.Touch(storeKey, databaseId);
 
         TimeSpan statementTimeout = settings.QueryTimeout < MaxStatementTimeout ? settings.QueryTimeout : MaxStatementTimeout;
         ReadOnlySqlOptions sessionOptions = new()

@@ -88,6 +88,9 @@ public class StudioRegistrationTests
         (typeof(ITableRowService), ServiceLifetime.Scoped, How.Type, typeof(TableRowService)),
         (typeof(DatabaseBrowserState), ServiceLifetime.Scoped, How.Type, typeof(DatabaseBrowserState)),
         (typeof(HealthCheckRegistry), ServiceLifetime.Singleton, How.Type, typeof(HealthCheckRegistry)),
+
+        // W5-API: the bound on databases with state (API design §3.5).
+        (typeof(HealthDatabaseBound), ServiceLifetime.Singleton, How.Type, typeof(HealthDatabaseBound)),
         (typeof(HealthHistory), ServiceLifetime.Singleton, How.Type, typeof(HealthHistory)),
         (typeof(HealthSweeper), ServiceLifetime.Singleton, How.Type, typeof(HealthSweeper)),
         (typeof(HealthSweepCache), ServiceLifetime.Singleton, How.Type, typeof(HealthSweepCache)),

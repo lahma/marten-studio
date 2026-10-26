@@ -234,7 +234,9 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// (<c>StatementReads.SeriesName</c>): about 25 KB a sample, so up to about 1.5 MB a database for a full ring at its worst,
 /// never a number per statement the extension holds. Beside it, the statement checks' <c>StatementTextCache</c> holds up to
 /// 256 texts of at most 4,096 characters per database whose statement checks have run, for the life of the process - about
-/// 2 MB a database at its worst - so it, too, grows with the number of databases swept, and with nothing else.
+/// 2 MB a database at its worst - so it, too, grows with the number of databases swept, and with nothing else. Since 0.5
+/// that number is bounded: the 64 databases swept or read most recently keep their rings and their texts, and the least
+/// recently used past them loses both (<see cref="HealthDatabaseBound" />, API design §3.5).
 /// </para>
 /// <para>
 /// Singleton. Two circuits watching one database are watching one history: the sweep is shared, so its
@@ -255,10 +257,19 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// watching began.
 /// </para>
 /// </remarks>
-internal sealed class HealthHistory
+internal sealed class HealthHistory : IPerDatabaseState
 {
     /// <summary>How many samples a database keeps.</summary>
     public const int Capacity = 60;
+
+    /// <param name="bound">
+    /// The process's bound on databases with state (API design §3.5), which forgets a database's rings - its first-seen map
+    /// with them - once it is the least recently used past the bound; <see langword="null" /> for no bound, in a test.
+    /// </param>
+    public HealthHistory(HealthDatabaseBound? bound = null)
+    {
+        bound?.Register(this);
+    }
 
     /// <summary>
     /// How many remembered series a database's first-seen map keeps (W5-V1): T14's holder identities, at most twenty
@@ -374,6 +385,20 @@ internal sealed class HealthHistory
 
     /// <summary>What a statement history's ring is keyed by after the database's identity.</summary>
     internal const string StatementsRingSuffix = "|statements";
+
+    /// <inheritdoc />
+    /// <remarks>Both of the database's rings - its own and its statement history - and the first-seen map that is part of each.</remarks>
+    public void Forget(string storeKey, string databaseId)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        lock (gate)
+        {
+            rings.Remove(KeyFor(storeKey, RingOf(databaseId, HealthSweepKind.Regular)));
+            rings.Remove(KeyFor(storeKey, RingOf(databaseId, HealthSweepKind.Statements)));
+        }
+    }
 
     private static string KeyFor(string storeKey, string databaseId) => storeKey + "|" + databaseId;
 
