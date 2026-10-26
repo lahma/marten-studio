@@ -69,7 +69,7 @@ internal sealed class StudioSourceResolver
 
         // 2. The registration.
         StudioSourceRegistration registration = provider.Find(scope.StoreKey)
-            ?? throw new KeyNotFoundException($"No {descriptor.SourceNoun} is registered under '{scope.StoreKey}'.");
+            ?? throw new KeyNotFoundException($"No {descriptor.SourceNoun} is registered under '{StudioLogValue.Cap(scope.StoreKey)}'.");
 
         // 3. The source itself, which may refuse to build.
         StoreAvailability availability = provider.TryResolve(registration, out IStudioSource? source);
@@ -78,11 +78,12 @@ internal sealed class StudioSourceResolver
             throw new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason", descriptor.SourceNoun);
         }
 
-        // 4. The database, matched against what the source already knows.
+        // 4. The database, matched against what the source already knows. The visitor's spelling goes into the message
+        //    escaped and bounded (StudioLogValue.Cap): a message like this one is logged and audited whole.
         IReadOnlyList<IStudioDatabase> databases = await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
         IStudioDatabase database = Match(databases, scope.DatabaseId)
             ?? throw new KeyNotFoundException(
-                $"{descriptor.SourceNoun} '{registration.Key}' has no database with identity '{scope.DatabaseId}'.");
+                $"{descriptor.SourceNoun} '{registration.Key}' has no database with identity '{StudioLogValue.Cap(scope.DatabaseId)}'.");
 
         // 5. Authorize again, by the registered key and the matched identity, when the visitor spelled either another way:
         //    a key in another case, a database id in another case, or none at all (the first database). The policies

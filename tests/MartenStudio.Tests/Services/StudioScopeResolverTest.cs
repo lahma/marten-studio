@@ -378,6 +378,44 @@ public class StudioScopeResolverTest
         harness.Authorization.Calls[3].Should().Be((WritePolicy, new MartenStoreResource("default", identity, null, nameof(StudioCapability.DeleteDocuments))));
     }
 
+    // SEC-fix 7: what a visitor typed reaches a refusal's message escaped and bounded, because that message is logged and
+    // audited whole
+
+    [Fact]
+    public async Task An_unknown_database_id_reaches_the_refusal_escaped_and_bounded()
+    {
+        using var harness = CreateHarness();
+        string typed = "line\nbreak" + new string('x', 10_000);
+
+        var refused = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("default", typed, null), null, Token).AsTask())
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        refused.Which.Message.Should().NotContain("\n").And.Contain(StudioLogValue.Cap(typed));
+        refused.Which.Message.Length.Should().BeLessThan(StudioLogValue.MaxLength + 200);
+    }
+
+    [Fact]
+    public async Task An_unknown_store_key_and_an_unlisted_tenant_reach_the_refusal_escaped_and_bounded()
+    {
+        using var harness = CreateHarness(static options => options.KnownTenantIds.Add("acme"));
+        string typed = "line\nbreak" + new string('x', 10_000);
+
+        var store = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope(typed, string.Empty, null), null, Token).AsTask())
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        store.Which.Message.Should().NotContain("\n");
+        store.Which.Message.Length.Should().BeLessThan(StudioLogValue.MaxLength + 200);
+
+        var tenant = await harness.Resolver
+            .Invoking(x => x.ResolveAsync(new StudioScope("default", string.Empty, typed), null, Token).AsTask())
+            .Should().ThrowAsync<KeyNotFoundException>();
+
+        tenant.Which.Message.Should().NotContain("\n").And.Contain(StudioLogValue.Cap(typed));
+        tenant.Which.Message.Length.Should().BeLessThan(StudioLogValue.MaxLength + 200);
+    }
+
     /// <summary>The default store's first database identity, read through the resolver; the questions it asked are forgotten.</summary>
     private static async Task<string> IdentityAsync(Harness harness)
     {
