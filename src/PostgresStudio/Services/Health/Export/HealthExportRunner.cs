@@ -453,8 +453,7 @@ internal sealed class HealthExportRunner
             return HealthExportSummary.Stopping(started, settings.Text);
         }
 
-        (IReadOnlyList<HealthExportDatabaseResult> latest, int skipped) =
-            rotation.Collect(listed, attempted, timeProvider.GetUtcNow(), plan.Window(interval));
+        (IReadOnlyList<HealthExportDatabaseResult> latest, int skipped) = rotation.Collect(listed, attempted, plan.RunsKept);
 
         return HealthExportSummary.From(started, latest, skipped, timedOut, notReached, notEnumerated, unnamed);
     }
@@ -466,11 +465,12 @@ internal sealed class HealthExportRunner
 internal sealed record HealthExportPlan(IReadOnlyList<StudioListedDatabase> Targets, int RunsPerRotation)
 {
     /// <summary>
-    /// How old a database's latest result may be and still be reported: one full rotation plus one interval, so a finding in
-    /// the last tenant of the rotation stays reported until a sweep clears it, and does not flap with the cursor.
+    /// For how many runs a database's latest result is reported: one full rotation and one run more, so a finding in the last
+    /// tenant of the rotation stays reported until a sweep clears it, and does not flap with the cursor. Counted in runs,
+    /// never in time: a run of slow databases takes longer than an interval, and a window in time would let a result expire
+    /// before the rotation came back to it (W5-API-fix F3).
     /// </summary>
-    /// <param name="interval">The run's cadence, <c>EffectiveHealthInterval</c>.</param>
-    public TimeSpan Window(TimeSpan interval) => interval * (RunsPerRotation + 1);
+    public int RunsKept => RunsPerRotation + 1;
 }
 
 /// <summary>
@@ -487,10 +487,12 @@ internal sealed record HealthExportPlan(IReadOnlyList<StudioListedDatabase> Targ
 /// the others.
 /// </para>
 /// <para>
-/// <b>Reported until cleared.</b> Each database's latest result is reported while it is younger than one full rotation plus
-/// one interval, so a Critical in tenant 180 surfaces within <c>ceil(200 / 25)</c> runs and stays reported, rather than
-/// coming and going with the cursor. A database no longer listed is forgotten. <c>databasesSkipped</c> counts only the
-/// databases no run has reported yet and this run did not reach.
+/// <b>Reported until cleared.</b> Each database's latest result is reported for one full rotation and one run more, counted
+/// in runs rather than in time (<see cref="HealthExportPlan.RunsKept" />), so a Critical in tenant 180 surfaces within
+/// <c>ceil(200 / 25)</c> runs and stays reported however long each run takes, rather than coming and going with the cursor.
+/// A database no longer listed is forgotten. <c>databasesSkipped</c> counts only the listed databases no run has checked
+/// in this process and this run did not set out to check; one checked before whose result has aged out is neither reported
+/// nor skipped, and the rotation comes back to it.
 /// </para>
 /// <para>
 /// Touched only by the one run in flight (the runner is single flight), so it needs no lock of its own.
@@ -502,7 +504,10 @@ internal sealed class HealthExportRotation
     private const string SingleSourcesGroup = " one-database sources";
 
     private readonly Dictionary<string, int> cursors = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, HealthExportDatabaseResult> latest = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (HealthExportDatabaseResult Result, long Run)> latest = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How many runs this rotation has planned: the clock a result's age is counted on.</summary>
+    private long run;
 
     /// <summary>A listed database's key: its source's key and its identity.</summary>
     public static string KeyOf(StudioListedDatabase database)
@@ -518,6 +523,7 @@ internal sealed class HealthExportRotation
     {
         ArgumentNullException.ThrowIfNull(listed);
 
+        run++;
         List<StudioListedDatabase> targets = [];
         List<StudioListedDatabase> singleSources = [.. listed.Where(static x => x.SingleDatabaseSource)];
 
@@ -585,30 +591,30 @@ internal sealed class HealthExportRotation
         return new HealthExportPlan(targets, Math.Max(1, runs));
     }
 
-    /// <summary>Keeps a database's latest result.</summary>
+    /// <summary>Keeps a database's latest result, as of the run this rotation last planned.</summary>
     public void Remember(string key, HealthExportDatabaseResult result)
     {
         ArgumentNullException.ThrowIfNull(key);
         ArgumentNullException.ThrowIfNull(result);
-        latest[key] = result;
+        latest[key] = (result, run);
     }
 
     /// <summary>
-    /// Every listed database's latest result young enough to report, and how many listed databases no run has reported and
-    /// this run did not reach. Forgets every result of a database no longer listed.
+    /// Every listed database's latest result still within <paramref name="runsKept" /> runs of the one that took it, and how
+    /// many listed databases no run has checked and this run did not set out to. Forgets every result of a database no longer
+    /// listed.
     /// </summary>
     /// <param name="listed">This run's listing.</param>
     /// <param name="attempted">The keys this run set out to sweep, whether or not it finished.</param>
-    /// <param name="now">The time.</param>
-    /// <param name="window">How old a result may be.</param>
+    /// <param name="runsKept">For how many runs a result is reported (<see cref="HealthExportPlan.RunsKept" />).</param>
     public (IReadOnlyList<HealthExportDatabaseResult> Latest, int Skipped) Collect(
         IReadOnlyList<StudioListedDatabase> listed,
         IReadOnlySet<string> attempted,
-        DateTimeOffset now,
-        TimeSpan window)
+        int runsKept)
     {
         ArgumentNullException.ThrowIfNull(listed);
         ArgumentNullException.ThrowIfNull(attempted);
+        ArgumentOutOfRangeException.ThrowIfLessThan(runsKept, 1);
 
         HashSet<string> keys = new(listed.Select(KeyOf), StringComparer.OrdinalIgnoreCase);
 
@@ -622,9 +628,13 @@ internal sealed class HealthExportRotation
 
         foreach (string key in keys)
         {
-            if (latest.TryGetValue(key, out HealthExportDatabaseResult? result) && now - result.MeasuredAt < window)
+            if (latest.TryGetValue(key, out (HealthExportDatabaseResult Result, long Run) kept))
             {
-                reported.Add(result);
+                // Checked before: reported while young enough, and never skipped - the rotation comes back to it.
+                if (run - kept.Run < runsKept)
+                {
+                    reported.Add(kept.Result);
+                }
             }
             else if (!attempted.Contains(key))
             {

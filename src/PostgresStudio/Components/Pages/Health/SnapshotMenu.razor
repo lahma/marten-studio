@@ -1,4 +1,5 @@
 @using Microsoft.Extensions.DependencyInjection
+@using Microsoft.Extensions.Logging
 @using PostgresStudio.Components.Json
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
@@ -8,6 +9,7 @@
 @inject IServiceProvider Services
 @inject StudioState State
 @inject IJSRuntime JsRuntime
+@inject ILogger<SnapshotMenu> Logger
 
 @*
     The Health page's Snapshot menu (W5-API, API design §2.4 and §4.3): what this visitor's pages show of the database, as one
@@ -90,11 +92,12 @@
         {
             return null;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // The page services answer a failure as a value; anything that still escapes is a bug, and its words are not
-            // the visitor's to read - the server log has it.
-            message = "The snapshot could not be built.";
+            // the visitor's to read - the server log has it, once per click.
+            Logger.LogWarning(exception, "The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built", scope.StoreKey, scope.DatabaseId);
+            message = "The snapshot could not be built; the server log has why.";
             return null;
         }
     }
@@ -131,8 +134,8 @@
 
         try
         {
-            await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, snapshot.FileName, "application/json", snapshot.Json);
-            message = "Saved " + snapshot.FileName + ".";
+            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, snapshot.FileName, "application/json", snapshot.Json);
+            message = saved ? "Saved " + snapshot.FileName + "." : "The browser did not save the file.";
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
         {

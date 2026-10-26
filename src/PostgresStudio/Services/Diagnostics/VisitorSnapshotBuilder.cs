@@ -98,7 +98,13 @@ internal sealed class VisitorSnapshotBuilder
         StatementsView statementsView = await statements.GetLatestAsync(scope, cancellationToken).ConfigureAwait(false);
         ServerPageView serverView = await server.GetAsync(scope, cancellationToken).ConfigureAwait(false);
         SessionActivitySummary summary = await sessions.GetSummaryAsync(scope, cancellationToken).ConfigureAwait(false);
-        SessionActivityDetails details = await sessions.GetDetailsAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        // The details only for a visitor the summary says may have them, as Database > Sessions asks: a closed gate is the
+        // summary's sentence, never a refused request - D27's "using a page whose gate is closed refuses nothing", so no
+        // audit entry and no 9202/9203 for a click on the menu.
+        SessionActivityDetails details = summary is { Refusal: DatabaseRefusal.None, Details.IsOpen: true }
+            ? await sessions.GetDetailsAsync(scope, cancellationToken).ConfigureAwait(false)
+            : NotAsked(summary);
 
         DateTimeOffset now = timeProvider.GetUtcNow();
         PostgresDiagnosticsSnapshot snapshot = Compose(
@@ -114,6 +120,21 @@ internal sealed class VisitorSnapshotBuilder
             now);
 
         return new VisitorSnapshot(snapshot.ToJson(), FileName(descriptor.Key, scope.StoreKey, scope.DatabaseId, now));
+    }
+
+    /// <summary>
+    /// The details a visitor the summary already shuts out is not asked for: refused with the summary's own sentence - what it
+    /// would take, naming the option or the policy - so the file says why without the service recording a refusal.
+    /// </summary>
+    internal static SessionActivityDetails NotAsked(SessionActivitySummary summary)
+    {
+        ArgumentNullException.ThrowIfNull(summary);
+
+        DatabaseRefusal refusal = summary.Refusal != DatabaseRefusal.None
+            ? summary.Refusal
+            : summary.Details.Refusal != DatabaseRefusal.None ? summary.Details.Refusal : DatabaseRefusal.WritePolicy;
+
+        return SessionActivityDetails.Refused(refusal, summary.Details.Denial ?? summary.Reason ?? "withheld");
     }
 
     /// <summary>

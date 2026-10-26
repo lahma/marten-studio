@@ -303,6 +303,8 @@ public class LogLevelsTests
             "A section the diagnostics API was asked for failed by connection, an unexpected SQLSTATE or a reader that threw; a host polls, so Warning once per source, database and kind in ten minutes, and privilege and timeouts are Debug."),
         ["src/PostgresStudio/Services/PostgresStudioLog.Diagnostics.cs : 9251 PostgresStudioDiagnosticsSectionFailed"] = (Verdict.Throttled,
             "9251 in Postgres Studio's words: a section of a diagnostics snapshot failed, asked as often as the host polls."),
+        ["src/PostgresStudio/Components/Pages/Health/SnapshotMenu.razor : The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built"] = (Verdict.VisitorAction,
+            "The Snapshot menu's builder threw, which the page services never should: one line per click, and the menu says it failed."),
     };
 
     [Fact]

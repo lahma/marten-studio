@@ -12,8 +12,13 @@ namespace PostgresStudio.Services.Diagnostics;
 /// </para>
 /// <para>
 /// <b>Never the pages'.</b> A page's sweep and a page's facts read do not come through here, so a visitor is never queued
-/// behind a host's batch. A permit is held for the caller's wait: a caller that gives up releases it, and the shared read it
-/// started goes on under no caller's token, as every cache here runs its work.
+/// behind a host's batch.
+/// </para>
+/// <para>
+/// <b>A permit is the read's, not the caller's.</b> The read runs under no caller's token, as every cache here runs its work,
+/// and its permit comes back when it finishes - never when the caller that started it gives up waiting. A caller that cancels
+/// stops waiting at once; the read it started goes on holding its connection, and so its permit, so callers that cancel and
+/// call again still have at most two reads running.
 /// </para>
 /// </remarks>
 internal sealed class FreshReadLimiter : IDisposable
@@ -24,6 +29,7 @@ internal sealed class FreshReadLimiter : IDisposable
     private readonly SemaphoreSlim permits;
     private int running;
     private int mostRunning;
+    private bool disposed;
 
     /// <param name="concurrency">How many fresh reads may run at once; <see cref="DefaultConcurrency" /> in a host.</param>
     public FreshReadLimiter(int concurrency = DefaultConcurrency)
@@ -47,7 +53,10 @@ internal sealed class FreshReadLimiter : IDisposable
     /// <typeparam name="T">What the read answers.</typeparam>
     /// <param name="cached">Whether the read would be answered from a cache, asked before a permit is taken.</param>
     /// <param name="read">The read.</param>
-    /// <param name="cancellationToken">Cancels this caller's wait for a permit, and its wait for the read.</param>
+    /// <param name="cancellationToken">
+    /// Cancels this caller's wait for a permit, and its wait for the read - never the read itself once it has started, which is
+    /// handed <see cref="CancellationToken.None" /> and keeps its permit until it finishes.
+    /// </param>
     public async Task<T> RunAsync<T>(bool cached, Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(read);
@@ -68,17 +77,55 @@ internal sealed class FreshReadLimiter : IDisposable
             }
         }
 
+        // The read runs under no caller's token and holds its permit until it finishes, however soon the caller stops waiting:
+        // a read a cancelled caller started still holds a connection, so releasing its permit early would let the next caller
+        // start a third (W5-API-fix F2).
+        Task<T> work;
+
         try
         {
-            return await read(cancellationToken).ConfigureAwait(false);
+            work = read(CancellationToken.None);
         }
-        finally
+        catch
         {
-            Interlocked.Decrement(ref running);
-            permits.Release();
+            Done();
+            throw;
         }
+
+        _ = work.ContinueWith(
+            static (_, state) => ((FreshReadLimiter) state!).Done(),
+            this,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+        return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public void Dispose() => permits.Dispose();
+    public void Dispose()
+    {
+        Volatile.Write(ref disposed, true);
+        permits.Dispose();
+    }
+
+    /// <summary>A read finished, however it ended: its permit goes back - unless the process is shutting the limiter down.</summary>
+    private void Done()
+    {
+        Interlocked.Decrement(ref running);
+
+        if (Volatile.Read(ref disposed))
+        {
+            return;
+        }
+
+        try
+        {
+            permits.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Disposed between the check and the release, at shutdown: nobody is waiting for the permit any more.
+        }
+    }
 }

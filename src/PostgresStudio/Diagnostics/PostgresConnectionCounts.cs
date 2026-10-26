@@ -18,7 +18,10 @@ public sealed record PostgresConnectionCounts
     /// <summary>Idle inside a transaction, aborted ones included.</summary>
     public int IdleInTransaction { get; init; }
 
-    /// <summary>Waiting on a lock.</summary>
+    /// <summary>
+    /// Waiting on a lock: a subset of <see cref="Active" />, never added to it - a session waits for a lock only while it runs
+    /// a statement, so <c>Active + Idle + IdleInTransaction + StateUnknown</c> is at most <see cref="Total" /> without it.
+    /// </summary>
     public int Waiting { get; init; }
 
     /// <summary>

@@ -1,6 +1,9 @@
 using Bunit;
 
+using MartenStudio.Tests.Support;
+
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using PostgresStudio.Components.Pages.Health;
 using PostgresStudio.Services;
@@ -48,7 +51,7 @@ public class SnapshotMenuTests
             Task.FromResult(new ServerPageView { MeasuredAt = DateTimeOffset.UnixEpoch });
     }
 
-    private static async Task<(PostgresStudioComponentContext Context, FakeStatements Statements)> ContextAsync()
+    private static async Task<(PostgresStudioComponentContext Context, FakeStatements Statements)> ContextAsync(Action<IServiceCollection>? more = null)
     {
         FakeStatements statements = new();
 
@@ -58,6 +61,7 @@ public class SnapshotMenuTests
             services.AddSingleton<IServerPageService>(new FakeServer());
             services.AddSingleton(new HealthCheckRegistry(PostgresStudioDescriptor.Instance));
             services.AddScoped<VisitorSnapshotBuilder>();
+            more?.Invoke(services);
         });
 
         context.Health.WithFindings(MartenStudio.Tests.Health.FakeHealthService.Finding("T01", HealthSeverity.Warning, "A table is read whole", HealthArea.Tables));
@@ -77,6 +81,8 @@ public class SnapshotMenuTests
         (PostgresStudioComponentContext context, FakeStatements statements) = await ContextAsync();
         await using PostgresStudioComponentContext owned = context;
 
+        context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
+
         IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
         await SelectAsync(menu, "Download JSON");
 
@@ -95,7 +101,51 @@ public class SnapshotMenuTests
 
         statements.Reads.Should().Be(0, "a snapshot never starts a statement sweep the visitor did not start");
         statements.Latest.Should().Be(1);
-        menu.Find(".ms-snapshot-message").TextContent.Should().Contain(fileName);
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("Saved " + fileName + ".");
+    }
+
+    /// <summary>W5-API-fix F4: a download the browser refused is never reported as saved.</summary>
+    [Fact]
+    public async Task A_download_the_browser_did_not_save_is_not_called_saved()
+    {
+        (PostgresStudioComponentContext context, _) = await ContextAsync();
+        await using PostgresStudioComponentContext owned = context;
+
+        context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(false);
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+        await SelectAsync(menu, "Download JSON");
+
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("The browser did not save the file.");
+    }
+
+    /// <summary>W5-API-fix F4: a builder that throws is logged at Warning, once, and the visitor is told only that it failed.</summary>
+    [Fact]
+    public async Task A_snapshot_that_cannot_be_built_is_logged_and_says_so_without_the_exceptions_words()
+    {
+        CapturingLoggerProvider logs = new();
+        (PostgresStudioComponentContext context, _) = await ContextAsync(services =>
+        {
+            services.AddSingleton<IServerPageService>(new ThrowingServer());
+            services.AddLogging(builder => builder.AddProvider(logs));
+        });
+        await using PostgresStudioComponentContext owned = context;
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+        await SelectAsync(menu, "View JSON");
+
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("The snapshot could not be built; the server log has why.")
+            .And.NotContain(ThrowingServer.Words);
+        menu.FindAll(".ms-snapshot-view").Should().BeEmpty();
+        logs.Entries.Should().ContainSingle(static x => x.Level == LogLevel.Warning && x.Message.Contains("could not be built", StringComparison.Ordinal));
+    }
+
+    private sealed class ThrowingServer : IServerPageService
+    {
+        public const string Words = "SENTINEL-EXCEPTION-WORDS";
+
+        public Task<ServerPageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(Words);
     }
 
     [Fact]

@@ -221,9 +221,11 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             : null;
         PostgresComputeCapacity? compute = await ComputeAsync(regular, resolved, facts, cancellationToken).ConfigureAwait(false);
 
+        bool reached = Reached(regular, out string? unreachable);
+
         snapshot = snapshot with
         {
-            Outcome = Reached(regular, out string? unreachable) ? PostgresReadOutcome.Read : PostgresReadOutcome.Failed,
+            Outcome = reached ? PostgresReadOutcome.Read : PostgresReadOutcome.Failed,
             Reason = unreachable,
             Server = server,
             Compute = compute,
@@ -233,13 +235,16 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         {
             List<HealthCheckResult> results = [.. regular.Results];
 
-            if (registry.HasTier(HealthCostTier.BoundedData, kind)
+            // A database the regular sweep could not reach is asked nothing more: no costlier sweep is started or read.
+            if (reached
+                && registry.HasTier(HealthCostTier.BoundedData, kind)
                 && await CostlierAsync(resolved, HealthSweepKind.Deeper, request.RunDeeperChecks, cancellationToken).ConfigureAwait(false) is { } deeper)
             {
                 results.AddRange(deeper.Results);
             }
 
-            if (registry.HasTier(HealthCostTier.Statements, kind)
+            if (reached
+                && registry.HasTier(HealthCostTier.Statements, kind)
                 && request.IncludeActivity
                 && await CostlierAsync(resolved, HealthSweepKind.Statements, request.RunDeeperChecks, cancellationToken).ConfigureAwait(false) is { } statements)
             {
@@ -264,6 +269,13 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
                 FindingsMeasuredAt = regular.MeasuredAt,
                 FindingsWithheld = count,
             };
+        }
+
+        if (!reached)
+        {
+            // Every check that reads the catalog already failed to connect: each section asked for says so, without a second
+            // failed connection per section and without a 9251 Warning per section for what the sweep has already logged.
+            return Unreached(snapshot, request, timeProvider.GetUtcNow());
         }
 
         if (request.Storage)
@@ -324,6 +336,49 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
 
         HealthSweep? recent = cache.Latest(storeKey, databaseId, kind);
         return recent is not null && cache.Now - recent.MeasuredAt < HealthSweepCache.DeeperTimeToLive ? recent : null;
+    }
+
+    /// <summary>What each section a snapshot of an unreached database was asked for says, in place of reading it.</summary>
+    internal const string NotReachedSection = "Not read: the studio could not reach this database (the snapshot's Reason says why).";
+
+    /// <summary>
+    /// A snapshot of a database the regular sweep could not reach: every section asked for is there, <see cref="PostgresReadOutcome.Failed" />
+    /// with <see cref="NotReachedSection" />, and nothing is read for it; the Activity-grade ones the request did not include are
+    /// named in <see cref="PostgresDiagnosticsSnapshot.Withheld" /> as on any other call.
+    /// </summary>
+    internal static PostgresDiagnosticsSnapshot Unreached(PostgresDiagnosticsSnapshot snapshot, PostgresDiagnosticsRequest request, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(request);
+
+        Dictionary<string, string> withheld = new(StringComparer.Ordinal);
+
+        if (request.Statements && !request.IncludeActivity)
+        {
+            withheld["statements"] = HostGate.WithheldSection;
+        }
+
+        if (request.Connections && !request.IncludeActivity)
+        {
+            withheld["connections.byApplication"] = HostGate.WithheldSection;
+        }
+
+        return snapshot with
+        {
+            Storage = request.Storage
+                ? new PostgresStorageSection { Outcome = PostgresReadOutcome.Failed, Reason = NotReachedSection, MeasuredAt = now }
+                : null,
+            Statements = request.Statements && request.IncludeActivity
+                ? new PostgresStatementsSection { Outcome = PostgresReadOutcome.Failed, Reason = NotReachedSection, MeasuredAt = now }
+                : null,
+            Settings = request.Settings
+                ? new PostgresSettingsSection { Outcome = PostgresReadOutcome.Failed, Reason = NotReachedSection, MeasuredAt = now }
+                : null,
+            Connections = request.Connections
+                ? new PostgresConnectionsSection { Outcome = PostgresReadOutcome.Failed, Reason = NotReachedSection, MeasuredAt = now }
+                : null,
+            Withheld = withheld,
+        };
     }
 
     /// <summary>

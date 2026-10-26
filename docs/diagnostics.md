@@ -88,7 +88,9 @@ section. A section not asked for is `null`.
 
 A section that could not be read is still there, with its own `Outcome` and `Reason`: a privilege the role lacks or a
 statement timeout is `Unavailable` or `TimedOut`, anything else `Failed` with the SQLSTATE. The rest of the snapshot is
-answered all the same.
+answered all the same. When the database cannot be reached at all - every check that reads the catalog failed to - the
+snapshot's own `Outcome` is `Failed`, and each section asked for is there as `Failed` without being read, so a database
+that is down costs one failed sweep, not one failed connection per section.
 
 ### Findings and codes
 
@@ -153,7 +155,8 @@ An API nobody calls reads nothing. A call shares the pages' single-flight caches
 `HealthInterval` old, and the costlier sweeps - the deeper checks and the statement checks - are read from a recent run
 unless `RunDeeperChecks` asks for one. So an application polling every few seconds costs one sweep per interval per
 database. Fresh reads started by API calls - a sweep or a section read the caches do not hold - run **at most two at a
-time** in the process, so a loop over hundreds of databases costs two connections at a time.
+time** in the process, so a loop over hundreds of databases costs two connections at a time. Cancelling a call stops its
+wait at once; a read it already started finishes for the caches and keeps its place among the two until it does.
 
 A snapshot never changes anything: no DDL, no settings, no `pg_stat_reset`. An `IPostgresDatabaseSource` must list its
 databases without creating anything, and its names are identities: they key policies, history and mutes, and survive a

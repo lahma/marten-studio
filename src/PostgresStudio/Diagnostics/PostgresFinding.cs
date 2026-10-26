@@ -42,7 +42,7 @@ public sealed record PostgresFinding
     /// <summary>The check's area.</summary>
     public PostgresFindingCategory Category { get; init; }
 
-    /// <summary>One English sentence. A fallback for a code the host has no wording for.</summary>
+    /// <summary>One English sentence, in this studio's own words. A fallback for a code the host has no wording for.</summary>
     public string Title { get; init; } = "";
 
     /// <summary>Why it matters, in English.</summary>

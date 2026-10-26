@@ -396,6 +396,11 @@ internal sealed class HealthSweeper
             }
         }
 
+        // The database is still in use, and about to have its history, its texts and its cache slot written: touched again, so
+        // a database other sweeps evicted while this one gathered is tracked once more rather than left holding state the bound
+        // no longer knows of (W5-API-fix F7).
+        bound?.Touch(storeKey, databaseId);
+
         // Phase 2: one sample, from every check that read something - a regular sweep's into the database's history,
         // a statement sweep's into a history of its own that only statement sweeps read, and a deeper sweep's nowhere -
         // so that nothing a gated tier reads becomes history an ungated evaluator can see.

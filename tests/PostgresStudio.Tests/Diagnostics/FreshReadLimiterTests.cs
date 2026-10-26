@@ -71,6 +71,45 @@ public class FreshReadLimiterTests
         (await limiter.RunAsync(cached: false, static _ => Task.FromResult(2), Token)).Should().Be(2, "the one permit came back once");
     }
 
+    /// <summary>
+    /// W5-API-fix F2: a caller that cancels stops waiting at once, but the read it started still holds its connection - so its
+    /// permit is held until that read finishes, and a caller that cancels and calls again cannot start a third read.
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_caller_does_not_free_the_permit_until_its_read_finishes()
+    {
+        using FreshReadLimiter limiter = new(concurrency: 1);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken readToken = new(canceled: true);
+
+        using CancellationTokenSource impatient = new();
+        Task<int> first = limiter.RunAsync(cached: false, async token =>
+        {
+            readToken = token;
+            await release.Task;
+            return 1;
+        }, impatient.Token);
+
+        await impatient.CancelAsync();
+        await FluentActions.Awaiting(() => first).Should().ThrowAsync<OperationCanceledException>("the caller stops waiting at once");
+        readToken.CanBeCanceled.Should().BeFalse("the read runs under no caller's token");
+
+        int secondStarted = 0;
+        Task<int> second = limiter.RunAsync(cached: false, _ =>
+        {
+            Interlocked.Increment(ref secondStarted);
+            return Task.FromResult(2);
+        }, Token);
+
+        await Task.Yield();
+        second.IsCompleted.Should().BeFalse("the cancelled caller's read still holds the one permit");
+        Volatile.Read(ref secondStarted).Should().Be(0);
+
+        release.SetResult();
+        (await second.WaitAsync(TimeSpan.FromSeconds(10), Token)).Should().Be(2, "the permit came back when the read finished");
+        limiter.MostRunning.Should().Be(1, "never two at once on one permit");
+    }
+
     [Fact]
     public void The_host_limit_is_two() => new FreshReadLimiter().Concurrency.Should().Be(2);
 

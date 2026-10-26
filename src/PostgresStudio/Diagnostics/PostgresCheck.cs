@@ -11,7 +11,11 @@ public sealed record PostgresCheck
     /// <summary>Its area: the code's letter.</summary>
     public PostgresFindingCategory Category { get; init; }
 
-    /// <summary>What it looks for, in English; also its docs heading.</summary>
+    /// <summary>
+    /// What it looks for, in English and in this studio's own words - Marten Studio's and Postgres Studio's may differ, and
+    /// either may be worded differently from the heading in <c>docs/health/codes.md</c>. Wording, not identity: key your own
+    /// on <see cref="Code" />. The check's documentation is <see cref="DocsUrl" />.
+    /// </summary>
     public string Title { get; init; } = "";
 
     /// <summary>Its variants, frozen; empty for a check with one kind of finding, whose findings carry none.</summary>

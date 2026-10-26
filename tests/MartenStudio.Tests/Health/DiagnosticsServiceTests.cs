@@ -161,6 +161,41 @@ public class DiagnosticsServiceTests
         snapshot.Connections!.Outcome.Should().NotBe(PostgresReadOutcome.Read);
     }
 
+    /// <summary>
+    /// W5-API-fix F6: when every check that reads the catalog failed to reach the database, the sections asked for are not read
+    /// - each says so - so a dead database costs no further failed connection and no 9251 Warning per section.
+    /// </summary>
+    [Fact]
+    public async Task A_database_the_sweep_could_not_reach_is_asked_nothing_more()
+    {
+        await using HealthHarness harness = HealthHarness.Create(checks: [typeof(ScriptedConfigurationCheck), typeof(ScriptedCatalogCheck), typeof(ScriptedDeeperCheck)]);
+        harness.Script.Throws("T90", new Npgsql.NpgsqlException("SENTINEL-CONNECTION-WORDS", new System.Net.Sockets.SocketException(10061)));
+
+        PostgresDiagnosticsSnapshot snapshot = await Diagnostics(harness).GetSnapshotAsync(
+            Database(harness),
+            PostgresDiagnosticsRequest.AllSections with { IncludeActivity = true, RunDeeperChecks = true },
+            Token);
+
+        snapshot.Outcome.Should().Be(PostgresReadOutcome.Failed, snapshot.Reason);
+        snapshot.Checks.Single(static x => x.Code == "T90").Outcome.Should().Be(PostgresReadOutcome.Failed);
+
+        foreach ((string Name, PostgresReadOutcome? Outcome, string? Reason) section in new (string, PostgresReadOutcome?, string?)[]
+        {
+            ("storage", snapshot.Storage?.Outcome, snapshot.Storage?.Reason),
+            ("statements", snapshot.Statements?.Outcome, snapshot.Statements?.Reason),
+            ("settings", snapshot.Settings?.Outcome, snapshot.Settings?.Reason),
+            ("connections", snapshot.Connections?.Outcome, snapshot.Connections?.Reason),
+        })
+        {
+            section.Outcome.Should().Be(PostgresReadOutcome.Failed, section.Name + " is there, and says it was not read");
+            section.Reason.Should().Be(PostgresDiagnosticsService.NotReachedSection, section.Name);
+        }
+
+        snapshot.ToJson().Should().NotContain("SENTINEL-CONNECTION-WORDS");
+        harness.Logs.Entries.Should().NotContain(static x => x.EventId.Id == 9251, "no section was read, so none failed");
+        harness.Script.Runs.Should().NotContainKey("E90", "no costlier sweep is started for a database that cannot be reached");
+    }
+
     [Fact]
     public async Task A_call_is_logged_at_Debug_with_codes_and_counts_and_never_higher()
     {

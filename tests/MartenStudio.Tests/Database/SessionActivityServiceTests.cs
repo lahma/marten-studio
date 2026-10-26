@@ -8,6 +8,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using Npgsql;
 using PostgresStudio.Services;
@@ -126,6 +127,37 @@ public class SessionActivityServiceTests
         entry.Capability.Should().Be(nameof(StudioCapability.ViewDatabaseActivity));
         harness.Policies.Calls.Should().BeEmpty("a capability that is off is answered before anybody is asked who is asking");
         harness.Reader.Reads.Should().Be(0);
+    }
+
+    /// <summary>
+    /// W5-API-fix F1: the Health page's Snapshot download, built by a visitor short of <c>ViewDatabaseActivity</c>, asks the
+    /// details nothing - the summary already says the gate is shut - so a click on the menu records no refusal: no ring entry
+    /// and no 9202 (D27: using a page whose gate is closed refuses nothing). The same visitor asking the details directly is
+    /// refused and audited, which is what makes this a test of the builder rather than of a quiet service.
+    /// </summary>
+    [Fact]
+    public async Task The_snapshot_download_asks_no_details_of_a_visitor_the_summary_shuts_out()
+    {
+        CapturingLoggerProvider logs = new();
+        await using Harness harness = Harness.Create(static options => options.Capabilities = new MartenStudioCapabilities(), policies: true, logs: logs);
+        await using AsyncServiceScope circuit = harness.Provider.CreateAsyncScope();
+
+        PostgresStudio.Services.Diagnostics.VisitorSnapshot snapshot = await circuit.ServiceProvider
+            .GetRequiredService<PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder>()
+            .BuildAsync(Scope, Token);
+
+        harness.Ring.Should().BeEmpty("the menu's click refuses nothing");
+        logs.Entries.Should().NotContain(static x => x.EventId.Id == 9202 || x.EventId.Id == 9203);
+
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(snapshot.Json);
+        document.RootElement.GetProperty("withheld").GetProperty("connections.byApplication").GetString()
+            .Should().Contain("MartenStudioOptions.Capabilities.ViewDatabaseActivity", "the summary's own sentence says what the names need");
+        document.RootElement.GetProperty("connections").GetProperty("database").GetProperty("total").GetInt32().Should().Be(3);
+
+        // The anti-vacuity half: the details asked for directly are refused, audited and logged.
+        await circuit.ServiceProvider.GetRequiredService<ISessionActivityService>().GetDetailsAsync(Scope, Token);
+        harness.Ring.Should().ContainSingle();
+        logs.Entries.Should().Contain(static x => x.EventId.Id == 9202);
     }
 
     [Fact]
@@ -385,7 +417,11 @@ public class SessionActivityServiceTests
         /// <summary>The store's one database's own identity, which an empty <c>?db=</c> resolves to.</summary>
         public string Identity => Provider.GetRequiredService<IDocumentStore>().Storage.Database.Id.Identity;
 
-        public static Harness Create(Action<MartenStudioOptions> configure, bool policies = false, bool otherStore = false)
+        public static Harness Create(
+            Action<MartenStudioOptions> configure,
+            bool policies = false,
+            bool otherStore = false,
+            CapturingLoggerProvider? logs = null)
         {
             TestAuthenticationStateProvider users = new();
             users.SignIn("operator");
@@ -394,7 +430,14 @@ public class SessionActivityServiceTests
             FakeSessionActivityReader reader = new();
 
             ServiceCollection services = new();
-            services.AddLogging();
+            services.AddLogging(builder =>
+            {
+                if (logs is not null)
+                {
+                    builder.SetMinimumLevel(LogLevel.Trace);
+                    builder.AddProvider(logs);
+                }
+            });
             services.AddMarten(static options =>
             {
                 options.Connection(HealthHarness.RefusedConnectionString);

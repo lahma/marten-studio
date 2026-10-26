@@ -84,6 +84,37 @@ public class HealthDatabaseBoundTests
         harness.Cache.SweepCount.Should().Be(before + 1, "read again, it is swept again");
     }
 
+    /// <summary>
+    /// W5-API-fix F7: a database evicted while its own sweep was gathering - other databases used in the meantime - is touched
+    /// again before the sweep writes its history and its slot, so what the sweep writes is tracked and is forgotten with it the
+    /// next time it is the least recently used, rather than kept for ever outside the bound.
+    /// </summary>
+    [Fact]
+    public async Task A_database_evicted_mid_sweep_is_tracked_again_when_its_sweep_writes()
+    {
+        await using HealthHarness harness = HealthHarness.Create(before: static services => services.AddSingleton(new HealthDatabaseBound(capacity: 1)));
+        HealthDatabaseBound bound = harness.Services.GetRequiredService<HealthDatabaseBound>();
+
+        // While the sweep gathers, another database is used, which evicts this one.
+        harness.Script.Gather["T90"] = (_, _) =>
+        {
+            bound.Touch("tenants", "acme");
+            return Task.FromResult(new ScriptedFacts("T90", [], null));
+        };
+
+        HealthSweep sweep = await harness.Cache.GetAsync(harness.Resolved, HealthSweepKind.Regular, null, TestContext.Current.CancellationToken);
+
+        harness.History.Read(sweep.StoreKey, sweep.DatabaseId).Since.Should().NotBeNull("the sweep wrote its history");
+        harness.Cache.Latest(sweep.StoreKey, sweep.DatabaseId).Should().BeSameAs(sweep);
+        bound.Count.Should().Be(1);
+
+        // The next database used evicts this one - which it can only do if the bound tracks it again.
+        bound.Touch("tenants", "globex");
+
+        harness.History.Read(sweep.StoreKey, sweep.DatabaseId).Since.Should().BeNull("its history went with it, as the bound promises");
+        harness.Cache.Latest(sweep.StoreKey, sweep.DatabaseId).Should().BeNull("and its slot");
+    }
+
     [Fact]
     public void The_host_bound_is_sixty_four_databases()
     {

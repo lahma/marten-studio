@@ -66,11 +66,11 @@ public class HealthExportRotationTests
 
         Names(plan).Should().Equal("admin/admin", "tenants/t1", "tenants/t2");
         plan.RunsPerRotation.Should().Be(1);
-        plan.Window(TimeSpan.FromMinutes(1)).Should().Be(TimeSpan.FromMinutes(2), "one rotation and one interval");
+        plan.RunsKept.Should().Be(2, "one rotation and one run more");
     }
 
     [Fact]
-    public void The_window_is_one_rotation_and_one_interval()
+    public void A_result_is_kept_for_one_rotation_and_one_run_more()
     {
         HealthExportRotation rotation = new();
         StudioListedDatabase[] listed = [Single(Admin, "admin"), .. Enumerable.Range(1, 200).Select(static x => Many(Tenants, "t" + x))];
@@ -79,7 +79,7 @@ public class HealthExportRotationTests
 
         plan.Targets.Should().HaveCount(25);
         plan.RunsPerRotation.Should().Be(9, "two hundred tenants, twenty-four a run after the admin database");
-        plan.Window(TimeSpan.FromMinutes(1)).Should().Be(TimeSpan.FromMinutes(10));
+        plan.RunsKept.Should().Be(10);
     }
 
     [Fact]
@@ -94,22 +94,55 @@ public class HealthExportRotationTests
     }
 
     [Fact]
-    public void A_latest_result_is_reported_while_young_enough_and_a_database_no_run_reached_is_skipped()
+    public void A_latest_result_is_reported_for_its_runs_and_only_a_database_never_checked_is_skipped()
     {
         HealthExportRotation rotation = new();
         StudioListedDatabase[] listed = [Many(Tenants, "t1"), Many(Tenants, "t2"), Many(Tenants, "t3")];
-        TimeSpan window = TimeSpan.FromMinutes(3);
+        const int RunsKept = 2;
 
-        rotation.Remember(HealthExportRotation.KeyOf(listed[0]), Result(Now.AddMinutes(-1), critical: 1));
-        rotation.Remember(HealthExportRotation.KeyOf(listed[1]), Result(Now.AddMinutes(-4)));
+        rotation.Plan(listed, 1);
+        rotation.Remember(HealthExportRotation.KeyOf(listed[1]), Result(Now.AddHours(-1)));
+        rotation.Plan(listed, 1);
+        rotation.Plan(listed, 1);
+        rotation.Remember(HealthExportRotation.KeyOf(listed[0]), Result(Now, critical: 1));
 
-        (IReadOnlyList<HealthExportDatabaseResult> latest, int skipped) = rotation.Collect(listed, new HashSet<string>(), Now, window);
+        (IReadOnlyList<HealthExportDatabaseResult> latest, int skipped) = rotation.Collect(listed, new HashSet<string>(), RunsKept);
 
         latest.Should().ContainSingle().Which.Checks.Should().ContainSingle(static x => x.Critical == 1, "a finding stays reported until a sweep clears it");
-        skipped.Should().Be(2, "one too old to report and one never checked, and this run reached neither");
+        skipped.Should().Be(1, "t2 was checked two runs ago - aged out, but checked, so not skipped; only t3 was never checked");
 
-        (_, int attemptedNotSkipped) = rotation.Collect(listed, new HashSet<string> { HealthExportRotation.KeyOf(listed[2]) }, Now, window);
-        attemptedNotSkipped.Should().Be(1, "a database this run set out to check is the run's to count, as timed out or not reached");
+        (_, int attemptedNotSkipped) = rotation.Collect(listed, new HashSet<string> { HealthExportRotation.KeyOf(listed[2]) }, RunsKept);
+        attemptedNotSkipped.Should().Be(0, "a database this run set out to check is the run's to count, as timed out or not reached");
+    }
+
+    /// <summary>
+    /// W5-API-fix F3: the window is counted in runs, so a run that takes far longer than an interval - slow databases, a big
+    /// rotation - does not age a result out before the rotation comes back to it. Ten runs, each an hour long on the clock.
+    /// </summary>
+    [Fact]
+    public void A_slow_run_does_not_age_a_result_out_before_the_rotation_returns()
+    {
+        HealthExportRotation rotation = new();
+        StudioListedDatabase[] listed = [.. Enumerable.Range(1, 6).Select(static x => Many(Tenants, "t" + x))];
+        DateTimeOffset clock = Now;
+
+        for (int i = 1; i <= 10; i++)
+        {
+            HealthExportPlan plan = rotation.Plan(listed, 2);
+            plan.RunsPerRotation.Should().Be(3);
+
+            foreach (StudioListedDatabase target in plan.Targets)
+            {
+                clock = clock.AddMinutes(30);
+                rotation.Remember(HealthExportRotation.KeyOf(target), Result(clock, critical: 1));
+            }
+
+            (IReadOnlyList<HealthExportDatabaseResult> latest, int skipped) =
+                rotation.Collect(listed, new HashSet<string>(plan.Targets.Select(HealthExportRotation.KeyOf)), plan.RunsKept);
+
+            latest.Should().HaveCount(Math.Min(6, 2 * i), "run " + i + ": every database checked so far is still reported");
+            skipped.Should().Be(Math.Max(0, 6 - (2 * i)), "run " + i + ": only the databases no run has reached yet");
+        }
     }
 
     [Fact]
@@ -119,9 +152,48 @@ public class HealthExportRotationTests
         StudioListedDatabase gone = Many(Tenants, "gone");
         rotation.Remember(HealthExportRotation.KeyOf(gone), Result(Now));
 
-        rotation.Collect([Many(Tenants, "t1")], new HashSet<string>(), Now, TimeSpan.FromMinutes(2));
+        rotation.Collect([Many(Tenants, "t1")], new HashSet<string>(), 2);
 
         rotation.Remembered.Should().Be(0, "its memory goes with it: the export holds a result only for a database a source lists");
+    }
+
+    /// <summary>
+    /// W5-API-fix F3, through the runner: each database's sweep takes 45 s on the clock, so a run of two takes 90 s - longer
+    /// than the 60 s interval. A window counted in time (a rotation and an interval, 180 s) aged the first run's second
+    /// database out before the second run's collect; counted in runs, all three are reported and none is skipped.
+    /// </summary>
+    [Fact]
+    public async Task Slow_runs_keep_every_checked_database_reported()
+    {
+        await using HealthExportHarness harness = HealthExportHarness.Create(
+            checks: [typeof(ScriptedConfigurationCheck)],
+            limits: new HealthExportLimits(MaxDatabases: 2),
+            tenancy: static options => options.MultiTenantedDatabases(static tenancy =>
+            {
+                tenancy.AddSingleTenantDatabase(HealthExportHarness.Refused("export_slow_a"), "a");
+                tenancy.AddSingleTenantDatabase(HealthExportHarness.Refused("export_slow_b"), "b");
+                tenancy.AddSingleTenantDatabase(HealthExportHarness.Refused("export_slow_c"), "c");
+            }));
+
+        harness.Script.Finds("K90", HealthSeverity.Critical);
+        harness.Script.Gather["K90"] = (_, _) =>
+        {
+            harness.Clock.Advance(TimeSpan.FromSeconds(45));
+            return Task.FromResult(new ScriptedFacts("K90", [], null));
+        };
+
+        HealthReportEntry first = await harness.ProbeAsync();
+        first.Data["databases"].Should().Be(2);
+
+        harness.Clock.Advance(TimeSpan.FromSeconds(61));
+        await harness.ProbeAsync();
+        await harness.Runner.WhenIdleAsync();
+
+        HealthReportEntry second = await harness.ProbeAsync();
+
+        second.Data["databases"].Should().Be(3, "the first run's databases are within one rotation and one run of it, however long the runs took");
+        second.Data["databasesSkipped"].Should().Be(0);
+        ((string[]) second.Data["critical"]).Should().Equal("K90");
     }
 
     [Fact]
