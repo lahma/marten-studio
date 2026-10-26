@@ -116,8 +116,9 @@ internal interface IStudioTableSet
 /// <para>
 /// <b>Whole-database scope is the contract (issue #8, G1).</b> A source answers every table of the database it can
 /// classify, each marked <see cref="StudioTableOwnership" />: the source's own, a recognised library's, or somebody
-/// else's. MartenStudio's implementation still answers only the tables its store declares, which is 0.4's behaviour;
-/// widening it to the whole database, with the store's declarations laid over the catalog, is a later packet's (G1-M).
+/// else's. Postgres Studio's answers every table of the schemas <c>BrowsableSchemas</c> admits; MartenStudio's lays its
+/// store's declarations over the catalog - the declared tables exactly as before, and every other table of the store's
+/// own schemas and of the ones the database browser admits beside them, another registered store's left out.
 /// </para>
 /// <para>
 /// <b>What it must not do.</b> Read the set without a statement where it can (a store's configuration, the database

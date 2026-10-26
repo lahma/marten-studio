@@ -9,35 +9,61 @@ statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`
 
 What every check here has in common:
 
-- **A "Marten table" is one the store's configuration declares**: a document type's table, the event store's
-  tables, a projection's or an `ExtendedSchemaObjects` table, and `mt_hilo` - each in the schema it is
-  declared in, an `ExtendedSchemaObjects` table in a schema of its own included. The list comes from the
-  configuration alone, never from `AllObjects()` or `AllSchemaNames()` (which migrate), and a document type
-  `IsDocumentTypeVisible` hides is left out of it - its table is not even a parameter of a statement. Such a
-  table's schema does not become one of the store's own for the database browser or the Schema screen's lists,
-  so a finding that names it needs the database browser's gate for that schema as well as the check's own:
-  `Capabilities.BrowseDatabase`, the write policy and a `BrowsableSchemas` entry (or `"*"`) that admits it,
-  as the browser asks before it shows that schema at all. Anybody else has the finding counted as not shown
-  to them, and the navigation badge, which cannot ask that gate, counts it as not shown for everybody. T12 and
-  T13, which are about the whole database, stay visible instead and name such a table only as "a
-  Marten-managed table outside the store's own schemas", as a check row's note does.
+- **Every table, with the store's declarations laid over it.** The checks judge every ordinary and partitioned
+  table in the store's own schemas, and - while `Capabilities.BrowseDatabase` is on - in the schemas
+  `BrowsableSchemas` admits (exact names, or `"*"`), not only the tables the store declares.
+  - **A "Marten table" is one the store's configuration declares**: a document type's table, the event store's
+    tables, a projection's or an `ExtendedSchemaObjects` table, and `mt_hilo`. Each is in the schema it is
+    declared in, an `ExtendedSchemaObjects` table in a schema of its own included. That list comes from the
+    configuration alone, never from `AllObjects()` or `AllSchemaNames()` (which migrate). Each declared table is
+    judged exactly as before: its kind, the origin of each of its indexes, and `StoreOptions` remedies. Marten's own
+    event tables and bookkeeping count as the store's own, because their indexes are already told apart by origin.
+  - **Every other table** comes from one catalog statement per sweep, estimates only, which locks nothing it lists.
+    Each one is classified by name:
+    - a table a recognised library names (`qrtz_*`, `wolverine_*`, `__EFMigrationsHistory`, `VersionInfo`, and an
+      `mt_` table nobody declares) is that library's. It is exempt from the index-design rules (T01, T04, T05)
+      only: vacuum, statistics, size and wraparound still apply to it, and a remedy for those says the library's
+      design is left as it is;
+    - any other table in the store's own schemas is the host's own relational table, judged by every rule and given
+      migration SQL "for your own migrations - the studio never runs this";
+    - a table in a schema that only `BrowsableSchemas` admits is somebody else's. It is judged by every rule, with
+      migration SQL only for its upkeep.
+  - **What is left out.** A document type `IsDocumentTypeVisible` hides is left out: its table is not even read
+    while a type may be hidden, because then no table named like a document table is read from the catalog at all.
+    Another registered store's tables are left out too: a sweep has no visitor whose policy for that store it could
+    ask. Past 2,000 tables, the smallest by estimated size are left out, with the store's own tables always kept.
+    What is left out is said in every finding's caveat ("Judged: ..."), as counts and never as names.
+  - **Gated like the database browser.** A table outside the store's own schemas is not in one of the store's own
+    schemas for the database browser or the Schema screen's lists, and that includes an `ExtendedSchemaObjects`
+    table in a schema of its own. So a finding that names it needs the database browser's gate for that schema as
+    well as the check's own: `Capabilities.BrowseDatabase`, the write policy and a `BrowsableSchemas` entry (or
+    `"*"`) that admits it, as the browser asks before it shows that schema at all. Anybody else has the finding
+    counted as not shown to them, and the navigation badge, which cannot ask that gate, counts it as not shown for
+    everybody. T12 and T13, which are about the whole database, stay visible instead. They name such a table only as
+    "a Marten-managed table outside the store's own schemas" or "a table outside the studio's own schemas", as a
+    check row's note does.
 - **One read, shared.** The regular checks share one read of the tables and one of their indexes per sweep,
-  so the whole area costs a regular sweep eight statements on the sample store - those two, T10's `pg_stats`
-  read, T11's two (whether `mt_hilo` exists, then its one row), and three for T12-T14: the wraparound read the
-  three share, T14's read of who holds the horizon, and the replication-slot read it shares with R01.
+  so the whole area costs a regular sweep nine statements on the sample store - the catalog's list of the tables
+  beside the store, those two, T10's `pg_stats` read, T11's two (whether `mt_hilo` exists, then its one row), and
+  three for T12-T14: the wraparound read the three share, T14's read of who holds the horizon, and the
+  replication-slot read it shares with R01.
 - **A list locks nothing it lists.** Sizes are `relpages` estimates, never `pg_relation_size`, which opens the
   table and queues behind any migration's lock on it; partitions are walked through `pg_inherits`, never
   `pg_partition_tree()`, which holds a lock on every partition. A tenant-partitioned table is one row, its
   partitions' figures rolled in, and a partition is never named: Marten names a tenant's partition after the
   tenant. The only row of a user table a regular sweep reads is `mt_hilo`'s (T11), and only once the catalog
-  says it exists.
+  says it exists. The one wait is in the index read: `pg_get_indexdef` opens each indexed table for an instant to
+  name its columns, and releases it at once. So a migration that holds `ACCESS EXCLUSIVE` on a judged table - Marten's,
+  or any library's - costs T03-T06 that sweep: they wait out `lock_timeout`, say so, and are tried at the next interval.
+  Nothing is held past the call.
 - **Rates, not totals.** The `pg_stat_*` counters run from the last statistics reset, which may be a year ago,
   so T01 and T06 sample them into the in-memory history and judge the change over the window it holds, and say
   "watching" until two samples exist. A counter that goes down is a reset, and the window restarts there.
 - **Held, not glimpsed.** A batch delete or a bulk load makes any table look bloated or unanalysed for the
   minute before autovacuum wakes up, so T07 and T08 speak only when the condition has held for ten minutes of
   samples - unless autovacuum is switched off for the table or the server, when there is nothing to wait for.
-- **Remedies are `StoreOptions` lines.** `FillFactor(n)` and `StorageParameter(name, value)` need Marten 9.47
+- **Remedies are `StoreOptions` lines for a Marten table**, and migration SQL for the host's own relational table
+  (built with every name quoted, and never run by the studio). `FillFactor(n)` and `StorageParameter(name, value)` need Marten 9.47
   or later, and say so. Marten manages only the storage parameters a mapping declares and does not reset one it
   does not, so a DBA's `ALTER TABLE ... SET (...)` on an older Marten is left by an apply - unless the apply
   rebuilds the table, as a changed partition scheme does (`AutoCreate.CreateOrUpdate` is not additive). It is

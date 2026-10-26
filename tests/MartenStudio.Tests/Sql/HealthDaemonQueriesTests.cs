@@ -85,13 +85,18 @@ public class HealthDaemonQueriesTests
     }
 
     [Fact]
-    public void The_high_water_reading_is_one_snapshot_of_the_three_rows_the_sequence_and_one_primary_key_probe()
+    public void The_high_water_reading_is_one_snapshot_of_the_three_rows_the_sequence_and_two_primary_key_probes()
     {
         HealthQuery query = HealthDaemonQueries.HighWater("studio_events");
 
         query.Sql.Should().Contain("from \"studio_events\".\"mt_event_progression\"");
         query.Sql.Should().Contain("case when s.is_called then s.last_value else 0 end from \"studio_events\".\"mt_events_sequence\"");
         query.Sql.Should().Contain("pg_catalog.min(e.seq_id) from \"studio_events\".\"mt_events\" e where e.seq_id > h.last_seq_id");
+
+        // D09's two: Marten's own reading of what the sequence has handed out (#5091), and the other end of the same key.
+        query.Sql.Should().Contain(
+            "(select case when s.is_called then s.last_value else s.last_value - 1 end from \"studio_events\".\"mt_events_sequence\" s) as allocated_high");
+        query.Sql.Should().Contain("(select pg_catalog.max(e.seq_id) from \"studio_events\".\"mt_events\" e) as highest_committed");
         query.Sql.Should().Contain("pg_catalog.transaction_timestamp() as server_now", "every age is server time");
         query.Sql.Should().NotContain("HighWaterStuckGap", "the bookkeeping row names are values");
 

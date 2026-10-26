@@ -35,7 +35,7 @@ internal sealed record HeldLock(string LockType, string Mode, string? Schema, st
 /// advisory lock, or calls a function that locks what it lists (D27) shows up there.
 /// </para>
 /// <para>
-/// <b>No DDL.</b> <see cref="SnapshotAsync" /> lists every relation, routine, type, trigger and constraint in
+/// <b>No DDL.</b> <see cref="SnapshotAsync(PostgresFixture, string[])" /> lists every relation, routine, type, trigger and constraint in
 /// a set of schemas - the test's own, never the whole database, because other test classes create objects in
 /// parallel - and a sweep must leave the snapshot exactly as it found it.
 /// </para>
@@ -46,8 +46,24 @@ internal sealed record HeldLock(string LockType, string Mode, string? Schema, st
 /// <c>probe.BeyondCatalogReads.Should().BeEmpty()</c> and compare a second snapshot to the first.
 /// </para>
 /// </remarks>
-internal sealed class HealthSweepProbe(PostgresFixture postgres) : IHealthStatementObserver
+internal sealed class HealthSweepProbe : IHealthStatementObserver
 {
+    private readonly Func<CancellationToken, Task<NpgsqlConnection>> open;
+
+    /// <summary>A probe whose second connection is to the fixture's own database.</summary>
+    public HealthSweepProbe(PostgresFixture postgres)
+        : this(postgres.OpenAsync)
+    {
+    }
+
+    /// <summary>A probe whose second connection is to <paramref name="connectionString" />'s database - a test's own.</summary>
+    public HealthSweepProbe(string connectionString)
+        : this(token => OpenAsync(connectionString, token))
+    {
+    }
+
+    private HealthSweepProbe(Func<CancellationToken, Task<NpgsqlConnection>> open) => this.open = open;
+
     private const string LocksSql =
         "select l.locktype, l.mode, n.nspname, c.relname "
         + "from pg_catalog.pg_locks l "
@@ -82,7 +98,7 @@ internal sealed class HealthSweepProbe(PostgresFixture postgres) : IHealthStatem
     {
         Interlocked.Increment(ref statements);
 
-        await using NpgsqlConnection second = await postgres.OpenAsync(cancellationToken);
+        await using NpgsqlConnection second = await open(cancellationToken);
         await using NpgsqlCommand command = new(LocksSql, second);
         command.Parameters.AddWithValue("pid", backendProcessId);
 
@@ -111,7 +127,21 @@ internal sealed class HealthSweepProbe(PostgresFixture postgres) : IHealthStatem
     /// Every object in <paramref name="schemas" />, by name and kind - read on a connection of the test's
     /// own, so nothing of the studio's is in the measurement.
     /// </summary>
-    public static async Task<IReadOnlySet<string>> SnapshotAsync(PostgresFixture postgres, params string[] schemas)
+    public static Task<IReadOnlySet<string>> SnapshotAsync(PostgresFixture postgres, params string[] schemas) =>
+        SnapshotAsync(postgres.OpenAsync, schemas);
+
+    /// <summary><see cref="SnapshotAsync(PostgresFixture, string[])" /> in a database of the test's own.</summary>
+    public static Task<IReadOnlySet<string>> SnapshotAsync(string connectionString, params string[] schemas) =>
+        SnapshotAsync(token => OpenAsync(connectionString, token), schemas);
+
+    private static async Task<NpgsqlConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
+    {
+        NpgsqlConnection connection = new(connectionString);
+        await connection.OpenAsync(cancellationToken);
+        return connection;
+    }
+
+    private static async Task<IReadOnlySet<string>> SnapshotAsync(Func<CancellationToken, Task<NpgsqlConnection>> open, string[] schemas)
     {
         const string Sql =
             "select 'schema:' || n.nspname from pg_catalog.pg_namespace n where n.nspname = any(@schemas) "
@@ -127,7 +157,7 @@ internal sealed class HealthSweepProbe(PostgresFixture postgres) : IHealthStatem
             + "union all select 'constraint:' || n.nspname || '.' || o.conname from pg_catalog.pg_constraint o "
             + "join pg_catalog.pg_namespace n on n.oid = o.connamespace where n.nspname = any(@schemas)";
 
-        await using NpgsqlConnection connection = await postgres.OpenAsync(TestContext.Current.CancellationToken);
+        await using NpgsqlConnection connection = await open(TestContext.Current.CancellationToken);
         await using NpgsqlCommand command = new(Sql, connection);
         command.Parameters.AddWithValue("schemas", schemas);
 

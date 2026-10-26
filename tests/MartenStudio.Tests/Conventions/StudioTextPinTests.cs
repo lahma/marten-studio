@@ -132,15 +132,18 @@ public class StudioTextPinTests
             + "await using var session = store.LightweightSession();\n"
             + "// ... work ...\n"
             + "await session.SaveChangesAsync(cancellationToken);");
-        Marten.JudgedTables.Should().Be("Marten tables");
-        Marten.JudgedTable.Should().Be("Marten table");
-        Marten.NotJudged.Should().Be("not the store's");
-        Marten.JudgedTablesRead.Should().Be("the store's own tables");
-        Marten.NoJudgedTable.Should().Be("No table this store declares exists yet.");
+        // G1M (issue #8, G1): reworded when MartenStudio's table checks began to judge every table beside the store, so
+        // that "Marten table" no longer names a Quartz.NET one.
+        Marten.JudgedTables.Should().Be("Tables the studio judges");
+        Marten.JudgedTable.Should().Be("table the studio judges");
+        Marten.NotJudged.Should().Be("not among the tables the studio judges");
+        Marten.JudgedTablesRead.Should().Be("the tables the studio judges");
+        Marten.NoJudgedTable.Should().Be("No table the studio judges exists yet.");
         Marten.UnjudgedOldest.Should().Be(
-            " The oldest table in this database is not one the store declares - a legacy schema, another library's job store, "
-            + "a document type the studio hides - and wraparound protection counts every table in the database, so it holds the "
-            + "whole database back as surely as a Marten table would.");
+            " The oldest table in this database is not one the studio judges - in a schema neither the store nor "
+            + "MartenStudioOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
+            + "beyond the largest tables a sweep reads - and wraparound protection counts every table in the database, so it "
+            + "holds the whole database back as surely as one of these would.");
         Marten.MartenTablePartitionParameters.Should().Be("the Schema screen's Tables tab shows which parameters the partitions differ on");
 
         HealthEvaluation.At(DateTimeOffset.UnixEpoch).Text.Should().BeSameAs(Marten, "a unit test's evaluation is MartenStudio's");

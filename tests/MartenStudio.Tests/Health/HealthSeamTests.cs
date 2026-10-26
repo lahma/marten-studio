@@ -153,7 +153,12 @@ public class HealthSeamTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Evidence.Should().Contain(new HealthEvidence("Table", "the table app.orders"));
-        finding.Remedy.Should().BeNull("MartenStudio's wording has no line for a table no store declares");
+
+        // G1M (issue #8, G1): a table no store declares is the host's migrations' to change, so MartenStudio composes
+        // Postgres Studio's migration SQL for it - never a StoreOptions line.
+        finding.Remedy.Should().NotBeNull();
+        finding.Remedy!.IsMigration.Should().BeTrue();
+        finding.Remedy.Code.Should().Be("ALTER TABLE \"app\".\"orders\" RESET (autovacuum_enabled);");
         finding.WhyItMatters.Should().Contain("the host's to do, in its own migrations")
             .And.NotContain("StoreOptions").And.NotContain("Marten");
     }
@@ -169,7 +174,10 @@ public class HealthSeamTests
 
         finding.WhyItMatters.Should().Contain("the host's own index").And.NotContain("Marten");
         finding.Evidence.Should().Contain(new HealthEvidence("Declared", "by the host's own schema"));
-        finding.Remedy.Should().BeNull();
+
+        // G1M: the rebuild the finding describes, as the host's migration - no re-apply, which would not touch it.
+        finding.Remedy!.IsMigration.Should().BeTrue();
+        finding.Remedy.Code.Should().Contain("REINDEX INDEX CONCURRENTLY").And.NotContain("ApplyAllConfiguredChangesToDatabaseAsync");
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -219,7 +227,7 @@ public class HealthSeamTests
 
         registry.All.Select(static x => x.Info.CheckType).Should().BeEquivalentTo(
             MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
-        registry.All.Should().HaveCount(49, "the studio ships 49 checks");
+        registry.All.Should().HaveCount(50, "the studio ships 50 checks: 0.4's 49 and W5's D09");
 
         HealthCheckRegistry.Describe(typeof(ScriptedLightUpCheck), MartenStudioRuntime.Current).Requires
             .Should().BeSameAs(RuntimeFeature.TransientFailureClassifier);

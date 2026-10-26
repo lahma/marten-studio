@@ -1,7 +1,7 @@
 # Health: daemon and high water (D)
 
 These checks answer the question asked most often: **why aren't my projections moving?** They read
-`mt_event_progression` (a few dozen rows), the event sequence, one primary-key probe of `mt_events`, the
+`mt_event_progression` (a few dozen rows), the event sequence, two primary-key probes of `mt_events`, the
 dead-letter table, and - only when there is work and no healthy daemon in this process - `pg_locks`. Every read
 runs in the advisor's read-only transaction at the health cadence (`HealthInterval`, 60 s by default), never on
 a page's poll, and takes only the `AccessShareLock` a plain read takes on what it reads, and none on a table
@@ -15,12 +15,12 @@ A rate, a "for the whole window" and how long a committed event has waited behin
 own samples, which exist only while somebody has the Health page or the Overview open; before two samples a minute
 apart exist, the checks that need them say they are watching and report nothing.
 
-A finding that names a projection - D03, D04, D05 and D06 - carries the document types that projection writes, so a
+A finding that names a projection - D03, D04, D05, D06 and D09 - carries the document types that projection writes, so a
 projection of a type `IsDocumentTypeVisible` hides is never named, in a finding or in a check's status line.
 
 A store with `Events.UseTenantPartitionedEvents` keeps a high-water mark per tenant and no durable record of when
-one was pinned: D01-D04 say "not checked" there rather than read store-global rows nothing maintains. D05 and
-D06 still apply.
+one was pinned: D01-D04 and D09 say "not checked" there rather than read store-global rows nothing maintains. D05
+and D06 still apply.
 
 ## D01 High-water mark pinned behind a gap
 
@@ -351,3 +351,53 @@ is not covered.
 
 There is no `StoreOptions` line. If another process is rebuilding, let it finish; if a rebuild stopped part-way,
 restarting the shard continues it from its position, and a rebuild here starts it again from the first event.
+
+## D09 Event sequence and daemon progression disagree
+
+**Critical.** Marten Studio only. The event sequence, the high-water mark, the registered shards and the events
+already committed disagree about where the event store is. There are three kinds of finding, all from the snapshot the
+high-water read already takes: the sequence's `last_value` and `is_called`, the progression rows, and one more
+backward probe of `mt_events`' primary key (`max(seq_id)`, under the same `AccessShareLock` as D01's `min(seq_id)`
+probe).
+
+- **`mark-ahead`**: the `HighWaterMark` row is above the highest number the sequence has handed out. New events take
+  numbers the daemon has already passed, so no async projection or subscription sees them, and nothing reports them as
+  lost. The registered shards that are ahead with it are listed in the same finding.
+- **`shard-ahead`**: a registered shard is above the sequence and the mark is not, so that one projection or
+  subscription never sees the next events.
+- **`sequence-behind`**: the highest committed `seq_id` is at or above the number the sequence hands out next. The next
+  append draws a number `mt_events` already holds and fails with a unique violation (23505) on its primary key. Each
+  failed append burns the number it drew, so appends go on failing one at a time until the sequence has passed every
+  event. Where the events are partitioned by archive status, a number that only an archived event holds is no conflict
+  at all, and two events then share it.
+
+"Handed out" is Marten's own reading of the sequence (#5091's `AllocatedSequenceHigh`, read at `V9.39.0` and
+`v9.51.0`): `last_value` once the sequence has been called, `last_value - 1` before. So a sequence restarted at `n` has
+handed out `n - 1`, and the next append takes `n`. A sequence is not transactional, so an append that drew a number at
+the instant of the read counts as handed out. That can only make the sequence look further ahead. In a healthy store the
+mark, every shard and every committed event are at or below the sequence, and nothing fires.
+
+These are what leave a store like this:
+
+- a reset of the sequence (`ALTER SEQUENCE ... RESTART`, or a `TRUNCATE` of `mt_events` with `RESTART IDENTITY`);
+- a restore of `mt_events`, its sequence or `mt_event_progression` from a different point in time than the others;
+- a cut-over to a database that logical replication filled: it copies rows, and before PostgreSQL 19 it does not copy a
+  sequence's position.
+
+What to do, read at `V9.39.0` and `v9.51.0`:
+
+- **`mark-ahead`**: the projections screen's **Correct progression** (`Capabilities.CorrectProgression`), which runs
+  Marten's own `store.Advanced.TryCorrectProgressInDatabaseAsync`. Marten sets the mark and every shard's row back to
+  the sequence's `last_value`, leaving its own allocation-fence and stuck-gap rows alone, and it does so only while the
+  mark is above that value. Every event appended since the reset at a number at or below it is then treated as
+  processed, so rebuild the projections that should hold those events. Right after a `RESTART`, before anything is
+  appended, `last_value` is the number the sequence hands out next: the mark ends one past what it has handed out, D09
+  goes on reporting it, and the first event appended afterwards is treated as processed too.
+- **`shard-ahead`**: Correct progression does nothing here, because the mark is not ahead. Rebuild the projection, or
+  rewind the subscription; either leaves the shard where the events are.
+- **`sequence-behind`**: a DBA's repair, with appends stopped: `setval` the sequence to `max(seq_id)` of `mt_events`.
+  When both this and a progression finding are reported, do this first. The correction moves progression to the
+  sequence's position, and that position has to be past the events, or the daemon processes them all again.
+
+A shard whose projection writes a document type `IsDocumentTypeVisible` hides is never named. Like D01-D04, a store with
+`Events.UseTenantPartitionedEvents` is not checked, because every tenant draws from a sequence of its own there.

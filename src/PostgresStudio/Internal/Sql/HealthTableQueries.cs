@@ -532,7 +532,12 @@ internal static class HealthTableQueries
     /// <remarks>
     /// <para>
     /// <c>pg_get_indexdef</c> reads the system cache, as Weasel's own index read does and as the Schema
-    /// screen's always has; it is called for the listed tables' indexes only, never a partition's. The
+    /// screen's always has - all but the column names, for which its deparser opens the indexed table for an
+    /// instant (<c>set_relation_column_names</c>: <c>AccessShareLock</c>, released as soon as it has them). So
+    /// nothing is held past the call, but a migration's <c>ACCESS EXCLUSIVE</c> on a listed table makes this
+    /// statement wait out <c>lock_timeout</c> and fail, and the index checks say so and try again at the next
+    /// interval (<c>WholeDatabaseTableHealthLiveTests</c> pins it). It is called for the listed tables' indexes
+    /// only, never a partition's. The
     /// referenced columns come from <c>pg_depend</c>, where Postgres records the columns an expression or a
     /// predicate reads, and from <c>indkey</c> for the plain ones - an index backing a constraint depends on the
     /// constraint rather than on its columns, so <c>pg_depend</c> alone would miss them.
@@ -824,8 +829,100 @@ internal static class HealthTableQueries
         limit @cap
         """;
 
+    /// <summary>
+    /// <see cref="RelationalTablesSql" /> for a source that declares tables of its own (issue #8, G1 for a Marten store):
+    /// the same admission, the same estimates, the same order and cap, and two more lines in <c>candidates</c> - a table
+    /// the configuration of a registered source declares is left out (<c>@declared_schemas</c>, <c>@declared_tables</c>,
+    /// compared ignoring case as the source's own sets compare them), and, with <c>@skip_documents</c>, so is every table
+    /// named like a document table (<c>@document_prefix</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Left out before the count and the cap</b>, so the total the coverage sentence says is the number of tables that
+    /// could have been judged, and the cap is spent on them alone: a declared table is judged from the configuration, never
+    /// from this list, and another source's is not this sweep's to judge.
+    /// </para>
+    /// <para>
+    /// <b>A hidden document type's table is never a value here.</b> The caller passes <c>@skip_documents</c> whenever a
+    /// document type may be hidden, so such a table never comes back from the catalog at all and its name is not in any
+    /// parameter: only visible declarations are ever bound.
+    /// </para>
+    /// <para>
+    /// Kept the same as <see cref="RelationalTablesSql" /> but for those two predicates, which
+    /// <c>HealthTableQueriesTests</c> holds it to: removing them gives back that statement byte for byte.
+    /// </para>
+    /// </remarks>
+    internal const string UndeclaredTablesSql =
+        """
+        with recursive admitted as (
+            select n.oid, n.nspname
+            from pg_catalog.pg_namespace n
+            where pg_catalog.left(n.nspname::text, 3) <> 'pg_'
+              and not (n.nspname = any(@system))
+              and coalesce(pg_catalog.has_schema_privilege(n.oid, 'USAGE'), false)
+              and (n.nspname = any(@names)
+                   or (@everything and not exists (
+                       select 1
+                       from pg_catalog.pg_depend d
+                       where d.classid = 'pg_catalog.pg_namespace'::pg_catalog.regclass
+                         and d.objid = n.oid
+                         and d.deptype = 'e')))
+        ),
+        candidates as (
+            select c.oid, a.nspname, c.relname, c.relkind, c.relpages
+            from pg_catalog.pg_class c
+            join admitted a on a.oid = c.relnamespace
+            where c.relkind in ('r', 'p')
+              and not c.relispartition
+              and not (@skip_documents and pg_catalog.starts_with(pg_catalog.lower(c.relname::text), @document_prefix))
+              and not exists (
+                  select 1
+                  from rows from (pg_catalog.unnest(@declared_schemas), pg_catalog.unnest(@declared_tables)) as x(schema_name, table_name)
+                  where pg_catalog.lower(x.schema_name) = pg_catalog.lower(a.nspname::text)
+                    and pg_catalog.lower(x.table_name) = pg_catalog.lower(c.relname::text))
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+        ),
+        tree (root, relid) as (
+            select t.oid, i.inhrelid
+            from candidates t
+            join pg_catalog.pg_inherits i on i.inhparent = t.oid
+            where t.relkind = 'p'
+            union all
+            select tree.root, i.inhrelid
+            from tree
+            join pg_catalog.pg_inherits i on i.inhparent = tree.relid
+        ),
+        partitioned (root, pages) as (
+            select tree.root, pg_catalog.sum(x.relpages::bigint)
+            from tree
+            join pg_catalog.pg_class x on x.oid = tree.relid
+            group by tree.root
+        )
+        select t.nspname::text,
+               t.relname::text,
+               t.relkind::text,
+               case when t.relkind = 'p' then coalesce(p.pages, 0)::bigint else t.relpages::bigint end,
+               (pg_catalog.count(*) over ())::int
+        from candidates t
+        left join partitioned p on p.root = t.oid
+        order by 4 desc, 1, 2
+        limit @cap
+        """;
+
+    /// <summary>
+    /// The prefix every Marten document table's name carries - <c>DatabaseObjectClassifier.DocumentTablePrefix</c>, bound
+    /// rather than spelt in <see cref="UndeclaredTablesSql" />, and held equal to it by a test.
+    /// </summary>
+    internal const string DocumentTablePrefix = "mt_doc_";
+
     /// <summary>Every list statement - the ones that must lock nothing they list - for the tests that hold them to it.</summary>
-    internal static IReadOnlyList<string> ListStatements { get; } = [TablesSql, IndexesSql, SoftDeleteSql, HiloExistsSql, RelationalTablesSql];
+    internal static IReadOnlyList<string> ListStatements { get; } =
+        [TablesSql, IndexesSql, SoftDeleteSql, HiloExistsSql, RelationalTablesSql, UndeclaredTablesSql];
 
     /// <summary>
     /// The tables a plain data source's health checks judge (<see cref="RelationalTablesSql" />): every table in
@@ -847,6 +944,46 @@ internal static class HealthTableQueries
                 new NpgsqlParameter("everything", NpgsqlDbType.Boolean) { Value = everything },
                 new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = cap },
                 new NpgsqlParameter("system", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = SystemSchemasBeyondPrefix },
+            ]);
+    }
+
+    /// <summary>
+    /// The tables of the admitted schemas but the ones a registered source declares (<see cref="UndeclaredTablesSql" />):
+    /// the schemas named in <paramref name="names" /> and, with <paramref name="everything" />, every schema <c>"*"</c>
+    /// admits, the largest <paramref name="cap" /> by estimated size.
+    /// </summary>
+    /// <param name="names">The schemas named exactly.</param>
+    /// <param name="everything">Whether <c>"*"</c> is configured and in force.</param>
+    /// <param name="declared">
+    /// The tables registered sources declare, left out of the list and its count. Never a hidden document type's: those are
+    /// left out by <paramref name="skipDocumentTables" />.
+    /// </param>
+    /// <param name="skipDocumentTables">Whether to leave out every table named like a document table.</param>
+    /// <param name="cap">How many tables at most.</param>
+    public static HealthQuery UndeclaredTables(
+        IReadOnlyList<string> names,
+        bool everything,
+        IReadOnlyList<HealthTableTarget> declared,
+        bool skipDocumentTables,
+        int cap)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        ArgumentNullException.ThrowIfNull(declared);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cap);
+
+        NpgsqlParameter[] targets = TargetParameters(declared);
+
+        return new HealthQuery(
+            UndeclaredTablesSql,
+            [
+                new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = names as string[] ?? [.. names] },
+                new NpgsqlParameter("everything", NpgsqlDbType.Boolean) { Value = everything },
+                new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = cap },
+                new NpgsqlParameter("system", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = SystemSchemasBeyondPrefix },
+                new NpgsqlParameter("skip_documents", NpgsqlDbType.Boolean) { Value = skipDocumentTables },
+                new NpgsqlParameter("document_prefix", NpgsqlDbType.Text) { Value = DocumentTablePrefix },
+                new NpgsqlParameter("declared_schemas", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = targets[0].Value },
+                new NpgsqlParameter("declared_tables", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = targets[1].Value },
             ]);
     }
 

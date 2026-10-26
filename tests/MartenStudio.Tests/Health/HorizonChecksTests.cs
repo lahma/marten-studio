@@ -177,12 +177,12 @@ public class HorizonChecksTests
         HealthFinding finding = new TransactionIdAgeCheck().Evaluate(facts, Evaluation()).Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Warning);
-        finding.Title.Should().StartWith("This database (a table that is not the store's) is 1.2 billion transactions");
+        finding.Title.Should().StartWith("This database (a table that is not among the tables the studio judges) is 1.2 billion transactions");
         finding.Evidence.Should().Contain(new HealthEvidence("This database's age(datfrozenxid)", "1,200,000,000"));
         finding.Evidence.Should().Contain(new HealthEvidence("Other tables past autovacuum_freeze_max_age",
-            "3 (1 of them temporary), never named: they are not the store's"));
-        finding.Evidence.Should().Contain(new HealthEvidence("Marten tables past the warning line", "0"));
-        finding.WhyItMatters.Should().Contain("not one the store declares").And.Contain("only by the session that created it");
+            "3 (1 of them temporary), never named: they are not among the tables the studio judges"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Tables the studio judges past the warning line", "0"));
+        finding.WhyItMatters.Should().Contain("not one the studio judges").And.Contain("only by the session that created it");
         finding.DocumentTypes.Should().BeEmpty("no table of the store's is past the line");
         finding.Subject.Should().BeNull();
     }
@@ -486,7 +486,8 @@ public class HorizonChecksTests
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().StartWith("At the rate of the last 40 minutes, Postgres would stop creating multixacts in about 29 days");
         finding.Evidence.Should().Contain(static x => x.Label == "New multixacts refused in");
-        finding.Evidence.Should().Contain(new HealthEvidence("Other tables past autovacuum_multixact_freeze_max_age", "0, never named: they are not the store's"));
+        finding.Evidence.Should().Contain(new HealthEvidence(
+            "Other tables past autovacuum_multixact_freeze_max_age", "0, never named: they are not among the tables the studio judges"));
     }
 
     [Fact]

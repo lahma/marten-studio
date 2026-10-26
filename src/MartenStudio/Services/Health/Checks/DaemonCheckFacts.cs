@@ -435,6 +435,20 @@ internal sealed record HighWaterReading(
     long? NextCommitted)
 {
     /// <summary>
+    /// The highest number the sequence has handed out, as Marten itself reads it (#5091's <c>AllocatedSequenceHigh</c>):
+    /// <c>last_value</c> once called, <c>last_value - 1</c> before - so a sequence restarted at <c>n</c> reads
+    /// <c>n - 1</c>, and the next append takes <c>AllocatedHigh + 1</c>. <see langword="null" /> for a reading that
+    /// predates it. D09's.
+    /// </summary>
+    public long? AllocatedHigh { get; init; }
+
+    /// <summary>
+    /// The highest committed <c>seq_id</c> in <c>mt_events</c>, or <see langword="null" /> for an empty table (or a reading
+    /// that predates it). D09's.
+    /// </summary>
+    public long? HighestCommitted { get; init; }
+
+    /// <summary>
     /// Whether the stuck-gap row describes the mark as it is now. Marten upserts it only when the mark differs and
     /// never deletes it (V9.39.0, V9.50.2), so a row whose mark is behind the mark's own row is an old pin, long gone.
     /// </summary>
@@ -504,7 +518,11 @@ internal sealed record HighWaterReading(
                         NullableLong(reader, 6),
                         NullableTime(reader, 7),
                         NullableTime(reader, 8),
-                        NullableLong(reader, 9)),
+                        NullableLong(reader, 9))
+                    {
+                        AllocatedHigh = NullableLong(reader, 10),
+                        HighestCommitted = NullableLong(reader, 11),
+                    },
                     token)
                 .ConfigureAwait(false);
 
@@ -556,7 +574,10 @@ internal sealed record DaemonShardRow(
     /// <summary>Whether a failure is recorded on it.</summary>
     public bool HasFailure => FailureCategory is { Length: > 0 };
 
-    /// <summary>The registered shards' rows (<see cref="HealthDaemonQueries.ShardRows" />).</summary>
+    /// <summary>
+    /// The registered shards' rows (<see cref="HealthDaemonQueries.ShardRows" />) - once per sweep for each way of asking,
+    /// whichever check asks first, so D03 and D09 judge one snapshot of the shards.
+    /// </summary>
     public static Task<IReadOnlyList<DaemonShardRow>> ReadAsync(
         HealthCheckContext context,
         EventStoreRelations shape,
@@ -567,6 +588,7 @@ internal sealed record DaemonShardRow(
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(shape);
         ArgumentNullException.ThrowIfNull(configuration);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (configuration.AsyncShards.Count == 0)
         {
@@ -574,9 +596,13 @@ internal sealed record DaemonShardRow(
         }
 
         IReadOnlyList<string> selected = HealthDaemonQueries.SelectedShardColumns(shape.ProgressionColumns, extendedProgressionTracking);
-        var query = HealthDaemonQueries.ShardRows(configuration.EventSchema, shape.ProgressionColumns, extendedProgressionTracking, configuration.AsyncShards);
 
-        return context.Sql.QueryAsync(query, reader => Read(reader, selected), cancellationToken);
+        return context.Shared(
+            "daemon.shard-rows:" + configuration.EventSchema + (extendedProgressionTracking ? ":extended" : ":plain"),
+            token => context.Sql.QueryAsync(
+                HealthDaemonQueries.ShardRows(configuration.EventSchema, shape.ProgressionColumns, extendedProgressionTracking, configuration.AsyncShards),
+                reader => Read(reader, selected),
+                token));
     }
 
     /// <summary>Every row the extended tracking says is not running or carries a failure (<see cref="HealthDaemonQueries.ProblemShardRows" />).</summary>

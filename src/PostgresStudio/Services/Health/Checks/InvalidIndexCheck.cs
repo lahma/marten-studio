@@ -117,7 +117,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             return new HealthVerdict(findings, note);
         }
 
-        return HealthVerdict.Quiet(note ?? (facts.Indexes.Count == 0 ? "No table this store declares exists yet." : null));
+        return HealthVerdict.Quiet(note ?? (facts.Indexes.Count == 0 ? evaluation.Text.NoJudgedTable : null));
     }
 
     /// <summary>

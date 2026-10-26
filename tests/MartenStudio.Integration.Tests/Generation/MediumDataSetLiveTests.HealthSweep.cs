@@ -250,7 +250,8 @@ public partial class MediumDataSetLiveTests
 /// </para>
 /// <para>
 /// <b>The readers</b>, measured over the hundred-thousand-row set on 2026-10-19: the progression table D01, D02, D03, D05
-/// and D08; the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02 and D03 share;
+/// and D08; the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02, D03 and D09 share
+/// (with D09's <c>max(seq_id)</c>, W5-G1M);
 /// the high-water skips D07; the dead letters D06 - each with the table's indexes, which the planner opens with it - and
 /// <c>mt_hilo</c> T11. The event checks of a regular sweep (E05, E07) read only the catalog and the statistics views, so a
 /// lock of theirs on <c>mt_events</c> fails this.
@@ -262,7 +263,7 @@ internal sealed class SweepLockAllowList
     public static readonly string[] EventBookkeeping = ["mt_event_progression", "mt_events", "mt_high_water_skips", "mt_doc_deadletterevent"];
 
     /// <summary>The checks whose statements may read <see cref="EventBookkeeping" />: the daemon checks, and no other.</summary>
-    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08"];
+    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09"];
 
     /// <summary>The checks whose statements may read <c>mt_hilo</c>.</summary>
     public static readonly string[] HiloReaders = ["T11"];

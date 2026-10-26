@@ -42,7 +42,8 @@ internal static class MartenTableKind
 
 /// <summary>
 /// The tables this store declares in this database, from its configuration alone - and what it declares about their
-/// indexes. MartenStudio's <see cref="IStudioTableSet" />.
+/// indexes. The declared half of MartenStudio's judged set (<see cref="MartenDatabaseTableSet" />), and an
+/// <see cref="IStudioTableSet" /> of its own for a context with no table source.
 /// </summary>
 /// <param name="Tables">Every declared table but a hidden document type's, in schema and table order.</param>
 /// <param name="Declarations">What <see cref="SchemaDeclarationReader" /> read.</param>
@@ -102,22 +103,27 @@ internal sealed record MartenTableSet(
 }
 
 /// <summary>
-/// Reads the tables this store declares, for the tables-and-indexes checks: MartenStudio's half of the shared reader
-/// (<see cref="HealthTables" />), and the Marten-only checks' way to it.
+/// Reads the tables this store declares, for the tables-and-indexes checks: the declared half of MartenStudio's judged set
+/// (<see cref="MartenHealthTableSource" /> lays it over the catalog), and the Marten-only checks' way to the shared reader
+/// (<see cref="HealthTables" />).
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The set comes from the configuration, never from the database</b>: <see cref="SchemaDeclarationReader" />,
+/// <b>The declared set comes from the configuration, never from the database</b>: <see cref="SchemaDeclarationReader" />,
 /// which reads <c>StoreOptions</c> and <c>IDocumentType</c> and touches no connection - never
 /// <c>AllObjects()</c> or <c>AllSchemaNames()</c>, which migrate (AGENTS.md hard rule 14). So a "Marten table"
-/// here is one the store declares; a leftover <c>mt_doc_*</c> table no registered type names is not one, which
-/// is also what keeps a hidden type nothing in the process has touched out of every finding.
+/// here is one the store declares; a leftover <c>mt_doc_*</c> table no registered type names is not one. The catalog's
+/// other tables are <see cref="MartenHealthTableSource" />'s to add, and it leaves every table named like a document table
+/// out of its read while a type may be hidden - which is what keeps a hidden type nothing in the process has touched out
+/// of every finding.
 /// </para>
 /// <para>
 /// <b>Every table the store declares is the application's own</b> (<see cref="StudioTableOwnership.Owned" />), its event
-/// tables and bookkeeping included: their indexes are told apart by where they come from (<see cref="IndexOrigin" />), which
-/// is what keeps Marten's own design out of the index-design findings, and a hand-made index on <c>mt_events</c> is still
-/// one the next apply drops. The library classification of <c>mt_*</c> is for a table whose declarations are not known.
+/// tables and bookkeeping included - kept so on purpose when the set was widened (issue #8, G1), rather than calling
+/// Marten's own tables a library's: their indexes are told apart by where they come from (<see cref="IndexOrigin" />),
+/// which already keeps Marten's own design out of the index-design findings, and a hand-made index on <c>mt_events</c> is
+/// still one the next apply drops, so moving them would change findings for no host's benefit. The library
+/// classification of <c>mt_*</c> is for a table whose declarations are not known.
 /// </para>
 /// <para>
 /// <b>A hidden document type is never read about.</b> Its table is left out of the set, so its name is not
@@ -176,6 +182,19 @@ internal static class MartenTables
 
         /// <summary>The mapping, when the document type is Marten's own <see cref="DocumentMapping" />.</summary>
         public DocumentMapping? Mapping => table.DocumentType as DocumentMapping;
+
+        /// <summary>
+        /// Whether the store's configuration declares the table - one <see cref="MartenTables.Table" /> described - rather
+        /// than the catalog listing it beside the store (<see cref="MartenHealthTableSource" />).
+        /// </summary>
+        /// <remarks>
+        /// Told apart by shape, which the two halves of the set keep disjoint: a declared table is always
+        /// <see cref="StudioTableOwnership.Owned" /> and never <see cref="StudioTableKind.Relational" />, and an undeclared one
+        /// is either the host's relational table (Owned and Relational) or a library's or somebody else's. So a check or a
+        /// remedy that only makes sense for this store's own tables - T09's sample, T22's guarded writes, a
+        /// <c>StoreOptions</c> line - asks this, and a table that merely sits beside the store is never mistaken for one.
+        /// </remarks>
+        public bool IsDeclaredByStore => table.Ownership == StudioTableOwnership.Owned && table.Kind != StudioTableKind.Relational;
     }
 
     /// <summary>The tables the store declares, a hidden type's left out.</summary>
@@ -258,25 +277,39 @@ internal static class MartenTables
     }
 
     /// <summary>
-    /// The declared tables and the catalog's row for each - the shared read (<see cref="HealthTables" />), over this store's
-    /// set, read once per sweep whichever checks ask.
+    /// The judged tables and the catalog's row for each - the shared read (<see cref="HealthTables" />), read once per sweep
+    /// whichever checks ask. A Marten-only check that is about the store's own tables alone keeps the ones
+    /// <c>IsDeclaredByStore</c> says are.
     /// </summary>
+    /// <remarks>
+    /// <b>The sweep's own set, never a second one.</b> The shared read is memoised under one key, and the first set handed
+    /// to it is the one read, so a check that asked with the declared set before T01 asked with the whole database's would
+    /// have narrowed every table check of that sweep to the declared tables. So where the studio registered its table
+    /// source - every sweep - this reads that source's set; only a context built by hand with no source reads the declared
+    /// set.
+    /// </remarks>
     public static async Task<IReadOnlyList<TableFacts>> TablesAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        MartenTableSet set = await SetAsync(context).ConfigureAwait(false);
+        IStudioTableSet set = await JudgedSetAsync(context).ConfigureAwait(false);
         return await HealthTables.TablesAsync(context, set).ConfigureAwait(false);
     }
 
-    /// <summary>Every index on the declared tables, read once per sweep like <see cref="TablesAsync" />.</summary>
+    /// <summary>Every index on the judged tables, read once per sweep like <see cref="TablesAsync" />.</summary>
     public static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        MartenTableSet set = await SetAsync(context).ConfigureAwait(false);
+        IStudioTableSet set = await JudgedSetAsync(context).ConfigureAwait(false);
         return await HealthTables.IndexesAsync(context, set).ConfigureAwait(false);
     }
+
+    /// <summary>The sweep's judged set when the studio registered its table source, and the declared set otherwise.</summary>
+    private static async Task<IStudioTableSet> JudgedSetAsync(HealthCheckContext context) =>
+        context.Services.GetService(typeof(IHealthTableSource)) is not null
+            ? await HealthTables.SetAsync(context).ConfigureAwait(false)
+            : await SetAsync(context).ConfigureAwait(false);
 
     /// <summary>
     /// The indexes <c>Marten.Storage.DocumentTable</c> adds to a document table by itself, named the way it

@@ -192,7 +192,10 @@ internal sealed class StudioText
 
     /// <summary>
     /// MartenStudio's wording, exactly as the shared code wrote it before it was shared. Every member is either one of
-    /// the constants it used, or that literal moved here.
+    /// the constants it used, or that literal moved here - but the six judged-table members of T12 and T13
+    /// (<see cref="JudgedTables" /> to <see cref="UnjudgedOldest" />), reworded in 0.5 when MartenStudio's table checks
+    /// began to judge every table of the store's schemas and the ones the database browser admits, not only the tables
+    /// the store declares (issue #8, G1).
     /// </summary>
     public static StudioText Marten { get; } = new()
     {
@@ -253,15 +256,16 @@ internal sealed class StudioText
             // ... work ...
             await session.SaveChangesAsync(cancellationToken);
             """,
-        JudgedTables = "Marten tables",
-        JudgedTable = "Marten table",
-        NotJudged = "not the store's",
-        JudgedTablesRead = "the store's own tables",
-        NoJudgedTable = "No table this store declares exists yet.",
+        JudgedTables = "Tables the studio judges",
+        JudgedTable = "table the studio judges",
+        NotJudged = "not among the tables the studio judges",
+        JudgedTablesRead = "the tables the studio judges",
+        NoJudgedTable = "No table the studio judges exists yet.",
         UnjudgedOldest =
-            " The oldest table in this database is not one the store declares - a legacy schema, another library's job store, "
-            + "a document type the studio hides - and wraparound protection counts every table in the database, so it holds the "
-            + "whole database back as surely as a Marten table would.",
+            " The oldest table in this database is not one the studio judges - in a schema neither the store nor "
+            + "MartenStudioOptions.BrowsableSchemas admits, another registered store's, a document type the studio hides, or "
+            + "beyond the largest tables a sweep reads - and wraparound protection counts every table in the database, so it "
+            + "holds the whole database back as surely as one of these would.",
         MartenTablePartitionParameters = "the Schema screen's Tables tab shows which parameters the partitions differ on",
     };
 }

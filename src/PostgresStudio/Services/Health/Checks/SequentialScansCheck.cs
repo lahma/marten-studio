@@ -147,7 +147,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
         }
 
         return HealthVerdict.Quiet(large == 0
-            ? "No table this store declares (or, for a partitioned table, no partition of one) has "
+            ? "No table the studio judges (or, for a partitioned table, no partition of one) has "
               + TableText.Count(LargeTableRows) + " live rows or more."
             : watched == 0
                 ? "Watching " + TableText.Count(large) + " large table" + (large == 1 ? string.Empty : "s")
