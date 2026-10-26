@@ -34,6 +34,24 @@ internal interface IMaintenanceService
     Task<BloatMeasureResult> MeasureBloatAsync(StudioScope scope, string schema, string table, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// The database browser's gate, as the Maintenance page asks it which schemas a visitor is shown by name (D27): a seam over
+/// <see cref="DatabaseAccess.GateAsync" />, so a test can say what the gate answers (D12).
+/// </summary>
+internal interface IMaintenanceNameGate
+{
+    /// <summary>The gate for <paramref name="scope" />, as <see cref="DatabaseAccess.GateAsync" /> reads it.</summary>
+    Task<DatabaseGateRead> GateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken);
+}
+
+/// <summary>The gate a host's studio asks: <see cref="DatabaseAccess" />'s own.</summary>
+internal sealed class DatabaseAccessNameGate(DatabaseAccess access) : IMaintenanceNameGate
+{
+    /// <inheritdoc />
+    public Task<DatabaseGateRead> GateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken) =>
+        access.GateAsync(scope, resolved, cancellationToken);
+}
+
 /// <summary>One measure per database at once: the measure running now, by store and database.</summary>
 /// <remarks>
 /// A singleton, because a database is everybody's: two visitors pressing at once on one database get one measure - the same
@@ -108,15 +126,12 @@ internal sealed class MaintenanceService : IMaintenanceService
     /// <summary>How many tables the forecast lists.</summary>
     internal const int FreezeTables = 5;
 
-    /// <summary>What a running command on a table the page does not judge is called.</summary>
-    internal const string UnnamedTable = "a table this page does not name";
-
     private readonly IStudioSettings settings;
     private readonly StudioSourceResolver resolver;
     private readonly StudioAuthorization authorization;
     private readonly IMaintenanceFacts facts;
     private readonly IHealthService health;
-    private readonly DatabaseAccess? access;
+    private readonly IMaintenanceNameGate? access;
     private readonly StudioActionLog audit;
     private readonly BloatMeasureFlights flights;
     private readonly ILogger<MaintenanceService> logger;
@@ -131,7 +146,7 @@ internal sealed class MaintenanceService : IMaintenanceService
         StudioActionLog audit,
         BloatMeasureFlights flights,
         ILogger<MaintenanceService> logger,
-        DatabaseAccess? access = null,
+        IMaintenanceNameGate? access = null,
         TimeProvider? time = null)
     {
         this.settings = settings;
@@ -417,6 +432,7 @@ internal sealed class MaintenanceService : IMaintenanceService
         Dictionary<string, TableFacts> judged = (read.Tables ?? []).ToDictionary(static x => x.Key, StringComparer.Ordinal);
         List<MaintenanceRunningRow> rows = [];
         int unseen = 0;
+        int unnamed = 0;
 
         foreach (MaintenanceProgressRow row in running)
         {
@@ -426,10 +442,18 @@ internal sealed class MaintenanceService : IMaintenanceService
                 continue;
             }
 
-            string label = row.TableKey is { } key && judged.TryGetValue(key, out TableFacts? table) && await shown(table.Table.GatedSchemas).ConfigureAwait(false)
+            string? label = row.TableKey is { } key && judged.TryGetValue(key, out TableFacts? table) && await shown(table.Table.GatedSchemas).ConfigureAwait(false)
                 ? key + row.Part switch { "toast" => " (its TOAST table)", "partition" => " (one of its partitions)", _ => string.Empty }
                 : row.SystemCatalog && row.TableKey is { } catalog ? "the system catalog " + catalog
-                : UnnamedTable;
+                : null;
+
+            // A table this page does not name - withheld, hidden, or not one it judges - is counted and nothing more: its
+            // blocks, its phase and an ETA would give away how big it is (W5-V1 review).
+            if (label is null)
+            {
+                unnamed++;
+                continue;
+            }
 
             rows.Add(new MaintenanceRunningRow(
                 row.Kind,
@@ -454,7 +478,7 @@ internal sealed class MaintenanceService : IMaintenanceService
             ? PostgresGrants.NotChecked(PostgresGrant.ReadAllStats, platform, grants.ReadsAs)
             : unseen > 0 ? "Not checked: this needs pg_read_all_stats (pg_monitor includes it) for the role the studio reads as." : null;
 
-        return new MaintenanceRunningView(true, rows, unseen, notChecked);
+        return new MaintenanceRunningView(true, rows, unseen, notChecked) { Unnamed = unnamed };
     }
 
     /// <summary>
@@ -610,7 +634,15 @@ internal sealed class MaintenanceService : IMaintenanceService
                         }
 
                         BloatMeasureRow? measured = await MaintenanceQueries
-                            .MeasureBloatAsync(connection, transaction, schema, table.Table.Schema, table.Table.Table, commandTimeout, token)
+                            .MeasureBloatAsync(
+                                connection,
+                                transaction,
+                                schema,
+                                table.Table.Schema,
+                                table.Table.Table,
+                                commandTimeout,
+                                token,
+                                MaintenanceQueries.HasApproximate(pre.ExtensionVersion))
                             .ConfigureAwait(false);
 
                         return measured is null ? (null, "That table is no longer there.") : (measured, null);
@@ -625,7 +657,8 @@ internal sealed class MaintenanceService : IMaintenanceService
 
             audit.Record(MeasureAction, key, succeeded: true,
                 "Measured: " + TableText.Percent(measure!.DeadPercent / 100) + " dead tuples, " + TableText.Percent(measure.FreePercent / 100) + " free space, "
-                + SessionText.Count(measure.Indexes.Count, "index") + ".",
+                + SessionText.Number(measure.Indexes.Count) + (measure.Indexes.Count == 1 ? " index" : " indexes")
+                + (measure.IndexesNotMeasured > 0 ? " (" + SessionText.Number(measure.IndexesNotMeasured) + " more not measured)" : string.Empty) + ".",
                 capability, whole.Scope);
 
             return new BloatMeasureResult(key, measure, null, now);

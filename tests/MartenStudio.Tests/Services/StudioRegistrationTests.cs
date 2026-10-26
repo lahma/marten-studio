@@ -97,6 +97,7 @@ public class StudioRegistrationTests
         (typeof(IHealthService), ServiceLifetime.Scoped, How.Type, typeof(HealthService)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.MaintenanceFactsReader)),
         (typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights)),
+        (typeof(PostgresStudio.Services.Maintenance.IMaintenanceNameGate), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Maintenance.DatabaseAccessNameGate)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Maintenance.MaintenanceService)),
         (typeof(SessionPoolObserver), ServiceLifetime.Singleton, How.Type, typeof(SessionPoolObserver)),
         (typeof(ISessionActivityReader), ServiceLifetime.Singleton, How.Type, typeof(SessionActivityReader)),

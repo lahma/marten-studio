@@ -217,13 +217,17 @@ internal sealed record HealthTableRow
     /// <summary>How many of its leaves' TOAST tables have <c>autovacuum_enabled = false</c> (<c>toast.autovacuum_enabled</c>).</summary>
     public int ToastAutovacuumOffLeaves { get; init; }
 
-    /// <summary>How many of its leaves have never been analysed (<c>reltuples &lt; 0</c>, no analyze of either kind).</summary>
+    /// <summary>
+    /// How many of its leaves have never been analysed (<c>reltuples &lt; 0</c>, no analyze of either kind) and are, each on
+    /// its own, big enough for that to matter (<see cref="HealthTableQueries.UnanalyzedMinRows" />): never a sum over small
+    /// partitions, so a store partitioned by many small tenants is not one big table never analysed (W5-V1 review).
+    /// </summary>
     public int UnanalyzedLeaves { get; init; }
 
-    /// <summary>The live rows (<c>n_live_tup</c>) of those leaves.</summary>
+    /// <summary>The most live rows (<c>n_live_tup</c>) of any one of those leaves.</summary>
     public long UnanalyzedLiveRows { get; init; }
 
-    /// <summary>The rows read from those leaves since the counters began (<c>seq_tup_read + idx_tup_fetch</c>).</summary>
+    /// <summary>The most rows read from any one of those leaves since the counters began (<c>seq_tup_read + idx_tup_fetch</c>).</summary>
     public long UnanalyzedRowsRead { get; init; }
 
     /// <summary>
@@ -300,6 +304,12 @@ internal sealed record AutovacuumUnit
 
     /// <summary>Whether <c>pg_stat_progress_vacuum</c> names the unit: a <c>VACUUM</c> of it is running now.</summary>
     public bool Running { get; init; }
+
+    /// <summary>
+    /// Whether another session holds a lock on the unit that autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with - a
+    /// running VACUUM or ANALYZE apart - so autovacuum, which skips a table it cannot lock, passes it by now.
+    /// </summary>
+    public bool Locked { get; init; }
 
     /// <summary>Whether autovacuum would act now: the counter strictly past the trigger.</summary>
     public bool Due => Counter > Trigger;
@@ -624,6 +634,18 @@ internal static class HealthTableQueries
             from pg_catalog.pg_stat_progress_vacuum p
             where p.datid = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
         ),
+        locks as (
+            select distinct l.relation as relid
+            from pg_catalog.pg_locks l
+            where l.locktype = 'relation'
+              and l.granted
+              and l.database = (select db.oid from pg_catalog.pg_database db where db.datname = pg_catalog.current_database())
+              and l.mode in ('ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')
+              and l.pid <> pg_catalog.pg_backend_pid()
+              and l.pid not in (select v.pid from pg_catalog.pg_stat_progress_vacuum v
+                                union all
+                                select z.pid from pg_catalog.pg_stat_progress_analyze z)
+        ),
         settings as (
             select pg_catalog.current_setting('block_size')::bigint as block_size,
                    (select db.stats_reset
@@ -663,6 +685,12 @@ internal static class HealthTableQueries
                    coalesce(s.n_live_tup, 0) as live,
                    coalesce(s.seq_tup_read, 0) + coalesce(s.idx_tup_fetch, 0) as rows_read,
                    d.reltuples < 0 and s.last_analyze is null and s.last_autoanalyze is null as unanalyzed,
+                   d.reltuples < 0 and s.last_analyze is null and s.last_autoanalyze is null
+                       and (coalesce(s.n_live_tup, 0) >= @min_rows
+                            or (coalesce(s.seq_tup_read, 0) + coalesce(s.idx_tup_fetch, 0) >= @min_rows
+                                and (coalesce(s.n_live_tup, 0) = 0
+                                     or (coalesce(s.seq_scan, 0) > 0 and coalesce(s.seq_tup_read, 0) >= @min_rows * s.seq_scan)))) as unanalyzed_sized,
+                   exists (select 1 from locks k where k.relid = u.relid) as locked,
                    coalesce(ro.enabled, 'true')::boolean as enabled,
                    coalesce(tro.enabled, 'true')::boolean as toast_enabled,
                    greatest(s.last_vacuum, s.last_autovacuum) as vacuumed,
@@ -720,14 +748,14 @@ internal static class HealthTableQueries
                    j.modified / nullif(j.anl_trigger, 0) as analyze_ratio,
                    case when j.counted then pg_catalog.jsonb_build_object(
                        'counter', j.dead, 'trigger', j.vac_trigger, 'threshold', j.vt, 'scale', j.vsf, 'tuples', j.tuples,
-                       'last', extract(epoch from j.vacuumed), 'running', j.running,
+                       'last', extract(epoch from j.vacuumed), 'running', j.running, 'locked', j.locked,
                        'max', case when j.vmax >= 0 then j.vmax end) end as vacuum_unit,
                    case when j.counted and j.ins_trigger is not null then pg_catalog.jsonb_build_object(
                        'counter', j.inserted, 'trigger', j.ins_trigger, 'threshold', j.it, 'scale', j.isf, 'tuples', j.tuples,
-                       'last', extract(epoch from j.vacuumed), 'running', j.running, 'unfrozen', j.unfrozen) end as insert_unit,
+                       'last', extract(epoch from j.vacuumed), 'running', j.running, 'locked', j.locked, 'unfrozen', j.unfrozen) end as insert_unit,
                    case when j.counted then pg_catalog.jsonb_build_object(
                        'counter', j.modified, 'trigger', j.anl_trigger, 'threshold', j.at, 'scale', j.asf, 'tuples', j.tuples,
-                       'last', extract(epoch from j.analyzed), 'running', false) end as analyze_unit
+                       'last', extract(epoch from j.analyzed), 'running', false, 'locked', j.locked) end as analyze_unit
             from judged j
         ),
         worst_vacuum as (
@@ -753,9 +781,9 @@ internal static class HealthTableQueries
                    pg_catalog.count(*) filter (where j.modified > j.anl_trigger)::int as past_analyze,
                    pg_catalog.count(*) filter (where not j.enabled)::int as autovacuum_off,
                    pg_catalog.count(*) filter (where not j.toast_enabled)::int as toast_autovacuum_off,
-                   pg_catalog.count(*) filter (where j.unanalyzed)::int as unanalyzed,
-                   coalesce(pg_catalog.sum(j.live) filter (where j.unanalyzed), 0)::bigint as unanalyzed_live,
-                   coalesce(pg_catalog.sum(j.rows_read) filter (where j.unanalyzed), 0)::bigint as unanalyzed_read
+                   pg_catalog.count(*) filter (where j.unanalyzed_sized)::int as unanalyzed,
+                   coalesce(pg_catalog.max(j.live) filter (where j.unanalyzed_sized), 0)::bigint as unanalyzed_live,
+                   coalesce(pg_catalog.max(j.rows_read) filter (where j.unanalyzed_sized), 0)::bigint as unanalyzed_read
             from judged j
             group by j.root
         )
@@ -1319,7 +1347,16 @@ internal static class HealthTableQueries
     }
 
     /// <summary>The listed tables, rolled up (<see cref="TablesSql" />).</summary>
-    public static HealthQuery Tables(IReadOnlyList<HealthTableTarget> tables) => new(TablesSql, TargetParameters(tables));
+    public static HealthQuery Tables(IReadOnlyList<HealthTableTarget> tables) =>
+        new(TablesSql, [.. TargetParameters(tables), new NpgsqlParameter("min_rows", NpgsqlDbType.Bigint) { Value = UnanalyzedMinRows }]);
+
+    /// <summary>
+    /// T08's line for a table never analysed (<c>StaleStatisticsCheck.MinRows</c>): that many live rows, or that many read
+    /// with a sign the table is that big - a sequential scan that reads that many on average, or counters that say nothing
+    /// lives in it, which is the shape <c>pg_upgrade</c> leaves (W5-V1 review). Bound into <see cref="TablesSql" />, which
+    /// judges each partition against it alone.
+    /// </summary>
+    public const long UnanalyzedMinRows = 1_000;
 
     /// <summary>Every index on the listed tables (<see cref="IndexesSql" />).</summary>
     public static HealthQuery Indexes(IReadOnlyList<HealthTableTarget> tables) => new(IndexesSql, TargetParameters(tables));
@@ -1489,6 +1526,7 @@ internal static class HealthTableQueries
                 ? DateTimeOffset.UnixEpoch.AddTicks((long) Math.Round(last.GetDouble() * TimeSpan.TicksPerSecond))
                 : null,
             Running = root.TryGetProperty("running", out JsonElement running) && running.ValueKind == JsonValueKind.True,
+            Locked = root.TryGetProperty("locked", out JsonElement locked) && locked.ValueKind == JsonValueKind.True,
         };
 
         static double Number(JsonElement element, string name) =>

@@ -123,7 +123,9 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
             "28,500 inserts are 28.5 times 18's trigger, past ten, and 4.75 times 17's");
         inserts.Evidence.Should().Contain(new HealthEvidence("Inserted since the last vacuum", "28,500"));
         inserts.Evidence.Single(static x => x.Label == "Its insert trigger").Value.Should().StartWith(major >= 18 ? "1,000 (" : "6,000 (");
-        inserts.Finding.Remedy!.Code.Should().Be("ALTER TABLE \"ps_g2\".\"ev\" SET (autovacuum_vacuum_insert_scale_factor = 0.2);");
+        // What keeps autovacuum away is the test's own lock, and the finding says so - with no setting to change (W5-V1 review).
+        inserts.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "a lock another session holds on the table, which autovacuum skips"));
+        inserts.Finding.Remedy.Should().BeNull();
 
         HealthReportFinding dead = AutovacuumServer.About(report, "T07", "ps_g2.dr").Should().ContainSingle().Subject;
         dead.Finding.Variant.Should().Be(VacuumBehindCheck.DeadRowsVariant);
@@ -131,7 +133,8 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         dead.Finding.Title.Should().StartWith("ps_g2.dr has 15,000 dead rows, ", "7.5% dead, nowhere near the fifth 0.4 waited for");
         dead.Evidence.Single(static x => x.Label == "Its dead-row trigger").Value.Should().StartWith("2,050 (")
             .And.Contain("autovacuum_vacuum_scale_factor 0.01, the table's own storage parameter");
-        dead.Finding.Remedy!.Code.Should().Be("ALTER TABLE \"ps_g2\".\"dr\" SET (autovacuum_vacuum_scale_factor = 0.005);");
+        dead.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "a lock another session holds on the table, which autovacuum skips"));
+        dead.Finding.Remedy.Should().BeNull();
 
         // Released: autovacuum, woken every second, vacuums both - the trigger read said it would.
         await held.CommitAsync(Token);
@@ -205,9 +208,68 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
+    /// The healthy shapes the widened rule must not name (W5-V1 review): a five-row table, its key index built while it was
+    /// empty so that <c>reltuples</c> stays <c>-1</c> - every Marten document table - read two thousand times by its key; and a
+    /// table partitioned into thirty small tenants, each read often and none analysed, whose rows read add up to thousands.
+    /// </summary>
+    [PostgresFact]
+    [HealthQuiet("T08")]
+    public async Task A_small_table_read_by_its_key_and_thirty_small_partitions_never_analysed_are_quiet()
+    {
+        const string schema = "ps_maint_t08_quiet";
+        await postgres.CreateSchemaAsync(schema, Token);
+        ManualClock clock = new(Start);
+        await using StudioHost host = FixtureHost(schema, clock);
+
+        List<string> statements =
+        [
+            "create table ps_maint_t08_quiet.small (id int primary key, note text not null)",
+            "insert into ps_maint_t08_quiet.small select g, 'n' || g from generate_series(1, 5) g",
+            "create table ps_maint_t08_quiet.tenants (tenant int not null, id int not null, note text) partition by list (tenant)",
+        ];
+
+        for (int tenant = 1; tenant <= 30; tenant++)
+        {
+            string number = Number(tenant);
+            statements.Add("create table ps_maint_t08_quiet.tenants_" + number + " partition of ps_maint_t08_quiet.tenants for values in (" + number + ")");
+        }
+
+        statements.Add("insert into ps_maint_t08_quiet.tenants select t, g, 'n' || g from generate_series(1, 30) t, generate_series(1, 30) g");
+        await ExecuteAsync([.. statements]);
+
+        // Two thousand reads by the key, and each partition scanned ten times: 2,000 rows read from five, and 300 from each.
+        await ExecuteAsync(
+            "set enable_seqscan = off",
+            "do $$ begin for i in 1..2000 loop perform note from ps_maint_t08_quiet.small where id = 1 + i % 5; end loop; end $$",
+            "reset enable_seqscan",
+            "do $$ begin for i in 1..10 loop perform pg_catalog.count(*) from ps_maint_t08_quiet.tenants; end loop; end $$");
+
+        (await ScalarAsync<double>("select c.reltuples::float8 from pg_catalog.pg_class c where c.oid = 'ps_maint_t08_quiet.small'::regclass"))
+            .Should().Be(-1, "its index was built while it was empty, and five rows never reach autoanalyze's 50");
+        (await ScalarAsync<long>("select s.idx_tup_fetch from pg_catalog.pg_stat_user_tables s where s.relid = 'ps_maint_t08_quiet.small'::regclass"))
+            .Should().BeGreaterThanOrEqualTo(2_000, "the reads that 0.5's first cut of the rule counted as a size");
+        (await ScalarAsync<long>("select sum(s.seq_tup_read)::bigint from pg_catalog.pg_stat_user_tables s where s.relname like 'tenants\\_%'"))
+            .Should().BeGreaterThanOrEqualTo(9_000, "thirty partitions' reads add up to a large table's, which a sum would have judged");
+
+        await AutovacuumServer.ReportAsync(host);
+        clock.Advance(TimeSpan.FromMinutes(11));
+        HealthReport report = await AutovacuumServer.ReportAsync(host);
+
+        IReadOnlyList<HealthReportFinding> ours = [.. report.Findings.Where(static x => x.Code == "T08"
+            && x.Finding.Subject?.StartsWith(schema + ".", StringComparison.Ordinal) == true)];
+        ours.Should().BeEmpty(string.Join(" | ", ours.Select(static x => x.Finding.Title)));
+        AutovacuumServer.Status(report, "T08").Outcome.Should().Be(HealthCheckOutcome.Checked);
+    }
+
+    /// <summary>
     /// S02 on a server whose <c>autovacuum</c> and <c>track_activities</c> are switched off with <c>ALTER SYSTEM</c> and a
     /// reload: Critical and Warning, each named by its setting; T16 says no worker runs; reset, both are gone.
     /// </summary>
+    /// <remarks>
+    /// No <c>[HealthFires]</c> or <c>[HealthQuiet]</c> mark: S02 is one of the checks this suite's convention names as proven
+    /// in the Marten suite (<c>HealthLiveTestConventionTests.ProvenElsewhere</c>), where its quiet half needs a server with
+    /// <c>fsync</c> and <c>full_page_writes</c> on, and a mark on a code this suite does not claim fails the convention.
+    /// </remarks>
     [PostgresFact]
     public async Task Autovacuum_and_track_activities_switched_off_server_wide_are_S02_until_they_are_reset()
     {
@@ -310,7 +372,8 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         const string schema = "ps_maint_c06";
         await postgres.CreateSchemaAsync(schema, Token);
         await ExecuteAsync(
-            "create table ps_maint_c06.big (id int primary key, pad text not null)",
+            // Autovacuum off for it, so the VACUUM the test starts has the dead rows to crawl through, not autovacuum before it.
+            "create table ps_maint_c06.big (id int primary key, pad text not null) with (autovacuum_enabled = false)",
             "insert into ps_maint_c06.big select g, pg_catalog.repeat('p', 200) from generate_series(1, 20000) g",
             "delete from ps_maint_c06.big where id % 2 = 0");
 

@@ -43,6 +43,15 @@ internal sealed record MaintenanceWorkersRow
     /// a worker between two tables is in neither, so it is a lower bound.
     /// </summary>
     public int MaintenanceRunning { get; init; }
+
+    /// <summary>
+    /// <c>autovacuum_vacuum_cost_delay</c>, in milliseconds: how long a worker sleeps each time it has spent its cost limit
+    /// (2 by default from PostgreSQL 12; -1 means <c>vacuum_cost_delay</c>, which is 0).
+    /// </summary>
+    public double CostDelayMilliseconds { get; init; } = 2;
+
+    /// <summary>The cost limit autovacuum's workers share: <c>autovacuum_vacuum_cost_limit</c>, or <c>vacuum_cost_limit</c> at -1.</summary>
+    public int CostLimit { get; init; } = 200;
 }
 
 /// <summary>One maintenance command running in this database, as <see cref="MaintenanceQueries.Progress" /> reads it.</summary>
@@ -118,7 +127,11 @@ internal sealed record BloatMeasureRow(
     double DeadPercent,
     long FreeBytes,
     double FreePercent,
-    IReadOnlyList<BloatIndexRow> Indexes);
+    IReadOnlyList<BloatIndexRow> Indexes)
+{
+    /// <summary>How many of the table's valid indexes the measure left out: it reads the <see cref="MaintenanceQueries.MeasuredIndexes" /> largest.</summary>
+    public int IndexesNotMeasured { get; init; }
+}
 
 /// <summary>One index's measure.</summary>
 /// <param name="Name">The index.</param>
@@ -142,7 +155,11 @@ internal sealed record BloatIndexRow(
 /// <param name="ExtensionSchema">The schema <c>pgstattuple</c> is installed in, or <see langword="null" /> when it is not.</param>
 /// <param name="MayScan">Whether the role holds <c>pg_stat_scan_tables</c> (or is a superuser).</param>
 /// <param name="TableKind">The table's <c>relkind</c>, or <see langword="null" /> when there is no such table.</param>
-internal sealed record BloatPreconditionRow(string ReadsAs, string? ExtensionSchema, bool MayScan, string? TableKind);
+internal sealed record BloatPreconditionRow(string ReadsAs, string? ExtensionSchema, bool MayScan, string? TableKind)
+{
+    /// <summary>The installed <c>pgstattuple</c>'s version, or <see langword="null" /> when it is not installed.</summary>
+    public string? ExtensionVersion { get; init; }
+}
 
 /// <summary>
 /// The statements behind the Maintenance page and T16 (W5-V1): the server's autovacuum workers, what maintenance is running
@@ -191,7 +208,15 @@ internal static class MaintenanceQueries
                (select pg_catalog.count(distinct p.pid)
                 from (select v.pid from pg_catalog.pg_stat_progress_vacuum v
                       union all
-                      select z.pid from pg_catalog.pg_stat_progress_analyze z) p)::int
+                      select z.pid from pg_catalog.pg_stat_progress_analyze z) p)::int,
+               (select case when s.setting::float8 < 0
+                            then (select c.setting::float8 from pg_catalog.pg_settings c where c.name = 'vacuum_cost_delay')
+                            else s.setting::float8 end
+                from pg_catalog.pg_settings s where s.name = 'autovacuum_vacuum_cost_delay'),
+               (select case when s.setting::int < 0
+                            then (select c.setting::int from pg_catalog.pg_settings c where c.name = 'vacuum_cost_limit')
+                            else s.setting::int end
+                from pg_catalog.pg_settings s where s.name = 'autovacuum_vacuum_cost_limit')
         """;
 
     /// <summary>
@@ -290,6 +315,8 @@ internal static class MaintenanceQueries
             CanReadAllStats = !reader.IsDBNull(5) && reader.GetBoolean(5),
             WorkersSeen = reader.GetInt32(6),
             MaintenanceRunning = reader.GetInt32(7),
+            CostDelayMilliseconds = reader.IsDBNull(8) ? 2 : reader.GetDouble(8),
+            CostLimit = reader.IsDBNull(9) ? 200 : reader.GetInt32(9),
         };
     }
 
@@ -329,6 +356,7 @@ internal static class MaintenanceQueries
                 from pg_catalog.pg_extension e
                 join pg_catalog.pg_namespace n on n.oid = e.extnamespace
                 where e.extname = @extension),
+               (select e.extversion::text from pg_catalog.pg_extension e where e.extname = @extension),
                coalesce((select r.rolsuper from pg_catalog.pg_roles r where r.rolname = current_user), false)
                    or pg_catalog.pg_has_role(current_user, 'pg_stat_scan_tables', 'USAGE'),
                (select c.relkind::text
@@ -359,21 +387,30 @@ internal static class MaintenanceQueries
         return new BloatPreconditionRow(
             reader.GetString(0),
             reader.IsDBNull(1) ? null : reader.GetString(1),
-            !reader.IsDBNull(2) && reader.GetBoolean(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3));
+            !reader.IsDBNull(3) && reader.GetBoolean(3),
+            reader.IsDBNull(4) ? null : reader.GetString(4))
+        {
+            ExtensionVersion = reader.IsDBNull(2) ? null : reader.GetString(2),
+        };
     }
 
+    /// <summary>How many of a table's indexes the measure reads, the largest first; the rest are counted (W5-V1 review).</summary>
+    public const int MeasuredIndexes = 5;
+
     /// <summary>
-    /// The measure itself: <c>pgstattuple_approx</c> of the table, then, for each valid index on it, <c>pgstatindex</c>
-    /// (b-tree), <c>pgstatginindex</c> (GIN) or <c>pgstathashindex</c> (hash) - every other access method listed with its size
-    /// alone. The table is found by schema and name, both values.
+    /// The measure itself, one statement under one <c>statement_timeout</c>: <c>pgstattuple_approx</c> of the table - or, for
+    /// an extension older than 1.3, which has no such function, the exact <c>pgstattuple</c> - then, for each of the
+    /// <see cref="MeasuredIndexes" /> largest valid indexes on it, <c>pgstatindex</c> (b-tree), <c>pgstatginindex</c> (GIN) or
+    /// <c>pgstathashindex</c> (hash), every other access method listed with its size alone; and how many indexes it left out.
+    /// The table is found by schema and name, both values.
     /// </summary>
     /// <param name="extensionSchema">Where <c>pgstattuple</c> is installed, as <see cref="ReadBloatPreconditionsAsync" /> read it.</param>
-    internal static string BloatSql(string extensionSchema)
+    /// <param name="approximate">Whether the installed version has <c>pgstattuple_approx</c> (<see cref="HasApproximate" />).</param>
+    internal static string BloatSql(string extensionSchema, bool approximate = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(extensionSchema);
 
-        string approx = SqlIdentifier.Qualify(extensionSchema, "pgstattuple_approx");
+        string approx = SqlIdentifier.Qualify(extensionSchema, approximate ? "pgstattuple_approx" : "pgstattuple");
         string btree = SqlIdentifier.Qualify(extensionSchema, "pgstatindex");
         string gin = SqlIdentifier.Qualify(extensionSchema, "pgstatginindex");
         string hash = SqlIdentifier.Qualify(extensionSchema, "pgstathashindex");
@@ -393,11 +430,25 @@ internal static class MaintenanceQueries
             + "                       when 'gin' then (select pg_catalog.to_jsonb(g) from " + gin + "(x.indexrelid::pg_catalog.regclass) g)\n"
             + "                       when 'hash' then (select pg_catalog.to_jsonb(h) from " + hash + "(x.indexrelid::pg_catalog.regclass) h)\n"
             + "                   end) order by ic.relname), '[]'::jsonb)\n"
-            + "        from pg_catalog.pg_index x\n"
+            + "        from (select x.indexrelid\n"
+            + "              from pg_catalog.pg_index x\n"
+            + "              join pg_catalog.pg_class i on i.oid = x.indexrelid\n"
+            + "              where x.indrelid = (select t.oid from target t) and x.indisvalid and i.relkind = 'i'\n"
+            + "              order by i.relpages desc, i.relname\n"
+            + "              limit " + MeasuredIndexes.ToString(System.Globalization.CultureInfo.InvariantCulture) + ") x\n"
             + "        join pg_catalog.pg_class ic on ic.oid = x.indexrelid\n"
-            + "        join pg_catalog.pg_am am on am.oid = ic.relam\n"
-            + "        where x.indrelid = (select t.oid from target t) and x.indisvalid and ic.relkind = 'i')::text";
+            + "        join pg_catalog.pg_am am on am.oid = ic.relam)::text,\n"
+            + "       (select pg_catalog.count(*)\n"
+            + "        from pg_catalog.pg_index x\n"
+            + "        join pg_catalog.pg_class i on i.oid = x.indexrelid\n"
+            + "        where x.indrelid = (select t.oid from target t) and x.indisvalid and i.relkind = 'i')::int";
     }
+
+    /// <summary>Whether a <c>pgstattuple</c> version has <c>pgstattuple_approx</c>, which 1.3 added.</summary>
+    internal static bool HasApproximate(string? version) =>
+        version is null
+        || !System.Version.TryParse(version.Contains('.', StringComparison.Ordinal) ? version : version + ".0", out System.Version? parsed)
+        || parsed >= new System.Version(1, 3);
 
     /// <summary>Runs <see cref="BloatSql" /> in the caller's transaction and reads its one row.</summary>
     public static async Task<BloatMeasureRow?> MeasureBloatAsync(
@@ -407,16 +458,18 @@ internal static class MaintenanceQueries
         string schema,
         string table,
         int timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool approximate = true)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        await using NpgsqlCommand command = new(BloatSql(extensionSchema), connection, transaction) { CommandTimeout = timeout };
+        await using NpgsqlCommand command = new(BloatSql(extensionSchema, approximate), connection, transaction) { CommandTimeout = timeout };
         command.Parameters.Add(new NpgsqlParameter("schema", NpgsqlDbType.Text) { Value = schema });
         command.Parameters.Add(new NpgsqlParameter("table", NpgsqlDbType.Text) { Value = table });
 
         string? heap;
         string? indexes;
+        int indexCount;
 
         await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
         {
@@ -427,9 +480,16 @@ internal static class MaintenanceQueries
 
             heap = reader.IsDBNull(0) ? null : reader.GetString(0);
             indexes = reader.IsDBNull(1) ? null : reader.GetString(1);
+            indexCount = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
         }
 
-        return heap is null ? null : ParseBloat(heap, indexes ?? "[]");
+        if (heap is null)
+        {
+            return null;
+        }
+
+        BloatMeasureRow measured = ParseBloat(heap, indexes ?? "[]");
+        return measured with { IndexesNotMeasured = Math.Max(0, indexCount - measured.Indexes.Count) };
     }
 
     /// <summary>The measure's two <c>jsonb</c> values as one row.</summary>
@@ -455,14 +515,15 @@ internal static class MaintenanceQueries
                 NullableNumber(measure, "free_percent")));
         }
 
+        // pgstattuple_approx's names, else the exact pgstattuple's - which reads every page, so all of it is scanned.
         return new BloatMeasureRow(
             (long) Number(t, "table_len"),
-            Number(t, "scanned_percent"),
-            Number(t, "approx_tuple_count"),
+            NullableNumber(t, "scanned_percent") ?? 100,
+            NullableNumber(t, "approx_tuple_count") ?? Number(t, "tuple_count"),
             (long) Number(t, "dead_tuple_count"),
             Number(t, "dead_tuple_percent"),
-            (long) Number(t, "approx_free_space"),
-            Number(t, "approx_free_percent"),
+            (long) (NullableNumber(t, "approx_free_space") ?? Number(t, "free_space")),
+            NullableNumber(t, "approx_free_percent") ?? Number(t, "free_percent"),
             rows);
 
         static double Number(JsonElement element, string name) => NullableNumber(element, name) ?? 0;

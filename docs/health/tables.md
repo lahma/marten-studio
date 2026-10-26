@@ -244,8 +244,9 @@ table vacuumed by hand a moment ago can show its inserts or dead rows again. Eve
 
 ## T07 Vacuum falling behind
 
-**Warning; Critical** past ten times the trigger, or with autovacuum switched off for the table or the server and
-the table behind. Behind means a counter at least **10,000 past twice its trigger**, the last vacuum of either
+**Warning; Critical** past ten times the trigger, or with autovacuum switched off by the table's own
+`autovacuum_enabled = false`. A server whose `autovacuum = off` keeps each table behind at Warning: S02 is that
+Critical. Behind means a counter at least **10,000 past twice its trigger**, the last vacuum of either
 kind more than **an hour** ago or never, and the table **not being vacuumed now** - held for ten minutes of
 samples, unless autovacuum is switched off for the table or the server, when there is nothing to wait for. The
 fixed 20% dead and one-day rules of 0.4 are gone: a table tuned to `scale_factor 0.01` is caught long before it
@@ -258,28 +259,41 @@ Variants:
   a library's history table depends on: it is the pass that sets the visibility map index-only scans read and
   freezes pages early, so the anti-wraparound vacuum that comes for every table later is cheap.
 
-A finding's key is `T07|<variant>|<table>`, so the two kinds of finding about one table mute apart (0.4's
-`T07|<table>` keys, and their mutes, reset once).
+A finding's key is `T07|<variant>|<table>` (0.4's `T07|<table>` keys, and their mutes, reset once). A table behind
+on both is one finding, the `dead-rows` one, with both counters and both triggers in its evidence.
 
 **"Not being vacuumed now"** is `pg_stat_progress_vacuum.relid`. A role without `pg_read_all_stats` sees only the
 process id and database of a `VACUUM` it did not run - autovacuum's on its own tables included - so while such a
 one runs in the database, the finding still speaks, and its caveat says it may be under way now and which grant
 would tell (`pg_read_all_stats`, and who can grant it on this platform).
 
-The remedy is a scale factor that would have triggered it sooner: the next rung below the one in force
-(0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 0.002, 0.001), with the explanation naming the trigger now and at the new
-value. For a document table:
+**The remedy is for what keeps autovacuum away.** A table behind is already past its trigger, so a lower scale
+factor changes nothing; the finding's evidence ("What keeps autovacuum away") and its remedy name, from what the
+sweep read, the first of:
+
+- **a lock** another session holds on the table that autovacuum's `SHARE UPDATE EXCLUSIVE` conflicts with (a
+  long migration, a `LOCK TABLE`, a `CREATE INDEX` without `CONCURRENTLY`) - autovacuum skips a table it cannot
+  lock rather than wait. No setting answers it; Database › Sessions shows who holds it;
+- **every worker busy** (T16, now or in its latest sample) - `autovacuum_max_workers`, doubled;
+- **throttling** - an `autovacuum_vacuum_cost_delay` of 10 ms or more, or an `autovacuum_vacuum_cost_limit` of 100
+  or less, the table's own storage parameter or the server's setting - back to Postgres' default (2 ms, 200);
+- **a horizon held for over an hour** (T14's latest sample; dead rows only) - vacuum cannot remove a row any
+  transaction may still see; T14 names the holder;
+- otherwise nothing the sweep can see, and the finding says so and points at `log_autovacuum_min_duration`.
+
+A scale factor is offered only when nothing above applies and the next rung below the one in force (0.2, 0.1,
+0.05, 0.02, 0.01, 0.005, 0.002, 0.001) would at least halve the trigger - "so autovacuum starts sooner next time",
+which is all it can do for a table already past its trigger. For a document table:
 
 ```csharp
-opts.Schema.For<Order>().StorageParameter("autovacuum_vacuum_scale_factor", 0.005);   // Marten 9.47+
+opts.Schema.For<Order>().StorageParameter("autovacuum_vacuum_scale_factor", 0.02);   // Marten 9.47+
 ```
 
 For an `inserts` finding it is `autovacuum_vacuum_insert_scale_factor`; a host's own relational table gets the
-`ALTER TABLE ... SET (...)` for its migrations. A scale factor already at 0.001 is not the answer, and the
-finding says what is: workers busy elsewhere (T16), the cost limit, or a transaction holding the horizon (T14).
-On a table autovacuum is switched off for, the remedy is `StorageParameter("autovacuum_enabled", true)`; with the
-server's `autovacuum = off` it is a DBA's (S02). A DBA's `ALTER TABLE ... SET (...)` on a table is not reset by an
-apply unless the apply rebuilds the table, as a changed partition scheme does.
+`ALTER TABLE ... SET (...)` for its migrations. On a table autovacuum is switched off for, the remedy is
+`StorageParameter("autovacuum_enabled", true)`; with the server's `autovacuum = off` it is a DBA's (S02). A DBA's
+`ALTER TABLE ... SET (...)` on a table is not reset by an apply unless the apply rebuilds the table, as a changed
+partition scheme does.
 
 ## T08 Never analysed, or stale statistics
 
@@ -287,15 +301,21 @@ apply unless the apply rebuilds the table, as a changed partition scheme does.
 both. Variants:
 
 - `stale` - `n_mod_since_analyze` at least **10,000 past twice the table's own analyze trigger**, with no
-  analyze of either kind in **an hour**. The remedy is the next rung of `autovacuum_analyze_scale_factor`; a
-  DBA's `ANALYZE` fixes the statistics now, and the parameter keeps them fixed.
+  analyze of either kind in **an hour**. As T07's, the remedy is for what keeps autoanalyze away - a lock, every
+  worker busy, the table's own throttling - and the next rung of `autovacuum_analyze_scale_factor` only where it
+  would at least halve the trigger; a DBA's `ANALYZE` fixes the statistics now.
 - `never-analysed` - `reltuples = -1` and no analyze of either kind, with at least **1,000 live rows - or 1,000
-  rows read since the counters began** (`seq_tup_read + idx_tup_fetch`). The second half is the shape every
-  table has after `pg_upgrade` from 14-17, which carries no statistics over: `n_live_tup` is 0, and autovacuum
-  analyses a table only after enough modifications, so a read-mostly table is planned on defaults indefinitely.
+  rows read since the counters began** (`seq_tup_read + idx_tup_fetch`) **with a sign the table is that big**: a
+  sequential scan that reads 1,000 rows on average, or no live rows counted at all. Rows read alone are not one:
+  a table whose indexes were built while it was empty keeps `reltuples = -1` - every Marten document table - and
+  five rows read two thousand times by their key are two thousand rows read. The no-live-rows half is the shape
+  every table has after `pg_upgrade` from 14-17, which carries no statistics over: `n_live_tup` is 0, and
+  autovacuum analyses a table only after enough modifications, so a read-mostly table is planned on defaults
+  indefinitely.
   The remedy is in words, for whoever runs the server: `vacuumdb --all --analyze-in-stages` (17 and before), or
   on 18 `vacuumdb --all --analyze-in-stages --missing-stats-only` followed by `vacuumdb --all --analyze-only` -
-  or the table's own `ANALYZE`. A partitioned table is flagged for its partitions that were never analysed, and -
+  or the table's own `ANALYZE`. A partitioned table is flagged for its partitions that were never analysed and
+  are, each on its own, past the same lines - never a sum, so many small tenants are not one large table - and -
   as **Info**, with nothing to wait for - when the parent itself never was: autovacuum does not analyse partitioned
   tables, so the parent's statistics, which a query across partitions plans from, exist only once somebody runs
   `ANALYZE` on it.
@@ -763,14 +783,16 @@ shown to a visitor the store policy passes for the database as a whole (`TenantI
 - **Running now** - with `pg_read_all_stats`, every `VACUUM`, `ANALYZE`, index build and `CLUSTER` in this database:
   its phase, blocks and (PostgreSQL 17+) indexes, whether it is autovacuum's and why, and an ETA at the rate its blocks
   went between T16's samples. Without it, the commands the role cannot see the table of are counted, with the grant
-  that would show them.
+  that would show them. A command on a table the page does not name to this visitor - withheld, hidden, or not one it
+  judges - is counted too, with no phase, blocks or ETA, which would say how big the table is.
 - **Workers** - `autovacuum_max_workers`, how many are busy (as T16 counts them), `autovacuum_naptime`.
 - **Freeze forecast** - T12's and T13's own facts and samples: the oldest ages against the forced-freeze and
   write-refusal lines, and the time to each at the history's rate.
 - **Vacuum horizon** - T14's finding, its names behind the activity gate as on the Health page.
-- **Measure bloat** - one table at a time, on demand: `pgstattuple_approx` for the heap and `pgstatindex`,
-  `pgstatginindex` or `pgstathashindex` for each index, in a read-only transaction as `SqlConsoleRole` under
-  `QueryTimeout`, one measure per database at once. It needs the `pgstattuple` extension (not trusted: a superuser or
+- **Measure bloat** - one table at a time, on demand: `pgstattuple_approx` for the heap (the exact `pgstattuple`
+  where the installed extension is older than 1.3) and `pgstatindex`, `pgstatginindex` or `pgstathashindex` for the
+  five largest indexes, the rest counted - one statement, so one `QueryTimeout` bounds the whole measure - in a
+  read-only transaction as `SqlConsoleRole` under `lock_timeout`, one measure per database at once. It needs the `pgstattuple` extension (not trusted: a superuser or
   the platform's administrator installs it) and `pg_stat_scan_tables` (in `pg_monitor`); without either it says which,
   and who can grant or install it. It is never part of a sweep or a list - it reads the table, under an
   `AccessShareLock` - and every press is audited as "Measure bloat", with the table and nothing else.

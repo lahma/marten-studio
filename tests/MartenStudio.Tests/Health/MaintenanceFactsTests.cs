@@ -146,6 +146,32 @@ public class MaintenanceFactsTests
         sql.Should().NotContain("pg_relation_size", "a size is relpages, never a function that waits behind a migration");
     }
 
+    /// <summary>
+    /// The measure is bounded (W5-V1 review): one statement, the five largest indexes and a count of the rest, and the exact
+    /// <c>pgstattuple</c> only for an extension older than 1.3, which has no <c>pgstattuple_approx</c>.
+    /// </summary>
+    [Fact]
+    public void The_measure_reads_the_five_largest_indexes_and_the_approximate_heap_where_the_extension_has_it()
+    {
+        string approximate = MaintenanceQueries.BloatSql("public");
+        approximate.Should().Contain("\"public\".\"pgstattuple_approx\"").And.Contain("order by i.relpages desc").And.Contain("limit 5");
+
+        string exact = MaintenanceQueries.BloatSql("public", approximate: false);
+        exact.Should().Contain("\"public\".\"pgstattuple\"(").And.NotContain("pgstattuple_approx");
+
+        MaintenanceQueries.HasApproximate("1.5").Should().BeTrue();
+        MaintenanceQueries.HasApproximate("1.3").Should().BeTrue();
+        MaintenanceQueries.HasApproximate("1.2").Should().BeFalse();
+
+        BloatMeasureRow row = MaintenanceQueries.ParseBloat(
+            """{"table_len": 8192, "tuple_count": 90, "tuple_len": 1, "tuple_percent": 70, "dead_tuple_count": 10, "dead_tuple_len": 1, "dead_tuple_percent": 9, "free_space": 800, "free_percent": 10}""",
+            "[]");
+
+        row.LiveTuples.Should().Be(90, "the exact function's names are read where the approximate one's are absent");
+        row.FreeBytes.Should().Be(800);
+        row.ScannedPercent.Should().Be(100, "the exact function reads every page");
+    }
+
     [Fact]
     public async Task One_measure_per_database_at_once_the_same_table_joins_it_and_another_is_refused()
     {
