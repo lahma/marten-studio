@@ -90,14 +90,19 @@ public class HealthDaemonQueriesTests
         HealthQuery query = HealthDaemonQueries.HighWater("studio_events");
 
         query.Sql.Should().Contain("from \"studio_events\".\"mt_event_progression\"");
-        query.Sql.Should().Contain("case when s.is_called then s.last_value else 0 end from \"studio_events\".\"mt_events_sequence\"");
         query.Sql.Should().Contain("pg_catalog.min(e.seq_id) from \"studio_events\".\"mt_events\" e where e.seq_id > h.last_seq_id");
 
-        // D09's two: Marten's own reading of what the sequence has handed out (#5091), and the other end of the same key.
-        query.Sql.Should().Contain(
-            "(select case when s.is_called then s.last_value else s.last_value - 1 end from \"studio_events\".\"mt_events_sequence\" s) as allocated_high");
+        // The sequence is read once, as one row, and every reading of it is derived from that row (the G1M-fix delta
+        // review's N6): two reads of a sequence, which is not transactional, could straddle an append.
+        query.Sql.Should().Contain("cross join (select q.last_value, q.is_called from \"studio_events\".\"mt_events_sequence\" q) as s\n");
+        query.Sql.Split("\"mt_events_sequence\"").Should().HaveCount(2, "the sequence is named, and so read, exactly once");
+        query.Sql.Should().Contain("case when s.is_called then s.last_value else 0 end as highest_sequence");
+
+        // D09's: Marten's own reading of what the sequence has handed out (#5091), the other end of the same key, and the
+        // raw last_value Marten's correction compares the mark with.
+        query.Sql.Should().Contain("case when s.is_called then s.last_value else s.last_value - 1 end as allocated_high");
         query.Sql.Should().Contain("(select pg_catalog.max(e.seq_id) from \"studio_events\".\"mt_events\" e) as highest_committed");
-        query.Sql.Should().Contain("(select s.last_value from \"studio_events\".\"mt_events_sequence\" s) as sequence_last_value",
+        query.Sql.Should().Contain("s.last_value as sequence_last_value\n",
             "Marten's correction compares the mark with the raw last_value, and D09 says when it has nothing left to do");
         query.Sql.Should().Contain("pg_catalog.transaction_timestamp() as server_now", "every age is server time");
         query.Sql.Should().NotContain("HighWaterStuckGap", "the bookkeeping row names are values");
@@ -214,6 +219,51 @@ public class HealthDaemonQueriesTests
         HealthDaemonQueries.ExplainPreparedTransactions().Sql.Should().Contain("p.database = pg_catalog.current_database()");
         HealthDaemonQueries.ExplainHiddenWriters().Sql.Should()
             .Contain("l.locktype = 'transactionid'").And.Contain("a.datname = pg_catalog.current_database()").And.Contain("a.xact_start is null");
+    }
+
+    /// <summary>
+    /// D09's repair statement: computed when it runs - the greater of the mark and <c>max(seq_id)</c>, read by the
+    /// statement itself - only ever forward, and, for the repair after a RESTART, only while nothing has drawn from the
+    /// sequence (the G1M-fix delta review's N1 and N2). <c>ProgressionAheadOfSequenceLiveTests</c> runs it.
+    /// </summary>
+    [Fact]
+    public void The_sequence_repair_reads_its_target_when_it_runs_and_only_moves_the_sequence_forward()
+    {
+        string repair = HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: false)!;
+
+        repair.Should().Be(
+            "select pg_catalog.setval('\"studio_events\".\"mt_events_sequence\"', t.target)\n"
+            + "from \"studio_events\".\"mt_events_sequence\" q\n"
+            + "cross join lateral (\n"
+            + "    select greatest(\n"
+            + "        coalesce((select h.last_seq_id from \"studio_events\".\"mt_event_progression\" h where h.name = 'HighWaterMark'), 0),\n"
+            + "        coalesce((select pg_catalog.max(e.seq_id) from \"studio_events\".\"mt_events\" e), 0)) as target) t\n"
+            + "where t.target > (case when q.is_called then q.last_value else q.last_value - 1 end);");
+
+        HealthDaemonQueries.SequenceRepair("studio_events", onlyWhileNeverCalled: true)
+            .Should().Be(repair.TrimEnd(';') + "\n  and not q.is_called;");
+    }
+
+    [Theory]
+    [InlineData("Odd Schema", true)]
+    [InlineData("odd'schema", false)]
+    [InlineData("odd\\schema", false)]
+    [InlineData("has\"quote", false)]
+    [InlineData("line\nbreak", false)]
+    [InlineData("rlo‮schema", false)]
+    public void The_sequence_repair_quotes_its_names_and_prints_none_it_cannot_print_honestly(string schema, bool printed)
+    {
+        string? repair = HealthDaemonQueries.SequenceRepair(schema, onlyWhileNeverCalled: true);
+
+        if (printed)
+        {
+            repair.Should().Contain("setval('\"Odd Schema\".\"mt_events_sequence\"', t.target)")
+                .And.Contain("from \"Odd Schema\".\"mt_events\" e");
+        }
+        else
+        {
+            repair.Should().BeNull("a name the setval literal or a pasted line could not show as it is gets the repair in words");
+        }
     }
 
     [Fact]
