@@ -122,16 +122,19 @@
   so new events take numbers the daemon has already passed (judged only for a store with an async projection or
   subscription); and `sequence-behind`, where the sequence is behind the highest committed event, so the next append
   fails on `mt_events`' primary key (judged for any store with events). These are what a sequence reset, a restore
-  from mixed points in time or a logical-replication cut-over leaves behind. The remedies are the projections screen's
-  Correct progression (Marten's `TryCorrectProgressInDatabaseAsync`) for a mark ahead - and once that has done all it
-  can after a `RESTART`, a DBA's `setval` to the greater of the mark and `max(seq_id)`, made only while the sequence
-  still reads `is_called = false`, because the next event appended would otherwise be treated as processed (where the
-  events already reach the mark, the sequence-behind repair does both: one repair, not two); a rebuild (which empties
-  the projection's tables first) or a rewind to the lower of the mark and the highest number handed out for a lone
-  shard; and a DBA's `setval` to the greater of `max(seq_id)` and the mark for the sequence. Each `setval` is shown as a
-  statement that reads its target when it runs and only moves the sequence forward, so pasting it later is as safe as
-  running it at once. It is not checked under `UseTenantPartitionedEvents`. The high-water read adds one backward
-  primary-key probe of `mt_events`, and reads the sequence's `last_value` and `is_called` once.
+  from mixed points in time or a logical-replication cut-over leaves behind. A sequence behind the events gets a DBA's
+  `setval` to the greater of `max(seq_id)` and the mark; where the mark is ahead as well - the commonest state - that
+  one repair is the remedy for both findings, and D09 says not to run Correct progression, which would move
+  progression back below events the daemon has already processed. Otherwise a mark ahead gets the projections screen's
+  Correct progression (Marten's `TryCorrectProgressInDatabaseAsync`), and once that has done all it can after a
+  `RESTART`, the same `setval`, made only while the sequence still reads `is_called = false`, because the next event
+  appended would otherwise be treated as processed. A lone shard ahead gets a rebuild (which empties the projection's
+  tables first) or a rewind to the lower of the mark and the highest number handed out, and a shard past the mark is
+  rewound to the mark once the repair has run. Each `setval` is a statement that reads its target when it runs and
+  only moves the sequence forward, so pasting it later is as safe as running it at once; the Health page draws it as
+  "A one-off repair, run by hand - the studio never runs this" and names the database to run it in. It is not checked
+  under `UseTenantPartitionedEvents`. The high-water read adds one backward primary-key probe of `mt_events`, and
+  reads the sequence's `last_value` and `is_called` once.
 
 # 0.4.0
 
