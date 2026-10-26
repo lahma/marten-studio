@@ -63,8 +63,9 @@ public class SampleConsoleRoleLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// The seeding runs on every database the sample is pointed at, so its grants hold only for a role the login is a member
-    /// of - one the host made here. A role that is not there is granted nothing, and is not made either.
+    /// The grants hold only for a role the login is a member of: a role that is not there is granted nothing, and is not made
+    /// either. Membership is the server's, though, not the database's - which is why the seeding asks the host first
+    /// (<see cref="The_seeding_grants_the_role_nothing_on_a_database_the_host_did_not_say_is_the_demos" />).
     /// </summary>
     [PostgresFact]
     public async Task A_role_the_host_did_not_make_is_granted_nothing()
@@ -87,6 +88,71 @@ public class SampleConsoleRoleLiveTests(PostgresFixture postgres)
         finally
         {
             await ExecuteAsync("drop schema if exists " + schema + " cascade;");
+        }
+    }
+
+    /// <summary>
+    /// SEC-fix F3: the seeding runs on every database the sample is pointed at, and once a start has made the login a member
+    /// of the sample's role, it is a member on every database of that server - so <see cref="SampleConsoleRole.GrantAsync" />'s
+    /// own membership check would grant the role the demo's schemas in any database. The seeder grants only when the host said
+    /// the database is the demo's (<see cref="SampleSeeding.GrantConsoleRole" />), and the granted half proves the check reads
+    /// the grants it is looking for.
+    /// </summary>
+    /// <remarks>
+    /// The sample's own role, <see cref="SampleConsoleRole.Name" />, because that is the one the seeder grants; making it is
+    /// idempotent and other classes on this container make it the same way. Each half has a database of its own, because the
+    /// seeder grants in the sample's fixed schemas.
+    /// </remarks>
+    [PostgresFact]
+    public async Task The_seeding_grants_the_role_nothing_on_a_database_the_host_did_not_say_is_the_demos()
+    {
+        (await SampleConsoleRole.EnsureAsync(postgres.ConnectionString, cancellationToken: Token)).Should().BeTrue(
+            "the premise: the server has the role and the login is a member, as after a start on the demo's database");
+
+        (long Schemas, long Granted, bool Member) withheld = await SeedAsync("sample_seed_role_withheld", grant: false);
+        (long Schemas, long Granted, bool Member) granted = await SeedAsync("sample_seed_role_granted", grant: true);
+
+        withheld.Member.Should().BeTrue("the login is a member on a database nobody made the role for: membership is cluster-wide");
+        withheld.Schemas.Should().Be(SampleConsoleRole.Schemas.Count, "the seeding made every demo schema there");
+        withheld.Granted.Should().Be(0, "a database the host did not call the demo's grants the role nothing");
+
+        granted.Schemas.Should().Be(SampleConsoleRole.Schemas.Count);
+        granted.Granted.Should().Be(SampleConsoleRole.Schemas.Count, "where the host allowed it, every demo schema is granted");
+    }
+
+    /// <summary>
+    /// A database of its own, the sample's store in it seeded with <paramref name="grant" /> as the host's answer, and then
+    /// what the role holds there; the database is dropped again.
+    /// </summary>
+    private async Task<(long Schemas, long Granted, bool Member)> SeedAsync(string database, bool grant)
+    {
+        string connectionString = await Browser.BrowserSuiteFixture.CreateDatabaseAsync(postgres, database);
+
+        try
+        {
+            await using (MartenFixture marten = await MartenFixture.CreateAsync(connectionString, SampleStore.DocumentSchema))
+            {
+                await new SampleDataSeeder(seeding: new SampleSeeding(GrantConsoleRole: grant)).Populate(marten.Store, Token);
+            }
+
+            await using NpgsqlConnection connection = new(connectionString);
+            await connection.OpenAsync(Token);
+            await using NpgsqlCommand command = new(
+                "select count(*), count(*) filter (where pg_catalog.has_schema_privilege(@role, n.oid, 'USAGE')), "
+                + "pg_catalog.pg_has_role(current_user, @role, 'MEMBER') "
+                + "from pg_catalog.pg_namespace n where n.nspname = any(@schemas)",
+                connection);
+            command.Parameters.AddWithValue("role", SampleConsoleRole.Name);
+            command.Parameters.AddWithValue("schemas", SampleConsoleRole.Schemas.ToArray());
+
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+            (await reader.ReadAsync(Token)).Should().BeTrue();
+            return (reader.GetInt64(0), reader.GetInt64(1), reader.GetBoolean(2));
+        }
+        finally
+        {
+            // `with (force)` ends the sessions the pools above still hold; the name is this test's own, so none is reused.
+            await ExecuteAsync("drop database if exists " + database + " with (force);");
         }
     }
 

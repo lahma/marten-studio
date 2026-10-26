@@ -54,6 +54,10 @@ if (await SampleDatabaseCheck.PrepareAsync(
 bool consoleRole = (EphemeralPostgres.IsThrowaway(connectionString) || sample.AllowDataGeneration)
     && await SampleConsoleRole.EnsureAsync(connectionString, Console.Out);
 
+// And the seeding grants the role the demo's schemas only on such a database, as the role itself is made only there: role
+// membership is the server's, so a login an earlier start made a member is one on every database of that server.
+builder.Services.AddSingleton(new SampleSeeding(GrantConsoleRole: consoleRole));
+
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
