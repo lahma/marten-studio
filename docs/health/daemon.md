@@ -386,37 +386,46 @@ These are what leave a store like this:
 
 What to do, read at `V9.39.0`, `v9.51.0` and `V9.54.1`:
 
-- **`mark-ahead`**: the projections screen's **Correct progression** (`Capabilities.CorrectProgression`), which runs
-  Marten's own `store.Advanced.TryCorrectProgressInDatabaseAsync`. Marten sets the mark and every shard's row back to
-  the sequence's `last_value`, leaving its own allocation-fence and stuck-gap rows alone, and it does so only while the
-  mark is above that value. Every event appended since the reset at a number at or below it is then treated as
-  processed, so rebuild the projections that should hold those events - a rebuild empties the projection's tables
-  before it replays.
-  - Right after a `RESTART`, before anything is appended, `last_value` is the number the sequence hands out next. So the
-    correction leaves the mark exactly there, one past what has been handed out, and has done all it can. D09 then no
-    longer offers it, and says that the next event appended takes the mark's own number and is treated as already
-    processed.
-  - The remedy then is a DBA's, with appends stopped, and only while `mt_events_sequence` still reads
-    `is_called = false`: `setval` it to the greater of the mark and `max(seq_id)` of `mt_events`. The statement D09
-    shows (below) reads both when it runs, not when the sweep did, and does nothing once anything has drawn from the
-    sequence. By then the event at the mark's number has been taken, and the projections that should hold it need a
-    rebuild.
-  - Where the events already reach the mark, D09 reports `sequence-behind` too, and that repair moves the sequence past
-    the events and past the mark alike: one repair, not two.
-  - A shard past the mark itself keeps its own remedy, the rebuild or rewind of `shard-ahead`.
+- **`mark-ahead`** gets one of three remedies, and which one depends first on whether D09 also reports
+  `sequence-behind`:
+  - **The sequence is behind the events too** - the commonest state, a `RESTART` under a table full of events. Do not
+    run **Correct progression**: Marten would set the mark and every shard back to the sequence's `last_value`, and
+    every event above it up to the mark, which the daemon has already processed, would be processed again. The remedy is
+    the `sequence-behind` repair alone. It moves the sequence past the events and past the mark alike: one repair for
+    both findings, not two.
+  - **The sequence is not behind the events, and the mark is above `last_value`**: the projections screen's **Correct
+    progression** (`Capabilities.CorrectProgression`), which runs Marten's own
+    `store.Advanced.TryCorrectProgressInDatabaseAsync`. Marten sets the mark and every shard's row back to the
+    sequence's `last_value`, leaving its own allocation-fence and stuck-gap rows alone, and it does so only while the
+    mark is above that value. Every event appended since the reset at a number at or below it is then treated as
+    processed, so rebuild the projections that should hold those events - a rebuild empties the projection's tables
+    before it replays.
+  - **The sequence is not behind the events, and the mark is at `last_value`**. Right after a `RESTART` over an empty
+    table, before anything is appended, `last_value` is the number the sequence hands out next, and the correction
+    leaves the mark exactly there: it has done all it can, and D09 no longer offers it. The next event appended would
+    take the mark's own number and be treated as already processed. The remedy is a DBA's, with appends stopped, and
+    only while `mt_events_sequence` still reads `is_called = false`: `setval` it to the greater of the mark and
+    `max(seq_id)` of `mt_events`. The statement does nothing once anything has drawn from the sequence; by then the
+    event at the mark's number has been taken, and the projections that should hold it need a rebuild.
+  - A shard past the mark itself keeps its own remedy, a rebuild or a rewind, after either repair. The repair leaves the
+    sequence at the mark at least, so the rewind's floor is the mark.
 - **`shard-ahead`**: Correct progression does nothing here, because the mark is not ahead. Either fix leaves the shard
   where the events are:
   - rebuild the projection, which empties its tables and replays from the first event to the mark;
   - or rewind the subscription to the lower of the mark and the highest number the sequence has handed out (that
     number alone when there is no mark). No shard is rightly past the mark. JasperFx replays from the number after the
     floor it is given, so events appended since the reset at or below the floor are not replayed by a rewind; a rebuild
-    is the way to those.
+    is the way to those. A floor below what a subscription has already processed repeats its side effects: every event
+    it replays is handled a second time.
 - **`sequence-behind`**: a DBA's repair, with appends stopped: `setval` the sequence to the greater of `max(seq_id)` of
   `mt_events` and the mark. The statement reads both when it runs and never moves the sequence back, so pasting it after
-  more events have committed is as safe as running it at once.
-  - Because it moves the sequence past the mark as well, a `mark-ahead` reported beside it needs no correction.
-  - Run the correction first instead, and it moves progression back to a number the events have long passed, and the
-    daemon processes them all again.
+  more events have committed is as safe as running it at once. Because it moves the sequence past the mark as well, a
+  `mark-ahead` reported beside it needs nothing more for the mark, and certainly not the correction.
+
+Every `setval` is a one-off repair, drawn on the Health page under "A one-off repair, run by hand - the studio never
+runs this". Its explanation names the database to run it in by the studio's identity for that database - Marten's
+server-and-database id, as the scope selector lists it - and never by a connection string: each database has its own
+sequence and its own events.
 
 The statement D09 shows, for an event store in `public`. The last line is there only for the repair after a `RESTART`:
 
@@ -431,8 +440,8 @@ where t.target > (case when q.is_called then q.last_value else q.last_value - 1 
   and not q.is_called;
 ```
 
-An event store whose schema name holds a quote or a backslash, or a character a pasted line could not show as it is,
-gets the same repair in words instead.
+An event store whose schema name holds a single or double quote or a backslash, or a character a pasted line could
+not show as it is, gets the same repair in words instead.
 
 `mark-ahead` and `shard-ahead` are judged only for a store that registers an async projection or subscription, as D02,
 D03, D05, D07 and D08 are: without one, nothing waits on a progression row. `sequence-behind` is judged for any store

@@ -64,17 +64,29 @@ public class ProgressionAheadOfSequenceLiveTests(PostgresFixture postgres)
         HealthReportFinding ahead = Of(reset, "D09").Should().ContainSingle(x => x.Finding.Subject == "HighWaterMark").Subject;
         ahead.Severity.Should().Be(HealthSeverity.Critical);
         ahead.Evidence.Should().Contain(new HealthEvidence("Shards ahead of the sequence", shard + " at " + Events));
-        ahead.Finding.Remedy!.Code.Should().Contain("TryCorrectProgressInDatabaseAsync");
 
-        // Marten's correction, as the remedy describes it: every row but its own bookkeeping to the sequence's last_value,
-        // and only because the mark is above it. Right after the RESTART that is 1, the number handed out next - so the
-        // mark ends one past what the sequence has handed out, and D09 goes on saying so.
+        // The commonest state (the G1M-fix2 delta review's blocker): Marten's correction would act - the mark is above
+        // last_value - and would set progression back below events the daemon has processed. So it is not offered: the
+        // remedy is the sequence-behind repair, the same statement on both findings, a one-off repair the studio never runs.
+        string database = host.Store.Storage.Database.Id.Identity;
+        HealthRemedy oneRepair = ahead.Finding.Remedy!;
+        oneRepair.Kind.Should().Be(HealthRemedyKind.Repair);
+        oneRepair.Code.Should().NotContain("TryCorrectProgressInDatabaseAsync").And.StartWith("-- One repair for both of D09's findings");
+        oneRepair.Explanation.Should().StartWith("Do not run Correct progression here")
+            .And.Contain("Run it in the database this finding is about - " + database + ", as the studio names it");
+        string repair = StatementOf(oneRepair);
+        StatementOf(behind.Finding.Remedy!).Should().Be(repair);
+        repair.Should().NotContain("not q.is_called");
+        ahead.Finding.Link.Should().BeNull("no shard is past the mark, so nothing sends anybody to Correct progression");
+
+        // What the correction does - what the remedy says not to do, run here to show why: every row but its own bookkeeping
+        // to the sequence's last_value, 1, the number handed out next. 29 events the daemon had processed sit above it.
         long lastValue = await ScalarAsync<long>("select last_value from " + SqlIdentifier.Qualify(events, "mt_events_sequence"));
         lastValue.Should().Be(1);
         await host.Store.Advanced.TryCorrectProgressInDatabaseAsync(Token);
 
         (await ProgressionAsync(events, "HighWaterMark")).Should().Be(lastValue);
-        (await ProgressionAsync(events, shard)).Should().Be(lastValue);
+        (await ProgressionAsync(events, shard)).Should().Be(lastValue, "the shard that had processed all 30 is to process 2 to 30 again");
 
         clock.Advance(TimeSpan.FromMinutes(2));
         HealthReport corrected = await ReportAsync(host);
@@ -83,15 +95,14 @@ public class ProgressionAheadOfSequenceLiveTests(PostgresFixture postgres)
         HealthReportFinding stillBehind = Of(corrected, "D09").Should().ContainSingle(x => x.Finding.Variant == "sequence-behind").Subject;
 
         // The correction has done all it can, and running it again changes nothing - so it is not offered again. The events
-        // reach past the mark, so the sequence-behind repair is the one repair for both: the same statement, which reads
-        // its target - the greater of the mark and max(seq_id) - when it runs (the G1M-fix delta review's N1 and N2).
+        // reach past the mark, so the sequence-behind repair is still the one repair for both: the same statement, which
+        // reads its target - the greater of the mark and max(seq_id) - when it runs (the G1M-fix delta review's N1 and N2).
         exhausted.Finding.Remedy!.Code.Should().NotContain("TryCorrectProgressInDatabaseAsync")
             .And.StartWith("-- One repair for both of D09's findings");
         exhausted.Finding.Remedy.Explanation.Should().StartWith("Correct progression has done what it can")
-            .And.Contain("The events already reach " + Events + ", at or past the mark").And.Contain("one repair, not two");
-        string repair = StatementOf(exhausted.Finding.Remedy);
+            .And.Contain("The events reach " + Events + ", at or past the mark").And.Contain("one repair for both findings, not two");
+        StatementOf(exhausted.Finding.Remedy).Should().Be(repair);
         StatementOf(stillBehind.Finding.Remedy!).Should().Be(repair);
-        repair.Should().NotContain("not q.is_called");
 
         await host.Store.Advanced.TryCorrectProgressInDatabaseAsync(Token);
         (await ProgressionAsync(events, "HighWaterMark")).Should().Be(1, "Marten corrects only while the mark is above last_value");
@@ -135,7 +146,8 @@ public class ProgressionAheadOfSequenceLiveTests(PostgresFixture postgres)
         clock.Advance(TimeSpan.FromMinutes(2));
         HealthReportFinding trailing = Of(await ReportAsync(host), "D09").Should().ContainSingle().Subject;
         trailing.Finding.Remedy!.Code.Should().EndWith("rewind the subscription to 20.", "the mark trails the sequence");
-        trailing.Finding.Remedy.Explanation.Should().Contain("events appended since the reset at or below 20 are not replayed by it");
+        trailing.Finding.Remedy.Explanation.Should().Contain("events appended since the reset at or below 20 are not replayed by it")
+            .And.Contain("A floor below what a subscription has already processed repeats its side effects");
 
         host.Logs.WarningsOrWorse.Should().BeEmpty();
     }
@@ -163,15 +175,21 @@ public class ProgressionAheadOfSequenceLiveTests(PostgresFixture postgres)
         await ExecuteAsync(postgres, "alter sequence " + SqlIdentifier.Qualify(events, "mt_events_sequence") + " restart");
 
         HealthReport reset = await ReportAsync(host);
-        Of(reset, "D09").Should().ContainSingle().Which.Finding.Remedy!.Code.Should().Contain("TryCorrectProgressInDatabaseAsync",
-            "the mark is above last_value, so Marten's correction acts");
+        HealthRemedy correction = Of(reset, "D09").Should().ContainSingle().Which.Finding.Remedy!;
+        correction.Code.Should().Contain("TryCorrectProgressInDatabaseAsync",
+            "the mark is above last_value and no event is left for it to move progression below, so Marten's correction is the remedy");
+        correction.Kind.Should().Be(HealthRemedyKind.Configuration);
         await host.Store.Advanced.TryCorrectProgressInDatabaseAsync(Token);
 
         clock.Advance(TimeSpan.FromMinutes(2));
         HealthReportFinding done = Of(await ReportAsync(host), "D09").Should().ContainSingle().Subject;
         done.Finding.Variant.Should().Be("mark-ahead");
-        done.Finding.Remedy!.Code.Should().StartWith(
-            "-- A DBA's repair, with appends stopped, and only while mt_events_sequence still reads is_called = false:");
+        done.Finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Repair);
+        done.Finding.Remedy.Code.Should().StartWith(
+            "-- With appends stopped, and only while mt_events_sequence still reads is_called = false:");
+        done.Finding.Remedy.Explanation.Should()
+            .Contain("Run it in the database this finding is about - " + host.Store.Storage.Database.Id.Identity + ", as the studio names it")
+            .And.EndWith(HealthRemedy.RepairHandOverNote);
 
         string repair = StatementOf(done.Finding.Remedy);
         repair.Should().EndWith("\n  and not q.is_called;");
