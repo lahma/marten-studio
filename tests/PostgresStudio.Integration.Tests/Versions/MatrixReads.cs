@@ -128,7 +128,26 @@ internal static class MatrixReads
         // ---- W5-S2: the Server page's facts - every section, as the read the page makes ----------------------------
         new("server: settings, extensions, connection and grants", true, static async (x, t) => ServerClean(
             await x.Services.GetRequiredService<PostgresStudio.Services.Server.IServerSettingsFactsReader>().ReadAsync(x.Resolved, t))),
+
+        // ---- W5-Q1: the Statements page's facts - the statement sweep's own read, as the page takes it ----------------
+        // Not lock-free: the counters read takes the extension's own AccessShareLock on pg_stat_statements_info, as the
+        // statement checks always have - only DROP or ALTER EXTENSION queues against it. StatementsLiveTests proves it is the
+        // only lock beyond a catalog read.
+        new("statements: facts", false, static async (x, t) => StatementsClean(
+            await x.Services.GetRequiredService<PostgresStudio.Services.Statements.IStatementFacts>().ReadAsync(x.Resolved, t))),
     ];
+
+    /// <summary>
+    /// Fails a Statements facts read that failed: on every release the read reads, or says which expected state stopped it -
+    /// the role with nothing recorded here yet - never a failure.
+    /// </summary>
+    private static void StatementsClean(PostgresStudio.Services.Statements.StatementFacts facts)
+    {
+        if (facts.State == PostgresStudio.Services.Statements.StatementsState.Failed)
+        {
+            throw new InvalidOperationException("The statements facts read failed: " + facts.Failure);
+        }
+    }
 
     /// <summary>
     /// Fails a facts read any section of which failed: on every release each section reads, or says it does not apply or is

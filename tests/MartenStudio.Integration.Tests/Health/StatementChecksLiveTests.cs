@@ -20,7 +20,7 @@ namespace MartenStudio.Integration.Tests.Health;
 /// The statement checks (T02, T22, T23) against a real <c>pg_stat_statements</c>, on a server of their own with the
 /// library preloaded: each fires on the condition it looks for and stays quiet on the healthy sample store; the page and
 /// the findings are gated both ways; a statement's text is masked for its visitor; a narrowed console role hides nothing
-/// of the store's own statements; no sweep reads the text of more than twenty statements; and the only locks beyond a
+/// of the store's own statements; no sweep reads the text of more statements than it keeps; and the only locks beyond a
 /// catalog read are an EXPLAIN's <c>AccessShareLock</c>s.
 /// </summary>
 public class StatementChecksLiveTests(PostgresFixture postgres, StatementsServerFixture server) : IClassFixture<StatementsServerFixture>
@@ -437,46 +437,52 @@ public class StatementChecksLiveTests(PostgresFixture postgres, StatementsServer
     }
 
     // ------------------------------------------------------------------------------------------------
-    // Acceptance 4: no sweep reads the text of more than twenty statements
+    // Acceptance 4: no sweep reads the text of more statements than it keeps
     // ------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// What a live server can show of the cap: an extension holding twice what may be kept, a read that kept no more than
-    /// twenty, and one text call that returned no more than twenty rows.
+    /// What a live server can show of the cap: an extension holding more than may be kept, a read that kept no more than
+    /// <see cref="HealthStatementQueries.MaxTexts" /> - the checks' twenty and the Statements page's hundred (W5-Q1; two
+    /// hundred more on Aurora) - and one text call that returned no more rows than that.
     /// </summary>
     /// <remarks>
     /// Said plainly, because a test that cannot fail proves less than its name: this one cannot see the cap broken. The
     /// counters statement ends <c>limit @max</c> with <c>@max</c> at most <see cref="HealthStatementQueries.MaxTexts" />, and
-    /// <see cref="HealthStatementQueries.Texts" /> refuses more ids than that, so no server can return a twenty-first row.
+    /// <see cref="HealthStatementQueries.Texts" /> refuses more ids than that, so no server can return a row past it.
     /// What pins the cap is the fast suite: <c>HealthStatementQueriesTests</c> holds the bound parameter, the refusal and
-    /// <c>StatementSelection.SharesFit</c> - every check's share fits inside the limit, so the limit drops nobody's pick.
+    /// <c>StatementSelection.SharesFit</c> - every share fits inside the limit, so the limit drops nobody's pick.
     /// </remarks>
     [PostgresFact]
-    public async Task No_sweep_reads_the_text_of_more_than_twenty_statements_whatever_the_extension_holds()
+    public async Task No_sweep_reads_the_text_of_more_statements_than_it_keeps_whatever_the_extension_holds()
     {
         string database = await StatementsLive.CreateDatabaseAsync(server.ConnectionString, "health_statements_cost");
         await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, store: Targets, studio: Activity);
         await SeedAsync(host, 2_000);
 
-        // Forty statements of distinct shapes on the store's table, each called often enough to be ranked by its mean as
-        // well as its time, so that the extension holds twice what the read may keep.
-        for (int shape = 1; shape <= 40; shape++)
-        {
-            string columns = string.Join(", ", Enumerable.Range(1, shape).Select(static i => "t.data ->> 'Color' as c" + i));
+        // More statements of distinct shapes on the store's table than the read may keep, so that the extension holds more
+        // than is read.
+        int shapes = HealthStatementQueries.MaxTexts + 30;
 
-            for (int run = 0; run < ExpensiveStatementsCheck.SlowMeanCalls; run++)
+        await using (NpgsqlConnection connection = new(new NpgsqlConnectionStringBuilder(database) { Pooling = false }.ConnectionString))
+        {
+            await connection.OpenAsync(Token);
+
+            for (int shape = 1; shape <= shapes; shape++)
             {
-                await StatementsLive.ExecuteAsync(database, "select " + columns + " from " + TargetTable + " t limit 5");
+                string columns = string.Join(", ", Enumerable.Range(1, shape).Select(static i => "t.data ->> 'Color' as c" + i));
+                await using NpgsqlCommand command = new("select " + columns + " from " + TargetTable + " t limit 5", connection);
+                await command.ExecuteNonQueryAsync(Token);
             }
         }
 
         StatementRead read = await host.GatherAsync(static (context, _) => StatementReads.ReadAsync(context));
 
-        read.AllStatements.Should().BeGreaterThan(2 * HealthStatementQueries.MaxTexts, "the extension holds more statements than are read");
+        read.AllStatements.Should().BeGreaterThan(HealthStatementQueries.MaxTexts, "the extension holds more statements than are read");
         read.Statements.Should().NotBeEmpty().And.HaveCountLessThanOrEqualTo(HealthStatementQueries.MaxTexts);
+        read.Statements.Count.Should().BeLessThanOrEqualTo(StatementReads.PageTop + 20, "off Aurora the page's hundred and the checks' twenty");
         read.TextsRead.Should().Be(read.Statements.Count, "the text is read for exactly the statements kept");
 
-        // pg_stat_statements' own count of the studio's text read: one call, and no more rows than twenty.
+        // pg_stat_statements' own count of the studio's text read: one call, and no more rows than it keeps.
         (long Calls, long Rows) text = await TextReadAsync(database);
         text.Calls.Should().Be(1);
         text.Rows.Should().BeLessThanOrEqualTo(HealthStatementQueries.MaxTexts);

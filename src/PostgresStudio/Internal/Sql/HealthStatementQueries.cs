@@ -35,6 +35,22 @@ internal sealed record StatementExtension(int ServerVersion, string? Schema, str
 
     /// <summary>1.11 (PostgreSQL 17): <c>jit_deform_time</c> and each entry's own <c>stats_since</c>.</summary>
     public bool HasStatsSince => Parsed is { } parsed && parsed >= new Version(1, 11);
+
+    /// <summary>
+    /// 1.11 (PostgreSQL 17): <c>blk_read_time</c> renamed <c>shared_blk_read_time</c>, beside a new
+    /// <c>local_blk_read_time</c> (<c>PostgresFeature.StatementsSharedBlkTimeNames</c>, B0 §6).
+    /// </summary>
+    public bool HasSharedBlockTimeNames => HasStatsSince;
+
+    /// <summary>1.12 (PostgreSQL 18): <c>parallel_workers_to_launch</c>, <c>parallel_workers_launched</c> and <c>wal_buffers_full</c> (B0 §6).</summary>
+    public bool HasParallelWorkers => Parsed is { } parsed && parsed >= new Version(1, 12);
+
+    /// <summary>
+    /// Whether this database has Aurora's <c>pg_catalog.aurora_stat_statements(boolean)</c> (issue #8 A5) - looked for in
+    /// <c>pg_catalog</c> alone, where no role short of a superuser creates a function, so a function of that name somebody
+    /// made in <c>public</c> is never called as the store's own role (the platform detector's rule, W5-R2-fix B3).
+    /// </summary>
+    public bool AuroraStatements { get; init; }
 }
 
 /// <summary>Which statements the counters read keeps: the union of each check's top few, and never more than <see cref="Max" />.</summary>
@@ -47,11 +63,18 @@ internal sealed record StatementExtension(int ServerVersion, string? Schema, str
 /// <param name="JitCalls">The fewest calls a JIT share is ranked on.</param>
 /// <param name="Max">The most statements kept, and so the most whose text is ever returned.</param>
 /// <remarks>
-/// <b>Each check has a share, and the shares fit.</b> The four tops are a union, ranked on the server, and
+/// <para>
+/// <b>Each check has a share, and the shares fit.</b> The tops are a union, ranked on the server, and
 /// <see cref="Max" /> is a <c>limit</c> after it - so tops that summed to more than <see cref="Max" /> would let the
 /// limit, which orders by load, drop the guarded writes or the JIT picks a statement that ranks high by load had
 /// pushed out. <see cref="HealthStatementQueries.Counters" /> refuses a selection whose shares do not fit, which makes
 /// the limit a guard that never cuts.
+/// </para>
+/// <para>
+/// <b>The Statements page's two shares</b> (W5-Q1, issue #8 G6 and A5): the statements with the most execution time since
+/// their counters began (<see cref="TopByTotal" />), and on Aurora the most storage-level reads
+/// (<see cref="TopByStorage" />) - so the page's top hundred by either is in the one read the checks already make.
+/// </para>
 /// </remarks>
 internal sealed record StatementSelection(
     int TopByLoad,
@@ -63,8 +86,17 @@ internal sealed record StatementSelection(
     int JitCalls,
     int Max)
 {
-    /// <summary>Whether every check's share fits in <see cref="Max" /> at once.</summary>
-    public bool SharesFit => TopByLoad + TopByMean + TopGuarded + TopJit <= Max;
+    /// <summary>The most execution time since the counters began: the Statements page's ranking (G6).</summary>
+    public int TopByTotal { get; init; }
+
+    /// <summary>
+    /// The most storage-level reads, where Aurora's <c>aurora_stat_statements</c> is joined (A5); a statement with no
+    /// storage reads read is never picked by it.
+    /// </summary>
+    public int TopByStorage { get; init; }
+
+    /// <summary>Whether every share fits in <see cref="Max" /> at once.</summary>
+    public bool SharesFit => TopByLoad + TopByMean + TopGuarded + TopJit + TopByTotal + TopByStorage <= Max;
 }
 
 /// <summary>One statement's counters, from <c>pg_stat_statements(showtext := false)</c>, with the database's totals.</summary>
@@ -114,6 +146,39 @@ internal sealed record StatementCounterRow
 
     /// <summary><c>pg_stat_statements_info.stats_reset</c> - <see langword="null" /> below 1.9.</summary>
     public DateTimeOffset? StatsReset { get; init; }
+
+    /// <summary><c>shared_blks_hit</c>: shared buffers found in the cache.</summary>
+    public long SharedBlocksHit { get; init; }
+
+    /// <summary><c>shared_blks_read</c>: shared blocks read from outside the cache.</summary>
+    public long SharedBlocksRead { get; init; }
+
+    /// <summary>
+    /// The time spent reading shared blocks, in milliseconds - <c>shared_blk_read_time</c> from extension 1.11,
+    /// <c>blk_read_time</c> before it - and zero while <c>track_io_timing</c> is off.
+    /// </summary>
+    public double IoReadMs { get; init; }
+
+    /// <summary><c>parallel_workers_to_launch</c> (extension 1.12) - <see langword="null" /> below it.</summary>
+    public long? ParallelWorkersToLaunch { get; init; }
+
+    /// <summary><c>parallel_workers_launched</c> (extension 1.12) - <see langword="null" /> below it.</summary>
+    public long? ParallelWorkersLaunched { get; init; }
+
+    /// <summary><c>wal_buffers_full</c> (extension 1.12) - <see langword="null" /> below it.</summary>
+    public long? WalBuffersFull { get; init; }
+
+    /// <summary>
+    /// Aurora's <c>storage_blks_read</c> (<c>aurora_stat_statements</c>, issue #8 A5): blocks read from the cluster's
+    /// storage rather than a cache - <see langword="null" /> where it is not joined.
+    /// </summary>
+    public long? StorageBlocksRead { get; init; }
+
+    /// <summary>Aurora's <c>orcache_blks_hit</c>: blocks found in the optimised-reads cache - <see langword="null" /> where not joined.</summary>
+    public long? OrcacheBlocksHit { get; init; }
+
+    /// <summary>Aurora's <c>storage_blk_read_time</c>, in milliseconds - <see langword="null" /> where not joined.</summary>
+    public double? StorageReadMs { get; init; }
 }
 
 /// <summary>One statement's text, as much of it as is read.</summary>
@@ -190,11 +255,22 @@ internal enum StatementPlanRefusal
 /// read does, where planning an <c>insert</c>, <c>update</c>, <c>delete</c> or a <c>select … for update</c> takes the
 /// lock its execution would. It runs as <c>SqlConsoleRole</c>, like the Query page's <c>EXPLAIN</c>.
 /// </para>
+/// <para>
+/// <b>Aurora's storage reads, joined and never trusted for the fence</b> (issue #8 A5, W5-Q1). Where the platform is Aurora
+/// and <c>pg_catalog.aurora_stat_statements(boolean)</c> exists, <see cref="Counters" /> joins it to the extension's own
+/// rows on <c>(userid, dbid, toplevel, queryid)</c> and takes its extra columns by name (<c>to_jsonb(x) -&gt;&gt; 'col'</c>):
+/// on PostgreSQL 17 its documented "every pg_stat_statements column, then eleven more" collides with the extension's own
+/// <c>local_blk_read_time</c>, so neither its column list nor its order is relied on (B0's Aurora table). Its rows are
+/// fenced to <c>userid = current_user</c> and this database exactly as the extension's are, before the join.
+/// </para>
 /// </remarks>
 internal static partial class HealthStatementQueries
 {
-    /// <summary>The most statements one sweep keeps, and so the most whose text one call returns.</summary>
-    public const int MaxTexts = 20;
+    /// <summary>
+    /// The most statements one sweep keeps, and so the most whose text one call returns: the checks' twenty, the Statements
+    /// page's hundred by execution time, and on Aurora its hundred by storage reads (W5-Q1).
+    /// </summary>
+    public const int MaxTexts = 220;
 
     /// <summary>
     /// The most characters of one statement's text read - the same 4,096 Database › Sessions reads of
@@ -216,7 +292,11 @@ internal static partial class HealthStatementQueries
     public static HealthQuery Extension() => new(
         "select current_setting('server_version_num')::int4 as server_version,\n" +
         "       n.nspname::text as extension_schema,\n" +
-        "       e.extversion::text as extension_version\n" +
+        "       e.extversion::text as extension_version,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p\n" +
+        "                where p.proname = 'aurora_stat_statements'\n" +
+        "                  and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace\n" +
+        "                  and p.pronargs = 1 and p.proargtypes[0] = 'pg_catalog.bool'::pg_catalog.regtype) as aurora_statements\n" +
         "  from (select 1) one\n" +
         "  left join pg_catalog.pg_extension e on e.extname = 'pg_stat_statements'\n" +
         "  left join pg_catalog.pg_namespace n on n.oid = e.extnamespace");
@@ -229,7 +309,10 @@ internal static partial class HealthStatementQueries
         return new StatementExtension(
             reader.GetInt32(0),
             reader.IsDBNull(1) ? null : reader.GetString(1),
-            reader.IsDBNull(2) ? null : reader.GetString(2));
+            reader.IsDBNull(2) ? null : reader.GetString(2))
+        {
+            AuroraStatements = !reader.IsDBNull(3) && reader.GetBoolean(3),
+        };
     }
 
     /// <summary>
@@ -238,7 +321,11 @@ internal static partial class HealthStatementQueries
     /// </summary>
     /// <param name="extension">What is installed; it must be <see cref="StatementExtension.Supported" />.</param>
     /// <param name="selection">Which statements to keep.</param>
-    public static HealthQuery Counters(StatementExtension extension, StatementSelection selection)
+    /// <param name="storageReads">
+    /// Whether to join Aurora's <c>pg_catalog.aurora_stat_statements</c> for its storage-level reads (issue #8 A5): only
+    /// where the platform is Aurora and <see cref="StatementExtension.AuroraStatements" /> says the function is there.
+    /// </param>
+    public static HealthQuery Counters(StatementExtension extension, StatementSelection selection, bool storageReads = false)
     {
         ArgumentNullException.ThrowIfNull(extension);
         ArgumentNullException.ThrowIfNull(selection);
@@ -255,7 +342,7 @@ internal static partial class HealthStatementQueries
         }
 
         return new HealthQuery(
-            CountersSql(extension, SqlIdentifier.Quote(schema)),
+            CountersSql(extension, SqlIdentifier.Quote(schema), storageReads),
         [
             Integer("top_load", selection.TopByLoad),
             Integer("top_mean", selection.TopByMean),
@@ -264,13 +351,15 @@ internal static partial class HealthStatementQueries
             Integer("guarded_calls", selection.GuardedCalls),
             Integer("top_jit", selection.TopJit),
             Integer("jit_calls", selection.JitCalls),
+            Integer("top_total", selection.TopByTotal),
+            Integer("top_storage", storageReads ? selection.TopByStorage : 0),
             Integer("max", Math.Min(selection.Max, MaxTexts)),
         ],
-            CountersSql(extension, WithheldNames.Token));
+            CountersSql(extension, WithheldNames.Token, storageReads));
     }
 
     /// <summary>The counters statement, with the extension's schema spelled <paramref name="schema" />.</summary>
-    private static string CountersSql(StatementExtension extension, string schema)
+    private static string CountersSql(StatementExtension extension, string schema, bool storageReads)
     {
         string function = schema + "." + SqlIdentifier.Quote("pg_stat_statements");
 
@@ -286,15 +375,36 @@ internal static partial class HealthStatementQueries
         string since = extension.HasStatsSince ? "s.stats_since" : "null::timestamptz";
         string toplevel = extension.HasToplevelAndInfo ? "\n     and s.toplevel" : string.Empty;
 
+        // Read by name for the installed extension's version, never by position: 1.11 renamed blk_read_time, and 1.12 added
+        // the parallel workers and wal_buffers_full (PostgresFeature.StatementsSharedBlkTimeNames, B0 §6).
+        string ioRead = extension.HasSharedBlockTimeNames ? "s.shared_blk_read_time" : "s.blk_read_time";
+        string parallel = extension.HasParallelWorkers
+            ? "s.parallel_workers_to_launch::int8 as parallel_to_launch, s.parallel_workers_launched::int8 as parallel_launched,\n"
+              + "         s.wal_buffers_full::int8 as wal_buffers_full"
+            : "null::int8 as parallel_to_launch, null::int8 as parallel_launched, null::int8 as wal_buffers_full";
+
+        string aurora = storageReads ? AuroraSql(extension.HasToplevelAndInfo) : string.Empty;
+        string storage = storageReads
+            ? "a.storage_blks_read, a.orcache_blks_hit, a.storage_blk_read_time"
+            : "null::int8 as storage_blks_read, null::int8 as orcache_blks_hit, null::float8 as storage_blk_read_time";
+        string join = !storageReads
+            ? string.Empty
+            : "\n    left join aurora a on a.queryid = s.queryid and a.userid = s.userid and a.dbid = s.dbid"
+              + (extension.HasToplevelAndInfo ? " and a.toplevel = s.toplevel" : string.Empty);
+
         return
             ApplicationRoleComment +
             "with info as (\n" + info + "),\n" +
+            aurora +
             "s as (\n" +
             "  select s.queryid, s.calls, s.rows, s.total_exec_time, s.mean_exec_time, s.temp_blks_written,\n" +
             "         s.wal_bytes::float8 as wal_bytes, s.wal_records,\n" +
             "         " + jit + " as jit_time,\n" +
-            "         " + since + " as stats_since\n" +
-            "    from " + function + "(showtext := false) s\n" +
+            "         " + since + " as stats_since,\n" +
+            "         s.shared_blks_hit, s.shared_blks_read, " + ioRead + "::float8 as io_read_ms,\n" +
+            "         " + parallel + ",\n" +
+            "         " + storage + "\n" +
+            "    from " + function + "(showtext := false) s" + join + "\n" +
             "   where " + OwnStatements + "\n" +
             "     and s.queryid is not null" + toplevel + "\n" +
             "),\n" +
@@ -309,19 +419,41 @@ internal static partial class HealthStatementQueries
             "                                s.queryid) as by_load,\n" +
             "         row_number() over (order by case when s.calls >= @mean_calls then s.mean_exec_time end desc nulls last, s.queryid) as by_mean,\n" +
             "         row_number() over (order by case when " + Guarded("s") + " then s.calls - s.rows end desc nulls last, s.queryid) as by_guarded,\n" +
-            "         row_number() over (order by case when s.calls >= @jit_calls and s.jit_time > 0 then s.jit_time end desc nulls last, s.queryid) as by_jit\n" +
+            "         row_number() over (order by case when s.calls >= @jit_calls and s.jit_time > 0 then s.jit_time end desc nulls last, s.queryid) as by_jit,\n" +
+            "         row_number() over (order by s.total_exec_time desc, s.queryid) as by_total,\n" +
+            "         row_number() over (order by s.storage_blks_read desc nulls last, s.queryid) as by_storage\n" +
             "    from s cross join info i\n" +
             ")\n" +
             "select r.queryid, r.calls, r.rows, r.total_exec_time, r.mean_exec_time, r.temp_blks_written, r.wal_bytes, r.wal_records,\n" +
-            "       r.jit_time, r.stats_since, t.statements, t.exec_time, t.wal_bytes, i.dealloc, i.stats_reset\n" +
+            "       r.jit_time, r.stats_since, t.statements, t.exec_time, t.wal_bytes, i.dealloc, i.stats_reset,\n" +
+            "       r.shared_blks_hit, r.shared_blks_read, r.io_read_ms, r.parallel_to_launch, r.parallel_launched, r.wal_buffers_full,\n" +
+            "       r.storage_blks_read, r.orcache_blks_hit, r.storage_blk_read_time\n" +
             "  from ranked r cross join totals t cross join info i\n" +
             " where r.by_load <= @top_load\n" +
             "    or (r.by_mean <= @top_mean and r.calls >= @mean_calls)\n" +
             "    or (r.by_guarded <= @top_guarded and " + Guarded("r") + ")\n" +
             "    or (r.by_jit <= @top_jit and r.calls >= @jit_calls and r.jit_time > 0)\n" +
+            "    or r.by_total <= @top_total\n" +
+            "    or (r.by_storage <= @top_storage and r.storage_blks_read is not null)\n" +
             " order by r.by_load\n" +
             " limit @max";
     }
+
+    /// <summary>
+    /// Aurora's <c>aurora_stat_statements</c> rows, its join keys and its storage columns by name, fenced to the store's own
+    /// role and this database as the extension's are - a CTE of the counters statement (issue #8 A5).
+    /// </summary>
+    /// <param name="toplevel">Whether the extension has <c>toplevel</c>, which the join then keys on too.</param>
+    private static string AuroraSql(bool toplevel) =>
+        "aurora as (\n" +
+        "  select (a.j ->> 'queryid')::int8 as queryid, (a.j ->> 'userid')::oid as userid, (a.j ->> 'dbid')::oid as dbid,\n" +
+        (toplevel ? "         (a.j ->> 'toplevel')::bool as toplevel,\n" : string.Empty) +
+        "         (a.j ->> 'storage_blks_read')::int8 as storage_blks_read,\n" +
+        "         (a.j ->> 'orcache_blks_hit')::int8 as orcache_blks_hit,\n" +
+        "         (a.j ->> 'storage_blk_read_time')::float8 as storage_blk_read_time\n" +
+        "    from (select pg_catalog.to_jsonb(x) as j from pg_catalog." + SqlIdentifier.Quote("aurora_stat_statements") + "(false) x) a\n" +
+        "   where " + Own("(a.j ->> 'userid')::oid", "(a.j ->> 'dbid')::oid") + "\n" +
+        "),\n";
 
     /// <summary>Reads one of <see cref="Counters" />' rows.</summary>
     public static StatementCounterRow ReadCounters(NpgsqlDataReader reader)
@@ -345,6 +477,15 @@ internal static partial class HealthStatementQueries
             AllWalBytes = reader.IsDBNull(12) ? 0 : reader.GetDouble(12),
             Dealloc = reader.IsDBNull(13) ? null : reader.GetInt64(13),
             StatsReset = reader.IsDBNull(14) ? null : reader.GetFieldValue<DateTimeOffset>(14),
+            SharedBlocksHit = reader.GetInt64(15),
+            SharedBlocksRead = reader.GetInt64(16),
+            IoReadMs = reader.IsDBNull(17) ? 0 : reader.GetDouble(17),
+            ParallelWorkersToLaunch = reader.IsDBNull(18) ? null : reader.GetInt64(18),
+            ParallelWorkersLaunched = reader.IsDBNull(19) ? null : reader.GetInt64(19),
+            WalBuffersFull = reader.IsDBNull(20) ? null : reader.GetInt64(20),
+            StorageBlocksRead = reader.IsDBNull(21) ? null : reader.GetInt64(21),
+            OrcacheBlocksHit = reader.IsDBNull(22) ? null : reader.GetInt64(22),
+            StorageReadMs = reader.IsDBNull(23) ? null : reader.GetDouble(23),
         };
     }
 
@@ -602,6 +743,11 @@ internal static partial class HealthStatementQueries
     private const string OwnStatements =
         "s.userid = (select r.oid from pg_catalog.pg_roles r where r.rolname = current_user)\n" +
         "     and s.dbid = (select d.oid from pg_catalog.pg_database d where d.datname = pg_catalog.current_database())";
+
+    /// <summary><see cref="OwnStatements" />'s bound over another row's user and database columns: Aurora's, read by name.</summary>
+    private static string Own(string userid, string dbid) =>
+        userid + " = (select r.oid from pg_catalog.pg_roles r where r.rolname = current_user)\n" +
+        "     and " + dbid + " = (select d.oid from pg_catalog.pg_database d where d.datname = pg_catalog.current_database())";
 
     /// <summary>
     /// A write that may be a guarded one: called often enough to judge, some calls changed no row, and the ones that

@@ -10,6 +10,7 @@ using PostgresStudio.Services.Relationships;
 using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Statements;
 using PostgresStudio.Services.Storage;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -190,5 +191,11 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton<IServerSettingsFactsReader, ServerSettingsFactsReader>();
         services.TryAddSingleton<ServerSettingsFactsCache>();
         services.TryAddScoped<IServerPageService, ServerPageService>();
+
+        // W5-Q1: the Statements page. The facts are the statement sweep's own read - the database's, single flight, kept for five
+        // minutes for every circuit - grouped by the studio's IStatementClassifier, which each Add*Studio registers; what a
+        // visitor is shown of them, and which first read this circuit has audited, are the circuit's.
+        services.TryAddSingleton<IStatementFacts, StatementFactsReader>();
+        services.TryAddScoped<IStatementsService, StatementsService>();
     }
 }

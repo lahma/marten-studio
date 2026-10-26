@@ -6,6 +6,7 @@ using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Statements;
 
 namespace PostgresStudio;
 
@@ -106,6 +107,9 @@ public static class PostgresStudioServiceCollectionExtensions
         services.TryAddScoped<IDatabaseDeclarationsSource, PostgresDatabaseDeclarationsSource>();
         services.TryAddSingleton<IHealthTableSource, PostgresHealthTableSource>();
         services.TryAddSingleton<IHealthTableRemedies, PostgresHealthTableRemedies>();
+
+        // W5-Q1: the Statements page's groups - a statement's verb and its first table of the judged set.
+        services.TryAddSingleton<IStatementClassifier>(PostgresStatementClassifier.Instance);
 
         // The Overview's server read: scoped, because what it remembers is the circuit's.
         services.TryAddScoped<IPostgresServerReader, PostgresServerReader>();

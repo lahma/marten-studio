@@ -1,0 +1,462 @@
+@page "/postgres/statements"
+@using System.Globalization
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Health.Checks
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@using PostgresStudio.Services.Sources
+@using PostgresStudio.Services.Statements
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject IStatementsService StatementsData
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+
+@*
+    Statements (W5-Q1, issue #8 G6 and A5): where this database's time goes, statement by statement - the statements
+    pg_stat_statements counts for the source's own role, over the window the statement checks watched, ranked by execution
+    time (and on Aurora by storage-level reads), and summed by group. Read through IStatementsService, whose facts are the
+    statement sweep's own read: no second read of pg_stat_statements.
+
+    One audience: a visitor through the activity gate (ViewDatabaseActivity, the store policy and the write policy, all asked
+    with no tenant), as Database › Sessions' details are. Below it the page says what it needs and reads nothing. Every text
+    is masked for the visitor, and a group that names a table in a schema they may not see is shown without it: both the
+    service's to decide.
+
+    Read when the page becomes interactive and every HealthInterval while it stays open, and on Refresh. The statement sweep
+    behind it is kept for five minutes, single flight, whoever asks. There is no drill-in: a statement's plan, plan insights
+    and the hypothetical-index proof are 0.6's.
+*@
+
+<PageTitle>Statements</PageTitle>
+
+<div class="ms-page ms-stmts">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Statements</h1>
+        <div class="ms-stmts-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-stmts-lead">
+        Where this database's time goes, statement by statement: what pg_stat_statements counts for @Settings.Text.SourcePossessive own
+        role, over the window the statement checks watched, and the text of each statement as you may read it.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        @* A static render reads nothing: the read waits for the circuit, so a prerender is never a statement sweep. *@
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a database in the header to see its statements.</p>
+        </div>
+    }
+    else if (view.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly)
+    {
+        <CapabilityDisabled Capability="ViewDatabaseActivity" Action="Statements" />
+        <p class="ms-muted ms-stmts-gate">
+            Statements are other programs' source text and the work of other sessions, so this page is shown only with
+            ViewDatabaseActivity on and the write policy allowing it for this database - as Database › Sessions' details are.
+        </p>
+    }
+    else if (view.Refusal != DatabaseRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-stmts-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else if (view.State != StatementsState.Read)
+    {
+        <div class="ms-alert ms-alert-info ms-stmts-status" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Status</p>
+            </div>
+        </div>
+
+        @Footer(view)
+    }
+    else
+    {
+        <p class="ms-stmts-window">@view.WindowText</p>
+
+        @if (view.Basis is { Length: > 0 } basis)
+        {
+            <p class="ms-stmts-basis" role="note">@basis</p>
+        }
+
+        <div class="ms-stmts-controls">
+            <div class="ms-stmts-choice" role="group" aria-label="How many statements">
+                <span class="ms-stmts-choice-label">Top</span>
+                @foreach (int choice in StatementsView.TopChoices)
+                {
+                    int n = choice;
+                    <button type="button" class="ms-button ms-stmts-choice-button @(top == n ? "ms-stmts-on" : null)" aria-pressed="@(top == n ? "true" : "false")" @onclick="() => top = n">@n</button>
+                }
+            </div>
+
+            @if (view.StorageReads)
+            {
+                <div class="ms-stmts-choice" role="group" aria-label="Rank by">
+                    <span class="ms-stmts-choice-label">Rank by</span>
+                    <button type="button" class="ms-button ms-stmts-choice-button @(ranking == StatementRanking.TotalTime ? "ms-stmts-on" : null)" aria-pressed="@(ranking == StatementRanking.TotalTime ? "true" : "false")" @onclick="() => Rank(StatementRanking.TotalTime)">total time</button>
+                    <button type="button" class="ms-button ms-stmts-choice-button ms-stmts-rank-storage @(ranking == StatementRanking.StorageReads ? "ms-stmts-on" : null)" aria-pressed="@(ranking == StatementRanking.StorageReads ? "true" : "false")" @onclick="() => Rank(StatementRanking.StorageReads)">storage reads</button>
+                </div>
+            }
+
+            <div class="ms-stmts-choice" role="group" aria-label="View">
+                <span class="ms-stmts-choice-label">View</span>
+                <button type="button" class="ms-button ms-stmts-choice-button @(!groups ? "ms-stmts-on" : null)" aria-pressed="@(!groups ? "true" : "false")" @onclick="() => groups = false">statements</button>
+                <button type="button" class="ms-button ms-stmts-choice-button ms-stmts-view-groups @(groups ? "ms-stmts-on" : null)" aria-pressed="@(groups ? "true" : "false")" @onclick="() => groups = true">groups</button>
+            </div>
+        </div>
+
+        @if (view.TextsWithheld is { Length: > 0 } withheld)
+        {
+            <p class="ms-stmts-withheld" role="note">@withheld</p>
+        }
+
+        @if (view.Rows.Count == 0)
+        {
+            <p class="ms-muted">No statement is in the window yet.</p>
+        }
+        else if (groups)
+        {
+            IReadOnlyList<StatementGroupRowView> rows = view.Groups(top, ranking);
+
+            <TableScroll Label="The top statements of this database, summed by group">
+                <table class="ms-table ms-stmts-groups">
+                    <thead>
+                        <tr>
+                            <th scope="col">Group</th>
+                            <th scope="col" class="ms-stmts-number">Statements</th>
+                            <th scope="col">Share</th>
+                            <th scope="col" class="ms-stmts-number">Total</th>
+                            <th scope="col" class="ms-stmts-number">Calls</th>
+                            <th scope="col" class="ms-stmts-number">Rows</th>
+                            <th scope="col" class="ms-stmts-number">Shared read</th>
+                            <th scope="col" class="ms-stmts-number">Temp written</th>
+                            @if (view.StorageReads)
+                            {
+                                <th scope="col" class="ms-stmts-number">Storage reads</th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (StatementGroupRowView row in rows)
+                        {
+                            <tr @key="row.Key">
+                                <td class="ms-stmts-group">@row.Label</td>
+                                <td class="ms-stmts-number">@SessionText.Number(row.Statements)</td>
+                                <td class="ms-stmts-share">@Share(row.Share)</td>
+                                <td class="ms-stmts-number">@StatementWindows.Milliseconds(row.Counts.ExecMs)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.Calls)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.Rows)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.SharedBlocksRead)</td>
+                                <td class="ms-stmts-number">@TableText.Count(row.Counts.TempBlocksWritten)</td>
+                                @if (view.StorageReads)
+                                {
+                                    <td class="ms-stmts-number">@(row.Counts.StorageBlocksRead is { } storage ? TableText.Count(storage) : "–")</td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+        else
+        {
+            IReadOnlyList<StatementRowView> rows = view.Top(top, ranking, sort);
+
+            <TableScroll Label="The top statements of this database">
+                <table class="ms-table ms-stmts-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Group</th>
+                            <th scope="col">Share</th>
+                            @SortHeader("Total", StatementSort.TotalTime)
+                            @SortHeader("Calls", StatementSort.Calls)
+                            @SortHeader("Mean", StatementSort.Mean)
+                            @SortHeader("Rows", StatementSort.Rows)
+                            <th scope="col" class="ms-stmts-number">Shared hit</th>
+                            @SortHeader("Shared read", StatementSort.SharedRead)
+                            @SortHeader("Temp written", StatementSort.Temp)
+                            @if (view.StorageReads)
+                            {
+                                @SortHeader("Storage reads", StatementSort.StorageReads)
+                            }
+                            <th scope="col">Statement</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (StatementRowView row in rows)
+                        {
+                            <tr @key="row.Key" class="@(row.Window is null ? "ms-stmts-unwatched" : null)">
+                                <td class="ms-stmts-group">@row.GroupLabel</td>
+                                <td class="ms-stmts-share">@Share(row.Share)</td>
+                                @if (row.Window is { } counts)
+                                {
+                                    <td class="ms-stmts-number">@StatementWindows.Milliseconds(counts.ExecMs)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.Calls)</td>
+                                    <td class="ms-stmts-number">@(counts.MeanMs is { } mean ? StatementWindows.Milliseconds(mean) : "–")</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.Rows)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.SharedBlocksHit)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.SharedBlocksRead)</td>
+                                    <td class="ms-stmts-number">@TableText.Count(counts.TempBlocksWritten)</td>
+                                    @if (view.StorageReads)
+                                    {
+                                        <td class="ms-stmts-number">@(counts.StorageBlocksRead is { } storage ? TableText.Count(storage) : "–")</td>
+                                    }
+                                }
+                                else
+                                {
+                                    <td class="ms-stmts-number ms-muted" colspan="@(view.StorageReads ? 8 : 7)">
+                                        not watched yet: new to the statements kept, watched from the next check
+                                    </td>
+                                }
+                                <td class="ms-stmts-statement">
+                                    @if (row.Text is { Length: > 0 } text)
+                                    {
+                                        <details class="ms-stmts-text">
+                                            <summary><code>@Summary(text)</code></summary>
+                                            <pre class="ms-mono">@text</pre>
+                                        </details>
+                                    }
+
+                                    @if (row.TextNote is { Length: > 0 } note)
+                                    {
+                                        <p class="ms-stmts-note">@note</p>
+                                    }
+
+                                    @if (row.WatchedFrom is { } from)
+                                    {
+                                        <p class="ms-stmts-note">Watched since @TableText.When(from), part of the window.</p>
+                                    }
+
+                                    @if (row.ParallelNote is { Length: > 0 } parallel)
+                                    {
+                                        <p class="ms-stmts-note">@parallel</p>
+                                    }
+
+                                    <p class="ms-stmts-queryid">queryid @row.Key</p>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        <p class="ms-stmts-caveat">@view.Caveat</p>
+
+        @Footer(view)
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>The page's own polling loop, at <c>HealthInterval</c>; built rather than injected.</summary>
+    private StudioLiveUpdates? live;
+
+    private StatementsView? view;
+    private string? error;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    private int top = 25;
+    private StatementRanking ranking = StatementRanking.TotalTime;
+    private StatementSort sort = StatementSort.TotalTime;
+    private bool groups;
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+
+        await LoadAsync();
+
+        // Leaving the page during the first read disposes it under the await: the lifetime's source is gone, and reading its
+        // token would throw out of OnAfterRenderAsync and end the circuit.
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
+    }
+
+    /// <summary>One poll, under the loop's token as well as the page's.</summary>
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync(CancellationToken poll = default)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StatementsView? read = scope is null ? null : await StatementsData.GetAsync(scope, token);
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                view = read;
+                error = null;
+
+                if (view is { StorageReads: false } && (ranking == StatementRanking.StorageReads || sort == StatementSort.StorageReads))
+                {
+                    Rank(StatementRanking.TotalTime);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>A sortable column's header: a button that sorts the top statements by it, the most first.</summary>
+    private RenderFragment SortHeader(string label, StatementSort by) => __builder =>
+    {
+        <th scope="col" class="ms-stmts-number" aria-sort="@(sort == by ? "descending" : "none")">
+            <button type="button" class="ms-stmts-sort @(sort == by ? "ms-stmts-on" : null)" @onclick="() => sort = by">@label</button>
+        </th>
+    };
+
+    /// <summary>The studio's own line, "Show SQL" and when it was read: below the table, and below a status alone.</summary>
+    private RenderFragment Footer(StatementsView shown) => __builder =>
+    {
+        @if (shown.StudioCost is { } cost)
+        {
+            <p class="ms-stmts-studio">@StudioLine(cost, shown.StudioCostText)</p>
+        }
+
+        @foreach (HealthStatement statement in shown.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+
+        @if (shown.MeasuredAt is { } measured)
+        {
+            <p class="ms-stmts-measured">
+                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
+            </p>
+        }
+    };
+
+    /// <summary>Ranks by <paramref name="by" />, and sorts by it too: the top N by storage reads are read most-first.</summary>
+    private void Rank(StatementRanking by)
+    {
+        ranking = by;
+        sort = by == StatementRanking.StorageReads ? StatementSort.StorageReads : StatementSort.TotalTime;
+    }
+
+    /// <summary>"The studio itself: 1.50 s of database time over 12 connections to this database in the last 5 minutes. …"</summary>
+    private static string StudioLine(StudioCost cost, string? covers) =>
+        "The studio itself: " + cost.Total.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture) + " s of database time over "
+        + SessionText.Count(cost.Connections, "connection") + " to this database in the last "
+        + ((int) cost.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes. " + covers;
+
+    private static string Share(double? share) => share is { } value ? TableText.Percent(value) : "–";
+
+    /// <summary>The first line of a statement, cut, for the row's summary.</summary>
+    private static string Summary(string text)
+    {
+        string first = text.Split('\n', 2)[0].Trim();
+        return first.Length > 120 ? first[..120] + " …" : first;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

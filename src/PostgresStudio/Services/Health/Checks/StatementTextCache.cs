@@ -16,11 +16,13 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <para>
 /// <b>Bounded, and only what was read.</b> At most <see cref="MaxPerDatabase" /> texts a database, each at most
 /// <see cref="HealthStatementQueries.MaxTextCharacters" /> characters; a database that would hold more starts again
-/// empty, which costs one text call. The bound is per database and not across them: a process holds up to
-/// 200 × 4,096 characters (about 1.6 MB as UTF-16) for every database whose statement checks have run, for its whole
-/// life - which grows with the deployment exactly as <see cref="HealthHistory" />'s rings do, and is said beside them. It holds only texts the checks already read for a visitor through the activity
-/// gate, in memory, for the life of the process, and every one is still masked for whoever it is shown to - holding a
-/// text changes nobody's view of it.
+/// empty, which costs one text call. The bound is above what one sweep keeps (<see cref="HealthStatementQueries.MaxTexts" />,
+/// the checks' twenty and the Statements page's hundred, two hundred on Aurora - W5-Q1), so a sweep whose statements are the
+/// last one's never empties it. The bound is per database and not across them: a process holds up to
+/// 256 × 4,096 characters (about 2 MB as UTF-16) for every database whose statement checks or Statements page have run, for
+/// its whole life - which grows with the deployment exactly as <see cref="HealthHistory" />'s rings do, and is said beside
+/// them. It holds only texts the checks already read for a visitor through the activity gate, in memory, for the life of
+/// the process, and every one is still masked for whoever it is shown to - holding a text changes nobody's view of it.
 /// </para>
 /// <para>
 /// Singleton, like <see cref="HealthHistory" />: the sweep is the database's, so its memory is too.
@@ -28,8 +30,8 @@ namespace PostgresStudio.Services.Health.Checks;
 /// </remarks>
 internal sealed class StatementTextCache
 {
-    /// <summary>The most texts one database's cache holds.</summary>
-    public const int MaxPerDatabase = 200;
+    /// <summary>The most texts one database's cache holds: above the most one sweep keeps (<see cref="HealthStatementQueries.MaxTexts" />).</summary>
+    public const int MaxPerDatabase = 256;
 
     private readonly Dictionary<string, Dictionary<long, StatementTextRow>> byDatabase = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock gate = new();

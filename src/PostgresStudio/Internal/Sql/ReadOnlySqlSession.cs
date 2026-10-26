@@ -83,8 +83,9 @@ internal sealed record ReadOnlySqlOptions
     public SqlValueFormatterOptions? Formatting { get; init; }
 
     /// <summary>
-    /// Where the session's wall time is counted for the health advisor's "studio cost" line, or
-    /// <see langword="null" /> for the process's own <see cref="StudioDatabaseTime.Shared" />.
+    /// Where the session is counted for the "studio cost" line - its rollback always, and its wall time when its connection
+    /// is not metered already (<see cref="StudioConnectionMeter" />) - or <see langword="null" /> for the process's own
+    /// <see cref="StudioDatabaseTime.Shared" />.
     /// </summary>
     public StudioDatabaseTime? Meter { get; init; }
 }
@@ -281,7 +282,20 @@ internal sealed class ReadOnlySqlSession
 
             await transaction.DisposeAsync().ConfigureAwait(false);
 
-            (options.Meter ?? StudioDatabaseTime.Shared).RecordSince(StudioDatabaseTime.KeyOf(connection), started, rolledBack);
+            // A metered connection already times everything on it, open to close (StudioConnectionMeter): the session counts
+            // itself and its rollback there - C08 subtracts those exactly - and adds no time of its own, so no statement is
+            // timed twice. One the studio did not meter is timed here, begin to rollback, as before.
+            StudioDatabaseTime meter = options.Meter ?? StudioDatabaseTime.Shared;
+            string key = StudioDatabaseTime.KeyOf(connection);
+
+            if (StudioConnectionMeter.IsMetered(connection))
+            {
+                meter.RecordSession(key, rolledBack);
+            }
+            else
+            {
+                meter.RecordSince(key, started, rolledBack);
+            }
         }
     }
 

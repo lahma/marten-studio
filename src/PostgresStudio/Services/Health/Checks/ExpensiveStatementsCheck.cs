@@ -154,11 +154,11 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
             yield return new HealthSamplePart(StatementWindows.DeallocSeries, dealloc);
         }
 
-        foreach (ObservedStatement statement in read.Statements.Where(static x => x.NamesStoreTable && x.IsWorkload))
+        // Every kept statement, not only the ones T02 judges: the Statements page shows a window for each (W5-Q1), and a
+        // series has one writer - this check, which every statement sweep runs. T02 reads back only its own statements'.
+        foreach (HealthSamplePart part in StatementReads.Sample(read))
         {
-            yield return new HealthSamplePart(CallsSeries + statement.Key, statement.Counters.Calls);
-            yield return new HealthSamplePart(ExecSeries + statement.Key, statement.Counters.TotalExecMs);
-            yield return new HealthSamplePart(RowsSeries + statement.Key, statement.Counters.Rows);
+            yield return part;
         }
     }
 

@@ -268,6 +268,12 @@ public class LogLevelsTests
         ["src/PostgresStudio/Services/PostgresStudioLog.ServerPosture.cs : 9440 PostgresStudioServerFactsReadFailed"] = (Verdict.Throttled,
             "9440 in Postgres Studio's words: a section of the Server page's facts failed, re-read every HealthInterval."),
 
+        // ---- W5-Q1 -----------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.StatementsPage.cs : 9451 StatementsReadFailed"] = (Verdict.Throttled,
+            "The Statements page could not take the statement sweep for a reason nobody chose; an expected state is the page's sentence, a check that failed is the sweep's 9222, and the page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.StatementsPage.cs : 9451 PostgresStudioStatementsReadFailed"] = (Verdict.Throttled,
+            "9451 in Postgres Studio's words: the Statements page's read failed for a reason nobody chose, re-read every HealthInterval."),
+
         // ---- Faults ---------------------------------------------------------------------------------
         ["src/PostgresStudio/Services/StudioState.cs : A Marten Studio page failed to handle a scope change"] = (Verdict.Fault,
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),

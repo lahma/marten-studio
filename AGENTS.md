@@ -1300,6 +1300,14 @@ tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each f
                                          14-18 as app and probe, and their no-lock, no-DDL reads
 src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
                                          (W5-index §4); never reaches main
+src/PostgresStudio/Services/Statements/   The Statements page (W5-Q1): its facts (the statement sweep's own read and
+                                         history), the per-visitor view behind the activity gate, the plain classifier
+src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group
+tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the view's ranking and groups, the gate, the
+                                         classifier, the cost meter's connection tracker, and the page - no database
+tests/MartenStudio.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
+tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
+                                         matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

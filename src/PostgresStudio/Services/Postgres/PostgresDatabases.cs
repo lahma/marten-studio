@@ -1,5 +1,6 @@
 using Npgsql;
 
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Postgres;
@@ -35,10 +36,16 @@ internal sealed record DataSourceDatabase(string Identity, NpgsqlDataSource Data
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// One pool for both usages: a plain data source does not tell a read replica from the primary, and a multi-host one
     /// is not re-targeted - what answered is what a server read reports.
+    /// </para>
+    /// <para>
+    /// Metered, open to close, for the studio's cost line (<see cref="StudioConnectionMeter" />, W5-Q1): every statement
+    /// the studio issues here runs on a connection from this.
+    /// </para>
     /// </remarks>
-    public NpgsqlConnection CreateConnection(StudioConnectionUsage usage) => DataSource.CreateConnection();
+    public NpgsqlConnection CreateConnection(StudioConnectionUsage usage) => StudioConnectionMeter.Attach(DataSource.CreateConnection());
 
     private static (string Name, string Server) Describe(NpgsqlDataSource dataSource)
     {

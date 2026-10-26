@@ -440,7 +440,7 @@ internal sealed class LinqQueryService : ILinqQueryService
             Role = value.SqlConsoleRole,
         });
 
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
         var stopwatch = new Stopwatch();
         LinqPage? page = null;

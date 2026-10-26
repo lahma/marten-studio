@@ -420,11 +420,12 @@ internal sealed class HealthSweeper
         List<HealthCheckResult> results =
             [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage))];
 
-        // A regular sweep keeps its shared reads for the pages that reuse them (W5-V1): the deeper and statement tiers'
-        // reads are gated, and a page's gate-free facts read never takes them.
+        // A regular sweep keeps its shared reads for the pages that reuse them (W5-V1), and a statement sweep keeps its own for
+        // the Statements page (W5-Q1), whose service shows them only through the activity gate - the gate the sweep itself
+        // ran behind. The deeper tier's reads are kept for nobody.
         return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results)
         {
-            Shared = kind == HealthSweepKind.Regular ? memo.Completed() : new Dictionary<string, object>(),
+            Shared = kind is HealthSweepKind.Regular or HealthSweepKind.Statements ? memo.Completed() : new Dictionary<string, object>(),
         };
 
         async Task<Gathered> GatherAsync(HealthCheckDescriptor descriptor)

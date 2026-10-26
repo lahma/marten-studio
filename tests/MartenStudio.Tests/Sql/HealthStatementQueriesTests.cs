@@ -55,20 +55,29 @@ public class HealthStatementQueriesTests
         }
     }
 
+    /// <summary>
+    /// The checks' twenty and the Statements page's two hundreds (W5-Q1: by total time, and on Aurora by storage reads) are
+    /// the read's shares, and they fit its limit exactly, so the limit drops nobody's pick.
+    /// </summary>
     [Fact]
     public void Every_checks_share_fits_so_the_limit_never_drops_one_checks_picks_for_another()
     {
         StatementSelection selection = StatementReads.Selection;
 
-        (selection.TopByLoad + selection.TopByMean + selection.TopGuarded + selection.TopJit).Should().Be(HealthStatementQueries.MaxTexts);
+        (selection.TopByLoad + selection.TopByMean + selection.TopGuarded + selection.TopJit).Should().Be(20, "the checks' own picks are unchanged");
+        (selection.TopByTotal, selection.TopByStorage).Should().Be((StatementReads.PageTop, StatementReads.PageTop));
+        (selection.TopByLoad + selection.TopByMean + selection.TopGuarded + selection.TopJit + selection.TopByTotal + selection.TopByStorage)
+            .Should().Be(HealthStatementQueries.MaxTexts);
         selection.SharesFit.Should().BeTrue();
 
         FluentActions.Invoking(() => HealthStatementQueries.Counters(At("1.11"), selection with { TopJit = selection.TopJit + 1 }))
             .Should().Throw<ArgumentException>().WithMessage("*shares must fit*");
+        FluentActions.Invoking(() => HealthStatementQueries.Counters(At("1.11"), selection with { TopByTotal = selection.TopByTotal + 1 }))
+            .Should().Throw<ArgumentException>().WithMessage("*shares must fit*");
     }
 
     [Fact]
-    public void The_text_is_read_for_the_kept_statements_only_and_never_for_more_than_twenty()
+    public void The_text_is_read_for_the_kept_statements_only_and_never_for_more_than_the_read_keeps()
     {
         HealthQuery query = HealthStatementQueries.Texts(At("1.11"), [7L, 8L, 7L]);
 
@@ -78,9 +87,76 @@ public class HealthStatementQueriesTests
         ids.NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Bigint);
         ids.Value.Should().BeOfType<long[]>().Which.Should().Equal(7L, 8L);
 
-        FluentActions.Invoking(() => HealthStatementQueries.Texts(At("1.11"), [.. Enumerable.Range(1, 21).Select(static x => (long) x)]))
+        FluentActions.Invoking(() => HealthStatementQueries.Texts(At("1.11"), [.. Enumerable.Range(1, HealthStatementQueries.MaxTexts + 1).Select(static x => (long) x)]))
             .Should().Throw<ArgumentException>();
         FluentActions.Invoking(() => HealthStatementQueries.Texts(At("1.11"), [])).Should().Throw<ArgumentException>();
+    }
+
+    /// <summary>
+    /// W5-Q1: the page's own ranking - total time since the counters began - and the blocks and read time it shows are in the
+    /// one counters read, by name for the installed extension's version: 17's <c>shared_blk_read_time</c> rename (1.11) and
+    /// 18's parallel workers and <c>wal_buffers_full</c> (1.12).
+    /// </summary>
+    [Theory]
+    [InlineData("1.8", "s.blk_read_time::float8 as io_read_ms", false)]
+    [InlineData("1.10", "s.blk_read_time::float8 as io_read_ms", false)]
+    [InlineData("1.11", "s.shared_blk_read_time::float8 as io_read_ms", false)]
+    [InlineData("1.12", "s.shared_blk_read_time::float8 as io_read_ms", true)]
+    public void The_17_and_18_column_names_are_read_by_the_installed_extensions_version(string version, string readTime, bool parallel)
+    {
+        string sql = Counters(version).Sql;
+
+        sql.Should().Contain(readTime).And.Contain("s.shared_blks_hit, s.shared_blks_read");
+        sql.Contains("s.parallel_workers_to_launch::int8 as parallel_to_launch", StringComparison.Ordinal).Should().Be(parallel);
+        sql.Contains("s.wal_buffers_full::int8 as wal_buffers_full", StringComparison.Ordinal).Should().Be(parallel);
+        sql.Should().Contain(parallel ? "s.parallel_workers_launched::int8 as parallel_launched" : "null::int8 as parallel_launched");
+        sql.Should().Contain("row_number() over (order by s.total_exec_time desc, s.queryid) as by_total").And.Contain("or r.by_total <= @top_total");
+        Counters(version).Parameters.Single(static x => x.ParameterName == "top_total").Value.Should().Be(StatementReads.PageTop);
+    }
+
+    /// <summary>
+    /// A5: on Aurora the counters join <c>pg_catalog.aurora_stat_statements(false)</c> on its four keys and take its storage
+    /// columns by name - never its column list, which on 17 collides with the extension's own - with its rows fenced to the
+    /// store's role and this database as the extension's are; elsewhere the columns are null and nothing ranks by them.
+    /// </summary>
+    [Theory]
+    [InlineData("1.10", true)]
+    [InlineData("1.11", true)]
+    [InlineData("1.8", false)]
+    public void Auroras_storage_reads_are_joined_on_the_four_keys_by_name_and_fenced(string version, bool toplevel)
+    {
+        HealthQuery query = HealthStatementQueries.Counters(At(version), StatementReads.Selection, storageReads: true);
+        string sql = query.Sql;
+
+        sql.Should().Contain("from (select pg_catalog.to_jsonb(x) as j from pg_catalog.\"aurora_stat_statements\"(false) x) a");
+        sql.Should().Contain("(a.j ->> 'storage_blks_read')::int8 as storage_blks_read")
+            .And.Contain("(a.j ->> 'orcache_blks_hit')::int8 as orcache_blks_hit")
+            .And.Contain("(a.j ->> 'storage_blk_read_time')::float8 as storage_blk_read_time");
+        sql.Should().NotContain("x.*").And.NotContain("a.*");
+        sql.Should().Contain("left join aurora a on a.queryid = s.queryid and a.userid = s.userid and a.dbid = s.dbid"
+            + (toplevel ? " and a.toplevel = s.toplevel" : string.Empty));
+        sql.Contains("(a.j ->> 'toplevel')::bool as toplevel", StringComparison.Ordinal).Should().Be(toplevel);
+
+        // The fence on Aurora's rows, before the join, as well as the extension's own.
+        sql.Should().Contain("(a.j ->> 'userid')::oid = (select r.oid from pg_catalog.pg_roles r where r.rolname = current_user)");
+        sql.Should().Contain("(a.j ->> 'dbid')::oid = (select d.oid from pg_catalog.pg_database d where d.datname = pg_catalog.current_database())");
+        sql.Should().Contain("s.userid = (select r.oid from pg_catalog.pg_roles r where r.rolname = current_user)");
+        sql.Should().Contain("or (r.by_storage <= @top_storage and r.storage_blks_read is not null)");
+        query.Parameters.Single(static x => x.ParameterName == "top_storage").Value.Should().Be(StatementReads.PageTop);
+
+        HealthQuery elsewhere = HealthStatementQueries.Counters(At(version), StatementReads.Selection);
+        elsewhere.Sql.Should().NotContain("aurora").And.Contain("null::int8 as storage_blks_read");
+        elsewhere.Parameters.Single(static x => x.ParameterName == "top_storage").Value.Should().Be(0, "nothing ranks by storage reads that are not read");
+    }
+
+    [Fact]
+    public void Auroras_function_is_looked_for_in_pg_catalog_alone()
+    {
+        string sql = HealthStatementQueries.Extension().Sql;
+
+        sql.Should().Contain("p.proname = 'aurora_stat_statements'")
+            .And.Contain("p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace")
+            .And.Contain("p.proargtypes[0] = 'pg_catalog.bool'::pg_catalog.regtype");
     }
 
     [Theory]

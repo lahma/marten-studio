@@ -227,12 +227,14 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// ordinary store, up to a few megabytes for one with hundreds of shards or slots. A store with a database per
 /// tenant keeps a ring per database it has been swept for, each carrying the same server's slots, so R01's part is
 /// bounded by <c>MaxSlots</c> × the databases swept × <see cref="Capacity" /> - the one place this grows with the
-/// deployment. A database whose statement checks were run has a second ring (<see cref="RingOf" />), of at most
-/// <c>HealthStatementQueries.MaxTexts</c> (20) statements' few series a sample, written only when a visitor runs the
-/// statement checks: kilobytes, never a number per statement the extension holds. Beside it, the statement checks'
-/// <c>StatementTextCache</c> holds up to 200 texts of at most 4,096 characters per database whose statement checks
-/// have run, for the life of the process - about 1.6 MB a database at its worst - so it, too, grows with the number
-/// of databases swept, and with nothing else.
+/// deployment. A database whose statement checks or Statements page were run has a second ring (<see cref="RingOf" />), of
+/// at most <c>HealthStatementQueries.MaxTexts</c> (120, or 220 on Aurora) statements' seven or eight series a sample (W5-Q1),
+/// written only when a visitor through the activity gate runs the statement checks or opens the Statements page - at most
+/// one sample per statement sweep, every five minutes - and with each series name shared between samples
+/// (<c>StatementReads.SeriesName</c>): about 25 KB a sample, so up to about 1.5 MB a database for a full ring at its worst,
+/// never a number per statement the extension holds. Beside it, the statement checks' <c>StatementTextCache</c> holds up to
+/// 256 texts of at most 4,096 characters per database whose statement checks have run, for the life of the process - about
+/// 2 MB a database at its worst - so it, too, grows with the number of databases swept, and with nothing else.
 /// </para>
 /// <para>
 /// Singleton. Two circuits watching one database are watching one history: the sweep is shared, so its

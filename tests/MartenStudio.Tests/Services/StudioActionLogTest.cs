@@ -236,11 +236,12 @@ public class StudioActionLogTest
         // read failure. 9420 and 9421 are W5-V1's (9420-9429): a bloat measure the visitor pressed that failed, and one
         // refused for an expected reason, at Debug. 9430 and 9431 are W5-R2's (9430-9439): the Replication page's throttled
         // facts read failure and a tablespace size the visitor asked for that failed. 9440 is W5-S2's (9440-9449): the
-        // Server page's throttled facts read failure.
+        // Server page's throttled facts read failure. 9450-9452 are W5-Q1's (9450-9459): the Statements page refused by its
+        // gate at Debug, its throttled read failure, and its first read in a circuit, the audit line.
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
             9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
-            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421, 9430, 9431, 9440);
+            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421, 9430, 9431, 9440, 9450, 9451, 9452);
     }
 
     /// <summary>
@@ -262,7 +263,7 @@ public class StudioActionLogTest
 
         Ids(typeof(StudioLog)).Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237,
-            9245, 9246, 9270, 9280, 9281, 9290, 9410, 9420, 9421, 9430, 9431, 9440);
+            9245, 9246, 9270, 9280, 9281, 9290, 9410, 9420, 9421, 9430, 9431, 9440, 9450, 9451, 9452);
 
         Ids(typeof(MartenLog)).Should().Equal(
             9206, 9207, 9208, 9209, 9211, 9212, 9215, 9216, 9217, 9218, 9260, 9261, 9262, 9263, 9264, 9320);

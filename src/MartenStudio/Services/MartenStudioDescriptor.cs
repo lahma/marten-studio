@@ -112,6 +112,9 @@ internal static class MartenStudioDescriptor
             // Health is first in its section: it is where a person starts when something is wrong, and its
             // badge reads the last sweep a Health page or the Overview ran - it never starts one.
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+
+            // W5-Q1: the top statements by total time, after Health and before Maintenance (W5-index §4).
+            new("Statements", "statements", "statements", Title: "The top statements by total time, over the window the statement checks watched"),
             new("Maintenance", "maintenance", "maintenance", Title: "Autovacuum's triggers, running maintenance, the freeze forecast and the horizon"),
 
             // W5-CAP: the database's size, growth and largest tables, after Maintenance.

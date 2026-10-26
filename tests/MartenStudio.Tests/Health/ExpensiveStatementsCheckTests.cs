@@ -277,19 +277,44 @@ public class ExpensiveStatementsCheckTests
         Judge(Read(Busy(1, 0.5)), history).Findings.Single().Caveat.Should().Contain("evicted 37 entries in the window");
     }
 
+    /// <summary>
+    /// W5-Q1: every kept statement is sampled with the database's totals - not only the store's, which T02 judges - because the
+    /// Statements page shows a window for each, and T02, which every statement sweep runs, is the series' one writer.
+    /// </summary>
     [Fact]
-    public void Only_the_stores_statements_are_sampled_with_the_databases_totals()
+    public void Every_kept_statement_is_sampled_with_the_databases_totals()
     {
         StatementRead read = Read(Busy(1, 0.5), Statement(2, "select 1", [], 10, 5));
 
         Dictionary<string, double> parts = Check.Sample(new ExpensiveStatementFacts(read, [], []))
             .ToDictionary(static x => x.Series, static x => x.Value, StringComparer.Ordinal);
 
+        string[] perStatement =
+        [
+            ExpensiveStatementsCheck.CallsSeries, ExpensiveStatementsCheck.ExecSeries, ExpensiveStatementsCheck.RowsSeries,
+            StatementReads.SharedHitSeries, StatementReads.SharedReadSeries, StatementReads.TempSeries, StatementReads.IoReadSeries,
+        ];
+
         parts.Keys.Should().BeEquivalentTo(
         [
             StatementWindows.AllExecSeries, StatementWindows.AllWalSeries, StatementWindows.DeallocSeries,
-            ExpensiveStatementsCheck.CallsSeries + "1", ExpensiveStatementsCheck.ExecSeries + "1", ExpensiveStatementsCheck.RowsSeries + "1",
-        ]);
+            .. perStatement.Select(static x => x + "1"),
+            .. perStatement.Select(static x => x + "2"),
+        ], "no storage-read series where Aurora's are not read");
+
+        parts[ExpensiveStatementsCheck.CallsSeries + "2"].Should().Be(10);
+        parts[ExpensiveStatementsCheck.ExecSeries + "2"].Should().Be(5);
+    }
+
+    /// <summary>W5-Q1: a statement's series name is the same string instance every sweep, so a full ring holds numbers, not names.</summary>
+    [Fact]
+    public void A_series_name_is_shared_between_samples()
+    {
+        string first = StatementReads.SeriesName(ExpensiveStatementsCheck.CallsSeries, 4242);
+        string again = StatementReads.SeriesName(ExpensiveStatementsCheck.CallsSeries, 4242);
+
+        first.Should().Be(ExpensiveStatementsCheck.CallsSeries + "4242");
+        ReferenceEquals(first, again).Should().BeTrue();
     }
 
     [Fact]

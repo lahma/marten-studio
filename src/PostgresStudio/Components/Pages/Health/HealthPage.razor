@@ -96,7 +96,7 @@
             }
 
             <p class="ms-health-summary-line ms-health-cost">
-                @(report.Cost is { } cost ? HealthPresentation.Cost(cost) : "Studio cost: withheld - " + report.CostWithheld + ".")
+                @(report.Cost is { } cost ? HealthPresentation.Cost(cost, Settings.Text) : "Studio cost: withheld - " + report.CostWithheld + ".")
             </p>
 
             @if (!report.DeeperChecksExist)
