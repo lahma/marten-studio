@@ -141,7 +141,8 @@ internal static partial class StudioOptionsValidation
     /// <summary>
     /// A Postgres role name as <c>SET LOCAL ROLE</c> will accept it. The console's role cannot be a parameter - it is an
     /// identifier - so it is held to the shape of an unquoted identifier here, at startup, rather than escaped later.
+    /// <c>\A</c> and <c>\z</c>, because .NET's <c>$</c> also matches before a final line feed.
     /// </summary>
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_$]{0,62}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_$]{0,62}\z", RegexOptions.CultureInvariant)]
     private static partial Regex PostgresRoleName();
 }

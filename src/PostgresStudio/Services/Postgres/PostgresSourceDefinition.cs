@@ -45,9 +45,11 @@ internal static partial class PostgresSourceNames
     /// <summary>A host-listed database's name: as a key, up to 128 characters.</summary>
     public static bool IsValidDatabaseName(string? name) => name is not null && DatabaseNamePattern().IsMatch(name);
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", RegexOptions.CultureInvariant)]
+    // \A and \z rather than ^ and $: .NET's $ also matches before a final line feed, so "tenant_a\n" would pass as a name
+    // of its own - and reach the resource a policy is asked about, the URL, the audit log and the logs.
+    [GeneratedRegex(@"\A[A-Za-z0-9][A-Za-z0-9._-]{0,63}\z", RegexOptions.CultureInvariant)]
     private static partial Regex KeyPattern();
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z", RegexOptions.CultureInvariant)]
     private static partial Regex DatabaseNamePattern();
 }

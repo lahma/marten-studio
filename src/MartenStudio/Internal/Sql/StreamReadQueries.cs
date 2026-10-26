@@ -318,6 +318,7 @@ internal static partial class StreamReadQueries
         return "@" + name;
     }
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    // \A and \z, because .NET's $ also matches before a final line feed.
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]*\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex PlainColumn();
 }
