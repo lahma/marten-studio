@@ -3,6 +3,7 @@ using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 
@@ -42,13 +43,38 @@ internal sealed record PublicSchemaCreateFacts(IReadOnlyList<string> OwnSchemas,
 [HealthCheck("S06", HealthArea.Server, HealthCostTier.Catalog, "Anyone may create in an application schema")]
 internal sealed class PublicSchemaCreateCheck : HealthCheck<PublicSchemaCreateFacts>
 {
+    /// <summary>What the status row says when the source's declarations - its own schemas - could not be read.</summary>
+    internal const string DeclarationsUnread =
+        "The source's own schemas could not be read from its declarations, so whether PUBLIC may create in them is not checked.";
+
+    /// <summary>
+    /// The source's own schemas from its declarations - failing closed, as the database browser's classification does: a
+    /// studio with no declarations, or declarations that could not all be read, has no schemas the studio may call its own,
+    /// and "nothing to check" would be a quiet row for a check that never looked. Pure, for the unit tests.
+    /// </summary>
+    /// <exception cref="HealthCheckUnavailableException">There are no declarations, or they did not succeed.</exception>
+    internal static IReadOnlyList<string> OwnSchemas(DatabaseDeclarations? declared) =>
+        declared is { Succeeded: true } ? declared.StoreSchemas : throw new HealthCheckUnavailableException(DeclarationsUnread);
+
     /// <inheritdoc />
     public override async Task<PublicSchemaCreateFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        IDatabaseDeclarationsSource? declarations;
+
+        try
+        {
+            declarations = context.Services.GetService<IDatabaseDeclarationsSource>();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A source the sweep's scope, which has no circuit, cannot build fails closed, as C06's classifier does.
+            throw new HealthCheckUnavailableException(DeclarationsUnread, exception);
+        }
+
+        IReadOnlyList<string> own = OwnSchemas(declarations?.ReadUncached(context.Source));
         PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
-        IReadOnlyList<string> own = context.Services.GetService<IDatabaseDeclarationsSource>()?.ReadUncached(context.Source).StoreSchemas ?? [];
 
         if (own.Count == 0)
         {

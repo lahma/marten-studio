@@ -162,6 +162,44 @@ public class ServerSettingsFactsTests
         line.SetBy.Should().Contain("Postgres's own default").And.Contain("the studio's own read sets its own");
     }
 
+    // ---- Who set a setting the studio's own transaction sets for itself (W5-S2-fix) ---------------------------------
+
+    private static ServerSettingValue StudioSet(string value, string? entrySource, string boot = "0") =>
+        new("idle_in_transaction_session_timeout", value, "ms", entrySource, false, "user", boot) { StudioSet = true };
+
+    [Theory]
+    [InlineData("30000", "database", "30s", "database")]
+    [InlineData("30000", "user", "'30s'", "user")]
+    [InlineData("60000", "database user", "1min", "database user")]
+    [InlineData("30000", "database", "30000", "database")]
+    [InlineData("5000", "database", "30s", "client")]
+    [InlineData("30000", "database", "thirty", null)]
+    public void A_role_or_database_entry_is_the_source_only_while_its_value_is_the_value(string resetVal, string entrySource, string entryValue, string? expected)
+    {
+        ServerSettingSource.Resolve(StudioSet(resetVal, entrySource), entryValue, new HashSet<string>()).Should().Be(expected);
+    }
+
+    [Fact]
+    public void The_connections_startup_options_outrank_every_entry_and_the_default()
+    {
+        IReadOnlySet<string> options = ServerSettingSource.StartupOptions(
+            "Host=db;Username=app;Options=-c idle_in_transaction_session_timeout=5000 --lock-timeout=1s -cstatement_timeout=2s");
+
+        options.Should().BeEquivalentTo(["idle_in_transaction_session_timeout", "lock_timeout", "statement_timeout"]);
+        ServerSettingSource.Resolve(StudioSet("5000", "database"), "30s", options).Should().Be("client");
+        ServerSettingSource.Resolve(StudioSet("0", null), null, options).Should().Be("client");
+    }
+
+    [Fact]
+    public void With_no_entry_the_built_in_value_is_the_default_and_anything_else_is_not_known()
+    {
+        ServerSettingSource.Resolve(StudioSet("0", null), null, new HashSet<string>()).Should().Be("default");
+        ServerSettingSource.Resolve(StudioSet("10000", null), null, new HashSet<string>()).Should().BeNull(
+            "the configuration file, the command line or an environment variable, which the read cannot tell apart");
+        ServerSettingSource.StartupOptions("Host=db").Should().BeEmpty();
+        ServerSettingSource.StartupOptions(null).Should().BeEmpty();
+    }
+
     // ---- Chips ------------------------------------------------------------------------------------------------------
 
     [Fact]
@@ -277,6 +315,12 @@ public class ServerSettingsFactsTests
 
         findings.Select(static x => x.Code).Should().Equal("K07", "S04", "S07");
         checks.Select(static x => x.Code).Should().Equal("S04", "S05", "K05");
+        ServerPosture.Withheld(checks).Should().BeNull("none of the section's own rows withholds anything");
+
+        // The section counts only its own rows' withheld findings, never the report's whole count.
+        HealthCheckStatus withheld = Row("S04") with { FindingsWithheld = true };
+        ServerPosture.Withheld([withheld, Row("S05")]).Should().Be("One of these checks has findings not shown to you; the Health page says why.");
+        ServerPosture.Withheld([withheld, withheld with { Code = "K05" }]).Should().StartWith("2 of these checks");
 
         static HealthReportFinding Shown(string code, HealthSeverity severity) =>
             new(MartenStudio.Tests.Health.FakeHealthService.Finding(code, severity, code + " title"), [], code, "docs", true, null);

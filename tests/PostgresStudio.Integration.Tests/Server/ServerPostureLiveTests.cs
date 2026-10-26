@@ -5,6 +5,7 @@ using Npgsql;
 using PostgresStudio.Integration.Tests.Health;
 using PostgresStudio.Integration.Tests.Versions;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Checks;
 
 namespace PostgresStudio.Integration.Tests.Server;
 
@@ -112,6 +113,15 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
 
         result.Outcome.Should().Be(HealthCheckOutcome.Checked, result.Problem?.Reason);
         result.Findings.Should().BeEmpty();
+
+        // Quiet because public was looked at and found closed, not because nothing was looked at.
+        await using MatrixHost matrixHost = await MatrixHost.CreateAsync(server, MatrixRole.App);
+        (HealthCheckContext context, HealthConnection connection) = matrixHost.Context();
+        await using HealthConnection _ = connection;
+
+        PublicSchemaCreateFacts facts = await new PublicSchemaCreateCheck().GatherAsync(context, Token);
+        facts.OwnSchemas.Should().Contain("public");
+        facts.Schemas.Should().Contain(new SchemaCreateRow("public", false), "public is examined, and PUBLIC holds no CREATE on it from 15");
     }
 
     // ---- S07 ----------------------------------------------------------------------------------------------------------

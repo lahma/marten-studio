@@ -27,10 +27,11 @@ namespace PostgresStudio.Internal.Sql;
 /// transaction, which sets <c>statement_timeout</c>, <c>lock_timeout</c> and <c>idle_in_transaction_session_timeout</c>
 /// with <c>SET LOCAL</c> (<see cref="StudioSetSettings" />) - so <c>pg_settings.setting</c> for those three is the studio's
 /// value, and its <c>source</c> is <c>session</c>. For them the read takes <c>reset_val</c> instead, the value every new
-/// session of the data source starts with, and finds who set it the way Postgres applies it: a role-and-database, role,
-/// database or global entry in <c>pg_db_role_setting</c> for the session's login (<c>session_user</c>, which
-/// <c>SET ROLE</c> does not change), else the default when it is the built-in value, else the server's configuration or
-/// the connection's own startup options (<see langword="null" />).
+/// session of the data source starts with, and the role-and-database, role, database or global entry in
+/// <c>pg_db_role_setting</c> for the session's login (<c>session_user</c>, which <c>SET ROLE</c> does not change) that
+/// Postgres would apply, with that entry's own value. Whose value <c>reset_val</c> is, is then the caller's to decide
+/// (<c>ServerSettingSource</c>): the connection's startup options outrank every such entry, so an entry whose value is not
+/// <c>reset_val</c> lost to them.
 /// </para>
 /// <para>
 /// <b>Every value is a parameter.</b> A setting's or a role's name written as a literal is structure, as
@@ -72,29 +73,30 @@ internal static class ServerPostureQueries
 
     private const string SettingsSql =
         "select s.name,\n" +
-        "       case when r.studio_set then s.reset_val else s.setting end as setting,\n" +
+        "       case when f.studio_set then s.reset_val else s.setting end as setting,\n" +
         "       s.unit,\n" +
-        "       case when r.studio_set then coalesce(r.reset_source, case when s.reset_val = s.boot_val then 'default' end) else s.source end as source,\n" +
+        "       case when f.studio_set then r.entry_source else s.source end as source,\n" +
         "       s.pending_restart,\n" +
         "       s.context,\n" +
         "       s.boot_val,\n" +
-        "       r.studio_set\n" +
+        "       f.studio_set,\n" +
+        "       r.entry_value\n" +
         "  from pg_catalog.pg_settings s\n" +
-        " cross join lateral (\n" +
-        "       select (s.source = 'session' and s.name = any(@studio_set)) as studio_set,\n" +
-        "              (select case when d.setdatabase <> 0 and d.setrole <> 0 then 'database user'\n" +
-        "                           when d.setrole <> 0 then 'user'\n" +
-        "                           when d.setdatabase <> 0 then 'database'\n" +
-        "                           else 'global' end\n" +
-        "                 from pg_catalog.pg_db_role_setting d\n" +
-        "                 cross join lateral pg_catalog.unnest(d.setconfig) c(item)\n" +
-        "                where s.source = 'session' and s.name = any(@studio_set)\n" +
-        "                  and d.setdatabase in (0, (select b.oid from pg_catalog.pg_database b where b.datname = pg_catalog.current_database()))\n" +
-        "                  and d.setrole in (0, (select a.oid from pg_catalog.pg_roles a where a.rolname = session_user))\n" +
-        "                  and pg_catalog.split_part(c.item, '=', 1) = s.name\n" +
-        "                order by (d.setdatabase <> 0 and d.setrole <> 0) desc, (d.setrole <> 0) desc, (d.setdatabase <> 0) desc\n" +
-        "                limit 1) as reset_source\n" +
-        "       ) r\n" +
+        " cross join lateral (select (s.source = 'session' and s.name = any(@studio_set)) as studio_set) f\n" +
+        "  left join lateral (\n" +
+        "       select case when d.setdatabase <> 0 and d.setrole <> 0 then 'database user'\n" +
+        "                   when d.setrole <> 0 then 'user'\n" +
+        "                   when d.setdatabase <> 0 then 'database'\n" +
+        "                   else 'global' end as entry_source,\n" +
+        "              pg_catalog.substr(c.item, pg_catalog.strpos(c.item, '=') + 1) as entry_value\n" +
+        "         from pg_catalog.pg_db_role_setting d\n" +
+        "         cross join lateral pg_catalog.unnest(d.setconfig) c(item)\n" +
+        "        where f.studio_set\n" +
+        "          and d.setdatabase in (0, (select b.oid from pg_catalog.pg_database b where b.datname = pg_catalog.current_database()))\n" +
+        "          and d.setrole in (0, (select a.oid from pg_catalog.pg_roles a where a.rolname = session_user))\n" +
+        "          and pg_catalog.split_part(c.item, '=', 1) = s.name\n" +
+        "        order by (d.setdatabase <> 0 and d.setrole <> 0) desc, (d.setrole <> 0) desc, (d.setdatabase <> 0) desc\n" +
+        "        limit 1) r on true\n" +
         " where s.name = any(@names) or s.name like any(@prefixes)\n" +
         " order by s.name";
 
@@ -130,16 +132,27 @@ internal static class ServerPostureQueries
         "       (n.name = any(@named)) as named,\n" +
         "       e.extversion::text as installed_version,\n" +
         "       a.default_version::text as default_version,\n" +
-        "       v.trusted,\n" +
         "       pg_catalog.count(*) over () as total\n" +
         "  from (select e.extname::text as name from pg_catalog.pg_extension e\n" +
         "        union\n" +
         "        select g.name from pg_catalog.unnest(@named) as g(name)) n\n" +
         "  left join pg_catalog.pg_extension e on e.extname = n.name\n" +
         "  left join pg_catalog.pg_available_extensions a on a.name = n.name\n" +
-        "  left join pg_catalog.pg_available_extension_versions v on v.name = n.name and v.version = a.default_version\n" +
         " order by (n.name = any(@named)) desc, n.name\n" +
         " limit @limit";
+
+    private const string ExtensionTrustSql =
+        "select v.name::text, pg_catalog.bool_or(v.trusted) as trusted\n" +
+        "  from pg_catalog.pg_available_extension_versions v\n" +
+        "  join pg_catalog.pg_available_extensions a on a.name = v.name and a.default_version = v.version\n" +
+        " where v.name = any(@names)\n" +
+        " group by v.name";
+
+    private const string UpdatePathsSql =
+        "select c.name,\n" +
+        "       exists (select 1 from pg_catalog.pg_extension_update_paths(c.name::name) p\n" +
+        "                where p.source = c.installed and p.target = c.target and p.path is not null) as updatable\n" +
+        "  from rows from (pg_catalog.unnest(@names), pg_catalog.unnest(@installed), pg_catalog.unnest(@targets)) as c(name, installed, target)";
 
     private const string SchemaCreateSql =
         "select n.nspname::text as schema,\n" +
@@ -192,8 +205,9 @@ internal static class ServerPostureQueries
 
     /// <summary>
     /// Every extension installed in this database and every one of <paramref name="named" /> whether or not it is, with the
-    /// installed version, the server's default version and whether that version is trusted (creatable by a role with
-    /// <c>CREATE</c> on the database) - the named ones first, then by name, at most <see cref="MaxExtensions" />.
+    /// installed version and the server's default version - the named ones first, then by name, at most
+    /// <see cref="MaxExtensions" />. Not whether a version is trusted: that is <c>pg_available_extension_versions</c>, which
+    /// reads every version's control and script files, and the sweep does not pay for it (<see cref="ExtensionTrust" />).
     /// </summary>
     /// <param name="named">The extensions the page shows a chip for.</param>
     public static HealthQuery Extensions(IReadOnlyCollection<string> named)
@@ -205,6 +219,36 @@ internal static class ServerPostureQueries
             [
                 Texts("named", named),
                 new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = MaxExtensions },
+            ]);
+    }
+
+    /// <summary>
+    /// Whether each of <paramref name="names" />' default version is trusted - creatable by a role with <c>CREATE</c> on the
+    /// database. The Server page's alone, for a chip it cannot word from what the studio knows, never the sweep's: the view
+    /// reads every version's control and script files.
+    /// </summary>
+    /// <param name="names">The extensions to ask about.</param>
+    public static HealthQuery ExtensionTrust(IReadOnlyCollection<string> names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        return new HealthQuery(ExtensionTrustSql, [Texts("names", names)]);
+    }
+
+    /// <summary>
+    /// For each extension, whether the server has an update path from its installed version to its default one
+    /// (<c>pg_extension_update_paths</c>) - asked only for the few whose versions differ (S07), never for the list.
+    /// </summary>
+    /// <param name="candidates">Each extension, its installed version and the server's default.</param>
+    public static HealthQuery UpdatePaths(IReadOnlyCollection<(string Name, string Installed, string Target)> candidates)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+
+        return new HealthQuery(
+            UpdatePathsSql,
+            [
+                Texts("names", [.. candidates.Select(static x => x.Name)]),
+                Texts("installed", [.. candidates.Select(static x => x.Installed)]),
+                Texts("targets", [.. candidates.Select(static x => x.Target)]),
             ]);
     }
 

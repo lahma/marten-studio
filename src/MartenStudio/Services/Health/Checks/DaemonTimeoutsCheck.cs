@@ -20,14 +20,15 @@ namespace MartenStudio.Services.Health.Checks;
 /// <param name="MonitoredLock"><c>Events.UseMonitoredAdvisoryLock</c>.</param>
 /// <param name="LeadershipPolling"><c>LeadershipPollingTime</c>.</param>
 /// <param name="KeepaliveMonitor">
-/// Whether the lock monitor is DistributedLock's keepalive, which leaves the leader idle between statements (Weasel 9.45, and
-/// a connection string without Npgsql's <c>Keepalive</c> or <c>Multiplexing</c>), rather than 9.39's <c>pg_sleep</c>, which
-/// keeps it active.
+/// Whether the lock monitor is DistributedLock's keepalive, which leaves the leader idle between statements (from Weasel 9.34,
+/// Marten 9.39.1, with a connection string without Npgsql's <c>Keepalive</c> or <c>Multiplexing</c>), rather than the
+/// <c>pg_sleep</c> monitor, which keeps it active (<see cref="LeaderLockMonitor" />).
 /// </param>
 /// <param name="IdleInTransaction"><c>idle_in_transaction_session_timeout</c>, or <see langword="null" /> when not read.</param>
 /// <param name="TransactionTimeout"><c>transaction_timeout</c> (17+), or <see langword="null" /> where the server has none.</param>
 /// <param name="IdleSession"><c>idle_session_timeout</c>, or <see langword="null" /> when not read.</param>
 /// <param name="LockSetting">How <c>UseAdvisoryLockTransaction</c> reads against the default of the Marten this host runs.</param>
+/// <param name="MonitorBasis">What said which monitor runs (<see cref="LeaderLockMonitor.Basis" />), for the evidence.</param>
 internal sealed record DaemonTimeoutsFacts(
     DaemonMode AsyncMode,
     bool TransactionScopedLock,
@@ -37,7 +38,8 @@ internal sealed record DaemonTimeoutsFacts(
     ServerSettingValue? IdleInTransaction,
     ServerSettingValue? TransactionTimeout,
     ServerSettingValue? IdleSession,
-    string LockSetting)
+    string LockSetting,
+    string MonitorBasis = "")
 {
     /// <summary>
     /// How long the leader sits idle in its leadership transaction, or <see langword="null" /> for "for as long as it leads" -
@@ -66,10 +68,12 @@ internal sealed record DaemonTimeoutsFacts(
 /// leadership is not Marten's.
 /// </para>
 /// <para>
-/// <b>The leader's idle stretch, from what the daemon is configured to do and the Weasel it runs</b> - measured, never
-/// assumed (<c>HotColdLeaderSessionLiveTests</c>, <c>DaemonTimeoutsLiveTests</c>, at Marten 9.39 and the latest tested). With a
-/// transaction-scoped lock and its monitor on: at Weasel 9.45 DistributedLock's keepalive runs in the leadership transaction
-/// about once a minute, the session idle in between; below it - or where the connection string sets Npgsql's
+/// <b>The leader's idle stretch, from what the daemon is configured to do and the DistributedLock it runs</b> - measured, never
+/// assumed (<c>HotColdLeaderSessionLiveTests</c>, <c>DaemonTimeoutsLiveTests</c>, at Marten 9.39.0, 9.45.0 and the latest
+/// tested). With a transaction-scoped lock and its monitor on: from Weasel 9.34 (Marten 9.39.1), whose Patched
+/// DistributedLock.Postgres 1.3.3 this reads off the loaded assembly (<see cref="LeaderLockMonitor" />), DistributedLock's
+/// keepalive runs in the leadership transaction about once a minute, the session idle in between; with the upstream 1.3.0
+/// (Weasel 9.33, Marten 9.39.0) - or where the connection string sets Npgsql's
 /// <c>Keepalive</c> or <c>Multiplexing</c> - the monitor's <c>pg_sleep</c> keeps it active, idle only until its first
 /// leadership poll has passed. With the monitor off it is idle for as long as it leads, and any timeout ends it. A
 /// session-scoped lock's connection sits idle up to a minute at a time between keepalives (Marten's <c>async-daemon.md</c>).
@@ -88,7 +92,8 @@ internal sealed class DaemonTimeoutsCheck : HealthCheck<DaemonTimeoutsFacts>
 {
     /// <summary>
     /// DistributedLock's keepalive, and the session-scoped monitor's idle wait: about a minute between statements - 61 s
-    /// measured at Weasel 9.45 (CL3), and "up to a minute at a time" in Marten's <c>async-daemon.md</c>.
+    /// measured from Weasel 9.34 (Marten 9.39.1; CL3 at 9.50.2, W5-S2 at 9.45.0 and 9.54.1), and "up to a minute at a time"
+    /// in Marten's <c>async-daemon.md</c>.
     /// </summary>
     public static readonly TimeSpan KeepaliveCadence = TimeSpan.FromSeconds(61);
 
@@ -115,8 +120,8 @@ internal sealed class DaemonTimeoutsCheck : HealthCheck<DaemonTimeoutsFacts>
 
         ServerSettingsRead settings = await ServerSettingsRead.SharedAsync(context).ConfigureAwait(false);
 
-        bool keepalive = (MartenRuntime.Current.VersionOf(RuntimePackage.WeaselCore) ?? new Version(0, 0)) >= new Version(9, 45)
-            && !SleepsInsteadOfKeepalive(context);
+        LeaderLockMonitor monitor = LeaderLockMonitor.Current;
+        bool keepalive = monitor.Keepalive && !SleepsInsteadOfKeepalive(context);
 
         return new DaemonTimeoutsFacts(
             mode,
@@ -127,7 +132,8 @@ internal sealed class DaemonTimeoutsCheck : HealthCheck<DaemonTimeoutsFacts>
             settings.Find("idle_in_transaction_session_timeout"),
             settings.Find("transaction_timeout"),
             settings.Find("idle_session_timeout"),
-            pooling.DescribeLockSetting(MartenRuntime.Current));
+            pooling.DescribeLockSetting(MartenRuntime.Current),
+            monitor.Basis);
     }
 
     /// <inheritdoc />
@@ -215,6 +221,7 @@ internal sealed class DaemonTimeoutsCheck : HealthCheck<DaemonTimeoutsFacts>
                 + "; UseAdvisoryLockTransaction " + facts.LockSetting
                 + "; UseMonitoredAdvisoryLock " + (facts.MonitoredLock ? "true" : "false")),
             new("Leader idle", IdleStretch(facts).TrimEnd(',', ' ')),
+            new("Lock monitor", facts.MonitorBasis.Length > 0 ? facts.MonitorBasis : "not read"),
         ],
         Caveat =
             "Read in pg_settings on a connection from the store's own data source, as the store's role sees it - "

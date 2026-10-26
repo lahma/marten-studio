@@ -457,6 +457,25 @@ internal static class ServerPosture
             [.. report.Checks.Where(static x => Codes.Contains(x.Code, StringComparer.Ordinal)).OrderBy(static x => IndexOf(x.Code))]);
     }
 
+    /// <summary>
+    /// What the section says of findings it does not show: how many of its own checks' rows withhold some - never the
+    /// report's whole count, which is about every area - or <see langword="null" /> when none does.
+    /// </summary>
+    /// <param name="checks">The section's own status rows (<see cref="Of" />).</param>
+    public static string? Withheld(IReadOnlyList<HealthCheckStatus> checks)
+    {
+        ArgumentNullException.ThrowIfNull(checks);
+
+        int withheld = checks.Count(static x => x.FindingsWithheld);
+
+        return withheld switch
+        {
+            0 => null,
+            1 => "One of these checks has findings not shown to you; the Health page says why.",
+            _ => SessionText.Number(withheld) + " of these checks have findings not shown to you; the Health page says why.",
+        };
+    }
+
     private static int IndexOf(string code)
     {
         for (int i = 0; i < Codes.Count; i++)

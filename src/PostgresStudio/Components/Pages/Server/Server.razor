@@ -300,9 +300,9 @@
                         <p class="ms-s2-note">@HealthPresentation.Count(muted, "finding") muted in this browser; the Health page lists them.</p>
                     }
 
-                    @if (report.WithheldCount > 0)
+                    @if (ServerPosture.Withheld(checks) is { Length: > 0 } withheld)
                     {
-                        <p class="ms-s2-note">@HealthPresentation.Withheld(report.WithheldCount, report.WithheldReason)</p>
+                        <p class="ms-s2-note ms-s2-withheld">@withheld</p>
                     }
 
                     @if (checks.Count > 0)

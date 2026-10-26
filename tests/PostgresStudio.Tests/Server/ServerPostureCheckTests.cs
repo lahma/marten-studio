@@ -178,12 +178,28 @@ public class ServerPostureCheckTests
             .Note.Should().Contain("exists yet");
     }
 
+    [Fact]
+    public void S06_fails_closed_when_the_sources_declarations_could_not_be_read()
+    {
+        PublicSchemaCreateCheck.OwnSchemas(new PostgresStudio.Services.Database.DatabaseDeclarations(
+                new PostgresStudio.Services.Database.DatabaseObjectClassifier([]), ["public"], null))
+            .Should().Equal("public");
+
+        FluentActions.Invoking(() => PublicSchemaCreateCheck.OwnSchemas(new PostgresStudio.Services.Database.DatabaseDeclarations(null, ["public"], "another store's declarations failed")))
+            .Should().Throw<HealthCheckUnavailableException>().WithMessage(PublicSchemaCreateCheck.DeclarationsUnread);
+        FluentActions.Invoking(() => PublicSchemaCreateCheck.OwnSchemas(null))
+            .Should().Throw<HealthCheckUnavailableException>("a studio with no declarations has no schemas of its own to call so");
+    }
+
     // ---- S07 ----------------------------------------------------------------------------------------------------------
 
+    private static OutdatedExtensionFacts Extensions(ServerExtensionsRead read, params (string Name, bool Updatable)[] paths) =>
+        new(read, paths.ToDictionary(static x => x.Name, static x => x.Updatable, StringComparer.Ordinal));
+
     [Fact]
-    public void S07_an_extension_at_another_version_than_the_servers_is_an_Info_naming_it()
+    public void S07_an_extension_the_server_can_update_is_an_Info_naming_it()
     {
-        ServerExtensionsRead facts = new(
+        ServerExtensionsRead read = new(
         [
             new("pg_stat_statements", true, "1.9", "1.10", false),
             new("pgstattuple", true, null, "1.5", false),
@@ -191,7 +207,8 @@ public class ServerPostureCheckTests
             new("gone", false, "2.0", null, null),
         ], 4);
 
-        HealthVerdict verdict = new OutdatedExtensionCheck().Evaluate(facts, Evaluation()).ShouldBeWellFormedFor<OutdatedExtensionCheck>();
+        HealthVerdict verdict = new OutdatedExtensionCheck().Evaluate(Extensions(read, ("pg_stat_statements", true)), Evaluation())
+            .ShouldBeWellFormedFor<OutdatedExtensionCheck>();
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Info);
@@ -203,10 +220,22 @@ public class ServerPostureCheckTests
     }
 
     [Fact]
+    public void S07_a_version_with_no_update_path_to_the_default_differs_and_is_no_finding()
+    {
+        ServerExtensionsRead read = new([new("timescaledb", true, "2.17.0", "2.16.1", false)], 1);
+
+        HealthVerdict verdict = new OutdatedExtensionCheck().Evaluate(Extensions(read, ("timescaledb", false)), Evaluation());
+
+        verdict.Findings.Should().BeEmpty("a version newer than the default has nothing to update to");
+        verdict.Note.Should().Contain("timescaledb is at 2.17.0, which differs from the server's default 2.16.1")
+            .And.Contain("no update path").And.NotContain("ALTER EXTENSION");
+    }
+
+    [Fact]
     public void S07_is_quiet_when_every_installed_extension_is_current()
     {
         new OutdatedExtensionCheck()
-            .Evaluate(new ServerExtensionsRead([new("plpgsql", false, "1.0", "1.0", true), new("pg_repack", true, null, "1.5.0", false)], 2), Evaluation())
+            .Evaluate(Extensions(new ServerExtensionsRead([new("plpgsql", false, "1.0", "1.0", true), new("pg_repack", true, null, "1.5.0", false)], 2)), Evaluation())
             .Note.Should().Be("Every extension installed in this database is at the version the server offers.");
     }
 

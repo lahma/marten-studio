@@ -197,6 +197,18 @@ internal sealed class StudioText
     public required string MartenTablePartitionParameters { get; init; }
 
     /// <summary>
+    /// T14: what a timeout the DBA sets as a backstop must also respect, starting with " - " to follow "is the DBA's
+    /// backstop" - MartenStudio's HotCold leader's idle stretch (K08) - or empty for a studio with no daemon.
+    /// </summary>
+    public required string LeaderTimeoutClause { get; init; }
+
+    /// <summary>S10: the writes a read-only transaction refuses, after "every": <c>SaveChanges, append and projection write</c>.</summary>
+    public required string ReadOnlyWrites { get; init; }
+
+    /// <summary>S10: that the application never asks for a read-write transaction, after "is read-only - ".</summary>
+    public required string ReadOnlyNeverAsks { get; init; }
+
+    /// <summary>
     /// MartenStudio's wording, exactly as the shared code wrote it before it was shared. Every member is either one of
     /// the constants it used, or that literal moved here - but the six judged-table members of T12 and T13
     /// (<see cref="JudgedTables" /> to <see cref="UnjudgedOldest" />), reworded in 0.5 when MartenStudio's table checks
@@ -277,5 +289,10 @@ internal sealed class StudioText
             + "beyond the largest tables a sweep reads - and wraparound protection counts every table in the database, so it "
             + "holds the whole database back as surely as one of these would.",
         MartenTablePartitionParameters = "the Schema screen's Tables tab shows which parameters the partitions differ on",
+        LeaderTimeoutClause =
+            " - but where a Marten HotCold daemon leads from a transaction, the first must be longer than its leader's idle stretch "
+            + "and the second unset for the store's role, or they end that leadership too (K08)",
+        ReadOnlyWrites = "SaveChanges, append and projection write",
+        ReadOnlyNeverAsks = "and Marten, like most data access, never asks",
     };
 }

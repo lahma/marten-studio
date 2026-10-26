@@ -34,7 +34,8 @@ internal static class ConnectionThresholds
     /// <summary>
     /// C04: how long Marten's own HotCold leader - a session holding one of the store's daemon lock ids - may sit idle in its
     /// leadership transaction before it is raised. Three minutes: about three times the 61 s measured between DistributedLock's
-    /// keepalives at Weasel 9.45 (Marten 9.50.2, CL3), so a keepalive a loaded host runs late is no finding, and short enough
+    /// keepalives - which run from Weasel 9.34 (Marten 9.39.1) - measured at Marten 9.50.2 (CL3), so a keepalive a loaded host
+    /// runs late is no finding, and short enough
     /// that a leader whose keepalive has stopped - monitoring off, a polling interval of minutes - is raised within minutes.
     /// </summary>
     public static readonly TimeSpan DaemonLeaderIdleBound = TimeSpan.FromMinutes(3);
