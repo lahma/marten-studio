@@ -150,7 +150,7 @@ public class ActivityViewsOffThePollPathTests
     {
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(MaintenanceBuilder.Split('/'))))
             .Should().BeTrue("the maintenance builder reads pg_stat_activity for T16, so its exemption is not an exemption for nothing");
-        ReadsAnActivityView.IsMatch(PostgresStudio.Internal.Sql.MaintenanceQueries.BloatSql("ext") + PostgresStudio.Internal.Sql.MaintenanceQueries.BloatPreconditionsSql)
+        ReadsAnActivityView.IsMatch(PostgresStudio.Internal.Sql.MaintenanceQueries.BloatHeapSql("ext") + PostgresStudio.Internal.Sql.MaintenanceQueries.BloatPreconditionsSql)
             .Should().BeFalse("the on-demand measure reads no activity view");
 
         List<string> callers =

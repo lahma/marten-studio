@@ -770,17 +770,17 @@ internal enum AutovacuumHindrance
     /// <summary>Nothing the sweep can see.</summary>
     None,
 
-    /// <summary>Another session holds a lock autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with, and autovacuum skips a table it cannot lock.</summary>
+    /// <summary>
+    /// A session or a prepared transaction holds or waits for a lock autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> gives way to:
+    /// autovacuum skips a table it cannot lock at once.
+    /// </summary>
     Locked,
 
-    /// <summary>Every autovacuum worker on the server is busy (T16).</summary>
+    /// <summary>Every autovacuum worker on the server is busy (T16) - or, for a role that cannot tell them apart, as many maintenance processes.</summary>
     WorkersBusy,
 
     /// <summary>Cost-based throttling - the table's own or the server's - makes each worker sleep more than it works.</summary>
     Throttled,
-
-    /// <summary>A transaction has held the vacuum horizon back for over an hour (T14), so vacuum cannot remove the dead rows.</summary>
-    HorizonHeld,
 }
 
 /// <summary>
@@ -797,22 +797,19 @@ internal static class AutovacuumHindrances
     /// <summary>The cost limit at and below which autovacuum counts as throttled (the default is 200).</summary>
     public const int ThrottledCostLimit = 100;
 
+    /// <summary>The evidence line of a lock autovacuum gives way to.</summary>
+    internal const string LockedLabel = "a lock on the table, held or waited for, that autovacuum gives way to";
+
     /// <summary>
-    /// The series T14 writes in every sweep it runs in: how long, in seconds and as Postgres' own timestamps bound it, the
-    /// oldest session or prepared transaction holding the store's tables back has done so. A number about the database, no name.
+    /// What keeps autovacuum from <paramref name="unit" />, in the order the evidence is surest. Never a held horizon: under
+    /// one autovacuum keeps running and dating its <c>last_autovacuum</c>, so a table is not behind for it - T14 says it
+    /// (W5-V1 review).
     /// </summary>
-    internal const string HorizonHeldSeries = "tables.horizon-held-for";
-
-    /// <summary>How long the horizon must have been held for T07 to blame it - T14's own line.</summary>
-    public static readonly TimeSpan HorizonHeldFor = TimeSpan.FromHours(1);
-
-    /// <summary>What keeps autovacuum from <paramref name="unit" />, in the order the evidence is surest.</summary>
     /// <param name="table">The table.</param>
     /// <param name="unit">The decision it is behind on.</param>
     /// <param name="workers">The sweep's workers read, or <see langword="null" /> where the check did not read it.</param>
-    /// <param name="history">The database's samples: T16's saturated run and T14's held horizon.</param>
-    /// <param name="horizonMatters">Whether a held horizon explains it: dead rows only - inserts leave none for it to keep.</param>
-    public static AutovacuumHindrance Of(TableFacts table, AutovacuumUnit unit, MaintenanceWorkersRow? workers, HealthHistoryView history, bool horizonMatters)
+    /// <param name="history">The database's samples: T16's saturated run.</param>
+    public static AutovacuumHindrance Of(TableFacts table, AutovacuumUnit unit, MaintenanceWorkersRow? workers, HealthHistoryView history)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(unit);
@@ -828,12 +825,7 @@ internal static class AutovacuumHindrances
             return AutovacuumHindrance.WorkersBusy;
         }
 
-        if (Throttle(table, workers) is not null)
-        {
-            return AutovacuumHindrance.Throttled;
-        }
-
-        return horizonMatters && HorizonHeld(history) ? AutovacuumHindrance.HorizonHeld : AutovacuumHindrance.None;
+        return Throttle(table, workers) is not null ? AutovacuumHindrance.Throttled : AutovacuumHindrance.None;
     }
 
     /// <summary>Whether every worker is busy now, or was in T16's latest sample.</summary>
@@ -843,15 +835,6 @@ internal static class AutovacuumHindrances
 
         return (workers is { Autovacuum: true } read && new AutovacuumWorkersFacts(DateTimeOffset.MinValue, read, [], PostgresPlatform.SelfHosted).Saturated)
             || AutovacuumWorkersCheck.SaturatedRun(history) > 0;
-    }
-
-    /// <summary>Whether T14's latest sample says the horizon has been held for over an hour.</summary>
-    public static bool HorizonHeld(HealthHistoryView history)
-    {
-        ArgumentNullException.ThrowIfNull(history);
-
-        HealthTrend trend = history.Trend(HorizonHeldSeries);
-        return trend.Points.Count > 0 && trend.Points[^1].Value >= HorizonHeldFor.TotalSeconds;
     }
 
     /// <summary>
@@ -884,11 +867,11 @@ internal static class AutovacuumHindrances
     /// <summary>The evidence line: what keeps autovacuum away.</summary>
     public static string Label(AutovacuumHindrance hindrance, TableFacts table, MaintenanceWorkersRow? workers) => hindrance switch
     {
-        AutovacuumHindrance.Locked => "a lock another session holds on the table, which autovacuum skips",
-        AutovacuumHindrance.WorkersBusy => "every autovacuum worker is busy (T16)",
+        AutovacuumHindrance.Locked => LockedLabel,
+        AutovacuumHindrance.WorkersBusy when workers is { CanReadAllStats: true } => "every autovacuum worker is busy (T16)",
+        AutovacuumHindrance.WorkersBusy => "at least as many maintenance processes as workers, manual runs included (T16)",
         AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle =>
             "cost-based throttling: " + throttle.Parameter + " = " + throttle.Current + (throttle.TableOwn ? ", the table's own storage parameter" : ", the server's setting"),
-        AutovacuumHindrance.HorizonHeld => "the vacuum horizon, held back for over an hour (T14)",
         _ => "nothing the sweep can see",
     };
 
@@ -896,27 +879,30 @@ internal static class AutovacuumHindrances
     public static string Sentence(AutovacuumHindrance hindrance, TableFacts table, MaintenanceWorkersRow? workers) => hindrance switch
     {
         AutovacuumHindrance.Locked =>
-            " Another session holds a lock on it that autovacuum's SHARE UPDATE EXCLUSIVE lock conflicts with, and autovacuum skips a "
-            + "table it cannot lock rather than wait - a long migration, a LOCK TABLE, a CREATE INDEX without CONCURRENTLY. It passes the "
-            + "table by until that lock goes; Database › Sessions shows who holds it.",
-        AutovacuumHindrance.WorkersBusy =>
+            " A session - or a prepared transaction - holds or waits for a lock on it that autovacuum gives way to: autovacuum takes its "
+            + "SHARE UPDATE EXCLUSIVE lock only if it can have it at once, so it passes the table by while a conflicting lock is held, "
+            + "and while a stronger request waits in the queue - a long migration, a LOCK TABLE, a CREATE INDEX without CONCURRENTLY, an "
+            + "orphaned prepared transaction. Database › Sessions shows the sessions, and C07 a prepared transaction.",
+        AutovacuumHindrance.WorkersBusy when workers is { CanReadAllStats: true } =>
             " Every autovacuum worker on the server is busy (T16), so a table past its trigger waits for one to come free, however far "
             + "past it it goes.",
+        AutovacuumHindrance.WorkersBusy =>
+            " At least as many maintenance processes as autovacuum has workers are running on the server, manual runs included (T16) - "
+            + "this role cannot tell autovacuum's workers from a manual VACUUM - so a table past its trigger may be waiting for a "
+            + "worker to come free.",
         AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle =>
             " Autovacuum's cost-based throttling holds it back: " + throttle.Parameter + " = " + throttle.Current
             + (throttle.TableOwn ? ", the table's own storage parameter," : ", the server's setting,")
             + " makes each worker sleep more than it works on a table this size.",
-        AutovacuumHindrance.HorizonHeld =>
-            " A transaction has held the vacuum horizon back for over an hour (T14): vacuum cannot remove a dead row any transaction may "
-            + "still see, so even when it runs these stay, and autovacuum keeps coming back to them.",
         _ =>
-            " Nothing the sweep can see explains it - no lock on the table, no shortage of workers (T16), no throttling and no held "
-            + "horizon (T14). Autovacuum's own log (log_autovacuum_min_duration) says what it did with the table, and when.",
+            " Nothing the sweep can see explains it - no lock on the table, no shortage of workers (T16) and no throttling. "
+            + "Autovacuum's own log (log_autovacuum_min_duration) says what it did with the table, and when.",
     };
 
     /// <summary>
-    /// The remedy for <paramref name="hindrance" />: more workers, or the cost setting back to Postgres' default - or none, for
-    /// a lock or a held horizon, whose holder is somebody to talk to rather than a setting to change.
+    /// The remedy for <paramref name="hindrance" />: more workers - only where the count is of autovacuum's workers, which needs
+    /// <c>pg_read_all_stats</c> - or the cost setting back to Postgres' default; none for a lock, whose holder is somebody to
+    /// talk to rather than a setting to change.
     /// </summary>
     public static HealthRemedy? Remedy(
         AutovacuumHindrance hindrance,
@@ -931,7 +917,7 @@ internal static class AutovacuumHindrances
 
         switch (hindrance)
         {
-            case AutovacuumHindrance.WorkersBusy when workers is { } read:
+            case AutovacuumHindrance.WorkersBusy when workers is { CanReadAllStats: true } read:
                 string more = (read.MaxWorkers * 2).ToString(CultureInfo.InvariantCulture);
                 return ServerSettingRemedy.Build(
                     platform,

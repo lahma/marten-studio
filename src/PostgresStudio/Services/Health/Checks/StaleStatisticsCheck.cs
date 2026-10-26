@@ -191,11 +191,11 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
 
     /// <summary>
     /// Whether a table never analysed is big enough for that to matter: <see cref="MinRows" /> live rows, or that many read
-    /// with a sign the table is that big - a sequential scan that reads that many on average, or counters that say nothing
-    /// lives in it, the shape <c>pg_upgrade</c> leaves. Rows read alone are not one: a table whose indexes were built while it
-    /// was empty keeps <c>reltuples = -1</c> - every Marten document table - and a five-row table read by its key two
-    /// thousand times has read two thousand rows (W5-V1 review). <see cref="HealthTableQueries.TablesSql" /> applies the same
-    /// rule to each partition.
+    /// by sequential scans that read that many on average. Rows read alone are not a size: a table whose indexes were built
+    /// while it was empty keeps <c>reltuples = -1</c> - every Marten document table - and a five-row table read by its key two
+    /// thousand times has read two thousand rows; nor are rows read with no live rows counted, which is the pg_upgrade shape
+    /// but also every table's after a crash, a failover or <c>pg_stat_reset()</c> - which <c>since-restart</c> speaks for
+    /// (W5-V1 review). <see cref="HealthTableQueries.TablesSql" /> applies the same rule to each partition.
     /// </summary>
     internal static bool BigEnough(HealthTableRow row)
     {
@@ -206,7 +206,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
         long scans = row.SequentialScans ?? 0;
 
         return live >= MinRows
-            || (read >= MinRows && (live == 0 || (scans > 0 && (row.SequentialRowsRead ?? 0) >= MinRows * scans)));
+            || (read >= MinRows && scans > 0 && (row.SequentialRowsRead ?? 0) >= MinRows * scans);
     }
 
     /// <summary>What is wrong with a table's statistics at <paramref name="at" />, before persistence is considered.</summary>
@@ -470,7 +470,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
         // offered only where it would at least halve the trigger. No workers read here: the server's own throttling is T07's.
         AutovacuumHindrance hindrance = table.AutovacuumOff
             ? AutovacuumHindrance.None
-            : AutovacuumHindrances.Of(table, analyze, workers: null, evaluation.History, horizonMatters: false);
+            : AutovacuumHindrances.Of(table, analyze, workers: null, evaluation.History);
         (double ScaleFactor, double Trigger)? halving = AutovacuumHindrances.HalvingScaleFactor(analyze, 1, cap: null);
 
         List<HealthEvidence> evidence =

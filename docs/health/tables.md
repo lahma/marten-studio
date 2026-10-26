@@ -260,7 +260,10 @@ Variants:
   freezes pages early, so the anti-wraparound vacuum that comes for every table later is cheap.
 
 A finding's key is `T07|<variant>|<table>` (0.4's `T07|<table>` keys, and their mutes, reset once). A table behind
-on both is one finding, the `dead-rows` one, with both counters and both triggers in its evidence.
+on both is one finding, the `dead-rows` one, with both counters and both triggers in its evidence - so a finding
+that began as `inserts` takes the `dead-rows` key once the dead rows have been behind for their own ten minutes: its
+key, and a mute of it, change mid-incident. That is deliberate (one table, one thing to do), and a mute of the
+`inserts` key does not hide the `dead-rows` finding.
 
 **"Not being vacuumed now"** is `pg_stat_progress_vacuum.relid`. A role without `pg_read_all_stats` sees only the
 process id and database of a `VACUUM` it did not run - autovacuum's on its own tables included - so while such a
@@ -271,15 +274,21 @@ would tell (`pg_read_all_stats`, and who can grant it on this platform).
 factor changes nothing; the finding's evidence ("What keeps autovacuum away") and its remedy name, from what the
 sweep read, the first of:
 
-- **a lock** another session holds on the table that autovacuum's `SHARE UPDATE EXCLUSIVE` conflicts with (a
-  long migration, a `LOCK TABLE`, a `CREATE INDEX` without `CONCURRENTLY`) - autovacuum skips a table it cannot
-  lock rather than wait. No setting answers it; Database › Sessions shows who holds it;
-- **every worker busy** (T16, now or in its latest sample) - `autovacuum_max_workers`, doubled;
+- **a lock autovacuum gives way to** - one a session or a prepared transaction holds or waits for, in a mode
+  autovacuum's `SHARE UPDATE EXCLUSIVE` conflicts with (a long migration, a `LOCK TABLE`, a `CREATE INDEX` without
+  `CONCURRENTLY`, an orphaned two-phase commit, whose locks have no process). Autovacuum takes its lock only if it can
+  have it at once, so it passes the table by while such a lock is held and while a stronger request waits in the
+  queue. No setting answers it; Database › Sessions shows the sessions, and C07 a prepared transaction;
+- **every worker busy** (T16, now or in its latest sample) - `autovacuum_max_workers`, doubled. A role without
+  `pg_read_all_stats` counts maintenance processes rather than workers, as T16 does: the finding says "at least as
+  many maintenance processes as workers, manual runs included" and offers no setting, since the count may be of
+  manual VACUUMs;
 - **throttling** - an `autovacuum_vacuum_cost_delay` of 10 ms or more, or an `autovacuum_vacuum_cost_limit` of 100
   or less, the table's own storage parameter or the server's setting - back to Postgres' default (2 ms, 200);
-- **a horizon held for over an hour** (T14's latest sample; dead rows only) - vacuum cannot remove a row any
-  transaction may still see; T14 names the holder;
 - otherwise nothing the sweep can see, and the finding says so and points at `log_autovacuum_min_duration`.
+
+A horizon held back is not on the list: under one autovacuum keeps running and dating its `last_autovacuum`, so the
+table is not behind by T07's rule - its dead rows stay because no vacuum may remove them, which T14 says.
 
 A scale factor is offered only when nothing above applies and the next rung below the one in force (0.2, 0.1,
 0.05, 0.02, 0.01, 0.005, 0.002, 0.001) would at least halve the trigger - "so autovacuum starts sooner next time",
@@ -305,13 +314,14 @@ both. Variants:
   worker busy, the table's own throttling - and the next rung of `autovacuum_analyze_scale_factor` only where it
   would at least halve the trigger; a DBA's `ANALYZE` fixes the statistics now.
 - `never-analysed` - `reltuples = -1` and no analyze of either kind, with at least **1,000 live rows - or 1,000
-  rows read since the counters began** (`seq_tup_read + idx_tup_fetch`) **with a sign the table is that big**: a
-  sequential scan that reads 1,000 rows on average, or no live rows counted at all. Rows read alone are not one:
-  a table whose indexes were built while it was empty keeps `reltuples = -1` - every Marten document table - and
-  five rows read two thousand times by their key are two thousand rows read. The no-live-rows half is the shape
-  every table has after `pg_upgrade` from 14-17, which carries no statistics over: `n_live_tup` is 0, and
-  autovacuum analyses a table only after enough modifications, so a read-mostly table is planned on defaults
-  indefinitely.
+  rows read since the counters began** (`seq_tup_read + idx_tup_fetch`) **by sequential scans that read 1,000 rows
+  on average** - the one sign rows read give of a table's size. Rows read alone are not one: a table whose indexes
+  were built while it was empty keeps `reltuples = -1` - every Marten document table - and five rows read two
+  thousand times by their key are two thousand rows read. That is also why no live rows counted is not a sign on its
+  own: it is the shape every table has after `pg_upgrade` from 14-17, which carries no statistics over, but also
+  after a crash, a failover or `pg_stat_reset()`, when a small table read by its key would be named for nothing. A
+  table that is scanned is caught by its scans; the reset itself is `since-restart`'s. Autovacuum analyses a table
+  only after enough modifications, so a read-mostly table with no statistics is planned on defaults indefinitely.
   The remedy is in words, for whoever runs the server: `vacuumdb --all --analyze-in-stages` (17 and before), or
   on 18 `vacuumdb --all --analyze-in-stages --missing-stats-only` followed by `vacuumdb --all --analyze-only` -
   or the table's own `ANALYZE`. A partitioned table is flagged for its partitions that were never analysed and
@@ -791,8 +801,10 @@ shown to a visitor the store policy passes for the database as a whole (`TenantI
 - **Vacuum horizon** - T14's finding, its names behind the activity gate as on the Health page.
 - **Measure bloat** - one table at a time, on demand: `pgstattuple_approx` for the heap (the exact `pgstattuple`
   where the installed extension is older than 1.3) and `pgstatindex`, `pgstatginindex` or `pgstathashindex` for the
-  five largest indexes, the rest counted - one statement, so one `QueryTimeout` bounds the whole measure - in a
-  read-only transaction as `SqlConsoleRole` under `lock_timeout`, one measure per database at once. It needs the `pgstattuple` extension (not trusted: a superuser or
-  the platform's administrator installs it) and `pg_stat_scan_tables` (in `pg_monitor`); without either it says which,
+  five largest indexes, the rest counted. The heap is measured in a statement of its own, then the indexes smallest
+  first, each under a savepoint and what is left of `QueryTimeout`, so an index that runs out of time costs only
+  itself: the heap's figures and the indexes measured so far stand, and the result says how many were - in a
+  read-only transaction as `SqlConsoleRole` under `lock_timeout`, one measure per database at once. It needs the
+  `pgstattuple` extension (not trusted: a superuser or the platform's administrator installs it) and `pg_stat_scan_tables` (in `pg_monitor`); without either it says which,
   and who can grant or install it. It is never part of a sweep or a list - it reads the table, under an
   `AccessShareLock` - and every press is audited as "Measure bloat", with the table and nothing else.

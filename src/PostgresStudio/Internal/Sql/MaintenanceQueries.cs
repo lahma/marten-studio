@@ -129,7 +129,10 @@ internal sealed record BloatMeasureRow(
     double FreePercent,
     IReadOnlyList<BloatIndexRow> Indexes)
 {
-    /// <summary>How many of the table's valid indexes the measure left out: it reads the <see cref="MaintenanceQueries.MeasuredIndexes" /> largest.</summary>
+    /// <summary>
+    /// How many of the table's valid indexes the measure left out: it considers the <see cref="MaintenanceQueries.MeasuredIndexes" />
+    /// largest, and measures them smallest first while its time lasts.
+    /// </summary>
     public int IndexesNotMeasured { get; init; }
 }
 
@@ -394,55 +397,73 @@ internal static class MaintenanceQueries
         };
     }
 
-    /// <summary>How many of a table's indexes the measure reads, the largest first; the rest are counted (W5-V1 review).</summary>
+    /// <summary>How many of a table's indexes the measure considers - its largest, measured smallest first; the rest are counted.</summary>
     public const int MeasuredIndexes = 5;
 
+    /// <summary>The least time left in the budget for the measure to start another index.</summary>
+    internal static readonly TimeSpan MinimumIndexBudget = TimeSpan.FromMilliseconds(100);
+
     /// <summary>
-    /// The measure itself, one statement under one <c>statement_timeout</c>: <c>pgstattuple_approx</c> of the table - or, for
-    /// an extension older than 1.3, which has no such function, the exact <c>pgstattuple</c> - then, for each of the
-    /// <see cref="MeasuredIndexes" /> largest valid indexes on it, <c>pgstatindex</c> (b-tree), <c>pgstatginindex</c> (GIN) or
-    /// <c>pgstathashindex</c> (hash), every other access method listed with its size alone; and how many indexes it left out.
-    /// The table is found by schema and name, both values.
+    /// The heap's measure, in a statement of its own so that it stands whatever the indexes cost (W5-V1 review):
+    /// <c>pgstattuple_approx</c> of the table - or, for an extension older than 1.3, which has no such function, the exact
+    /// <c>pgstattuple</c> - with the indexes to measure after it (the <see cref="MeasuredIndexes" /> largest valid ones, smallest
+    /// first, by number, access method and size) and how many valid indexes the table has. The table is found by schema and
+    /// name, both values.
     /// </summary>
     /// <param name="extensionSchema">Where <c>pgstattuple</c> is installed, as <see cref="ReadBloatPreconditionsAsync" /> read it.</param>
     /// <param name="approximate">Whether the installed version has <c>pgstattuple_approx</c> (<see cref="HasApproximate" />).</param>
-    internal static string BloatSql(string extensionSchema, bool approximate = true)
+    internal static string BloatHeapSql(string extensionSchema, bool approximate = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(extensionSchema);
 
-        string approx = SqlIdentifier.Qualify(extensionSchema, approximate ? "pgstattuple_approx" : "pgstattuple");
-        string btree = SqlIdentifier.Qualify(extensionSchema, "pgstatindex");
-        string gin = SqlIdentifier.Qualify(extensionSchema, "pgstatginindex");
-        string hash = SqlIdentifier.Qualify(extensionSchema, "pgstathashindex");
+        string heap = SqlIdentifier.Qualify(extensionSchema, approximate ? "pgstattuple_approx" : "pgstattuple");
 
         return
             "with target as (\n"
             + "    select c.oid from pg_catalog.pg_class c join pg_catalog.pg_namespace n on n.oid = c.relnamespace\n"
             + "    where n.nspname = @schema and c.relname = @table and c.relkind in ('r', 'm')\n"
             + ")\n"
-            + "select (select pg_catalog.to_jsonb(s) from " + approx + "((select t.oid from target t)::pg_catalog.regclass) s)::text,\n"
+            + "select (select pg_catalog.to_jsonb(s) from " + heap + "((select t.oid from target t)::pg_catalog.regclass) s)::text,\n"
             + "       (select coalesce(pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(\n"
-            + "                   'name', ic.relname::text,\n"
-            + "                   'am', am.amname::text,\n"
-            + "                   'bytes', ic.relpages::bigint * pg_catalog.current_setting('block_size')::bigint,\n"
-            + "                   'measure', case am.amname\n"
-            + "                       when 'btree' then (select pg_catalog.to_jsonb(b) from " + btree + "(x.indexrelid::pg_catalog.regclass) b)\n"
-            + "                       when 'gin' then (select pg_catalog.to_jsonb(g) from " + gin + "(x.indexrelid::pg_catalog.regclass) g)\n"
-            + "                       when 'hash' then (select pg_catalog.to_jsonb(h) from " + hash + "(x.indexrelid::pg_catalog.regclass) h)\n"
-            + "                   end) order by ic.relname), '[]'::jsonb)\n"
-            + "        from (select x.indexrelid\n"
+            + "                   'oid', c.oid::bigint, 'name', c.relname, 'am', c.am, 'bytes', c.bytes) order by c.pages, c.relname), '[]'::jsonb)\n"
+            + "        from (select i.oid, i.relname::text as relname, am.amname::text as am, i.relpages as pages,\n"
+            + "                     i.relpages::bigint * pg_catalog.current_setting('block_size')::bigint as bytes\n"
             + "              from pg_catalog.pg_index x\n"
             + "              join pg_catalog.pg_class i on i.oid = x.indexrelid\n"
+            + "              join pg_catalog.pg_am am on am.oid = i.relam\n"
             + "              where x.indrelid = (select t.oid from target t) and x.indisvalid and i.relkind = 'i'\n"
             + "              order by i.relpages desc, i.relname\n"
-            + "              limit " + MeasuredIndexes.ToString(System.Globalization.CultureInfo.InvariantCulture) + ") x\n"
-            + "        join pg_catalog.pg_class ic on ic.oid = x.indexrelid\n"
-            + "        join pg_catalog.pg_am am on am.oid = ic.relam)::text,\n"
+            + "              limit " + MeasuredIndexes.ToString(System.Globalization.CultureInfo.InvariantCulture) + ") c)::text,\n"
             + "       (select pg_catalog.count(*)\n"
             + "        from pg_catalog.pg_index x\n"
             + "        join pg_catalog.pg_class i on i.oid = x.indexrelid\n"
             + "        where x.indrelid = (select t.oid from target t) and x.indisvalid and i.relkind = 'i')::int";
     }
+
+    /// <summary>
+    /// One index's measure, by its number: <c>pgstatindex</c> (b-tree), <c>pgstatginindex</c> (GIN) or <c>pgstathashindex</c>
+    /// (hash) - or <see langword="null" /> for an access method <c>pgstattuple</c> has no measure for, which is listed with its
+    /// size alone.
+    /// </summary>
+    internal static string? BloatIndexSql(string extensionSchema, string accessMethod)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(extensionSchema);
+
+        string? function = accessMethod switch
+        {
+            "btree" => "pgstatindex",
+            "gin" => "pgstatginindex",
+            "hash" => "pgstathashindex",
+            _ => null,
+        };
+
+        return function is null
+            ? null
+            : "select pg_catalog.to_jsonb(m)::text from " + SqlIdentifier.Qualify(extensionSchema, function) + "(@index::pg_catalog.regclass) m";
+    }
+
+    /// <summary>What the time left in the measure's budget becomes before each index: its own <c>statement_timeout</c>.</summary>
+    internal const string IndexTimeoutSql = "select pg_catalog.set_config('statement_timeout', @timeout, true)";
 
     /// <summary>Whether a <c>pgstattuple</c> version has <c>pgstattuple_approx</c>, which 1.3 added.</summary>
     internal static bool HasApproximate(string? version) =>
@@ -450,36 +471,47 @@ internal static class MaintenanceQueries
         || !System.Version.TryParse(version.Contains('.', StringComparison.Ordinal) ? version : version + ".0", out System.Version? parsed)
         || parsed >= new System.Version(1, 3);
 
-    /// <summary>Runs <see cref="BloatSql" /> in the caller's transaction and reads its one row.</summary>
+    /// <summary>
+    /// The measure, in the caller's read-only transaction: the heap first (<see cref="BloatHeapSql" />), under the session's
+    /// <c>statement_timeout</c>; then the indexes, smallest first, each in its own statement under a savepoint and a
+    /// <c>statement_timeout</c> of what is left of <paramref name="budget" /> - so an index that runs out of time is rolled
+    /// back and the measure stops there with the heap and the indexes it has, never losing the heap (W5-V1 review).
+    /// </summary>
+    /// <returns>The measure, or <see langword="null" /> when there is no such table.</returns>
     public static async Task<BloatMeasureRow?> MeasureBloatAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         string extensionSchema,
         string schema,
         string table,
+        TimeSpan budget,
         int timeout,
         CancellationToken cancellationToken,
         bool approximate = true)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(transaction);
 
-        await using NpgsqlCommand command = new(BloatSql(extensionSchema, approximate), connection, transaction) { CommandTimeout = timeout };
-        command.Parameters.Add(new NpgsqlParameter("schema", NpgsqlDbType.Text) { Value = schema });
-        command.Parameters.Add(new NpgsqlParameter("table", NpgsqlDbType.Text) { Value = table });
+        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
 
         string? heap;
-        string? indexes;
+        string candidates;
         int indexCount;
 
-        await using (NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        await using (NpgsqlCommand command = new(BloatHeapSql(extensionSchema, approximate), connection, transaction) { CommandTimeout = timeout })
         {
+            command.Parameters.Add(new NpgsqlParameter("schema", NpgsqlDbType.Text) { Value = schema });
+            command.Parameters.Add(new NpgsqlParameter("table", NpgsqlDbType.Text) { Value = table });
+
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
             if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 return null;
             }
 
             heap = reader.IsDBNull(0) ? null : reader.GetString(0);
-            indexes = reader.IsDBNull(1) ? null : reader.GetString(1);
+            candidates = reader.IsDBNull(1) ? "[]" : reader.GetString(1);
             indexCount = reader.IsDBNull(2) ? 0 : reader.GetInt32(2);
         }
 
@@ -488,32 +520,64 @@ internal static class MaintenanceQueries
             return null;
         }
 
-        BloatMeasureRow measured = ParseBloat(heap, indexes ?? "[]");
-        return measured with { IndexesNotMeasured = Math.Max(0, indexCount - measured.Indexes.Count) };
+        List<BloatIndexRow> indexes = [];
+
+        foreach ((uint oid, string name, string accessMethod, long bytes) in ParseCandidates(candidates))
+        {
+            if (BloatIndexSql(extensionSchema, accessMethod) is not { } sql)
+            {
+                indexes.Add(ParseIndex(name, accessMethod, bytes, measure: null));
+                continue;
+            }
+
+            TimeSpan left = budget - watch.Elapsed;
+
+            if (left < MinimumIndexBudget)
+            {
+                break;
+            }
+
+            const string Savepoint = "ms_bloat_index";
+            await transaction.SaveAsync(Savepoint, cancellationToken).ConfigureAwait(false);
+
+            try
+            {
+                await using (NpgsqlCommand limit = new(IndexTimeoutSql, connection, transaction) { CommandTimeout = timeout })
+                {
+                    limit.Parameters.Add(new NpgsqlParameter("timeout", NpgsqlDbType.Text)
+                    {
+                        Value = ((long) Math.Ceiling(left.TotalMilliseconds)).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    });
+                    await limit.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                string? measured;
+
+                await using (NpgsqlCommand index = new(sql, connection, transaction) { CommandTimeout = timeout })
+                {
+                    index.Parameters.Add(new NpgsqlParameter("index", NpgsqlDbType.Oid) { Value = oid });
+                    measured = await index.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
+                }
+
+                await transaction.ReleaseAsync(Savepoint, cancellationToken).ConfigureAwait(false);
+                indexes.Add(ParseIndex(name, accessMethod, bytes, measured));
+            }
+            catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.QueryCanceled or PostgresErrorCodes.LockNotAvailable)
+            {
+                // Out of time, or the index is locked for a schema change: back to before it, and the measure is what it has.
+                await transaction.RollbackAsync(Savepoint, cancellationToken).ConfigureAwait(false);
+                break;
+            }
+        }
+
+        return ParseHeap(heap) with { Indexes = indexes, IndexesNotMeasured = Math.Max(0, indexCount - indexes.Count) };
     }
 
-    /// <summary>The measure's two <c>jsonb</c> values as one row.</summary>
-    internal static BloatMeasureRow ParseBloat(string heap, string indexes)
+    /// <summary>The heap's measure, from <c>pgstattuple_approx</c>'s or the exact <c>pgstattuple</c>'s <c>jsonb</c>, with no index yet.</summary>
+    internal static BloatMeasureRow ParseHeap(string heap)
     {
         using JsonDocument table = JsonDocument.Parse(heap);
-        using JsonDocument list = JsonDocument.Parse(indexes);
-
         JsonElement t = table.RootElement;
-
-        List<BloatIndexRow> rows = [];
-        foreach (JsonElement index in list.RootElement.EnumerateArray())
-        {
-            JsonElement measure = index.TryGetProperty("measure", out JsonElement m) ? m : default;
-
-            rows.Add(new BloatIndexRow(
-                index.GetProperty("name").GetString() ?? string.Empty,
-                index.GetProperty("am").GetString() ?? string.Empty,
-                (long) Number(index, "bytes"),
-                NullableNumber(measure, "avg_leaf_density"),
-                NullableNumber(measure, "leaf_fragmentation"),
-                NullableNumber(measure, "pending_pages") is { } pending ? (long) pending : null,
-                NullableNumber(measure, "free_percent")));
-        }
 
         // pgstattuple_approx's names, else the exact pgstattuple's - which reads every page, so all of it is scanned.
         return new BloatMeasureRow(
@@ -524,15 +588,51 @@ internal static class MaintenanceQueries
             Number(t, "dead_tuple_percent"),
             (long) (NullableNumber(t, "approx_free_space") ?? Number(t, "free_space")),
             NullableNumber(t, "approx_free_percent") ?? Number(t, "free_percent"),
-            rows);
-
-        static double Number(JsonElement element, string name) => NullableNumber(element, name) ?? 0;
-
-        static double? NullableNumber(JsonElement element, string name) =>
-            element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number
-                ? value.GetDouble()
-                : null;
+            []);
     }
+
+    /// <summary>The indexes <see cref="BloatHeapSql" /> lists to measure, in its order.</summary>
+    internal static IReadOnlyList<(uint Oid, string Name, string AccessMethod, long Bytes)> ParseCandidates(string candidates)
+    {
+        using JsonDocument list = JsonDocument.Parse(candidates);
+
+        return
+        [
+            .. list.RootElement.EnumerateArray().Select(static x => (
+                (uint) Number(x, "oid"),
+                x.GetProperty("name").GetString() ?? string.Empty,
+                x.GetProperty("am").GetString() ?? string.Empty,
+                (long) Number(x, "bytes"))),
+        ];
+    }
+
+    /// <summary>One index's row, from its measure's <c>jsonb</c> - or its size alone, where it has no measure.</summary>
+    internal static BloatIndexRow ParseIndex(string name, string accessMethod, long bytes, string? measure)
+    {
+        if (measure is null)
+        {
+            return new BloatIndexRow(name, accessMethod, bytes, null, null, null, null);
+        }
+
+        using JsonDocument document = JsonDocument.Parse(measure);
+        JsonElement m = document.RootElement;
+
+        return new BloatIndexRow(
+            name,
+            accessMethod,
+            bytes,
+            NullableNumber(m, "avg_leaf_density"),
+            NullableNumber(m, "leaf_fragmentation"),
+            NullableNumber(m, "pending_pages") is { } pending ? (long) pending : null,
+            NullableNumber(m, "free_percent"));
+    }
+
+    private static double Number(JsonElement element, string name) => NullableNumber(element, name) ?? 0;
+
+    private static double? NullableNumber(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Number
+            ? value.GetDouble()
+            : null;
 
     private static string? Text(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 

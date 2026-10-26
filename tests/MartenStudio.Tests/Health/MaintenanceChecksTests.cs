@@ -224,8 +224,9 @@ public class MaintenanceChecksTests
             .Evaluate(new VacuumFacts(Now, [table]), Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
             .Findings.Should().ContainSingle().Subject;
 
-        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "a lock another session holds on the table, which autovacuum skips"));
-        finding.WhyItMatters.Should().Contain("autovacuum skips a table it cannot lock");
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", AutovacuumHindrances.LockedLabel));
+        AutovacuumHindrances.LockedLabel.Should().Be("a lock on the table, held or waited for, that autovacuum gives way to");
+        finding.WhyItMatters.Should().Contain("holds or waits for a lock on it that autovacuum gives way to").And.Contain("prepared transaction");
         finding.Remedy.Should().BeNull("a lock's holder is somebody to talk to, not a setting");
     }
 
@@ -280,24 +281,39 @@ public class MaintenanceChecksTests
         finding.Remedy.Code.Should().Contain("autovacuum_vacuum_cost_delay = 2");
     }
 
+    /// <summary>
+    /// Without <c>pg_read_all_stats</c> a role counts maintenance processes, not autovacuum's workers: it says "at least as
+    /// many as workers, manual runs included", as T16 does, and offers no <c>autovacuum_max_workers</c> - the count may be of
+    /// manual VACUUMs (W5-V1 review).
+    /// </summary>
     [Fact]
-    public void A_horizon_T14_saw_held_for_over_an_hour_is_what_keeps_the_dead_rows_and_never_the_inserts()
+    public void As_many_maintenance_processes_as_workers_for_a_role_that_cannot_tell_them_apart_offers_no_more_workers()
     {
         MartenTable orders = Document<HealthOrderDoc>();
-        string condition = VacuumBehindCheck.BehindSeries + orders.Key;
+        MaintenanceWorkersRow counted = new() { MaxWorkers = 3, CanReadAllStats = false, MaintenanceRunning = 3 };
 
-        HealthHistoryView history = History(
-            (TimeSpan.FromMinutes(11), [(VacuumBehindCheck.SweptSeries, 1), (condition, 1), (AutovacuumHindrances.HorizonHeldSeries, 7_200)]),
-            (TimeSpan.Zero, [(VacuumBehindCheck.SweptSeries, 1), (condition, 1), (AutovacuumHindrances.HorizonHeldSeries, 7_800)]));
-
-        HealthFinding finding = new VacuumBehindCheck().Evaluate(new VacuumFacts(Now, [Tuned(orders)]), Evaluation(history))
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(
+                new VacuumFacts(Now, [Tuned(orders)]) { Workers = counted },
+                Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
             .Findings.Should().ContainSingle().Subject;
 
-        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "the vacuum horizon, held back for over an hour (T14)"));
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "at least as many maintenance processes as workers, manual runs included (T16)"));
+        finding.WhyItMatters.Should().Contain("manual runs included").And.NotContain("Every autovacuum worker on the server is busy");
         finding.Remedy.Should().BeNull();
+    }
 
-        AutovacuumHindrances.Of(Tuned(orders), Unit(40_000, 10_050), null, history, horizonMatters: false)
-            .Should().Be(AutovacuumHindrance.None, "inserts leave no dead rows for a horizon to keep");
+    /// <summary>
+    /// A held horizon is not what keeps autovacuum from a table (W5-V1 review): autovacuum runs under it and dates its last
+    /// vacuum, so the table is not behind - T14 says it, and T07 names nothing for it.
+    /// </summary>
+    [Fact]
+    public void A_held_horizon_is_never_named_as_what_keeps_autovacuum_away()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+
+        Enum.GetNames<AutovacuumHindrance>().Should().Equal("None", "Locked", "WorkersBusy", "Throttled");
+        AutovacuumHindrances.Sentence(AutovacuumHindrance.None, Tuned(orders), null).Should().NotContain("T14");
     }
 
     [Theory]
@@ -441,7 +457,7 @@ public class MaintenanceChecksTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Remedy.Should().BeNull();
-        finding.WhyItMatters.Should().Contain("Nothing the sweep can see").And.Contain("T16").And.Contain("T14");
+        finding.WhyItMatters.Should().Contain("Nothing the sweep can see").And.Contain("T16");
     }
 
     [Theory]
@@ -573,8 +589,8 @@ public class MaintenanceChecksTests
     /// is in use - and a read-mostly table is never modified enough for autovacuum to analyse it.
     /// </summary>
     [Theory]
-    [InlineData(600, 400, true)]
-    [InlineData(600, 399, false)]
+    [InlineData(1_000, 0, true)]
+    [InlineData(999, 1, false)]
     public void A_table_with_no_statistics_that_is_read_is_never_analysed_even_with_no_live_rows_counted(long seqRead, long indexFetched, bool flagged)
     {
         MartenTable orders = Document<HealthOrderDoc>();
@@ -582,6 +598,7 @@ public class MaintenanceChecksTests
         {
             EstimatedRows = -1,
             LiveRows = 0,
+            SequentialScans = 1,
             SequentialRowsRead = seqRead,
             IndexRowsFetched = indexFetched,
             LastAnalyze = null,
@@ -603,13 +620,17 @@ public class MaintenanceChecksTests
     /// <summary>
     /// Rows read are a size signal only with one beside them (W5-V1 review): a table whose indexes were built while it was empty
     /// keeps <c>reltuples = -1</c> - every Marten document table - so five rows read two thousand times by their key, or
-    /// scanned four hundred times, are not a table never analysed; scans that read a thousand rows each are.
+    /// scanned four hundred times, are not a table never analysed; scans that read a thousand rows each are. Nor are rows
+    /// read with no live rows counted - every table's shape after a crash, a failover or <c>pg_stat_reset()</c>, which
+    /// <c>since-restart</c> speaks for - without the same scans (W5-V1 review, N4).
     /// </summary>
     [Theory]
     [InlineData(5, 0, 0, 2_000, false)]
     [InlineData(5, 400, 2_000, 0, false)]
     [InlineData(500, 2, 2_400, 0, true)]
-    [InlineData(0, 0, 0, 2_000, true)]
+    [InlineData(0, 0, 0, 2_000, false)]
+    [InlineData(0, 400, 2_000, 0, false)]
+    [InlineData(0, 2, 2_400, 0, true)]
     public void Rows_read_count_toward_never_analysed_only_with_a_sign_the_table_is_that_big(long live, long scans, long seqRead, long indexFetched, bool flagged)
     {
         MartenTable orders = Document<HealthOrderDoc>();

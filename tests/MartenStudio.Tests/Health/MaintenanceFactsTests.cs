@@ -120,52 +120,61 @@ public class MaintenanceFactsTests
     }
 
     [Fact]
-    public void The_measure_s_two_json_values_parse_into_one_row_with_each_index_s_own_measure()
+    public void The_heap_the_candidates_and_each_index_s_measure_parse_on_their_own()
     {
-        BloatMeasureRow row = MaintenanceQueries.ParseBloat(
-            """{"table_len": 8192000, "scanned_percent": 12.5, "approx_tuple_count": 9000, "approx_tuple_len": 1, "approx_tuple_percent": 70, "dead_tuple_count": 1000, "dead_tuple_len": 1, "dead_tuple_percent": 9.5, "approx_free_space": 819200, "approx_free_percent": 10}""",
-            """[{"name": "pk", "am": "btree", "bytes": 245760, "measure": {"avg_leaf_density": 45.2, "leaf_fragmentation": 3}}, {"name": "gin_data", "am": "gin", "bytes": 81920, "measure": {"version": 2, "pending_pages": 7, "pending_tuples": 70}}, {"name": "brin_ts", "am": "brin", "bytes": 8192, "measure": null}]""");
+        BloatMeasureRow row = MaintenanceQueries.ParseHeap(
+            """{"table_len": 8192000, "scanned_percent": 12.5, "approx_tuple_count": 9000, "approx_tuple_len": 1, "approx_tuple_percent": 70, "dead_tuple_count": 1000, "dead_tuple_len": 1, "dead_tuple_percent": 9.5, "approx_free_space": 819200, "approx_free_percent": 10}""");
 
         row.TableBytes.Should().Be(8_192_000);
         row.DeadTuples.Should().Be(1_000);
         row.DeadPercent.Should().Be(9.5);
         row.FreePercent.Should().Be(10);
-        row.Indexes.Should().HaveCount(3);
-        row.Indexes[0].LeafDensity.Should().Be(45.2);
-        row.Indexes[1].PendingPages.Should().Be(7);
-        row.Indexes[2].LeafDensity.Should().BeNull("BRIN has no pgstattuple measure, and is listed with its size alone");
+        row.Indexes.Should().BeEmpty("the heap stands on its own; the indexes are measured after it");
+
+        MaintenanceQueries.ParseCandidates("""[{"oid": 16390, "name": "brin_ts", "am": "brin", "bytes": 8192}, {"oid": 16385, "name": "pk", "am": "btree", "bytes": 245760}]""")
+            .Should().Equal((16_390u, "brin_ts", "brin", 8_192L), (16_385u, "pk", "btree", 245_760L));
+
+        MaintenanceQueries.ParseIndex("pk", "btree", 245_760, """{"avg_leaf_density": 45.2, "leaf_fragmentation": 3}""").LeafDensity.Should().Be(45.2);
+        MaintenanceQueries.ParseIndex("gin_data", "gin", 81_920, """{"version": 2, "pending_pages": 7, "pending_tuples": 70}""").PendingPages.Should().Be(7);
+        MaintenanceQueries.ParseIndex("brin_ts", "brin", 8_192, measure: null).LeafDensity.Should().BeNull("BRIN has no pgstattuple measure, and is listed with its size alone");
     }
 
     [Fact]
     public void The_measure_names_the_extension_s_functions_by_the_schema_it_is_installed_in_quoted()
     {
-        string sql = MaintenanceQueries.BloatSql("Ext Schema");
+        string sql = MaintenanceQueries.BloatHeapSql("Ext Schema");
 
         sql.Should().Contain("\"Ext Schema\".\"pgstattuple_approx\"").And.Contain("@schema").And.Contain("@table");
-        FluentActions.Invoking(static () => MaintenanceQueries.BloatSql("ext\"s")).Should().Throw<ArgumentException>("a name with a quote is never spliced");
+        MaintenanceQueries.BloatIndexSql("Ext Schema", "btree").Should().Contain("\"Ext Schema\".\"pgstatindex\"(@index::pg_catalog.regclass)");
+        FluentActions.Invoking(static () => MaintenanceQueries.BloatHeapSql("ext\"s")).Should().Throw<ArgumentException>("a name with a quote is never spliced");
         sql.Should().NotContain("pg_relation_size", "a size is relpages, never a function that waits behind a migration");
     }
 
     /// <summary>
-    /// The measure is bounded (W5-V1 review): one statement, the five largest indexes and a count of the rest, and the exact
-    /// <c>pgstattuple</c> only for an extension older than 1.3, which has no <c>pgstattuple_approx</c>.
+    /// The measure is bounded (W5-V1 review): the heap in a statement of its own, then up to the five largest indexes, smallest
+    /// first, each under what is left of the budget; the exact <c>pgstattuple</c> only for an extension older than 1.3, which
+    /// has no <c>pgstattuple_approx</c>; and BRIN, which has no measure, listed with its size alone.
     /// </summary>
     [Fact]
-    public void The_measure_reads_the_five_largest_indexes_and_the_approximate_heap_where_the_extension_has_it()
+    public void The_measure_takes_the_five_largest_indexes_smallest_first_and_the_approximate_heap_where_the_extension_has_it()
     {
-        string approximate = MaintenanceQueries.BloatSql("public");
-        approximate.Should().Contain("\"public\".\"pgstattuple_approx\"").And.Contain("order by i.relpages desc").And.Contain("limit 5");
+        string approximate = MaintenanceQueries.BloatHeapSql("public");
+        approximate.Should().Contain("\"public\".\"pgstattuple_approx\"").And.Contain("order by i.relpages desc").And.Contain("limit 5")
+            .And.Contain("order by c.pages, c.relname", "measured smallest first, so as many as the time allows are");
+        approximate.Should().NotContain("pgstatindex", "no index is measured in the heap's statement");
 
-        string exact = MaintenanceQueries.BloatSql("public", approximate: false);
+        MaintenanceQueries.BloatIndexSql("public", "brin").Should().BeNull();
+        MaintenanceQueries.IndexTimeoutSql.Should().Contain("set_config('statement_timeout', @timeout, true)", "local to the savepoint it runs under");
+
+        string exact = MaintenanceQueries.BloatHeapSql("public", approximate: false);
         exact.Should().Contain("\"public\".\"pgstattuple\"(").And.NotContain("pgstattuple_approx");
 
         MaintenanceQueries.HasApproximate("1.5").Should().BeTrue();
         MaintenanceQueries.HasApproximate("1.3").Should().BeTrue();
         MaintenanceQueries.HasApproximate("1.2").Should().BeFalse();
 
-        BloatMeasureRow row = MaintenanceQueries.ParseBloat(
-            """{"table_len": 8192, "tuple_count": 90, "tuple_len": 1, "tuple_percent": 70, "dead_tuple_count": 10, "dead_tuple_len": 1, "dead_tuple_percent": 9, "free_space": 800, "free_percent": 10}""",
-            "[]");
+        BloatMeasureRow row = MaintenanceQueries.ParseHeap(
+            """{"table_len": 8192, "tuple_count": 90, "tuple_len": 1, "tuple_percent": 70, "dead_tuple_count": 10, "dead_tuple_len": 1, "dead_tuple_percent": 9, "free_space": 800, "free_percent": 10}""");
 
         row.LiveTuples.Should().Be(90, "the exact function's names are read where the approximate one's are absent");
         row.FreeBytes.Should().Be(800);

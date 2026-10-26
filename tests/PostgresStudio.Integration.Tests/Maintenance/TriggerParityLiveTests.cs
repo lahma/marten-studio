@@ -182,7 +182,7 @@ public class TriggerParityLiveTests
     }
 
     /// <summary>The table read, exactly as a sweep runs it, over a host of the server's <c>ps_parity</c> schema.</summary>
-    private static async Task<IReadOnlyList<TableFacts>> TablesAsync(AutovacuumServer server)
+    internal static async Task<IReadOnlyList<TableFacts>> TablesAsync(AutovacuumServer server)
     {
         await using StudioHost host = server.Host("ps_parity", new ManualClock(DateTimeOffset.UtcNow));
         await using StudioCircuit circuit = host.Circuit();
