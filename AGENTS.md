@@ -992,6 +992,17 @@ tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSou
 tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
 tests/PostgresStudio.Tests/Support/      PostgresStudio's own test doubles (the shared ones are linked from MartenStudio.Tests)
 tests/PostgresStudio.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
+tests/PostgresStudio.Integration.Tests/  PostgresStudio's live suite: Testcontainers Postgres under a reuse label of its own
+                                         (never the Marten suite's container) + Playwright. Needs Docker; no Marten
+tests/PostgresStudio.Integration.Tests/Browser/  Playwright over samples/PostgresStudio.Sample on real Kestrel: six
+                                         scenarios, the D19 gate, and the zero-config start
+tests/PostgresStudio.Integration.Tests/Database/  Live Postgres: first navigation writes nothing, the D27 gate and its
+                                         audit, Sessions, the pool panel at both Npgsql majors, the sample's tenant databases
+tests/PostgresStudio.Integration.Tests/Health/  Live Postgres: the table checks fire and stay quiet over the
+                                         whole-database table source, and the export over a host source past its budget
+tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console example runs
+tests/PostgresStudio.Integration.Tests/Sources/  Live Postgres: discovery, and isolation between a host source's
+                                         databases through every cache
 src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
                                          Postgres identifier becomes SQL text (hard rule 4)
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
