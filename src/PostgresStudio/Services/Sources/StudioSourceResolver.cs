@@ -17,6 +17,17 @@ namespace PostgresStudio.Services.Sources;
 /// The database is matched by <see cref="IStudioDatabase.Identity" /> against what the source enumerates, and never
 /// handed to anything that would create one: a string a browser supplied is how a UI creates a database nobody asked for.
 /// </para>
+/// <para>
+/// <b>The question is asked again by the names a policy knows.</b> A source key and a database id match in any case,
+/// and an empty database id is the source's first database, so the question asked before the lookup carries the
+/// visitor's spelling - <c>?store=ADMIN</c>, or no <c>?db=</c> at all. A handler that keys on the registered names
+/// (<c>resource.SourceName != "admin"</c>) would pass that spelling and then be answered with <c>admin</c>. So once the
+/// registration and the database are matched, and whenever either spelling differs from the registered key or the
+/// matched identity, both policies are asked again about those - before the source completes the scope, opens anything
+/// or reads anything. The public resources promise a handler those names (<c>PostgresStudioResource.DatabaseIdentifier</c>
+/// is "the name a host's <c>IPostgresDatabaseSource</c> lists the database under"); this is where that promise is kept,
+/// whichever caller built the scope. A scope already spelled that way is asked once.
+/// </para>
 /// </remarks>
 internal sealed class StudioSourceResolver
 {
@@ -40,7 +51,10 @@ internal sealed class StudioSourceResolver
     /// against the write policy with the capability named on the resource; the scope policy has already had to pass.
     /// </param>
     /// <param name="cancellationToken">Cancels the resolution.</param>
-    /// <exception cref="StudioNotAuthorizedException">The visitor may not have this scope.</exception>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// The visitor may not have this scope - as spelled, or by the registered key and the matched identity, in which case
+    /// the exception carries the latter, the scope that was refused.
+    /// </exception>
     /// <exception cref="KeyNotFoundException">No such source, no such database in it, or no such tenant of it.</exception>
     /// <exception cref="StudioStoreUnavailableException">The source is registered but will not build.</exception>
     public async ValueTask<ResolvedSource> ResolveAsync(
@@ -51,16 +65,7 @@ internal sealed class StudioSourceResolver
         ArgumentNullException.ThrowIfNull(scope);
 
         // 1. Authorize, before anything is looked up. A denied scope and an unknown one are one answer.
-        if (!await authorization.IsAuthorizedAsync(scope, null, cancellationToken).ConfigureAwait(false))
-        {
-            throw new StudioNotAuthorizedException(scope);
-        }
-
-        if (capability is not null
-            && !await authorization.IsAuthorizedAsync(scope, capability, cancellationToken).ConfigureAwait(false))
-        {
-            throw new StudioNotAuthorizedException(scope);
-        }
+        await AuthorizeAsync(scope, capability, cancellationToken).ConfigureAwait(false);
 
         // 2. The registration.
         StudioSourceRegistration registration = provider.Find(scope.StoreKey)
@@ -79,8 +84,53 @@ internal sealed class StudioSourceResolver
             ?? throw new KeyNotFoundException(
                 $"{descriptor.SourceNoun} '{registration.Key}' has no database with identity '{scope.DatabaseId}'.");
 
-        // 5-6. The tenant and the instance it was built from - the source's own steps, asked with the list just read.
+        // 5. Authorize again, by the registered key and the matched identity, when the visitor spelled either another way:
+        //    a key in another case, a database id in another case, or none at all (the first database). The policies
+        //    must have said yes to what is about to be read, not only to how a link spelled it. Before the source
+        //    completes the scope, because completing it may open the database (a host's database source does).
+        StudioScope named = Named(scope, registration, database);
+        if (!ReferenceEquals(named, scope))
+        {
+            await AuthorizeAsync(named, capability, cancellationToken).ConfigureAwait(false);
+        }
+
+        // 6-7. The tenant and the instance it was built from - the source's own steps, asked with the list just read.
         return await source.CompleteAsync(scope, database, databases, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// <paramref name="scope" /> by the registered key and the matched identity - or <paramref name="scope" /> itself,
+    /// the same instance, when it already spells both that way (compared ordinally: a policy compares however it likes).
+    /// The tenant is kept as it is, because a tenant is matched ordinally and is therefore already spelled as listed.
+    /// </summary>
+    internal static StudioScope Named(StudioScope scope, StudioSourceRegistration registration, IStudioDatabase database)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(registration);
+        ArgumentNullException.ThrowIfNull(database);
+
+        return string.Equals(scope.StoreKey, registration.Key, StringComparison.Ordinal)
+               && string.Equals(scope.DatabaseId, database.Identity, StringComparison.Ordinal)
+            ? scope
+            : scope with { StoreKey = registration.Key, DatabaseId = database.Identity };
+    }
+
+    /// <summary>
+    /// The scope policy about <paramref name="scope" />, then - for a capability - the write policy, which names it; throws
+    /// on the first refusal, carrying <paramref name="scope" /> for the caller's audit entry.
+    /// </summary>
+    private async ValueTask AuthorizeAsync(StudioScope scope, string? capability, CancellationToken cancellationToken)
+    {
+        if (!await authorization.IsAuthorizedAsync(scope, null, cancellationToken).ConfigureAwait(false))
+        {
+            throw new StudioNotAuthorizedException(scope);
+        }
+
+        if (capability is not null
+            && !await authorization.IsAuthorizedAsync(scope, capability, cancellationToken).ConfigureAwait(false))
+        {
+            throw new StudioNotAuthorizedException(scope);
+        }
     }
 
     /// <summary>

@@ -19,6 +19,13 @@ namespace PostgresStudio;
 /// database on such an answer: every scope it resolves names its database, and one that names none is refused. A
 /// handler must not treat an empty identifier as permission for every database of the source.
 /// </para>
+/// <para>
+/// <b>A handler is always asked the registered names before anything is read.</b> A link's source and database match in
+/// any case, so the first question about a link can carry its spelling (<c>ADMIN</c>). Whenever that spelling differs,
+/// the studio asks again with <paramref name="SourceName" /> and <paramref name="DatabaseIdentifier" /> exactly as
+/// registered and listed, and reads nothing unless that answer is yes too - so a handler that compares ordinally, a
+/// deny-list included, decides about the names it knows.
+/// </para>
 /// </remarks>
 /// <param name="SourceName">
 /// <c>default</c> for the application's own unkeyed <c>NpgsqlDataSource</c>, or the name given to

@@ -316,7 +316,8 @@ public class PostgresStudioSourceProviderTests
     /// <summary>
     /// The review's live finding, as a unit: a policy that allows the empty database id - which the studio asks only to
     /// list a source that would not build - and refuses <c>globex</c> by name must never be answered with globex. The
-    /// shared resolver matches an empty id to the first listed database; the source refuses to complete such a scope.
+    /// shared resolver matches an empty id to the first listed database, asks the policy about it by name (SEC-fix F1),
+    /// and the source refuses to complete such a scope even when the policy allows that name.
     /// </summary>
     [Fact]
     public async Task A_scope_with_no_database_is_refused_whatever_the_policy_said_about_an_empty_id()
@@ -336,7 +337,7 @@ public class PostgresStudioSourceProviderTests
         StudioSourceResolver resolver = Resolver(harness, options, policy);
 
         Func<Task> empty = async () => await resolver.ResolveAsync(new StudioScope("tenants", string.Empty, null), cancellationToken: Token);
-        await empty.Should().ThrowAsync<KeyNotFoundException>("an empty id is never 'the first database'");
+        await empty.Should().ThrowAsync<StudioNotAuthorizedException>("an empty id matches globex, and the policy is asked about globex by name");
 
         Func<Task> refused = async () => await resolver.ResolveAsync(new StudioScope("tenants", "globex", null), cancellationToken: Token);
         await refused.Should().ThrowAsync<StudioNotAuthorizedException>();
@@ -346,7 +347,95 @@ public class PostgresStudioSourceProviderTests
         Func<Task> single = async () => await resolver.ResolveAsync(new StudioScope("default", string.Empty, null), cancellationToken: Token);
         await single.Should().ThrowAsync<KeyNotFoundException>("a data source's one database is named by its key, never by an empty id");
 
+        // A policy that allows globex by name too: the empty id is still not "the first database" - the source refuses it.
+        policy.Allow(static x => x.DatabaseIdentifier is "" or "acme" or "globex" or "default");
+        await empty.Should().ThrowAsync<KeyNotFoundException>("an empty id is never 'the first database'");
+
         tenants.Opened.Should().Equal(["acme"], "nothing was opened for the empty id or for globex");
+    }
+
+    // SEC-fix F1: the policies are asked the registered names, whatever the link spelled
+
+    /// <summary>
+    /// A deny-list handler keyed on a registered name (<c>SourceName != "admin"</c>, ordinally) passes <c>?store=ADMIN</c>,
+    /// which matches <c>admin</c> ignoring case. The resolver asks again by the registered key and the database's name -
+    /// a data source's one database is named by its key - and refuses, carrying them for the audit.
+    /// </summary>
+    [Fact]
+    public async Task A_deny_list_policy_refuses_another_spelling_of_the_source_it_names()
+    {
+        ServiceCollection services = new();
+        await using NpgsqlDataSource admin = NpgsqlDataSource.Create("Host=admin.example;Database=admin;Username=app");
+
+        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src" }
+            .AddDataSource("admin", _ => admin);
+        await using Harness harness = new(services, options);
+
+        TestSourceAuthorizationService policy = new();
+        policy.Allow(static x => !string.Equals(x.SourceName, "admin", StringComparison.Ordinal));
+        StudioSourceResolver resolver = Resolver(harness, options, policy);
+
+        Func<Task> resolve = async () => await resolver.ResolveAsync(new StudioScope("ADMIN", "ADMIN", null), cancellationToken: Token);
+        var refused = await resolve.Should().ThrowAsync<StudioNotAuthorizedException>();
+
+        policy.Calls.Select(static x => x.Resource).Should().Equal(
+            new PostgresStudioResource("ADMIN", "ADMIN", null),
+            new PostgresStudioResource("admin", "admin", null));
+        refused.Which.Scope.Should().Be(new StudioScope("admin", "admin", null), "the audit names the scope that was refused");
+    }
+
+    /// <summary>
+    /// The same for a host-listed database: <c>?db=ACME</c> matches <c>acme</c>, and a handler that refuses <c>acme</c> by the
+    /// name the host lists it under is asked about that name before the host is asked to open it.
+    /// </summary>
+    [Fact]
+    public async Task A_deny_list_policy_refuses_another_spelling_of_a_listed_database_before_the_host_opens_it()
+    {
+        ServiceCollection services = new();
+        await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
+        FakeDatabaseSource tenants = new("acme") { DataSources = { ["acme"] = acme } };
+
+        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" }
+            .AddDatabaseSource("tenants", _ => tenants);
+        await using Harness harness = new(services, options);
+
+        TestSourceAuthorizationService policy = new();
+        policy.Allow(static x => !string.Equals(x.DatabaseIdentifier, "acme", StringComparison.Ordinal));
+        StudioSourceResolver resolver = Resolver(harness, options, policy);
+
+        Func<Task> resolve = async () => await resolver.ResolveAsync(new StudioScope("Tenants", "ACME", null), "RunSql", Token);
+        await resolve.Should().ThrowAsync<StudioNotAuthorizedException>();
+
+        policy.Calls.Should().Equal(
+            ("src", new PostgresStudioResource("Tenants", "ACME", null)),
+            ("write", new PostgresStudioResource("Tenants", "ACME", "RunSql")),
+            ("src", new PostgresStudioResource("tenants", "acme", null)));
+        tenants.Opened.Should().BeEmpty("a refused database is never opened");
+    }
+
+    /// <summary>A scope spelled as registered and listed is asked once per policy, and the second question is never asked.</summary>
+    [Fact]
+    public async Task A_scope_spelled_as_registered_is_asked_once()
+    {
+        ServiceCollection services = new();
+        await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
+        FakeDatabaseSource tenants = new("acme") { DataSources = { ["acme"] = acme } };
+
+        PostgresStudioOptions options = new PostgresStudioOptions { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" }
+            .AddDatabaseSource("tenants", _ => tenants);
+        await using Harness harness = new(services, options);
+
+        TestSourceAuthorizationService policy = new();
+        StudioSourceResolver resolver = Resolver(harness, options, policy);
+
+        (await resolver.ResolveAsync(new StudioScope("tenants", "acme", null), cancellationToken: Token)).Target.DataSource.Should().BeSameAs(acme);
+        policy.Calls.Should().ContainSingle().Which.Should().Be(("src", new PostgresStudioResource("tenants", "acme", null)));
+
+        policy.Calls.Clear();
+        await resolver.ResolveAsync(new StudioScope("tenants", "acme", null), "RunSql", Token);
+        policy.Calls.Should().Equal(
+            ("src", new PostgresStudioResource("tenants", "acme", null)),
+            ("write", new PostgresStudioResource("tenants", "acme", "RunSql")));
     }
 
     [Fact]

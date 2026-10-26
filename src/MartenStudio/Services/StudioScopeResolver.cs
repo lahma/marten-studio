@@ -16,6 +16,13 @@ namespace MartenStudio.Services;
 /// registration looked up, the store built, the database matched and the tenant checked.
 /// </para>
 /// <para>
+/// <b>The names a policy is shown are the shared resolver's too.</b> A store key and a database id match in any case
+/// and an empty database id is the store's first database, so when the scope spells either another way the store
+/// policy - and the write policy, for a capability - is asked again about the registered key and the matched
+/// <c>Id.Identity</c> before the tenant is checked (<see cref="StudioSourceResolver" />'s remarks): a handler that
+/// refuses <c>MartenStoreResource.StoreName == "admin"</c> is never answered with <c>admin</c> for <c>?store=ADMIN</c>.
+/// </para>
+/// <para>
 /// The database is matched by <c>Id.Identity</c> against what <c>Storage.AllDatabases()</c> answers, and
 /// never passed to <c>FindOrCreateDatabase</c>: that method's name is literal, and handing it a string a
 /// browser supplied is how a UI creates a database nobody asked for.
