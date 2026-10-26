@@ -60,29 +60,74 @@ public class ScopeFailureWordsTests
         RelationshipReads.Describe(Named(), gate: null).Should().Contain("42P01").And.NotContain(Withheld);
     }
 
+    /// <summary>
+    /// H1b: a host's <see cref="IPostgresDatabaseSource" /> that throws anything but a Postgres or an Npgsql exception - an
+    /// <see cref="InvalidOperationException" />, a <see cref="TimeoutException" /> - has its words said, because they are the
+    /// host's sentence about its own list. They are the host's, so they carry anything: a line break that would start a
+    /// second line in whatever records the refusal, a bidirectional override, a megabyte. They reach the page escaped and
+    /// bounded, as every other value the studio did not write does (<see cref="StudioLogValue.CapText" />).
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task A_hosts_own_words_about_its_list_reach_the_page_escaped_and_bounded(Type type)
+    {
+        Exception thrown = (Exception) Activator.CreateInstance(type, HostWords)!;
+        await using ServiceProvider provider = Services(() => thrown);
+        await using AsyncServiceScope circuit = provider.CreateAsyncScope();
+
+        StudioScope scope = new("tenants", "acme", null);
+        IDatabaseObjectService objects = circuit.ServiceProvider.GetRequiredService<IDatabaseObjectService>();
+
+        DatabaseBrowserOverview overview = await objects.GetOverviewAsync(scope, Token);
+        overview.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        ShouldBeEscapedAndBounded(overview.Reason);
+
+        DatabaseObjectDetail detail = await objects.GetObjectAsync(scope, "public", "orders", Token);
+        ShouldBeEscapedAndBounded(detail.Reason);
+
+        RelationshipGraph graph = await circuit.ServiceProvider.GetRequiredService<IRelationshipDataService>().GetGraphAsync(scope, Token);
+        ShouldBeEscapedAndBounded(graph.Error);
+
+        DatabaseObjectService.ScopeReadFailure(thrown).Should().Be(
+            "The scope could not be resolved: " + StudioLogValue.CapText(HostWords), "the sentence is the studio's, the words the host's");
+    }
+
+    /// <summary>What a host's list says when it fails: a forged second line, an override, and far past any bound.</summary>
+    private static readonly string HostWords =
+        "the tenant directory is down\n2026-10-27 INFO forged: all clear ‮evil" + new string('x', StudioLogValue.MaxTextLength * 2);
+
+    private static void ShouldBeEscapedAndBounded(string? reason)
+    {
+        reason.Should().NotBeNull();
+        reason.Should().Contain("the tenant directory is down\\n2026-10-27 INFO forged", "the line break is said, escaped");
+        reason.Should().NotContain("\n").And.NotContain("‮");
+        reason!.Length.Should().BeLessThan(StudioLogValue.MaxTextLength + 200, "the host's words are bounded, not the page's");
+    }
+
     private static PostgresException Named() =>
         new("relation \"" + Withheld + ".databases\" does not exist", "ERROR", "ERROR", "42P01");
 
-    private static ServiceProvider Services()
+    private static ServiceProvider Services(Func<Exception>? failure = null)
     {
         TestAuthenticationStateProvider users = new();
         users.SignIn("operator");
 
         ServiceCollection services = new();
         services.AddLogging();
-        services.AddPostgresStudio(static options => options.AddDatabaseSource("tenants", static _ => new FailingSource()));
+        services.AddPostgresStudio(options => options.AddDatabaseSource("tenants", _ => new FailingSource(failure ?? Named)));
         services.AddScoped<AuthenticationStateProvider>(_ => users);
 
         return services.BuildServiceProvider();
     }
 
-    /// <summary>A host's database source whose list is a query that Postgres refuses, naming a schema.</summary>
-    private sealed class FailingSource : IPostgresDatabaseSource
+    /// <summary>A host's database source whose list fails - by default, a query that Postgres refuses, naming a schema.</summary>
+    private sealed class FailingSource(Func<Exception> failure) : IPostgresDatabaseSource
     {
         public async IAsyncEnumerable<string> ListAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
             await Task.Yield();
-            throw Named();
+            throw failure();
 #pragma warning disable CS0162 // An iterator needs a yield to be one.
             yield break;
 #pragma warning restore CS0162

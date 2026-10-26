@@ -371,11 +371,13 @@ internal static class MartenDatabaseTables
         }
         else if (total > listed)
         {
+            // The own reading leaves the cap out (H1b): the declared tables and a capped list fill exactly the cap, so the
+            // cap less the declared and the own schemas' judged counts is how many tables the sweep judged in schemas this
+            // reader is not shown - arithmetic that would give back the count the own reading exists to withhold.
             parts.Add("the store's " + scope.DeclaredCount.ToString("N0", CultureInfo.InvariantCulture) + " declared tables and the "
                 + judged.ToString("N0", CultureInfo.InvariantCulture) + " largest of "
                 + total.ToString("N0", CultureInfo.InvariantCulture) + " other tables"
-                + (ownSchemasOnly ? " in its own schemas" : string.Empty)
-                + " by estimated size (a sweep judges at most " + cap + ")");
+                + (ownSchemasOnly ? " in its own schemas by estimated size" : " by estimated size (a sweep judges at most " + cap + ")"));
         }
 
         if (ownSchemasOnly ? scope.OtherStoresDeclareInOwnSchemas : scope.OtherStoresDeclareHere)

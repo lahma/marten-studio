@@ -130,12 +130,21 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
             ownCoverage);
     }
 
-    /// <summary>"the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)", over the own schemas or every one.</summary>
+    /// <summary>
+    /// "the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)" over every admitted schema, or "the 1
+    /// largest of 10 tables in the data source's own schemas by estimated size" over the own schemas alone.
+    /// </summary>
+    /// <remarks>
+    /// The own reading leaves the cap out (H1b): a capped list holds exactly the cap's number of tables, so the cap less the
+    /// own schemas' judged count is how many tables the sweep judged in schemas this reader is not shown - arithmetic that
+    /// would give back the count the own reading exists to withhold.
+    /// </remarks>
     private static string CoverageOf(int judged, int total, int cap, bool ownSchemasOnly) =>
         "the " + judged.ToString("N0", CultureInfo.InvariantCulture) + " largest of "
         + total.ToString("N0", CultureInfo.InvariantCulture) + " tables"
-        + (ownSchemasOnly ? " in the data source's own schemas" : string.Empty)
-        + " by estimated size (a sweep judges at most " + cap.ToString("N0", CultureInfo.InvariantCulture) + ")";
+        + (ownSchemasOnly
+            ? " in the data source's own schemas by estimated size"
+            : " by estimated size (a sweep judges at most " + cap.ToString("N0", CultureInfo.InvariantCulture) + ")");
 
     /// <summary>What a Marten table is, by its name alone - no store is registered to say more.</summary>
     /// <param name="table">An <c>mt_</c> table's name.</param>

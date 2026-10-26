@@ -436,9 +436,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             {
                 return Refuse(
                     DatabaseRefusal.NoPrivilege,
-                    settings.SqlConsoleRole is { } role
-                        ? "The role '" + role + "' (" + settings.OptionName("SqlConsoleRole") + ") has neither SELECT nor USAGE on it."
-                        : "The store's Postgres role has neither SELECT nor USAGE on it.",
+                    await SequenceNoPrivilegeAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false),
                     audited: false);
             }
 
@@ -461,6 +459,35 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             return Refuse(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception, known), audited: false);
         }
+    }
+
+    /// <summary>What a sequence value refused for the reading role's want of a privilege says, when the role is not named.</summary>
+    internal const string SequenceNoPrivilegeUnnamed = "The role the studio reads as has neither SELECT nor USAGE on it.";
+
+    /// <summary>
+    /// Why the reading role may not read a sequence's value - naming <c>SqlConsoleRole</c> only to a visitor past the Database
+    /// gate (H1's R4, H1b).
+    /// </summary>
+    /// <remarks>
+    /// The name of the role the studio reads as is Database-gate information (D29): the store policy asked about the database
+    /// as a whole, with no tenant. The value of Marten's own sequence in the store's own schemas is the Schema screen's
+    /// structure, read with the visitor's own scope, tenant and all - so a visitor the store policy passes only for a tenant
+    /// reached this sentence, and was told the role. A scope with no tenant has passed that gate already: the resolver asked
+    /// it, by the spelling and again by the registered names, and so does every <c>BrowseDatabase</c> read.
+    /// </remarks>
+    private async Task<string> SequenceNoPrivilegeAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken)
+    {
+        if (settings.SqlConsoleRole is not { } role)
+        {
+            return "The store's Postgres role has neither SELECT nor USAGE on it.";
+        }
+
+        bool named = resolved.Scope.TenantId is null
+            || await access.PassesDatabaseGateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+        return named
+            ? "The role '" + role + "' (" + settings.OptionName("SqlConsoleRole") + ") has neither SELECT nor USAGE on it."
+            : SequenceNoPrivilegeUnnamed;
     }
 
     private async Task<DatabaseObjectDefinition> ReadDefinitionAsync(
@@ -848,6 +875,12 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// What a page is told when resolving the scope itself failed in the database: the SQLSTATE, never Postgres' words -
     /// no gate has been read to mask a schema they name.
     /// </summary>
+    /// <remarks>
+    /// Any other failure's words are said, escaped and bounded (<see cref="StudioLogValue.CapText" />, H1b): an
+    /// <see cref="InvalidOperationException" /> or a <see cref="TimeoutException" /> here can be a host's - its
+    /// <c>IPostgresDatabaseSource.ListAsync</c> threw it - and so carry anything, a line break or a megabyte included, onto
+    /// the page and into whatever records the refusal.
+    /// </remarks>
     internal static string ScopeReadFailure(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
@@ -857,7 +890,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
               + "the schemas they may name could not be checked for you."
             : exception is NpgsqlException
                 ? "The scope could not be resolved: the database could not be reached."
-                : "The scope could not be resolved: " + exception.Message;
+                : "The scope could not be resolved: " + StudioLogValue.CapText(exception.Message);
     }
 
     /// <summary>

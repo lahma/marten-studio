@@ -62,7 +62,7 @@ public class HealthSweeperCoverageTests
     [Fact]
     public async Task A_set_that_reads_beyond_the_sources_own_schemas_is_read_per_visitor()
     {
-        const string Own = "the 1 largest of 4 tables in the data source's own schemas by estimated size (a sweep judges at most 2)";
+        const string Own = "the 1 largest of 4 tables in the data source's own schemas by estimated size";
         const string JudgedOwn = "Judged: " + Own + ".";
 
         await using HealthHarness harness = Harness(Coverage, Own);

@@ -142,7 +142,8 @@ internal interface IStorageService
 /// gate shows that schema - read once per view, and only when such a table is among the largest - and otherwise is listed with
 /// its sizes and without its name, its owner or its link: a structured field is blanked, never half-masked. A gate that cannot
 /// be read withholds every such name. A hidden document type's table is absent: the table source leaves it out, and this drops
-/// any that reached it anyway.
+/// any that reached it anyway. The Tables tile - how many tables are judged, and what the set leaves out - counts tables in
+/// those other schemas only for a visitor past the browser's gate, and the source's own schemas' alone for anyone else (H1b).
 /// </para>
 /// <para>
 /// <b>Nothing is audited.</b> Sizes are the Schema screen's kind of structure, not another session's activity; the page reads
@@ -228,8 +229,14 @@ internal sealed class StorageService : IStorageService
 
     /// <summary>
     /// <paramref name="read" /> as one visitor may see it - pure but for <paramref name="browserGate" />, which is asked at most once,
-    /// and only when a table outside the source's own schemas is among the largest.
+    /// and only when a table outside the source's own schemas is among the largest, or the source judges one at all.
     /// </summary>
+    /// <remarks>
+    /// <b>The Tables tile per visitor</b> (G1M F6, H1b): how many tables the source judges, and what its set leaves out, count the
+    /// tables in schemas only <c>BrowsableSchemas</c> admits - which is the database browser's to show. So a visitor past its gate
+    /// (<see cref="DatabaseGate.IsOpen" />, the same rule the Health page's coverage follows) reads the whole count, and anyone
+    /// else - a gate that is shut, or one that cannot be read - the count over the source's own schemas alone.
+    /// </remarks>
     /// <param name="read">The shared facts.</param>
     /// <param name="scope">The visitor's scope, which the links carry.</param>
     /// <param name="browserGate">The database browser's gate for this visitor, or <see langword="null" /> when it cannot be read.</param>
@@ -244,6 +251,17 @@ internal sealed class StorageService : IStorageService
         int withheld = 0;
         List<StorageTableView> tables = [];
 
+        async Task<DatabaseGate?> GateOnceAsync()
+        {
+            if (!gateRead)
+            {
+                gate = await browserGate().ConfigureAwait(false);
+                gateRead = true;
+            }
+
+            return gate;
+        }
+
         foreach (StorageTableFacts table in read.LargestTables)
         {
             if (table.Table.DocumentTypes.Any(type => settings.IsDocumentTypeVisible?.Invoke(type) == false))
@@ -256,13 +274,8 @@ internal sealed class StorageService : IStorageService
 
             if (table.Table.GatedSchemas.Count > 0)
             {
-                if (!gateRead)
-                {
-                    gate = await browserGate().ConfigureAwait(false);
-                    gateRead = true;
-                }
-
-                named = gate is not null && !table.Table.GatedSchemas.Any(gate.IsWithheld);
+                DatabaseGate? shown = await GateOnceAsync().ConfigureAwait(false);
+                named = shown is not null && !table.Table.GatedSchemas.Any(shown.IsWithheld);
             }
 
             if (!named)
@@ -291,6 +304,9 @@ internal sealed class StorageService : IStorageService
 
         string? withheldReason = withheld == 0 ? null : WithheldReason(withheld, gate is not null);
 
+        // The whole count past the browser's gate, the own schemas' short of it or when it cannot be read (fail closed).
+        bool whole = !read.HasOwnSchemasReading || await GateOnceAsync().ConfigureAwait(false) is { IsOpen: true };
+
         return new StorageView
         {
             MeasuredAt = read.MeasuredAt,
@@ -305,8 +321,8 @@ internal sealed class StorageService : IStorageService
                     : GrowthPendingText(window),
             Window = window,
             WindowNotRead = read.WindowNotRead,
-            TableCount = read.TableCount,
-            Coverage = read.Coverage,
+            TableCount = whole ? read.TableCount : read.OwnSchemasTableCount,
+            Coverage = whole ? read.Coverage : read.OwnSchemasCoverage,
             TablesNotRead = read.TablesNotRead,
             Tables = tables,
             WithheldReason = withheldReason,

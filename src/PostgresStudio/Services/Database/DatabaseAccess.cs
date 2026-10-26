@@ -403,6 +403,23 @@ internal sealed class DatabaseAccess
     }
 
     /// <summary>
+    /// Whether this visitor passes D29's Database gate for the database <paramref name="resolved" /> names: the store policy,
+    /// asked about the database as a whole - no tenant - by the registered key and the database's own identity. What a name
+    /// only that gate shows (the role the studio reads as, say) is shown behind.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="resolved">What it resolved to.</param>
+    /// <param name="cancellationToken">Cancels the question.</param>
+    public async Task<bool> PassesDatabaseGateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(resolved);
+
+        StudioScope whole = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target) with { TenantId = null };
+        return await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// The whole gate for a resolved scope: declarations (fail closed), capability, policy, every other
     /// registered source's policies (<see cref="IDatabaseDeclarationsSource.OtherSourcesAsync" />), and the
     /// database's live schema list, which <c>"*"</c> and the withheld count need.

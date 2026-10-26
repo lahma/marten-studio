@@ -170,7 +170,9 @@ public sealed class PostgresSeamTests : IDisposable
             2);
 
         set.Coverage.Should().Be("the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)");
-        set.OwnSchemasCoverage.Should().Be("the 1 largest of 10 tables in the data source's own schemas by estimated size (a sweep judges at most 2)");
+        set.OwnSchemasCoverage.Should().Be(
+            "the 1 largest of 10 tables in the data source's own schemas by estimated size",
+            "the cap is left out (H1b): two judged in all, less the one of the own schemas, is the one judged in legacy");
 
         IStudioTableSet whole = PostgresHealthTableSource.Build(
             [Row("legacy", "ledger", total: 2) with { OwnTotal = 1 }, Row("public", "orders", total: 2) with { OwnTotal = 1 }], ["public"], 2);

@@ -285,7 +285,12 @@ internal sealed class RelationshipReads
         {
             PostgresException postgres => $"{postgres.SqlState}: {postgres.MessageText}",
             NpgsqlException => "The database could not be reached: " + exception.Message,
-            _ => exception.Message,
+
+            // The studio's own sentences, which put whatever they quote through StudioLogValue already.
+            KeyNotFoundException or StudioNotAuthorizedException or StudioStoreUnavailableException => exception.Message,
+
+            // Anything else may be a host's words - its IPostgresDatabaseSource's list threw it - and is escaped and bounded (H1b).
+            _ => StudioLogValue.CapText(exception.Message),
         };
 
         return gate is null ? message : PostgresErrorText.Redact(message, gate.WithheldSchemas) ?? message;

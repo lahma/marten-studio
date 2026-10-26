@@ -283,9 +283,11 @@ public class WholeDatabaseTableSetTests
             "the store's " + declared + " declared tables and the 3 largest of 10 other tables by estimated size (a sweep judges at most "
             + cap + "); another registered Marten store's tables are not judged here");
         set.OwnSchemasCoverage.Should().Be(
-            "the store's " + declared + " declared tables and the 1 largest of 4 other tables in its own schemas by estimated size (a sweep "
-            + "judges at most " + cap + "); another registered Marten store's tables are not judged here",
-            "nothing of what legacy holds - not even how many tables - is in the sentence its gate's refusers read");
+            "the store's " + declared + " declared tables and the 1 largest of 4 other tables in its own schemas by estimated size; "
+            + "another registered Marten store's tables are not judged here",
+            "nothing of what legacy holds - not even how many tables - is in the sentence its gate's refusers read; with the cap "
+            + "in it, the cap less the declared and the one own table would be the two judged in legacy (H1b)");
+        set.OwnSchemasCoverage.Should().NotContain("a sweep judges at most", "no number in the own reading adds up to the gated count");
 
         HealthTableQueries.UndeclaredTables(scope.Names, scope.Everything, scope.Declared, scope.SkipDocumentTables, scope.Cap, own: scope.StoreSchemas)
             .Parameters.Single(static x => x.ParameterName == "own").Value.Should().BeEquivalentTo(scope.StoreSchemas.ToArray());

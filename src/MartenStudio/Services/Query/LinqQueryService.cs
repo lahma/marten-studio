@@ -219,9 +219,14 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         types.Sort(static (left, right) => QueryService.CompareAliases(left.Alias, right.Alias));
 
-        bool mayRun = await authorization.IsAuthorizedAsync(scope, StudioCapability.RunLinqQueries, cancellationToken).ConfigureAwait(false);
+        // The page's hints ask what the run and the plan will be asked: by the registered key and the database's own
+        // identity, never the visitor's spelling of either (D29, H1b) - or a policy keyed on those names would offer a Run
+        // button, or a plan, that the run then refuses.
+        StudioScope named = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target);
 
-        return new LinqModeStatus(LinqAvailability.Available, null, types, mayRun, mayRun && await MayExplainAsync(scope, cancellationToken).ConfigureAwait(false));
+        bool mayRun = await authorization.IsAuthorizedAsync(named, StudioCapability.RunLinqQueries, cancellationToken).ConfigureAwait(false);
+
+        return new LinqModeStatus(LinqAvailability.Available, null, types, mayRun, mayRun && await MayExplainAsync(named, cancellationToken).ConfigureAwait(false));
     }
 
     // ---------------------------------------------------------------------------------------------------
