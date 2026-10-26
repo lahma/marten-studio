@@ -1327,7 +1327,8 @@ tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the
                                          limiter, the sections from hand-built facts, the visitor download and the Snapshot
                                          menu - no database
 tests/PostgresStudio.Integration.Tests/Diagnostics/  Live: G9 by application as app and probe, a full snapshot that
-                                         creates nothing, three databases behind a database source, an API-only host
+                                         creates nothing, three databases behind a database source, an API-only host, and
+                                         the statements section on a pg_stat_statements server
 tests/MartenStudio.Integration.Tests/Diagnostics/  Live: the API over a conjoined store (a tenant's finding needs
                                          IncludeActivity) and a master-table tenancy that lists nothing
 ```
