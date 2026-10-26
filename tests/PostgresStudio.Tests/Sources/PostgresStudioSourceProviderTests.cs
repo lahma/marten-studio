@@ -581,7 +581,7 @@ public class PostgresStudioSourceProviderTests
     }
 
     [Fact]
-    public async Task A_sweep_covers_every_database_opening_each_host_database_as_it_is_reached()
+    public async Task An_unattended_listing_names_every_database_and_opens_none_of_them()
     {
         ServiceCollection services = new();
         services.AddSingleton(NpgsqlDataSource.Create(Cs));
@@ -594,17 +594,49 @@ public class PostgresStudioSourceProviderTests
 
         await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
 
-        List<StudioSweepTarget> targets = [];
-        await foreach (StudioSweepTarget target in harness.Provider.SweepTargetsAsync(Token))
+        List<StudioListedDatabase> listed = [];
+        await foreach (StudioListedDatabase entry in harness.Provider.ListUnattendedAsync(Token))
         {
-            targets.Add(target);
+            listed.Add(entry);
         }
 
-        targets.Select(static x => (x.Source.Key, x.Outcome, x.Resolved?.Scope.DatabaseId)).Should().Equal(
-            ("default", StudioSweepTargetOutcome.Database, "default"),
-            ("tenants", StudioSweepTargetOutcome.Database, "acme"),
-            ("tenants", StudioSweepTargetOutcome.SourceNotReached, null));
-        targets.Should().OnlyContain(static x => x.Resolved == null || x.Resolved.TenantId == null);
+        listed.Select(static x => (x.Source.Key, x.Outcome, x.DatabaseId, x.SingleDatabaseSource)).Should().Equal(
+            ("default", StudioSweepTargetOutcome.Database, "default", true),
+            ("tenants", StudioSweepTargetOutcome.Database, "acme", false),
+            ("tenants", StudioSweepTargetOutcome.Database, "gone", false),
+            ("tenants", StudioSweepTargetOutcome.Database, "broken", false));
+        tenants.Opened.Should().BeEmpty("listing builds no data source (API design S1)");
+    }
+
+    [Fact]
+    public async Task An_unattended_resolution_opens_one_database_and_says_not_found_and_not_reached_as_values()
+    {
+        ServiceCollection services = new();
+        services.AddSingleton(NpgsqlDataSource.Create(Cs));
+        await using NpgsqlDataSource acme = NpgsqlDataSource.Create("Host=acme.example;Database=acme;Username=app");
+        FakeDatabaseSource tenants = new("acme", "gone", "broken")
+        {
+            DataSources = { ["acme"] = acme },
+            OpenFailures = { ["broken"] = new InvalidOperationException("tenant database down") },
+        };
+
+        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+
+        StudioUnattendedResolution opened = await harness.Provider.ResolveUnattendedAsync("TENANTS", "ACME", Token);
+        opened.Outcome.Should().Be(StudioUnattendedOutcome.Resolved);
+        opened.Resolved!.Scope.Should().Be(new StudioScope("tenants", "acme", null), "the registered key and the listed name, not the spelling asked");
+        tenants.Opened.Should().Equal("acme");
+
+        (await harness.Provider.ResolveUnattendedAsync("tenants", "gone", Token)).Outcome.Should().Be(StudioUnattendedOutcome.NotFound, "the host no longer has it");
+        StudioUnattendedResolution broken = await harness.Provider.ResolveUnattendedAsync("tenants", "broken", Token);
+        broken.Outcome.Should().Be(StudioUnattendedOutcome.NotReached);
+        broken.Reason.Should().NotContain("tenant database down", "a host's exception's words are not the studio's to repeat");
+        (await harness.Provider.ResolveUnattendedAsync("tenants", "nobody", Token)).Outcome.Should().Be(StudioUnattendedOutcome.NotFound);
+        (await harness.Provider.ResolveUnattendedAsync("nobody", "acme", Token)).Outcome.Should().Be(StudioUnattendedOutcome.NotFound);
+
+        StudioUnattendedResolution single = await harness.Provider.ResolveUnattendedAsync("default", "", Token);
+        single.Resolved!.Scope.Should().Be(new StudioScope("default", "default", null), "an empty id is a data source's one database");
+        (await harness.Provider.ResolveUnattendedAsync("default", "other", Token)).Outcome.Should().Be(StudioUnattendedOutcome.NotFound);
     }
 
     [Fact]

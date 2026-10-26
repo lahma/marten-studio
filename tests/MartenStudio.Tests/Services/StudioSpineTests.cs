@@ -262,16 +262,24 @@ public class StudioSpineTests
     {
         await using SourceHarness harness = SourceHarness.Create();
 
-        List<StudioSweepTarget> targets = [];
-        await foreach (StudioSweepTarget target in harness.Sources.SweepTargetsAsync(Token))
+        List<StudioListedDatabase> listed = [];
+        await foreach (StudioListedDatabase entry in harness.Sources.ListUnattendedAsync(Token))
         {
-            targets.Add(target);
+            listed.Add(entry);
         }
 
-        StudioSweepTarget only = targets.Should().ContainSingle().Subject;
+        StudioListedDatabase only = listed.Should().ContainSingle().Subject;
         only.Outcome.Should().Be(StudioSweepTargetOutcome.Database);
-        only.Resolved.Should().BeOfType<ResolvedScope>().Which.TenantId.Should().BeNull();
-        only.Resolved!.Scope.DatabaseId.Should().Be(only.Resolved.Target.Identity);
+        only.SingleDatabaseSource.Should().BeTrue("a default tenancy is one database");
+
+        StudioUnattendedResolution resolved = await harness.Sources.ResolveUnattendedAsync(only.Source.Key, only.DatabaseId!, Token);
+        resolved.Resolved.Should().BeOfType<ResolvedScope>().Which.TenantId.Should().BeNull();
+        resolved.Resolved!.Scope.DatabaseId.Should().Be(resolved.Resolved.Target.Identity);
+
+        (await harness.Sources.ResolveUnattendedAsync(only.Source.Key, "", Token)).Resolved!.Target.Identity
+            .Should().Be(only.DatabaseId, "an empty id is the store's first database, as the visitor's resolver takes it");
+        (await harness.Sources.ResolveUnattendedAsync(only.Source.Key, "elsewhere", Token)).Outcome
+            .Should().Be(StudioUnattendedOutcome.NotFound, "only a database the tenancy holds");
     }
 
     [Fact]
@@ -289,13 +297,14 @@ public class StudioSpineTests
             provider,
             NullLogger<MartenStudioSourceProvider>.Instance);
 
-        List<StudioSweepTarget> targets = [];
-        await foreach (StudioSweepTarget target in sources.SweepTargetsAsync(Token))
+        List<StudioListedDatabase> listed = [];
+        await foreach (StudioListedDatabase entry in sources.ListUnattendedAsync(Token))
         {
-            targets.Add(target);
+            listed.Add(entry);
         }
 
-        targets.Should().ContainSingle().Which.Outcome.Should().Be(StudioSweepTargetOutcome.SourceNotReached);
+        listed.Should().ContainSingle().Which.Outcome.Should().Be(StudioSweepTargetOutcome.SourceNotReached);
+        (await sources.ResolveUnattendedAsync(listed[0].Source.Key, "", Token)).Outcome.Should().Be(StudioUnattendedOutcome.NotReached);
     }
 
     // ---------------------------------------------------------------------------------------------

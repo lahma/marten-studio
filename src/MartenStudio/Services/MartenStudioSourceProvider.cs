@@ -91,61 +91,114 @@ internal sealed class MartenStudioSourceProvider : IStudioSourceProvider
     /// Every store, every database its tenancy already holds (<see cref="HeldDatabases" />, which never builds one), in
     /// registration order. A store that will not build, or whose held databases cannot be listed, is one
     /// <see cref="StudioSweepTargetOutcome.SourceNotReached" /> - the latter logged as 9213 under the same throttle key
-    /// as the scope selector's and the Overview's.
+    /// as the scope selector's and the Overview's. A store whose tenancy is one database is a one-database source.
     /// </remarks>
-    public async IAsyncEnumerable<StudioSweepTarget> SweepTargetsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<StudioListedDatabase> ListUnattendedAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         foreach (MartenStoreRegistration registration in registry.Registrations(options))
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             StudioSourceRegistration source = registration.AsSource();
-            StoreAvailability availability = registry.TryResolve(registration, services, out IDocumentStore? store);
+            (IDocumentStore? store, HeldDatabaseList? listed) = await HeldAsync(registration).ConfigureAwait(false);
 
-            if (!availability.IsAvailable || store is null)
+            if (store is null || listed is null)
             {
-                // TryResolve has logged why, throttled (9210).
-                yield return new StudioSweepTarget(source, StudioSweepTargetOutcome.SourceNotReached);
-                continue;
-            }
-
-            HeldDatabaseList? listed = null;
-
-            try
-            {
-                listed = await HeldDatabases.ListAsync(store).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                LogLevel level = StudioLogThrottle.LevelOrWarning(
-                    throttle, "Store.Databases", registration.Key, null, StudioLogThrottle.KindOf(exception));
-                logger.StoreDatabasesUnreadable(level, exception, registration.Key);
-            }
-
-            if (listed is null)
-            {
-                yield return new StudioSweepTarget(source, StudioSweepTargetOutcome.SourceNotReached);
+                // Logged already: 9210 for a store that will not build, 9213 for one whose databases could not be listed.
+                yield return new StudioListedDatabase(source, StudioSweepTargetOutcome.SourceNotReached);
                 continue;
             }
 
             if (listed.Unnamed > 0)
             {
-                yield return new StudioSweepTarget(source, StudioSweepTargetOutcome.Unnamed, Count: listed.Unnamed);
+                yield return new StudioListedDatabase(source, StudioSweepTargetOutcome.Unnamed, Count: listed.Unnamed);
             }
 
             if (listed.Databases.Count == 0 && listed.Unnamed == 0)
             {
-                yield return new StudioSweepTarget(source, StudioSweepTargetOutcome.SourceNotEnumerated, Count: 0, Detail: listed.Shape.ToString());
+                yield return new StudioListedDatabase(source, StudioSweepTargetOutcome.SourceNotEnumerated, Count: 0, Detail: listed.Shape.ToString());
                 continue;
             }
 
+            bool single = MartenStudioSource.Map(SafeCardinality(store)) == StudioDatabaseCardinality.Single;
+
             foreach (IMartenDatabase database in listed.Databases)
             {
-                yield return new StudioSweepTarget(
-                    source,
-                    StudioSweepTargetOutcome.Database,
-                    new ResolvedScope(new StudioScope(registration.Key, database.Id.Identity, null), registration, store, database));
+                yield return new StudioListedDatabase(source, StudioSweepTargetOutcome.Database, database.Id.Identity) { SingleDatabaseSource = single };
             }
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The store's held databases, never <c>AllDatabases()</c> on a tenancy that builds (D27, hard rule 14): a database the
+    /// tenancy does not hold yet is "not found", as it is to the export. An empty id is the first held database - for a
+    /// configured tenancy the same first database the visitor's resolver takes.
+    /// </remarks>
+    public async ValueTask<StudioUnattendedResolution> ResolveUnattendedAsync(string sourceKey, string databaseId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sourceKey);
+        ArgumentNullException.ThrowIfNull(databaseId);
+
+        if (registry.Find(sourceKey, options) is not { } registration)
+        {
+            return StudioUnattendedResolution.NotFound("No Marten store is registered under '" + sourceKey + "'.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        (IDocumentStore? store, HeldDatabaseList? listed) = await HeldAsync(registration).ConfigureAwait(false);
+
+        if (store is null || listed is null)
+        {
+            return StudioUnattendedResolution.NotReached(
+                "Marten store '" + registration.Key + "' could not be built, or its databases listed; the server log says why (event 9210 or 9213).");
+        }
+
+        IMartenDatabase? database = databaseId.Length == 0
+            ? (listed.Databases.Count > 0 ? listed.Databases[0] : null)
+            : listed.Databases.FirstOrDefault(x => string.Equals(x.Id.Identity, databaseId, StringComparison.OrdinalIgnoreCase));
+
+        return database is null
+            ? StudioUnattendedResolution.NotFound(
+                "Marten store '" + registration.Key + "' holds no database '" + databaseId + "' in this process: its tenancy is never asked to build one.")
+            : StudioUnattendedResolution.Of(
+                new ResolvedScope(new StudioScope(registration.Key, database.Id.Identity, null), registration, store, database));
+    }
+
+    /// <summary>The store and the databases its tenancy holds, or nulls when it will not build or cannot say (both logged).</summary>
+    private async Task<(IDocumentStore? Store, HeldDatabaseList? Listed)> HeldAsync(MartenStoreRegistration registration)
+    {
+        StoreAvailability availability = registry.TryResolve(registration, services, out IDocumentStore? store);
+
+        if (!availability.IsAvailable || store is null)
+        {
+            // TryResolve has logged why, throttled (9210).
+            return (null, null);
+        }
+
+        try
+        {
+            return (store, await HeldDatabases.ListAsync(store).ConfigureAwait(false));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            LogLevel level = StudioLogThrottle.LevelOrWarning(
+                throttle, "Store.Databases", registration.Key, null, StudioLogThrottle.KindOf(exception));
+            logger.StoreDatabasesUnreadable(level, exception, registration.Key);
+            return (store, null);
+        }
+    }
+
+    /// <summary>The tenancy's cardinality, or <c>DynamicMultiple</c> - the cautious answer - when it cannot say.</summary>
+    private static DatabaseCardinality SafeCardinality(IDocumentStore store)
+    {
+        try
+        {
+            return store.Options.Tenancy.Cardinality;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return DatabaseCardinality.DynamicMultiple;
         }
     }
 }
