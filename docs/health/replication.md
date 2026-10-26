@@ -137,9 +137,11 @@ anywhere.
 
 The distance is parsed from the two file names in the studio, the same way on every release (`pg_split_walfile_name`
 exists only from 16): a WAL file name is a timeline and a segment number, and the numbering continues across a
-timeline change. A `.partial` file (the last segment of the old timeline at a promotion) and a `.backup` label (a base
-backup's) are read as the segment their 24-digit prefix names, which is where the archiver got to. A last archived file
-that names no segment - none yet, or a `.history` file - counts as "nothing archived yet", and the backlog is then the
+timeline change. A `.partial` file (the last segment of the old timeline at a promotion) is read as the segment its
+24-digit prefix names, which is where the archiver got to. A last archived file that names no position counts as
+"nothing archived yet": none yet, a `.history` file, or a `.backup` label, whose 24 digits are the base backup's *start*
+segment and which the archiver sends before the backup's stop segment, so it says nothing about where the archiver got
+to. The distance series then has a gap rather than a jump, and the backlog is the
 segments the advisor has seen written in its window, judged only while the archiver archived nothing in that same
 window (an archived file is a working archiver): a lower bound, never sized by the whole WAL sequence. A standby is
 not judged for a backlog, because `pg_walfile_name` cannot run in recovery. A `failing` archiver has a backlog too, and
@@ -186,11 +188,22 @@ behind, **Critical** at an hour.
   role the studio reads as and who can grant it - and a physical slot's `restart_lsn` is no substitute, because it
   tracks flush, not replay.
 - **`standby-view`**: the data source answered in recovery - a multi-host data source that reaches a standby. What
-  the standby has received less what it has replayed is exact and needs no grant, and the time is the age of its last
-  replayed commit. That age grows on an idle primary with no lag at all, and a busy standby holds a record or two in
-  flight at any instant, so the time is judged only while the standby has held WAL it has not replayed **on two
-  consecutive samples**, or holds 16 MiB (a segment) or more now. One sample below that says so in the status row and
-  waits for the next.
+  the standby has received less what it has replayed is exact and needs no grant. The time is **how long WAL it
+  received has gone unreplayed**: each sweep samples what the standby has received (`pg_last_wal_receive_lsn()`),
+  and the time behind is the age of the oldest sample whose position replay has still not reached. That is a lower
+  bound, exact to within one sample. It is never the age of the last replayed commit, which grows with no lag at all
+  on an idle primary, behind a long writer that has not committed (a freeze `VACUUM` writes WAL for hours and
+  commits nothing), and on a delayed standby after a quiet night; that age is shown in the evidence and never judged.
+  The start of a stall - that oldest unreplayed sample - is carried from sweep to sweep in series of its own, so a
+  stall longer than the 60 samples the advisor keeps still grows, and a sample above what the standby has received
+  now (from before a `pg_rewind` onto an earlier fork, or a restore to an earlier point) is never a start.
+
+  So a standby that is hours behind when the advisor starts watching, but holds under 1 GiB unreplayed, is:
+  - **"not judged yet"** for its first 5 minutes of samples - nothing yet says how long it has been stuck;
+  - then a **Warning** at the lower bound, worded "at least", because the stall may be older than the samples;
+  - and **Critical** once the stall's recorded start is an hour old, however many samples the ring has dropped since.
+
+  A gibibyte or more unreplayed is a Warning at once, on the bytes alone.
 - **`paused`**, Warning: replay is paused (`pg_wal_replay_pause()`, `pg_get_wal_replay_pause_state()` from 14). The
   standby keeps receiving WAL and applies none of it until somebody runs `pg_wal_replay_resume()`.
 
@@ -202,9 +215,19 @@ gate, and never judged; a logical sender of another database is counted ("N logi
 server, never named") and nothing else - its application name, client address and role are blanked in the query
 itself, for every visitor.
 
-**A delayed standby** (`recovery_min_apply_delay`) replays late on purpose. On the standby the setting is read, and only
-the time beyond the delay is judged; the WAL it holds for the delay is shown and not judged. From the primary the
-setting cannot be read, so the caveat says that such a standby's delay shows there as lag.
+**A delayed standby** (`recovery_min_apply_delay`) replays late on purpose. On the standby the setting is read, and the
+time judged is the time beyond the delay: a healthy one replays what it received a delay ago, so it fires only when WAL
+received more than the delay and 5 minutes ago is still unreplayed - replay stuck behind the delay, not waiting on it.
+Until replay is first seen to pass a position the advisor sampled - about one delay after it began watching - the
+status row says "not judged yet" and why, unless the time is already more than 5 minutes beyond the delay, which fires.
+From then on the stall's carried start judges it, so the samples need not reach back past the delay: a delay longer
+than the 60 samples the advisor keeps is judged too. An hour's delay after a night with no commits is not 8.5 hours of lag: the
+last replayed commit is that old, but replay has reached everything received more than an hour ago. The WAL it holds
+for the delay is shown and not judged.
+
+**A known limit from the primary.** The delay is the standby's own setting, which the primary cannot read, so from the
+primary a delayed standby's `replay_lag` and bytes include its delay: an hour's delay reads as Critical there. The
+caveat says so. Point a data source at the standby to judge it beyond its delay.
 
 **A cascading standby** - a standby that others stream from - measures its downstream standbys against the furthest it
 has received or replayed, never `pg_current_wal_lsn()` (which cannot run in recovery). R03 judges only the server the
@@ -215,8 +238,13 @@ name, client address and role are evidence shown only with `ViewDatabaseActivity
 
 **Not applicable** on Amazon Aurora: its readers share the cluster volume and do not stream WAL.
 
-**History.** On a standby, R03 adds `replication.standby-replay-behind`, the WAL it held unreplayed, to the samples: the
-previous sample is what the two-sample rule reads.
+**A known limit on the standby side.** A standby whose WAL receiver has disconnected receives nothing new, replays what
+it has, and so is not seen to fall behind from the standby itself. R01 sees its slot go inactive and hold WAL on the
+primary, and from the primary's view it is missing from `pg_stat_replication`.
+
+**History.** On a standby, R03 adds `replication.standby-received`, the position it has received, to the samples, and,
+while a stall lasts, `replication.standby-stall-since`, `replication.standby-stall-position` and (while it may be older
+than the samples) `replication.standby-stall-open`, which carry its start from one sweep to the next.
 
 ## R04 Requested checkpoints
 

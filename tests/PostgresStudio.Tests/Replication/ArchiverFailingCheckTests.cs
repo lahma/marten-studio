@@ -242,6 +242,22 @@ public class ArchiverFailingCheckTests
     }
 
     [Fact]
+    public void A_backup_label_archived_last_is_a_gap_in_the_distance_never_a_jump()
+    {
+        // W5-R2-fix2 2: a base backup that started at segment 10 while the archiver was at 198. Its label's 24 digits are the
+        // backup's start segment, archived before the stop segment - read as a position, it is 190 segments (3 GiB) behind.
+        HealthHistoryView history = History(
+            (Now.AddMinutes(-15), [(ReplicationHistory.ArchiverBacklog, 2), (ReplicationHistory.WalSegment, 150), (ReplicationHistory.ArchiverArchived, 148)]),
+            (Now.AddMinutes(-5), [(ReplicationHistory.ArchiverBacklog, 2), (ReplicationHistory.WalSegment, 190), (ReplicationHistory.ArchiverArchived, 188)]));
+        ArchiverFacts labelled = Archiver(lastArchived: Wal(10) + ".00000028.backup", archived: 189, current: Wal(200));
+
+        labelled.Backlog!.Distance.Should().BeNull("a backup label names no position the archiver has reached");
+        Check.Sample(Facts(labelled)).Select(static x => x.Series)
+            .Should().NotContain(ReplicationHistory.ArchiverBacklog, "a gap, never a stand-in");
+        Evaluate(labelled, history).Findings.Should().BeEmpty("the archiver archived a file in the window, so it works");
+    }
+
+    [Fact]
     public void A_failing_archiver_is_said_once_as_failing_with_its_backlog_in_the_evidence()
     {
         ArchiverFacts both = Archiver(lastArchived: Wal(100), current: Wal(300), failed: 9, lastFailed: Wal(101), lastFailedAt: Now.AddMinutes(-1), lastArchivedAt: Now.AddHours(-2));

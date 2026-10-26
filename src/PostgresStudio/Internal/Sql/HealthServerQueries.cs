@@ -66,9 +66,11 @@ internal static class HealthServerQueries
         "   from pg_catalog.pg_settings s where s.name = '" + name + "')";
 
     /// <summary>
-    /// Where a provider's setting can come from: the server's own configuration, never a <c>SET</c> - a session's, a
-    /// database's (<c>ALTER DATABASE … SET</c>) or a role's (<c>ALTER ROLE … SET</c>) - nor the client's startup options,
-    /// which is where anybody who can connect or owns a database could put a placeholder of that name (W5-R2-fix B3).
+    /// Where a provider's setting can come from: the server's own configuration - defence in depth, not the fence itself
+    /// (W5-R2-fix2 4). On a server without the provider's module, a setting of that name can only be a placeholder, and
+    /// Postgres never lists a placeholder in <c>pg_settings</c> (it is <c>GUC_NO_SHOW_ALL</c>), whether a session's <c>SET</c>
+    /// or <c>SET LOCAL</c> or a client's startup options made it; a database's or a role's <c>SET</c> of one is refused to
+    /// anybody but a superuser. Should a module define one, this still counts only a value from the server's configuration.
     /// </summary>
     private const string ServerConfigured = "s.source in ('default', 'environment variable', 'configuration file', 'command line', 'override')";
 
@@ -109,10 +111,13 @@ internal static class HealthServerQueries
     /// marker would silence findings with nothing logged.
     /// </para>
     /// <list type="bullet">
-    /// <item>A setting counts only from the server's own configuration (<c>source</c> in <c>default</c>, <c>environment
-    /// variable</c>, <c>configuration file</c>, <c>command line</c>, <c>override</c>): a placeholder of the same name made by
-    /// a session's <c>SET</c>, a database owner's <c>ALTER DATABASE … SET</c>, a role's own <c>ALTER ROLE … SET</c> or a
-    /// client's startup options shows up in <c>pg_settings</c> with another source.</item>
+    /// <item>A setting is read from <c>pg_settings</c>, which never lists a placeholder: on a server without the provider's
+    /// module, a <c>rds.*</c>, <c>azure.*</c> or <c>cloudsql.*</c> name a session <c>SET</c>s (or <c>SET LOCAL</c>s) or a
+    /// client passes in its startup options is invisible there, and a database owner's <c>ALTER DATABASE … SET</c> or a role's
+    /// own <c>ALTER ROLE … SET</c> of one is refused (42501) to anybody but a superuser - measured on 14, 17 and 18 by
+    /// <c>PlatformMarkerSpoofLiveTests</c>. On top of that, as defence in depth, a setting counts only from the server's own
+    /// configuration (<c>source</c> in <c>default</c>, <c>environment variable</c>, <c>configuration file</c>,
+    /// <c>command line</c>, <c>override</c>).</item>
     /// <item><c>aurora_version()</c> counts only in <c>pg_catalog</c>, where only a superuser may create a function. Not
     /// also fenced to <c>oid &lt; 16384</c> (initdb's objects): a function an engine or a superuser adds after initdb -
     /// the test shim among them - has a higher oid, and the namespace already keeps out every role but a superuser.</item>

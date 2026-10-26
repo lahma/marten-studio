@@ -33,10 +33,13 @@ So a Supabase server reached through a proxy of your own is taken to be self-hos
 which platform was detected and why.
 
 **No marker can be planted by a role short of a superuser.** A platform silences findings (S02's stand-down, R02-R04
-on Aurora), so each server marker is fenced to where only a superuser or the provider can put it. A setting counts only
-when it comes from the server's own configuration: a placeholder of the same name from a session's `SET`, a database
-owner's `ALTER DATABASE ... SET`, a role's `ALTER ROLE ... SET` or a client's startup options does not. The Aurora
-function counts only in `pg_catalog`, where only a superuser may create one - a `public.aurora_version()` does not.
+on Aurora), so each server marker is fenced to where only a superuser or the provider can put it. A setting is read
+from `pg_settings`, and on a server without the provider's module a name such as `rds.extensions` can only be a
+placeholder, which `pg_settings` never lists - whether a session's `SET` or `SET LOCAL` or a client's startup options
+made it - while a database owner's `ALTER DATABASE ... SET` or a role's `ALTER ROLE ... SET` of one is refused to
+anybody but a superuser. As defence in depth, a setting also counts only when it comes from the server's own
+configuration. The Aurora function counts only in `pg_catalog`, where only a superuser may create one - a
+`public.aurora_version()` does not.
 Neon's role counts only with `REPLICATION` and `BYPASSRLS`, which only a superuser may grant before PostgreSQL 16,
 and from 16 only a `CREATEROLE` role holding both.
 

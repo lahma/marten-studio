@@ -44,6 +44,12 @@ internal sealed record ReplicationRole(
     /// <summary>Whether replay is paused (<c>pg_wal_replay_pause()</c> took effect).</summary>
     public bool IsPaused => string.Equals(PauseState, "paused", StringComparison.Ordinal);
 
+    /// <summary><see cref="ReceiveLsn" /> as a number, for R03's samples of it (W5-R2-fix2 1).</summary>
+    public ulong? ReceivePosition => WalPosition.Of(ReceiveLsn);
+
+    /// <summary><see cref="ReplayLsn" /> as a number.</summary>
+    public ulong? ReplayPosition => WalPosition.Of(ReplayLsn);
+
     /// <summary>The sweep's one read of it (<see cref="HealthCheckContext.Shared{T}" />).</summary>
     public static Task<ReplicationRole> SharedAsync(HealthCheckContext context)
     {
@@ -508,8 +514,9 @@ internal sealed record ArchiverFacts(
 internal sealed record ArchiveBacklog(long CurrentSegment, long? Distance, long SegmentBytes)
 {
     /// <summary>
-    /// Whether the last archived file names no segment - none since the statistics began, or a <c>.history</c> file - so
-    /// "nothing archived yet" (W5-R2 addition 3). A <c>.partial</c> or <c>.backup</c> file names the segment it is of.
+    /// Whether the last archived file names no position - none since the statistics began, a <c>.history</c> file or a
+    /// <c>.backup</c> label - so "nothing archived yet" (W5-R2 addition 3; W5-R2-fix2 2). A <c>.partial</c> file names the
+    /// segment it is of.
     /// </summary>
     public bool NothingArchived => Distance is null;
 
@@ -539,6 +546,34 @@ internal sealed record ArchiveBacklog(long CurrentSegment, long? Distance, long 
 /// <param name="Number">The segment number, counted across timelines (a promotion continues the numbering).</param>
 internal readonly record struct WalSegment(uint Timeline, ulong Number);
 
+/// <summary>A WAL position (<c>pg_lsn</c>) as Postgres prints it - two hex numbers, <c>16/B374D848</c> - as one number.</summary>
+internal static class WalPosition
+{
+    /// <summary>Parses <paramref name="text" />: the high 32 bits, a slash, the low 32 bits.</summary>
+    public static bool TryParse(string? text, out ulong position)
+    {
+        position = 0;
+        int slash = text?.IndexOf('/', StringComparison.Ordinal) ?? -1;
+
+        if (text is null || slash <= 0 || slash == text.Length - 1)
+        {
+            return false;
+        }
+
+        if (!uint.TryParse(text.AsSpan(0, slash), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out uint high)
+            || !uint.TryParse(text.AsSpan(slash + 1), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out uint low))
+        {
+            return false;
+        }
+
+        position = ((ulong) high << 32) | low;
+        return true;
+    }
+
+    /// <summary>The position, or <see langword="null" /> when <paramref name="text" /> is none.</summary>
+    public static ulong? Of(string? text) => TryParse(text, out ulong position) ? position : null;
+}
+
 /// <summary>
 /// WAL file names, parsed as Postgres builds them (<c>XLogFileName</c>): 24 hex digits - the timeline, then the segment
 /// number split at every 4 GiB of WAL into a "log" and a "seg" part, the second counting segments of
@@ -547,8 +582,10 @@ internal readonly record struct WalSegment(uint Timeline, ulong Number);
 /// <remarks>
 /// Parsed here rather than by <c>pg_split_walfile_name</c>, which only PostgreSQL 16 has and which raises on a name it
 /// does not take. What the archiver also archives - a <c>.history</c> file at a promotion, a <c>.partial</c> segment of the
-/// old timeline, a base backup's <c>.backup</c> label - is read by <see cref="TryParseArchived" />: the last two name their
-/// segment in their first 24 digits, a history file names none.
+/// old timeline, a base backup's <c>.backup</c> label - is read by <see cref="TryParseArchived" />: a <c>.partial</c> file
+/// names the segment the old timeline had reached in its first 24 digits; a history file names none, and neither does a
+/// backup label for this purpose - its 24 digits are the backup's <i>start</i> segment, and the archiver sends the label
+/// before the stop segment, so it is no position the archiver has reached (W5-R2-fix2 2).
 /// </remarks>
 internal static class WalFileName
 {
@@ -556,9 +593,11 @@ internal static class WalFileName
     private const ulong LogSpan = 0x1_0000_0000UL;
 
     /// <summary>
-    /// Parses a file the archiver archived: a segment, or a <c>.partial</c> (<c>000000010000000000000003.partial</c>) or a
-    /// <c>.backup</c> (<c>000000010000000000000002.00000028.backup</c>) file, by the segment its first 24 digits name. A
-    /// <c>.history</c> file names no segment.
+    /// Parses a file the archiver archived as the segment it has reached: a segment, or a <c>.partial</c> file
+    /// (<c>000000010000000000000003.partial</c>) by the segment its first 24 digits name. A <c>.history</c> file and a
+    /// <c>.backup</c> label (<c>000000010000000000000002.00000028.backup</c>, whose digits are the backup's start segment,
+    /// archived before its stop segment) name no position, and read as "nothing to measure from" - a gap in the distance,
+    /// never a stand-in for one.
     /// </summary>
     public static bool TryParseArchived(string? name, long segmentBytes, out WalSegment segment)
     {
@@ -574,12 +613,7 @@ internal static class WalFileName
             return TryParse(name, segmentBytes, out segment);
         }
 
-        string suffix = name[24..];
-        bool partial = string.Equals(suffix, ".partial", StringComparison.Ordinal);
-        bool backup = suffix.Length == 16 && suffix[0] == '.' && suffix.EndsWith(".backup", StringComparison.Ordinal)
-            && uint.TryParse(suffix.AsSpan(1, 8), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out _);
-
-        return (partial || backup) && TryParse(name[..24], segmentBytes, out segment);
+        return string.Equals(name[24..], ".partial", StringComparison.Ordinal) && TryParse(name[..24], segmentBytes, out segment);
     }
 
     /// <summary>Parses a segment's file name for a server whose segments are <paramref name="segmentBytes" /> long.</summary>

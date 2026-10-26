@@ -203,6 +203,16 @@ internal static class StandbyLagLive
             report.Checks.Single(static x => x.Code == "R03").Note.Should().StartWith("1 standby streams from this server, none of them behind");
         }
 
+        // On the standby itself, replay caught up with what it has received - the primary's view above says replay reached the
+        // primary's position, and the standby may since have received a record (a checkpoint, a running-xacts record) it has
+        // not replayed yet (W5-R2-fix3 3).
+        await ReplicationServer.UntilAsync(
+            async () => await ReplicationServer.Scalar<bool>(
+                pair.StandbyConnectionString(MatrixRole.Superuser),
+                "select coalesce(pg_catalog.pg_last_wal_receive_lsn() = pg_catalog.pg_last_wal_replay_lsn(), false)"),
+            TimeSpan.FromSeconds(60),
+            "the standby to have replayed everything it received");
+
         await using (StudioHost onStandby = ReplicationServer.HostOver(pair.StandbyConnectionString(MatrixRole.Probe), TimeProvider.System))
         {
             HealthReport report = await ReportAsync(onStandby);

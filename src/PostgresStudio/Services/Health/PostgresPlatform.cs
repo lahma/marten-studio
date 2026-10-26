@@ -44,8 +44,10 @@ internal sealed record PostgresPlatformMarkers(
 /// </para>
 /// <para>
 /// <b>No marker a role short of a superuser can plant</b> (W5-R2-fix B3), because a platform silences findings: each server
-/// marker is fenced in <c>HealthServerQueries.Platform</c> - a setting only from the server's own configuration, the Aurora
-/// function only in <c>pg_catalog</c>, Neon's role only with the attributes only a superuser grants.
+/// marker is fenced in <c>HealthServerQueries.Platform</c> - a setting read from <c>pg_settings</c>, which never lists a
+/// placeholder a session or a client made and refuses a database's or role's one to all but a superuser (and, as defence
+/// in depth, only from the server's own configuration), the Aurora function only in <c>pg_catalog</c>, Neon's role only
+/// with the attributes only a superuser grants.
 /// </para>
 /// <para>
 /// <b>Every marker is the provider's own, documented, and read without a privilege</b> (verified 2026-10-17; a marker

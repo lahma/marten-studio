@@ -51,8 +51,7 @@ public class WalFileNameTests
     [Theory]
     [InlineData("000000010000000000000003", 3ul)]
     [InlineData("000000010000000000000003.partial", 3ul)]
-    [InlineData("000000010000000000000002.00000028.backup", 2ul)]
-    public void A_partial_or_backup_file_archived_names_the_segment_its_first_24_digits_name(string name, ulong number)
+    public void A_segment_or_a_partial_file_archived_names_the_segment_its_first_24_digits_name(string name, ulong number)
     {
         WalFileName.TryParseArchived(name, Segment16, out WalSegment segment).Should().BeTrue();
         segment.Number.Should().Be(number);
@@ -60,11 +59,12 @@ public class WalFileNameTests
 
     [Theory]
     [InlineData("00000002.history")]
+    [InlineData("000000010000000000000002.00000028.backup")] // the backup's start segment, archived before its stop segment
     [InlineData("000000010000000000000003.part")]
     [InlineData("000000010000000000000002.0000002G.backup")]
     [InlineData("000000010000000000000002.backup")]
     [InlineData(null)]
-    public void A_history_file_or_anything_else_archived_names_no_segment(string? name)
+    public void A_history_file_a_backup_label_or_anything_else_archived_names_no_position(string? name)
     {
         WalFileName.TryParseArchived(name, Segment16, out _).Should().BeFalse();
     }
@@ -99,6 +99,7 @@ public class WalFileNameTests
     [Theory]
     [InlineData(null)]
     [InlineData("00000002.history")]
+    [InlineData("000000010000000000000002.00000028.backup")]
     public void Nothing_archived_yet_has_no_distance_and_only_the_segment_being_written(string? lastArchived)
     {
         ArchiveBacklog backlog = ArchiveBacklog.Measure(lastArchived, Wal(70), Segment16)!;
