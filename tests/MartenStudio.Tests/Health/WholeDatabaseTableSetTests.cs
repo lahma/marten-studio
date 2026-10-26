@@ -356,7 +356,7 @@ public class WholeDatabaseTableSetTests
             marten.AutovacuumSetting(orders, "autovacuum_vacuum_scale_factor", "0.02", "Vacuums sooner."),
         ];
 
-        remedies.Should().OnlyContain(static x => x != null && x.IsMigration, "the host's own table is the host's migrations' to change");
+        remedies.Should().OnlyContain(static x => x != null && x.Kind == HealthRemedyKind.Migration, "the host's own table is the host's migrations' to change");
         remedies[0]!.Code.Should().Be(PostgresHealthTableRemedies.Instance.IndexTheFilteredMember(orders)!.Code, "composed, never copied");
         remedies[5]!.Code.Should().Contain("\"g1m\".\"orders\"").And.Contain("RESET (autovacuum_enabled)");
         remedies.Should().OnlyContain(static x => !x!.Code.Contains("StoreOptions", StringComparison.Ordinal) && !x.Code.Contains("opts.", StringComparison.Ordinal));
@@ -384,7 +384,7 @@ public class WholeDatabaseTableSetTests
         })
         {
             upkeep.Should().NotBeNull();
-            upkeep!.IsMigration.Should().BeTrue();
+            upkeep!.Kind.Should().Be(HealthRemedyKind.Migration);
             upkeep.Explanation.Should().StartWith("The table is Quartz.NET's: its columns and indexes are that library's design, and this changes neither");
             upkeep.Explanation.Should().EndWith(HealthRemedy.HandOverNote);
             upkeep.Explanation!.Split(HealthRemedy.HandOverNote).Should().HaveCount(2, "the hand-over note is said once");

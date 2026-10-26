@@ -20,7 +20,7 @@ internal sealed record ProgressionAheadFacts(
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Three kinds</b> (the variants VERS's model names; set as <c>HealthFinding.Variant</c> once it lands), each Critical:
+/// <b>Three kinds</b>, its variants (<see cref="HealthFinding.Variant" />), each Critical:
 /// </para>
 /// <list type="bullet">
 /// <item><description>
@@ -58,7 +58,13 @@ internal sealed record ProgressionAheadFacts(
 /// there, and the store-global rows are not the ones that count.
 /// </para>
 /// </remarks>
-[HealthCheck("D09", HealthArea.Daemon, HealthCostTier.Catalog, "Event sequence and daemon progression disagree", Gate = HealthGate.Database)]
+[HealthCheck(
+    "D09",
+    HealthArea.Daemon,
+    HealthCostTier.Catalog,
+    "Event sequence and daemon progression disagree",
+    Gate = HealthGate.Database,
+    Variants = [MarkAhead, ShardAhead, SequenceBehind])]
 internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionAheadFacts>
 {
     /// <summary>The high-water mark is ahead of the sequence.</summary>
@@ -69,9 +75,6 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
 
     /// <summary>The sequence is behind the highest committed event.</summary>
     internal const string SequenceBehind = "sequence-behind";
-
-    /// <summary>The kinds of finding D09 makes, for the variant model (VERS) to list.</summary>
-    internal static IReadOnlyList<string> VariantNames { get; } = [MarkAhead, ShardAhead, SequenceBehind];
 
     /// <summary>What every finding says about where this comes from.</summary>
     internal const string Causes =
@@ -170,6 +173,7 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         return new HealthFinding
         {
             Code = "D09",
+            Variant = SequenceBehind,
             Severity = HealthSeverity.Critical,
             Subject = sequence,
             Title = "The event sequence is behind the events: it hands out " + DaemonCheckConfiguration.Number(next)
@@ -210,6 +214,7 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         return new HealthFinding
         {
             Code = "D09",
+            Variant = MarkAhead,
             Severity = HealthSeverity.Critical,
             Subject = HealthDaemonQueries.HighWaterMarkRow,
 
@@ -241,6 +246,7 @@ internal sealed class ProgressionAheadOfSequenceCheck : HealthCheck<ProgressionA
         return new HealthFinding
         {
             Code = "D09",
+            Variant = ShardAhead,
             Severity = HealthSeverity.Critical,
             Subject = shard.Name,
             DocumentTypes = configuration.PublishedTypesOf(shard.Name),

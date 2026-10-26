@@ -137,7 +137,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
     /// </summary>
     private static HealthRemedy? Upkeep(StudioTable table, HealthRemedy? migration)
     {
-        if (migration is null || table.Ownership != StudioTableOwnership.Library || !migration.IsMigration)
+        if (migration is null || table.Ownership != StudioTableOwnership.Library || migration.Kind != HealthRemedyKind.Migration)
         {
             return migration;
         }

@@ -157,7 +157,7 @@ public class HealthSeamTests
         // G1M (issue #8, G1): a table no store declares is the host's migrations' to change, so MartenStudio composes
         // Postgres Studio's migration SQL for it - never a StoreOptions line.
         finding.Remedy.Should().NotBeNull();
-        finding.Remedy!.IsMigration.Should().BeTrue();
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
         finding.Remedy.Code.Should().Be("ALTER TABLE \"app\".\"orders\" RESET (autovacuum_enabled);");
         finding.WhyItMatters.Should().Contain("the host's to do, in its own migrations")
             .And.NotContain("StoreOptions").And.NotContain("Marten");
@@ -176,7 +176,7 @@ public class HealthSeamTests
         finding.Evidence.Should().Contain(new HealthEvidence("Declared", "by the host's own schema"));
 
         // G1M: the rebuild the finding describes, as the host's migration - no re-apply, which would not touch it.
-        finding.Remedy!.IsMigration.Should().BeTrue();
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
         finding.Remedy.Code.Should().Contain("REINDEX INDEX CONCURRENTLY").And.NotContain("ApplyAllConfiguredChangesToDatabaseAsync");
     }
 

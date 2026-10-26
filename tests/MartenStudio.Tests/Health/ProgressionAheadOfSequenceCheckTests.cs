@@ -150,8 +150,20 @@ public class ProgressionAheadOfSequenceCheckTests
     }
 
     [Fact]
-    public void Its_three_kinds_are_named_for_the_variant_model()
+    public void Its_three_kinds_are_its_listed_variants_and_each_finding_says_which()
     {
-        ProgressionAheadOfSequenceCheck.VariantNames.Should().Equal(["mark-ahead", "shard-ahead", "sequence-behind"]);
+        HealthCheckRegistry.Describe(typeof(ProgressionAheadOfSequenceCheck)).Variants
+            .Should().Equal(["mark-ahead", "shard-ahead", "sequence-behind"]);
+        HealthCheckRegistry.Problems([typeof(ProgressionAheadOfSequenceCheck)]).Should().BeEmpty();
+
+        HealthVerdict both = Evaluate(Reading(0, mark: 50, highest: 50));
+        both.Findings.Select(static x => (x.Variant, x.Key)).Should().BeEquivalentTo(
+        [
+            ("sequence-behind", "D09|sequence-behind|studio_events.mt_events_sequence"),
+            ("mark-ahead", "D09|mark-ahead|HighWaterMark"),
+        ]);
+
+        Evaluate(Reading(20, mark: 20, highest: 20), null, Shard("DailySales:All", 40))
+            .Findings.Should().ContainSingle().Which.Variant.Should().Be("shard-ahead");
     }
 }

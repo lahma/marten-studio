@@ -52,10 +52,10 @@ What every check here has in common:
   `pg_partition_tree()`, which holds a lock on every partition. A tenant-partitioned table is one row, its
   partitions' figures rolled in, and a partition is never named: Marten names a tenant's partition after the
   tenant. The only row of a user table a regular sweep reads is `mt_hilo`'s (T11), and only once the catalog
-  says it exists. The one wait is in the index read: `pg_get_indexdef` opens each indexed table for an instant to
-  name its columns, and releases it at once. So a migration that holds `ACCESS EXCLUSIVE` on a judged table - Marten's,
-  or any library's - costs T03-T06 that sweep: they wait out `lock_timeout`, say so, and are tried at the next interval.
-  Nothing is held past the call.
+  says it exists. `pg_get_indexdef` opens each indexed table for an instant to name its columns, so the index read
+  first looks in `pg_locks` and deparses nothing on a table somebody holds or awaits `ACCESS EXCLUSIVE` on - a
+  migration of the store's or of any library's: T03-T06 then say "not checked" for that sweep, without waiting, and
+  read the indexes again at the next. Nothing is held past a call.
 - **Rates, not totals.** The `pg_stat_*` counters run from the last statistics reset, which may be a year ago,
   so T01 and T06 sample them into the in-memory history and judge the change over the window it holds, and say
   "watching" until two samples exist. A counter that goes down is a reset, and the window restarts there.

@@ -170,7 +170,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         {
             finding.Finding.GatedSchemas.Should().BeEmpty("{0}: the table is in the store's own schema", finding.Code);
             finding.Finding.Remedy.Should().NotBeNull("{0} has a remedy for the host's own table", finding.Code);
-            finding.Finding.Remedy!.IsMigration.Should().BeTrue("{0}: no StoreOptions line reaches a table no store declares", finding.Code);
+            finding.Finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration, "{0}: no StoreOptions line reaches a table no store declares", finding.Code);
             finding.Finding.Remedy.Code.Should().NotContain("opts.");
             finding.Evidence.Should().Contain(new HealthEvidence("Table", "the table " + key));
         }
@@ -220,7 +220,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
             // The condition is real: the same shape on the host's own table is a redundant index.
             HealthReportFinding hosts = About(report, "T04", SchemaKey.For(Sample, RelationalDemoSchema.AppSettingsTable)).Should().ContainSingle().Subject;
             hosts.Finding.Subject.Should().EndWith(".g1m_settings_key");
-            hosts.Finding.Remedy!.IsMigration.Should().BeTrue();
+            hosts.Finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
             hosts.Finding.Remedy.Code.Should().Contain("DROP INDEX CONCURRENTLY");
 
             Of(report, "T04").Should().NotContain(x => x.Finding.Subject != null && x.Finding.Subject.StartsWith(Quartz + ".", StringComparison.Ordinal),
@@ -231,7 +231,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
             HealthReportFinding vacuum = About(report, "T07", key).Should().ContainSingle().Subject;
             vacuum.Finding.GatedSchemas.Should().Equal([Quartz], "quartz is not one of the store's own schemas (D29)");
             vacuum.Evidence.Should().Contain(new HealthEvidence("Table", "the Quartz.NET table " + key));
-            vacuum.Finding.Remedy!.IsMigration.Should().BeTrue();
+            vacuum.Finding.Remedy!.Kind.Should().Be(HealthRemedyKind.Migration);
             vacuum.Finding.Remedy.Code.Should().Be("ALTER TABLE \"quartz\".\"qrtz_g1m_history\" RESET (autovacuum_enabled);");
             vacuum.Finding.Remedy.Explanation.Should().StartWith("The table is Quartz.NET's: its columns and indexes are that library's design");
         }
@@ -363,11 +363,11 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
     }
 
     /// <summary>
-    /// The known limit, pinned: the index read names each index's columns with <c>pg_get_indexdef</c>, whose deparser opens
-    /// the indexed table for an instant (<c>AccessShareLock</c>, released at once), so a migration holding
-    /// <c>ACCESS EXCLUSIVE</c> on a judged table - Marten's or now any library's - costs the index checks (T03-T06) that one
-    /// sweep: they wait out <c>lock_timeout</c>, say so, and are tried at the next interval, while every other table check
-    /// runs, nothing is left holding a lock, and the next sweep is whole again.
+    /// A migration's <c>ACCESS EXCLUSIVE</c> on a judged table - now any library's too, not only Marten's - costs the index
+    /// checks (T03-T06) that one sweep and nothing more: the index read sees the lock in <c>pg_locks</c> and does not
+    /// deparse behind it (<c>pg_get_indexdef</c> would open the table and queue), so they say "not checked" at once rather
+    /// than waiting out <c>lock_timeout</c>; every other table check runs, nothing is left holding a lock, and the next
+    /// sweep is whole again.
     /// </summary>
     [PostgresFact]
     public async Task A_migrations_lock_on_a_judged_table_costs_the_index_checks_one_sweep_and_holds_nothing()
@@ -397,8 +397,10 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         {
             if (indexChecks.Contains(status.Code))
             {
-                status.Outcome.Should().Be(HealthCheckOutcome.Unavailable, "{0} reads the indexes, whose definitions open the locked table", status.Code);
-                status.Problem.Should().StartWith("The check's statement waited too long for a lock somebody else holds; it is tried again at the next interval.");
+                status.Outcome.Should().Be(HealthCheckOutcome.Unavailable, "{0} reads the indexes, whose definitions would open the locked table", status.Code);
+                status.Problem.Should().StartWith("A table whose indexes this check judges is locked for a schema change right now",
+                    "the lock was seen in pg_locks, so nothing queued behind it");
+                status.Problem.Should().NotContain("waited too long").And.NotContain("qrtz_job_details", "the row names no table");
             }
             else
             {

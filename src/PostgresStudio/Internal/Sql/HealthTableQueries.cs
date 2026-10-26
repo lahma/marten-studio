@@ -532,12 +532,7 @@ internal static class HealthTableQueries
     /// <remarks>
     /// <para>
     /// <c>pg_get_indexdef</c> reads the system cache, as Weasel's own index read does and as the Schema
-    /// screen's always has - all but the column names, for which its deparser opens the indexed table for an
-    /// instant (<c>set_relation_column_names</c>: <c>AccessShareLock</c>, released as soon as it has them). So
-    /// nothing is held past the call, but a migration's <c>ACCESS EXCLUSIVE</c> on a listed table makes this
-    /// statement wait out <c>lock_timeout</c> and fail, and the index checks say so and try again at the next
-    /// interval (<c>WholeDatabaseTableHealthLiveTests</c> pins it). It is called for the listed tables' indexes
-    /// only, never a partition's. The
+    /// screen's always has; it is called for the listed tables' indexes only, never a partition's. The
     /// referenced columns come from <c>pg_depend</c>, where Postgres records the columns an expression or a
     /// predicate reads, and from <c>indkey</c> for the plain ones - an index backing a constraint depends on the
     /// constraint rather than on its columns, so <c>pg_depend</c> alone would miss them.
