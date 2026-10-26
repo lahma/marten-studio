@@ -113,7 +113,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Test - MartenStudio.Tests (no Docker)">
-    <PackageVersion Include="bunit" Version="2.11.3" />
+    <PackageVersion Include="bunit" Version="2.13.3" />
     <!--
       PINNED AT 32.0.0 ON PURPOSE. Verify.XunitV3 33.x depends on xunit.v3.extensibility.core
       4.0.1; 32.0.0 is the last release that depends on 3.2.2, which is where xunit.v3 is held.
