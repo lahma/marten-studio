@@ -82,8 +82,8 @@ internal sealed class AnonymousStudioCheck : HealthCheck<AnonymousStudioFacts>
                 + (options.Enabled.Count == 1 ? "is" : "are") + " on: anyone who can reach the address can use "
                 + (options.Enabled.Count == 1 ? "it" : "them") + " - "
                 + (options.IsEnabled(StudioCapability.RunSql) ? "read every row the console's role can, " : string.Empty)
-                + "and every write a capability allows. A store or write policy still decides what an anonymous visitor reaches, if "
-                + "the host set one; with none, nothing does.",
+                + "and every write a capability allows. A " + evaluation.Text.ScopePolicyNoun + " or write policy still decides what "
+                + "an anonymous visitor reaches, if the host set one; with none, nothing does.",
             Evidence =
             [
                 new("Mapping", "the studio's pages allow anonymous visitors"),

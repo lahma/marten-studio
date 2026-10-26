@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Services.Aurora;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Health.Checks;
 
@@ -135,14 +136,14 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
 
         return HealthVerdict.Of(nearest switch
         {
-            RoleVariant => RoleFinding(facts, critical, used),
+            RoleVariant => RoleFinding(facts, critical, used, evaluation.Text),
             DatabaseVariant => DatabaseFinding(facts, critical, used),
-            _ => ServerFinding(facts, critical, used, share),
+            _ => ServerFinding(facts, critical, used, share, evaluation.Text),
         });
     }
 
     /// <summary>The server's own finding - its text as it always was, but where the platform or a capacity reading adds to it.</summary>
-    private static HealthFinding ServerFinding(ServerConnectionHeadroomFacts facts, bool critical, string used, double share)
+    private static HealthFinding ServerFinding(ServerConnectionHeadroomFacts facts, bool critical, string used, double share, StudioText text)
     {
         ServerConnectionLimits limits = facts.Limits;
 
@@ -164,9 +165,9 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
                 : "The server's connections are more than " + SessionText.Percent(ConnectionThresholds.ServerUsedWarning) + " used",
             WhyItMatters =
                 "Once every connection an ordinary role may open is taken, the next one is refused with \"sorry, too many clients "
-                + "already\" - a pool that wants to grow, a deployment's new instance, the async daemon's next connection, a person "
-                + "with psql. Only superusers keep the reserved slots. Connections to every database on the server count, this "
-                + "store's and everybody else's.",
+                + "already\" - " + text.NextConnectionExamples + ", a person "
+                + "with psql. Only superusers keep the reserved slots. Connections to every database on the server count, "
+                + text.EveryDatabasesConnections + ".",
             Evidence = evidence,
             Caveat =
                 "Counts every client backend on the server, every database included. A session the studio's role may not read into "
@@ -176,10 +177,7 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
             Remedy = facts.Platform.Kind == PostgresPlatformKind.AmazonAurora
                 ? AuroraRemedy(facts.Capacity, limits)
                 : new HealthRemedy(
-                    """
-                    // Fewer connections per process - every data source Marten builds from a connection string:
-                    opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);
-                    """,
+                    text.FewerConnectionsRemedyCode,
                     "Lower pool ceilings across the applications that share the server, or a pooler such as PgBouncer in front of it. "
                     + "max_connections itself is the server's setting, which the studio never changes; raising it costs memory per "
                     + "connection on the server."),
@@ -271,7 +269,7 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
             + "and this remedy says which applies.");
     }
 
-    private static HealthFinding RoleFinding(ServerConnectionHeadroomFacts facts, bool critical, string used)
+    private static HealthFinding RoleFinding(ServerConnectionHeadroomFacts facts, bool critical, string used, StudioText text)
     {
         ServerConnectionLimits limits = facts.Limits;
         string role = limits.LoginRole ?? "(the login role)";
@@ -305,8 +303,8 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
                 : "The login role's sessions are more than " + SessionText.Percent(ConnectionThresholds.ServerUsedWarning) + " of its connection limit",
             WhyItMatters =
                 "Once the role the data source logs in as has as many sessions as its CONNECTION LIMIT, the next connection is refused "
-                + "with \"too many connections for role\" - whatever max_connections has left: a pool that wants to grow, a "
-                + "deployment's new instance, the async daemon's next connection. Every session of the role counts, in every database "
+                + "with \"too many connections for role\" - whatever max_connections has left: " + text.NextConnectionExamples
+                + ". Every session of the role counts, in every database "
                 + "on the server. The limit is not enforced against a superuser.",
             Evidence = evidence,
             Caveat =

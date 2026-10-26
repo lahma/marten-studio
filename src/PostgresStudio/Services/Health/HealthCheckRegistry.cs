@@ -70,18 +70,24 @@ internal sealed partial class HealthCheckRegistry
     /// <summary>Every check in the assemblies <paramref name="descriptor" /> names, resolved against the studio's runtime.</summary>
     /// <param name="descriptor">The studio's descriptor.</param>
     /// <param name="runtime">The studio's runtime, or <see langword="null" /> for a studio that registers none.</param>
-    public HealthCheckRegistry(StudioDescriptor descriptor, IStudioRuntime? runtime = null)
+    /// <param name="settings">
+    /// The studio's settings, whose words title a check its own way (<see cref="StudioText.CheckTitles" />), or
+    /// <see langword="null" /> for the attributes' titles.
+    /// </param>
+    public HealthCheckRegistry(StudioDescriptor descriptor, IStudioRuntime? runtime = null, IStudioSettings? settings = null)
         : this(
             DiscoverAll((descriptor ?? throw new ArgumentNullException(nameof(descriptor))).HealthCheckAssemblies),
             runtime ?? NoStudioRuntime.Instance,
-            descriptor.ProductName)
+            descriptor.ProductName,
+            settings?.Text)
     {
     }
 
     private HealthCheckRegistry(
         IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks,
         IStudioRuntime runtime,
-        string productName = "Marten Studio")
+        string productName = "Marten Studio",
+        StudioText? text = null)
     {
         IReadOnlyList<string> problems = Problems([.. checks.Select(static x => x.Type)], runtime);
 
@@ -95,7 +101,7 @@ internal sealed partial class HealthCheckRegistry
         [
             .. checks
                 .Select(check => new HealthCheckDescriptor(
-                    Describe(check.Type, runtime), (IHealthCheck) Activator.CreateInstance(check.Type)!, check.SourceKinds))
+                    Describe(check.Type, runtime, text), (IHealthCheck) Activator.CreateInstance(check.Type)!, check.SourceKinds))
                 .OrderBy(static x => x.Info.Area)
                 .ThenBy(static x => x.Info.Code, StringComparer.Ordinal),
         ];
@@ -189,7 +195,11 @@ internal sealed partial class HealthCheckRegistry
     /// <summary>The metadata of one check class. It must carry the attribute.</summary>
     /// <param name="checkType">The check class.</param>
     /// <param name="runtime">The runtime its <c>RequiresFeature</c> is resolved against, or <see langword="null" /> for none.</param>
-    internal static HealthCheckInfo Describe(Type checkType, IStudioRuntime? runtime = null)
+    /// <param name="text">
+    /// The studio's words, whose <see cref="StudioText.CheckTitles" /> may title the check its own way; <see langword="null" />
+    /// for the attribute's title. The docs heading is the attribute's title either way (<see cref="HealthCheckInfo.DocsTitle" />).
+    /// </param>
+    internal static HealthCheckInfo Describe(Type checkType, IStudioRuntime? runtime = null, StudioText? text = null)
     {
         ArgumentNullException.ThrowIfNull(checkType);
         runtime ??= NoStudioRuntime.Instance;
@@ -202,11 +212,12 @@ internal sealed partial class HealthCheckRegistry
             attribute.Area,
             attribute.Tier,
             attribute.Gate,
-            attribute.Title,
+            text?.CheckTitle(attribute.Code, attribute.Title) ?? attribute.Title,
             attribute.RequiresFeature is { } feature ? runtime.FindFeature(feature) : null,
             checkType)
         {
             Variants = [.. attribute.Variants ?? []],
+            DocsTitle = attribute.Title,
         };
     }
 

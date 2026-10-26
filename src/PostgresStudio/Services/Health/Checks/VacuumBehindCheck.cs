@@ -357,7 +357,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
                     ? "A dead row is an old version an update or a delete left behind, and only vacuum makes its space reusable. Until it "
                       + "runs, every sequential scan reads the dead rows, every index still points at them, the table and its indexes keep "
                       + "growing, and the visibility map that index-only scans need goes stale."
-                    : "An append-only table - an event log such as mt_events, a history table - leaves no dead rows, so autovacuum visits it "
+                    : "An append-only table - " + evaluation.Text.AppendOnlyExamples + " - leaves no dead rows, so autovacuum visits it "
                       + "only for its inserts: that pass sets the visibility map that index-only scans read, and freezes pages while they are "
                       + "still in memory, so the anti-wraparound vacuum that must come for every table later is cheap rather than a scan of "
                       + "everything at once.")

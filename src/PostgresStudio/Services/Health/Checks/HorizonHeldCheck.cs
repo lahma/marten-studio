@@ -776,7 +776,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
 
         if (chosen.HoldsTables)
         {
-            evidence.Add(new HealthEvidence("Dead rows in the store's tables", DeadRows(facts, chosen.Age, chosen.TimeKind)));
+            evidence.Add(new HealthEvidence(evaluation.Text.HorizonDeadRowsLabel, DeadRows(facts, chosen.Age, chosen.TimeKind)));
         }
 
         if (oldest is { } binding && binding.Holder.XidAge > held.XidAge)
@@ -829,7 +829,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             Code = "T14",
             Severity = chosen.Severity!.Value,
             Title = Title(held, chosen.Age, chosen.TimeKind, chosen.HoldsTables),
-            WhyItMatters = WhyItMatters(held, leader, facts, chosen.HoldsTables, chosen.Behind.Count > 0),
+            WhyItMatters = WhyItMatters(held, leader, facts, chosen.HoldsTables, chosen.Behind.Count > 0, evaluation.Text),
             Evidence = evidence,
             Caveat = string.Join(" ", caveat),
             Remedy = RemedyFor(held, leader, facts.LeaderLockInTransaction, evaluation.Text),
@@ -1034,7 +1034,7 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
             + "; of one that holds only a snapshot it is not known, because the snapshot's id is somebody else's.";
     }
 
-    private static string WhyItMatters(HorizonHolder holder, bool leader, HorizonFacts facts, bool holdsTables, bool anythingBehind)
+    private static string WhyItMatters(HorizonHolder holder, bool leader, HorizonFacts facts, bool holdsTables, bool anythingBehind, StudioText text)
     {
         string why =
             "Vacuum removes a dead row, and freezes a live one, only once no transaction could still see it - and the oldest "
@@ -1084,8 +1084,8 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
                 " A physical slot's xmin is its standby's hot_standby_feedback, kept even while the standby is away; a DBA ends it by "
                 + "bringing the standby back or dropping a slot nothing uses any more (R01 watches the WAL it retains).",
             HealthHorizonHolderKind.SlotCatalogXmin =>
-                " A logical slot keeps the system catalogs as they were when its consumer last confirmed - Debezium, a CDC pipeline on "
-                + "mt_events, a subscription - and an abandoned one holds them, and every database's freeze, for good. Restart its "
+                " A logical slot keeps the system catalogs as they were when its consumer last confirmed - " + text.LogicalSlotConsumers
+                + " - and an abandoned one holds them, and every database's freeze, for good. Restart its "
                 + "consumer, or have a DBA drop a slot nothing uses (R01 watches the WAL it retains).",
             HealthHorizonHolderKind.Standby =>
                 " A standby with hot_standby_feedback = on sends its oldest snapshot here, so a long query on the standby holds back "

@@ -136,10 +136,14 @@ public class ServerSettingRemedyPinTests
             .Evaluate(new ServerConnectionLimits(96, 10, 100, 3, 0, 170004), HealthEvaluation.At(Today, text: Text(studio)))
             .Findings.Single().Remedy!;
 
-        remedy.Kind.Should().Be(HealthRemedyKind.Configuration, "C03's remedy is the store's pool ceiling, not a server setting");
-        remedy.Code.Should().Be(
-            "// Fewer connections per process - every data source Marten builds from a connection string:\n"
-            + "opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);");
+        remedy.Kind.Should().Be(HealthRemedyKind.Configuration, "C03's remedy is the source's pool ceiling, not a server setting");
+
+        // Wave 6: in Postgres Studio the line is the data source's own connection string - there is no store to configure.
+        remedy.Code.Should().Be(studio == "PostgresStudio"
+            ? "// Fewer connections per process, in the connection string each data source is built from:\n"
+              + "Maximum Pool Size=50"
+            : "// Fewer connections per process - every data source Marten builds from a connection string:\n"
+              + "opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);");
         remedy.Explanation.Should().Be(
             "Lower pool ceilings across the applications that share the server, or a pooler such as PgBouncer in front of it. "
             + "max_connections itself is the server's setting, which the studio never changes; raising it costs memory per "

@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -99,14 +100,23 @@ internal sealed record StatementReadOutcome(StatementReadState State, StatementE
     public Exception? Cause { get; init; }
 
     /// <summary>The sentence a check's row says for a state that is not <see cref="StatementReadState.Read" />: H7's, unchanged.</summary>
-    public string? Reason => State switch
+    public string? Reason => ReasonIn(StudioText.Marten);
+
+    /// <summary><see cref="Reason" /> in the words of the studio <paramref name="text" /> is - whose role recorded nothing.</summary>
+    /// <param name="text">The studio's words.</param>
+    public string? ReasonIn(StudioText text)
     {
-        StatementReadState.NotInstalled => StatementReads.NotInstalled,
-        StatementReadState.TooOld => StatementReads.TooOld(Extension),
-        StatementReadState.NotPreloaded => StatementReads.NotPreloaded,
-        StatementReadState.NothingRecorded => StatementReads.NothingRecorded,
-        _ => null,
-    };
+        ArgumentNullException.ThrowIfNull(text);
+
+        return State switch
+        {
+            StatementReadState.NotInstalled => StatementReads.NotInstalled,
+            StatementReadState.TooOld => StatementReads.TooOld(Extension),
+            StatementReadState.NotPreloaded => StatementReads.NotPreloaded,
+            StatementReadState.NothingRecorded => text.NothingRecorded,
+            _ => null,
+        };
+    }
 }
 
 /// <summary>What one statement sweep read of <c>pg_stat_statements</c>, shared by T02, T22 and T23.</summary>
@@ -257,11 +267,6 @@ internal static partial class StatementReads
         "pg_stat_statements is installed in this database but its library is not loaded: it must be in "
         + "shared_preload_libraries, which takes a PostgreSQL restart. Until then the statement checks have nothing to read.";
 
-    /// <summary>What the status row says when the role has no statement recorded here yet.</summary>
-    internal const string NothingRecorded =
-        "pg_stat_statements has recorded no statement of the store's own role in this database yet - since its last reset, "
-        + "or since the extension was installed - so there is nothing to judge until the application has run.";
-
     /// <summary>The read, once per sweep for every statement check that asks.</summary>
     /// <exception cref="HealthCheckUnavailableException">An expected state stopped it: its row's reason (<see cref="StatementReadOutcome.Reason" />).</exception>
     public static Task<StatementRead> ReadAsync(HealthCheckContext context)
@@ -276,9 +281,11 @@ internal static partial class StatementReads
                 return read;
             }
 
+            string reason = outcome.ReasonIn(context.Settings.Text)!;
+
             throw outcome.Cause is { } cause
-                ? new HealthCheckUnavailableException(outcome.Reason!, cause)
-                : new HealthCheckUnavailableException(outcome.Reason!);
+                ? new HealthCheckUnavailableException(reason, cause)
+                : new HealthCheckUnavailableException(reason);
         });
     }
 
@@ -787,11 +794,16 @@ internal static class StatementWindows
     }
 
     /// <summary>The caveat every statement finding carries: where it was read, over what, and what it cannot see.</summary>
-    public static string Caveat(StatementRead read, StatementWindow window, HealthHistoryView history)
+    /// <param name="read">The statement read.</param>
+    /// <param name="window">The window the finding measured.</param>
+    /// <param name="history">The advisor's samples.</param>
+    /// <param name="text">The studio's words for whose role it read as, or <see langword="null" /> for MartenStudio's.</param>
+    public static string Caveat(StatementRead read, StatementWindow window, HealthHistoryView history, StudioText? text = null)
     {
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(history);
+        text ??= StudioText.Marten;
 
         string when = window.Watched
             ? "Measured " + Describe(window, read.ReadAt) + ", between two statement checks."
@@ -812,7 +824,7 @@ internal static class StatementWindows
         }
 
         return when
-            + " Read from pg_stat_statements as the store's own role, which holds that role's statements in this database and only "
+            + " Read from pg_stat_statements as " + text.SourcePossessive + " own role, which holds that role's statements in this database and only "
             + "the ones that completed: another role's statements are not among them, and another application's are when it "
             + "connects as the same role." + evicted;
     }

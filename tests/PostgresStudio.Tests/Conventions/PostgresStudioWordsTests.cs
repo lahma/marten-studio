@@ -14,9 +14,10 @@ namespace PostgresStudio.Tests.Conventions;
 /// <summary>
 /// PostgresStudio says its own words (PS-3b): every sentence it reads from <see cref="StudioText" /> and every log template
 /// it writes is free of MartenStudio's option names, configuration and session APIs - except the few that name Marten
-/// on purpose, to say that a Marten store's objects are browsed elsewhere.
+/// on purpose, to say that a Marten store's objects are browsed elsewhere. The <c>.Checks</c> part holds every shared
+/// health check to the same, by evaluating it (wave 6).
 /// </summary>
-public class PostgresStudioWordsTests
+public partial class PostgresStudioWordsTests
 {
     /// <summary>What only MartenStudio's configuration and API are called: never in a PostgresStudio sentence.</summary>
     private static readonly string[] MartenStudioNames =

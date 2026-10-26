@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Health.Checks;
@@ -55,7 +56,10 @@ internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IRea
 [HealthCheck("T03", HealthArea.Tables, HealthCostTier.Catalog, "Invalid index")]
 internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 {
-    /// <summary>What a partitioned table's invalid index needs instead of a re-apply.</summary>
+    /// <summary>
+    /// What a partitioned table's invalid index needs instead of a re-apply, in MartenStudio
+    /// (<see cref="Settings.StudioText.PartitionedIndexRepair" /> is each studio's).
+    /// </summary>
     internal const string PartitionedInWords =
         " On a partitioned table a re-apply cannot resume the build: Weasel reads only the partitioned table's own indexes, "
         + "and rebuilding under the same child index name fails while the leftover index on the partition is still there. A "
@@ -94,7 +98,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
                 continue;
             }
 
-            findings.Add(OnTable(index, partitioned.Contains(index.Table.Key), evaluation.TableRemedies));
+            findings.Add(OnTable(index, partitioned.Contains(index.Table.Key), evaluation.TableRemedies, evaluation.Text));
         }
 
         foreach (TableFacts table in facts.Tables)
@@ -113,7 +117,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
             if (table.Row.InvalidPartitionIndexes > 0)
             {
-                findings.Add(OnPartitions(table));
+                findings.Add(OnPartitions(table, evaluation.Text));
             }
         }
 
@@ -167,7 +171,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             + "pg_stat_progress_create_index as a role that can, before acting." + meanwhile);
     }
 
-    private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable, IHealthTableRemedies? remedies)
+    private static HealthFinding OnTable(IndexFacts index, bool onPartitionedTable, IHealthTableRemedies? remedies, StudioText text)
     {
         StudioTable table = index.Table;
         (HealthSeverity severity, string builds, string caveat) = Certainty(
@@ -187,11 +191,11 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
                 + "drops or rebuilds it in Postgres directly.",
             _ when onPartitionedTable =>
                 " On a partitioned table an index stays invalid until every partition has its own index attached - a build that "
-                + "stopped before the last partition." + PartitionedInWords,
+                + "stopped before the last partition." + text.PartitionedIndexRepair,
             IndexOrigin.Undeclared =>
                 " Nothing in the configuration declares it, so it is a hand-made CREATE INDEX CONCURRENTLY that failed, and the "
                 + "next apply drops it. If it is wanted, declare it first.",
-            _ => " Marten's configuration declares it, so a re-apply drops it and builds it again.",
+            _ => text.DeclaredIndexRebuild,
         };
 
         return new HealthFinding
@@ -221,7 +225,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         };
     }
 
-    private static HealthFinding OnPartitions(TableFacts table)
+    private static HealthFinding OnPartitions(TableFacts table, StudioText text)
     {
         int count = table.Row.InvalidPartitionIndexes;
         string indexes = count == 1 ? "1 index" : count.ToString("N0", CultureInfo.InvariantCulture) + " indexes";
@@ -247,7 +251,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             WhyItMatters =
                 "Postgres has marked an index on one or more of this table's partitions invalid" + builds
                 + " a concurrent build or rebuild on a partition that failed leaves behind. Queries that reach that partition read it "
-                + "without the index, and every write to it still maintains it." + PartitionedInWords,
+                + "without the index, and every write to it still maintains it." + text.PartitionedIndexRepair,
             Evidence =
             [
                 new HealthEvidence("Table", table.Table.Describe()),

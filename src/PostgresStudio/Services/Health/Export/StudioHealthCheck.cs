@@ -55,7 +55,7 @@ internal sealed class StudioHealthCheck : AspNetCoreHealthCheck
 
             return new AspNetCoreHealthCheckResult(
                 StatusOf(summary.Level, failureStatus),
-                description: summary.Describe(runner.Interval),
+                description: summary.Describe(runner.Interval, runner.Text),
                 exception: null,
                 data: summary.ToData());
         }

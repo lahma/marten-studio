@@ -265,8 +265,8 @@ internal sealed class UnindexedForeignKeyCheck : HealthCheck<UnindexedForeignKey
             Evidence = evidence,
             Caveat =
                 "Covered means an index - valid, not partial, a b-tree or a one-column hash - whose leading columns are exactly the "
-                + "key's, in any order; on a partitioned table the columns its partition key prunes on are left to pruning, and "
-                + "a column the table's own configuration adds to every key (a conjoined Marten table's tenant_id) need not lead. "
+                + "key's, in any order; on a partitioned table the columns its partition key prunes on are left to pruning"
+                + evaluation.Text.ConfiguredKeyColumnClause + ". "
                 + "An index that leads with some of them narrows the lookup, and is Info. The size is relpages', as of the last "
                 + "VACUUM or ANALYZE.",
             Remedy = remedy,
