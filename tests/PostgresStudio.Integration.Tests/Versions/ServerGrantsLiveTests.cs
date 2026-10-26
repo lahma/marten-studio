@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Server;
 
@@ -54,6 +55,97 @@ public class ServerGrantsLiveTests(PostgresVersionMatrix matrix)
         probe.Roles.Single(static x => x.Name == "pg_maintain").Exists.Should().Be(server.VersionNumber >= 170000, "pg_maintain is 17's");
         probe.Roles.Where(x => PostgresGrants.ProviderAdminRoles.Contains(x.Name)).Should().OnlyContain(static x => !x.Exists,
             "a server of somebody's own has no provider's role, and asking about one is no error");
+        probe.LoginRole.Should().Be("probe", "with no SqlConsoleRole the reads run as the login");
+    }
+
+    /// <summary>
+    /// A member that does not have a predefined role's privileges is not said to hold it: a <c>NOINHERIT</c> role granted
+    /// <c>pg_monitor</c> on every version, and a grant of <c>pg_read_all_stats</c> <c>WITH INHERIT FALSE</c> on 16 and later -
+    /// what <c>pg_has_role(..., 'USAGE')</c> answers, where <c>'MEMBER'</c> said yes to both.
+    /// </summary>
+    [PostgresTheory]
+    [MemberData(nameof(PostgresVersionMatrix.All), MemberType = typeof(PostgresVersionMatrix))]
+    public async Task A_member_without_the_privileges_does_not_hold_the_role(int major)
+    {
+        MatrixServer server = await matrix.ServerAsync(major);
+        server.SkipIfUnavailable();
+
+        PostgresGrants noInherit = await GrantsAsync(server, MatrixRole.NoInheritMonitor);
+        noInherit.Holds(PostgresGrant.Monitor).Should().BeFalse("a NOINHERIT role has pg_monitor's privileges only after SET ROLE");
+        noInherit.Holds(PostgresGrant.ReadAllStats).Should().BeFalse();
+
+        if (server.VersionNumber >= 160000)
+        {
+            PostgresGrants uninherited = await GrantsAsync(server, MatrixRole.UninheritedStats);
+            uninherited.Holds(PostgresGrant.ReadAllStats).Should().BeFalse("WITH INHERIT FALSE makes a member without the privileges");
+
+            await using NpgsqlConnection connection = await server.OpenAsync(cancellationToken: Token);
+            await using NpgsqlCommand member = new(
+                "select pg_catalog.pg_has_role('uninherited_stats', 'pg_read_all_stats', 'MEMBER'), "
+                + "pg_catalog.pg_has_role('noinherit_mon', 'pg_monitor', 'MEMBER')",
+                connection);
+            await using NpgsqlDataReader reader = await member.ExecuteReaderAsync(Token);
+            await reader.ReadAsync(Token);
+            (reader.GetBoolean(0), reader.GetBoolean(1)).Should().Be((true, true), "both are members - which is why MEMBER was the wrong question");
+        }
+    }
+
+    /// <summary>
+    /// With <c>SqlConsoleRole</c> set, a refused read as that role names it, and a refused read as the application's own role
+    /// (<c>QueryAsApplicationRoleAsync</c>) names the login - each the role Postgres refused.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData(14)]
+    [InlineData(18)]
+    public async Task A_refused_read_names_the_role_it_ran_as(int major)
+    {
+        MatrixServer server = await matrix.ServerAsync(major);
+        server.SkipIfUnavailable();
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(
+            server,
+            MatrixRole.ConsoleLogin,
+            services: static s => s.AddSingleton(HealthCheckRegistry.ForTypes([typeof(ReadsWhatItMayNotCheck), typeof(ReadsAsTheApplicationCheck)])),
+            options: static o => o.SqlConsoleRole = "console_role");
+
+        HealthSweep sweep = await host.SweepAsync(HealthSweepKind.Regular);
+
+        sweep.Results.Single(static x => x.Check.Code == "T95").Problem!.Reason.Should().StartWith(
+            "Not checked: Postgres refused role console_role a read this check needs (SQLSTATE 42501)");
+        sweep.Results.Single(static x => x.Check.Code == "T96").Problem!.Reason.Should().StartWith(
+            "Not checked: Postgres refused role console_login a read this check needs (SQLSTATE 42501)");
+        sweep.Results.Should().OnlyContain(static x => x.Outcome == HealthCheckOutcome.Unavailable);
+    }
+
+    /// <summary>
+    /// A domain's NOT NULL is a constraint row from 17 on (<c>contype = 'n'</c>); the browser's type list leaves it to the
+    /// type's own NOT NULL flag, so the domain's constraints read the same on every version - its CHECK.
+    /// </summary>
+    [PostgresTheory]
+    [MemberData(nameof(PostgresVersionMatrix.Supported), MemberType = typeof(PostgresVersionMatrix))]
+    public async Task A_domains_NOT_NULL_is_its_flag_and_never_a_constraint_row(int major)
+    {
+        MatrixServer server = await matrix.ServerAsync(major);
+        server.SkipIfUnavailable();
+
+        await using NpgsqlConnection connection = await server.OpenAsync(MatrixRole.App, cancellationToken: Token);
+        await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(Token);
+
+        await using (NpgsqlCommand count = new(
+            "select pg_catalog.count(*) from pg_catalog.pg_constraint k where k.contypid = 'store.positive_count'::pg_catalog.regtype and k.contype = 'n'",
+            connection,
+            transaction))
+        {
+            ((long) (await count.ExecuteScalarAsync(Token))!).Should().Be(major >= 17 ? 1 : 0,
+                "17 catalogs a domain's NOT NULL as a constraint (the anti-vacuity half)");
+        }
+
+        await DatabaseCatalogQueries.PinSearchPathAsync(connection, transaction, 30, Token);
+        CatalogList<CatalogType> types = await DatabaseCatalogQueries.ReadTypesAsync(connection, transaction, ["store"], null, "positive_count", DatabaseCatalog.ListCap, 30, Token);
+
+        CatalogType domain = types.Items.Single();
+        domain.NotNull.Should().BeTrue();
+        domain.Checks.Should().Equal("CHECK (VALUE > 0)");
     }
 
     /// <summary>
@@ -171,17 +263,29 @@ public class ServerGrantsLiveTests(PostgresVersionMatrix matrix)
         result.Problem!.SqlState.Should().Be(PostgresErrorCodes.InsufficientPrivilege);
         result.Problem.UnavailableReason.Should().Be(HealthUnavailableReason.HostChoice);
         result.Problem.Reason.Should().Be(
-            "Not checked: Postgres refused role probe a read this check needs (SQLSTATE 42501); pg_monitor covers every statistics "
-            + "view the advisor reads. On a self-hosted server a superuser can grant it.");
+            "Not checked: Postgres refused role probe a read this check needs (SQLSTATE 42501), and what it refused is in "
+            + "Postgres' words below. A table, schema or sequence is its owner's to grant (SELECT or USAGE); a statistics view "
+            + "or function is covered by pg_monitor. On a self-hosted server a superuser can grant it.");
+        result.Problem.PostgresText.Should().Contain("permission denied for schema store", "the words the sentence points at are Postgres' own");
         result.Statements.Select(static x => x.Sql).Should().Contain(ServerReachQueries.Grants().Sql, "Show SQL carries the grant read the sentence came from");
     }
 
-    /// <summary>A made-up check that reads a table the role has no privilege on.</summary>
+    /// <summary>A made-up check that reads a table the role has no privilege on, as <c>SqlConsoleRole</c>.</summary>
     [HealthCheck("T95", HealthArea.Tables, HealthCostTier.Catalog, "Reads a table it may not")]
     private sealed class ReadsWhatItMayNotCheck : HealthCheck<int>
     {
         public override async Task<int> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken) =>
             (await context.Sql.QueryAsync(new HealthQuery("select pg_catalog.count(*)::int4 from store.child"), static r => r.GetInt32(0), cancellationToken)).Single();
+
+        public override HealthVerdict Evaluate(int facts, HealthEvaluation evaluation) => HealthVerdict.Quiet();
+    }
+
+    /// <summary>The same read, as the application's own role - the path only the statement checks take in <c>src/</c>.</summary>
+    [HealthCheck("T96", HealthArea.Tables, HealthCostTier.Catalog, "Reads a table it may not, as the application")]
+    private sealed class ReadsAsTheApplicationCheck : HealthCheck<int>
+    {
+        public override async Task<int> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken) =>
+            (await context.Sql.QueryAsApplicationRoleAsync(new HealthQuery("select pg_catalog.count(*)::int4 from store.child"), static r => r.GetInt32(0), cancellationToken)).Single();
 
         public override HealthVerdict Evaluate(int facts, HealthEvaluation evaluation) => HealthVerdict.Quiet();
     }

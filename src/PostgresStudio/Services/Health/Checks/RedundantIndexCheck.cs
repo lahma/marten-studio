@@ -6,7 +6,11 @@ namespace PostgresStudio.Services.Health.Checks;
 
 /// <summary>What T04 reads: every index on the declared tables.</summary>
 /// <param name="Indexes">The indexes, with where each comes from.</param>
-internal sealed record RedundantIndexFacts(IReadOnlyList<IndexFacts> Indexes);
+internal sealed record RedundantIndexFacts(IReadOnlyList<IndexFacts> Indexes)
+{
+    /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T04: an index another valid index on the same table already does the whole job of.
@@ -30,20 +34,23 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
     /// <inheritdoc />
     public override async Task<RedundantIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        return new RedundantIndexFacts(await HealthTables.IndexesAsync(context).ConfigureAwait(false));
+        HealthIndexRead read = await HealthTables.IndexReadAsync(context).ConfigureAwait(false);
+        return new RedundantIndexFacts(read.Indexes) { LockedTables = read.LockedTables };
     }
 
     /// <inheritdoc />
     public override HealthVerdict Evaluate(RedundantIndexFacts facts, HealthEvaluation evaluation)
     {
+        IndexFacts[] judged = [.. facts.Indexes.Where(x => !facts.LockedTables.Contains(x.Table.Key))];
+
         Dictionary<HealthIndexRow, IndexFacts> byRow = new(ReferenceEqualityComparer.Instance);
-        foreach (IndexFacts index in facts.Indexes)
+        foreach (IndexFacts index in judged)
         {
             byRow[index.Row] = index;
         }
 
         IReadOnlyList<RedundantIndex> redundant = IndexRedundancy.Find(
-            [.. facts.Indexes.Select(static x => x.Row)],
+            [.. judged.Select(static x => x.Row)],
             row => KeepRank(byRow[row].Origin));
 
         List<HealthFinding> findings = [];
@@ -62,7 +69,8 @@ internal sealed class RedundantIndexCheck : HealthCheck<RedundantIndexFacts>
             findings.Add(Finding(index, cover, found.Kind, evaluation.TableRemedies));
         }
 
-        return findings.Count == 0 ? HealthVerdict.Quiet() : new HealthVerdict(findings);
+        string? note = HealthTables.LockedNote(facts.LockedTables);
+        return findings.Count == 0 ? HealthVerdict.Quiet(note) : new HealthVerdict(findings, note);
     }
 
     /// <summary>Which of two exact duplicates to keep: Marten's own over a declaration over a hand-made one.</summary>

@@ -2,17 +2,22 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 
+using Microsoft.Extensions.DependencyInjection;
+
 using Npgsql;
 
+using PostgresStudio.Integration.Tests.Health;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Server;
 
 namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
-/// The studio's core reads on PostgreSQL 14 to 18, and on 19's release candidate as a preview: every health check ends
-/// read, not applicable or not checked - never failed, never on an unknown column, function, relation or syntax - as the
-/// application's role and as a role with no grant at all; every database-browser, Sessions and relationship read runs;
+/// The studio's core reads on PostgreSQL 14 to 18, and on 19's release candidate as a preview: every one of the shared
+/// studio's health checks - the regular and the statement checks; it has no deeper ones, and MartenStudio's checks are not
+/// in the matrix - ends read, not applicable or not checked, never failed, never on an unknown column, function, relation
+/// or syntax, as the application's role and as a role with no grant at all, and C01 judges the host's pool; every
+/// database-browser, Sessions and relationship read runs;
 /// the lists and the regular sweep return behind somebody's <c>ACCESS EXCLUSIVE</c> lock under a 300 ms
 /// <c>lock_timeout</c>; nothing creates anything; and <see cref="PostgresFeatures" /> agrees with each server's own catalog.
 /// </summary>
@@ -23,12 +28,15 @@ namespace PostgresStudio.Integration.Tests.Versions;
 /// day its image is a released one (<see cref="MatrixVersion.Preview" />), the same finding fails.
 /// </para>
 /// <para>
-/// <b>Wall clock</b> (this machine, images local): see the report's "matrix wall clock" line - the first test of each
-/// major starts its server, the rest share it.
+/// <b>Wall clock</b> (this machine, images local, 2026-10-26): about 40 s for the folder - the first test of each major
+/// starts its server, the rest share it.
 /// </para>
 /// </remarks>
 public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
 {
+    /// <summary>What every index check's status row says while one of its tables is locked for a schema change.</summary>
+    private const string OneLockedTable = "1 table was locked for a schema change and not judged this sweep.";
+
     /// <summary>What a statement that names something missing, or does not parse, raises - a read that does not fit the version.</summary>
     private static readonly HashSet<string> VersionStates = ["42703", "42883", "42P01", "42601"];
 
@@ -86,13 +94,16 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
                     problems.Add($"{result.Check.Code} ran a statement this version does not have ({state}): {result.Problem.PostgresText}");
                 }
 
-                if (result.Problem?.SqlState == PostgresErrorCodes.InsufficientPrivilege
-                    && (result.Outcome != HealthCheckOutcome.Unavailable || !result.Problem.Reason.StartsWith("Not checked: Postgres refused role ", StringComparison.Ordinal)))
+                // The host's pool is its own (MatrixHost), so C01 judges it on every leg rather than standing down.
+                if (result.Check.Code == "C01" && result.Outcome != HealthCheckOutcome.Checked)
                 {
-                    problems.Add($"{result.Check.Code} was refused a privilege and did not say which grant: {result.Outcome} {result.Problem.Reason}");
+                    problems.Add($"C01 did not judge the host's own pool: {result.Outcome} {result.Problem?.Reason}");
                 }
             }
         }
+
+        // No core check is refused anything as probe on 14 to 19 - every statistics view it reads is open to every role - so
+        // the 42501 wording is proved where a check is refused on purpose: ServerGrantsLiveTests' T95.
 
         TestContext.Current.TestOutputHelper?.WriteLine("PostgreSQL {0} as {1}:\n{2}", server.ServerVersion, role, report);
 
@@ -128,7 +139,9 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
     /// <summary>
     /// D27 on every version: while a second session holds <c>ACCESS EXCLUSIVE</c> on a table and on a partition - what a
     /// migration's <c>ALTER</c> takes - every lock-free read and the regular sweep return under a 300 ms
-    /// <c>lock_timeout</c>, so neither queues behind the migration (B0's "waits" method, the one that is proof).
+    /// <c>lock_timeout</c>, so neither queues behind the migration (B0's "waits" method, the one that is proof). The index
+    /// checks judge every other table and count the locked one as not judged, and the sweep holds no lock beyond a catalog
+    /// read (B0's "held" method).
     /// </summary>
     [PostgresTheory]
     [MemberData(nameof(PostgresVersionMatrix.All), MemberType = typeof(PostgresVersionMatrix))]
@@ -139,8 +152,9 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
 
         TimeSpan lockTimeout = TimeSpan.FromMilliseconds(300);
         CancellationToken token = TestContext.Current.CancellationToken;
+        HealthSweepProbe probe = new(cancellation => server.OpenAsync(cancellationToken: cancellation));
 
-        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App);
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, services: s => s.AddSingleton<IHealthStatementObserver>(probe));
         await using NpgsqlConnection holder = await server.OpenAsync(cancellationToken: token);
         await using NpgsqlTransaction held = await holder.BeginTransactionAsync(token);
 
@@ -166,16 +180,21 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
             .Where(static x => x.Problem?.SqlState == PostgresErrorCodes.LockNotAvailable || x.Outcome == HealthCheckOutcome.Failed)
             .Select(static x => $"{x.Check.Code} behind the lock: {x.Outcome} {x.Problem?.SqlState} {x.Problem?.Reason}"));
 
-        // The index checks read the definitions of store.child's indexes, which deparse would open the locked table for:
-        // they stand down for the sweep, saying so, rather than queue (HealthTableQueries.IndexesSql).
-        string[] standingDown = [.. sweep.Results
-            .Where(static x => x.Outcome == HealthCheckOutcome.Unavailable && x.Problem?.Reason.Contains("locked for a schema change", StringComparison.Ordinal) == true)
-            .Select(static x => x.Check.Code)];
-
-        if (!standingDown.Contains("T03"))
+        // The index checks would deparse store.child's indexes, which opens the locked table: they judge every other table
+        // and count that one, rather than queue or stand down whole (HealthTableQueries.IndexesSql, HealthTables.ReadIndexesAsync).
+        foreach (string code in (string[]) ["T03", "T04", "T05", "T06"])
         {
-            problems.Add("T03 did not stand down behind the lock on store.child: " + string.Join(", ", sweep.Results.Select(static x => x.Check.Code + " " + x.Outcome)));
+            HealthCheckResult? result = sweep.Results.SingleOrDefault(x => x.Check.Code == code);
+
+            if (result is not { Outcome: HealthCheckOutcome.Checked } || result.Note?.Contains(OneLockedTable, StringComparison.Ordinal) != true)
+            {
+                problems.Add($"{code} behind the lock on store.child did not judge the rest and count the one: {result?.Outcome} {result?.Note} {result?.Problem?.Reason}");
+            }
         }
+
+        // The partition store.r_2026_10 is locked too, but no index read deparses a partition: it is not among them.
+        probe.StatementsObserved.Should().BePositive("so 'no lock' is not 'nothing ran'");
+        problems.AddRange(probe.BeyondCatalogReads.Select(static x => "held behind the lock: " + x));
 
         TestContext.Current.TestOutputHelper?.WriteLine("PostgreSQL {0}: lists and the regular sweep behind the lock in {1:0} ms", server.ServerVersion, clock.Elapsed.TotalMilliseconds);
 
@@ -217,6 +236,19 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         Report(server, problems);
     }
 
+    /// <summary>A leg is a preview by its tag alone: a repository whose name has "rc" or "beta" in it is not a release candidate.</summary>
+    [Theory]
+    [InlineData("postgres:19rc1-alpine", true)]
+    [InlineData("postgres:19beta2", true)]
+    [InlineData("postgres:18.6-alpine", false)]
+    [InlineData("postgres:19.1-alpine", false)]
+    [InlineData("example.org/rcorp/postgres-beta:18.6-alpine", false)]
+    [InlineData("localhost:5000/postgres:19rc2", true)]
+    public void A_preview_is_told_by_its_tag(string image, bool preview)
+    {
+        new MatrixVersion(19, image).Preview.Should().Be(preview);
+    }
+
     [Fact]
     public void Every_feature_is_probed_against_the_catalog_or_named_as_one_that_cannot_be()
     {
@@ -226,10 +258,9 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         Unprobed.Should().NotIntersectWith(Probes.Keys);
     }
 
-    /// <summary>The features no catalog read can show: behaviour after a restart, and a JIT plan's shape.</summary>
+    /// <summary>The features no catalog read can show: a JIT plan's shape, which needs a plan costly enough to compile.</summary>
     private static readonly HashSet<PostgresFeature> Unprobed =
     [
-        PostgresFeature.StatsPersistAcrossCleanRestart,
         PostgresFeature.ExplainGenerationObject,
     ];
 
@@ -250,6 +281,10 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         [PostgresFeature.ReltuplesUnknownIsMinusOne] = "select c.reltuples = -1 from pg_catalog.pg_class c where c.oid = 'store.l'::pg_catalog.regclass",
         [PostgresFeature.StatementsJit] = Column("public.pg_stat_statements", "jit_functions"),
         [PostgresFeature.ForceNextFlush] = Function("pg_stat_force_next_flush"),
+
+        // A fresh server's database counters were never reset: 14's collector still stamped the time, 15 leaves it null.
+        [PostgresFeature.DatabaseStatsResetNullAfterCrash] =
+            "select d.stats_reset is null from pg_catalog.pg_stat_database d where d.datname = pg_catalog.current_database()",
         [PostgresFeature.PgStatIo] = Relation("pg_catalog.pg_stat_io"),
         [PostgresFeature.LastScanColumns] = Column("pg_catalog.pg_stat_all_tables", "last_seq_scan"),
         [PostgresFeature.NewPageUpdates] = Column("pg_catalog.pg_stat_all_tables", "n_tup_newpage_upd"),

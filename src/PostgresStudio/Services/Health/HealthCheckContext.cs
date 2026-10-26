@@ -356,7 +356,7 @@ internal sealed class HealthSqlRunner
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken) =>
-        QueryAsync(session, query, map, cancellationToken);
+        QueryAsync(session, asApplicationRole: false, query, map, cancellationToken);
 
     /// <summary>
     /// Runs <paramref name="query" /> as the store's own Postgres role - the role its data source connects as -
@@ -391,10 +391,11 @@ internal sealed class HealthSqlRunner
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken) =>
-        QueryAsync(applicationRoleSession, query, map, cancellationToken);
+        QueryAsync(applicationRoleSession, asApplicationRole: true, query, map, cancellationToken);
 
     private async Task<IReadOnlyList<T>> QueryAsync<T>(
         ReadOnlySqlSession readOnly,
+        bool asApplicationRole,
         HealthQuery query,
         Func<NpgsqlDataReader, T> map,
         CancellationToken cancellationToken)
@@ -449,12 +450,39 @@ internal sealed class HealthSqlRunner
                     cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception) when (open.State is not System.Data.ConnectionState.Open)
+        catch (Exception exception)
         {
-            // The connection broke under the statement. The next check gets a fresh one.
-            await connection.ResetAsync().ConfigureAwait(false);
+            // What Postgres refused a statement read as the application's role is that role's to be granted, not
+            // SqlConsoleRole's: said on the exception, which a shared read hands every check that asked for it.
+            // The flag rather than the session: only QueryAsApplicationRoleAsync touches that session (StatementChecksFenceTests).
+            if (exception is PostgresException && asApplicationRole)
+            {
+                exception.Data[ApplicationRoleKey] = true;
+            }
+
+            if (open.State is not System.Data.ConnectionState.Open)
+            {
+                // The connection broke under the statement. The next check gets a fresh one.
+                await connection.ResetAsync().ConfigureAwait(false);
+            }
+
             throw;
         }
+    }
+
+    /// <summary>The <see cref="Exception.Data" /> key that marks a failure of a statement read as the application's role.</summary>
+    internal const string ApplicationRoleKey = "PostgresStudio.Health.ReadAsApplicationRole";
+
+    /// <summary>
+    /// Whether <paramref name="exception" /> (or the exception it wraps) is Postgres refusing a statement this runner read as
+    /// the application's role (<see cref="QueryAsApplicationRoleAsync{T}" />) rather than as <c>SqlConsoleRole</c>.
+    /// </summary>
+    internal static bool WasReadAsApplicationRole(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception.Data.Contains(ApplicationRoleKey)
+            || (exception.InnerException is { } inner && inner.Data.Contains(ApplicationRoleKey));
     }
 
     /// <summary>Runs <paramref name="query" /> and reads the first column of its first row.</summary>

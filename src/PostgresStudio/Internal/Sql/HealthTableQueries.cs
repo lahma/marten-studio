@@ -531,8 +531,8 @@ internal static class HealthTableQueries
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>pg_get_indexdef</c> reads the system cache, as Weasel's own index read does and as the Schema
-    /// screen's always has; it is called for the listed tables' indexes only, never a partition's. The
+    /// <c>pg_get_indexdef</c> deparses each index, as Weasel's own index read does and as the Schema screen's always
+    /// has - opening its table to do so (below); it is called for the listed tables' indexes only, never a partition's. The
     /// referenced columns come from <c>pg_depend</c>, where Postgres records the columns an expression or a
     /// predicate reads, and from <c>indkey</c> for the plain ones - an index backing a constraint depends on the
     /// constraint rather than on its columns, so <c>pg_depend</c> alone would miss them.
@@ -545,9 +545,10 @@ internal static class HealthTableQueries
     /// <c>VersionMatrixLiveTests</c> on 14 to 19, where the regular sweep's index checks all waited out the
     /// <c>lock_timeout</c>. So <c>locked</c> reads <c>pg_locks</c> once (a shared-memory snapshot, no relation lock) for
     /// any <c>AccessExclusiveLock</c> held or awaited on a listed table, and such a table's indexes come back undeparsed,
-    /// marked in the last column (<see cref="HealthIndexRow.TableLocked" />); the reader makes that the index checks'
-    /// "not checked" for this sweep rather than judging half a table. A lock taken between the snapshot and the call
-    /// still waits, bounded by <c>lock_timeout</c>, as before.
+    /// marked in the last column (<see cref="HealthIndexRow.TableLocked" />); the reader leaves that table's indexes out and
+    /// counts it, so every other table is still judged and each index check says how many were not
+    /// (<c>HealthTables.ReadIndexesAsync</c>). A lock taken between the snapshot and a call still waits, bounded by
+    /// <c>lock_timeout</c>; the reader then asks once more, when the snapshot sees it.
     /// </para>
     /// </remarks>
     internal const string IndexesSql =

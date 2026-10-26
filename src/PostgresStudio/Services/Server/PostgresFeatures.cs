@@ -77,12 +77,13 @@ internal enum PostgresFeature
     ForceNextFlush,
 
     /// <summary>
-    /// The cumulative statistics live in shared memory, written out at a clean shutdown and read back at start (14's
-    /// statistics collector kept them across one too) and dropped after a crash - which, from 15, leaves
-    /// <c>pg_stat_database.stats_reset</c> null where 14's collector set it, so a crash is told by the shared views'
-    /// <c>stats_reset</c>, the postmaster's start time or a counter that went down. B0 G4.
+    /// <c>pg_stat_database.stats_reset</c> is null until somebody resets the database's counters, and stays null through a
+    /// crash that zeroes them: on 14 the statistics collector set it, and moved it on a crash (B0 G4: 14 kept the counters
+    /// and the time across a clean restart and reset both on a <c>SIGQUIT</c>; 17 kept them across the restart, zeroed
+    /// them on the crash and left <c>stats_reset</c> null throughout). So from 15 a crash is told by the shared views'
+    /// <c>stats_reset</c>, the postmaster's start time or a counter that went down - never by this column.
     /// </summary>
-    StatsPersistAcrossCleanRestart,
+    DatabaseStatsResetNullAfterCrash,
 
     // ---- 16 -----------------------------------------------------------------------------------------------------------
 
@@ -283,7 +284,7 @@ internal static class PostgresFeatures
         // 15
         new(PostgresFeature.StatementsJit, 150000),
         new(PostgresFeature.ForceNextFlush, 150000),
-        new(PostgresFeature.StatsPersistAcrossCleanRestart, 150000),
+        new(PostgresFeature.DatabaseStatsResetNullAfterCrash, 150000),
 
         // 16
         new(PostgresFeature.PgStatIo, 160000),

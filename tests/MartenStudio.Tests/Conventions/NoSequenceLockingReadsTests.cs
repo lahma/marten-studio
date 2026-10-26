@@ -29,8 +29,9 @@ namespace MartenStudio.Tests.Conventions;
 /// </remarks>
 public class NoSequenceLockingReadsTests
 {
-    private static readonly Regex SequencesView = new(@"\bpg_sequences\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(5));
-    private static readonly Regex LastValue = new(@"\bpg_sequence_last_value\b", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(5));
+    // SQL names fold to lower case, so PG_SEQUENCES reads the same view: matched ignoring case.
+    private static readonly Regex SequencesView = new(@"\bpg_sequences\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(5));
+    private static readonly Regex LastValue = new(@"\bpg_sequence_last_value\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(5));
 
     [Fact]
     public void Nothing_in_src_reads_the_pg_sequences_view()
@@ -84,6 +85,7 @@ public class NoSequenceLockingReadsTests
     [InlineData("class Q { string S(string s) => $\"select * from {s}.pg_sequences\"; }", true)]
     [InlineData("class Q { const string Sql = \"-- a URL: https://example.org\\nselect 1 from pg_sequences\"; }", true)]
     [InlineData("class Q { const string Sql = \"\"\"\n    select 'a // b' from pg_sequences\n    \"\"\"; }", true)]
+    [InlineData("class Q { const string Sql = \"SELECT LAST_VALUE FROM PG_CATALOG.PG_SEQUENCES\"; }", true)]
     [InlineData("// never read pg_sequences\nclass Q { }", false)]
     [InlineData("/// <summary>The pg_sequences view locks.</summary>\nclass Q { }", false)]
     [InlineData("/* pg_sequences */\nclass Q { }", false)]
@@ -96,6 +98,7 @@ public class NoSequenceLockingReadsTests
 
     [Theory]
     [InlineData("class Q { const string Sql = \"select pg_catalog.pg_sequence_last_value(c.oid) from pg_class c\"; }", 1)]
+    [InlineData("class Q { const string Sql = \"SELECT PG_SEQUENCE_LAST_VALUE(C.OID) FROM PG_CLASS C\"; }", 1)]
     [InlineData("// pg_sequence_last_value takes a lock\nclass Q { }", 0)]
     public void The_scanner_counts_a_planted_value_read_and_not_one_in_prose(string source, int expected)
     {

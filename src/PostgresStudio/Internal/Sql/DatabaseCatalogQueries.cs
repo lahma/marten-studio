@@ -408,8 +408,11 @@ internal sealed record CatalogDefinition(string? Sql, string? RoutineKind, strin
 /// <b>A list locks nothing.</b> Every function a list statement calls reads the system catalogs or the
 /// statistics collector and takes no lock on the object it describes - measured on PG 17 against
 /// <c>pg_locks</c> for the calling backend (<c>DatabaseCatalogLockLiveTests</c>): <c>format_type</c>,
-/// <c>pg_get_constraintdef</c>, <c>pg_get_function_*</c>, <c>has_*_privilege</c>,
-/// <c>obj_description</c>, <c>pg_stat_get_*</c> and <c>to_regtype</c> leave none. Two that do were taken
+/// <c>pg_get_constraintdef</c> of a domain's constraint, <c>pg_get_function_*</c>, <c>has_*_privilege</c>,
+/// <c>obj_description</c>, <c>pg_stat_get_*</c> and <c>to_regtype</c> leave none. (A table's CHECK is another matter:
+/// <c>pg_get_constraintdef</c> opens the table to deparse it, as <c>pg_get_indexdef</c> and <c>pg_get_expr</c> with a
+/// relation do, and queues behind a migration's <c>ACCESS EXCLUSIVE</c> - so only the by-oid
+/// <see cref="ConstraintsSql" /> deparses one, and no list does.) Two that do were taken
 /// out, because a list reads every part in one transaction and its locks pile up until it ends:
 /// <c>pg_partition_tree</c> (through <c>find_all_inheritors</c>, one <c>AccessShareLock</c> per partition -
 /// 308 for a parent with 300, and a Marten store partitioned per tenant has thousands) is replaced by a
@@ -767,7 +770,7 @@ internal static class DatabaseCatalogQueries
                   where e.enumtypid = t.oid),
                (select pg_catalog.array_agg(pg_catalog.pg_get_constraintdef(k.oid, true) order by k.conname)
                   from pg_catalog.pg_constraint k
-                  where k.contypid = t.oid),
+                  where k.contypid = t.oid and k.contype <> 'n'),
                (select pg_catalog.array_agg(a.attname::text order by a.attnum)
                   from pg_catalog.pg_attribute a
                   where t.typtype = 'c' and a.attrelid = t.typrelid and a.attnum > 0 and not a.attisdropped),

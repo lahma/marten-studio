@@ -364,10 +364,10 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
     /// <summary>
     /// A migration's <c>ACCESS EXCLUSIVE</c> on a judged table - now any library's too, not only Marten's - costs the index
-    /// checks (T03-T06) that one sweep and nothing more: the index read sees the lock in <c>pg_locks</c> and does not
-    /// deparse behind it (<c>pg_get_indexdef</c> would open the table and queue), so they say "not checked" at once rather
-    /// than waiting out <c>lock_timeout</c>; every other table check runs, nothing is left holding a lock, and the next
-    /// sweep is whole again.
+    /// checks (T03-T06) that one table for that one sweep and nothing more: the index read sees the lock in <c>pg_locks</c>
+    /// and does not deparse behind it (<c>pg_get_indexdef</c> would open the table and queue), so they judge every other
+    /// table at once and count the locked one as not judged, rather than waiting out <c>lock_timeout</c> or standing down
+    /// whole; nothing is left holding a lock, and the next sweep is whole again.
     /// </summary>
     [PostgresFact]
     public async Task A_migrations_lock_on_a_judged_table_costs_the_index_checks_one_sweep_and_holds_nothing()
@@ -395,16 +395,13 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
         foreach (HealthCheckStatus status in report.Checks.Where(static x => x.Code.StartsWith('T')))
         {
+            status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} judges every table but the locked one: {1}", status.Code, status.Problem);
+
             if (indexChecks.Contains(status.Code))
             {
-                status.Outcome.Should().Be(HealthCheckOutcome.Unavailable, "{0} reads the indexes, whose definitions would open the locked table", status.Code);
-                status.Problem.Should().StartWith("A table whose indexes this check judges is locked for a schema change right now",
-                    "the lock was seen in pg_locks, so nothing queued behind it");
-                status.Problem.Should().NotContain("waited too long").And.NotContain("qrtz_job_details", "the row names no table");
-            }
-            else
-            {
-                status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} reads no index definition: {1}", status.Code, status.Problem);
+                status.Note.Should().Contain("1 table was locked for a schema change and not judged this sweep.",
+                    "{0} reads the indexes, whose definitions would open the locked table: the lock was seen in pg_locks, and counted", status.Code);
+                status.Note.Should().NotContain("qrtz_job_details", "the row names no table");
             }
         }
 
@@ -413,6 +410,8 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
         next.Checks.Where(static x => x.Code.StartsWith('T')).Should().OnlyContain(static x => x.Outcome == HealthCheckOutcome.Checked,
             "the next sweep, with the migration gone, is whole again");
+        next.Checks.Where(x => indexChecks.Contains(x.Code)).Should().OnlyContain(static x => x.Note == null || !x.Note.Contains("locked for a schema change"),
+            "and counts no locked table");
         probe.BeyondCatalogReads.Should().NotContain(static x => x.Relation == "qrtz_job_details",
             "the deparser's lock is released as soon as it has the column names: no statement ends holding it");
     }

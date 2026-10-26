@@ -21,7 +21,14 @@ internal sealed record StatementPlan(long QueryId, IReadOnlyList<ExplainPlanScan
 /// <param name="Read">The statement checks' shared read.</param>
 /// <param name="Plans">The plans of the statements worth planning, at most <see cref="ExpensiveStatementsCheck.MaxPlans" />.</param>
 /// <param name="Indexes">Every index on the store's tables, read only when a plan reads a whole document table.</param>
-internal sealed record ExpensiveStatementFacts(StatementRead Read, IReadOnlyList<StatementPlan> Plans, IReadOnlyList<IndexFacts> Indexes);
+internal sealed record ExpensiveStatementFacts(StatementRead Read, IReadOnlyList<StatementPlan> Plans, IReadOnlyList<IndexFacts> Indexes)
+{
+    /// <summary>
+    /// The tables locked for a schema change when the indexes were read (<see cref="HealthIndexRead.LockedTables" />): the
+    /// advisor says nothing about a whole-table read of one of them this sweep, whose indexes it did not see.
+    /// </summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T02: the store's own statements that cost the database the most - by the time they take, and by the time each
@@ -125,11 +132,11 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         bool readsWholeDocumentTable = plans.Any(plan => plan.Scans.Any(scan =>
             IsSequential(scan) && TableOf(read.Statements.First(x => x.QueryId == plan.QueryId), scan) is { Kind: StudioTableKind.DocumentTable }));
 
-        IReadOnlyList<IndexFacts> indexes = readsWholeDocumentTable
-            ? await HealthTables.IndexesAsync(context).ConfigureAwait(false)
-            : [];
+        HealthIndexRead indexes = readsWholeDocumentTable
+            ? await HealthTables.IndexReadAsync(context).ConfigureAwait(false)
+            : HealthIndexRead.Empty;
 
-        return new ExpensiveStatementFacts(read, plans, indexes);
+        return new ExpensiveStatementFacts(read, plans, indexes.Indexes) { LockedTables = indexes.LockedTables };
     }
 
     /// <inheritdoc />
@@ -203,7 +210,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
                 .Select(x => Finding(facts, x.Statement, x.Window, x.Severity, x.Slow, evaluation)),
         ];
 
-        return new HealthVerdict(findings);
+        return new HealthVerdict(findings, HealthTables.LockedNote(facts.LockedTables));
     }
 
     /// <summary>The window T02 judges a statement over: its own samples, or its totals since its counters began.</summary>
@@ -446,7 +453,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         // A withheld text is never planned (PlanCandidates), and a plan is never read for one even if it were.
         StatementPlan? plan = statement.TextWithheld is null ? facts.Plans.FirstOrDefault(x => x.QueryId == statement.QueryId) : null;
         StatementPlanAdvice.Reading? reading = plan is { NotPlanned: null }
-            ? StatementPlanAdvice.Read(plan.Scans, statement, facts.Indexes, evaluation.PlanAdvisor)
+            ? StatementPlanAdvice.Read(plan.Scans, statement, facts.Indexes, evaluation.PlanAdvisor, facts.LockedTables)
             : null;
 
         evidence.Add(new HealthEvidence("Plan", reading?.Summary
@@ -549,11 +556,16 @@ internal static class StatementPlanAdvice
     /// <param name="statement">The statement planned.</param>
     /// <param name="indexes">The indexes on the judged tables, as the sweep read them.</param>
     /// <param name="advisor">What the studio can say about a whole-table read of one of its tables, or <see langword="null" />.</param>
+    /// <param name="lockedTables">
+    /// The tables locked for a schema change when the indexes were read, or <see langword="null" />: the advisor is not asked
+    /// about a whole-table read of one, whose indexes it did not see.
+    /// </param>
     public static Reading Read(
         IReadOnlyList<ExplainPlanScan> scans,
         ObservedStatement statement,
         IReadOnlyList<IndexFacts> indexes,
-        IHealthPlanAdvisor? advisor)
+        IHealthPlanAdvisor? advisor,
+        IReadOnlySet<string>? lockedTables = null)
     {
         ArgumentNullException.ThrowIfNull(scans);
         ArgumentNullException.ThrowIfNull(statement);
@@ -576,6 +588,7 @@ internal static class StatementPlanAdvice
             string how = scan.Index is { } index ? scan.NodeType + " using " + index + " on " + table.Table : scan.NodeType + " on " + table.Table;
 
             if (scan.NodeType.Equals("Seq Scan", StringComparison.Ordinal)
+                && lockedTables?.Contains(table.Key) != true
                 && advisor?.AdviseSequentialScan(
                     table,
                     scan.Filter,

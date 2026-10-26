@@ -39,7 +39,7 @@ public class PostgresFeaturesTests
         (PostgresFeature.ReltuplesUnknownIsMinusOne, 140000),
         (PostgresFeature.StatementsJit, 150000),
         (PostgresFeature.ForceNextFlush, 150000),
-        (PostgresFeature.StatsPersistAcrossCleanRestart, 150000),
+        (PostgresFeature.DatabaseStatsResetNullAfterCrash, 150000),
         (PostgresFeature.PgStatIo, 160000),
         (PostgresFeature.LastScanColumns, 160000),
         (PostgresFeature.NewPageUpdates, 160000),

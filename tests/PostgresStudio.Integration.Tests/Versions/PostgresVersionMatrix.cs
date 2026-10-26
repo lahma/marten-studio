@@ -29,6 +29,25 @@ public enum MatrixRole
 
     /// <summary><c>mon</c>: a member of <c>pg_monitor</c>.</summary>
     Monitor,
+
+    /// <summary>
+    /// <c>noinherit_mon</c>: a <c>NOINHERIT</c> role granted <c>pg_monitor</c> - a member that does not have its privileges
+    /// without <c>SET ROLE</c>.
+    /// </summary>
+    NoInheritMonitor,
+
+    /// <summary>
+    /// <c>uninherited_stats</c>: on 16 and later granted <c>pg_read_all_stats</c> <c>WITH INHERIT FALSE</c>, which makes it a
+    /// member without the privileges; below 16 granted nothing (the option does not exist there).
+    /// </summary>
+    UninheritedStats,
+
+    /// <summary>
+    /// <c>console_login</c>: logs in, and is a member of the <c>NOLOGIN</c> role <c>console_role</c>, which a host sets as
+    /// <c>SqlConsoleRole</c> - so a read as the application's role runs as <c>console_login</c> and every other as
+    /// <c>console_role</c>. Neither holds anything in <c>store</c>.
+    /// </summary>
+    ConsoleLogin,
 }
 
 /// <summary>One leg of the matrix: a PostgreSQL major and the exact image it runs.</summary>
@@ -37,10 +56,15 @@ public enum MatrixRole
 public sealed record MatrixVersion(int Major, string Image)
 {
     /// <summary>
-    /// Whether the image is a pre-release (<c>rc</c>, <c>beta</c>): a preview leg runs and reports, and fails CI only
-    /// once its tag is a general-availability one.
+    /// Whether the image's tag - and only the tag, never the repository's name - is a pre-release: a version then
+    /// <c>rc</c>, <c>beta</c> or <c>alpha</c> (<c>19rc1-alpine</c>, <c>19beta2</c>). A preview leg runs and reports, and fails
+    /// CI only once its tag is a general-availability one.
     /// </summary>
-    public bool Preview => Image.Contains("rc", StringComparison.Ordinal) || Image.Contains("beta", StringComparison.Ordinal);
+    public bool Preview => System.Text.RegularExpressions.Regex.IsMatch(
+        Tag, @"^\d+(rc|beta|alpha)\d*\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>The image's tag: <c>19rc1-alpine</c> of <c>postgres:19rc1-alpine</c>.</summary>
+    public string Tag => Image[(Image.LastIndexOf(':') + 1)..];
 
     /// <inheritdoc />
     public override string ToString() => Major.ToString(CultureInfo.InvariantCulture) + " (" + Image + ")";
@@ -120,6 +144,17 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
         create role mon login password 'mon';
         grant pg_read_all_stats to stats;
         grant pg_monitor to mon;
+        create role noinherit_mon login password 'noinherit_mon' noinherit;
+        grant pg_monitor to noinherit_mon;
+        create role uninherited_stats login password 'uninherited_stats';
+        do $$ begin
+            if pg_catalog.current_setting('server_version_num')::int >= 160000 then
+                execute 'grant pg_read_all_stats to uninherited_stats with inherit false';
+            end if;
+        end $$;
+        create role console_role nologin;
+        create role console_login login password 'console_login';
+        grant console_role to console_login;
         create extension if not exists pg_stat_statements;
         create schema store authorization app;
 
@@ -135,6 +170,7 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
         create table store.parent (id int primary key);
         create table store.child (id int primary key, parent_id int references store.parent (id), n int not null default 42 check (n > 0), label text not null default 'x');
         create sequence store.s as int;
+        create domain store.positive_count as int not null check (value > 0);
         create view store.v as select id from store.child;
         create function store.touch() returns trigger language plpgsql as $$ begin return new; end $$;
         create trigger child_touch before update on store.child for each row execute function store.touch();
@@ -236,6 +272,9 @@ public sealed class MatrixServer : IAsyncDisposable
             MatrixRole.Probe => ("probe", "probe"),
             MatrixRole.Stats => ("stats", "stats"),
             MatrixRole.Monitor => ("mon", "mon"),
+            MatrixRole.NoInheritMonitor => ("noinherit_mon", "noinherit_mon"),
+            MatrixRole.UninheritedStats => ("uninherited_stats", "uninherited_stats"),
+            MatrixRole.ConsoleLogin => ("console_login", "console_login"),
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, null),
         };
 

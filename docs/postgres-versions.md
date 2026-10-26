@@ -24,14 +24,15 @@ Every release runs the **version matrix**: one server per major - `postgres:14.2
 `16.15-alpine`, `17.11-alpine` and `18.6-alpine`, with `pg_stat_statements` preloaded and `track_io_timing` on - and
 on each one, as the application's own role and as a role with no grant at all:
 
-- a full health sweep - the regular checks, the deeper ones and the statement checks - in which every check reads,
-  is not applicable, or says why it was not checked, and none fails on a column, function or view that version does
-  not have;
+- a health sweep of the shared studio's checks - the regular ones and the statement checks; it has no deeper ones,
+  and Marten Studio's own checks (the daemon, the event store, the document tables' Marten-only checks) are not part
+  of the matrix - in which every check reads, is not applicable, or says why it was not checked, and none fails on a
+  column, function or view that version does not have;
 - every list and detail read of the database browser, the Sessions read, the Overview's server read and the
   relationship read;
 - the lists and the regular sweep again while another session holds `ACCESS EXCLUSIVE` on a table and on a
   partition - what a migration's `ALTER` takes - under a 300 ms `lock_timeout`, so that no list queues behind a
-  migration;
+  migration, and the index checks judge every other table and count the locked one as not judged;
 - a fingerprint of every schema, extension and role before and after, which must be identical: no read creates
   anything;
 - the studio's table of version gates against the server's own catalog.
@@ -87,10 +88,18 @@ Nothing the studio ships names either renamed literal.
 ## Privileges, and "not checked"
 
 Some reads need more than the role the studio reads as has. Such a row is never an error: it says **not checked**,
-which privilege it needs, for which role, and who can grant it on the platform that runs the server - for example
-"Not checked: this needs pg_read_all_stats (pg_monitor includes it) for role app_reader. On Amazon Aurora PostgreSQL
-the master user (a member of rds_superuser) can grant it." The studio never suggests a `GRANT` statement to paste,
-and never runs one. `pg_monitor` covers every statistics view the advisor reads. A column's statistics
-(`pg_stats`) need `SELECT` on that column, which only the table's owner can grant; `pg_monitor` does not give it.
-`pg_stat_statements`, `pgstattuple` and `hypopg` are not trusted extensions, so creating one needs a superuser, or
-the platform's administrator.
+for which role, and who can grant what it lacks on the platform that runs the server.
+
+- A check that knows the grant it needs names it - for example "Not checked: this needs pg_read_all_stats (pg_monitor
+  includes it) for role app_reader. On Amazon Aurora PostgreSQL the master user (a member of rds_superuser) can grant
+  it."
+- A check Postgres refused (`42501`) without the check knowing why names the role refused - `SqlConsoleRole`, or the
+  store's own login for the statement checks, which read as it - and leaves what was refused to Postgres' own words,
+  shown below: a table, schema or sequence is its owner's to grant (`SELECT` or `USAGE`); a statistics view or function
+  is covered by `pg_monitor`.
+
+A role holds a monitoring role only when it has its privileges: a `NOINHERIT` member, or one granted it `WITH INHERIT
+FALSE` (16+), does not, because the studio never runs `SET ROLE`. The studio never suggests a `GRANT` statement to
+paste, and never runs one. A column's statistics (`pg_stats`) need `SELECT` on that column, which only the table's
+owner can grant; `pg_monitor` does not give it. `pg_stat_statements`, `pgstattuple` and `hypopg` are not trusted
+extensions, so creating one needs a superuser, or the platform's administrator.

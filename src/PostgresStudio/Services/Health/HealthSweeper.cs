@@ -192,7 +192,7 @@ internal sealed record HealthSweep(
 /// <b>Expected states are values</b> (AGENTS.md, the memory rule): a gatherer's
 /// <see cref="HealthCheckUnavailableException" />, a privilege Postgres refused (42501), a statement that ran
 /// out of its timeout (57014) or its lock wait (55P03) - each is an <see cref="HealthCheckOutcome.Unavailable" />
-/// row and a Debug line. A refused privilege's row says which grant and who gives it on this platform
+/// row and a Debug line. A refused privilege's row says which role was refused and who grants what on this platform
 /// (<see cref="PostgresGrants.Refused" />, W5 §2.6), from the sweep's one grant read. Anything else is a
 /// <see cref="HealthCheckOutcome.Failed" /> row and event 9222, at
 /// Warning once per check, database and kind of failure in ten minutes (<see cref="StudioLogThrottle" />),
@@ -432,7 +432,7 @@ internal sealed class HealthSweeper
 
                 if (problem.SqlState == PostgresErrorCodes.InsufficientPrivilege)
                 {
-                    problem = await NamingTheGrantAsync(context, info.Tier, problem).ConfigureAwait(false);
+                    problem = await NamingTheGrantAsync(context, info, HealthSqlRunner.WasReadAsApplicationRole(exception), problem).ConfigureAwait(false);
                 }
 
                 Report(info, outcome, exception, storeKey, databaseId);
@@ -526,24 +526,48 @@ internal sealed class HealthSweeper
     }
 
     /// <summary>
-    /// A privilege Postgres refused (<c>42501</c>), worded as every "not checked" row is (W5 §2.6): the role the reads run
-    /// as, the grant that covers the advisor's reads, and who can grant it on this platform
-    /// (<see cref="PostgresGrants.Refused" />) - from the sweep's one grant read and its one platform read. Should either
-    /// read fail, the row keeps the sentence it had, which names neither.
+    /// A privilege Postgres refused (<c>42501</c>), worded as every "not checked" row is (W5 §2.6): the role the refused
+    /// statement ran as, whose each kind of object is to grant, and who grants a monitoring role on this platform
+    /// (<see cref="PostgresGrants.Refused" />), with what was refused left to Postgres' own words - from the sweep's one
+    /// grant read and its one platform read. Should either read fail, the row keeps the sentence it had, which names
+    /// neither, and the log says why at Debug.
     /// </summary>
-    private static async Task<HealthCheckProblem> NamingTheGrantAsync(HealthCheckContext context, HealthCostTier tier, HealthCheckProblem problem)
+    /// <param name="context">The refused check's context, whose runner the two shared reads go through.</param>
+    /// <param name="info">The refused check.</param>
+    /// <param name="asApplicationRole">
+    /// Whether the refused statement was read as the application's role, which names the login (<see cref="PostgresGrants.LoginRole" />)
+    /// rather than <c>SqlConsoleRole</c>.
+    /// </param>
+    /// <param name="problem">The row as <see cref="Classify" /> worded it.</param>
+    private async Task<HealthCheckProblem> NamingTheGrantAsync(
+        HealthCheckContext context,
+        HealthCheckInfo info,
+        bool asApplicationRole,
+        HealthCheckProblem problem)
     {
         try
         {
             PostgresGrants grants = await PostgresGrants.SharedAsync(context).ConfigureAwait(false);
             PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
 
-            return problem with { Reason = PostgresGrants.Refused(server.Platform, grants.ReadsAs, tier) };
+            return problem with { Reason = PostgresGrants.Refused(server.Platform, grants.RoleOf(asApplicationRole)) };
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             // Including a cancellation: this runs inside the check's own catch, and the sweep's loop is what rethrows
             // a cancellation of the whole sweep, at its next turn - nothing here may escape the sweep.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio could not name the grant health check {Code} was refused on {DatabaseId}", info.Code, context.DatabaseId);
+                }
+            }
+
             return problem;
         }
     }

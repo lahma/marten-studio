@@ -78,10 +78,14 @@ internal sealed record PostgresGrant
     public string Described => IncludedIn is { } umbrella ? Privilege + " (" + umbrella + " includes it)" : Privilege;
 }
 
-/// <summary>Whether the reading role is a member of one role, and whether that role exists on this server.</summary>
+/// <summary>Whether the reading role holds one role, and whether that role exists on this server.</summary>
 /// <param name="Name">The role.</param>
 /// <param name="Exists">Whether the server has it - <c>pg_maintain</c> below 17, a provider's role elsewhere, do not.</param>
-/// <param name="Member">Whether the reading role is a member of it, directly or through another role.</param>
+/// <param name="Member">
+/// For a predefined role, whether the reading role has its privileges (<c>pg_has_role(..., 'USAGE')</c>: through an
+/// inherited grant, never a <c>NOINHERIT</c> or <c>INHERIT FALSE</c> one); for a provider's admin role, whether it is a
+/// member at all (<c>'MEMBER'</c>), which is who it is (<see cref="ServerReachQueries.Grants" />).
+/// </param>
 internal sealed record PostgresRoleMembership(string Name, bool Exists, bool Member);
 
 /// <summary>
@@ -122,7 +126,21 @@ internal sealed record PostgresRoleMembership(string Name, bool Exists, bool Mem
 internal sealed record PostgresGrants(string ReadsAs, bool Superuser, IReadOnlyList<PostgresRoleMembership> Roles)
 {
     /// <summary>The admin roles of the managed platforms: membership is "provider admin", never a superuser (B0 §5).</summary>
-    public static IReadOnlyList<string> ProviderAdminRoles { get; } = ["rds_superuser", "azure_pg_admin", "cloudsqlsuperuser", "neon_superuser"];
+    public static IReadOnlyList<string> ProviderAdminRoles => ServerReachQueries.ProviderAdminRoles;
+
+    /// <summary>
+    /// The role the connection authenticated as (<c>session_user</c>) - the store's or the data source's own login - which
+    /// a statement read as the application's role runs as (<c>HealthSqlRunner.QueryAsApplicationRoleAsync</c>), where
+    /// <see cref="ReadsAs" /> is <c>SqlConsoleRole</c> when one is set. <see langword="null" /> when not read.
+    /// </summary>
+    public string? LoginRole { get; init; }
+
+    /// <summary>
+    /// The role a refused statement ran as: <see cref="LoginRole" /> for one read as the application's role, and
+    /// <see cref="ReadsAs" /> for every other.
+    /// </summary>
+    /// <param name="asApplicationRole">Whether the statement was read as the application's role.</param>
+    public string RoleOf(bool asApplicationRole) => asApplicationRole && LoginRole is { Length: > 0 } login ? login : ReadsAs;
 
     /// <summary>
     /// The extensions a check may need whose <c>trusted</c> flag the studio states: none of them is trusted, so creating
@@ -150,10 +168,14 @@ internal sealed record PostgresGrants(string ReadsAs, bool Superuser, IReadOnlyL
         ArgumentNullException.ThrowIfNull(context);
 
         var query = ServerReachQueries.Grants();
-        IReadOnlyList<(string ReadsAs, bool Superuser, PostgresRoleMembership Role)> rows = await context.Sql
+        IReadOnlyList<(string ReadsAs, bool Superuser, PostgresRoleMembership Role, string Login)> rows = await context.Sql
             .QueryAsync(
                 query,
-                static reader => (reader.GetString(0), reader.GetBoolean(1), new PostgresRoleMembership(reader.GetString(2), reader.GetBoolean(3), reader.GetBoolean(4))),
+                static reader => (
+                    reader.GetString(0),
+                    reader.GetBoolean(1),
+                    new PostgresRoleMembership(reader.GetString(2), reader.GetBoolean(3), reader.GetBoolean(4)),
+                    reader.GetString(5)),
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -162,10 +184,17 @@ internal sealed record PostgresGrants(string ReadsAs, bool Superuser, IReadOnlyL
             throw new InvalidOperationException("The grant read returned no rows; it returns one per role it asks about.");
         }
 
-        return new PostgresGrants(rows[0].ReadsAs, rows[0].Superuser, [.. rows.Select(static x => x.Role)]);
+        return new PostgresGrants(rows[0].ReadsAs, rows[0].Superuser, [.. rows.Select(static x => x.Role)])
+        {
+            LoginRole = rows[0].Login,
+        };
     }
 
-    /// <summary>Whether the reading role is a member of <paramref name="role" /> (a superuser is a member of every role).</summary>
+    /// <summary>
+    /// Whether the reading role holds <paramref name="role" />: has its privileges for a predefined role (<c>USAGE</c>, so
+    /// not through a <c>NOINHERIT</c> or <c>INHERIT FALSE</c> grant), or is a member of a provider's admin role. A superuser
+    /// holds every role.
+    /// </summary>
     public bool IsMember(string role) => Superuser || Roles.Any(x => x.Member && string.Equals(x.Name, role, StringComparison.Ordinal));
 
     /// <summary>
@@ -199,25 +228,24 @@ internal sealed record PostgresGrants(string ReadsAs, bool Superuser, IReadOnlyL
     }
 
     /// <summary>
-    /// What a check whose statement Postgres refused (<c>42501</c>) says when it does not know which grant it lacked: the
-    /// role, and what covers the kind of read the check makes - <c>pg_monitor</c>, which covers every statistics view the
-    /// advisor reads, and who can grant it; or, for a check that reads a bounded slice of rows ("Run deeper checks"),
-    /// <c>SELECT</c> on the tables it reads, which their owner grants and no monitoring role gives.
+    /// What a check whose statement Postgres refused (<c>42501</c>) says when the check declared no grant of its own
+    /// (<see cref="NotChecked" /> is for one that did): the role refused, that what it refused is in Postgres' own words
+    /// below, whose each kind of object is to grant, and who can grant a monitoring role on this platform. It claims no
+    /// one grant, because it does not know which the statement lacked.
     /// </summary>
     /// <param name="platform">Who runs the server.</param>
-    /// <param name="readsAs">The role the reads run as.</param>
-    /// <param name="tier">What the refused check reads.</param>
-    public static string Refused(PostgresPlatform platform, string readsAs, HealthCostTier tier = HealthCostTier.Catalog)
+    /// <param name="refusedRole">
+    /// The role the refused statement ran as - <see cref="RoleOf" />: <c>SqlConsoleRole</c>'s, or the login's for a
+    /// statement read as the application's role.
+    /// </param>
+    public static string Refused(PostgresPlatform platform, string refusedRole)
     {
         ArgumentNullException.ThrowIfNull(platform);
-        ArgumentException.ThrowIfNullOrWhiteSpace(readsAs);
+        ArgumentException.ThrowIfNullOrWhiteSpace(refusedRole);
 
-        string refused = "Not checked: Postgres refused role " + readsAs + " a read this check needs (SQLSTATE 42501); ";
-
-        return tier == HealthCostTier.BoundedData
-            ? refused + "it reads a bounded slice of the rows of the tables it judges, which needs SELECT on them - their owner "
-              + "can grant it, and no monitoring role gives it."
-            : refused + "pg_monitor covers every statistics view the advisor reads. " + Grantor(PostgresGrant.Monitor, platform);
+        return "Not checked: Postgres refused role " + refusedRole + " a read this check needs (SQLSTATE 42501), and what it "
+            + "refused is in Postgres' words below. A table, schema or sequence is its owner's to grant (SELECT or USAGE); a "
+            + "statistics view or function is covered by pg_monitor. " + Grantor(PostgresGrant.Monitor, platform);
     }
 
     /// <summary>

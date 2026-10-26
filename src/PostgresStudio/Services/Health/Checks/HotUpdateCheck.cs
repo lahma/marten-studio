@@ -6,7 +6,11 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <param name="Tables">The declared tables (only document tables are judged).</param>
 /// <param name="Indexes">The indexes on them.</param>
 /// <param name="Database">When the counters began.</param>
-internal sealed record HotUpdateFacts(IReadOnlyList<TableFacts> Tables, IReadOnlyList<IndexFacts> Indexes, DatabaseStatistics Database);
+internal sealed record HotUpdateFacts(IReadOnlyList<TableFacts> Tables, IReadOnlyList<IndexFacts> Indexes, DatabaseStatistics Database)
+{
+    /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T06: most updates to a document table are not HOT updates.
@@ -58,9 +62,9 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
     public override async Task<HotUpdateFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
-        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
+        HealthIndexRead read = await HealthTables.IndexReadAsync(context).ConfigureAwait(false);
 
-        return new HotUpdateFacts(tables, indexes, DatabaseStatistics.Of(tables));
+        return new HotUpdateFacts(tables, read.Indexes, DatabaseStatistics.Of(tables)) { LockedTables = read.LockedTables };
     }
 
     /// <inheritdoc />
@@ -110,6 +114,13 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
                 continue;
             }
 
+            // Its indexes were not read, so "no index blocks HOT" is unknown, not true: falling through would raise the
+            // fill-factor finding for a table whose indexes may be what blocks it.
+            if (facts.LockedTables.Contains(table.Key))
+            {
+                continue;
+            }
+
             IReadOnlyList<IndexFacts> blocking = [.. BlockingIndexes(table, facts.Indexes)];
 
             findings.Add(blocking.Count == 0
@@ -119,10 +130,10 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
 
         if (findings.Count > 0)
         {
-            return new HealthVerdict(findings);
+            return new HealthVerdict(findings, HealthTables.LockedNote(facts.LockedTables));
         }
 
-        return HealthVerdict.Quiet(watched ? null : "An update rate needs two samples, one interval apart.");
+        return HealthVerdict.Quiet(HealthTables.WithLockedNote(watched ? null : "An update rate needs two samples, one interval apart.", facts.LockedTables));
     }
 
     /// <summary>The first server version (<c>server_version_num</c>) on which a BRIN index no longer blocks HOT.</summary>
