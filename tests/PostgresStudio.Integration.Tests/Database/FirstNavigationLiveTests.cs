@@ -24,7 +24,7 @@ namespace PostgresStudio.Integration.Tests.Database;
 /// page injects, in a circuit-shaped scope - and then every read the page offers a click away: each object's detail and
 /// definition, each relation's rows, a row and its references, an exact count, a sequence's value, the deeper health
 /// checks, Sessions' details. The layout settles a scope first, as <c>StudioLayout</c> does. The browser suite walks the
-/// same pages in Chromium over the sample (<c>FirstNavigationScenarioTests</c>).
+/// same pages in Chromium over the sample (<c>PostgresStudioScenarioTests</c>).
 /// </para>
 /// <para>
 /// <b>What "nothing" means.</b> <see cref="ServerSnapshot" />, read before and after on connections of the test's own:
