@@ -104,6 +104,7 @@ internal sealed partial class EventDataService : IEventDataService
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<EventDataService> logger;
     private readonly DatabaseReachAuthorization reach;
+    private readonly DeadLetterGroupCache groups;
 
     public EventDataService(
         StudioScopeResolver resolver,
@@ -115,7 +116,8 @@ internal sealed partial class EventDataService : IEventDataService
         IndexCatalog indexes,
         IOptions<MartenStudioOptions> options,
         StudioLogThrottle throttle,
-        ILogger<EventDataService> logger)
+        ILogger<EventDataService> logger,
+        DeadLetterGroupCache groups)
     {
         this.resolver = resolver;
         this.capabilities = capabilities;
@@ -127,6 +129,7 @@ internal sealed partial class EventDataService : IEventDataService
         this.options = options;
         this.throttle = throttle;
         this.logger = logger;
+        this.groups = groups;
         reach = new DatabaseReachAuthorization(authorization, logger);
     }
 
@@ -1229,6 +1232,12 @@ internal sealed partial class EventDataService : IEventDataService
 
                 // One more than asked for, so "is there another page" is answered without a count.
                 Limit = pageSize + 1,
+
+                // A group opened from the grouped view: its letters, found by the grouped view's own predicates (M3).
+                Group = query.Group,
+                Events = query.Group is null
+                    ? null
+                    : await DescribeEventSourceAsync(resolved, connection, cancellationToken).ConfigureAwait(false),
             };
 
             DeadLetterJsonKeys keys = DeadLetterJsonKeys.For(
@@ -1593,6 +1602,7 @@ internal sealed partial class EventDataService : IEventDataService
                 // Marten's write path is how a UI corrupts a store (D6).
                 session.DeleteObjects([letter]);
                 await session.SaveChangesAsync(token).ConfigureAwait(false);
+                groups.InvalidateDatabase(resolved);
 
                 return "discarded";
             },
@@ -1623,70 +1633,134 @@ internal sealed partial class EventDataService : IEventDataService
                 // UseTenantPartitionedEvents requires - so there the skip is one tenant's, and needs one (the page pins
                 // the dead letter's own). The reach is that tenant's events and nothing else, so the scope the write policy
                 // was asked about, (store, database, tenant), is the whole of it (SEC1-fix4's rule, kept).
-                bool perTenant = resolved.Store.Options.Events.UseTenantPartitionedEvents;
-                if (perTenant)
-                {
-                    if (!TenantSkipAvailable)
-                    {
-                        throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
-                    }
+                RequireSkippableNumbering(resolved);
 
-                    if (resolved.TenantId is null)
-                    {
-                        throw new InvalidOperationException(StreamCompactionRules.SkipNeedsTenant);
-                    }
-                }
+                long[] sequences = [sequence];
 
                 await using (NpgsqlConnection connection = await OpenAsync(resolved, token).ConfigureAwait(false))
                 {
                     EventTableInfo table = await DescribeTablesAsync(resolved, connection, token).ConfigureAwait(false);
 
-                    if (!table.HasIsSkipped)
-                    {
-                        throw new InvalidOperationException(
-                            "This store does not record skipped events: mt_events has no is_skipped column, " +
-                            "which means the host did not enable event skipping in projections or subscriptions. " +
-                            "Marking an event as skipped would have nothing to write to.");
-                    }
+                    RequireSkipColumn(table);
 
-                    // IMartenDatabase.MarkEventsAsSkipped writes `update mt_events set is_skipped = true
-                    // where seq_id = any(...)` with no tenant predicate of any kind - so on a conjoined
-                    // store the sequence, which a dead letter hands over as a *global* number, has to be
-                    // proved to be in this scope before the write happens. The read is the same
-                    // tenant-scoped statement the dead-letter expansion uses; no row means the event is
-                    // somebody else's, and the refusal says nothing about whose (D5).
-                    if (table.HasTenantId && resolved.TenantId is not null)
-                    {
-                        await using NpgsqlCommand lookup =
-                            EventQueryBuilder.BuildEventBySequence(table, sequence, resolved.TenantId);
-
-                        lookup.Connection = connection;
-                        lookup.CommandTimeout = CommandTimeoutSeconds;
-
-                        List<EventRow> found = await ReadEventsAsync(lookup, table, token).ConfigureAwait(false);
-
-                        if (found.Count == 0)
-                        {
-                            throw new StudioNotAuthorizedException(resolved.Scope);
-                        }
-                    }
+                    await ProveSequencesInScopeAsync(resolved, connection, table, sequences, token).ConfigureAwait(false);
                 }
 
-                // Past every check, on a token of this operation's own (CommitAsync): a page that goes away now has not
-                // decided to abandon it, and the audit entry has to say how it ended.
-                if (perTenant)
-                {
-                    await CommitAsync(committing => MarkTenantEventAsSkippedAsync(resolved.Database, resolved.TenantId!, sequence, committing))
-                        .ConfigureAwait(false);
+                await CommitSkipAsync(resolved, sequences).ConfigureAwait(false);
 
-                    return "marked as skipped in tenant " + resolved.TenantId;
-                }
-
-                await CommitAsync(committing => resolved.Database.MarkEventsAsSkipped([sequence], committing)).ConfigureAwait(false);
-
-                return "marked as skipped";
+                return resolved.Store.Options.Events.UseTenantPartitionedEvents
+                    ? "marked as skipped in tenant " + resolved.TenantId
+                    : "marked as skipped";
             },
             cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>What a skip on a store with no <c>is_skipped</c> column is refused with.</summary>
+    internal const string NoSkipColumnMessage =
+        "This store does not record skipped events: mt_events has no is_skipped column, " +
+        "which means the host did not enable event skipping in projections or subscriptions. " +
+        "Marking an event as skipped would have nothing to write to.";
+
+    /// <summary>
+    /// The numbering check both skips make first, before anything is read: under <c>UseTenantPartitionedEvents</c> a skip
+    /// needs Marten's tenant overload (9.51) and a tenant to hand it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The store numbers events per tenant and this Marten, or this scope, cannot skip one tenant's.</exception>
+    private static void RequireSkippableNumbering(ResolvedScope resolved)
+    {
+        if (!resolved.Store.Options.Events.UseTenantPartitionedEvents)
+        {
+            return;
+        }
+
+        if (!TenantSkipAvailable)
+        {
+            throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
+        }
+
+        if (resolved.TenantId is null)
+        {
+            throw new InvalidOperationException(StreamCompactionRules.SkipNeedsTenant);
+        }
+    }
+
+    /// <summary>The column check both skips make: no <c>is_skipped</c>, nothing to write to.</summary>
+    private static void RequireSkipColumn(EventTableInfo table)
+    {
+        if (!table.HasIsSkipped)
+        {
+            throw new InvalidOperationException(NoSkipColumnMessage);
+        }
+    }
+
+    /// <summary>
+    /// The tenant proof both skips make for every sequence before it is handed over (hard rule 15): each has to be an event
+    /// this scope can see, or the whole skip is refused as a scope denial that says nothing about whose event it is (D5).
+    /// </summary>
+    /// <remarks>
+    /// <c>IMartenDatabase.MarkEventsAsSkipped</c> writes <c>update mt_events set is_skipped = true where seq_id =
+    /// any(...)</c> with no tenant predicate below 9.51 - and from 9.51 its tenant overload narrows only a conjoined store -
+    /// so on a store whose events carry <c>tenant_id</c> a sequence, which a dead letter hands over as a number, has to be
+    /// proved to be this scope's before the write. The statement is <see cref="EventQueryBuilder.BuildSequencesInScope" />,
+    /// the dead-letter expansion's own predicate over every sequence at once. With no tenant in the scope there is nothing
+    /// to prove: the write policy was asked about every tenant.
+    /// </remarks>
+    private async Task ProveSequencesInScopeAsync(
+        ResolvedScope resolved,
+        NpgsqlConnection connection,
+        EventTableInfo table,
+        long[] sequences,
+        CancellationToken token)
+    {
+        if (!table.HasTenantId || resolved.TenantId is null || sequences.Length == 0)
+        {
+            return;
+        }
+
+        await using NpgsqlCommand proof = EventQueryBuilder.BuildSequencesInScope(table, sequences, resolved.TenantId);
+        proof.Connection = connection;
+        proof.CommandTimeout = CommandTimeoutSeconds;
+
+        HashSet<long> found = [];
+        await using (NpgsqlDataReader reader = await proof
+            .ExecuteReaderAsync(CommandBehavior.SingleResult, token).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(token).ConfigureAwait(false))
+            {
+                found.Add(reader.GetInt64(0));
+            }
+        }
+
+        if (!sequences.All(found.Contains))
+        {
+            throw new StudioNotAuthorizedException(resolved.Scope);
+        }
+    }
+
+    /// <summary>
+    /// The one Marten call both skips end in, past every check, on a token of the operation's own (<see cref="CommitAsync" />):
+    /// <c>MarkEventsAsSkipped(sequences)</c>, or under <c>UseTenantPartitionedEvents</c> its tenant overload for the scope's
+    /// tenant (<see cref="MarkTenantEventsAsSkippedAsync" />). A page that goes away now has not decided to abandon it, and
+    /// the audit entry has to say how it ended.
+    /// </summary>
+    private async Task CommitSkipAsync(ResolvedScope resolved, long[] sequences)
+    {
+        try
+        {
+            if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
+            {
+                await CommitAsync(committing => MarkTenantEventsAsSkippedAsync(resolved.Database, resolved.TenantId!, sequences, committing))
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            await CommitAsync(committing => resolved.Database.MarkEventsAsSkipped(sequences, committing)).ConfigureAwait(false);
+        }
+        finally
+        {
+            // A group's skipped count changed - or may have, if the call failed part-way.
+            groups.InvalidateDatabase(resolved);
+        }
     }
 
     /// <summary>
@@ -1707,18 +1781,19 @@ internal sealed partial class EventDataService : IEventDataService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The one call of it, so the argument order is chosen once. Invoked through the interface's declaration, which
-    /// dispatches to <c>MartenDatabase</c>'s implementation - the probe has already said there is one rather than the
-    /// interface's throwing default - and a missing member is a refusal in the floor's words rather than a call that
-    /// fails half-way. Like the tenant-less overload it opens with <c>EnsureStorageExistsAsync(typeof(IEvent))</c>, and is
-    /// a capability-gated, audited write for the same reason; <c>StorageEnsuringCallTests</c> cannot see a reflected
-    /// call, and lists that among the shapes it does not see.
+    /// The one call of it, so the argument order is chosen once, reached only from <see cref="CommitSkipAsync" />. Invoked
+    /// through the interface's declaration, which dispatches to <c>MartenDatabase</c>'s implementation - the probe has
+    /// already said there is one rather than the interface's throwing default - and a missing member is a refusal in the
+    /// floor's words rather than a call that fails half-way. Like the tenant-less overload it opens with
+    /// <c>EnsureStorageExistsAsync(typeof(IEvent))</c>, and is a capability-gated, audited write for the same reason;
+    /// <c>StorageEnsuringCallTests</c> cannot see a reflected call, and lists that among the shapes it does not see.
     /// </para>
     /// </remarks>
-    internal static Task MarkTenantEventAsSkippedAsync(IMartenDatabase database, string tenantId, long sequence, CancellationToken token)
+    internal static Task MarkTenantEventsAsSkippedAsync(IMartenDatabase database, string tenantId, long[] sequences, CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
+        ArgumentNullException.ThrowIfNull(sequences);
 
         if (RuntimeFeature.TenantSkipMethod() is not { } method)
         {
@@ -1727,7 +1802,7 @@ internal sealed partial class EventDataService : IEventDataService
 
         try
         {
-            return method.Invoke(database, [tenantId, new[] { sequence }, token]) as Task
+            return method.Invoke(database, [tenantId, sequences, token]) as Task
                 ?? throw new InvalidOperationException("Marten's MarkEventsAsSkipped(tenantId, sequences) returned no task.");
         }
         catch (TargetInvocationException wrapped) when (wrapped.InnerException is { } inner)
@@ -1860,6 +1935,9 @@ internal sealed partial class EventDataService : IEventDataService
                 await CommitAsync(committing => RewindToFloorAsync(
                         daemon, projectionName, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, committing))
                     .ConfigureAwait(false);
+
+                // Marten deleted the projection's dead letters at or above the floor.
+                groups.InvalidateDatabase(resolved);
 
                 return floor == 0
                     ? "progression row removed, so the subscription replays from the first event"
@@ -2003,6 +2081,9 @@ internal sealed partial class EventDataService : IEventDataService
         await CommitAsync(committing => RewindTenantToFloorAsync(
                 daemon, agent.Name, agent.TenantId!, floor, logger, resolved.Registration.Key, resolved.Database.Id.Identity, committing))
             .ConfigureAwait(false);
+
+        // Marten deleted that tenant's dead letters of the shard at or above the floor.
+        groups.InvalidateDatabase(resolved);
 
         string tenant = " in tenant " + agent.TenantId;
 

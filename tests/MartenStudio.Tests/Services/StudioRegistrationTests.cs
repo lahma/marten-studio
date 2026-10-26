@@ -149,6 +149,9 @@ public class StudioRegistrationTests
         (typeof(DocumentBrowserState), ServiceLifetime.Scoped, How.Type, typeof(DocumentBrowserState)),
         (typeof(IDocumentWriteService), ServiceLifetime.Scoped, How.Type, typeof(DocumentWriteService)),
         (typeof(IEventDataService), ServiceLifetime.Scoped, How.Type, typeof(EventDataService)),
+
+        // M3: the grouped dead-letter view's read, shared across circuits for one refresh interval - added in 0.6.
+        (typeof(DeadLetterGroupCache), ServiceLifetime.Singleton, How.Type, typeof(DeadLetterGroupCache)),
         (typeof(ISchemaDataService), ServiceLifetime.Scoped, How.Type, typeof(SchemaDataService)),
         (typeof(IConfigurationService), ServiceLifetime.Scoped, How.Type, typeof(ConfigurationService)),
         (typeof(IQueryService), ServiceLifetime.Scoped, How.Type, typeof(QueryService)),

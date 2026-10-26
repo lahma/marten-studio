@@ -7,6 +7,8 @@ using JasperFx.MultiTenancy;
 using Marten;
 using Marten.Schema;
 
+using MartenStudio.Services.Events;
+
 using Npgsql;
 
 using NpgsqlTypes;
@@ -23,6 +25,8 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="ShardName">The key of <c>DeadLetterEvent.ShardName</c>.</param>
 /// <param name="ExceptionType">The key of <c>DeadLetterEvent.ExceptionType</c>.</param>
 /// <param name="Timestamp">The key of <c>DeadLetterEvent.Timestamp</c>, which the list is ordered by.</param>
+/// <param name="ExceptionMessage">The key of <c>DeadLetterEvent.ExceptionMessage</c>, which the grouped view fingerprints.</param>
+/// <param name="EventSequence">The key of <c>DeadLetterEvent.EventSequence</c>, which names the failing event.</param>
 /// <remarks>
 /// <c>Casing.Default</c> writes <c>ProjectionName</c>, <c>CamelCase</c> <c>projectionName</c> and
 /// <c>SnakeCase</c> <c>projection_name</c>; Marten's own LINQ reads the member through the same spelling, which is
@@ -35,7 +39,9 @@ internal sealed record DeadLetterJsonKeys(
     string ProjectionName,
     string ShardName,
     string ExceptionType,
-    string Timestamp)
+    string Timestamp,
+    string ExceptionMessage,
+    string EventSequence)
 {
     /// <summary>The keys under the store's naming policy, or the CLR names when it has none.</summary>
     public static DeadLetterJsonKeys For(JsonNamingPolicy? policy) => new(
@@ -43,7 +49,9 @@ internal sealed record DeadLetterJsonKeys(
         Key(nameof(DeadLetterEvent.ProjectionName), policy),
         Key(nameof(DeadLetterEvent.ShardName), policy),
         Key(nameof(DeadLetterEvent.ExceptionType), policy),
-        Key(nameof(DeadLetterEvent.Timestamp), policy));
+        Key(nameof(DeadLetterEvent.Timestamp), policy),
+        Key(nameof(DeadLetterEvent.ExceptionMessage), policy),
+        Key(nameof(DeadLetterEvent.EventSequence), policy));
 
     private static string Key(string member, JsonNamingPolicy? policy) => policy?.ConvertName(member) ?? member;
 }
@@ -62,6 +70,18 @@ internal sealed record DeadLetterPageQuery
 
     /// <summary>Only those whose exception type contains this, case-sensitively; <see langword="null" /> for any.</summary>
     public string? ExceptionType { get; init; }
+
+    /// <summary>
+    /// Only this group's letters (M3): <see cref="DeadLetterGroupQueries.AppendGroupPredicates" />, the grouped view's own
+    /// rule; <see langword="null" /> for every group.
+    /// </summary>
+    public DeadLetterGroupKey? Group { get; init; }
+
+    /// <summary>
+    /// The events table <see cref="Group" />'s event type is looked up in, or <see langword="null" /> when the database has
+    /// none - then only a group whose event type is missing matches.
+    /// </summary>
+    public DeadLetterEventSource? Events { get; init; }
 
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
@@ -223,6 +243,13 @@ internal static class DeadLetterQueries
             sql.Append("select ").Append(Column(DocumentTableInfo.IdColumn)).Append(", ").Append(data).Append('\n');
             sql.Append("from ").Append(table.QualifiedName).Append(" as " + Alias + "\n");
 
+            // A group's letters: each letter's event looked up for its type, kept whether or not it is found (a group
+            // whose event is gone has no type). The lookup reads @tenant and @tenant_key, which the clauses below bind.
+            if (query is { Group: not null, Events: { } events })
+            {
+                sql.Append(DeadLetterGroupQueries.EventLookup(command, keys, events, inner: false));
+            }
+
             sql.Append("where (").Append(Nullable(command, "tenant", query.TenantId)).Append(" is null or ")
                 .Append(data).Append(" ->> ").Append(Key(command, "tenant_key", keys.TenantId)).Append(" = @tenant)\n");
 
@@ -239,6 +266,11 @@ internal static class DeadLetterQueries
             if (LiveRows(table, Alias) is { } live)
             {
                 sql.Append("  and ").Append(live).Append('\n');
+            }
+
+            if (query.Group is { } group)
+            {
+                DeadLetterGroupQueries.AppendGroupPredicates(sql, command, keys, group, eventLookedUp: query.Events is not null);
             }
 
             sql.Append("order by (").Append(data).Append(" ->> ").Append(Key(command, "timestamp_key", keys.Timestamp))

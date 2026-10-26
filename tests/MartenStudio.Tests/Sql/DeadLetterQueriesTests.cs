@@ -129,11 +129,12 @@ public class DeadLetterQueriesTests
     [Fact]
     public void The_json_keys_follow_the_serializers_casing()
     {
-        DeadLetterJsonKeys.For(null).Should().Be(new DeadLetterJsonKeys("TenantId", "ProjectionName", "ShardName", "ExceptionType", "Timestamp"));
-        DeadLetterJsonKeys.For(JsonNamingPolicy.CamelCase).Should().Be(
-            new DeadLetterJsonKeys("tenantId", "projectionName", "shardName", "exceptionType", "timestamp"));
-        DeadLetterJsonKeys.For(JsonNamingPolicy.SnakeCaseLower).Should().Be(
-            new DeadLetterJsonKeys("tenant_id", "projection_name", "shard_name", "exception_type", "timestamp"));
+        DeadLetterJsonKeys.For(null).Should().Be(new DeadLetterJsonKeys(
+            "TenantId", "ProjectionName", "ShardName", "ExceptionType", "Timestamp", "ExceptionMessage", "EventSequence"));
+        DeadLetterJsonKeys.For(JsonNamingPolicy.CamelCase).Should().Be(new DeadLetterJsonKeys(
+            "tenantId", "projectionName", "shardName", "exceptionType", "timestamp", "exceptionMessage", "eventSequence"));
+        DeadLetterJsonKeys.For(JsonNamingPolicy.SnakeCaseLower).Should().Be(new DeadLetterJsonKeys(
+            "tenant_id", "projection_name", "shard_name", "exception_type", "timestamp", "exception_message", "event_sequence"));
     }
 
     /// <summary>A soft-deleted mapping - which only a host's own <c>Schema.For&lt;DeadLetterEvent&gt;()</c> makes - keeps Marten's default filter.</summary>

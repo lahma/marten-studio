@@ -85,8 +85,11 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         AggregateSnapshot replay = await host.EventsAsync(
             x => x.AggregateAtVersionAsync(Scope, Guid.NewGuid().ToString(), typeof(LedgerSummary).FullName!, 0, Token));
         bool exists = await host.DocumentsAsync(x => x.StreamExistsAsync(Scope, Guid.NewGuid().ToString(), Token));
+        DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
 
         page.Should().BeSameAs(DeadLetterPage.Empty, "no table is an empty list, not a failure");
+        groups.Error.Should().BeNull("M3: no table is no groups, not a failure");
+        groups.Groups.Should().BeEmpty();
         count.Should().Be(0);
         replay.Error.Should().BeNull("no event store is a stream that does not exist, not a failure");
         replay.Found.Should().BeFalse();
@@ -119,9 +122,12 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         DeadLetterPage page = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery(), Token));
         ProjectionsView projections = await host.ProjectionsAsync(x => x.GetProjectionsAsync(Scope, Token));
         long? count = await host.EventsAsync(x => x.CountDeadLettersAsync(Scope, Token));
+        DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
 
         shape.EventTablesExist.Should().BeTrue("the event store is there - only the dead-letter table is not");
         page.Should().BeSameAs(DeadLetterPage.Empty, "no table is an empty list, not a failure");
+        groups.Error.Should().BeNull("M3's grouped view: no table is no groups");
+        groups.Groups.Should().BeEmpty();
         projections.HasEventStore.Should().BeTrue();
         count.Should().Be(0);
 
@@ -148,6 +154,17 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         DeadLetterPage first = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery { PageSize = 2 }, Token));
         DeadLetterPage second = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery { PageSize = 2, Offset = 2 }, Token));
         long? count = await host.EventsAsync(x => x.CountDeadLettersAsync(Scope, Token));
+
+        // M3: the grouped view, a group opened in the list, and the skip dialog's count - every read it adds.
+        DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
+        groups.Error.Should().BeNull();
+        groups.TotalLetters.Should().Be(3);
+        DeadLetterGroupKey key = groups.Groups[0].Key;
+        DeadLetterPage opened = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery { Group = key }, Token));
+        DeadLetterGroupSkipPlan plan = await host.EventsAsync(x => x.DescribeDeadLetterGroupSkipAsync(Scope, key, Token));
+        opened.Error.Should().BeNull();
+        opened.Rows.Should().HaveCount((int) groups.Groups[0].Letters);
+        plan.Should().NotBeNull();
 
         all.Error.Should().BeNull();
         all.Rows.Select(static x => x.ExceptionMessage).Should().Equal(["third", "second", "first"], "newest failure first");

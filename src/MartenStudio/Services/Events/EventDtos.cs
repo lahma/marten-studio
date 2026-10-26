@@ -465,6 +465,9 @@ internal sealed record DeadLetterQuery
     /// <summary>Only those whose exception type contains this.</summary>
     public string? ExceptionType { get; init; }
 
+    /// <summary>Only this group's (M3: a group opened from the grouped view), on top of the filters above.</summary>
+    public DeadLetterGroupKey? Group { get; init; }
+
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
 

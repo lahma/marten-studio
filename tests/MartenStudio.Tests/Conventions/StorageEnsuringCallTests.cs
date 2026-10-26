@@ -177,9 +177,10 @@ public class StorageEnsuringCallTests
             ["DiscardDeadLetterAsync"],
             "DiscardDeadLetterAsync: whether a missed id belongs to another tenant, so the refusal is a refusal"),
         new("src/MartenStudio/Services/Events/EventDataService.cs", "MarkEventsAsSkipped",
-            ["SkipEventAsync"],
-            "SkipEventAsync (ManageDeadLetters), audited; NoSchemaBuildingCallTests allows it too. Its 9.51 tenant overload "
-            + "is reached by reflection from the same write (see the shapes neither layer sees)"),
+            ["CommitSkipAsync"],
+            "CommitSkipAsync, the one commit of SkipEventAsync and SkipDeadLetterGroupAsync (ManageDeadLetters), audited; "
+            + "NoSchemaBuildingCallTests allows it too. Its 9.51 tenant overload is reached by reflection from the same commit "
+            + "(see the shapes neither layer sees)"),
         new("src/MartenStudio/Services/Events/StreamCompactionInvoker.cs", "CompactStreamAsync",
             ["CompactAndSaveAsync", "CompactAndSaveAsync"],
             "the compaction (CompactStreams), Guid and string ids, audited by EventDataService.CompactStreamAsync"),
@@ -234,13 +235,13 @@ public class StorageEnsuringCallTests
     /// <summary>
     /// The reflected call neither layer above sees - Marten 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which
     /// ensures the event storage - is reached through exactly one studio method, and that method is called from exactly
-    /// one place: <c>SkipEventAsync</c>, the capability-gated, audited write the listed tenant-less call is made in.
+    /// one place: <c>CommitSkipAsync</c>, the one commit both skips end in, where the listed tenant-less call is made too.
     /// </summary>
     [Fact]
-    public void The_reflected_tenant_skip_is_reached_only_from_SkipEventAsync()
+    public void The_reflected_tenant_skip_is_reached_only_from_the_skips_one_commit()
     {
         MethodInfo helper = typeof(MartenStudio.Services.Events.EventDataService).GetMethod(
-            nameof(MartenStudio.Services.Events.EventDataService.MarkTenantEventAsSkippedAsync),
+            nameof(MartenStudio.Services.Events.EventDataService.MarkTenantEventsAsSkippedAsync),
             BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)!;
 
         helper.Should().NotBeNull("the one method that makes the reflected call");
@@ -251,8 +252,32 @@ public class StorageEnsuringCallTests
         scan.Calls.Should().ContainSingle("only EventDataService calls it").Which.Key.Should().Be(
             (typeof(MartenStudio.Services.Events.EventDataService).FullName!, helper.Name));
         scan.Calls.Single().Value.Should().Equal(
-            [nameof(MartenStudio.Services.Events.EventDataService.SkipEventAsync)],
+            ["CommitSkipAsync"],
             "a second caller would be a second path into a storage-ensuring Marten write that the allow-list above cannot see");
+    }
+
+    /// <summary>
+    /// M3: the skips' one commit, which makes both Marten calls, is reached from exactly the two capability-gated, audited
+    /// writes that end in it - single Skip and "Skip this group" - so the bulk skip is single Skip's path, not a second one.
+    /// </summary>
+    [Fact]
+    public void The_skips_one_commit_is_reached_only_from_the_two_skips()
+    {
+        MethodInfo commit = typeof(MartenStudio.Services.Events.EventDataService).GetMethod(
+            "CommitSkipAsync",
+            BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+        commit.Should().NotBeNull("the one method both skips end in");
+
+        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, target => target == commit);
+
+        scan.Unresolved.Should().BeEmpty();
+        scan.Calls.Should().ContainSingle("only EventDataService calls it").Which.Value.Should().BeEquivalentTo(
+            [
+                nameof(MartenStudio.Services.Events.EventDataService.SkipEventAsync),
+                nameof(MartenStudio.Services.Events.EventDataService.SkipDeadLetterGroupAsync),
+            ],
+            "a third caller would be a third way into MarkEventsAsSkipped, past checks nobody has listed");
     }
 
     /// <summary>The allow-list is a statement about code that exists, not a permanent exemption.</summary>
@@ -508,11 +533,12 @@ public class StorageEnsuringCallTests
     /// <list type="bullet">
     /// <item><description>A call made through <b>reflection</b> names the member as a string - <c>DocumentWriteService</c>
     /// builds its typed <c>Delete</c> and <c>UndoDeleteWhere</c> calls that way, and they queue operations that only its
-    /// <c>SaveChangesAsync</c> (on the list) runs. So does <c>EventDataService.MarkTenantEventAsSkippedAsync</c>: Marten
+    /// <c>SaveChangesAsync</c> (on the list) runs. So does <c>EventDataService.MarkTenantEventsAsSkippedAsync</c>: Marten
     /// 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which ensures the event storage like the tenant-less one on
     /// the list, and is reached by reflection because the floor has no such member to compile against. It is made only
-    /// from <c>SkipEventAsync</c> - the same capability-gated, audited write as the listed site, which
-    /// <see cref="The_reflected_tenant_skip_is_reached_only_from_SkipEventAsync" /> pins - and its declaration is
+    /// from <c>CommitSkipAsync</c> - the same commit as the listed site, reached only from the two capability-gated,
+    /// audited skips, which <see cref="The_reflected_tenant_skip_is_reached_only_from_the_skips_one_commit" /> and
+    /// <see cref="The_skips_one_commit_is_reached_only_from_the_two_skips" /> pin - and its declaration is
     /// looked up by name in <c>RuntimeFeature.TenantSkipMethod</c>, a string this scanner blanks.</description></item>
     /// <item><description>A call inside an <b>interpolation hole</b> is blanked with its string by the source layer; the
     /// compiled layer still sees it.</description></item>
