@@ -56,9 +56,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
         // before W5-V1's T16, whose three are the workers read, the progress read the Maintenance page shares, and the
         // sweep's one server-facts read, which T16 is the first table check to ask for (T24 shares the table read). Twelve
         // before T08's since-restart was wired to W5-CAP's statistics window (W5b-int): the window's one read, which T08 shares
-        // with C08 and C11 through the same memo, so the sweep as a whole runs it once either way.
+        // with C08 and C11 through the same memo, so the sweep as a whole runs it once either way. Thirteen before W5-B1's five:
+        // T15's foreign keys, the usage guard's counters-age read T01, T05 and T06 share, T26's integer keys, the partition
+        // read T19 and T20 share, and T17's document-named tables.
         first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
-            .Distinct(StringComparer.Ordinal).Should().HaveCount(13, "the regular table checks' whole catalog cost on the sample store");
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(18, "the regular table checks' whole catalog cost on the sample store");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(
             static x => x.Sql.Contains("pg_catalog.pg_stat_archiver", StringComparison.Ordinal), "T08 reads the statistics window for since-restart");
 

@@ -466,8 +466,17 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         demo.Should().Contain(SchemaKey.For(Quartz, "qrtz_job_details")).And.Contain(SchemaKey.For(Legacy, "departments"))
             .And.Contain(SchemaKey.For(Sample, RelationalDemoSchema.AppSettingsTable), "the demo's tables are judged");
 
+        // W5-B1: the one exception, and a true one. legacy.sensor_readings is a static half-year range whose newest partition
+        // ends 2027-01-01 with no DEFAULT - 77 days from this clock, within one partition-width - so an insert for 2027
+        // would fail, which is exactly T20's case. Extending the demo is the sample's call, not the check's.
+        string sensorReadings = SchemaKey.For(Legacy, "sensor_readings");
+        HealthReportFinding runningOut = report.Findings.Should().ContainSingle(x => x.Code == "T20" && x.Finding.Subject == sensorReadings).Subject;
+        runningOut.Severity.Should().Be(HealthSeverity.Critical);
+        runningOut.Finding.Variant.Should().Be(RangePartitionsCheck.RunningOutVariant);
+
         report.Findings.Where(static x => x.Code.StartsWith('T'))
             .Where(x => x.Finding.Subject is { } subject && demo.Any(table => subject == table || subject.StartsWith(table + ".", StringComparison.Ordinal)))
+            .Where(x => !ReferenceEquals(x, runningOut))
             .Select(static x => x.Code + " " + x.Finding.Subject + ": " + x.Finding.Title)
             .Should().BeEmpty("the demo starts healthy, and the studio does not cry wolf about a library's design");
 
