@@ -408,6 +408,9 @@ health checks, Amazon Aurora awareness, PostgreSQL 14 to 18 as a tested range, a
   and now the tenant databases with one deliberately unindexed foreign key - moved to
   `samples/PostgresStudio.SampleData`, which both samples share. The demo's `legacy.sensor_readings` gets its
   half-year partitions through next year, plus one beyond, every time it is applied, so it never ages into T20.
+- The Postgres Studio sample writes its demo data - three tenant databases and the `quartz`, `legacy` and
+  `studio_sample` schemas - only on the throwaway Postgres it starts itself, or when started with the new
+  `--allow-data-generation` switch. On any other configured database it starts read-only and says so in one line.
 - The Marten sample checks its database before Marten touches it. When another build of the sample seeded it, or its
   demo document tables hold rows with no seed marker, startup drops `studio_sample` and `studio_sample_events`
   (`drop schema … cascade`, which also drops whatever in other schemas depends on them) and seeds them again: on the
@@ -429,6 +432,9 @@ health checks, Amazon Aurora awareness, PostgreSQL 14 to 18 as a tested range, a
   keeps the statement that ran whole and escaped up to 32,768 characters, the most one circuit message carries by
   default, and past that its first and last 16,384 characters around a count of what was cut, so no padding can keep
   the statement out of the record. The Activity page is unchanged.
+- The projection summary's event 9216, the bloat measure's 9420 and the Configuration page's 9214 name the registered
+  store key and the database identity, not the link's spelling. The resolver's "no such store", "no such database" and
+  "not a tenant" refusals carry a visitor's value escaped and bounded.
 - A link to another store's database opens that database: `?store=B&db=X` opens B's database `X` when B lists it,
   where it opened B's first database before, and in Postgres Studio `?store=tenants&db=tenant_b` opens that source's
   database. On Documents, a document, and the database browser's object list, object and row pages, `?store=B` with
@@ -440,6 +446,14 @@ health checks, Amazon Aurora awareness, PostgreSQL 14 to 18 as a tested range, a
   previous store's tenant over unchecked.
 - A composite projection's members are listed under their composite, and no longer as "Unregistered shards"
   that nothing advances; they offer no Start or Stop of their own.
+- Security: the scope resolver asks the store and write policies again about the registered source key and the
+  matched database identity whenever a link spells either another way - another case, or no `?db=` at all - before
+  anything is opened or read. A handler that compares `MartenStoreResource` or `PostgresStudioResource` names
+  ordinally, a deny-list included, is no longer answered with a store or database it refused by name. The pages
+  already used those names; the resolver now does for every caller.
+- Security: a Skip event or Rewind subscription whose page goes away after its checks have passed runs to its end on
+  a token of its own and is audited. Before, closing the tab could cancel a rewind between stopping the subscription's
+  agents and restarting them, which left them stopped with no audit entry.
 
 # 0.4.0
 
