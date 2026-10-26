@@ -41,9 +41,9 @@
   tell, the line names that exception.
 - The Advance high water mark dialog says what the advance skips: every sequence number below the new mark with
   no committed event, an append still in flight included - not the events a projection has still to process.
-  From Marten 9.52 it also says that the advance first ensures the event store's storage under the database's
-  `AutoCreate`, and on a store that numbers events per tenant, which tenants' marks it moves; the button's hover
-  text says what the first press may create.
+  From Marten 9.52 it also says that the advance first ensures the event store's storage - with no tenant
+  selected in every database of the store, each under its own `AutoCreate` - and on a store that numbers events
+  per tenant, which tenants' marks it moves; the button's hover text says what the first press may create.
 - A composite projection's members are listed under their composite, and no longer as "Unregistered shards"
   that nothing advances; they offer no Start or Stop of their own.
 
