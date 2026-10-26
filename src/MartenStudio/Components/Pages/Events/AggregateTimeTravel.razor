@@ -66,12 +66,20 @@
             </button>
         </div>
 
-        <button type="button"
-                class="ms-button ms-button-primary"
-                disabled="@(IsLoading || string.IsNullOrEmpty(SelectedType))"
-                @onclick="LoadAsync">
-            @(IsLoading ? "Replaying..." : "Replay to this version")
-        </button>
+        <div class="ms-time-travel-actions">
+            <button type="button"
+                    class="ms-button ms-button-primary"
+                    disabled="@(IsLoading || string.IsNullOrEmpty(SelectedType))"
+                    @onclick="LoadAsync">
+                @(IsLoading ? "Replaying..." : "Replay to this version")
+            </button>
+
+            @* M1: the same fold, one event at a time, with what each event changed. *@
+            @if (!string.IsNullOrEmpty(StepHref))
+            {
+                <a class="ms-button ms-time-travel-step" href="@StepHref">Step through it event by event</a>
+            }
+        </div>
 
         @if (!string.IsNullOrWhiteSpace(Error))
         {
@@ -176,6 +184,10 @@
     /// <summary>Raised when the visitor asks for a replay.</summary>
     [Parameter]
     public EventCallback OnLoad { get; set; }
+
+    /// <summary>The stepper (M1) on this stream, at this version, in this aggregate type; no link when it is not set.</summary>
+    [Parameter]
+    public string? StepHref { get; set; }
 
     /// <summary>
     /// Why the last replay produced nothing, when the page could tell them apart.

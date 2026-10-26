@@ -266,6 +266,7 @@
                                  Error="@snapshot?.Error?.Display"
                                  NotFoundMessage="@NotFoundMessage"
                                  FoldsOnlyTheTenant="@(shape is { EventsConjoined: false, HasTenantId: true } && !string.IsNullOrEmpty(State.ActiveScope?.TenantId))"
+                                 StepHref="@StepHref"
                                  OnLoad="ReplayAsync" />
         </div>
     }
@@ -423,6 +424,11 @@
     private string StreamsHref => EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope);
 
     private string FeedHref => EventLinks.ToFeedForStream(Options.Value, State.ActiveScope, Id ?? string.Empty);
+
+    /// <summary>The stepper (M1) on this stream, in the aggregate type picked, at the version on the panel.</summary>
+    private string? StepHref => string.IsNullOrWhiteSpace(SelectedAggregate)
+        ? null
+        : EventLinks.ToStep(Options.Value, State.ActiveScope, Id ?? string.Empty, SelectedAggregate, SelectedVersion);
 
     private string ArchiveMessage =>
         $"Archiving marks stream {Id} and every one of its events as archived. Marten has no un-archive " +

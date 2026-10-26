@@ -461,6 +461,34 @@ public class DeadLettersTests
         query.Offset.Should().Be(50);
     }
 
+    /// <summary>M1: the stepper links a step to the dead letters of its event, by sequence, and the page says how to see the rest.</summary>
+    [Fact]
+    public async Task One_events_dead_letters_by_its_sequence_reach_the_query_and_the_page_says_how_to_see_them_all()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.Navigate("marten/events/dead-letters?seq=103&projection=Orders");
+
+        IRenderedComponent<DeadLetters> page = context.Render<DeadLetters>();
+
+        context.EventData.DeadLetterQueries[^1].EventSequence.Should().Be(103);
+        page.Find(".ms-dead-letters-event").TextContent.Should().Contain("event #103");
+        page.Find(".ms-dead-letters-event a").GetAttribute("href").Should().Contain("projection=Orders").And.NotContain("seq=");
+    }
+
+    /// <summary>M1: the event a dead letter is about opens in the stepper, on its step, in the projection that recorded it.</summary>
+    [Fact]
+    public async Task The_event_that_failed_links_to_its_step_in_the_projection_that_recorded_it()
+    {
+        using StudioComponentContext context = await NewContextAsync();
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId)], false);
+        context.EventData.EventBySequence = FakeEventDataService.Event(42, version: 3, streamId: "order-42");
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        page.Find("a.ms-dead-letter-step").GetAttribute("href").Should()
+            .Contain("events/streams/step?id=order-42").And.Contain("v=3").And.Contain("projection=OrderSummary");
+    }
+
     [Fact]
     public async Task No_dead_letters_is_good_news_and_says_so()
     {

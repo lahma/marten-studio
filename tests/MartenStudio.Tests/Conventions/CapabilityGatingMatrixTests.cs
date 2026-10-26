@@ -178,6 +178,10 @@ public class CapabilityGatingMatrixTests
             "GetEventTagsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
             "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",
             "ListEventTypesAsync", "ListStreamsAsync", "ListTagTypesAsync",
+
+            // M1: the stepper is time travel one event at a time, and gated as time travel is - the store policy for the
+            // scope, no capability. It runs the projection's own code exactly as AggregateAtVersionAsync does.
+            "FindNextChangeAsync", "StepAsync",
         ],
         [typeof(IProjectionDataService)] =
         [

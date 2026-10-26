@@ -11802,3 +11802,211 @@ a.ms-schema-health-mark:focus-visible {
         padding: var(--ms-space-md) var(--ms-space-md);
     }
 }
+
+/* ==========================================================================
+   M1. The projection stepper
+
+   0.6's M1: Events > a stream > Step through it event by event. Appended in D26 order; every selector is this packet's
+   own (ms-stepper-, and the four hooks it adds beside time travel and the dead letters: ms-time-travel-actions,
+   ms-time-travel-step, ms-dead-letter-step, ms-dead-letters-event), so nothing here re-declares an earlier rule. Notes use
+   the secondary text colour, not the muted one: UX-6 measured the muted grey below 4.5:1 on the surface. The step list is
+   a list, not a table, so D25's scroll region does not apply; it scrolls on its own axis, and on a phone it sits above
+   the step at a bounded height.
+   ========================================================================== */
+
+.ms-stepper-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-stepper-note {
+    max-width: 80ch;
+    margin: var(--ms-space-sm) 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stepper-nav,
+.ms-stepper-search {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: var(--ms-space-sm) 0;
+}
+
+.ms-stepper-position {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-stepper-jump {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-stepper-version {
+    width: 9ch;
+}
+
+.ms-stepper-path {
+    flex: 1 1 16rem;
+    min-width: 0;
+    max-width: 32rem;
+}
+
+.ms-stepper-panes {
+    display: grid;
+    grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+    gap: var(--ms-space-lg);
+    align-items: start;
+    margin-top: var(--ms-space-md);
+}
+
+.ms-stepper-steps {
+    max-height: 70vh;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-stepper-steps-item + .ms-stepper-steps-item {
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-stepper-step-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid transparent;
+    color: var(--ms-color-text);
+    text-decoration: none;
+}
+
+.ms-stepper-step-link:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-stepper-step-link-selected {
+    border-left-color: var(--ms-color-primary);
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-stepper-step-link-failed {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-stepper-step-version {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stepper-step-type {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-stepper-step-meta {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-stepper-marker {
+    padding: 0 var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-stepper-marker-failure {
+    border-color: var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+}
+
+.ms-stepper-marker-dead {
+    border-color: var(--ms-color-warning);
+    background-color: var(--ms-color-warning-bg);
+}
+
+.ms-stepper-step {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-stepper-state,
+.ms-stepper-diff {
+    min-width: 0;
+}
+
+.ms-stepper-failure p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-stepper-failure p + p {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-stepper-dead-letter-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-stepper-dead-letter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    overflow-wrap: anywhere;
+    border: 1px solid var(--ms-color-border);
+    border-left: 3px solid var(--ms-color-warning);
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-time-travel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-dead-letter-step {
+    display: inline-block;
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-dead-letters-event a {
+    margin-left: var(--ms-space-xs);
+}
+
+@media (max-width: 900px) {
+    .ms-stepper-panes {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ms-stepper-steps {
+        max-height: 16rem;
+    }
+}

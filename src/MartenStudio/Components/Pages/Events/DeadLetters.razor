@@ -72,6 +72,16 @@
         </div>
     </div>
 
+    @* M1: the stepper's link to one event's dead letters. A filter of its own rather than a field, because it is a
+       number a link carries, not something a visitor types. *@
+    @if (Sequence is { } sequence)
+    {
+        <p class="ms-stepper-note ms-dead-letters-event" role="status">
+            Only the dead letters of event #@sequence.ToString(CultureInfo.InvariantCulture).
+            <a href="@WithoutSequenceHref">Show every dead letter</a>
+        </p>
+    }
+
     @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
     {
         <CapabilityDisabled Capability="@nameof(StudioCapability.ManageDeadLetters)" Action="Managing dead letters" />
@@ -176,6 +186,12 @@
                                                            BinaryLength="offending.BinaryLength"
                                                            Json="@offending.Json"
                                                            Metadata="offending.Metadata" />
+
+                                                @* M1: the event in the stepper, folded into the aggregate this dead letter's
+                                                   projection builds when it is a single-stream one - the page picks it by
+                                                   the projection's name, and asks for a type when it is not. *@
+                                                <a class="ms-button ms-btn-sm ms-dead-letter-step"
+                                                   href="@StepHref(offending, row.ProjectionName)">Step to this event</a>
                                             }
                                         </div>
 
@@ -413,6 +429,10 @@
     [SupplyParameterFromQuery(Name = "exception")]
     public string? Exception { get; set; }
 
+    /// <summary>Only the dead letters of the event of this sequence - the stepper's link (M1).</summary>
+    [SupplyParameterFromQuery(Name = "seq")]
+    public long? Sequence { get; set; }
+
     /// <summary>How many to skip.</summary>
     [SupplyParameterFromQuery(Name = "offset")]
     public int? Offset { get; set; }
@@ -434,7 +454,8 @@
     private bool HasFilters =>
         !string.IsNullOrWhiteSpace(Projection)
         || !string.IsNullOrWhiteSpace(Shard)
-        || !string.IsNullOrWhiteSpace(Exception);
+        || !string.IsNullOrWhiteSpace(Exception)
+        || Sequence is not null;
 
     private int DetailColumnSpan => 7;
 
@@ -783,6 +804,7 @@
                     ProjectionName = Projection,
                     ShardName = Shard,
                     ExceptionType = Exception,
+                    EventSequence = Sequence,
                     Offset = OffsetValue,
                     PageSize = PageSize,
                 }, token);
@@ -1055,8 +1077,32 @@
                 new("projection", Projection),
                 new("shard", Shard),
                 new("exception", Exception),
+                new("seq", EventLinks.Number(Sequence)),
                 new("offset", offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null),
             ]);
+
+    /// <summary>The same filters without the event's, back to every dead letter they match.</summary>
+    private string WithoutSequenceHref =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.DeadLettersRoute,
+            State.ActiveScope,
+            [new("projection", Projection), new("shard", Shard), new("exception", Exception)]);
+
+    /// <summary>
+    /// The offending event in the stepper (M1), in the scope its stream link uses: the event's own tenant when the scope
+    /// names none and the events are conjoined (SEC1-fix5), and the dead letter's projection for the page to pick the
+    /// aggregate type by.
+    /// </summary>
+    private string StepHref(EventRow offending, string projection) =>
+        EventLinks.ToStep(
+            Options.Value,
+            State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(offending.TenantId)
+                ? all with { TenantId = offending.TenantId }
+                : State.ActiveScope,
+            offending.StreamId,
+            version: offending.Version,
+            projection: projection);
 
     /// <summary>
     /// The offending event's stream, in the event's own tenant when the scope names none and the event store is
@@ -1080,6 +1126,7 @@
             Projection,
             Shard,
             Exception,
+            EventLinks.Number(Sequence),
             OffsetValue.ToString(CultureInfo.InvariantCulture));
 
     public async ValueTask DisposeAsync()
