@@ -117,6 +117,22 @@ internal static class MatrixReads
 
             Found(await reader.ReadAsync(t) ? StatisticsWindow.Map(reader, DateTimeOffset.UtcNow) : null, "this database's pg_stat_database row");
         }),
+        new("stats: control privileges", true, static async (x, t) =>
+        {
+            await using NpgsqlCommand command = new(StatisticsWindowQueries.ControlPrivilegesSql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+            // Stock PostgreSQL grants both to PUBLIC, so every role of the matrix may call both.
+            Found(await reader.ReadAsync(t) && reader.GetBoolean(0) && reader.GetBoolean(1) ? reader : null, "EXECUTE on both control functions");
+        }),
+        new("stats: control", true, static async (x, t) =>
+        {
+            await using NpgsqlCommand command = new(StatisticsWindowQueries.ControlSql(true, true), x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+            StatisticsControl? control = await reader.ReadAsync(t) ? StatisticsWindow.MapControl(reader) : null;
+            Found(control is { Timeline: not null, SystemIdentifier: not null } ? control : null, "timeline and system identifier");
+        }),
     ];
 
     /// <summary>Fails a by-name read that found nothing: the fixture made the object, so "nothing" is a read that did not read.</summary>

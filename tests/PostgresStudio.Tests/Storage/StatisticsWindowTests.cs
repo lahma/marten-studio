@@ -180,6 +180,102 @@ public class StatisticsWindowTests
         later.Reason.Should().Be(StatisticsResetReason.Unexplained, "what it was is still said");
     }
 
+    // ---- the control signals, read apart (CAP-fix2) ------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("0A000")]
+    [InlineData("XX000")]
+    [InlineData("42883")]
+    [InlineData("42501")]
+    [InlineData("57014")]
+    public async Task A_control_read_that_fails_with_any_sqlstate_is_unknown_and_is_told_once(string sqlState)
+    {
+        List<Exception> told = [];
+
+        StatisticsControl control = await StatisticsWindow.ControlOrUnknownAsync(
+            _ => throw new Npgsql.PostgresException("pg_control is not available here", "ERROR", "ERROR", sqlState),
+            told.Add,
+            TestContext.Current.CancellationToken);
+
+        control.Should().Be(StatisticsControl.Unknown);
+        told.Should().ContainSingle().Which.Should().BeOfType<Npgsql.PostgresException>().Which.SqlState.Should().Be(sqlState);
+    }
+
+    [Fact]
+    public async Task A_control_read_that_was_cancelled_still_cancels()
+    {
+        Func<Task> read = () => StatisticsWindow.ControlOrUnknownAsync(
+            static _ => throw new OperationCanceledException(),
+            static _ => throw new InvalidOperationException("a cancellation is not a platform's state"),
+            TestContext.Current.CancellationToken);
+
+        await read.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task A_control_read_that_answers_is_passed_through()
+    {
+        StatisticsControl control = await StatisticsWindow.ControlOrUnknownAsync(
+            static _ => Task.FromResult(new StatisticsControl(3, 42)),
+            static _ => throw new InvalidOperationException("nothing failed"),
+            TestContext.Current.CancellationToken);
+
+        control.Should().Be(new StatisticsControl(3, 42));
+    }
+
+    [Fact]
+    public void A_timeline_not_read_on_either_side_of_a_promotion_elsewhere_says_no_failover()
+    {
+        Ring ring = new();
+        DateTimeOffset before = Boot.AddDays(20);
+        ring.Sweep(Seventeen(before));
+
+        // The control read failed for one sweep, then answered with another timeline: nothing to compare the new one with.
+        StatisticsWindow unread = ring.Sweep(Seventeen(before.AddMinutes(1), commits: 1_010) with { Timeline = null, SystemIdentifier = null });
+        StatisticsWindow answered = ring.Sweep(Seventeen(before.AddMinutes(2), commits: 1_020) with { Timeline = 2 });
+
+        unread.LooksReset.Should().BeFalse("a signal that was not read is unknown, not changed");
+        answered.LooksReset.Should().BeFalse("the last check read no timeline to compare with");
+        answered.Since.Should().Be(unread.Since);
+    }
+
+    [Fact]
+    public void A_system_identifier_not_read_says_no_new_cluster()
+    {
+        Ring ring = new();
+        DateTimeOffset before = Boot.AddDays(20);
+        ring.Sweep(Seventeen(before));
+
+        StatisticsWindow unread = ring.Sweep(Seventeen(before.AddMinutes(1), commits: 1_010) with { SystemIdentifier = null });
+        StatisticsWindow answered = ring.Sweep(Seventeen(before.AddMinutes(2), commits: 1_020) with { SystemIdentifier = 42 });
+
+        unread.LooksReset.Should().BeFalse();
+        answered.LooksReset.Should().BeFalse("the last check read no system identifier to compare with");
+        answered.Reason.Should().NotBe(StatisticsResetReason.FreshCluster);
+    }
+
+    [Fact]
+    public void A_different_server_started_within_half_a_second_whose_shared_times_moved_is_a_reset()
+    {
+        Ring ring = new();
+        DateTimeOffset before = Boot.AddDays(20);
+        ring.Sweep(Seventeen(before, commits: 900_000));
+
+        // Started 400 ms from the server watched, counters higher, but its own shared views' reset times and a new timeline:
+        // neither a promotion nor following one moves a reset time, so this is another server.
+        StatisticsWindow window = ring.Sweep(Seventeen(before.AddMinutes(1), commits: 950_000) with
+        {
+            ServerStartedAt = Boot.AddMilliseconds(400),
+            SharedReset = Boot.AddDays(3),
+            ArchiverReset = Boot.AddDays(3),
+            Timeline = 2,
+        });
+
+        window.LooksReset.Should().BeTrue();
+        window.Reason.Should().Be(StatisticsResetReason.Failover);
+        window.Since.Should().Be(Boot.AddDays(3));
+    }
+
     [Fact]
     public void A_sweep_keeps_the_later_bound_for_a_counter_drop()
     {

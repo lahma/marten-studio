@@ -326,9 +326,16 @@ counters have counted, and whether they were reset:
 - The page and each finding say where **Since** came from and what the counters' start looks like: the server's start,
   a reset, a crash, a restore, a failover, a new cluster (only when the system identifier or major version is seen to
   change), or nothing at all.
-- When the window cannot be read - a platform that refuses one of its functions - C11 is not checked, C08's status row
-  says its rates per day were not checked, and the Storage page shows its sizes and tables with growth "not available"
-  and why.
+- **The control functions are optional.** `pg_control_checkpoint()` and `pg_control_system()` are read by statements
+  of their own: `has_function_privilege` first, then a call of only the functions it allowed, because PostgreSQL checks
+  `EXECUTE` on every function a statement names before it runs, `CASE` or not. When a platform refuses them - revoked,
+  missing, or failing with any SQLSTATE - only the timeline and the system identifier are unknown: no failover and no
+  new cluster is said from them, a failure is logged at Debug and nowhere else, and the window, C08, C11 and the Storage
+  page go on as before.
+- When the window's own statement cannot be read, C08's status row says its rates per day were not checked, and the
+  Storage page shows its sizes and tables with growth "not available" and why. C11, which is nothing but the window,
+  is then not checked for a privilege the role lacks (`42501`), timed out for a statement or lock timeout (`57014`,
+  `55P03`), and could not be checked for anything else; the opt-in health check counts the last two as Degraded.
 
 Known limit: from PostgreSQL 15 a database created after the shared views were last reset reads as having counted
 since then, because its own `stats_reset` is null and no view an unprivileged role can read says when it was created. Its

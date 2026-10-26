@@ -9,6 +9,7 @@ using PostgresStudio.Integration.Tests.Versions;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Health.Export;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Storage;
 
@@ -168,6 +169,79 @@ public class StorageFactsLiveTests(PostgresVersionMatrix matrix)
         c08.Note.Should().Contain("The rates per day were not checked: the statistics window could not be read (SQLSTATE 42501).");
         c11.Outcome.Should().NotBe(HealthCheckOutcome.Checked, "C11 is nothing but the window");
         c11.Problem.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// CAP-fix2's legs: a function revoked from <c>PUBLIC</c> in the test's own database - one control function, which its guard
+    /// answers with a null, or <c>has_function_privilege(text, text)</c>, which makes the control statement itself fail.
+    /// </summary>
+    public static TheoryData<int, string> ControlRevocations => new()
+    {
+        { 14, "pg_catalog.pg_control_system()" },
+        { 17, "pg_catalog.pg_control_checkpoint()" },
+        { 16, "pg_catalog.has_function_privilege(text, text)" },
+        { 18, "pg_catalog.has_function_privilege(text, text)" },
+    };
+
+    /// <summary>
+    /// CAP-fix2 item 1: the control functions are signals the window can do without. A platform that refuses one - here by a
+    /// revocation, which a guard answers with a null, or by the control statement failing outright - costs the timeline or the
+    /// system identifier and nothing else: the window is read, C11 and C08 are checked, and the export is not made Degraded.
+    /// </summary>
+    [PostgresTheory]
+    [MemberData(nameof(ControlRevocations))]
+    public async Task A_platform_that_refuses_the_control_functions_costs_only_the_timeline_and_the_system_identifier(int major, string revoked)
+    {
+        (MatrixServer server, string database) = await SeededAsync(matrix, major, "cap_storage_control");
+        await StorageLive.ExecuteAsync(server.ConnectionString(MatrixRole.Superuser, database), "revoke execute on function " + revoked + " from public");
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+
+        StatisticsReading reading = await ReadingAsync(host);
+        bool statementFails = revoked.Contains("has_function_privilege", StringComparison.Ordinal);
+
+        reading.Commits.Should().BePositive("the window's own statement is read");
+        reading.SharedReset.Should().NotBeNull();
+        reading.Timeline.Should().Be(statementFails || revoked.Contains("checkpoint", StringComparison.Ordinal) ? null : 1);
+        (reading.SystemIdentifier is null).Should().Be(statementFails || revoked.Contains("system", StringComparison.Ordinal));
+
+        StorageFacts facts = await ((StorageFactsReader) host.Services.GetRequiredService<IStorageFacts>()).ReadUncachedAsync(host.Resolved, Token);
+        facts.Window.Should().NotBeNull(facts.WindowNotRead);
+        facts.WindowNotRead.Should().BeNull();
+
+        HealthSweep sweep = await host.Sweeper.SweepAsync(host.Resolved, HealthSweepKind.Regular, Token);
+        HealthCheckResult c08 = sweep.Results.Single(static x => x.Check.Code == "C08");
+        HealthCheckResult c11 = sweep.Results.Single(static x => x.Check.Code == "C11");
+
+        c11.Outcome.Should().Be(HealthCheckOutcome.Checked, c11.Problem?.Reason);
+        c08.Outcome.Should().Be(HealthCheckOutcome.Checked, c08.Problem?.Reason);
+        c08.Note.Should().NotContain("not checked");
+
+        // The export over the whole sweep: nothing failed or timed out for a control function. Its level over the window's
+        // own two checks: Healthy - the whole sweep's may carry a Warning that is not theirs (S01 on 14, its end of life).
+        HealthExportSummary summary = HealthExportSummary.From(DateTimeOffset.UtcNow, [sweep]);
+        summary.Failed.Should().BeEmpty("no check failed for a control function");
+        summary.TimedOut.Should().BeEmpty();
+        summary.Unavailable.Should().NotContain(["C08", "C11"]);
+        summary.Warning.Should().NotContain(["C08", "C11"]);
+        HealthExportSummary.From(DateTimeOffset.UtcNow, [sweep with { Results = [c08, c11] }]).Level.Should().Be(HealthExportLevel.Healthy);
+    }
+
+    /// <summary>The window's signals as a sweep reads them, on a connection of this read's own.</summary>
+    private static async Task<StatisticsReading> ReadingAsync(MatrixHost host)
+    {
+        await using HealthConnection connection = new(host.Resolved.Target);
+        HealthCheckContext context = new(
+            host.Resolved,
+            host.Services.GetRequiredService<PostgresStudio.Services.Settings.IStudioSettings>(),
+            NoStudioRuntime.Instance,
+            host.Services,
+            new HealthSqlRunner(connection, new PostgresStudio.Internal.Sql.ReadOnlySqlOptions(), observer: null),
+            DateTimeOffset.UtcNow,
+            new HealthSweepMemo(),
+            Token);
+
+        return await StatisticsWindow.ReadAsync(context, Token);
     }
 
     /// <summary>The page's view, through the real service in a scope of the host's own, as a circuit would ask it.</summary>

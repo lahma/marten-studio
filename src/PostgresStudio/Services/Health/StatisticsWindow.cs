@@ -1,5 +1,8 @@
 using System.Globalization;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Server;
 
@@ -106,6 +109,18 @@ internal enum StatisticsResetReason
 }
 
 /// <summary>
+/// The control signals, read by statements of their own (<see cref="StatisticsWindowQueries.Control(bool, bool)" />): each
+/// null when it was not read - the function revoked, absent, or failing - which every rule reads as "unknown".
+/// </summary>
+/// <param name="Timeline"><c>pg_control_checkpoint().timeline_id</c>.</param>
+/// <param name="SystemIdentifier"><c>pg_control_system().system_identifier</c>.</param>
+internal sealed record StatisticsControl(int? Timeline, long? SystemIdentifier)
+{
+    /// <summary>Neither was read.</summary>
+    public static StatisticsControl Unknown { get; } = new(null, null);
+}
+
+/// <summary>
 /// What <see cref="StatisticsWindowQueries" /> read, once per sweep: the reset times, the server's start, timeline and identity,
 /// and the counters a reset is told by.
 /// </summary>
@@ -132,11 +147,15 @@ internal sealed record StatisticsReading
 
     /// <summary>
     /// <c>pg_control_checkpoint().timeline_id</c>: the timeline of the last checkpoint, so a read just after a promotion can
-    /// still show the old one (B0 G4). Null where the function may not be called.
+    /// still show the old one (B0 G4). Null where the function may not be called or its statement failed
+    /// (<see cref="StatisticsControl" />), and then never compared.
     /// </summary>
     public int? Timeline { get; init; }
 
-    /// <summary><c>pg_control_system().system_identifier</c>: the same on a primary and its standbys, new for a new cluster.</summary>
+    /// <summary>
+    /// <c>pg_control_system().system_identifier</c>: the same on a primary and its standbys, new for a new cluster. Null as
+    /// <see cref="Timeline" /> is, and then never compared.
+    /// </summary>
     public long? SystemIdentifier { get; init; }
 
     /// <summary>
@@ -522,7 +541,10 @@ internal sealed record StatisticsWindow
         return context.Shared(ReadingKey, token => ReadAsync(context, token));
     }
 
-    /// <summary>Reads the signals: the server's version (the sweep's shared read), then the window's one statement.</summary>
+    /// <summary>
+    /// Reads the signals: the server's version (the sweep's shared read), the window's statement, then the control signals'
+    /// (<see cref="ControlOrUnknownAsync" />), whose failure costs only the timeline and the system identifier.
+    /// </summary>
     /// <exception cref="HealthCheckUnavailableException"><c>pg_stat_database</c> has no row for this database.</exception>
     public static async Task<StatisticsReading> ReadAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
@@ -540,8 +562,97 @@ internal sealed record StatisticsWindow
             throw new HealthCheckUnavailableException("pg_stat_database has no row for this database, so its counters cannot be read.");
         }
 
+        StatisticsControl control = await ControlOrUnknownAsync(
+                token => ReadControlAsync(context.Sql, token),
+                exception => ControlNotRead(context, exception),
+                cancellationToken)
+            .ConfigureAwait(false);
+
         // The one place a platform's instance identity joins the window (issue #8 A1): W5-AUR reads it into the server facts.
-        return rows[0] with { Instance = InstanceOf(server) };
+        return rows[0] with
+        {
+            Timeline = control.Timeline,
+            SystemIdentifier = control.SystemIdentifier,
+            Instance = InstanceOf(server),
+        };
+    }
+
+    /// <summary>
+    /// The control signals, or <see cref="StatisticsControl.Unknown" /> when their statement failed for any reason but this
+    /// caller's cancellation - a platform without <c>pg_control</c>, a SQLSTATE no privilege check predicts - after telling
+    /// <paramref name="notRead" />. Null is "unknown" to every rule that reads them (<see cref="Transition" />): no failover
+    /// and no new cluster is said from a signal that was not read.
+    /// </summary>
+    /// <param name="read">The statement, run.</param>
+    /// <param name="notRead">Told of a failure, before the unknowns are returned.</param>
+    /// <param name="cancellationToken">This caller's cancellation, which still cancels.</param>
+    internal static async Task<StatisticsControl> ControlOrUnknownAsync(
+        Func<CancellationToken, Task<StatisticsControl>> read,
+        Action<Exception> notRead,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(notRead);
+
+        try
+        {
+            return await read(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            notRead(exception);
+            return StatisticsControl.Unknown;
+        }
+    }
+
+    /// <summary>
+    /// The control signals: which of the two functions this role may call, then a call of only those - since a <c>CASE</c>
+    /// around a revoked function still fails at the executor's start (<see cref="StatisticsWindowQueries" />).
+    /// </summary>
+    private static async Task<StatisticsControl> ReadControlAsync(HealthSqlRunner sql, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<(bool Checkpoint, bool System)> granted = await sql
+            .QueryAsync(StatisticsWindowQueries.ControlPrivileges(), static reader => (reader.GetBoolean(0), reader.GetBoolean(1)), cancellationToken)
+            .ConfigureAwait(false);
+
+        if (granted.Count == 0 || granted[0] is (false, false))
+        {
+            return StatisticsControl.Unknown;
+        }
+
+        IReadOnlyList<StatisticsControl> read = await sql
+            .QueryAsync(StatisticsWindowQueries.Control(granted[0].Checkpoint, granted[0].System), MapControl, cancellationToken)
+            .ConfigureAwait(false);
+
+        return read.Count > 0 ? read[0] : StatisticsControl.Unknown;
+    }
+
+    /// <summary>
+    /// A failed control read, at Debug and nowhere else: it is a platform's expected state, which repeats every sweep, and the
+    /// statement is still in the sweep's "Show SQL".
+    /// </summary>
+    private static void ControlNotRead(HealthCheckContext context, Exception exception)
+    {
+        ILogger? logger = context.Services.GetService<ILoggerFactory>()?.CreateLogger(typeof(StatisticsWindow));
+
+        if (logger is not null && logger.IsEnabled(LogLevel.Debug))
+        {
+            string? sqlState = (exception as PostgresException ?? exception.InnerException as PostgresException)?.SqlState;
+            logger.LogDebug(
+                exception,
+                "{Product} read no timeline and no system identifier for database {DatabaseId} ({SqlState}): the statistics window goes on without them",
+                context.Settings.Text.ProductName,
+                context.DatabaseId,
+                sqlState ?? exception.GetType().Name);
+        }
+    }
+
+    /// <summary>Maps the one row of <see cref="StatisticsWindowQueries.Control(bool, bool)" />.</summary>
+    internal static StatisticsControl MapControl(NpgsqlDataReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        return new StatisticsControl(reader.IsDBNull(0) ? null : reader.GetInt32(0), reader.IsDBNull(1) ? null : reader.GetInt64(1));
     }
 
     /// <summary>
@@ -582,14 +693,12 @@ internal sealed record StatisticsWindow
             SharedReset = Timestamp(reader, 2),
             ArchiverReset = Timestamp(reader, 3),
             ServerStartedAt = Timestamp(reader, 4),
-            Timeline = reader.IsDBNull(5) ? null : reader.GetInt32(5),
-            SystemIdentifier = reader.IsDBNull(6) ? null : reader.GetInt64(6),
-            Commits = reader.GetInt64(7),
-            BlocksRead = reader.GetInt64(8),
-            BlocksHit = reader.GetInt64(9),
-            Tables = reader.GetInt32(10),
-            UnanalysedTables = reader.GetInt32(11),
-            InRecovery = reader.GetBoolean(12),
+            Commits = reader.GetInt64(5),
+            BlocksRead = reader.GetInt64(6),
+            BlocksHit = reader.GetInt64(7),
+            Tables = reader.GetInt32(8),
+            UnanalysedTables = reader.GetInt32(9),
+            InRecovery = reader.GetBoolean(10),
         };
     }
 
@@ -731,7 +840,8 @@ internal sealed record StatisticsWindow
             return (StatisticsResetReason.OtherInstance, "a different instance answered than at the last check");
         }
 
-        // 2. Another cluster: its system identifier, or its major version - pg_upgrade, a dump restored into a new one.
+        // 2. Another cluster: its system identifier, or its major version - pg_upgrade, a dump restored into a new one. A system
+        //    identifier that was not read, now or at the last check (StatisticsControl), is compared with nothing.
         if (current.SystemIdentifier is { } system && was.TryGetValue(SystemSeries, out double wasSystem) && wasSystem != (system & SystemMask))
         {
             return (StatisticsResetReason.FreshCluster, "the cluster's system identifier changed");
@@ -751,14 +861,22 @@ internal sealed record StatisticsWindow
         bool dropped = current.Commits < Value(was, CommitsSeries, current.Commits)
             || current.BlocksRead < Value(was, BlocksReadSeries, current.BlocksRead);
 
+        bool databaseMoved = Moved(was, DatabaseResetSeries, current.DatabaseReset);
+        bool sharedMoved = Moved(was, SharedResetSeries, current.SharedReset);
+        bool archiverMoved = Moved(was, ArchiverResetSeries, current.ArchiverReset);
+        bool anyMoved = databaseMoved || sharedMoved || archiverMoved;
+
         // 3. The timeline: another server promoted, or a recovery that ended in a promotion. Not the watched server's own: a
         //    standby that, never restarted, follows a promotion upstream (still in recovery) or is itself promoted (out of it)
         //    went on counting through it - measured on 14.24, 17.11 and 18.6 (CAP-fix) - and on 14 and 17
         //    pg_control_checkpoint() shows the new timeline only from the first checkpoint after the promotion, by when the
         //    server may be out of recovery with nothing else changed. Out of recovery its counters must not have gone down
-        //    either: they are what tells a different server, started the same second, apart.
+        //    either, and in or out of it neither shared view's reset time may have moved - neither a promotion nor following
+        //    one moves one (measured on 14 and 17): they are what tells a different server, started the same second, apart.
+        //    A timeline that was not read, now or at the last check, says nothing either way.
         bool sameServer = current.ServerStartedAt is { } running && wasStart is { } startedBefore && Near(running, startedBefore, Unmoved)
-            && (current.InRecovery || !dropped);
+            && (current.InRecovery || !dropped)
+            && !sharedMoved && !archiverMoved;
 
         if (!sameServer && current.Timeline is { } timeline && was.TryGetValue(TimelineSeries, out double wasTimeline) && (int) wasTimeline != timeline)
         {
@@ -769,11 +887,6 @@ internal sealed record StatisticsWindow
                 ? (StatisticsResetReason.Restore, moved + " and the server started after the last check")
                 : (StatisticsResetReason.Failover, moved + " on a server that was already running at the last check");
         }
-
-        bool databaseMoved = Moved(was, DatabaseResetSeries, current.DatabaseReset);
-        bool sharedMoved = Moved(was, SharedResetSeries, current.SharedReset);
-        bool archiverMoved = Moved(was, ArchiverResetSeries, current.ArchiverReset);
-        bool anyMoved = databaseMoved || sharedMoved || archiverMoved;
 
         // 4. The server started again.
         if (current.ServerStartedAt is { } started && wasStart is { } before && !Near(started, before, Unmoved))
