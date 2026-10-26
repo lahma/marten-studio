@@ -54,8 +54,11 @@ What every check here has in common:
   tenant. The only row of a user table a regular sweep reads is `mt_hilo`'s (T11), and only once the catalog
   says it exists. `pg_get_indexdef` opens each indexed table for an instant to name its columns, so the index read
   first looks in `pg_locks` and deparses nothing on a table somebody holds or awaits `ACCESS EXCLUSIVE` on - a
-  migration of the store's or of any library's: T03-T06 then say "not checked" for that sweep, without waiting, and
-  read the indexes again at the next. Nothing is held past a call.
+  migration of the store's or of any library's: T03-T06 then judge every other table without waiting, leave that one
+  out for the sweep and say how many they left out ("1 table was locked for a schema change and not judged this
+  sweep"), and read its indexes again at the next. T02's index advice skips such a table too. A lock taken in the
+  instant between that look and a call still waits out `lock_timeout`; the read is then asked once more, and leaves the
+  table out the same way. Nothing is held past a call.
 - **Rates, not totals.** The `pg_stat_*` counters run from the last statistics reset, which may be a year ago,
   so T01 and T06 sample them into the in-memory history and judge the change over the window it holds, and say
   "watching" until two samples exist. A counter that goes down is a reset, and the window restarts there.

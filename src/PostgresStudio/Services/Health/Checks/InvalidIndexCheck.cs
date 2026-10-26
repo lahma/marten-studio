@@ -7,7 +7,11 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <summary>What T03 reads: every index on the declared tables, and each table's count of invalid partition indexes.</summary>
 /// <param name="Indexes">The indexes on the declared tables (never a partition's).</param>
 /// <param name="Tables">The declared tables, for the invalid indexes on their partitions.</param>
-internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IReadOnlyList<TableFacts> Tables);
+internal sealed record InvalidIndexFacts(IReadOnlyList<IndexFacts> Indexes, IReadOnlyList<TableFacts> Tables)
+{
+    /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T03: an index on a Marten table that Postgres has marked invalid - and that no build is still working on.
@@ -61,10 +65,10 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
     /// <inheritdoc />
     public override async Task<InvalidIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
+        HealthIndexRead read = await HealthTables.IndexReadAsync(context).ConfigureAwait(false);
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
-        return new InvalidIndexFacts(indexes, tables);
+        return new InvalidIndexFacts(read.Indexes, tables) { LockedTables = read.LockedTables };
     }
 
     /// <inheritdoc />
@@ -78,7 +82,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
         foreach (IndexFacts index in facts.Indexes)
         {
-            if (index.Row.IsValid)
+            if (index.Row.IsValid || facts.LockedTables.Contains(index.Table.Key))
             {
                 continue;
             }
@@ -95,6 +99,11 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
         foreach (TableFacts table in facts.Tables)
         {
+            if (facts.LockedTables.Contains(table.Key))
+            {
+                continue;
+            }
+
             if (table.Row.BuildingPartitionIndexes > 0)
             {
                 int count = table.Row.BuildingPartitionIndexes;
@@ -114,10 +123,12 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
 
         if (findings.Count > 0)
         {
-            return new HealthVerdict(findings, note);
+            return new HealthVerdict(findings, HealthTables.WithLockedNote(note, facts.LockedTables));
         }
 
-        return HealthVerdict.Quiet(note ?? (facts.Indexes.Count == 0 ? evaluation.Text.NoJudgedTable : null));
+        return HealthVerdict.Quiet(HealthTables.WithLockedNote(
+            note ?? (facts.Indexes.Count == 0 && facts.LockedTables.Count == 0 ? evaluation.Text.NoJudgedTable : null),
+            facts.LockedTables));
     }
 
     /// <summary>

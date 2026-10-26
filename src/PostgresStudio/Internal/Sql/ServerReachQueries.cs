@@ -37,21 +37,44 @@ internal static class ServerReachQueries
         "rds_superuser", "azure_pg_admin", "cloudsqlsuperuser", "neon_superuser",
     ];
 
+    /// <summary>
+    /// The provider admin roles of <see cref="Roles" />, asked with <c>MEMBER</c> - who the role is - where the predefined
+    /// roles are asked with <c>USAGE</c>, what the role may use.
+    /// </summary>
+    public static IReadOnlyList<string> ProviderAdminRoles { get; } = ["rds_superuser", "azure_pg_admin", "cloudsqlsuperuser", "neon_superuser"];
+
     private const string GrantsSql =
         "select current_user::text as reads_as,\n" +
         "       coalesce((select r.rolsuper from pg_catalog.pg_roles r where r.rolname = current_user), false) as superuser,\n" +
         "       g.name as role_name,\n" +
         "       (r.oid is not null) as role_exists,\n" +
-        "       coalesce(pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER'), false) as member\n" +
+        "       coalesce(pg_catalog.pg_has_role(current_user, r.oid,\n" +
+        "                case when g.name = any(@admin_roles) then 'MEMBER' else 'USAGE' end), false) as holds,\n" +
+        "       session_user::text as login_role\n" +
         "  from pg_catalog.unnest(@roles) with ordinality as g(name, ord)\n" +
         "  left join pg_catalog.pg_roles r on r.rolname = g.name\n" +
         " order by g.ord";
 
     /// <summary>
-    /// One row per role in <see cref="Roles" />, in that order: the reading role, whether it is a superuser, the role's
-    /// name, whether it exists on this server and whether the reading role is a member of it.
+    /// One row per role in <see cref="Roles" />, in that order: the reading role (<c>current_user</c>, under the session's
+    /// <c>SET LOCAL ROLE</c>), whether it is a superuser, the role's name, whether it exists on this server, whether the
+    /// reading role holds it, and the login role the connection authenticated as (<c>session_user</c>) - the role a statement
+    /// read as the application's own runs as.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A predefined role is held by <c>USAGE</c>, not by <c>MEMBER</c>.</b> A role granted <c>pg_read_all_stats</c>
+    /// <c>WITH INHERIT FALSE</c> (16+), or a <c>NOINHERIT</c> role granted it, is a member who does not have its privileges
+    /// until it runs <c>SET ROLE</c>, which the studio never does: <c>MEMBER</c> would say it may read what it cannot.
+    /// <c>pg_has_role(..., 'USAGE')</c> is what the privileges follow. A provider's admin role is asked with <c>MEMBER</c>,
+    /// because there the question is who the role is - an <c>rds_superuser</c> member is the master user however it
+    /// inherits.
+    /// </para>
+    /// </remarks>
     public static HealthQuery Grants() => new(
         GrantsSql,
-        [new NpgsqlParameter("roles", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = Roles.ToArray() }]);
+        [
+            new NpgsqlParameter("roles", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = Roles.ToArray() },
+            new NpgsqlParameter("admin_roles", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = ProviderAdminRoles.ToArray() },
+        ]);
 }

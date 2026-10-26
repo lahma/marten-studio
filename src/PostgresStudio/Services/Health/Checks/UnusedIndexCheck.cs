@@ -18,7 +18,11 @@ internal sealed record UnusedIndexFacts(
     IReadOnlyList<IndexFacts> Indexes,
     IReadOnlyList<TableFacts> Tables,
     DatabaseStatistics Database,
-    bool MultiHost = false);
+    bool MultiHost = false)
+{
+    /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
+    public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+}
 
 /// <summary>
 /// T05: an index nothing has scanned since the counters began, on a table that is written to a lot.
@@ -67,10 +71,13 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     /// <inheritdoc />
     public override async Task<UnusedIndexFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
-        IReadOnlyList<IndexFacts> indexes = await HealthTables.IndexesAsync(context).ConfigureAwait(false);
+        HealthIndexRead read = await HealthTables.IndexReadAsync(context).ConfigureAwait(false);
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
-        return new UnusedIndexFacts(context.Now, indexes, tables, DatabaseStatistics.Of(tables), IsMultiHost(context));
+        return new UnusedIndexFacts(context.Now, read.Indexes, tables, DatabaseStatistics.Of(tables), IsMultiHost(context))
+        {
+            LockedTables = read.LockedTables,
+        };
     }
 
     /// <summary>
@@ -110,7 +117,12 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
     /// <inheritdoc />
     public override IEnumerable<HealthSamplePart> Sample(UnusedIndexFacts facts)
     {
-        yield return new HealthSamplePart(SweptSeries, 1);
+        // A sweep that could not read a locked table's indexes would read as "scanned" for each of them and reset its
+        // clock, so it is not counted as a sweep at all: it says nothing either way, for every index (TableHistory.HeldSince).
+        if (facts.LockedTables.Count == 0)
+        {
+            yield return new HealthSamplePart(SweptSeries, 1);
+        }
 
         foreach (IndexFacts index in facts.Indexes)
         {
@@ -129,7 +141,7 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
 
         foreach (IndexFacts index in facts.Indexes)
         {
-            if (!IsUnscanned(index) || !tables.TryGetValue(index.Table.Key, out TableFacts? table))
+            if (!IsUnscanned(index) || facts.LockedTables.Contains(index.Table.Key) || !tables.TryGetValue(index.Table.Key, out TableFacts? table))
             {
                 continue;
             }
@@ -143,7 +155,8 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
             findings.Add(Finding(index, table, writes, facts, evaluation));
         }
 
-        return findings.Count == 0 ? HealthVerdict.Quiet() : new HealthVerdict(findings);
+        string? note = HealthTables.LockedNote(facts.LockedTables);
+        return findings.Count == 0 ? HealthVerdict.Quiet(note) : new HealthVerdict(findings, note);
     }
 
     /// <summary>

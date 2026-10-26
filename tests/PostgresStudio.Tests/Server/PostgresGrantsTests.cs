@@ -87,22 +87,62 @@ public class PostgresGrantsTests
             "Not checked: this needs SELECT on column tenant_id of store.docs for role app_reader. The owner of store.docs can grant it.");
     }
 
+    /// <summary>
+    /// An undeclared refusal claims no one grant: it names the role, points at Postgres' own words, says whose each kind of
+    /// object is to grant, and who grants a monitoring role on this platform.
+    /// </summary>
     [Theory]
     [InlineData(PostgresPlatformKind.SelfHosted, "On a self-hosted server a superuser can grant it.")]
     [InlineData(PostgresPlatformKind.AmazonRds, "On Amazon RDS for PostgreSQL the master user (a member of rds_superuser) can grant it.")]
-    public void A_refused_privilege_names_the_role_pg_monitor_and_the_grantor(PostgresPlatformKind kind, string grantor)
+    [InlineData(PostgresPlatformKind.AmazonAurora, "On Amazon Aurora PostgreSQL the master user (a member of rds_superuser) can grant it.")]
+    public void An_undeclared_refusal_names_the_role_and_whose_each_kind_of_object_is_to_grant(PostgresPlatformKind kind, string grantor)
     {
         PostgresGrants.Refused(Platform(kind), "probe").Should().Be(
-            "Not checked: Postgres refused role probe a read this check needs (SQLSTATE 42501); pg_monitor covers every statistics "
-            + "view the advisor reads. " + grantor);
+            "Not checked: Postgres refused role probe a read this check needs (SQLSTATE 42501), and what it refused is in "
+            + "Postgres' words below. A table, schema or sequence is its owner's to grant (SELECT or USAGE); a statistics view "
+            + "or function is covered by pg_monitor. " + grantor);
+    }
+
+    /// <summary>The declared branch: a check that knows its grant claims it, and only then is pg_monitor named as the grant.</summary>
+    [Fact]
+    public void A_declared_grant_is_claimed_and_an_undeclared_one_is_not()
+    {
+        PostgresGrants.NotChecked(PostgresGrant.Monitor, Platform(PostgresPlatformKind.SelfHosted), "probe")
+            .Should().StartWith("Not checked: this needs pg_monitor for role probe.");
+        PostgresGrants.Refused(Platform(PostgresPlatformKind.SelfHosted), "probe")
+            .Should().NotContain("this needs", "an undeclared refusal does not know which grant the statement lacked");
+    }
+
+    /// <summary>
+    /// The role a refusal names: <c>SqlConsoleRole</c>'s (<see cref="PostgresGrants.ReadsAs" />) for a statement read as it,
+    /// the login (<see cref="PostgresGrants.LoginRole" />) for one read as the application's own role.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "console_role")]
+    [InlineData(true, "console_login")]
+    public void A_refusal_names_the_role_the_statement_ran_as(bool asApplicationRole, string role)
+    {
+        PostgresGrants grants = new("console_role", false, []) { LoginRole = "console_login" };
+
+        grants.RoleOf(asApplicationRole).Should().Be(role);
     }
 
     [Fact]
-    public void A_refused_read_of_rows_names_SELECT_on_the_tables_and_their_owner_never_a_monitoring_role()
+    public void Without_a_login_read_the_reading_role_is_named()
     {
-        PostgresGrants.Refused(Platform(PostgresPlatformKind.AmazonAurora), "reader", HealthCostTier.BoundedData).Should().Be(
-            "Not checked: Postgres refused role reader a read this check needs (SQLSTATE 42501); it reads a bounded slice of the "
-            + "rows of the tables it judges, which needs SELECT on them - their owner can grant it, and no monitoring role gives it.");
+        new PostgresGrants("app", false, []).RoleOf(asApplicationRole: true).Should().Be("app");
+    }
+
+    /// <summary>The runner's mark, which a shared read's exception carries to every check that asked for it.</summary>
+    [Fact]
+    public void A_failure_read_as_the_application_role_is_told_by_its_mark_or_its_inner_exceptions()
+    {
+        InvalidOperationException marked = new("refused");
+        marked.Data[HealthSqlRunner.ApplicationRoleKey] = true;
+
+        HealthSqlRunner.WasReadAsApplicationRole(marked).Should().BeTrue();
+        HealthSqlRunner.WasReadAsApplicationRole(new InvalidOperationException("wrapped", marked)).Should().BeTrue();
+        HealthSqlRunner.WasReadAsApplicationRole(new InvalidOperationException("refused")).Should().BeFalse();
     }
 
     [Theory]

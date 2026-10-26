@@ -8,6 +8,8 @@ using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 
+using Npgsql;
+
 namespace PostgresStudio.Services.Health.Checks;
 
 /// <summary>Where an index on a judged table comes from - which decides what a remedy can say about it.</summary>
@@ -102,6 +104,22 @@ internal sealed record IndexFacts(StudioTable Table, HealthIndexRow Row, IndexOr
 
     /// <summary>Whether anything in the configuration, or the host's own schema, can be changed to remove it.</summary>
     public bool Removable => Origin is IndexOrigin.Declared or IndexOrigin.Managed or IndexOrigin.Undeclared or IndexOrigin.Ignored or IndexOrigin.Host;
+}
+
+/// <summary>The sweep's index read: the indexes it read, and the tables locked for a schema change it left out.</summary>
+/// <param name="Indexes">Every index on the judged tables but the locked ones.</param>
+/// <param name="LockedTables">
+/// The keys (<see cref="StudioTable.Key" />, compared ignoring case) of the judged tables somebody held or awaited
+/// <c>ACCESS EXCLUSIVE</c> on when the read ran: their indexes were not deparsed, so a check that judges a table by its
+/// indexes skips them this sweep and says how many (<see cref="HealthTables.LockedNote" />).
+/// </param>
+internal sealed record HealthIndexRead(IReadOnlyList<IndexFacts> Indexes, IReadOnlySet<string> LockedTables)
+{
+    /// <summary>No table to read about.</summary>
+    public static HealthIndexRead Empty { get; } = new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>Whether the table of <paramref name="tableKey" /> was locked and its indexes left out.</summary>
+    public bool IsLocked(string tableKey) => LockedTables.Contains(tableKey);
 }
 
 /// <summary>The database-wide facts every row of the table read carries.</summary>
@@ -206,23 +224,64 @@ internal static class HealthTables
         return context.Shared(TablesKey, token => ReadTablesAsync(context, set, token));
     }
 
-    /// <summary>Every index on the judged tables, read once per sweep like <see cref="TablesAsync(HealthCheckContext)" />.</summary>
-    public static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context)
+    /// <summary>
+    /// Every index on the judged tables, read once per sweep like <see cref="TablesAsync(HealthCheckContext)" /> - but none of
+    /// a table locked for a schema change; a check that judges tables by their indexes asks <see cref="IndexReadAsync(HealthCheckContext)" />
+    /// instead, which says which tables those were.
+    /// </summary>
+    public static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context) =>
+        (await IndexReadAsync(context).ConfigureAwait(false)).Indexes;
+
+    /// <summary>Every index on the tables of <paramref name="set" />, as <see cref="IndexesAsync(HealthCheckContext)" />.</summary>
+    internal static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context, IStudioTableSet set) =>
+        (await IndexReadAsync(context, set).ConfigureAwait(false)).Indexes;
+
+    /// <summary>
+    /// The sweep's index read: every index on the judged tables, and the tables locked for a schema change whose indexes it
+    /// left out (<see cref="HealthIndexRead.LockedTables" />), read once per sweep.
+    /// </summary>
+    public static async Task<HealthIndexRead> IndexReadAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         IStudioTableSet set = await SetAsync(context).ConfigureAwait(false);
-        return await IndexesAsync(context, set).ConfigureAwait(false);
+        return await IndexReadAsync(context, set).ConfigureAwait(false);
     }
 
-    /// <summary>Every index on the tables of <paramref name="set" />, as <see cref="TablesAsync(HealthCheckContext, IStudioTableSet)" />.</summary>
-    internal static Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context, IStudioTableSet set)
+    /// <summary>The index read of the tables of <paramref name="set" />, as <see cref="IndexReadAsync(HealthCheckContext)" />.</summary>
+    internal static Task<HealthIndexRead> IndexReadAsync(HealthCheckContext context, IStudioTableSet set)
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(set);
 
         return context.Shared(IndexesKey, token => ReadIndexesAsync(context, set, token));
     }
+
+    /// <summary>
+    /// What a check that judges tables by their indexes adds to its status row while some were locked: "1 table was locked
+    /// for a schema change and not judged this sweep." - a count, never a name, because the row is shown at the check's
+    /// gate. <see langword="null" /> when none was.
+    /// </summary>
+    public static string? LockedNote(IReadOnlySet<string> lockedTables)
+    {
+        ArgumentNullException.ThrowIfNull(lockedTables);
+
+        return lockedTables.Count switch
+        {
+            0 => null,
+            1 => "1 table was locked for a schema change and not judged this sweep.",
+            int count => SessionText.Number(count) + " tables were locked for a schema change and not judged this sweep.",
+        };
+    }
+
+    /// <summary><paramref name="note" /> followed by <see cref="LockedNote" />, or whichever of them there is.</summary>
+    public static string? WithLockedNote(string? note, IReadOnlySet<string> lockedTables) =>
+        (note, LockedNote(lockedTables)) switch
+        {
+            ({ Length: > 0 } first, { } locked) => first + " " + locked,
+            (_, { } locked) => locked,
+            _ => note,
+        };
 
     /// <summary>What the statements bind, for every table of <paramref name="set" />.</summary>
     public static IReadOnlyList<HealthTableTarget> Targets(IStudioTableSet set)
@@ -259,44 +318,76 @@ internal static class HealthTables
         return facts;
     }
 
-    /// <summary>Every index on the judged tables, with where each comes from.</summary>
-    private static async Task<IReadOnlyList<IndexFacts>> ReadIndexesAsync(
+    /// <summary>
+    /// Every index on the judged tables, with where each comes from - and none of a table locked for a schema change, whose
+    /// key goes in <see cref="HealthIndexRead.LockedTables" /> instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A table somebody holds or awaits <c>ACCESS EXCLUSIVE</c> on - a migration - comes back undeparsed rather than queued
+    /// behind (<see cref="HealthTableQueries.IndexesSql" />). Its indexes cannot be judged, nor told from a declared one by
+    /// their definition, so they are left out and the table is counted: every other table is still judged, and each check
+    /// that judges by indexes says how many were not (<see cref="LockedNote" />).
+    /// </para>
+    /// <para>
+    /// <b>The residual race is classified the same way.</b> A lock taken after the statement's <c>pg_locks</c> snapshot
+    /// makes a deparse wait out <c>lock_timeout</c> and the statement fail with <c>55P03</c>. The read is then asked once
+    /// more, when the snapshot sees the lock and leaves that table out; should that fail the same way, every table is
+    /// counted as locked, rather than the index checks reporting a timeout.
+    /// </para>
+    /// </remarks>
+    private static async Task<HealthIndexRead> ReadIndexesAsync(
         HealthCheckContext context,
         IStudioTableSet set,
         CancellationToken cancellationToken)
     {
         if (set.Tables.Count == 0)
         {
-            return [];
+            return HealthIndexRead.Empty;
         }
 
-        IReadOnlyList<HealthIndexRow> rows = await context.Sql
-            .QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, cancellationToken)
-            .ConfigureAwait(false);
+        IReadOnlyList<HealthIndexRow>? rows = null;
 
-        // A table somebody holds or awaits ACCESS EXCLUSIVE on - a migration - came back undeparsed rather than queued
-        // behind it (HealthTableQueries.IndexesSql). Its indexes cannot be judged, nor told from a declared one by their
-        // definition, so every check that reads the indexes says "not checked" for this sweep instead of judging part of
-        // the picture - and names no table, because the row is shown at the check's gate.
-        if (rows.Where(static x => x.TableLocked).Select(static x => (x.Schema, x.Table)).Distinct().Count() is > 0 and int locked)
+        for (int attempt = 0; attempt < 2 && rows is null; attempt++)
         {
-            throw new HealthCheckUnavailableException(
-                (locked == 1 ? "A table" : SessionText.Number(locked) + " tables")
-                + " whose indexes this check judges " + (locked == 1 ? "is" : "are")
-                + " locked for a schema change right now (ACCESS EXCLUSIVE, held or awaited - a migration, usually), and reading an "
-                + "index's definition would queue behind it, so the indexes are read again at the next sweep.");
-        }
-
-        List<IndexFacts> facts = new(rows.Count);
-        foreach (HealthIndexRow row in rows)
-        {
-            if (set.Find(row.Schema, row.Table) is { } table)
+            try
             {
-                facts.Add(new IndexFacts(table, row, set.OriginOf(row, table)));
+                rows = await context.Sql
+                    .QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception exception) when ((exception as PostgresException ?? exception.InnerException as PostgresException)?.SqlState
+                                               == PostgresErrorCodes.LockNotAvailable)
+            {
+                // Taken between the snapshot and a deparse: the next attempt's snapshot sees it.
             }
         }
 
-        return facts;
+        if (rows is null)
+        {
+            return new HealthIndexRead([], new HashSet<string>(set.Tables.Select(static x => x.Key), StringComparer.OrdinalIgnoreCase));
+        }
+
+        HashSet<string> locked = new(StringComparer.OrdinalIgnoreCase);
+        List<IndexFacts> facts = new(rows.Count);
+
+        foreach (HealthIndexRow row in rows)
+        {
+            if (set.Find(row.Schema, row.Table) is not { } table)
+            {
+                continue;
+            }
+
+            if (row.TableLocked)
+            {
+                locked.Add(table.Key);
+                continue;
+            }
+
+            facts.Add(new IndexFacts(table, row, set.OriginOf(row, table)));
+        }
+
+        return new HealthIndexRead(facts, locked);
     }
 }
 

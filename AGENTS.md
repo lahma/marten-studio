@@ -454,7 +454,19 @@ withheld schema is refused its rows and its query; so is a trigger whose functio
 any document type may be hidden, a view that calls user code or reads a document table no store declares.
 **A list locks nothing it lists** — no `pg_partition_*`, no `pg_sequence_last_value`, no size function —
 because a tenant-partitioned store has thousands of partitions and the lock table is shared; a sequence's
-value is read on demand, one at a time. Another store's key and alias are shown only to a visitor that
+value is read on demand, one at a time.
+On PostgreSQL 18 the `pg_sequences` view no longer checks the privilege itself: it calls `pg_sequence_last_value` for
+every row and every reader, and that function takes a `RowExclusiveLock` on each sequence even when it then returns
+null - so does any read of the view, whatever columns it selects. Lists read `pg_catalog.pg_sequence`; the one value
+read goes through `has_sequence_privilege` first, which on 18 is what keeps the lock away (measured, B0, 2026-10-20).
+Nor does a list call a deparse function that opens what it describes: `pg_get_indexdef` in every form,
+`pg_get_expr` with a relation (a default's `adbin`, a partition's `relpartbound`), `pg_get_viewdef` and
+`pg_get_constraintdef` of a table's CHECK each take a transient `AccessShareLock` and queue behind a migration's
+`ACCESS EXCLUSIVE` on 14 to 18 (measured 2026-10-26); `pg_get_partkeydef`, a key's or foreign key's
+`pg_get_constraintdef` and a trigger without WHEN do not. A list that must deparse reads `pg_locks` once and
+leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its one
+relation, under `lock_timeout`.
+Another store's key and alias are shown only to a visitor that
 store's store policy passes, and its Marten-managed rows need its store and write policies. Known limits: a
 routine's body is shown as its author wrote it (a name it resolves through its own `SET search_path` or
 dynamic SQL is not masked); a hidden type nothing in the process has touched, and that is not registered
@@ -549,7 +561,9 @@ registered key and the resolved database's own `Id.Identity` - never the visitor
 or an empty database id - so the gates, the audit, the mute keys and the high-water Explain name one resource.
 `Activity` is for other people's sessions and statements - process ids, roles, client addresses, statement text:
 `ViewDatabaseActivity` (off by default, off under `ReadOnly`), then that store policy, then the write policy with
-the capability named, as Database › Sessions asks. A finding about one tenant names it, so it needs `Activity`
+the capability named, as Database › Sessions asks. The name of the role the studio reads as (`SqlConsoleRole`, or
+the store's own login where none is set) is Database-gate information: a "not checked" row names it, and the grant
+it lacks, to a visitor the check's own gate admits. A finding about one tenant names it, so it needs `Activity`
 and that tenant's store policy too. A withheld finding is counted and never described, and a row below its check's
 gate reads "findings not shown to you" whether or not there are any; the badge and the banners read only a scope
 the report would be shown to. A finding that names a table in a schema outside the store's own - an

@@ -15,6 +15,43 @@ namespace MartenStudio.Tests.Health;
 /// </remarks>
 public class PostgresEndOfLifeTableTests
 {
+    /// <summary>How long after a planned first release its row may stay planned.</summary>
+    private const int PlannedGraceDays = 30;
+
+    /// <summary>
+    /// A planned row is a projection - the planned general availability, and the policy's five years from it - so it is
+    /// held to its date too: a month after the planned release the row must carry the versioning page's dates. Real
+    /// clock, on purpose, as the alarm below.
+    /// </summary>
+    [Fact]
+    public void A_planned_row_takes_the_versioning_pages_dates_within_a_month_of_its_release()
+    {
+        string[] stale = Stale(PostgresCommunitySupport.Majors, DateOnly.FromDateTime(DateTime.UtcNow));
+
+        stale.Should().BeEmpty("a planned row is updated from {0} once its major ships, and Planned dropped", PostgresCommunitySupport.Source);
+    }
+
+    /// <summary>The anti-vacuity half: the rule fails on the day after the grace, and not on the last day of it.</summary>
+    [Theory]
+    [InlineData("2026-12-19", false)]
+    [InlineData("2026-12-20", true)]
+    public void The_planned_row_rule_fails_once_the_grace_is_over(string today, bool stale)
+    {
+        PostgresMajorSupport planned = new(19, "19", new DateOnly(2026, 11, 19), new DateOnly(2031, 11, 13)) { Planned = true };
+        PostgresMajorSupport released = new(18, "18", new DateOnly(2025, 9, 25), new DateOnly(2030, 11, 14));
+
+        Stale([released, planned], DateOnly.Parse(today, System.Globalization.CultureInfo.InvariantCulture))
+            .Should().HaveCount(stale ? 1 : 0).And.OnlyContain(static x => x.Contains("PostgreSQL 19", StringComparison.Ordinal));
+    }
+
+    private static string[] Stale(IEnumerable<PostgresMajorSupport> rows, DateOnly today) =>
+    [
+        .. rows
+            .Where(x => x.Planned && today > x.FirstRelease.AddDays(PlannedGraceDays))
+            .Select(static x => "PostgreSQL " + x.Name + " was planned for " + x.FirstRelease.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+                + ": update its row in PostgresCommunitySupport.Majors"),
+    ];
+
     [Fact]
     public void The_table_is_extended_a_year_before_its_last_row_runs_out()
     {

@@ -46,8 +46,14 @@ internal sealed record HeldLock(string LockType, string Mode, string? Schema, st
 /// <c>probe.BeyondCatalogReads.Should().BeEmpty()</c> and compare a second snapshot to the first.
 /// </para>
 /// </remarks>
-internal sealed class HealthSweepProbe(PostgresFixture postgres) : IHealthStatementObserver
+internal sealed class HealthSweepProbe(Func<CancellationToken, Task<NpgsqlConnection>> openSecond) : IHealthStatementObserver
 {
+    /// <summary>A probe whose second connection is the shared fixture's.</summary>
+    public HealthSweepProbe(PostgresFixture postgres)
+        : this(token => postgres.OpenAsync(token))
+    {
+    }
+
     private const string LocksSql =
         "select l.locktype, l.mode, n.nspname, c.relname "
         + "from pg_catalog.pg_locks l "
@@ -82,7 +88,7 @@ internal sealed class HealthSweepProbe(PostgresFixture postgres) : IHealthStatem
     {
         Interlocked.Increment(ref statements);
 
-        await using NpgsqlConnection second = await postgres.OpenAsync(cancellationToken);
+        await using NpgsqlConnection second = await openSecond(cancellationToken);
         await using NpgsqlCommand command = new(LocksSql, second);
         command.Parameters.AddWithValue("pid", backendProcessId);
 

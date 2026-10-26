@@ -61,30 +61,48 @@ internal sealed class MatrixHost : IAsyncDisposable
     /// Registrations made before <c>AddPostgresStudio()</c>, whose <c>TryAdd</c> then keeps them - a
     /// <c>HealthCheckRegistry.ForTypes(...)</c> of a test's own checks, say.
     /// </param>
+    /// <param name="options">
+    /// Changes to the studio's options after the matrix's own (<see cref="MatrixReads.Schemas" />, every capability) - a
+    /// <c>SqlConsoleRole</c>, say.
+    /// </param>
+    /// <remarks>
+    /// <b>A pool of the host's own.</b> The data source's connection string carries an <c>Application Name</c> no other pool
+    /// in the process has, and <see cref="RunAsync" /> reads through that same data source: C01 matches the store's pool by
+    /// its connection string, and Npgsql reports every pool of one connection string under one name, so a second pool of
+    /// the same string - another class's host of the same role, or a connection opened beside the data source - made C01
+    /// "not checked" on every leg.
+    /// </remarks>
     public static async Task<MatrixHost> CreateAsync(
         MatrixServer server,
         MatrixRole role,
         string database = MatrixServer.Database,
-        Action<IServiceCollection>? services = null)
+        Action<IServiceCollection>? services = null,
+        Action<PostgresStudioOptions>? options = null)
     {
         ArgumentNullException.ThrowIfNull(server);
+
+        NpgsqlConnectionStringBuilder own = new(server.ConnectionString(role, database))
+        {
+            ApplicationName = "ms-matrix-host-" + Guid.NewGuid().ToString("N")[..12],
+        };
 
         ServiceCollection collection = new();
         services?.Invoke(collection);
         collection.AddLogging();
         collection.AddAuthorization();
         collection.AddSingleton<AuthenticationStateProvider, Anonymous>();
-        collection.AddSingleton(NpgsqlDataSource.Create(server.ConnectionString(role, database)));
-        collection.AddPostgresStudio(options =>
+        collection.AddSingleton(NpgsqlDataSource.Create(own.ConnectionString));
+        collection.AddPostgresStudio(studio =>
         {
-            options.BrowsableSchemas.Clear();
+            studio.BrowsableSchemas.Clear();
 
             foreach (string schema in MatrixReads.Schemas)
             {
-                options.BrowsableSchemas.Add(schema);
+                studio.BrowsableSchemas.Add(schema);
             }
 
-            options.Capabilities = PostgresStudioCapabilities.All();
+            studio.Capabilities = PostgresStudioCapabilities.All();
+            options?.Invoke(studio);
         });
 
         ServiceProvider provider = collection.BuildServiceProvider();
@@ -94,6 +112,10 @@ internal sealed class MatrixHost : IAsyncDisposable
             await using AsyncServiceScope scope = provider.CreateAsyncScope();
             ResolvedSource resolved = await scope.ServiceProvider.GetRequiredService<StudioSourceResolver>()
                 .ResolveAsync(new StudioScope("default", "default", null), null, TestContext.Current.CancellationToken);
+
+            // As a running host's would, the pool exists before the first sweep: C01 runs before any catalog check opens it.
+            NpgsqlConnection warm = await provider.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(TestContext.Current.CancellationToken);
+            await warm.DisposeAsync();
 
             return new MatrixHost(server, role, database, provider, resolved);
         }
@@ -143,7 +165,7 @@ internal sealed class MatrixHost : IAsyncDisposable
         const int Timeout = 30;
         CancellationToken token = TestContext.Current.CancellationToken;
 
-        await using NpgsqlConnection connection = await Server.OpenAsync(Role, Database, token);
+        await using NpgsqlConnection connection = await services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync(token);
         ReadOnlySqlSession session = new(new ReadOnlySqlOptions { StatementTimeout = TimeSpan.FromSeconds(Timeout), LockTimeout = lockTimeout });
 
         try
