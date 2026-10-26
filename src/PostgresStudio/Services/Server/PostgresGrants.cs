@@ -129,18 +129,35 @@ internal sealed record PostgresGrants(string ReadsAs, bool Superuser, IReadOnlyL
     public static IReadOnlyList<string> ProviderAdminRoles => ServerReachQueries.ProviderAdminRoles;
 
     /// <summary>
-    /// The role the connection authenticated as (<c>session_user</c>) - the store's or the data source's own login - which
-    /// a statement read as the application's role runs as (<c>HealthSqlRunner.QueryAsApplicationRoleAsync</c>), where
-    /// <see cref="ReadsAs" /> is <c>SqlConsoleRole</c> when one is set. <see langword="null" /> when not read.
+    /// The role the connection authenticated as (<c>session_user</c>) - the store's or the data source's own login - which a
+    /// statement read as the application's role runs as while <c>SqlConsoleRole</c> is set, but for the residual case
+    /// <see cref="RoleOf" /> describes. <see langword="null" /> when not read.
     /// </summary>
     public string? LoginRole { get; init; }
 
     /// <summary>
-    /// The role a refused statement ran as: <see cref="LoginRole" /> for one read as the application's role, and
-    /// <see cref="ReadsAs" /> for every other.
+    /// The role a refused statement ran as. Every read but one runs where this grant read ran, so it is <see cref="ReadsAs" />;
+    /// a read as the application's role (<c>HealthSqlRunner.QueryAsApplicationRoleAsync</c>) runs without the
+    /// <c>SET LOCAL ROLE</c>, so where <paramref name="sqlConsoleRole" /> is set it is <see cref="LoginRole" />.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>With no <c>SqlConsoleRole</c> the two sessions are one</b>: neither sets a role, so the application-role read ran
+    /// as this read's <c>current_user</c>, <see cref="ReadsAs" /> - which is right even for a login whose sessions start
+    /// under another role.
+    /// </para>
+    /// <para>
+    /// <b>The residual case, with <c>SqlConsoleRole</c> set:</b> the application-role read runs as the connection's own
+    /// <c>current_user</c>, which this read - under <c>SET LOCAL ROLE</c> - cannot see. It is the login
+    /// (<c>session_user</c>, <see cref="LoginRole" />) unless the login's sessions start under another role
+    /// (<c>ALTER ROLE ... SET role</c>, or <c>-c role=</c> in the data source's <c>Options</c>); then the sentence names the
+    /// login, and Postgres' own words below it name the object it refused.
+    /// </para>
+    /// </remarks>
     /// <param name="asApplicationRole">Whether the statement was read as the application's role.</param>
-    public string RoleOf(bool asApplicationRole) => asApplicationRole && LoginRole is { Length: > 0 } login ? login : ReadsAs;
+    /// <param name="sqlConsoleRole">The studio's <c>SqlConsoleRole</c>, or <see langword="null" /> when none is set.</param>
+    public string RoleOf(bool asApplicationRole, string? sqlConsoleRole) =>
+        asApplicationRole && !string.IsNullOrWhiteSpace(sqlConsoleRole) && LoginRole is { Length: > 0 } login ? login : ReadsAs;
 
     /// <summary>
     /// The extensions a check may need whose <c>trusted</c> flag the studio states: none of them is trusted, so creating

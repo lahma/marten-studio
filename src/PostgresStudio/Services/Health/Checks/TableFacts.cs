@@ -109,14 +109,23 @@ internal sealed record IndexFacts(StudioTable Table, HealthIndexRow Row, IndexOr
 /// <summary>The sweep's index read: the indexes it read, and the tables locked for a schema change it left out.</summary>
 /// <param name="Indexes">Every index on the judged tables but the locked ones.</param>
 /// <param name="LockedTables">
-/// The keys (<see cref="StudioTable.Key" />, compared ignoring case) of the judged tables somebody held or awaited
-/// <c>ACCESS EXCLUSIVE</c> on when the read ran: their indexes were not deparsed, so a check that judges a table by its
-/// indexes skips them this sweep and says how many (<see cref="HealthTables.LockedNote" />).
+/// The keys (<see cref="StudioTable.Key" />, compared ordinally, as Postgres compares names: <c>"Orders"</c> and
+/// <c>orders</c> are two tables) of the judged tables somebody held or awaited <c>ACCESS EXCLUSIVE</c> on when the read
+/// ran: their indexes were not deparsed, so a check that judges a table by its indexes skips them this sweep and says how
+/// many (<see cref="HealthTables.LockedNote" />).
 /// </param>
 internal sealed record HealthIndexRead(IReadOnlyList<IndexFacts> Indexes, IReadOnlySet<string> LockedTables)
 {
     /// <summary>No table to read about.</summary>
-    public static HealthIndexRead Empty { get; } = new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    public static HealthIndexRead Empty { get; } = new([], new HashSet<string>(StringComparer.Ordinal));
+
+    /// <summary>
+    /// The indexes of the locked tables, read but not deparsed: <see cref="HealthIndexRow.Definition" /> and
+    /// <see cref="HealthIndexRow.Columns" /> are empty, and everything the catalog holds without opening the table - validity,
+    /// scans, size, origin - is there. Never judged; a check whose history must not skip a sweep (T05's "unscanned since")
+    /// samples them.
+    /// </summary>
+    public IReadOnlyList<IndexFacts> LockedIndexes { get; init; } = [];
 
     /// <summary>Whether the table of <paramref name="tableKey" /> was locked and its indexes left out.</summary>
     public bool IsLocked(string tableKey) => LockedTables.Contains(tableKey);
@@ -225,21 +234,13 @@ internal static class HealthTables
     }
 
     /// <summary>
-    /// Every index on the judged tables, read once per sweep like <see cref="TablesAsync(HealthCheckContext)" /> - but none of
-    /// a table locked for a schema change; a check that judges tables by their indexes asks <see cref="IndexReadAsync(HealthCheckContext)" />
-    /// instead, which says which tables those were.
-    /// </summary>
-    public static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context) =>
-        (await IndexReadAsync(context).ConfigureAwait(false)).Indexes;
-
-    /// <summary>Every index on the tables of <paramref name="set" />, as <see cref="IndexesAsync(HealthCheckContext)" />.</summary>
-    internal static async Task<IReadOnlyList<IndexFacts>> IndexesAsync(HealthCheckContext context, IStudioTableSet set) =>
-        (await IndexReadAsync(context, set).ConfigureAwait(false)).Indexes;
-
-    /// <summary>
     /// The sweep's index read: every index on the judged tables, and the tables locked for a schema change whose indexes it
     /// left out (<see cref="HealthIndexRead.LockedTables" />), read once per sweep.
     /// </summary>
+    /// <remarks>
+    /// The only way to the indexes, on purpose: a check that judges a table by its indexes must know which tables it could
+    /// not read, or a locked table reads as one with no covering index, no blocking index, nothing redundant.
+    /// </remarks>
     public static async Task<HealthIndexRead> IndexReadAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -330,10 +331,11 @@ internal static class HealthTables
     /// that judges by indexes says how many were not (<see cref="LockedNote" />).
     /// </para>
     /// <para>
-    /// <b>The residual race is classified the same way.</b> A lock taken after the statement's <c>pg_locks</c> snapshot
-    /// makes a deparse wait out <c>lock_timeout</c> and the statement fail with <c>55P03</c>. The read is then asked once
-    /// more, when the snapshot sees the lock and leaves that table out; should that fail the same way, every table is
-    /// counted as locked, rather than the index checks reporting a timeout.
+    /// <b>The residual race, once.</b> A lock taken after the statement's <c>pg_locks</c> snapshot makes a deparse wait out
+    /// <c>lock_timeout</c> and the statement fail with <c>55P03</c>. The read is then asked once more, when the snapshot sees
+    /// the lock and leaves that table out (<see cref="RetryOnceBehindALockAsync{T}" />). A second <c>55P03</c> is not
+    /// guessed at - it may be a lock the snapshot cannot see, or one taken again in that instant - so it reaches the sweep,
+    /// which says the checks waited too long for a lock (Unavailable, TimedOut), as it would of any read.
     /// </para>
     /// </remarks>
     private static async Task<HealthIndexRead> ReadIndexesAsync(
@@ -346,30 +348,15 @@ internal static class HealthTables
             return HealthIndexRead.Empty;
         }
 
-        IReadOnlyList<HealthIndexRow>? rows = null;
+        IReadOnlyList<HealthIndexRow> rows = await RetryOnceBehindALockAsync(
+                token => context.Sql.QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, token),
+                cancellationToken)
+            .ConfigureAwait(false);
 
-        for (int attempt = 0; attempt < 2 && rows is null; attempt++)
-        {
-            try
-            {
-                rows = await context.Sql
-                    .QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception exception) when ((exception as PostgresException ?? exception.InnerException as PostgresException)?.SqlState
-                                               == PostgresErrorCodes.LockNotAvailable)
-            {
-                // Taken between the snapshot and a deparse: the next attempt's snapshot sees it.
-            }
-        }
-
-        if (rows is null)
-        {
-            return new HealthIndexRead([], new HashSet<string>(set.Tables.Select(static x => x.Key), StringComparer.OrdinalIgnoreCase));
-        }
-
-        HashSet<string> locked = new(StringComparer.OrdinalIgnoreCase);
+        // Keyed as the table set keys its tables - ordinally - so a lock on "Orders" skips that table and never orders.
+        HashSet<string> locked = new(StringComparer.Ordinal);
         List<IndexFacts> facts = new(rows.Count);
+        List<IndexFacts> undeparsed = [];
 
         foreach (HealthIndexRow row in rows)
         {
@@ -378,16 +365,43 @@ internal static class HealthTables
                 continue;
             }
 
+            // An origin is decided by the index's key, never its text, so a locked table's index is told apart as well.
+            IndexFacts index = new(table, row, set.OriginOf(row, table));
+
             if (row.TableLocked)
             {
                 locked.Add(table.Key);
+                undeparsed.Add(index);
                 continue;
             }
 
-            facts.Add(new IndexFacts(table, row, set.OriginOf(row, table)));
+            facts.Add(index);
         }
 
-        return new HealthIndexRead(facts, locked);
+        return new HealthIndexRead(facts, locked) { LockedIndexes = undeparsed };
+    }
+
+    /// <summary>
+    /// Runs <paramref name="read" />, and once more if the first attempt waited out <c>lock_timeout</c> (<c>55P03</c>); a
+    /// second <c>55P03</c>, and anything else, is the caller's.
+    /// </summary>
+    /// <param name="read">The read, given the cancellation token.</param>
+    /// <param name="cancellationToken">Cancels both attempts.</param>
+    internal static async Task<T> RetryOnceBehindALockAsync<T>(Func<CancellationToken, Task<T>> read, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        try
+        {
+            return await read(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when ((exception as PostgresException ?? exception.InnerException as PostgresException)?.SqlState
+                                           == PostgresErrorCodes.LockNotAvailable)
+        {
+            // Taken between the snapshot and a deparse: the second attempt's snapshot sees it, and leaves that table out.
+        }
+
+        return await read(cancellationToken).ConfigureAwait(false);
     }
 }
 
