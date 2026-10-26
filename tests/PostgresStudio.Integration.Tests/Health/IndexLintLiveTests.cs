@@ -17,6 +17,8 @@ namespace PostgresStudio.Integration.Tests.Health;
 /// <remarks>
 /// The shared fixture is <c>postgres:17-alpine</c> with the server's defaults - <c>max_locks_per_transaction = 64</c>,
 /// <c>max_connections = 100</c> - which is what T19's numbers below are. Every write ends with a forced statistics flush.
+/// T25's test alone has a database of its own: its <c>VACUUM</c> must remove the deleted rows' index entries, and any session
+/// of the same database with an older snapshot keeps them.
 /// </remarks>
 public class IndexLintLiveTests(PostgresFixture postgres)
 {
@@ -114,15 +116,30 @@ public class IndexLintLiveTests(PostgresFixture postgres)
     public async Task A_primary_key_index_left_at_its_size_by_deleting_almost_every_row_is_a_T25_warning_with_a_concurrent_reindex()
     {
         const string schema = "ps_lint_t25";
-        await using StudioHost host = await HostAsync(schema);
+
+        // A database of its own, not a schema of the shared one. VACUUM removes a deleted row's index entries only once no
+        // session of the table's database can still see the row (PostgreSQL 14 and later count that database's sessions
+        // alone), and in the shared database other classes run beside this one, some holding a snapshot or a transaction id
+        // - an ACCESS EXCLUSIVE lock takes one - for seconds. A VACUUM in that window removes nothing and leaves the index's
+        // catalog row as the empty table's CREATE left it, one page and no entries, so T25 is rightly quiet (FLK-T25).
+        string database = await postgres.CreateDatabaseAsync(schema, Token);
+        await ExecuteInAsync(database, "create schema ps_lint_t25");
+        await using StudioHost host = Host(database, schema);
 
         // 3.5 million int4 entries make a pkey of about 75 MiB (22.6 bytes an entry, measured on 17); deleting 39 rows in 40
         // and vacuuming leaves the pages and 87,500 entries - some 900 bytes an entry, past the issue's 640.
-        await ExecuteAsync(
+        await ExecuteInAsync(
+            database,
             "create table ps_lint_t25.ledger (id int primary key)",
             "insert into ps_lint_t25.ledger select g from generate_series(1, 3500000) g");
-        await ExecuteAsync("delete from ps_lint_t25.ledger where id % 40 <> 0");
-        await ExecuteAsync("vacuum ps_lint_t25.ledger");
+        await ExecuteInAsync(database, "delete from ps_lint_t25.ledger where id % 40 <> 0");
+        await ExecuteInAsync(database, "vacuum ps_lint_t25.ledger");
+
+        // The precondition, read where T25 reads it: the index's own reltuples, which only a VACUUM that removed entries writes.
+        // It keeps the 87,500 live rows' and, of the deleted rows', those on a page another process had pinned as it passed -
+        // measured, now and then, one page's 220 ("not removed due to cleanup lock contention"). T25's line is some 122,800.
+        (await ScalarInAsync(database, "select c.reltuples::int8 from pg_catalog.pg_class c where c.oid = 'ps_lint_t25.ledger_pkey'::pg_catalog.regclass"))
+            .Should().BeInRange(87_500, 100_000, "VACUUM removes the deleted rows' index entries once no session of this database can still see the rows");
 
         HealthReportFinding finding = OnTable(await ReportAsync(host), "T25", schema + ".ledger").Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Warning);
@@ -216,11 +233,15 @@ public class IndexLintLiveTests(PostgresFixture postgres)
     private async Task<StudioHost> HostAsync(string schema, IHealthStatementObserver? observer = null)
     {
         await postgres.CreateSchemaAsync(schema, Token);
+        return Host(postgres.ConnectionString, schema, observer);
+    }
 
-        return StudioHost.Create(
+    /// <summary>A host over the database <paramref name="connectionString" /> names, whose only browsable schema is <paramref name="schema" />.</summary>
+    private static StudioHost Host(string connectionString, string schema, IHealthStatementObserver? observer = null) =>
+        StudioHost.Create(
             services =>
             {
-                services.AddSingleton(_ => NpgsqlDataSource.Create(postgres.ConnectionString));
+                services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
                 services.AddSingleton<TimeProvider>(new ManualClock(Start));
 
                 if (observer is not null)
@@ -229,7 +250,6 @@ public class IndexLintLiveTests(PostgresFixture postgres)
                 }
             },
             options => options.BrowsableSchemas.Add(schema));
-    }
 
     private static Task<HealthReport> ReportAsync(StudioHost host) =>
         host.CircuitAsync("admin", services => services.GetRequiredService<IHealthService>().GetReportAsync(Scope, HealthReportRequest.Regular, Token));
@@ -239,17 +259,25 @@ public class IndexLintLiveTests(PostgresFixture postgres)
             && (x.Finding.Subject == tableKey || x.Finding.Subject?.StartsWith(tableKey + ".", StringComparison.Ordinal) == true))];
 
     /// <summary>One number the test reads for itself.</summary>
-    private async Task<long> ScalarAsync(string sql)
+    private Task<long> ScalarAsync(string sql) => ScalarInAsync(postgres.ConnectionString, sql);
+
+    /// <summary>One number the test reads for itself, in the database <paramref name="connectionString" /> names.</summary>
+    private static async Task<long> ScalarInAsync(string connectionString, string sql)
     {
-        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        await using NpgsqlConnection connection = new(connectionString);
+        await connection.OpenAsync(Token);
         await using NpgsqlCommand command = new(sql, connection);
         return Convert.ToInt64(await command.ExecuteScalarAsync(Token), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     /// <summary>Runs statements on one connection of the test's own, then flushes its statistics.</summary>
-    private async Task ExecuteAsync(params string[] statements)
+    private Task ExecuteAsync(params string[] statements) => ExecuteInAsync(postgres.ConnectionString, statements);
+
+    /// <summary>Runs statements on one connection of the test's own to the database <paramref name="connectionString" /> names, then flushes its statistics.</summary>
+    private static async Task ExecuteInAsync(string connectionString, params string[] statements)
     {
-        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        await using NpgsqlConnection connection = new(connectionString);
+        await connection.OpenAsync(Token);
 
         foreach (string sql in statements)
         {
