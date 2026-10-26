@@ -103,6 +103,42 @@ public class StandbyLag17LiveTests(ReplicationPair17Fixture pairs) : IClassFixtu
 
     [PostgresFact]
     public Task The_pages_facts_read_on_both_sides_without_a_failure_in_this_releases_shape() => StandbyLagLive.FactsAsync(pairs, eighteen: false);
+
+    /// <summary>
+    /// S10's <c>standby</c> on a real standby (W5b-int; W5-S2 proved it by unit tests alone): a data source whose connection
+    /// reaches the standby - as <c>app</c>, a store's own role, with no grant to read anything else - is told that its write
+    /// connection reaches a server that accepts no write, and pointed at Target Session Attributes; the same role on the
+    /// primary is quiet. The standby's sessions start read-write by setting - a hot standby makes each transaction read-only
+    /// without touching <c>default_transaction_read_only</c> - so <c>read-only</c> does not fire beside it.
+    /// </summary>
+    [PostgresFact]
+    [HealthFires("S10")]
+    [HealthQuiet("S10")]
+    public async Task A_data_source_whose_connection_reaches_the_standby_is_S10_standby_and_on_the_primary_it_is_quiet()
+    {
+        ReplicationPair pair = await pairs.PairAsync();
+
+        await using (StudioHost onStandby = ReplicationServer.HostOver(pair.StandbyConnectionString(MatrixRole.App), TimeProvider.System))
+        {
+            HealthReport report = await StandbyLagLive.ReportAsync(onStandby);
+
+            report.Checks.Single(static x => x.Code == "S10").Outcome.Should().Be(HealthCheckOutcome.Checked);
+            HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "S10").Subject;
+
+            finding.Finding.Variant.Should().Be("standby");
+            finding.Severity.Should().Be(HealthSeverity.Warning);
+            finding.Evidence.Should().Contain(new HealthEvidence("pg_is_in_recovery()", "true"));
+            finding.Finding.Remedy!.Code.Should().Be("Target Session Attributes=read-write");
+        }
+
+        await using (StudioHost primary = pair.Primary.Host(MatrixRole.App, TimeProvider.System))
+        {
+            HealthReport report = await StandbyLagLive.ReportAsync(primary);
+
+            report.Checks.Single(static x => x.Code == "S10").Outcome.Should().Be(HealthCheckOutcome.Checked);
+            report.Findings.Should().NotContain(static x => x.Code == "S10");
+        }
+    }
 }
 
 /// <summary>The same pair on PostgreSQL 18, for the checkpointer's <c>num_done</c> and <c>pg_stat_io</c>'s byte columns.</summary>
