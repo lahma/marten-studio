@@ -126,6 +126,9 @@ public class StudioRegistrationTests
         (typeof(IHealthTableSource), ServiceLifetime.Singleton, How.Type, typeof(MartenHealthTableSource)),
         (typeof(IHealthTableRemedies), ServiceLifetime.Singleton, How.Instance, typeof(MartenHealthRemedyProvider)),
         (typeof(IHealthPlanAdvisor), ServiceLifetime.Singleton, How.Instance, typeof(MartenStatementPlanAdvisor)),
+
+        // W5-Q1: the Statements page's groups, in Marten's terms - added in 0.5, not moved.
+        (typeof(IStatementClassifier), ServiceLifetime.Singleton, How.Instance, typeof(MartenStatementClassifier)),
         (typeof(IHorizonContributor), ServiceLifetime.Singleton, How.Type, typeof(MartenHorizonContributor)),
         (typeof(IStudioRuntime), ServiceLifetime.Singleton, How.Factory, typeof(IStudioRuntime)),
         (typeof(SqlConsoleService), ServiceLifetime.Scoped, How.Type, typeof(SqlConsoleService)),
@@ -167,6 +170,10 @@ public class StudioRegistrationTests
         (typeof(PostgresStudio.Services.Aurora.IAuroraFactsReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraFactsReader)),
         (typeof(PostgresStudio.Services.Aurora.AuroraFactsCache), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraFactsCache)),
         (typeof(PostgresStudio.Services.Aurora.IAuroraService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraService)),
+
+        // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
+        (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
+        (typeof(PostgresStudio.Services.Statements.IStatementsService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Statements.StatementsService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

@@ -1059,7 +1059,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         ResolvedScope resolved,
         CancellationToken cancellationToken)
     {
-        var connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        var connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
         try
         {

@@ -136,6 +136,33 @@ internal sealed class StudioText
     public required string StorageStorePolicyDenial { get; init; }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // Statements (W5-Q1).
+
+    /// <summary>What a <c>ViewDatabaseActivity</c> that is off says about the Statements page.</summary>
+    public required string StatementsCapabilityDenial { get; init; }
+
+    /// <summary>What <c>ReadOnly</c> says about the Statements page.</summary>
+    public required string StatementsReadOnlyDenial { get; init; }
+
+    /// <summary>What the scope policy's refusal of the database's statements says.</summary>
+    public required string StatementsStorePolicyDenial { get; init; }
+
+    /// <summary>What the write policy's refusal of <c>ViewDatabaseActivity</c> says about the Statements page.</summary>
+    public required string StatementsWritePolicyDenial { get; init; }
+
+    /// <summary>
+    /// What the studio's cost meter counts and what it does not, inside the parentheses of the "studio cost" line - one meter
+    /// for the Health page and the Statements page.
+    /// </summary>
+    public required string StudioCostCovers { get; init; }
+
+    /// <summary>
+    /// Which of the studio's reads run as <c>SqlConsoleRole</c> while it is set, and which as the source's own role - whose
+    /// statements alone the Statements page reads - in a sentence after "SqlConsoleRole is x.".
+    /// </summary>
+    public required string StatementsStudioRoles { get; init; }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // Query and Relationships.
 
     /// <summary>The examples panel's lead.</summary>
@@ -247,6 +274,30 @@ internal sealed class StudioText
         StorageStorePolicyDenial =
             "Your account may not see this database's storage. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
             + "refused this store and database as a whole, with no tenant selected: a table's size belongs to no tenant.",
+
+        StatementsCapabilityDenial =
+            "The statements this database runs, their counters and their text, need MartenStudioOptions.Capabilities.ViewDatabaseActivity.",
+        StatementsReadOnlyDenial =
+            "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDatabaseActivity off with every "
+            + "other capability.",
+        StatementsStorePolicyDenial =
+            "Your account may not see this database's statements. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            + "refused this store and database as a whole, with no tenant selected: a statement belongs to no tenant.",
+        StatementsWritePolicyDenial =
+            "Your account may not see the statements this database runs. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, "
+            + "or StoreAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this store and database as "
+            + "a whole, with no tenant selected.",
+        StudioCostCovers =
+            "health checks, the SQL console, the database browser, the Query page, and the schema, relationship, document, event and "
+            + "projection reads; a Marten session the studio opens to write or to steer the daemon is not counted",
+        StatementsStudioRoles =
+            "It is the role of the health checks (all but these reads of pg_stat_statements), the SQL console, the Query page, "
+            + "the database browser, Sessions, the Maintenance, Storage, Replication and Server pages, the Schema page's catalog "
+            + "reads, the Relationships graph and the Projections page's high-water explanation, and this page lists none of "
+            + "their statements. The document, event and projection reads, tenant discovery, the Relationships page's document "
+            + "counts, these reads of pg_stat_statements and Marten's own sessions - the studio's writes, and the Schema page's "
+            + "Check, Preview and DDL - run as the store's own role, and are among the statements above when they rank among "
+            + "the ones kept.",
 
         ExamplesIntro = "Built from this store's own aliases and tables. Click one to load it.",
         ExamplesEmpty = "This store has no document type to build an example from.",

@@ -184,7 +184,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             HashSet<string> schemas = SchemaNames(resolved.Store);
@@ -271,7 +271,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
             // Marked, so that a dry pool or a connect timeout is never read as the count's own statement
             // timeout by the IsTimeout filter below: that would draw "?" and offer the button again for a
@@ -369,7 +369,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
 
             // Through PostgresFailure, so that the timeout catch below never reads a pool that ran dry or
             // a connect that timed out - spelled exactly like a statement timeout - as "too large to scan".
@@ -522,7 +522,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         try
         {
-            await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)

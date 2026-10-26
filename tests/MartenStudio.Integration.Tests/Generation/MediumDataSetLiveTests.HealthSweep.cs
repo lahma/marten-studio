@@ -37,9 +37,9 @@ namespace MartenStudio.Integration.Tests.Generation;
 /// </para>
 /// <para>
 /// <b>Database time is the sweep's own.</b> It is the sum of the gather times of the checks that ran SQL - each little
-/// more than that check's read-only transactions, begin to rollback, round trips included, which is what
-/// <c>StudioDatabaseTime</c> meters for the Health page's "Studio cost" line, measured the same way, client side, so an
-/// upper bound on what the server spent. The meter itself is not read here: it is process-wide
+/// more than that check's read-only transactions, begin to rollback, round trips included - client side, so an upper bound
+/// on what the server spent, as <c>StudioDatabaseTime</c>'s "Studio cost" line is (which since 0.5 times the sweep's whole
+/// connection, open to close, W5-Q1). The meter itself is not read here: it is process-wide
 /// and keyed by host, port and database, and every parallel test class in this assembly reads the same database through
 /// the same key, so its total over a sweep is the sweep's plus whatever the rest of the suite did meanwhile.
 /// </para>

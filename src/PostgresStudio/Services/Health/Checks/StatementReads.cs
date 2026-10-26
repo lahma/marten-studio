@@ -64,6 +64,51 @@ internal sealed record ObservedStatement(
             : HealthEvidence.StatementText(label, StatementReads.MaskComments(Text!), TextTruncated);
 }
 
+/// <summary>Whether the statement read could read, and - when it could not - which expected state stopped it.</summary>
+internal enum StatementReadState
+{
+    /// <summary>It read.</summary>
+    Read,
+
+    /// <summary><c>pg_stat_statements</c> is not installed in this database.</summary>
+    NotInstalled,
+
+    /// <summary>It is installed at a version older than 1.8.</summary>
+    TooOld,
+
+    /// <summary>It is installed, and its library is not in <c>shared_preload_libraries</c> (<c>55000</c>).</summary>
+    NotPreloaded,
+
+    /// <summary>It holds no statement of the store's own role in this database yet.</summary>
+    NothingRecorded,
+}
+
+/// <summary>
+/// The statement read's outcome as a value - what it read, or which expected state stopped it - so that a page that shows
+/// the extension's status (the Statements page, W5-Q1) can word it, where the checks throw it as their row's reason.
+/// </summary>
+/// <param name="State">Whether it read.</param>
+/// <param name="Extension">The extension and the server, as <see cref="HealthStatementQueries.Extension" /> read them.</param>
+/// <param name="Read">What it read, for <see cref="StatementReadState.Read" />; <see langword="null" /> otherwise.</param>
+internal sealed record StatementReadOutcome(StatementReadState State, StatementExtension Extension, StatementRead? Read)
+{
+    /// <summary>Who runs the server, as the sweep's one platform read said - <see langword="null" /> when it could not be read.</summary>
+    public PostgresPlatform? Platform { get; init; }
+
+    /// <summary>What Postgres said when the state is one Postgres raised (<see cref="StatementReadState.NotPreloaded" />).</summary>
+    public Exception? Cause { get; init; }
+
+    /// <summary>The sentence a check's row says for a state that is not <see cref="StatementReadState.Read" />: H7's, unchanged.</summary>
+    public string? Reason => State switch
+    {
+        StatementReadState.NotInstalled => StatementReads.NotInstalled,
+        StatementReadState.TooOld => StatementReads.TooOld(Extension),
+        StatementReadState.NotPreloaded => StatementReads.NotPreloaded,
+        StatementReadState.NothingRecorded => StatementReads.NothingRecorded,
+        _ => null,
+    };
+}
+
 /// <summary>What one statement sweep read of <c>pg_stat_statements</c>, shared by T02, T22 and T23.</summary>
 /// <param name="ReadAt">When, by the studio's clock.</param>
 /// <param name="Extension">The extension and the server.</param>
@@ -85,6 +130,12 @@ internal sealed record StatementRead(
 {
     /// <summary>How many statements had their text read.</summary>
     public int TextsRead => Statements.Count(static x => x.Text is not null);
+
+    /// <summary>Whether Aurora's storage-level reads were joined (issue #8 A5), so a statement's <c>StorageBlocksRead</c> means something.</summary>
+    public bool StorageReads { get; init; }
+
+    /// <summary>What the read ran, in order, for "Show SQL" on a page that shows it (W5-Q1).</summary>
+    public IReadOnlyList<HealthStatement> Ran { get; init; } = [];
 }
 
 /// <summary>
@@ -133,11 +184,41 @@ internal sealed record StatementRead(
 /// a statement's table here; a statement that names one as well is shown with its text withheld by the visitor's
 /// screen.
 /// </para>
+/// <para>
+/// <b>The Statements page reads the same read</b> (W5-Q1, issue #8 G6). Its hundred statements with the most execution time
+/// since their counters began - and on Aurora its hundred with the most storage-level reads, A5 - are shares of the one
+/// counters statement (<see cref="Selection" />), so the page adds no read of <c>pg_stat_statements</c> of its own: it takes
+/// this read from the statement sweep (<see cref="OutcomeAsync" />). For the same page the read also reads the server's
+/// platform (whether Aurora's storage reads may be joined) and the statistics window's signals (W5-CAP), which a statement
+/// sweep then carries in its own history, and every kept statement's counters are sampled (<see cref="Sample" />), so the
+/// page has a window for each.
+/// </para>
 /// </remarks>
 internal static partial class StatementReads
 {
     /// <summary>The memo key of the shared read.</summary>
     internal const string Key = "statements.read";
+
+    /// <summary>The memo key of the read's outcome as a value (<see cref="OutcomeAsync" />): what a statement sweep keeps for the Statements page.</summary>
+    internal const string OutcomeKey = "statements.outcome";
+
+    /// <summary>How many statements the Statements page ranks: its largest choice of "top N" (W5-Q1).</summary>
+    internal const int PageTop = 100;
+
+    /// <summary>The series of a statement's shared blocks hit.</summary>
+    internal const string SharedHitSeries = "statements.shared-hit:";
+
+    /// <summary>The series of a statement's shared blocks read.</summary>
+    internal const string SharedReadSeries = "statements.shared-read:";
+
+    /// <summary>The series of a statement's temporary blocks written.</summary>
+    internal const string TempSeries = "statements.temp-written:";
+
+    /// <summary>The series of a statement's time reading shared blocks, in milliseconds.</summary>
+    internal const string IoReadSeries = "statements.io-read-ms:";
+
+    /// <summary>The series of a statement's Aurora storage-level reads (A5).</summary>
+    internal const string StorageReadSeries = "statements.storage-read:";
 
     /// <summary>
     /// The fewest guarded calls in the window a guarded write's conflict rate is judged on - the optimistic-concurrency
@@ -159,7 +240,11 @@ internal static partial class StatementReads
         GuardedCalls: GuardedCallsFloor,
         TopJit: 3,
         JitCalls: JitShareCheck.MinCalls,
-        Max: HealthStatementQueries.MaxTexts);
+        Max: HealthStatementQueries.MaxTexts)
+    {
+        PageTopByLoad = PageTop,
+        TopByStorage = PageTop,
+    };
 
     /// <summary>What the status row says when the extension is not installed in this database.</summary>
     internal const string NotInstalled =
@@ -178,10 +263,33 @@ internal static partial class StatementReads
         + "or since the extension was installed - so there is nothing to judge until the application has run.";
 
     /// <summary>The read, once per sweep for every statement check that asks.</summary>
+    /// <exception cref="HealthCheckUnavailableException">An expected state stopped it: its row's reason (<see cref="StatementReadOutcome.Reason" />).</exception>
     public static Task<StatementRead> ReadAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return context.Shared(Key, token => ReadCoreAsync(context, token));
+
+        return context.Shared(Key, async _ =>
+        {
+            StatementReadOutcome outcome = await OutcomeAsync(context).ConfigureAwait(false);
+            if (outcome.Read is { } read)
+            {
+                return read;
+            }
+
+            throw outcome.Cause is { } cause
+                ? new HealthCheckUnavailableException(outcome.Reason!, cause)
+                : new HealthCheckUnavailableException(outcome.Reason!);
+        });
+    }
+
+    /// <summary>
+    /// The read's outcome, once per sweep: what it read, or the expected state that stopped it, as a value. A statement sweep
+    /// keeps it among its shared reads, which is where the Statements page takes it from (W5-Q1).
+    /// </summary>
+    public static Task<StatementReadOutcome> OutcomeAsync(HealthCheckContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.Shared(OutcomeKey, token => ReadCoreAsync(context, token));
     }
 
     /// <summary>What a status row says for an extension too old to read.</summary>
@@ -189,8 +297,66 @@ internal static partial class StatementReads
         "pg_stat_statements " + extension.Version + " is installed in this database, and the statement checks read 1.8 or later "
         + "(PostgreSQL 13+); a DBA can update the extension in this database to the server's own version.";
 
-    private static async Task<StatementRead> ReadCoreAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    /// <summary>
+    /// The counters of every kept statement, for the statement history: calls, time and rows (T02's three, which it judges a
+    /// window over), and the shared blocks, temporary blocks, read time and Aurora's storage reads the Statements page shows
+    /// over the same window (W5-Q1). Written by T02, the one check every statement sweep runs, because a series has one
+    /// writer.
+    /// </summary>
+    /// <remarks>
+    /// A series name holds the statement's <c>queryid</c>, and the same statement is sampled every sweep, so the names are
+    /// shared between samples rather than built anew for each (<see cref="SeriesName" />): a sample of two hundred statements
+    /// is a dictionary of numbers, not of a thousand new strings.
+    /// </remarks>
+    public static IEnumerable<HealthSamplePart> Sample(StatementRead read)
     {
+        ArgumentNullException.ThrowIfNull(read);
+
+        foreach (ObservedStatement statement in read.Statements)
+        {
+            StatementCounterRow row = statement.Counters;
+            long id = statement.QueryId;
+
+            yield return new HealthSamplePart(SeriesName(ExpensiveStatementsCheck.CallsSeries, id), row.Calls);
+            yield return new HealthSamplePart(SeriesName(ExpensiveStatementsCheck.ExecSeries, id), row.TotalExecMs);
+            yield return new HealthSamplePart(SeriesName(ExpensiveStatementsCheck.RowsSeries, id), row.Rows);
+            yield return new HealthSamplePart(SeriesName(SharedHitSeries, id), row.SharedBlocksHit);
+            yield return new HealthSamplePart(SeriesName(SharedReadSeries, id), row.SharedBlocksRead);
+            yield return new HealthSamplePart(SeriesName(TempSeries, id), row.TempBlocksWritten);
+            yield return new HealthSamplePart(SeriesName(IoReadSeries, id), row.IoReadMs);
+
+            if (row.StorageBlocksRead is { } storage)
+            {
+                yield return new HealthSamplePart(SeriesName(StorageReadSeries, id), storage);
+            }
+        }
+    }
+
+    /// <summary>The most series names <see cref="SeriesName" /> holds before it starts again: about twenty sweeps' worth of churn.</summary>
+    internal const int MaxSeriesNames = 8192;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string Prefix, long QueryId), string> SeriesNames = new();
+
+    /// <summary>
+    /// <paramref name="prefix" /> and <paramref name="queryId" /> as one series name, the same string instance for the same
+    /// statement every sweep - bounded, and started again when full.
+    /// </summary>
+    internal static string SeriesName(string prefix, long queryId)
+    {
+        ArgumentNullException.ThrowIfNull(prefix);
+
+        if (SeriesNames.Count >= MaxSeriesNames)
+        {
+            SeriesNames.Clear();
+        }
+
+        return SeriesNames.GetOrAdd((prefix, queryId), static key => key.Prefix + key.QueryId.ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static async Task<StatementReadOutcome> ReadCoreAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    {
+        int ranBefore = context.Sql.Statements.Count;
+
         IReadOnlyList<StatementExtension> found = await context.Sql
             .QueryAsync(HealthStatementQueries.Extension(), HealthStatementQueries.ReadExtension, cancellationToken)
             .ConfigureAwait(false);
@@ -199,32 +365,42 @@ internal static partial class StatementReads
 
         if (!extension.Installed)
         {
-            throw new HealthCheckUnavailableException(NotInstalled);
+            return new StatementReadOutcome(StatementReadState.NotInstalled, extension, null) { Platform = await PlatformAsync(context).ConfigureAwait(false) };
         }
 
         if (!extension.Supported)
         {
-            throw new HealthCheckUnavailableException(TooOld(extension));
+            return new StatementReadOutcome(StatementReadState.TooOld, extension, null) { Platform = await PlatformAsync(context).ConfigureAwait(false) };
         }
 
+        // Who runs the server - whether Aurora's storage reads may be joined (A5), and how the page words the extension's
+        // status - and since when the counters count (W5-CAP), which a statement sweep then carries in its own history.
+        PostgresPlatform? platform = await PlatformAsync(context).ConfigureAwait(false);
+        await StatisticsAsync(context).ConfigureAwait(false);
+
+        bool storageReads = extension.AuroraStatements && platform?.Kind == PostgresPlatformKind.AmazonAurora;
         IReadOnlyList<StatementCounterRow> rows;
 
         try
         {
             rows = await context.Sql
-                .QueryAsApplicationRoleAsync(HealthStatementQueries.Counters(extension, Selection), HealthStatementQueries.ReadCounters, cancellationToken)
+                .QueryAsApplicationRoleAsync(HealthStatementQueries.Counters(extension, Selection, storageReads), HealthStatementQueries.ReadCounters, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.ObjectNotInPrerequisiteState)
         {
             // "pg_stat_statements must be loaded via shared_preload_libraries": the host's configuration, not a fault.
-            throw new HealthCheckUnavailableException(NotPreloaded, exception);
+            return new StatementReadOutcome(StatementReadState.NotPreloaded, extension, null) { Platform = platform, Cause = exception };
         }
 
         if (rows.Count == 0)
         {
-            throw new HealthCheckUnavailableException(NothingRecorded);
+            return new StatementReadOutcome(StatementReadState.NothingRecorded, extension, null) { Platform = platform };
         }
+
+        // One row per statement: the counters statement already folds a queryid's entries below 1.9, and this is the belt -
+        // a page keyed by queryid and a history series named by it each fail outright on a second row.
+        rows = OnePerStatement(rows);
 
         IStudioTableSet set = await HealthTables.SetAsync(context).ConfigureAwait(false);
 
@@ -257,7 +433,7 @@ internal static partial class StatementReads
                 byId.TryAdd(text.QueryId, text);
             }
 
-            cache?.Remember(context.StoreKey, context.DatabaseId, texts);
+            cache?.Remember(context.StoreKey, context.DatabaseId, texts, kept: [.. rows.Select(static x => x.QueryId)]);
         }
 
         List<ObservedStatement> statements = new(rows.Count);
@@ -270,7 +446,75 @@ internal static partial class StatementReads
 
         StatementCounterRow first = rows[0];
 
-        return new StatementRead(context.Now, extension, first.AllStatements, first.AllExecMs, first.AllWalBytes, first.Dealloc, first.StatsReset, statements);
+        StatementRead read = new(context.Now, extension, first.AllStatements, first.AllExecMs, first.AllWalBytes, first.Dealloc, first.StatsReset, statements)
+        {
+            StorageReads = storageReads,
+            Ran = [.. context.Sql.Statements.Skip(ranBefore)],
+        };
+
+        return new StatementReadOutcome(StatementReadState.Read, extension, read) { Platform = platform };
+    }
+
+    /// <summary>
+    /// <paramref name="rows" /> with each <c>queryid</c> once, its first row kept - the counters statement ranks them, so the
+    /// first is the one it ranked higher. The statement folds a <c>queryid</c>'s entries itself
+    /// (<see cref="StatementExtension.FoldsNested" />), so this changes nothing unless a server returns what it should not;
+    /// then it keeps one row rather than adding the two, which could count one execution twice. Pure.
+    /// </summary>
+    internal static IReadOnlyList<StatementCounterRow> OnePerStatement(IReadOnlyList<StatementCounterRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        HashSet<long> seen = new(rows.Count);
+        List<StatementCounterRow>? kept = null;
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (seen.Add(rows[i].QueryId))
+            {
+                kept?.Add(rows[i]);
+            }
+            else
+            {
+                kept ??= [.. rows.Take(i)];
+            }
+        }
+
+        return kept ?? rows;
+    }
+
+    /// <summary>
+    /// The server's platform, through the sweep's one read of it - or <see langword="null" /> when it cannot be read, which
+    /// joins no Aurora column and words the status for a server of somebody's own.
+    /// </summary>
+    private static async Task<PostgresPlatform?> PlatformAsync(HealthCheckContext context)
+    {
+        try
+        {
+            PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+            return server.Platform;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The statistics window's signals (W5-CAP), read through the sweep's memo so that a statement sweep computes its window and
+    /// carries it in the statement history - what the Statements page bounds its window by. A failure here costs only that
+    /// bound, never the read.
+    /// </summary>
+    private static async Task StatisticsAsync(HealthCheckContext context)
+    {
+        try
+        {
+            await StatisticsWindow.ReadingAsync(context).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // No window from this sweep: the page says since when the extension's own counters count instead.
+        }
     }
 
     /// <summary>The tables of <paramref name="set" /> that <paramref name="text" /> names, in the order it names them.</summary>

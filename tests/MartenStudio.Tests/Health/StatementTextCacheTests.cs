@@ -42,6 +42,30 @@ public class StatementTextCacheTests
         cache.Known("default", "db").Should().Equal(StatementTextCache.MaxPerDatabase + 1L);
     }
 
+    /// <summary>
+    /// W5-Q1-fix F7: at its bound a database forgets what the sweep remembering did not keep and keeps what it did, so the
+    /// next sweep - whose statements are mostly this one's - still finds their texts and pays for no whole text file.
+    /// </summary>
+    [Fact]
+    public void At_its_bound_a_database_keeps_the_texts_the_sweep_kept_and_forgets_the_rest()
+    {
+        StatementTextCache cache = new();
+        cache.Remember("default", "db", Rows(1, StatementTextCache.MaxPerDatabase));
+
+        // This sweep kept 1..200 (found here) and 1001..1020 (just read): 201..256 are nobody's any more.
+        long[] kept = [.. Enumerable.Range(1, 200).Select(static x => (long) x), .. Enumerable.Range(1001, 20).Select(static x => (long) x)];
+        cache.Remember("default", "db", Rows(1001, 20), kept);
+
+        IReadOnlySet<long> known = cache.Known("default", "db");
+        known.Should().HaveCount(220).And.BeEquivalentTo(kept);
+        cache.TryGet("default", "db", 200, out _).Should().BeTrue("a text the sweep kept from the cache is still held");
+        cache.TryGet("default", "db", 201, out _).Should().BeFalse("a text no sweep kept is what goes");
+
+        // A sweep that kept more than the bound holds is more than one sweep keeps: nothing past the bound, either way.
+        cache.Remember("default", "db", Rows(5000, 40), [.. known, .. Enumerable.Range(5000, 40).Select(static x => (long) x)]);
+        cache.Known("default", "db").Count.Should().BeLessThanOrEqualTo(StatementTextCache.MaxPerDatabase);
+    }
+
     private static List<StatementTextRow> Rows(long first, int count) =>
         [.. Enumerable.Range(0, count).Select(i => new StatementTextRow(first + i, "select " + i, false))];
 }

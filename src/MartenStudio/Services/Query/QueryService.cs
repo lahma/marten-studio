@@ -220,7 +220,7 @@ internal sealed class QueryService : IQueryService
                 refusedShape.Predicate, rejected);
         }
 
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         // The configuration describes the table Marten would create; the studio reads one somebody else

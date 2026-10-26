@@ -7,6 +7,8 @@ using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Query;
 
+using StatementCounterRow = PostgresStudio.Internal.Sql.StatementCounterRow;
+
 namespace MartenStudio.Tests.Health;
 
 /// <summary>
@@ -277,19 +279,69 @@ public class ExpensiveStatementsCheckTests
         Judge(Read(Busy(1, 0.5)), history).Findings.Single().Caveat.Should().Contain("evicted 37 entries in the window");
     }
 
+    /// <summary>
+    /// W5-Q1: every kept statement is sampled with the database's totals - not only the store's, which T02 judges - because the
+    /// Statements page shows a window for each, and T02, which every statement sweep runs, is the series' one writer.
+    /// </summary>
     [Fact]
-    public void Only_the_stores_statements_are_sampled_with_the_databases_totals()
+    public void Every_kept_statement_is_sampled_with_the_databases_totals()
     {
         StatementRead read = Read(Busy(1, 0.5), Statement(2, "select 1", [], 10, 5));
 
         Dictionary<string, double> parts = Check.Sample(new ExpensiveStatementFacts(read, [], []))
             .ToDictionary(static x => x.Series, static x => x.Value, StringComparer.Ordinal);
 
+        string[] perStatement =
+        [
+            ExpensiveStatementsCheck.CallsSeries, ExpensiveStatementsCheck.ExecSeries, ExpensiveStatementsCheck.RowsSeries,
+            StatementReads.SharedHitSeries, StatementReads.SharedReadSeries, StatementReads.TempSeries, StatementReads.IoReadSeries,
+        ];
+
         parts.Keys.Should().BeEquivalentTo(
         [
             StatementWindows.AllExecSeries, StatementWindows.AllWalSeries, StatementWindows.DeallocSeries,
-            ExpensiveStatementsCheck.CallsSeries + "1", ExpensiveStatementsCheck.ExecSeries + "1", ExpensiveStatementsCheck.RowsSeries + "1",
-        ]);
+            .. perStatement.Select(static x => x + "1"),
+            .. perStatement.Select(static x => x + "2"),
+        ], "no storage-read series where Aurora's are not read");
+
+        parts[ExpensiveStatementsCheck.CallsSeries + "2"].Should().Be(10);
+        parts[ExpensiveStatementsCheck.ExecSeries + "2"].Should().Be(5);
+    }
+
+    /// <summary>
+    /// W5-Q1-fix F1, the belt: two rows of one <c>queryid</c> - what pg_stat_statements 1.8 returns on a server of 14 or later
+    /// under <c>track = all</c>, before the counters statement folded them - are one statement, the first (higher-ranked) kept,
+    /// so the sample names each series once and the page keys each row once. Rows that are already one per statement are
+    /// returned as they are.
+    /// </summary>
+    [Fact]
+    public void Two_rows_of_one_queryid_are_one_statement()
+    {
+        StatementCounterRow top = new() { QueryId = 42, Calls = 10, TotalExecMs = 100 };
+        StatementCounterRow nested = new() { QueryId = 42, Calls = 7, TotalExecMs = 30 };
+        StatementCounterRow other = new() { QueryId = 43, Calls = 1, TotalExecMs = 1 };
+
+        IReadOnlyList<StatementCounterRow> once = StatementReads.OnePerStatement([top, nested, other]);
+        once.Should().Equal(top, other);
+
+        IReadOnlyList<StatementCounterRow> clean = [top, other];
+        StatementReads.OnePerStatement(clean).Should().BeSameAs(clean);
+
+        // What the belt protects: a queryid read twice is a series sampled twice, which the history refuses outright.
+        StatementRead twice = Read(Statement(42, "select 1", [], 10, 100), Statement(42, "select 1", [], 7, 30));
+        Check.Sample(new ExpensiveStatementFacts(twice, [], [])).GroupBy(static x => x.Series)
+            .Should().Contain(static x => x.Count() > 1, "this is the read the belt never lets through");
+    }
+
+    /// <summary>W5-Q1: a statement's series name is the same string instance every sweep, so a full ring holds numbers, not names.</summary>
+    [Fact]
+    public void A_series_name_is_shared_between_samples()
+    {
+        string first = StatementReads.SeriesName(ExpensiveStatementsCheck.CallsSeries, 4242);
+        string again = StatementReads.SeriesName(ExpensiveStatementsCheck.CallsSeries, 4242);
+
+        first.Should().Be(ExpensiveStatementsCheck.CallsSeries + "4242");
+        ReferenceEquals(first, again).Should().BeTrue();
     }
 
     [Fact]

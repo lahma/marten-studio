@@ -1307,6 +1307,14 @@ tests/PostgresStudio.Tests/Aurora/        By-name mapping of Aurora's functions,
                                          reader, the parameter wording and R03's aurora-reader view - no database
 tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the instance, R03 aurora-reader, the wait section, a
                                          failover, the not-applicable checks, C03's remedy and the spoof-proof markers
+src/PostgresStudio/Services/Statements/   The Statements page (W5-Q1): its facts (the statement sweep's own read and
+                                         history), the per-visitor view behind the activity gate, the plain classifier
+src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group
+tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the view's ranking and groups, the gate, the
+                                         classifier, the cost meter's connection tracker, and the page - no database
+tests/MartenStudio.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
+tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
+                                         matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

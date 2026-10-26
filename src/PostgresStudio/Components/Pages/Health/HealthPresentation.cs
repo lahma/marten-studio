@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Components.Pages.Health;
 
@@ -75,18 +76,21 @@ internal static class HealthPresentation
     };
 
     /// <summary>
-    /// The "studio cost" line: what the studio's own read-only sessions spent in the database recently, and
-    /// what that does not include.
+    /// The "studio cost" line: what the studio's own connections to the database took recently, and what that does not
+    /// include - the same meter as the Statements page's "the studio itself" line (W5-Q1).
     /// </summary>
-    public static string Cost(StudioCost cost)
+    /// <param name="cost">The meter's total for the database.</param>
+    /// <param name="text">The studio's words, for what its connections cover.</param>
+    public static string Cost(StudioCost cost, StudioText text)
     {
-        string seconds = cost.Total.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture);
-        string sessions = cost.Sessions == 1 ? "1 read-only session" : cost.Sessions.ToString("N0", CultureInfo.InvariantCulture) + " read-only sessions";
+        ArgumentNullException.ThrowIfNull(text);
 
-        return "Studio cost: " + seconds + " s of database time in " + sessions + " against this database over the last "
-            + ((int) cost.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes, measured around the studio's own "
-            + "read-only sessions (health checks, the SQL console, the database browser, schema and relationship reads). "
-            + "The documents, events and projections screens' reads are not counted yet.";
+        string seconds = cost.Total.TotalSeconds.ToString("0.00", CultureInfo.InvariantCulture);
+        string connections = cost.Connections == 1 ? "1 connection" : cost.Connections.ToString("N0", CultureInfo.InvariantCulture) + " connections";
+
+        return "Studio cost: " + seconds + " s of database time over " + connections + " to this database in the last "
+            + ((int) cost.Window.TotalMinutes).ToString(CultureInfo.InvariantCulture) + " minutes, measured from open to close of "
+            + "every connection the studio opens to it (" + text.StudioCostCovers + ").";
     }
 
     /// <summary>A findings count with its noun.</summary>

@@ -123,6 +123,9 @@ public static partial class MartenStudioServiceCollectionExtensions
         // a made-up MartenRuntime first, which this one then reads).
         services.TryAddSingleton<IHealthTableRemedies>(MartenHealthRemedyProvider.Instance);
         services.TryAddSingleton<IHealthPlanAdvisor>(MartenStatementPlanAdvisor.Instance);
+
+        // W5-Q1: the Statements page's groups - a Marten operation and its document type, read off Marten's own SQL.
+        services.TryAddSingleton<IStatementClassifier>(MartenStatementClassifier.Instance);
         services.TryAddSingleton<IHorizonContributor, MartenHorizonContributor>();
         services.TryAddSingleton<IStudioRuntime>(static provider =>
             new MartenStudioRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));

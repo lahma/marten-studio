@@ -77,10 +77,37 @@ statement checks** also plans statements, which locks what a plain read of them 
 it never hides the other checks. A check that cannot run here for a reason that is the host's choice - no
 extension, no privilege, an old Postgres - says so and is logged at Debug, never as a warning.
 
-The page's **Studio cost** line is the database time the studio's own read-only sessions took in the
-selected database in the last five minutes: the health checks, the SQL console, the Query page's Marten mode,
-the database browser and the schema and relationship reads. The documents, events and projections screens'
-own reads are not counted yet. It is a database-wide number, so it is shown at the same gate as one.
+The page's **Studio cost** line is the database time the studio's own connections to the selected database
+took in the last five minutes, each timed from open to close: the health checks, the SQL console, the
+database browser, the Query page and the schema, relationship, document, event and projection reads. A
+Marten session the studio opens to write, or to steer the daemon, is not counted. It is a database-wide
+number, so it is shown at the same gate as one.
+
+## The Statements page
+
+**Operations › Statements** lists the top statements of the selected database by execution time, from the
+same read of `pg_stat_statements` the statement checks make (T02, T22, T23) - no second read - and behind
+the same gate as their texts: `ViewDatabaseActivity`, the store policy and the write policy, all asked with
+`TenantId = null`. It reads only what the store's own role ran in this database (D29), so another role's
+statements are never among them, and a statement the studio ran as `SqlConsoleRole` is not either.
+
+**It runs the statement checks when you open it or press Refresh, and at no other time.** A statement sweep
+plans statements (T02's generic plans), so a tab left open must not run one every five minutes on nobody's
+behalf: while the page stays open it shows the latest statement sweep that finished for the database and
+starts none of its own. Opening the page, pressing Refresh, or running the Health page's statement checks
+starts a sweep when the last one is more than five minutes old; within five minutes, everybody gets the one
+that ran. The window the page ranks over grows only between such sweeps.
+
+On pg_stat_statements 1.8 - no `toplevel` column - a statement's top-level and nested runs are summed into
+one row, so with `pg_stat_statements.track = all` a statement a function runs is counted on its own row as
+well as inside the function's. From 1.9 only top-level runs are read.
+
+On Amazon Aurora the page can rank by storage-level reads, from Aurora's `aurora_stat_statements(boolean)`.
+AWS documents the function but not the schema it is in, so the studio calls one only where it is in
+`pg_catalog` or is a member of the database's `pg_stat_statements` extension - places only a superuser, or
+the extension's owner, can put a function - and never one of that name in a schema anybody may create in.
+Its rows are fenced to the store's role and the database exactly as the extension's are, and its columns
+are read by name, because on PostgreSQL 17 its documented column list collides with the extension's own.
 
 ## Who sees what
 

@@ -1292,7 +1292,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         // message, where a client-side timeout only breaks the connection.
         int commandTimeout = CommandTimeoutSeconds + 5;
 
-        await using NpgsqlConnection connection = resolved.Database.CreateConnection(ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         return await session
