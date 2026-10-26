@@ -61,8 +61,8 @@ namespace MartenStudio.Tests.Marten;
 /// <c>Directory.Packages.props</c> floor for this file to compile at all.
 /// </para>
 /// <para>
-/// <b>The floor is <c>Marten</c> 9.39.0</b>, and it is a <em>security</em> floor (AGENTS.md,
-/// <em>Package budget changes</em>, 2026-10-15): 9.39.0 fixes GHSA-q4xm-rhx9-xjm4 and
+/// <b>The floor is <c>Marten</c> 9.39.0</b>, and it is a <em>security</em> floor (docs/maintainers/
+/// package-budget-changes.md, 2026-10-15): 9.39.0 fixes GHSA-q4xm-rhx9-xjm4 and
 /// GHSA-frqq-p5g3-8jq5, and nothing asserted here is missing at 9.31.0, the lowest version the code itself
 /// needs (bisected 2026-09-19). This file is half of why that one is where it is: below 9.22.4 it does not
 /// compile, because <c>ShardName.HighWaterMarkFor</c> - the member

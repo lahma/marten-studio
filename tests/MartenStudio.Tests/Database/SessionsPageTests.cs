@@ -201,7 +201,7 @@ public class SessionsPageTests
     /// work running - which the page's own polling loop and bUnit's <c>WaitForAssertion</c> both leave behind them - and
     /// the lease still goes back. bUnit 2.11.3's <c>DisposeComponentsAsync</c>, called from outside the dispatcher at
     /// that moment, disposed nothing and completed successfully (bUnit-dev/bUnit#1939);
-    /// <see cref="StudioComponentContext.DisposeComponentsAsync" /> runs it on the dispatcher.
+    /// bUnit 2.12.5 fixed that, so the test now holds bUnit's own disposal to it.
     /// </summary>
     [Fact]
     public async Task The_lease_goes_back_even_when_the_renderer_is_busy_as_the_page_closes()
