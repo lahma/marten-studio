@@ -6,7 +6,9 @@ namespace PostgresStudio.Services;
 
 // W5-Q1's events, 9450-9459: the Statements page. In a file of their own so that the wave-5 packets' event blocks never
 // meet in one file; the class's own documentation is StudioLog.cs's. Postgres Studio's spellings are PostgresStudioLog's
-// (PostgresStudioLog.StatementsPage.cs), chosen here by the studio's product.
+// (PostgresStudioLog.StatementsPage.cs), chosen here by the studio's product - except 9451's, which is throttled: its
+// caller picks the spelling itself, as every throttled event's caller does, so that the level it passes is visibly the
+// throttle's (LogLevelsTests.Every_call_of_a_throttled_event_takes_its_level_from_the_throttle, wave 6).
 internal static partial class StudioLog
 {
     /// <remarks>
@@ -53,19 +55,6 @@ internal static partial class StudioLog
         else
         {
             logger.StatementsPageRefused(storeKey, databaseId, reason);
-        }
-    }
-
-    /// <summary>9451, in the studio's words.</summary>
-    public static void StatementsReadFailed(this ILogger logger, StudioProduct product, LogLevel level, Exception exception, string storeKey, string databaseId, string? sqlState)
-    {
-        if (product == StudioProduct.PostgresStudio)
-        {
-            logger.PostgresStudioStatementsReadFailed(level, exception, storeKey, databaseId, sqlState);
-        }
-        else
-        {
-            logger.StatementsReadFailed(level, exception, storeKey, databaseId, sqlState);
         }
     }
 
