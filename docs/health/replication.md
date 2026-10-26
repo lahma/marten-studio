@@ -6,6 +6,8 @@ database's - a physical slot belongs to no database, and a logical slot for anot
 WAL this one writes - so, like C03, the numbers are the whole server's, and every store database on the server
 shows the same ones. Back to the [index](../health.md).
 
+**Studios.** R01 to R04 read Postgres alone and run in both studios ([codes.md](codes.md)).
+
 ## What these checks read, and when
 
 `pg_replication_slots`, `pg_current_wal_lsn()` (on a server in recovery, its last replayed position instead) and
@@ -26,7 +28,7 @@ The counts, the sizes and the settings are shown to anybody the store policy pas
 Names are shown more narrowly:
 
 - **A physical slot's name**, and **a logical slot's name, plugin and database when the slot is this database's**,
-  need `MartenStudioOptions.Capabilities.ViewDatabaseActivity` and the write policy asked with
+  need `Capabilities.ViewDatabaseActivity` and the write policy asked with
   `Capability = "ViewDatabaseActivity"` and `TenantId = null`, like every other name in the advisor. A physical
   slot belongs to no database, so it is the server's to name.
 - **A logical slot of another database on the same server is never named**, whatever gate the visitor passes. It

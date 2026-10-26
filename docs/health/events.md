@@ -2,6 +2,9 @@
 
 These checks look at the event store's traffic and shape. Back to the [index](../health.md).
 
+**Studios.** Every check here reads a Marten store's event store, and runs only in Marten Studio
+([codes.md](codes.md)).
+
 They read in two ways, and say which in every finding's caveat:
 
 - **E02, E03 and E04** share one **recent-traffic profile**, read only behind **Run deeper checks** (tier 2) and

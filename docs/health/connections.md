@@ -6,10 +6,14 @@ C05, C06, C07), the database's own counters (C08), whether a transaction-mode po
 HotCold daemon and its lock (C10), and how much of what the database reads its shared buffers hold (C11). Back to the
 [index](../health.md).
 
+**Studios.** C01, C03 to C08 and C11 read Postgres alone and run in both studios, with the data source in place of the
+store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
+Studio. The list of every code and its studios is [codes.md](codes.md).
+
 ## What these checks read, and when
 
 `pg_stat_activity`, `pg_locks`, `pg_prepared_xacts` and `pg_stat_database` are read **only by a health sweep**
-- once per `MartenStudioOptions.HealthInterval` (a minute by default) for everybody watching - and by the
+- once per `HealthInterval` (a minute by default) for everybody watching - and by the
 **Database › Sessions** page, at the same interval or on Refresh, through a shared snapshot that is never read
 twice within ten seconds. Nothing on the five-second `RefreshInterval` path reads them: they are scans of the
 server's process array and lock table, cheap once a minute and not something to do on every poll of every open
@@ -29,7 +33,7 @@ A finding's count, ages, states, wait classes, lock modes and the Marten label o
 anybody the store policy passes for the database as a whole (`TenantId = null`).
 
 Who the sessions are - **process ids, roles, client addresses, application names, connection times** and, on
-the Sessions page, **statements** - needs `MartenStudioOptions.Capabilities.ViewDatabaseActivity` (off by
+the Sessions page, **statements** - needs `Capabilities.ViewDatabaseActivity` (off by
 default, in `All()`, off under `ReadOnly`) **and** the write policy, asked with
 `Capability = "ViewDatabaseActivity"` and `TenantId = null`. Without it a visitor reads "withheld" in place of
 each of those, with what it would take.
@@ -228,16 +232,17 @@ Marten 9.39 and 9.40 (`Events.UseAdvisoryLockTransaction` on by default) it hold
 `Events.UseMonitoredAdvisoryLock` on, also the default, that session is `idle in transaction` from taking the lock
 until about 0.9 s after the first leadership poll that follows - five seconds or so at the default
 `LeadershipPollingTime` of 5,000 ms - and from then on `active`, running the lock monitor's `pg_sleep(60)` inside the
-same transaction, the next sleep beginning as the last one ends (measured live at 9.39). So it is idle in its
-transaction for a few seconds once, when it takes the lead. From 9.41 the lock is the session's by default and the
-leader is not in a transaction at all.
+same transaction, the next sleep beginning as the last one ends (measured live at 9.39.0, whose Weasel 9.33 carries the
+upstream DistributedLock.Postgres 1.3.0). So it is idle in its transaction for a few seconds once, when it takes the
+lead. From 9.41 the lock is the session's by default and the leader is not in a transaction at all.
 
-At Marten 9.50.2 (Weasel 9.45, Patched.DistributedLock.Postgres 1.3.3) with `Events.UseAdvisoryLockTransaction = true`
-- what a host behind a transaction-mode pooler keeps - there is no `pg_sleep` monitor: the leader sits `idle in
-transaction`, with a snapshot, until DistributedLock's keepalive (`SELECT 0`) runs in it about 61 s after the lock,
-and again every minute (measured live). Where the connection string sets Npgsql's `Keepalive` or `Multiplexing`,
-DistributedLock falls back to 9.39's `pg_sleep` instead: the leader is `active` in it, not idle, and C04 does not judge
-it. That reaches C04's minute, so **the leader is recognised by its leadership
+From Marten 9.39.1 (Weasel 9.34, the first with Patched.DistributedLock.Postgres 1.3.3), with
+`Events.UseAdvisoryLockTransaction = true` - the default up to 9.40, and what a host behind a transaction-mode pooler
+keeps - there is no `pg_sleep` monitor: the leader sits `idle in transaction`, with a snapshot, until DistributedLock's
+keepalive (`SELECT 0`) runs in it about 61 s after the lock, and again every minute (measured live at 9.45.0 and 9.50.2;
+K08 reads which monitor the process loads off the DistributedLock assembly Weasel binds to). Where the connection
+string sets Npgsql's `Keepalive` or `Multiplexing`, DistributedLock falls back to 9.39.0's `pg_sleep` instead: the
+leader is `active` in it, not idle, and C04 does not judge it. That reaches C04's minute, so **the leader is recognised by its leadership
 lock, never by its name**: a session that holds one of the store's daemon advisory lock ids, granted, in this
 database, and is idle in a transaction (`pg_locks` cannot say which scope the lock has), with the leader's shape - no
 transaction id and no relation lock - is not raised while it has been idle for less than three minutes
@@ -250,7 +255,7 @@ really does hold back vacuum; `Events.UseAdvisoryLockTransaction = false` is the
 The fix is in the application: dispose every session (`await using`), and end what it began. A server-wide
 `idle_in_transaction_session_timeout` is the DBA's backstop - and with the leadership lock transaction-scoped it can
 also end the HotCold daemon's leadership session: a timeout shorter than the minute or so the leader sits idle in its
-transaction (after taking the lead at 9.39, between keepalives at 9.50.2), or any timeout with lock monitoring off.
+transaction (after taking the lead at 9.39.0, between keepalives from 9.39.1), or any timeout with lock monitoring off.
 
 ## C05 Long-running statement
 

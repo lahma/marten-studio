@@ -7,6 +7,11 @@ statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`
 [below](#the-statement-checks-t02-t22-t23)); T14 also reads who holds the vacuum horizon back (`pg_stat_activity`,
 `pg_locks`, `pg_prepared_xacts`, `pg_replication_slots`, `pg_stat_replication`). Back to the [index](../health.md).
 
+**Studios.** T01 to T08, T12 to T16, T19, T20 and T23 to T26 read Postgres alone and run in both studios: in Marten
+Studio over the store's tables and the tables beside them, in Postgres Studio over every table of the schemas
+`BrowsableSchemas` admits. T09, T10, T11, T17 and T22 read what a Marten store declares, and run only in Marten Studio.
+The list of every code and its studios is [codes.md](codes.md).
+
 What every check here has in common:
 
 - **Every table, with the store's declarations laid over it.** The checks judge every ordinary and partitioned
@@ -528,11 +533,12 @@ and how many of them sit in tables vacuumed since the holder began - rows vacuum
   statement, so a transaction open for a day can hold the horizon back by a minute. Marten's own HotCold leader is
   one, with its lock transaction-scoped (`Events.UseAdvisoryLockTransaction`, the default at 9.39 and 9.40): it holds
   its leadership lock in a transaction it never ends, and its lock monitor (`Events.UseMonitoredAdvisoryLock`) runs a
-  statement in it about once a minute - `pg_sleep(60)` at Marten 9.39 (Weasel 9.33); at 9.50.2 (Weasel 9.45,
-  Patched.DistributedLock.Postgres 1.3.3) no sleep at all, but DistributedLock's keepalive (`SELECT 0`) about 61 s
-  after the lock and every minute on, the session idle in its transaction in between - or, where the connection string
-  sets Npgsql's `Keepalive` or `Multiplexing`, `pg_sleep(60)` again, the session `active`, as at 9.39 - so at read
-  committed its `backend_xmin` is never more than about a minute old, measured at both. So the age is a lower bound, from
+  statement in it about once a minute - `pg_sleep(60)` at Marten 9.39.0 (Weasel 9.33, the upstream
+  DistributedLock.Postgres 1.3.0); from 9.39.1 (Weasel 9.34, the first with Patched.DistributedLock.Postgres 1.3.3) no
+  sleep at all, but DistributedLock's keepalive (`SELECT 0`) about 61 s after the lock and every minute on, the session
+  idle in its transaction in between - or, where the connection string sets Npgsql's `Keepalive` or `Multiplexing`,
+  `pg_sleep(60)` again, the session `active`, as at 9.39.0 - so at read committed its `backend_xmin` is never more than
+  about a minute old, measured at 9.39.0 and at 9.50.2. So the age is a lower bound, from
   Postgres' own timestamps - a running statement's age, the time a session has been idle in its transaction, each
   capped at the transaction's own age (a `DO` that commits in a loop, or a concurrent index build, is one statement
   across many short transactions), a prepared transaction's age, an inactive slot's `inactive_since` (PostgreSQL 17) -
@@ -569,7 +575,7 @@ and how many of them sit in tables vacuumed since the holder began - rows vacuum
   and goes with the database's history; a holder no sweep in the ring's window saw is forgotten.
 - **Who it is** - the process id, role, application, client and connection time of a session, a prepared
   transaction's gid and owner, a slot's name, plugin and database, a standby's address - is evidence behind
-  `MartenStudioOptions.Capabilities.ViewDatabaseActivity`. The kind and the age are shown at the database-wide gate.
+  `Capabilities.ViewDatabaseActivity`. The kind and the age are shown at the database-wide gate.
 - **Without `pg_read_all_stats`** Postgres still shows a role every session's transaction ids, role and application
   name - measured on PostgreSQL 17 - and withholds their state, timings, client address and statement. So another
   role's session is still found and judged by how far back it holds the horizon; the caveat says how many sessions the
@@ -584,14 +590,15 @@ and how many of them sit in tables vacuumed since the holder began - rows vacuum
   does hold the horizon for as long as it leads, and T14 says so after an hour (the time idle in a transaction is
   Postgres' own), with `opts.Events.UseAdvisoryLockTransaction = false;` as the remedy - or, for a host that must keep
   the transaction lock behind a pooler, `Events.UseMonitoredAdvisoryLock = true`, which at read committed - Postgres'
-  default - bounds the hold to about a minute (measured at 9.39 and 9.50.2). At 9.50.2 the monitor is the keepalive
-  (read by decompiling Patched.DistributedLock.Core 1.0.11 and Patched.DistributedLock.Postgres 1.3.3):
+  default - bounds the hold to about a minute (measured at 9.39.0 and 9.50.2). From 9.39.1 the monitor is the keepalive
+  (read by decompiling Patched.DistributedLock.Core 1.0.11 and Patched.DistributedLock.Postgres 1.3.3, which Weasel 9.34
+  is the first to bring):
   `ConnectionMonitor` starts its worker only when a keepalive cadence is set - infinite, so never, by default - or a
   monitoring handle (`HandleLostToken`) is registered, and a monitoring handle makes it call the connection's
   `SleepAsync` for at most a minute at a time. Postgres 1.3.3's `SleepAsync` waits on the client
   (`NpgsqlConnection.WaitAsync`), the session idle in its transaction meanwhile, then runs
   `SELECT 0 /* DistributedLock connection keepalive */`. On a connection whose connection string sets Npgsql's
-  `Keepalive` or `Multiplexing` it falls back to 9.39's shape: `SAVEPOINT`, `pg_sleep(@sleepTimeSeconds)` and
+  `Keepalive` or `Multiplexing` it falls back to 9.39.0's shape: `SAVEPOINT`, `pg_sleep(@sleepTimeSeconds)` and
   `ROLLBACK TO SAVEPOINT`, the session `active` in the sleep - the same bound on the hold, read as a running statement
   rather than an idle transaction. (A connection a caller hands DistributedLock is not monitored at all; Weasel's come
   from a data source, so they are its own.) With monitoring off nothing runs in the leader's transaction at all. Under `default_transaction_isolation = 'repeatable read'` or
@@ -609,7 +616,7 @@ T02, T22 and T23 read `pg_stat_statements`, the extension that counts every stat
 What they have in common:
 
 - **Only behind Run statement checks, and only through the activity gate.** They read other people's statements,
-  so they run only when a visitor with `MartenStudioOptions.Capabilities.ViewDatabaseActivity` (and the write
+  so they run only when a visitor with `Capabilities.ViewDatabaseActivity` (and the write
   policy for the database as a whole) asks, and their result is cached for five minutes. A visitor without the gate
   sees the button off, the setting or policy it needs, and none of their findings - not even a count. Every
   statement shown is masked for the visitor reading it with Database › Sessions' own rule: a withheld schema's name

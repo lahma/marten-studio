@@ -5,6 +5,9 @@ supports it, the settings that blind the store's maintenance or trade its safety
 checksums failed. They read `pg_settings`, `pg_stat_database` and the server's version, once per regular sweep,
 in the studio's read-only transaction, and lock nothing they read. Back to the [index](../health.md).
 
+**Studios.** S01 to S10 read Postgres alone and run in both studios, with the data source in place of the store in
+Postgres Studio ([codes.md](codes.md)).
+
 ## Managed platforms
 
 A small detector says who runs the server, from markers each provider documents. It decides **only wording,

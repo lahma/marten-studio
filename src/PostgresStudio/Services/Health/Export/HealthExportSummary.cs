@@ -79,7 +79,7 @@ internal sealed record HealthExportSummary
     public IReadOnlyList<string> TimedOut { get; init; } = [];
 
     /// <summary>
-    /// How many databases are reported: each one's latest sweep, while it is younger than one rotation and one interval - the
+    /// How many databases are reported: each one's latest sweep, for one full rotation and one run more, counted in runs - the
     /// ones this run checked and the ones an earlier run did (API design §3.4).
     /// </summary>
     public int Databases { get; init; }
@@ -350,7 +350,7 @@ internal sealed record HealthExportSummary
             if (DatabasesSkipped > 0)
             {
                 text.Append("; ").Append(Count(DatabasesSkipped, "database", "databases"))
-                    .Append(" skipped: past the most one run checks");
+                    .Append(" skipped: not yet reached by the rotation");
             }
 
             if (DatabasesUnnamed > 0)

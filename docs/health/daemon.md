@@ -9,6 +9,9 @@ your documents are stored in. Each finding is about the database as a whole, so 
 store policy allows for the database with no tenant selected; a name of a session or a tenant sits behind
 `ViewDatabaseActivity`. Back to the [index](../health.md).
 
+**Studios.** Every check here reads a Marten store's event store and daemon, and runs only in Marten Studio
+([codes.md](codes.md)).
+
 Every age of a row below is measured in the **database server's** time (`transaction_timestamp()`), against
 timestamps the server wrote, so a clock that differs between the application and the database changes nothing.
 A rate, a "for the whole window" and how long a committed event has waited behind a gap come from the advisor's

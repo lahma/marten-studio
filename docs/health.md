@@ -1,8 +1,13 @@
-# Marten Studio: the health advisor
+# The health advisor
 
-The Health page (`/marten/health`) says what is wrong with the database a studio is pointed at, how sure it
-is, and which line of the host's `StoreOptions` would change it. It is an advisor, not a monitor: it pages
-nobody, it keeps an hour of history in memory and no more, and it runs only while somebody is looking.
+The Health page (`/marten/health` in Marten Studio, `/postgres/health` in Postgres Studio) says what is wrong with the
+database a studio is pointed at, how sure it is, and what would change it: a line of the host's `StoreOptions`, a
+migration for the host's own tables, or a server setting. It is an advisor, not a monitor: it pages nobody, it keeps
+an hour of history in memory and no more, and it runs only while somebody is looking.
+
+Both studios run the same engine. The checks that read Postgres alone run in both; the ones that read a Marten store -
+the daemon (`D`), the events (`E`) and a few others - run only in Marten Studio. Every code, its variants, what its
+subject names and which studios run it: [health/codes.md](health/codes.md).
 
 This page is the index. Each area has a file of its own with one section per check, and each section's
 heading is the anchor the page's "About" link opens:
@@ -27,10 +32,15 @@ that read it (Show SQL - parameter names, never values), a caveat that says how 
 - **Warning**: something is wrong or risky and is worth fixing on purpose.
 - **Info**: a setting that would let the store - or the advisor - tell you more.
 
-A remedy is always a `StoreOptions` line for the host's own registration, never DDL. An index, a storage
-parameter or a setting the studio created itself would be schema the host's configuration does not know
-about, and the next `CreateOrUpdate` would take it away again. A remedy that needs a Marten newer than the
-studio's floor says so ("Marten 9.47+") and, on a host that runs an older one, what that host runs.
+For a table a Marten store declares, a remedy is always a `StoreOptions` line for the host's own registration,
+never DDL. An index, a storage parameter or a setting the studio created itself would be schema the host's
+configuration does not know about, and the next `CreateOrUpdate` would take it away again. A remedy that needs a
+Marten newer than the studio's floor says so ("Marten 9.47+") and, on a host that runs an older one, what that host
+runs. For any other table - the host's own relational tables, in either studio - the remedy is migration SQL, shown
+under "For your own migrations - the studio never runs this", with every name quoted and no statement at all for a
+name that cannot be quoted safely; a recognised library's table (Quartz.NET, Wolverine, EF Core's and FluentMigrator's
+history) is left out of the index-design rules, and its other remedies say the library's design is left alone. A
+server setting's remedy names where it changes on the platform the server runs on. The studio never runs any of them.
 
 "Mute in this browser" hides one finding on one database for you, in your browser's `localStorage`. It is
 never written to the database and never hides anything from anybody else. What the browser keeps is an HMAC-SHA256 of
@@ -73,7 +83,7 @@ one, whatever their browser sends. They see the button off, the policy it needs,
 somebody else started - through the same per-finding gates as everything else.
 
 A sweep runs **only when the Health page or the Overview asks**, and its result is shared by everybody
-watching that database until `MartenStudioOptions.HealthInterval` (a minute by default) has passed: ten open
+watching that database until `HealthInterval` (a minute by default) has passed: ten open
 tabs cost one sweep per interval, not ten. There is no hosted service and no timer of the advisor's own - a
 studio nobody has open checks nothing. The navigation badge reads the last sweep and never starts one.
 
@@ -131,11 +141,18 @@ The sweep is about the database; what each visitor is shown of it is decided per
   Configuration page's store, Events, daemon and Runtime cards. K04's host and port are evidence at the
   database-wide gate, as the Configuration page's database list is. S01, a catalog read, is shown at the same
   gate as K01: the server's version is on the Overview already.
-- A database-wide number needs the store policy for the database as a whole, asked with `TenantId = null`.
-- Anything that names a session, a process id, a role, a client address, an application, a statement or a
-  tenant needs `MartenStudioOptions.Capabilities.ViewDatabaseActivity` - off by default, off under
+- A database-wide number needs the store policy for the database as a whole, asked with `TenantId = null` (in
+  Postgres Studio, the source policy for the database).
+- Anything that names another session, a process id, another role, a client address, an application, a statement or a
+  tenant needs `Capabilities.ViewDatabaseActivity` - off by default, off under
   `ReadOnly` - and the write policy, asked with `Capability = "ViewDatabaseActivity"` and `TenantId = null`.
   Without it a visitor still sees the counts and ages, never the names.
+- The studio's own roles are configuration, not somebody else's session, so they are named at the database-wide gate:
+  the role the studio reads as (`SqlConsoleRole`, or the store's or data source's own login where none is set), which a
+  "not checked" row names with the grant it lacks, and the login the data source connects as, which S04, S05, S08 and
+  S10 name and C02 and C03 show in their role-limit evidence. So is an Amazon Aurora instance's identifier - the
+  cluster's own name for one of its instances - in R03's `aurora-reader` evidence and the "Answered by" line; a
+  session's Aurora waits are behind the activity gate.
 - A document type `IsDocumentTypeVisible` hides never appears in a finding.
 - A table in a schema that is not one of the store's own - an `ExtendedSchemaObjects` table in a schema of
   its own - is named in a finding only to a visitor the database browser shows that schema to:
@@ -166,20 +183,25 @@ under event 9222.
 ## Export
 
 The advisor pages nobody, but the host's own monitoring already knows how to: an ASP.NET Core health check.
-It is opt-in, and `AddMartenStudio()` does not register it:
+It is opt-in, and neither `AddMartenStudio()` nor `AddPostgresStudio()` registers it:
 
 ```csharp
 builder.Services.AddMartenStudio();
 builder.Services.AddHealthChecks().AddMartenStudio(name: "marten-studio", failureStatus: null, tags: ["marten"]);
 
+// or, in a Postgres Studio host:
+builder.Services.AddPostgresStudio();
+builder.Services.AddHealthChecks().AddPostgresStudio(name: "postgres-studio", failureStatus: null, tags: ["postgres"]);
+
 // ...
 app.MapHealthChecks("/healthz");
 ```
 
-`AddHealthChecks().AddMartenStudio(...)` takes ASP.NET Core's usual `name` (`marten-studio` unless given),
-`failureStatus`, `tags` and `timeout`, and registers one check. Each run sweeps tiers 0 and 1 - the configuration
-and catalog checks, never the deeper reads or the statements - over every registered store and the databases
-each one holds (*Many databases*, below), straight through the sweeper the Health page uses.
+`AddHealthChecks().AddMartenStudio(...)` and `.AddPostgresStudio(...)` take ASP.NET Core's usual `name`
+(`marten-studio` or `postgres-studio` unless given), `failureStatus`, `tags` and `timeout`, and register one check.
+Each run sweeps tiers 0 and 1 - the configuration and catalog checks, never the deeper reads or the statements - over
+every registered store or source and the databases each one holds (*Many databases*, below), straight through the
+sweeper the Health page uses.
 
 **Status.** Any Critical finding reports `failureStatus` (`Unhealthy` unless given). These report `Degraded`, never
 worse than `failureStatus`, so a check registered with `failureStatus: HealthStatus.Degraded` never reports
@@ -195,8 +217,8 @@ worse than `failureStatus`, so a check registered with `failureStatus: HealthSta
 Info findings, and checks that could not run for a reason that is the host's choice - no privilege, no extension,
 an old Postgres - leave it `Healthy`. The Health page shows both kinds of "not checked" the same way; the export
 does not, because a database that cannot answer a catalog read in time is worth somebody's look. A host that added
-the health check but not `services.AddMartenStudio()` gets `Degraded` with a description saying which call is
-missing. A fault in the export itself is `Degraded` too, naming the exception's type, with its message in event 9270
+the health check but not the studio itself (`services.AddMartenStudio()` or `services.AddPostgresStudio()`) gets
+`Degraded` with a description saying which call is missing. A fault in the export itself is `Degraded` too, naming the exception's type, with its message in event 9270
 (a Warning once per ten minutes, Debug while it repeats). The check never throws, except when the probe's own
 cancellation fires.
 
@@ -209,8 +231,8 @@ who can reach the endpoint may read:
 | `failed` | The codes of checks that failed somewhere. |
 | `unavailable` | The codes of checks that could not run somewhere for a reason that is the host's choice. |
 | `timedOut` | The codes of checks that ran out of time somewhere. |
-| `databases` | How many databases were checked. |
-| `databasesSkipped` | Databases left out: past the 25 a run checks, or held by a sharded tenancy under an id its `TenantIdStyle` would correct (below). `databases + databasesSkipped` is how many the stores hold. |
+| `databases` | How many databases are reported: each one's latest result, from this run or an earlier one in the rotation (*Many databases*, below). |
+| `databasesSkipped` | Databases listed but never yet checked in this process. That is, before the rotation has reached them, or held by a sharded tenancy under an id its `TenantIdStyle` would correct (below). Once a full rotation has run, every listed database is reported and `databasesSkipped` is 0, unless a run timed out or a database was not reached. |
 | `databasesTimedOut` | Databases the run had not finished when its budget ran out: two minutes, or one `HealthInterval` if that is longer. |
 | `storesNotReached` | Stores that would not build, or whose databases could not be listed. |
 | `storesNotEnumerated` | Stores whose tenancy holds no database it can name without building one (below). |
@@ -230,7 +252,7 @@ prints both. One count is worth a thought before choosing one: on a database-per
 `databases + databasesSkipped` is the number of tenant databases this process holds.
 
 **Cost.** Concurrent probes share one run, and once a run has completed every probe is answered at once with the
-latest result. A probe that finds that result older than `MartenStudioOptions.HealthInterval` (a minute by default,
+latest result. A probe that finds that result older than `HealthInterval` (a minute by default,
 counted from when the run finished) starts the next run as it goes, and the probes after it get the new result. A
 result older than two intervals is not served at all: the probe that finds it - the first after a quiet spell -
 waits for a fresh run, as the process's first probe does. So an orchestrator probing every ten seconds costs one
@@ -249,9 +271,15 @@ one physical connection per swept database warm: Npgsql closes an idle pooled co
 server that is up to 25 server connections held by the export alone, one per checked database - count them against
 `max_connections` (C03 does, since it counts every session on the server).
 
-**Many databases.** A run checks at most 25 databases, in the order the studio lists them: stores in the picker's
-order, then each store's databases in Marten's. The rest are counted under `databasesSkipped` and do not change the
-status. Enumerating a dynamic tenancy is not a read - it applies, seeds, queries or creates (AGENTS.md D27) - so the
+**Many databases.** A run checks at most 25 databases, in rotation. Every single-database source is checked on every
+run, first; the rest of the 25 continue each multi-database source - a database-per-tenant store, a host's database
+source - from where the last run stopped, and a database source is asked only for the databases the run checks. A
+database a page swept within the interval is not swept again: its sweep is the one reported. Each database's latest
+result is reported for one full rotation and one run more, counted in runs rather than time, so a finding in the last
+database of the rotation stays reported until a sweep clears it, and does not flap however long a run takes. A host
+with two hundred tenant databases therefore has every one reported within eight runs, and the databases no run has
+reached yet are counted under `databasesSkipped`, which does not change the status. A database no longer listed is
+forgotten. Enumerating a dynamic tenancy is not a read - it applies, seeds, queries or creates (AGENTS.md D27) - so the
 export's own listing never enumerates one. It checks the databases the tenancy already holds, read from memory:
 
 - A single database, or a static multi-tenancy (`MultiTenantedDatabases`), is listed from its configuration.
