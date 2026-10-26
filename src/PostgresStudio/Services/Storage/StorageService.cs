@@ -13,7 +13,7 @@ namespace PostgresStudio.Services.Storage;
 /// <param name="Schema">The schema, or <see langword="null" /> when the table sits in a schema the visitor may not see (D27).</param>
 /// <param name="Name">The table, or <see langword="null" /> with <paramref name="Schema" />: a withheld table is never half-named.</param>
 /// <param name="Link">The database browser's page for it, which measures it exactly; <see langword="null" /> when withheld.</param>
-/// <param name="Ownership">Whose design it is (issue #8 G1).</param>
+/// <param name="Ownership">Whose design it is (issue #8 G1); <see langword="null" /> when withheld, which a library's name would give away.</param>
 /// <param name="Owner">The library that owns it, for a library's table; <see langword="null" /> otherwise and when withheld.</param>
 /// <param name="TotalBytes">Heap, indexes and TOAST, from <c>relpages</c>.</param>
 /// <param name="HeapBytes">The heap.</param>
@@ -28,7 +28,7 @@ internal sealed record StorageTableView(
     string? Schema,
     string? Name,
     string? Link,
-    StudioTableOwnership Ownership,
+    StudioTableOwnership? Ownership,
     string? Owner,
     long TotalBytes,
     long HeapBytes,
@@ -74,8 +74,11 @@ internal sealed record StorageView
     /// <summary>What the growth tiles say while there is no growth to show - "needs a day of statistics: 5 h so far".</summary>
     public string? GrowthPending { get; init; }
 
-    /// <summary>The statistics window the growth is measured over.</summary>
+    /// <summary>The statistics window the growth is measured over, or <see langword="null" /> when it could not be read.</summary>
     public StatisticsWindow? Window { get; init; }
+
+    /// <summary>Why <see cref="Window" /> is missing, or <see langword="null" />.</summary>
+    public string? WindowNotRead { get; init; }
 
     /// <summary>How many tables the source judges.</summary>
     public int TableCount { get; init; }
@@ -228,7 +231,7 @@ internal sealed class StorageService : IStorageService
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(browserGate);
 
-        StatisticsWindow window = read.Window;
+        StatisticsWindow? window = read.Window;
         DatabaseGate? gate = null;
         bool gateRead = false;
         int withheld = 0;
@@ -266,7 +269,7 @@ internal sealed class StorageService : IStorageService
                 named ? table.Table.Schema : null,
                 named ? table.Table.Table : null,
                 named ? DatabaseLinks.ToObject(settings, descriptor, scope, table.Table.Schema, table.Table.Table) : null,
-                table.Table.Ownership,
+                named ? table.Table.Ownership : null,
                 named ? table.Table.Library : null,
                 table.TotalBytes,
                 table.Row.HeapBytes,
@@ -276,7 +279,7 @@ internal sealed class StorageService : IStorageService
                 share > 0 ? (double) table.TotalBytes / share : null,
                 table.HotUpdateRatio,
                 table.NewPageShare,
-                table.GrowthBytesPerDay(window)));
+                window is null ? null : table.GrowthBytesPerDay(window)));
         }
 
         string? withheldReason = withheld == 0 ? null : WithheldReason(withheld, gate is not null);
@@ -288,8 +291,13 @@ internal sealed class StorageService : IStorageService
             DatabaseBytesNotRead = read.DatabaseBytesNotRead,
             EstimatedDatabaseBytes = read.EstimatedDatabaseBytes,
             GrowthBytesPerDay = read.GrowthBytesPerDay,
-            GrowthPending = read.GrowthBytesPerDay is null ? GrowthPendingText(window) : null,
+            GrowthPending = read.GrowthBytesPerDay is not null
+                ? null
+                : window is null
+                    ? "not available: " + (read.WindowNotRead ?? "the statistics window was not read")
+                    : GrowthPendingText(window),
             Window = window,
+            WindowNotRead = read.WindowNotRead,
             TableCount = read.TableCount,
             Coverage = read.Coverage,
             TablesNotRead = read.TablesNotRead,

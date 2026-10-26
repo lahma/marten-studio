@@ -36,6 +36,9 @@ internal sealed record DatabaseCounterFacts(
     /// be read, which leaves the hour's rules as they are.
     /// </summary>
     public StatisticsReading? Statistics { get; init; }
+
+    /// <summary>Why <see cref="Statistics" /> is missing - the studio's words and a SQLSTATE - or <see langword="null" />.</summary>
+    public string? StatisticsNotRead { get; init; }
 }
 
 /// <summary>C08: deadlocks, a high share of rollbacks, and sorts spilling to disk, over the advisor's history.</summary>
@@ -114,6 +117,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
 
         // The window's signals, shared with C11 and read once for the sweep.
         StatisticsReading? statistics = null;
+        string? notRead = null;
 
         try
         {
@@ -121,9 +125,9 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // A failure there costs only the rates per day: the hour's rules stand on this check's own read, and the window's
-            // failure is C11's row to show, with its reason.
-            statistics = null;
+            // A failure there costs only the rates per day, which the status row then says were not checked: the hour's rules
+            // stand on this check's own read, and C11's row shows the window's failure with its reason.
+            notRead = StatisticsWindow.NotRead(exception);
         }
 
         // Read after the statement, so its own rollback is counted on both samples alike.
@@ -131,6 +135,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             context.Now, commits, rollbacks, deadlocks, tempFiles, tempBytes, reset, StudioDatabaseTime.Shared.RollbacksEver(meterKey))
         {
             Statistics = statistics,
+            StatisticsNotRead = notRead,
         };
     }
 
@@ -177,7 +182,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 ? new HealthVerdict(findings)
                 : HealthVerdict.Quiet(
                     "Watching: deadlocks, rollbacks and temp files are judged as rates, which need two checks one HealthInterval apart "
-                    + "while a page is open. Counted " + since + "." + PerDayNote(window, perDay));
+                    + "while a page is open. Counted " + since + "." + PerDayNote(window, perDay, facts.StatisticsNotRead));
         }
 
         HealthSample first = run[0];
@@ -286,11 +291,13 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             return HealthVerdict.Quiet(
                 "No deadlock, no temporary file and " + SessionText.Number(ownRollbacks) + " of " + SessionText.Number(transactions)
                 + " transactions rolled back in the last " + SessionText.Duration(span) + " (the studio's own subtracted)."
-                + PerDayNote(window, perDay));
+                + PerDayNote(window, perDay, facts.StatisticsNotRead));
         }
 
         // Deadlocks, rollbacks, temp files: the order the page has always drawn them in.
-        return new HealthVerdict([.. findings.OrderBy(static x => Array.IndexOf(SubjectOrder, x.Subject))]);
+        return new HealthVerdict(
+            [.. findings.OrderBy(static x => Array.IndexOf(SubjectOrder, x.Subject))],
+            facts.StatisticsNotRead is { } notRead ? NotChecked(notRead) : null);
     }
 
     /// <summary>The order C08's findings are listed in, whichever rule found them.</summary>
@@ -334,11 +341,11 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
     }
 
     /// <summary>What the window adds to a note: the rates per day, or how long it has to go.</summary>
-    private static string PerDayNote(StatisticsWindow? window, PerDay? perDay)
+    private static string PerDayNote(StatisticsWindow? window, PerDay? perDay, string? notRead)
     {
         if (window is null)
         {
-            return string.Empty;
+            return notRead is null ? string.Empty : " " + NotChecked(notRead);
         }
 
         if (perDay is not { } day)
@@ -349,6 +356,9 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         return " Per day " + day.Window.SinceText + ": " + Rate(day.Deadlocks) + " deadlocks and " + Bytes((long) day.TempBytes)
             + " of temporary files.";
     }
+
+    /// <summary>What the status row says of the rates per day when the window could not be read.</summary>
+    private static string NotChecked(string notRead) => "The rates per day were not checked: " + notRead + ".";
 
     /// <summary>A rate per day: two decimals below ten, grouped and whole above.</summary>
     private static string Rate(double perDay) => perDay.ToString(perDay < 10 ? "0.##" : "N0", CultureInfo.InvariantCulture);

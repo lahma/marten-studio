@@ -96,12 +96,18 @@ internal sealed record StorageFacts
     /// <summary>What a table's share is a share of: the measured size, or the estimate when it could not be measured.</summary>
     public long ShareBase => DatabaseBytes ?? EstimatedDatabaseBytes;
 
-    /// <summary>The statistics window the growth figures are measured over.</summary>
-    public required StatisticsWindow Window { get; init; }
+    /// <summary>
+    /// The statistics window the growth figures are measured over, or <see langword="null" /> when it could not be read - the
+    /// sizes and the tables are still read, and <see cref="WindowNotRead" /> says why there is no growth.
+    /// </summary>
+    public StatisticsWindow? Window { get; init; }
+
+    /// <summary>Why <see cref="Window" /> is missing, in the studio's words and a SQLSTATE, or <see langword="null" />.</summary>
+    public string? WindowNotRead { get; init; }
 
     /// <summary>
     /// The database's growth a day: the judged tables' <see cref="StorageTableFacts.GrowthBytesPerDay" /> summed (issue #8 G3) -
-    /// <see langword="null" /> until the window has counted for a day, and while it looks reset.
+    /// <see langword="null" /> until the window has counted for a day, while it looks reset, and without a window.
     /// </summary>
     public double? GrowthBytesPerDay { get; init; }
 
@@ -145,6 +151,29 @@ internal sealed record StorageFacts
         IReadOnlyList<StorageTableRow> rows)
     {
         ArgumentNullException.ThrowIfNull(window);
+        return Build(storeKey, databaseId, window.MeasuredAt, window, database, set, rows);
+    }
+
+    /// <summary>
+    /// <see cref="Build(string, string, StatisticsWindow, StorageDatabaseRow, IStudioTableSet, IReadOnlyList{StorageTableRow})" />
+    /// with the window optional: without one there is no growth, and every size and table is still there.
+    /// </summary>
+    /// <param name="storeKey">The source's key.</param>
+    /// <param name="databaseId">The database's identity.</param>
+    /// <param name="measuredAt">When the facts were read, by the studio's clock.</param>
+    /// <param name="window">The statistics window, or <see langword="null" /> when it could not be read.</param>
+    /// <param name="database">The database as a whole.</param>
+    /// <param name="set">The judged tables, or <see langword="null" /> when the studio has no table source.</param>
+    /// <param name="rows">What the table statement read.</param>
+    public static StorageFacts Build(
+        string storeKey,
+        string databaseId,
+        DateTimeOffset measuredAt,
+        StatisticsWindow? window,
+        StorageDatabaseRow database,
+        IStudioTableSet? set,
+        IReadOnlyList<StorageTableRow> rows)
+    {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(rows);
 
@@ -163,7 +192,7 @@ internal sealed record StorageFacts
 
         double? growth = null;
 
-        if (window.CoversADay)
+        if (window is { CoversADay: true })
         {
             growth = tables.Select(x => x.GrowthBytesPerDay(window) ?? 0d).Sum();
         }
@@ -172,7 +201,7 @@ internal sealed record StorageFacts
         {
             StoreKey = storeKey,
             DatabaseId = databaseId,
-            MeasuredAt = window.MeasuredAt,
+            MeasuredAt = measuredAt,
             DatabaseBytes = database.DatabaseBytes,
             EstimatedDatabaseBytes = database.EstimatedBytes,
             Window = window,
@@ -301,12 +330,25 @@ internal sealed class StorageFactsReader : IStorageFacts
         await using AsyncServiceScope scope = scopes.CreateAsyncScope();
         await using HealthConnection connection = new(resolved.Target);
 
+        DateTimeOffset now = timeProvider.GetUtcNow();
         HealthSqlRunner sql = new(connection, options, observer);
-        HealthCheckContext context = new(
-            resolved, settings, runtime, scope.ServiceProvider, sql, timeProvider.GetUtcNow(), new HealthSweepMemo(), cancellationToken);
+        HealthCheckContext context = new(resolved, settings, runtime, scope.ServiceProvider, sql, now, new HealthSweepMemo(), cancellationToken);
 
-        StatisticsReading reading = await StatisticsWindow.ReadingAsync(context).ConfigureAwait(false);
-        StatisticsWindow window = StatisticsWindow.Compute(reading, history.Read(resolved.Source.Key, resolved.Target.Identity));
+        // The window is the growth's alone: a window that cannot be read - a platform that refuses a control function, say - costs
+        // the growth figures, never the sizes and the tables. Computed as a read that writes no history (recorded: false), so
+        // a reset seen against a stale sample stops looking like one once the window is a day long.
+        StatisticsWindow? window = null;
+        string? windowNotRead = null;
+
+        try
+        {
+            StatisticsReading reading = await StatisticsWindow.ReadingAsync(context).ConfigureAwait(false);
+            window = StatisticsWindow.Compute(reading, history.Read(resolved.Source.Key, resolved.Target.Identity), recorded: false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            windowNotRead = StatisticsWindow.NotRead(exception);
+        }
 
         IStudioTableSet? set = scope.ServiceProvider.GetService<IHealthTableSource>() is null
             ? null
@@ -328,9 +370,10 @@ internal sealed class StorageFactsReader : IStorageFacts
 
         string? notRead = database[0].DatabaseBytes is null ? await DatabaseSizeNotReadAsync(context).ConfigureAwait(false) : null;
 
-        return StorageFacts.Build(resolved.Source.Key, resolved.Target.Identity, window, database[0], set, rows) with
+        return StorageFacts.Build(resolved.Source.Key, resolved.Target.Identity, now, window, database[0], set, rows) with
         {
             DatabaseBytesNotRead = notRead,
+            WindowNotRead = windowNotRead,
             Statements = [.. sql.Statements],
         };
     }

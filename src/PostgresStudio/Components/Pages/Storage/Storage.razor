@@ -102,6 +102,10 @@
                     {
                         @("From " + window.BasisText + ": the counters began " + window.ReasonText + ".")
                     }
+                    else if (view.WindowNotRead is { Length: > 0 } windowNotRead)
+                    {
+                        @("Not available: " + windowNotRead + ".")
+                    }
                 </dd>
             </div>
             <div class="ms-storage-tile">
@@ -161,7 +165,7 @@
                                             @WithheldNames.Token
                                         }
                                     </td>
-                                    <td>@Owner(row)</td>
+                                    <td>@(row.Withheld ? WithheldNames.Token : Owner(row))</td>
                                     <td class="ms-storage-number">@SchemaFormat.Bytes(row.TotalBytes)</td>
                                     <td class="ms-storage-number">@SchemaFormat.Bytes(row.HeapBytes)</td>
                                     <td class="ms-storage-number">@SchemaFormat.Bytes(row.IndexBytes)</td>
@@ -316,6 +320,7 @@
     /// <summary>Whose design the table is (issue #8 G1), as the API names it: the application's, a library's, or another's.</summary>
     private static string Owner(StorageTableView row) => row.Ownership switch
     {
+        null => "–",
         StudioTableOwnership.Library => row.Owner ?? "a library",
         StudioTableOwnership.Other => "other",
         _ => "application",
