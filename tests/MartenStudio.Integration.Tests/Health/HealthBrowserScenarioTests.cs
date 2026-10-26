@@ -25,7 +25,7 @@ namespace MartenStudio.Integration.Tests.Health;
 [Collection(BrowserSuite.Name)]
 public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
 {
-    private const string SynchronousCommit = ".ms-health-area #finding-s02-synchronous_commit";
+    private const string SynchronousCommit = ".ms-health-area #finding-s02-setting-synchronous_commit";
 
     /// <summary>
     /// The muted list's own summary. A child combinator, because a muted finding that ran SQL - S02 does, where K02 read
@@ -59,7 +59,7 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
                 (await area.Locator("h2.ms-section-title").TextContentAsync())!.Trim().Should().Be(label);
             }
 
-            (await areas.Filter(new LocatorFilterOptions { Has = studio.Page.Locator("#finding-s02-synchronous_commit") }).GetAttributeAsync("aria-label"))
+            (await areas.Filter(new LocatorFilterOptions { Has = studio.Page.Locator("#finding-s02-setting-synchronous_commit") }).GetAttributeAsync("aria-label"))
                 .Should().Be("Server", "S02 is a Server finding");
             (await studio.Page.Locator(".ms-health-checks h2.ms-section-title").TextContentAsync())!.Trim().Should().Be("What was checked");
             (await studio.Page.Locator("#finding-k01").CountAsync()).Should().Be(0, "the sample host runs in Development");
