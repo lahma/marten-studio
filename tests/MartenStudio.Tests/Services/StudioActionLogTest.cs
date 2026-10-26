@@ -232,12 +232,13 @@ public class StudioActionLogTest
         // the statement checks' (H7, 9280-9284): a statement T02 could not plan, and a plan's prepared statement it
         // could not take back, both at Debug. 9290 is the server checks' platform detector (H10, 9290-9294), at Debug.
         // 9320 is DEPS' (9320-9329): a dead-letter rewind Marten refused as an unknown subscription, kept with Marten's
-        // own words, which the page and the audit are not given. 9420 and 9421 are W5-V1's (9420-9429): a bloat measure the
-        // visitor pressed that failed, and one refused for an expected reason, at Debug.
+        // own words, which the page and the audit are not given. 9410 is W5-CAP's (9410-9419): the Storage page's throttled
+        // read failure. 9420 and 9421 are W5-V1's (9420-9429): a bloat measure the visitor pressed that failed, and one
+        // refused for an expected reason, at Debug.
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
             9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
-            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320, 9420, 9421);
+            9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421);
     }
 
     /// <summary>
@@ -259,7 +260,7 @@ public class StudioActionLogTest
 
         Ids(typeof(StudioLog)).Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237,
-            9245, 9246, 9270, 9280, 9281, 9290, 9420, 9421);
+            9245, 9246, 9270, 9280, 9281, 9290, 9410, 9420, 9421);
 
         Ids(typeof(MartenLog)).Should().Equal(
             9206, 9207, 9208, 9209, 9211, 9212, 9215, 9216, 9217, 9218, 9260, 9261, 9262, 9263, 9264, 9320);

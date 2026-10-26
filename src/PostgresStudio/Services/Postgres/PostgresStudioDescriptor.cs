@@ -82,6 +82,9 @@ internal static class PostgresStudioDescriptor
         [
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
             new("Maintenance", "maintenance", "maintenance", Title: "Autovacuum's triggers, running maintenance, the freeze forecast and the horizon"),
+
+            // W5-CAP: the database's size, growth and largest tables, after Maintenance.
+            new("Storage", "storage", "storage", Title: "Database size, growth and the largest tables"),
         ]),
         new("System",
         [

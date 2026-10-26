@@ -8,6 +8,7 @@ using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
 using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Storage;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -170,5 +171,10 @@ internal static class StudioCoreRegistration
         // IRelationshipNodeSource, which the data service takes as optional - a studio with none draws plain tables.
         services.TryAddScoped<RelationshipReads>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
+
+        // W5-CAP: Storage. The facts are the database's - one read per database per HealthInterval, single flight, the same
+        // for every circuit - and what a visitor is shown of them is the circuit's.
+        services.TryAddSingleton<IStorageFacts, StorageFactsReader>();
+        services.TryAddScoped<IStorageService, StorageService>();
     }
 }

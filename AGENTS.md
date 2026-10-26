@@ -1274,11 +1274,19 @@ src/PostgresStudio/Services/Maintenance/  The Maintenance page's facts (the regu
                                          per-visitor view, and the on-demand bloat measure
 src/PostgresStudio/Components/Pages/Maintenance/  The Maintenance page: autovacuum's triggers per table, running
                                          maintenance, the workers, the freeze forecast and the vacuum horizon
-src/PostgresStudio/wwwroot/css/parts/    W5 CSS parts, one per packet: folded into studio.css in D26 order, then
-                                         deleted, by the orchestrator - parts/ never reaches main
 tests/PostgresStudio.Integration.Tests/Maintenance/  Live Postgres on autovacuum servers of their own: T07 against
                                          each table's triggers, T08, T16, T24, S02, the bloat measure, C06's VACUUM
                                          at the head and T14's standby through a slot
+src/PostgresStudio/Services/Storage/      The Storage page's facts (sizes from relpages, growth over the statistics
+                                         window, the largest tables) and its per-visitor view (W5-CAP)
+src/PostgresStudio/Components/Pages/Storage/  The Storage page: the tiles and the largest tables
+tests/PostgresStudio.Tests/Storage/       The statistics window over hand-built histories, the growth arithmetic, the
+                                         Storage builder's D27 fence - no database
+tests/MartenStudio.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
+tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 14-18: the Storage facts, behind a held lock, no DDL,
+                                         and the statistics window across a real crash
+src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
+                                         (W5-index §4); never reaches main
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

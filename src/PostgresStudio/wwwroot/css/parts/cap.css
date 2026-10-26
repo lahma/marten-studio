@@ -1,0 +1,101 @@
+/* ==========================================================================
+   W5-CAP. Storage: the database's size, its growth, and the largest tables
+
+   0.5's capacity packet (issue #8 G3). Appended to studio.css by the orchestrator in D26 order with the
+   other W5b parts; every selector is the page's own (ms-storage-), so nothing here re-declares an earlier
+   rule. Notes use the secondary text colour, not the muted one: UX-6 measured the muted grey below 4.5:1
+   on the surface.
+   ========================================================================== */
+
+.ms-storage-lead,
+.ms-storage-estimates {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-storage-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-storage-tile {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-storage-tile dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-storage-tile dd {
+    margin: 0;
+}
+
+.ms-storage-tile-value {
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-storage-tile-note {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-storage-heading {
+    margin: var(--ms-space-lg) 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-storage-withheld {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-storage-number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-storage-withheld-row td:first-child {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-storage-share {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    min-width: 12ch;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The share as a bar: its width is the table's share of the database, set on the element as a custom property. */
+.ms-storage-bar {
+    flex: 0 0 6rem;
+    height: 0.5rem;
+    border-radius: var(--ms-radius-full);
+    background: linear-gradient(
+        to right,
+        var(--ms-color-primary) 0 var(--ms-storage-share, 0%),
+        var(--ms-color-surface-alt) var(--ms-storage-share, 0%) 100%);
+    border: 1px solid var(--ms-color-border);
+}
+
+.ms-storage-measured {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+@media (max-width: 640px) {
+    .ms-storage-tiles {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

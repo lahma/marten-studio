@@ -143,6 +143,10 @@ public class StudioRegistrationTests
         (typeof(ILinqQueryService), ServiceLifetime.Scoped, How.Type, typeof(LinqQueryService)),
         (typeof(RelationshipReads), ServiceLifetime.Scoped, How.Type, typeof(RelationshipReads)),
         (typeof(IRelationshipDataService), ServiceLifetime.Scoped, How.Type, typeof(RelationshipDataService)),
+
+        // W5-CAP: Storage - added in 0.5, not moved; the facts are the database's, the view the circuit's.
+        (typeof(PostgresStudio.Services.Storage.IStorageFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Storage.StorageFactsReader)),
+        (typeof(PostgresStudio.Services.Storage.IStorageService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Storage.StorageService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

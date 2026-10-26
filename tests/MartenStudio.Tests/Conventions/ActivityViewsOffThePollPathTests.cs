@@ -260,8 +260,9 @@ public class ActivityViewsOffThePollPathTests
 
         HealthCheckDescriptor[] checks = [.. Health.StudioHealthChecks.Registry.All.Where(static x => x.Info.Area == HealthArea.Connections)];
 
-        // C10 (H10) reads no activity view - only pg_backend_pid(), twice - and runs in the same regular sweep.
-        checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10");
+        // C10 (H10) reads no activity view - only pg_backend_pid(), twice - and runs in the same regular sweep; nor does C11
+        // (W5-CAP), which reads pg_stat_database and the shared statistics views through the statistics window.
+        checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11");
         checks.Should().OnlyContain(x => regular.Contains(x.Info.Tier), "a regular sweep is cached for HealthInterval, never RefreshInterval");
     }
 

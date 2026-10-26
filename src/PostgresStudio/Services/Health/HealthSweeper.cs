@@ -364,6 +364,24 @@ internal sealed class HealthSweeper
         // so that nothing a gated tier reads becomes history an ungated evaluator can see.
         string ring = HealthHistory.RingOf(databaseId, kind);
 
+        // The statistics window (W5-CAP), when a gatherer read its signals: computed once, against the history before this
+        // sweep's sample, and written into that sample - at the database-wide gate, the window's own - for the next sweep to
+        // compare with. No check writes a stats. series, so these never meet a check's.
+        StatisticsWindow? statistics = null;
+
+        if (memo.TryGetCompleted<StatisticsReading>(StatisticsWindow.ReadingKey, out StatisticsReading? reading))
+        {
+            statistics = StatisticsWindow.Compute(reading, history.Read(storeKey, ring));
+
+            foreach (HealthSamplePart part in statistics.Sample(reading))
+            {
+                if (sample.TryAdd(part.Series, part.Value))
+                {
+                    sampleGates[part.Series] = part.Gate;
+                }
+            }
+        }
+
         if (kind is HealthSweepKind.Regular or HealthSweepKind.Statements)
         {
             history.Append(storeKey, ring, new HealthSample(now, sample) { Gates = sampleGates }, interval / 2, remembered);
@@ -383,6 +401,9 @@ internal sealed class HealthSweeper
                     TableRemedies = tableRemedies,
                     PlanAdvisor = planAdvisor,
                     Text = settings.Text,
+
+                    // Database-wide numbers, so only for an evaluator at or above that gate - as its series are.
+                    Statistics = gate >= HealthGate.Database ? statistics : null,
                 };
                 evaluations[gate] = evaluation;
             }

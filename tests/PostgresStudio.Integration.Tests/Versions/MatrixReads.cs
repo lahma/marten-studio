@@ -4,7 +4,10 @@ using Npgsql;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Storage;
 
 namespace PostgresStudio.Integration.Tests.Versions;
 
@@ -91,6 +94,29 @@ internal static class MatrixReads
         new("sessions: snapshot", true, static (x, t) => x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t)),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
+
+        // ---- W5-CAP: the Storage page's facts, and the statistics window's one statement ---------------------------------
+        new("storage: facts", true, static async (x, t) =>
+        {
+            StorageFacts facts = await x.Services.GetRequiredService<IStorageFacts>().ReadAsync(x.Resolved, t);
+            Found(facts.EstimatedDatabaseBytes > 0 ? facts : null, "the database's estimated size");
+
+            // Only the owner has USAGE on store: a role without it is admitted no table there, as the browser admits none.
+            if (x.Connection.UserName == "app")
+            {
+                Found(facts.LargestTables.FirstOrDefault(static y => y.Table.Table == "child"), "store.child among the largest tables");
+            }
+        }),
+        new("stats: window", true, static async (x, t) =>
+        {
+            bool checkpointer = PostgresFeatures.Has(PostgresFeature.PgStatCheckpointer, x.Connection.PostgreSqlVersion.Major * 10_000);
+            var query = StatisticsWindowQueries.Read(checkpointer);
+
+            await using NpgsqlCommand command = new(query.Sql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+            Found(await reader.ReadAsync(t) ? StatisticsWindow.Map(reader, DateTimeOffset.UtcNow) : null, "this database's pg_stat_database row");
+        }),
     ];
 
     /// <summary>Fails a by-name read that found nothing: the fixture made the object, so "nothing" is a read that did not read.</summary>

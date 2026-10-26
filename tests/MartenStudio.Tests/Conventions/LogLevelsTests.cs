@@ -259,6 +259,12 @@ public class LogLevelsTests
             "The same line in Postgres Studio's words: a page's scope-change handler threw, and it can show another scope's data."),
         ["src/MartenStudio/Services/Projections/StudioOperationTracker.cs : Marten Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
             "A rebuild the visitor started failed after tearing the projection's tables down; they stay empty until rebuilt."),
+
+        // ---- W5-CAP ---------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Storage.cs : 9410 StorageReadFailed"] = (Verdict.Throttled,
+            "A read of a database's storage failed by connection, an unexpected SQLSTATE or a table source that threw; privilege and timeouts are Debug, and the Storage page re-reads every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Storage.cs : 9410 PostgresStudioStorageReadFailed"] = (Verdict.Throttled,
+            "9410 in Postgres Studio's words: a storage read failed by connection or an unexpected SQLSTATE, re-read every HealthInterval."),
     };
 
     [Fact]
