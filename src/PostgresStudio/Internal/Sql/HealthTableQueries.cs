@@ -414,6 +414,56 @@ internal sealed record HealthIndexRow
     /// <summary><c>indnullsnotdistinct</c> (PostgreSQL 15+): a unique index that treats nulls as equal.</summary>
     public bool NullsNotDistinct { get; init; }
 
+    // ---- W5-B1: what the foreign-key, bloat and usage judgements read - catalog values, present for a locked table too ----
+
+    /// <summary>
+    /// <c>indkey</c>'s key columns, as attribute numbers of the table, in index order - zero for an expression - and never
+    /// an <c>INCLUDE</c> column: what T15 matches a foreign key's columns against (<c>ForeignKeyCoverage</c>). Read from the
+    /// catalog, never deparsed, so a locked table's indexes carry it too.
+    /// </summary>
+    public IReadOnlyList<short> KeyAttributes { get; init; } = [];
+
+    /// <summary>Whether it has a predicate (<c>indpred</c>): a partial index covers only the rows its <c>WHERE</c> admits.</summary>
+    public bool IsPartial { get; init; }
+
+    /// <summary>
+    /// Each column the index stores - its key columns and then its <c>INCLUDE</c> columns, attributes 1 to <c>indnatts</c>,
+    /// since a leaf entry carries both (W5-B1 review F6) - as its <c>attlen</c> on the index relation: its width in bytes, or
+    /// <c>-1</c> (and <c>-2</c>) for a variable-width type.
+    /// </summary>
+    public IReadOnlyList<short> KeyWidths { get; init; } = [];
+
+    /// <summary>Each column the index stores, <c>INCLUDE</c> columns too, as <c>format_type</c> prints its type.</summary>
+    public IReadOnlyList<string> KeyTypes { get; init; } = [];
+
+    /// <summary>
+    /// Each column the index stores, <c>INCLUDE</c> columns too, as its <c>pg_stats.avg_width</c> - the table column's, for a
+    /// plain column the reading role may read the statistics of - or <c>-1</c> where there is none: an expression, a column
+    /// never analysed, or a role without column <c>SELECT</c> (B0 §8c).
+    /// </summary>
+    public IReadOnlyList<int> KeyAverageWidths { get; init; } = [];
+
+    /// <summary>
+    /// The index's own <c>reltuples</c> - its entries, as of the last <c>VACUUM</c> or <c>ANALYZE</c> - summed over its
+    /// partitions' indexes; <see langword="null" /> while any is unknown (<c>-1</c>, never vacuumed or analysed).
+    /// </summary>
+    public double? EstimatedTuples { get; init; }
+
+    /// <summary>
+    /// <c>last_idx_scan</c> (PostgreSQL 16+): when it was last scanned, at the statistics flush after the scan - the latest of
+    /// its partitions' indexes' - or <see langword="null" /> for never, and before 16.
+    /// </summary>
+    public DateTimeOffset? LastScan { get; init; }
+
+    /// <summary>
+    /// <c>pg_stat_all_indexes.stats_reset</c> (PostgreSQL 19+): since when this one index's counters count, or
+    /// <see langword="null" /> - never reset on its own, or before 19.
+    /// </summary>
+    public DateTimeOffset? CountersReset { get; init; }
+
+    /// <summary><c>reloptions</c> of the index: its storage parameters (<c>fillfactor</c>, <c>deduplicate_items</c>), as <c>name=value</c>.</summary>
+    public IReadOnlyList<string> IndexOptions { get; init; } = [];
+
     /// <summary>The key the findings name this index by: schema, table, index.</summary>
     public string Key => Schema + "." + Table + "." + Name;
 
@@ -900,6 +950,14 @@ internal static class HealthTableQueries
     /// (<c>HealthTables.ReadIndexesAsync</c>). A lock taken between the snapshot and a call still waits, bounded by
     /// <c>lock_timeout</c>; the reader then asks once more, when the snapshot sees it.
     /// </para>
+    /// <para>
+    /// <b>What W5-B1 reads beside them, all from the catalog and the statistics views, none of it deparsed</b> - so a locked
+    /// table's indexes carry it too: the key columns as attribute numbers (<c>indkey</c>, for T15's foreign-key coverage),
+    /// whether the index is partial, each key column's width and type from the index relation's own <c>pg_attribute</c>
+    /// rows and its <c>pg_stats.avg_width</c> where the reading role may read it (for T25's size estimate), the index's own
+    /// <c>reltuples</c>, <c>last_idx_scan</c> (16+) and <c>stats_reset</c> (19+) read by name through <c>to_jsonb</c> - each
+    /// rolled up over a partitioned index's partitions - and its storage parameters.
+    /// </para>
     /// </remarks>
     internal const string IndexesSql =
         """
@@ -925,7 +983,10 @@ internal static class HealthTableQueries
                    x.indisunique, x.indisprimary, x.indisvalid, x.indnatts, x.indnkeyatts,
                    x.indkey, x.indclass, x.indcollation, x.indoption,
                    x.indisexclusion, x.indimmediate,
-                   coalesce((pg_catalog.to_jsonb(x) ->> 'indnullsnotdistinct')::boolean, false) as nulls_not_distinct
+                   coalesce((pg_catalog.to_jsonb(x) ->> 'indnullsnotdistinct')::boolean, false) as nulls_not_distinct,
+                   x.indpred is not null as partial,
+                   ic.reltuples,
+                   ic.reloptions as index_options
             from listed l
             join pg_catalog.pg_index x on x.indrelid = l.oid
             join pg_catalog.pg_class ic on ic.oid = x.indexrelid
@@ -957,7 +1018,11 @@ internal static class HealthTableQueries
         rolled as (
             select t.root,
                    pg_catalog.sum(d.relpages::bigint) as pages,
-                   pg_catalog.sum(s.idx_scan) as scans
+                   pg_catalog.sum(s.idx_scan) as scans,
+                   case when pg_catalog.bool_or(d.reltuples < 0) filter (where d.relkind = 'i') then null
+                        else pg_catalog.sum(d.reltuples::float8) filter (where d.relkind = 'i') end as tuples,
+                   pg_catalog.max((pg_catalog.to_jsonb(s) ->> 'last_idx_scan')::timestamptz) as last_scan,
+                   pg_catalog.max((pg_catalog.to_jsonb(s) ->> 'stats_reset')::timestamptz) as counters_reset
             from tree t
             join pg_catalog.pg_class d on d.oid = t.relid
             left join pg_catalog.pg_stat_user_indexes s on s.indexrelid = d.oid
@@ -1023,7 +1088,32 @@ internal static class HealthTableQueries
                 from builds b
                 where b.relid in (select t.relid from table_tree t where t.root = i.table_oid)
                 limit 1),
-               i.table_oid in (select lk.oid from locked lk)
+               i.table_oid in (select lk.oid from locked lk),
+               (pg_catalog.string_to_array(i.indkey::text, ' ')::pg_catalog.int2[])[1:i.indnkeyatts],
+               i.partial,
+               array(select a.attlen
+                     from pg_catalog.pg_attribute a
+                     where a.attrelid = i.oid and a.attnum between 1 and i.indnatts
+                     order by a.attnum),
+               array(select pg_catalog.format_type(a.atttypid, a.atttypmod)
+                     from pg_catalog.pg_attribute a
+                     where a.attrelid = i.oid and a.attnum between 1 and i.indnatts
+                     order by a.attnum),
+               array(select coalesce((select st.avg_width
+                                      from pg_catalog.pg_attribute ta
+                                      join pg_catalog.pg_stats st
+                                        on st.schemaname = i.nspname and st.tablename = i.table_name
+                                       and st.attname = ta.attname and not st.inherited
+                                      where ta.attrelid = i.table_oid and ta.attnum = k.attnum and k.attnum > 0), -1)
+                     from pg_catalog.unnest((pg_catalog.string_to_array(i.indkey::text, ' ')::pg_catalog.int2[])[1:i.indnatts])
+                          with ordinality as k(attnum, ord)
+                     order by k.ord),
+               case when i.relkind = 'I' then r.tuples
+                    when i.reltuples < 0 then null
+                    else i.reltuples::float8 end,
+               case when i.relkind = 'I' then r.last_scan else (pg_catalog.to_jsonb(s) ->> 'last_idx_scan')::timestamptz end,
+               case when i.relkind = 'I' then r.counters_reset else (pg_catalog.to_jsonb(s) ->> 'stats_reset')::timestamptz end,
+               coalesce(i.index_options, '{}'::text[])
         from indexes i
         left join rolled r on r.root = i.oid
         left join pg_catalog.pg_stat_user_indexes s on s.indexrelid = i.oid
@@ -1581,6 +1671,15 @@ internal static class HealthTableQueries
             NullsNotDistinct = reader.GetBoolean(21),
             TableBuildPhase = reader.IsDBNull(22) ? null : reader.GetString(22),
             TableLocked = !reader.IsDBNull(23) && reader.GetBoolean(23),
+            KeyAttributes = reader.IsDBNull(24) ? [] : reader.GetFieldValue<short[]>(24),
+            IsPartial = !reader.IsDBNull(25) && reader.GetBoolean(25),
+            KeyWidths = reader.IsDBNull(26) ? [] : reader.GetFieldValue<short[]>(26),
+            KeyTypes = reader.IsDBNull(27) ? [] : reader.GetFieldValue<string[]>(27),
+            KeyAverageWidths = reader.IsDBNull(28) ? [] : reader.GetFieldValue<int[]>(28),
+            EstimatedTuples = reader.IsDBNull(29) ? null : reader.GetDouble(29),
+            LastScan = NullableTimestamp(reader, 30),
+            CountersReset = NullableTimestamp(reader, 31),
+            IndexOptions = reader.IsDBNull(32) ? [] : reader.GetFieldValue<string[]>(32),
         };
     }
 

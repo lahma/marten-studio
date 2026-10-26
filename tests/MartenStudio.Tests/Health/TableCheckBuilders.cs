@@ -149,6 +149,25 @@ internal static class TableCheckBuilders
     public static HealthEvaluation Evaluation(HealthHistoryView? history = null, MartenRuntime? runtime = null) =>
         HealthEvaluation.At(Now, runtime, history);
 
+    /// <summary>
+    /// A statistics window of <paramref name="length" /> ending <see cref="Now" /> - what T01, T05 and T06's usage guards ask
+    /// before any verdict (W5-B1, issue #8 G4).
+    /// </summary>
+    public static StatisticsWindow StatisticsOver(TimeSpan length, bool looksReset = false) => new()
+    {
+        MeasuredAt = Now,
+        Since = Now - length,
+        Basis = StatisticsBasis.ServerReset,
+        Reason = looksReset ? StatisticsResetReason.Crash : StatisticsResetReason.None,
+        LooksReset = looksReset,
+        Signal = looksReset ? "the server restarted without its statistics" : null,
+        SharedView = "pg_stat_checkpointer",
+    };
+
+    /// <summary>An evaluation over a 30-day statistics window, which every usage guard passes.</summary>
+    public static HealthEvaluation UsageEvaluation(HealthHistoryView? history = null, MartenRuntime? runtime = null) =>
+        Evaluation(history, runtime) with { Statistics = StatisticsOver(TimeSpan.FromDays(30)) };
+
     /// <summary>A host on the Marten floor, where FillFactor and StorageParameter do not exist.</summary>
     public static MartenRuntime Floor { get; } = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
     {

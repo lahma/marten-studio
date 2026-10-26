@@ -123,8 +123,8 @@ internal sealed record HealthIndexRead(IReadOnlyList<IndexFacts> Indexes, IReadO
     /// <summary>
     /// The indexes of the locked tables, read but not deparsed: <see cref="HealthIndexRow.Definition" /> and
     /// <see cref="HealthIndexRow.Columns" /> are empty, and everything the catalog holds without opening the table - validity,
-    /// scans, size, origin - is there. Never judged; a check whose history must not skip a sweep (T05's "unscanned since")
-    /// samples them.
+    /// scans, size, origin - is there. Never judged; a check whose history must not skip a sweep samples them (0.4's T05
+    /// did, until W5-B1 folded its "unscanned since" clock into the usage guard).
     /// </summary>
     public IReadOnlyList<IndexFacts> LockedIndexes { get; init; } = [];
 

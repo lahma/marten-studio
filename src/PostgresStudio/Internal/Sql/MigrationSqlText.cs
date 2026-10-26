@@ -118,6 +118,145 @@ internal static partial class MigrationSqlText
             ? "ALTER TABLE " + qualified + " RESET (toast." + parameter + ");"
             : null;
 
+    // ---- W5-B1 --------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>CREATE INDEX CONCURRENTLY ON schema.table (a, b);</c> - an index whose leading columns are a foreign key's (T15) - or
+    /// <see langword="null" /> when a name cannot be printed honestly. Postgres names it.
+    /// </summary>
+    /// <param name="schema">The referencing table's schema.</param>
+    /// <param name="table">The referencing table.</param>
+    /// <param name="columns">The foreign key's columns, in key order.</param>
+    public static string? CreateIndexConcurrently(string schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        return columns.Count > 0 && columns.All(IsQuotable) && Qualified(schema, table) is { } qualified
+            ? "CREATE INDEX CONCURRENTLY ON " + qualified + " (" + string.Join(", ", columns.Select(SqlIdentifier.Quote)) + ");"
+            : null;
+    }
+
+    /// <summary>
+    /// <c>CREATE INDEX ON schema.table (a, b);</c> - for a partitioned table, where <c>CONCURRENTLY</c> is not allowed (T15) -
+    /// or <see langword="null" />.
+    /// </summary>
+    /// <param name="schema">The referencing table's schema.</param>
+    /// <param name="table">The referencing table.</param>
+    /// <param name="columns">The foreign key's columns, in key order.</param>
+    public static string? CreateIndexOnPartitionedTable(string schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        return columns.Count > 0 && columns.All(IsQuotable) && Qualified(schema, table) is { } qualified
+            ? "CREATE INDEX ON " + qualified + " (" + string.Join(", ", columns.Select(SqlIdentifier.Quote)) + ");"
+            : null;
+    }
+
+    /// <summary><c>ALTER TABLE schema.table ALTER COLUMN column TYPE bigint;</c> (T26), or <see langword="null" />.</summary>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="column">The integer column.</param>
+    public static string? WidenColumnToBigint(string schema, string table, string column) =>
+        IsQuotable(column) && Qualified(schema, table) is { } qualified
+            ? "ALTER TABLE " + qualified + " ALTER COLUMN " + SqlIdentifier.Quote(column) + " TYPE bigint;"
+            : null;
+
+    /// <summary><c>ALTER SEQUENCE schema.sequence AS bigint;</c> (T26), or <see langword="null" />.</summary>
+    /// <param name="schema">The sequence's schema.</param>
+    /// <param name="sequence">The sequence.</param>
+    public static string? WidenSequenceToBigint(string schema, string sequence) =>
+        Qualified(schema, sequence) is { } qualified ? "ALTER SEQUENCE " + qualified + " AS bigint;" : null;
+
+    /// <summary>
+    /// <c>ALTER SEQUENCE schema.sequence [AS bigint] NO MAXVALUE;</c> (T26), or <see langword="null" />: an explicit
+    /// <c>MAXVALUE</c> survives <c>AS bigint</c>, which raises only a maximum that was the old type's own (W5-B1 review F8).
+    /// </summary>
+    /// <param name="schema">The sequence's schema.</param>
+    /// <param name="sequence">The sequence.</param>
+    /// <param name="widen">Whether to widen it to <c>bigint</c> in the same statement.</param>
+    public static string? SequenceNoMaxValue(string schema, string sequence, bool widen) =>
+        Qualified(schema, sequence) is { } qualified ? "ALTER SEQUENCE " + qualified + (widen ? " AS bigint" : string.Empty) + " NO MAXVALUE;" : null;
+
+    /// <summary>
+    /// <c>ALTER TABLE schema.table ALTER COLUMN column SET NO MAXVALUE;</c> (T26): an identity column's sequence, through its
+    /// column, back to its type's maximum - or <see langword="null" />.
+    /// </summary>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="column">The identity column.</param>
+    public static string? IdentityNoMaxValue(string schema, string table, string column) =>
+        IsQuotable(column) && Qualified(schema, table) is { } qualified
+            ? "ALTER TABLE " + qualified + " ALTER COLUMN " + SqlIdentifier.Quote(column) + " SET NO MAXVALUE;"
+            : null;
+
+    /// <summary>
+    /// <c>CREATE TABLE schema.partition PARTITION OF schema.table FOR VALUES FROM (from) TO (to);</c> (T20), the bounds
+    /// literals this builder formats (<see cref="RangeBoundLiteral" />) - or <see langword="null" /> when a name cannot be
+    /// printed honestly, is longer than Postgres keeps (63 bytes, which it would cut without a word), or a bound cannot be
+    /// written for the key's type.
+    /// </summary>
+    /// <param name="schema">The partitioned table's schema, which the new partition goes in.</param>
+    /// <param name="table">The partitioned table.</param>
+    /// <param name="partition">The new partition's name.</param>
+    /// <param name="keyType">The partition key's type, as <c>format_type</c> spells it.</param>
+    /// <param name="from">The lower bound: Unix seconds for a time key, the number for an integer one.</param>
+    /// <param name="to">The upper bound, likewise.</param>
+    public static string? CreateRangePartition(string schema, string table, string partition, string keyType, double from, double to)
+    {
+        if (!IsQuotable(partition)
+            || System.Text.Encoding.UTF8.GetByteCount(partition) > 63
+            || Qualified(schema, table) is not { } parent
+            || Qualified(schema, partition) is not { } child
+            || RangeBoundLiteral(keyType, from) is not { } lower
+            || RangeBoundLiteral(keyType, to) is not { } upper)
+        {
+            return null;
+        }
+
+        return "CREATE TABLE " + child + " PARTITION OF " + parent + " FOR VALUES FROM (" + lower + ") TO (" + upper + ");";
+    }
+
+    /// <summary>
+    /// A range bound as SQL spells it for <paramref name="keyType" />: <c>'2026-12-01'</c> for a <c>date</c>,
+    /// <c>'2026-12-01 00:00:00'</c> for a <c>timestamp</c> (the value read as UTC), <c>'2026-12-01 00:00:00+00'</c> for a
+    /// <c>timestamptz</c>, the whole number for an integer type - or <see langword="null" /> for any other type or a value
+    /// that is not finite or not whole.
+    /// </summary>
+    /// <param name="keyType">The key's type, as <c>format_type</c> spells it.</param>
+    /// <param name="value">Unix seconds for a time key, the number for an integer one.</param>
+    public static string? RangeBoundLiteral(string keyType, double value)
+    {
+        if (!double.IsFinite(value))
+        {
+            return null;
+        }
+
+        switch (keyType)
+        {
+            case "smallint" or "integer" or "bigint":
+                return Math.Floor(value) == value && value is >= long.MinValue and <= long.MaxValue
+                    ? ((long) value).ToString(CultureInfo.InvariantCulture)
+                    : null;
+
+            case "date" or "timestamp without time zone" or "timestamp with time zone":
+                if (value < -62_135_596_800d || value > 253_402_300_799d)
+                {
+                    return null;
+                }
+
+                DateTime at = DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(value * 1000d)).UtcDateTime;
+                return keyType switch
+                {
+                    "date" => "'" + at.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + "'",
+                    "timestamp without time zone" => "'" + at.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + "'",
+                    _ => "'" + at.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + "+00'",
+                };
+
+            default:
+                return null;
+        }
+    }
+
     /// <summary>Whether <paramref name="parameter" /> has a storage parameter's shape: lower-case letters and underscores.</summary>
     public static bool IsParameterName(string? parameter) => parameter is { Length: > 0 } && ParameterName().IsMatch(parameter);
 

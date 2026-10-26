@@ -61,7 +61,7 @@ public partial class MediumDataSetLiveTests
     /// <remarks>
     /// <para>
     /// 0.4 measured 27 from 32 of 42 checks (2026-10-19), and wave 5's base (<c>main</c> at 1c3e21ef) still ran exactly those
-    /// 27, all of which a sweep still runs. Wave 5 added 17, each a catalog or statistics read run once per sweep, of a fixed
+    /// 27, all of which a sweep still runs. Wave 5 added 22, each a catalog or statistics read run once per sweep, of a fixed
     /// shape or under a <c>LIMIT</c> - none per table, per row, per shard or per tenant, and none of a data table:
     /// </para>
     /// <list type="bullet">
@@ -76,14 +76,20 @@ public partial class MediumDataSetLiveTests
     /// in (S06) and the extensions (S07) (<c>ServerPostureQueries</c>).</item>
     /// <item>W5-V1, 2: the autovacuum workers T16 reads and T07 shares, and T16's running maintenance
     /// (<c>MaintenanceQueries</c>).</item>
+    /// <item>W5-B1, 5: T15's foreign keys, the usage guard's counters-age read T01, T05 and T06 share, T26's integer keys,
+    /// the partition read T19 and T20 share (<c>IndexLintQueries</c>, <c>PartitionQueries</c>), and T17's document-named
+    /// tables (<c>OrphanedDocumentTableQueries</c>).</item>
     /// </list>
+    /// <para>
+    /// W5-Q1 adds only to statement sweeps, and W5-AUR's Aurora reads run only on Aurora, so neither moves this count.
+    /// </para>
     /// <para>
     /// T24, C11 and D09 add none of their own - each shares reads counted above - and K05-K08 read configuration in process.
     /// The reads wave 5 makes only on a condition this set does not meet are not counted: R02's WAL directory (archiving on,
     /// and <c>pg_monitor</c>), S07's update paths (an extension behind its default).
     /// </para>
     /// </remarks>
-    private const int MeasuredSweepStatements = 44;
+    private const int MeasuredSweepStatements = 49;
 
     /// <summary>
     /// The statement budget: the measured count plus two. A check that adds a statement on a path this data set takes is

@@ -30,7 +30,7 @@ public class MaintenanceChecksTests
 
         HealthVerdict verdict = new HotUpdateCheck().Evaluate(
             Hot(Table(orders), Index(orders, IndexRow(orders, "pk", "id") with { IsPrimaryKey = true, IsUnique = true }, IndexOrigin.PrimaryKey)),
-            Evaluation(Updates(orders.Key, (0, 0), (20_000, 2_000))));
+            UsageEvaluation(Updates(orders.Key, (0, 0), (20_000, 2_000))));
 
         HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
         finding.Code.Should().Be("T06");
@@ -47,7 +47,7 @@ public class MaintenanceChecksTests
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts computed = Index(orders, IndexRow(orders, "by_status", "(data ->> 'Status'::text)") with { ReferencedColumns = ["data"] });
 
-        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), computed), Evaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
+        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), computed), UsageEvaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
             .Findings.Should().ContainSingle().Subject;
 
         finding.Severity.Should().Be(HealthSeverity.Info);
@@ -65,7 +65,7 @@ public class MaintenanceChecksTests
         MartenTable orders = Document<HealthOrderDoc>();
         IndexFacts index = Index(orders, IndexRow(orders, "by_" + column, column), IndexOrigin.Declared);
 
-        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), index), Evaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
+        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), index), UsageEvaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
             .Findings.Should().ContainSingle().Subject;
 
         finding.Title.Should().Contain("fillfactor cannot help");
@@ -84,7 +84,7 @@ public class MaintenanceChecksTests
             ServerVersion = serverVersion,
         });
 
-        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), brin), Evaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
+        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), brin), UsageEvaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
             .Findings.Should().ContainSingle().Subject;
 
         finding.Remedy!.Code.Should().Contain("FillFactor", "a summarizing index no longer blocks HOT (PostgreSQL 16)");
@@ -102,7 +102,7 @@ public class MaintenanceChecksTests
             ServerVersion = serverVersion,
         });
 
-        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), brin), Evaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
+        HealthFinding finding = new HotUpdateCheck().Evaluate(Hot(Table(orders), brin), UsageEvaluation(Updates(orders.Key, (0, 0), (20_000, 0))))
             .Findings.Should().ContainSingle().Subject;
 
         finding.Title.Should().Contain("fillfactor cannot help", "before 16 every index on a changed column blocks HOT, BRIN included");
@@ -115,12 +115,12 @@ public class MaintenanceChecksTests
         MartenTable orders = Document<HealthOrderDoc>();
         HotUpdateCheck check = new();
 
-        check.Evaluate(Hot(Table(orders)), Evaluation(Updates(orders.Key, (0, 0), (HotUpdateCheck.MinUpdates - 1, 0)))).Findings.Should().BeEmpty();
-        check.Evaluate(Hot(Table(orders)), Evaluation(Updates(orders.Key, (0, 0), (20_000, 15_000)))).Findings.Should().BeEmpty();
+        check.Evaluate(Hot(Table(orders)), UsageEvaluation(Updates(orders.Key, (0, 0), (HotUpdateCheck.MinUpdates - 1, 0)))).Findings.Should().BeEmpty();
+        check.Evaluate(Hot(Table(orders)), UsageEvaluation(Updates(orders.Key, (0, 0), (20_000, 15_000)))).Findings.Should().BeEmpty();
 
         HealthVerdict one = check.Evaluate(
             Hot(Table(orders)),
-            Evaluation(History((TimeSpan.Zero, [(HotUpdateCheck.UpdatesSeries + orders.Key, 1_000_000), (HotUpdateCheck.HotUpdatesSeries + orders.Key, 0)]))));
+            UsageEvaluation(History((TimeSpan.Zero, [(HotUpdateCheck.UpdatesSeries + orders.Key, 1_000_000), (HotUpdateCheck.HotUpdatesSeries + orders.Key, 0)]))));
         one.Findings.Should().BeEmpty("a lifetime total is not a rate");
         one.Note.Should().Contain("two samples");
     }
@@ -130,7 +130,7 @@ public class MaintenanceChecksTests
     {
         MartenTable streams = EventTable("mt_streams");
 
-        new HotUpdateCheck().Evaluate(Hot(Table(streams)), Evaluation(Updates(streams.Key, (0, 0), (50_000, 0))))
+        new HotUpdateCheck().Evaluate(Hot(Table(streams)), UsageEvaluation(Updates(streams.Key, (0, 0), (50_000, 0))))
             .Findings.Should().BeEmpty("no Schema.For<T>() line sets an event table's fill factor; E08 judges mt_dcb_tag_version");
     }
 

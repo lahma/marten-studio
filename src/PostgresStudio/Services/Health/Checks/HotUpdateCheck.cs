@@ -10,6 +10,12 @@ internal sealed record HotUpdateFacts(IReadOnlyList<TableFacts> Tables, IReadOnl
 {
     /// <summary>The tables locked for a schema change, which are not judged this sweep (<see cref="HealthIndexRead.LockedTables" />).</summary>
     public IReadOnlySet<string> LockedTables { get; init; } = HealthIndexRead.Empty.LockedTables;
+
+    /// <summary>
+    /// The statistics window's signals and the counters' oldest recorded moment (<see cref="UsageGuard" />, issue #8 G4), or
+    /// <see langword="null" /> in a unit test that judges the window through <see cref="HealthEvaluation.Statistics" /> alone.
+    /// </summary>
+    public UsageWindowReading? Usage { get; init; }
 }
 
 /// <summary>
@@ -35,6 +41,10 @@ internal sealed record HotUpdateFacts(IReadOnlyList<TableFacts> Tables, IReadOnl
 /// <para>
 /// Rates over the window, like T01: the counters are sampled per document table and judged by their change,
 /// only past <see cref="MinUpdates" /> updates in the window.
+/// </para>
+/// <para>
+/// <b>Never over a short or reset window</b> (issue #8 G4, <see cref="UsageGuard" />): while the counters have counted for
+/// less than seven days, or look reset, there is no finding and the status row says why.
 /// </para>
 /// </remarks>
 [HealthCheck("T06", HealthArea.Tables, HealthCostTier.Catalog, "Low HOT-update ratio")]
@@ -63,8 +73,9 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
     {
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
         HealthIndexRead read = await HealthTables.IndexReadAsync(context).ConfigureAwait(false);
+        UsageWindowReading usage = await UsageGuard.ReadAsync(context).ConfigureAwait(false);
 
-        return new HotUpdateFacts(tables, read.Indexes, DatabaseStatistics.Of(tables)) { LockedTables = read.LockedTables };
+        return new HotUpdateFacts(tables, read.Indexes, DatabaseStatistics.Of(tables)) { LockedTables = read.LockedTables, Usage = usage };
     }
 
     /// <inheritdoc />
@@ -86,9 +97,27 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
         List<HealthFinding> findings = [];
         bool watched = false;
 
+        // Issue #8 G4: no verdict over statistics under seven days old or looking reset - asked only where there is a table to judge.
+        UsageWindow? usage = null;
+
+        if (facts.Tables.Any(static x => x.Table.Kind == StudioTableKind.DocumentTable))
+        {
+            if (UsageGuard.For(facts.Usage, evaluation) is not { } window)
+            {
+                return HealthVerdict.Quiet(HealthTables.WithLockedNote(UsageGuard.NotRead, facts.LockedTables));
+            }
+
+            if (window.Withheld(UsageGuard.MinimumWindow) is { } withheld)
+            {
+                return HealthVerdict.Quiet(HealthTables.WithLockedNote(withheld, facts.LockedTables));
+            }
+
+            usage = window;
+        }
+
         foreach (TableFacts table in facts.Tables)
         {
-            if (table.Table.Kind != StudioTableKind.DocumentTable)
+            if (table.Table.Kind != StudioTableKind.DocumentTable || usage is null)
             {
                 continue;
             }
@@ -124,7 +153,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
             IReadOnlyList<IndexFacts> blocking = [.. BlockingIndexes(table, facts.Indexes)];
 
             findings.Add(blocking.Count == 0
-                ? FillFactorFinding(table, updates, share, facts, evaluation)
+                ? FillFactorFinding(table, updates, share, usage, evaluation)
                 : CannotHelpFinding(table, updates, share, blocking, facts, evaluation));
         }
 
@@ -175,7 +204,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
         TableFacts table,
         CounterDelta updates,
         double share,
-        HotUpdateFacts facts,
+        UsageWindow usage,
         HealthEvaluation evaluation) => new()
     {
         Code = "T06",
@@ -190,7 +219,7 @@ internal sealed class HotUpdateCheck : HealthCheck<HotUpdateFacts>
             + "index, and leaves a dead row for vacuum. Leaving free space on each page lets most of them stay put.",
         Evidence = Evidence(table, updates, share),
         Caveat =
-            "Measured over " + TableText.Span(updates.Span) + " of history. " + TableText.CountersSince(facts.Database.StatsReset, evaluation.Now),
+            "Measured over " + TableText.Span(updates.Span) + " of history, with the counters " + usage.SinceText + ".",
         Remedy = evaluation.TableRemedies?.LeaveRoomForHotUpdates(table.Table, SuggestedFillFactor),
     };
 

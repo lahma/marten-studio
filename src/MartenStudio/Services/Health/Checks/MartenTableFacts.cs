@@ -162,6 +162,19 @@ internal static class MartenTables
             Alias = documentType?.Alias,
             SoftDeleted = documentType is DocumentMapping { DeleteStyle: DeleteStyle.SoftDelete },
             DocumentTypes = documentType is null ? [] : [documentType.DocumentType],
+
+            // ByRollingRange(...): a RangePartitioning whose manager is Weasel's ManagedRangePartitions, which provisions the
+            // periods ahead and always adds a DEFAULT partition (Marten's PartitioningExpression and AdvancedOperations, V9.39.0
+            // and V9.54.1; Weasel 9.33.0 and 9.46.0). ByExternallyManagedRangePartitions() sets IgnorePartitions: the host's.
+            RangePartitionsManaged = documentType is DocumentMapping
+            {
+                IgnorePartitions: false,
+                Partitioning: Weasel.Postgresql.Tables.Partitioning.RangePartitioning { PartitionManager: Weasel.Postgresql.Tables.Partitioning.ManagedRangePartitions },
+            },
+
+            // A conjoined type's ForeignKey<TRef> to another conjoined type keys (member, tenant_id) and indexes the member
+            // alone (DocumentForeignKey and MartenRegistry.ForeignKey, V9.39.0 and V9.54.1): T15 judges tenant_id trailing.
+            TrailingKeyColumns = documentType is DocumentMapping { TenancyStyle: TenancyStyle.Conjoined } ? ["tenant_id"] : [],
         };
 
         if (documentType is not null)

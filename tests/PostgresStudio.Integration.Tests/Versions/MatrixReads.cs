@@ -151,7 +151,57 @@ internal static class MatrixReads
         // only lock beyond a catalog read.
         new("statements: facts", false, static async (x, t) => StatementsClean(
             await x.Services.GetRequiredService<PostgresStudio.Services.Statements.IStatementFacts>().ReadAsync(x.Resolved, t))),
+        // ---- W5-B1: the lint reads - T15's keys, the usage guard's counters age, T26's keys, T19 and T20's partitions -------
+        new("lints: foreign keys", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthForeignKeyRow> keys = await QueryAsync(x, IndexLintQueries.ForeignKeys(LintTargets), IndexLintQueries.ReadForeignKey, t);
+            Owned(x, keys.FirstOrDefault(static y => y.Table == "child" && y.ReferencedTable == "parent"), "store.child's key to store.parent");
+        }),
+        new("lints: counters age", true, static (x, t) => QueryAsync(
+            x, IndexLintQueries.CountersAge(LintTargets, PostgresFeatures.Has(PostgresFeature.LastScanColumns, x.Connection.PostgreSqlVersion.Major * 10_000)),
+            IndexLintQueries.ReadCountersAge, t)),
+        new("lints: integer keys", true, static (x, t) => QueryAsync(x, IndexLintQueries.IntegerKeys(LintTargets), IndexLintQueries.ReadIntegerKey, t)),
+        new("lints: partitions", true, static async (x, t) =>
+        {
+            // store.r's bounds are deparsed with no relation, so its partition the matrix holds ACCESS EXCLUSIVE on is read too.
+            IReadOnlyList<HealthPartitionedTableRow> tables = await QueryAsync(x, PartitionQueries.Partitions(LintTargets), PartitionQueries.ReadPartitionedTable, t);
+            Owned(x, tables.FirstOrDefault(static y => y.Table == "r" && y.NewestUpper is not null && y.HasDefault), "store.r's bounds and its default partition");
+        }),
     ];
+
+    /// <summary>The fixture's tables the lint reads are asked about (W5-B1): a range and a list partitioning, and a key.</summary>
+    /// <remarks>A property, not a field: <see cref="All" /> is initialised first, and reads it.</remarks>
+    private static HealthTableTarget[] LintTargets =>
+        [new("store", "r"), new("store", "l"), new("store", "parent"), new("store", "child")];
+
+    /// <summary>Runs a health statement on the read's transaction and maps every row.</summary>
+    private static async Task<IReadOnlyList<T>> QueryAsync<T>(MatrixReadContext x, HealthQuery query, Func<NpgsqlDataReader, T> map, CancellationToken token)
+    {
+        await using NpgsqlCommand command = new(query.Sql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+        command.Parameters.AddRange(query.Parameters.Select(static p => p.Clone()).ToArray());
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(token);
+
+        List<T> rows = [];
+
+        while (await reader.ReadAsync(token))
+        {
+            rows.Add(map(reader));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Fails a read that found nothing the owner of <c>store</c> must find; a role without <c>USAGE</c> on it is admitted none,
+    /// as the browser admits none.
+    /// </summary>
+    private static void Owned(MatrixReadContext x, object? value, string what)
+    {
+        if (x.Connection.UserName == "app")
+        {
+            Found(value, what);
+        }
+    }
 
     /// <summary>
     /// Fails a Statements facts read that failed: on every release the read reads, or says which expected state stopped it -

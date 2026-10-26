@@ -226,7 +226,8 @@ BEGIN
   END IF;
 END $$;
 
--- Declaratively partitioned by range, with two partitions.
+-- Declaratively partitioned by range: the two 2026 halves here, which the seeded readings fill, and every later half
+-- through next year and one beyond added by LegacyDemoData.EnsureSensorReadingPartitionsAsync, so it never runs out.
 CREATE TABLE IF NOT EXISTS legacy.sensor_readings
   (
     sensor_id TEXT NOT NULL,

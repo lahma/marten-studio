@@ -40,10 +40,13 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
     [HealthQuiet("T24")]
     public async Task The_seeded_sample_store_is_quiet_on_every_table_and_index_check()
     {
-        ManualClock clock = new(Start);
+        // A clock a week past the statistics' start and an ANALYZE to prove it from, so T01, T05 and T06 judge rather than
+        // withhold: their silence below means something (W5-B1 review F3).
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = await HostAsync(postgres, "health_tables_quiet", clock);
 
         await new SampleDataSeeder().Populate(host.Store, Token);
+        await ExecuteAsync(postgres, "analyze " + TableOf<Customer>(host.Store));
 
         HealthReport first = await ReportAsync(host);
         first.Findings.Should().NotContain(static x => TableCodes.Contains(x.Code), string.Join(" | ", first.Findings.Select(static x => x.Finding.Title)));
@@ -58,9 +61,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
         // before T08's since-restart was wired to W5-CAP's statistics window (W5b-int): the window's one read, which T08 shares
         // with C08 and C11 through the same memo, so the sweep as a whole runs it once either way. Thirteen before W5-CAP-fix2
         // read pg_control_checkpoint() and pg_control_system() apart from the window: a has_function_privilege probe, then a
-        // call of only the functions it allowed - two more statements behind the same shared window read.
+        // call of only the functions it allowed - two more statements behind the same shared window read. Fifteen before
+        // W5-B1's five: T15's foreign keys, the usage guard's counters-age read T01, T05 and T06 share, T26's integer keys,
+        // the partition read T19 and T20 share, and T17's document-named tables.
         first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
-            .Distinct(StringComparer.Ordinal).Should().HaveCount(15, "the regular table checks' whole catalog cost on the sample store");
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(20, "the regular table checks' whole catalog cost on the sample store");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(
             static x => x.Sql.Contains("pg_catalog.pg_stat_archiver", StringComparison.Ordinal), "T08 reads the statistics window for since-restart");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(
@@ -84,6 +89,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
             status.Statements.Should().NotBeEmpty("{0} read the catalog", code);
         }
 
+        foreach (string code in (string[]) ["T01", "T05", "T06"])
+        {
+            (HealthLiveHost.Status(second, code).Note ?? string.Empty).Should().NotStartWith("Withheld:", "{0} judged usage over a covered window", code);
+        }
+
         host.Logs.WarningsOrWorse.Should().BeEmpty("an expected state is never a warning");
     }
 
@@ -95,9 +105,11 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task A_hidden_document_type_never_appears_though_its_table_has_everything_wrong_with_it()
     {
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(
+        // A clock a week past the statistics' start, or T05's unused index is withheld rather than found (issue #8 G4).
+        await using HealthLiveHost host = await HostAsync(
             postgres,
             "health_tables_hidden",
+            new ManualClock(Covering),
             store: static o =>
             {
                 o.Schema.For<HealthSecretThing>().Index(x => x.Name).Index(new System.Linq.Expressions.Expression<Func<HealthSecretThing, object>>[] { x => x.Name, x => x.Rank });

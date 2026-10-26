@@ -72,7 +72,7 @@
                     <td class="ms-db-cell-number">
                         @if (!sequence.CanReadValue)
                         {
-                            <span class="ms-db-none" title="@WithheldTitle(sequence)">@(MayReadData(sequence) ? "no privilege" : "withheld")</span>
+                            <span class="ms-db-none" title="@WithheldTitle(sequence)">@(MayReadData(sequence) ? NoPrivilegeText : "withheld")</span>
                         }
                         else if (values.TryGetValue(KeyOf(sequence), out DatabaseSequenceValue? read))
                         {
@@ -87,6 +87,38 @@
                             else
                             {
                                 <span class="ms-db-none" title="nextval has never been called on it">never used</span>
+                            }
+
+                            @if (read is { Found: true, Headroom: { } facts })
+                            {
+                                SequenceHeadroomReading headroom = SequenceHeadroom.Of(read.LastValue, facts, Earlier(sequence));
+
+                                <div class="ms-db-headroom" role="note">
+                                    <span class="ms-db-headroom-used"
+                                          title="@HeadroomTitle(facts, headroom)">@SequenceHeadroom.Percent(headroom.Used) of @(headroom.LimitIsColumn ? "the column's" : "its") range used</span>
+                                    @if (headroom.Left is { } left)
+                                    {
+                                        <span class="ms-db-headroom-rate">at the recent rate, @SequenceHeadroom.Describe(left) left</span>
+                                    }
+                                    else if (headroom.PerSecond is { } rate && rate <= 0)
+                                    {
+                                        <span class="ms-db-headroom-rate">no values taken since the last read</span>
+                                    }
+                                    else
+                                    {
+                                        <button type="button"
+                                                class="ms-btn ms-btn-sm ms-db-read-again"
+                                                title="Two reads make a rate: the second reads the value again, under the same brief lock"
+                                                aria-label="@($"Read the last value of {sequence.Name} again, for a rate")"
+                                                @onclick="() => ReadValueAsync(sequence)">
+                                            read again for a rate
+                                        </button>
+                                    }
+                                    @if (facts.Cycles)
+                                    {
+                                        <span class="ms-db-headroom-cycles" title="It starts again at its minimum rather than failing - and a key it feeds then meets its own old values">cycles</span>
+                                    }
+                                </div>
                             }
                         }
                         else
@@ -112,7 +144,13 @@
 </TableScroll>
 
 @code {
+    /// <summary>What the value cell says when the reading role may not read it (W5-B1).</summary>
+    internal const string NoPrivilegeText = "no privilege to read the value";
+
     private readonly Dictionary<string, DatabaseSequenceValue> values = new(StringComparer.Ordinal);
+
+    /// <summary>The read before the latest one, per sequence: two reads in a session make a rate (W5-B1).</summary>
+    private readonly Dictionary<string, DatabaseSequenceValue> earlier = new(StringComparer.Ordinal);
     private object? shownModel;
     private string? shownScope;
     private int generation;
@@ -176,6 +214,7 @@
             shownModel = Model;
             shownScope = scopeKey;
             values.Clear();
+            earlier.Clear();
             generation++;
         }
     }
@@ -205,9 +244,28 @@
         // Asked about a list that has since been replaced: the answer is about another database's sequence.
         if (asked == generation)
         {
+            if (values.TryGetValue(key, out DatabaseSequenceValue? before) && before is { Found: true, Headroom: not null })
+            {
+                earlier[key] = before;
+            }
+
             values[key] = value;
         }
     }
+
+    /// <summary>The read before the latest, as the headroom's rate takes it, or <see langword="null" />.</summary>
+    private (long? Value, DateTimeOffset At)? Earlier(DatabaseSequenceSummary sequence) =>
+        earlier.TryGetValue(KeyOf(sequence), out DatabaseSequenceValue? before) && before.Headroom is { } facts
+            ? (before.LastValue, facts.ReadAt)
+            : null;
+
+    /// <summary>The headroom's title: what the share is of, and against which limit.</summary>
+    private static string HeadroomTitle(SequenceHeadroomFacts facts, SequenceHeadroomReading headroom) =>
+        (headroom.LimitIsColumn
+            ? "Judged against the column it feeds (" + (facts.ColumnTypes ?? "an integer") + "), whose range is narrower than the sequence's own " + facts.DataType + ": "
+            : "Judged against its own range (" + facts.DataType + "): ")
+        + DatabasePresentation.Number((long) headroom.Remaining) + " values left before " + DatabasePresentation.Number(headroom.Limit)
+        + ", after which nextval fails" + (facts.Cycles ? " - or, as it cycles, starts again" : string.Empty) + ".";
 
     private string WithheldTitle(DatabaseSequenceSummary sequence) =>
         MayReadData(sequence)

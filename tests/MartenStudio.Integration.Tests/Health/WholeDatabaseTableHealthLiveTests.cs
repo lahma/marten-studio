@@ -148,7 +148,8 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
             "analyze " + table,
             "delete from " + table + " where id % 4 = 0");
 
-        ManualClock clock = new(Start);
+        // T01 and T05 judge usage only over statistics a week old: a clock eight days on, from the ANALYZE above.
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = Host(clock);
 
         HealthReport first = await ReportAsync(host);
@@ -441,7 +442,10 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
     [PostgresFact]
     public async Task The_seeded_samples_relational_schemas_raise_no_table_finding()
     {
-        ManualClock clock = new(Start);
+        // A clock a week past the statistics' start and an ANALYZE to prove it from, so T01, T05 and T06 judge rather than
+        // withhold: the demo's silence on them means something (W5-B1 review F3).
+        await fixture.ExecuteAsync("analyze " + SqlIdentifier.Qualify(Legacy, "departments"));
+        ManualClock clock = new(Covering);
         await using HealthLiveHost host = Host(clock);
 
         for (int minutes = 0; minutes < 12; minutes += 2)
@@ -465,6 +469,10 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         demo.Should().Contain(SchemaKey.For(Quartz, "qrtz_job_details")).And.Contain(SchemaKey.For(Legacy, "departments"))
             .And.Contain(SchemaKey.For(Sample, RelationalDemoSchema.AppSettingsTable), "the demo's tables are judged");
 
+        // W5-B1-rest: legacy.sensor_readings, a range with no DEFAULT, is judged by T20 like any other - and is quiet,
+        // because the demo creates its halves through next year and one beyond whenever it is applied.
+        demo.Should().Contain(SchemaKey.For(Legacy, "sensor_readings"));
+
         report.Findings.Where(static x => x.Code.StartsWith('T'))
             .Where(x => x.Finding.Subject is { } subject && demo.Any(table => subject == table || subject.StartsWith(table + ".", StringComparison.Ordinal)))
             .Select(static x => x.Code + " " + x.Finding.Subject + ": " + x.Finding.Title)
@@ -473,6 +481,11 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         foreach (HealthCheckStatus status in report.Checks.Where(static x => x.Code.StartsWith('T') && x.Tier != HealthCostTier.Statements))
         {
             status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} has to run for its silence to mean anything: {1}", status.Code, status.Problem);
+        }
+
+        foreach (string code in (string[]) ["T01", "T05", "T06"])
+        {
+            (report.Checks.Single(x => x.Code == code).Note ?? string.Empty).Should().NotStartWith("Withheld:", "{0} judged usage over a covered window", code);
         }
     }
 

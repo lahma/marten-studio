@@ -462,8 +462,10 @@ read goes through `has_sequence_privilege` first, which on 18 is what keeps the 
 Nor does a list call a deparse function that opens what it describes: `pg_get_indexdef` in every form,
 `pg_get_expr` with a relation (a default's `adbin`, a partition's `relpartbound`), `pg_get_viewdef` and
 `pg_get_constraintdef` of a table's CHECK each take a transient `AccessShareLock` and queue behind a migration's
-`ACCESS EXCLUSIVE` on 14 to 18 (measured 2026-10-26); `pg_get_partkeydef`, a key's or foreign key's
-`pg_get_constraintdef` and a trigger without WHEN do not. A list that must deparse reads `pg_locks` once and
+`ACCESS EXCLUSIVE` on 14 to 18 (measured 2026-10-26); a key's or foreign key's `pg_get_constraintdef` and a
+trigger without WHEN do not. `pg_get_partkeydef` and `pg_get_expr(relpartbound, <relid>)` open the relation and
+queue too, while `pg_get_expr(relpartbound, 0)` - no relation - does not, and is how a list reads partition bounds
+(14.24 and 18.6, measured 2026-10-26; `LintMatrixLiveTests`). A list that must deparse reads `pg_locks` once and
 leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its one
 relation, under `lock_timeout`.
 Another store's key and alias are shown only to a visitor that
@@ -1315,6 +1317,8 @@ tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the v
 tests/MartenStudio.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
 tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
                                          matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
+tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
+                                         sequence headroom and the lint statements' D27 shape - no database
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

@@ -40,6 +40,7 @@ public class HealthLiveTestConventionTests
     internal static readonly string[] ProvenHere =
     [
         "T01", "T03", "T04", "T05", "T06", "T07", "T08", "T12", "T16", "T24", "C11",
+        "T15", "T19", "T20", "T25", "T26",
         "R02", "R03", "R04",
         "S04", "S05", "S06", "S07", "S08", "S09", "S10", "K05", "K06", "K07",
     ];
