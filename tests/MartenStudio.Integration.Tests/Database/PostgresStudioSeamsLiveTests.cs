@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using MartenStudio.Integration.Tests.Browser;
 using MartenStudio.Integration.Tests.Health;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -25,6 +26,16 @@ namespace MartenStudio.Integration.Tests.Database;
 /// nothing; the <c>mt_</c> rule refuses a Marten table's rows and a view over one; nothing writes DDL. PS-5 builds the
 /// full PostgresStudio suite; these are the seams' own few.
 /// </summary>
+/// <remarks>
+/// <b>A database of each test's own</b>, never the assembly's shared one. Under <c>"*"</c> the table source lists every
+/// table of every schema the role can use, and a sweep judges at most <see cref="PostgresHealthTableSource.TableCap" />
+/// of them, the largest by estimated pages first. On the shared database every other class's schemas are admitted too,
+/// so this class's empty tables fell past the cap once the run had made enough (CI run 40289006510: an NRE on
+/// <c>qrtz_triggers</c>). W4-fix measured it with the Database, Health, Events and Documents namespaces in one run:
+/// 2,019 admitted tables, a set of 2,000 whose coverage said so, <c>orders</c> (one page) in it and <c>qrtz_triggers</c>
+/// and <c>ledger</c> (none) out. In a database of its own, <c>"*"</c> admits exactly what the test made, so the whole
+/// set is asserted and no other class can move it.
+/// </remarks>
 public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
 {
     private const string App = "ps3b_app";
@@ -35,11 +46,11 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
     [PostgresFact]
     public async Task The_table_source_judges_every_admitted_table_by_whose_it_is_and_locks_nothing_it_lists()
     {
-        await SeedAsync();
-        HealthSweepProbe probe = new(postgres);
-        IReadOnlySet<string> before = await HealthSweepProbe.SnapshotAsync(postgres, App, Legacy);
+        string connectionString = await SeedAsync("ps3b_seams_tables");
+        HealthSweepProbe probe = new(connectionString);
+        IReadOnlySet<string> before = await HealthSweepProbe.SnapshotAsync(connectionString, App, Legacy);
 
-        await using ServiceProvider services = Host(postgres.ConnectionString, [App, "*"]);
+        await using ServiceProvider services = Host(connectionString, [App, "*"]);
         ResolvedSource resolved = await ResolveAsync(services);
         await using HealthConnection connection = new(resolved.Target);
 
@@ -54,6 +65,14 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
             Token);
 
         IStudioTableSet set = await HealthTables.SetAsync(context);
+
+        set.Coverage.Should().BeNull("the database is the test's own, and holds six tables against a cap of 2,000");
+        set.Tables.Select(static x => x.Schema + "." + x.Table).Should().BeEquivalentTo(
+            [
+                App + ".orders", App + ".qrtz_triggers", App + ".__EFMigrationsHistory", App + ".mt_doc_order", App + ".mt_hilo",
+                Legacy + ".ledger",
+            ],
+            "\"*\" admits exactly the schemas the test made - public is empty - and nothing of the system's");
 
         set.Find(App, "orders")!.Should().Match<StudioTable>(static x => x.Kind == StudioTableKind.Relational
             && x.Ownership == StudioTableOwnership.Owned && x.GatedSchemas.Count == 0);
@@ -72,16 +91,16 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
 
         probe.StatementsObserved.Should().BePositive();
         probe.BeyondCatalogReads.Should().BeEmpty("a list locks nothing it lists (D27) - no size function, no row read");
-        (await HealthSweepProbe.SnapshotAsync(postgres, App, Legacy)).Should().BeEquivalentTo(before, "a read path writes nothing");
+        (await HealthSweepProbe.SnapshotAsync(connectionString, App, Legacy)).Should().BeEquivalentTo(before, "a read path writes nothing");
     }
 
     [PostgresFact]
     public async Task The_mt_rule_refuses_a_Marten_tables_rows_and_a_view_over_one_and_reads_the_hosts_own()
     {
-        await SeedAsync();
-        IReadOnlySet<string> before = await HealthSweepProbe.SnapshotAsync(postgres, App, Legacy);
+        string connectionString = await SeedAsync("ps3b_seams_rows");
+        IReadOnlySet<string> before = await HealthSweepProbe.SnapshotAsync(connectionString, App, Legacy);
 
-        await using ServiceProvider services = Host(postgres.ConnectionString, [App]);
+        await using ServiceProvider services = Host(connectionString, [App]);
         await using AsyncServiceScope circuit = services.CreateAsyncScope();
         StudioScope scope = new("default", "default", null);
 
@@ -109,7 +128,7 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
         own.State.Should().Be(TableRowPageState.Loaded);
         own.Rows.Should().HaveCount(2);
 
-        (await HealthSweepProbe.SnapshotAsync(postgres, App, Legacy)).Should().BeEquivalentTo(before, "a read path writes nothing");
+        (await HealthSweepProbe.SnapshotAsync(connectionString, App, Legacy)).Should().BeEquivalentTo(before, "a read path writes nothing");
     }
 
     private static ServiceProvider Host(string connectionString, string[] browsable)
@@ -141,14 +160,19 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
             .ResolveAsync(new StudioScope("default", "default", null), null, Token);
     }
 
-    private async Task SeedAsync()
+    /// <summary>A fresh database of the test's own on the assembly's container, seeded; its connection string.</summary>
+    /// <param name="database">The database name; a literal of this class, never anything typed.</param>
+    private async Task<string> SeedAsync(string database)
     {
-        await postgres.CreateSchemaAsync(App);
-        await postgres.CreateSchemaAsync(Legacy);
-        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        string connectionString = await BrowserSuiteFixture.CreateDatabaseAsync(postgres, database);
+
+        await using NpgsqlConnection connection = new(connectionString);
+        await connection.OpenAsync(Token);
 
         await using NpgsqlCommand command = new(
             """
+            create schema ps3b_app;
+            create schema ps3b_legacy;
             create table ps3b_app.orders (id int primary key, customer int not null);
             create index orders_by_customer on ps3b_app.orders (customer);
             insert into ps3b_app.orders values (1, 10), (2, 20);
@@ -164,6 +188,8 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
             connection);
 
         await command.ExecuteNonQueryAsync(Token);
+
+        return connectionString;
     }
 
     private sealed class Anonymous : AuthenticationStateProvider

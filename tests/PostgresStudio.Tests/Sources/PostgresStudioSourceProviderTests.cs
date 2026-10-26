@@ -386,6 +386,31 @@ public class PostgresStudioSourceProviderTests
             "a duplicate ignoring case, an invalid name and a name another source already answers to are left out");
     }
 
+    /// <summary>
+    /// A name that ends in a line break is left out as any invalid name is, counted under the same reason - never kept as
+    /// an identity of its own, which would reach the resource a policy is asked about, the URL, the audit and the logs.
+    /// </summary>
+    [Fact]
+    public async Task A_host_listed_name_ending_in_a_line_break_is_left_out_as_invalid()
+    {
+        CapturingLoggerProvider logs = new();
+        using ILoggerFactory factory = logs.CreateFactory();
+        ServiceCollection services = new();
+        FakeDatabaseSource tenants = new("acme", "tenant_a\n", "tenant_a\r\n", "tenant_a\u2028", "globex");
+
+        await using Harness harness = new(
+            services,
+            new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants),
+            logger: factory.CreateLogger<PostgresStudioSourceProvider>());
+
+        IReadOnlyList<IStudioDatabase> listed = await harness.Resolve("tenants").DatabasesAsync(Token);
+
+        listed.Select(static x => x.Identity).Should().Equal(["acme", "globex"]);
+        logs.Entries.Should().ContainSingle(static x => x.EventId.Id == 9301)
+            .Which.Message.Should().Be(
+                "Postgres Studio left 3 of the databases source tenants listed out: they do not match ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+    }
+
     [Fact]
     public async Task A_host_list_is_kept_for_sixty_seconds_then_read_again()
     {

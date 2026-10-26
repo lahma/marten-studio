@@ -739,9 +739,10 @@ internal static partial class LinqTextScreen
     /// <summary>
     /// Digits, an optional decimal part, and an optional suffix - the subset of Dynamic LINQ's number syntax that
     /// needs no exponent, no hex and no binary. Suffixes are case-sensitive where Dynamic LINQ's are: it reads
-    /// <c>U</c> and <c>L</c> only in upper case.
+    /// <c>U</c> and <c>L</c> only in upper case. <c>\A</c> and <c>\z</c>, because .NET's <c>$</c> also matches before a
+    /// final line feed - which the lexer never puts in a number token, so this is the anchor and not the guard.
     /// </summary>
-    [GeneratedRegex(@"^-?\d+(?:(?:\.\d+)?[mMdDfF]?|U|L|UL)$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(@"\A-?\d+(?:(?:\.\d+)?[mMdDfF]?|U|L|UL)\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex NumberLiteral();
 
     private enum TokenKind

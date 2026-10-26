@@ -208,6 +208,10 @@ internal sealed class StudioState
     /// falls back to its first database, as any unknown name does; the scope selector names none when the visitor
     /// picks another store, so picking one always opens its first.
     /// </para>
+    /// <para>
+    /// <b>A tenant the new listing does not carry</b> falls back to the previous scope's tenant only if the new store and
+    /// database accept that one too; otherwise to all tenants.
+    /// </para>
     /// </remarks>
     public async Task SetScopeAsync(
         string? storeKey,
@@ -236,9 +240,12 @@ internal sealed class StudioState
             ApplyFacts(await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false));
         }
 
+        // A tenant the listing does not carry falls back to the previous one only while this store and database still
+        // accept it: after a store or database change the previous tenant is the old scope's, and is checked against the
+        // new listing like any other name - or dropped, as RefreshAsync drops one.
         string? resolvedTenantId = TenantList.IsAcceptable(AvailableTenants, tenantId)
             ? NullIfBlank(tenantId)
-            : NullIfBlank(previous?.TenantId);
+            : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
         await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous).ConfigureAwait(false);
     }

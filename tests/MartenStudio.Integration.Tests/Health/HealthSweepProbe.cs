@@ -45,25 +45,14 @@ internal sealed record HeldLock(string LockType, string Mode, string? Schema, st
 /// sweep; then <c>probe.StatementsObserved.Should().BePositive()</c> (so "no locks" is not "nothing ran"),
 /// <c>probe.BeyondCatalogReads.Should().BeEmpty()</c> and compare a second snapshot to the first.
 /// </para>
+/// <para>
+/// <b>A database of the test's own</b> takes the connection-string constructor and snapshot: the second connection
+/// has to be to the database the statements ran in, because <c>pg_locks</c> names a relation by an oid that only
+/// that database's <c>pg_class</c> resolves.
+/// </para>
 /// </remarks>
 internal sealed class HealthSweepProbe : IHealthStatementObserver
 {
-    private readonly Func<CancellationToken, Task<NpgsqlConnection>> open;
-
-    /// <summary>A probe whose second connection is to the fixture's own database.</summary>
-    public HealthSweepProbe(PostgresFixture postgres)
-        : this(postgres.OpenAsync)
-    {
-    }
-
-    /// <summary>A probe whose second connection is to <paramref name="connectionString" />'s database - a test's own.</summary>
-    public HealthSweepProbe(string connectionString)
-        : this(token => OpenAsync(connectionString, token))
-    {
-    }
-
-    private HealthSweepProbe(Func<CancellationToken, Task<NpgsqlConnection>> open) => this.open = open;
-
     private const string LocksSql =
         "select l.locktype, l.mode, n.nspname, c.relname "
         + "from pg_catalog.pg_locks l "
@@ -71,9 +60,24 @@ internal sealed class HealthSweepProbe : IHealthStatementObserver
         + "left join pg_catalog.pg_namespace n on n.oid = c.relnamespace "
         + "where l.pid = @pid and l.granted";
 
+    private readonly Func<CancellationToken, Task<NpgsqlConnection>> open;
     private readonly List<HeldLock> locks = [];
     private readonly Lock gate = new();
     private int statements;
+
+    /// <summary>A probe of the assembly's shared database.</summary>
+    public HealthSweepProbe(PostgresFixture postgres)
+    {
+        ArgumentNullException.ThrowIfNull(postgres);
+        open = postgres.OpenAsync;
+    }
+
+    /// <summary>A probe of a database of the test's own (see the remarks).</summary>
+    public HealthSweepProbe(string connectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        open = cancellationToken => OpenAsync(connectionString, cancellationToken);
+    }
 
     /// <summary>How many health statements the probe was told about.</summary>
     public int StatementsObserved => Volatile.Read(ref statements);
@@ -127,21 +131,38 @@ internal sealed class HealthSweepProbe : IHealthStatementObserver
     /// Every object in <paramref name="schemas" />, by name and kind - read on a connection of the test's
     /// own, so nothing of the studio's is in the measurement.
     /// </summary>
-    public static Task<IReadOnlySet<string>> SnapshotAsync(PostgresFixture postgres, params string[] schemas) =>
-        SnapshotAsync(postgres.OpenAsync, schemas);
+    public static async Task<IReadOnlySet<string>> SnapshotAsync(PostgresFixture postgres, params string[] schemas)
+    {
+        ArgumentNullException.ThrowIfNull(postgres);
 
-    /// <summary><see cref="SnapshotAsync(PostgresFixture, string[])" /> in a database of the test's own.</summary>
-    public static Task<IReadOnlySet<string>> SnapshotAsync(string connectionString, params string[] schemas) =>
-        SnapshotAsync(token => OpenAsync(connectionString, token), schemas);
+        await using NpgsqlConnection connection = await postgres.OpenAsync(TestContext.Current.CancellationToken);
+        return await ReadSnapshotAsync(connection, schemas);
+    }
+
+    /// <summary>The same, in a database of the test's own.</summary>
+    public static async Task<IReadOnlySet<string>> SnapshotAsync(string connectionString, params string[] schemas)
+    {
+        await using NpgsqlConnection connection = await OpenAsync(connectionString, TestContext.Current.CancellationToken);
+        return await ReadSnapshotAsync(connection, schemas);
+    }
 
     private static async Task<NpgsqlConnection> OpenAsync(string connectionString, CancellationToken cancellationToken)
     {
         NpgsqlConnection connection = new(connectionString);
-        await connection.OpenAsync(cancellationToken);
-        return connection;
+
+        try
+        {
+            await connection.OpenAsync(cancellationToken);
+            return connection;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
     }
 
-    private static async Task<IReadOnlySet<string>> SnapshotAsync(Func<CancellationToken, Task<NpgsqlConnection>> open, string[] schemas)
+    private static async Task<IReadOnlySet<string>> ReadSnapshotAsync(NpgsqlConnection connection, string[] schemas)
     {
         const string Sql =
             "select 'schema:' || n.nspname from pg_catalog.pg_namespace n where n.nspname = any(@schemas) "
@@ -157,7 +178,6 @@ internal sealed class HealthSweepProbe : IHealthStatementObserver
             + "union all select 'constraint:' || n.nspname || '.' || o.conname from pg_catalog.pg_constraint o "
             + "join pg_catalog.pg_namespace n on n.oid = o.connamespace where n.nspname = any(@schemas)";
 
-        await using NpgsqlConnection connection = await open(TestContext.Current.CancellationToken);
         await using NpgsqlCommand command = new(Sql, connection);
         command.Parameters.AddWithValue("schemas", schemas);
 
