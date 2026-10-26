@@ -146,6 +146,12 @@ internal static class StudioCoreRegistration
         // H7: the statement checks' memory of the texts they have read, so a statement sweep whose statements are all
         // known makes no text call - each one costs pg_stat_statements its whole query-text file.
         services.TryAddSingleton<StatementTextCache>();
+
+        // Wave 6 (SEC2): the protector a browser's mute key is kept under, created once per process from the host's Data
+        // Protection - which AddRazorComponents() above has already registered - or, in a container without it, from an
+        // in-memory provider this constructs and registers nowhere.
+        services.TryAddSingleton(static provider =>
+            new HealthMuteKeys(provider.GetService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()));
         services.TryAddScoped<HealthMutes>();
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();

@@ -33,9 +33,17 @@ about, and the next `CreateOrUpdate` would take it away again. A remedy that nee
 studio's floor says so ("Marten 9.47+") and, on a host that runs an older one, what that host runs.
 
 "Mute in this browser" hides one finding on one database for you, in your browser's `localStorage`. It is
-never written to the database and never hides anything from anybody else. What the browser keeps is a SHA-256 of
+never written to the database and never hides anything from anybody else. What the browser keeps is an HMAC-SHA256 of
 the finding's key - its store, database, code and subject - never the key itself, which can name a tenant or a
-stream and would otherwise be readable by every script on the host's pages.
+stream and would otherwise be readable by every script on the host's pages. The HMAC is keyed with a random key of
+the browser's own, which the browser keeps only as the host's ASP.NET Core Data Protection protected it, so nobody
+who can read `localStorage` can confirm a guess at a key either. Every studio host has Data Protection already:
+the studio's own `AddRazorComponents()` and `AddInteractiveServerComponents()` register it, as they do for any
+Blazor Server app, and the studio adds nothing to it. Mutes therefore survive a restart, and reach every instance
+of a deployment, exactly as long as the host's Data Protection keys do - a host that persists its key ring keeps
+them, one whose keys live only in memory (a container with no volume for them) starts every mute again when it
+restarts. A container built by hand with no Data Protection at all keys mutes in memory, for the life of the
+process. Upgrading to 0.5 resets every mute once: a list kept by an earlier release is dropped, not migrated.
 
 A Critical finding that appears while a tab is open raises a toast in that tab, once. One that was already Critical
 when the tab first looked is not toasted - it is on the page and in the badge already - and one that stays Critical

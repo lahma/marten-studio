@@ -321,9 +321,12 @@ public class HealthAdvisorScenarioTests(BrowserSuiteFixture fixture)
     // Helpers
     // ------------------------------------------------------------------------------------------------
 
-    /// <summary>How many mute keys this browser keeps in <c>localStorage</c>.</summary>
+    /// <summary>
+    /// How many mute keys this browser keeps in <c>localStorage</c>: the hashes beside its protected key (wave 6), an object
+    /// the studio writes - read as none for anything else.
+    /// </summary>
     private static Task<int> MutedInStorageAsync(StudioPage studio) =>
-        studio.Page.EvaluateAsync<int>("() => JSON.parse(window.localStorage.getItem('ms_health_muted') || '[]').length");
+        studio.Page.EvaluateAsync<int>("() => { const kept = JSON.parse(window.localStorage.getItem('ms_health_muted') || '{}'); return Array.isArray(kept && kept.muted) ? kept.muted.length : 0; }");
 
     /// <summary>
     /// Keeps every toast this page shows, class and text, in <c>window.__msToasts</c> - a toast is removed after four

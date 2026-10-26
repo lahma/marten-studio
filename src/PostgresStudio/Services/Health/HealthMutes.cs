@@ -1,36 +1,136 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Settings;
 
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.JSInterop;
 
 namespace PostgresStudio.Services.Health;
 
 /// <summary>
-/// The findings this browser has muted: kept in the browser's <c>localStorage</c> as hashes, read once per circuit.
+/// The secret a browser's mute hashes are keyed with (wave 6, SEC2): one random key per browser, kept by the browser only
+/// in the form the host's ASP.NET Core Data Protection protects it in, under <see cref="Purpose" />.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why a key at all.</b> A finding's mute key can name what its gate guards - a tenant, a stream, a shard - and the
+/// browser's <c>localStorage</c> is readable by every script on the host's origin and by the next person at a shared
+/// machine. A plain SHA-256 took the names off the list, but anybody who could guess a whole key could hash the guess and
+/// confirm it. An HMAC under a key the browser holds only protected cannot be computed without the host's Data Protection
+/// keys, so the list confirms nothing.
+/// </para>
+/// <para>
+/// <b>Why one per browser, protected, and not one per process.</b> Data Protection does not protect deterministically -
+/// every <c>Protect</c> draws a random key modifier and a random IV (<c>ManagedAuthenticatedEncryptor</c>, read at
+/// ASP.NET Core 10.0.13) - so a key derived from a protected constant would be a new key at every start of the process,
+/// and every mute would be lost at every restart. The browser's own random key, kept protected beside its hashes, opens
+/// in every process that shares the host's key ring: mutes then survive a restart, and a deployment of several instances,
+/// for exactly as long as the host's Data Protection keys do. The protector itself is created once per process.
+/// </para>
+/// <para>
+/// <b>No host behaviour changes.</b> The provider is the host's, from its container - which every studio host has, because
+/// the studio's own <c>AddRazorComponents()</c> calls <c>AddAntiforgery()</c>, and its <c>AddInteractiveServerComponents()</c>
+/// calls <c>AddServerSideBlazor()</c>, and both call <c>AddDataProtection()</c> (read at ASP.NET Core 10.0.13); Blazor
+/// protects every prerendered component with the same key ring already. The studio registers nothing itself: a container
+/// with no <see cref="IDataProtectionProvider" /> - a hand-built one - gets an in-memory, per-process
+/// <see cref="EphemeralDataProtectionProvider" /> instead, constructed here and registered nowhere, and its mutes then do
+/// not survive a restart.
+/// </para>
+/// </remarks>
+internal sealed class HealthMuteKeys
+{
+    /// <summary>The Data Protection purpose a browser's key is protected under: fixed, so every process of the host opens it.</summary>
+    internal const string Purpose = "PostgresStudio.Health.MuteKeys.v1";
+
+    /// <summary>How long a browser's key is: 256 bits, HMAC-SHA256's own block-sized secret.</summary>
+    internal const int KeyLength = 32;
+
+    private readonly IDataProtector protector;
+
+    /// <summary>The keys for the host's Data Protection, or - with none in the container - an in-memory, per-process provider's.</summary>
+    /// <param name="provider">The host's <see cref="IDataProtectionProvider" />, or <see langword="null" /> for none.</param>
+    public HealthMuteKeys(IDataProtectionProvider? provider)
+    {
+        UsesHostDataProtection = provider is not null;
+        protector = (provider ?? new EphemeralDataProtectionProvider()).CreateProtector(Purpose);
+    }
+
+    /// <summary>
+    /// The per-process keys every circuit that was built without the container's - a hand-built <see cref="HealthMutes" />, as
+    /// a test makes one - shares: an in-memory provider, so their mutes last as long as the process.
+    /// </summary>
+    internal static HealthMuteKeys InProcess { get; } = new(null);
+
+    /// <summary>Whether the browser's key is protected by the host's Data Protection, rather than by an in-memory provider.</summary>
+    public bool UsesHostDataProtection { get; }
+
+    /// <summary>A new random key for a browser that has none, with the form the browser keeps it in.</summary>
+    public (byte[] Key, string Protected) Create()
+    {
+        byte[] key = RandomNumberGenerator.GetBytes(KeyLength);
+        return (key, Convert.ToBase64String(protector.Protect(key)));
+    }
+
+    /// <summary>
+    /// The browser's key from the form it keeps, or <see langword="null" /> when there is none, or it is not one this host's
+    /// Data Protection can open - another key ring, keys since lost, a value somebody edited.
+    /// </summary>
+    /// <param name="protectedKey">What the browser kept.</param>
+    public byte[]? Open(string? protectedKey)
+    {
+        if (string.IsNullOrWhiteSpace(protectedKey))
+        {
+            return null;
+        }
+
+        try
+        {
+            byte[] key = protector.Unprotect(Convert.FromBase64String(protectedKey));
+            return key.Length == KeyLength ? key : null;
+        }
+        catch (Exception exception) when (exception is CryptographicException or FormatException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>What the browser keeps for <paramref name="muteKey" />: its HMAC-SHA256 under the browser's key, as lowercase hex.</summary>
+    /// <param name="key">The browser's key.</param>
+    /// <param name="muteKey">The finding's mute key.</param>
+    public static string Hash(ReadOnlySpan<byte> key, string muteKey)
+    {
+        ArgumentNullException.ThrowIfNull(muteKey);
+        return Convert.ToHexStringLower(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(muteKey)));
+    }
+}
+
+/// <summary>
+/// The findings this browser has muted: kept in the browser's <c>localStorage</c> as keyed hashes, read once per circuit.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Per visitor, and nowhere else.</b> A mute is one person's "I know about this one", so it lives in their
 /// browser (<c>martenStudio.health</c> in <c>js/studio.js</c>) and the studio writes nothing to the
-/// host's database or to any other visitor's view. A mute key is the store, the database and the finding's
+/// host's database or to any other visitor's view. A mute key is the source, the database and the finding's
 /// key, so muting a finding about one database leaves the same code on another alone.
 /// </para>
 /// <para>
-/// <b>Hashed before it leaves the circuit.</b> A finding's key can carry what its gate guards - E03's subject is
-/// <c>tenant/streamName</c> - and <c>localStorage</c> is readable by every script on the host's origin and by the next
-/// person at a shared machine. So the browser is handed, and keeps, only the SHA-256 of each key, as lowercase hex
-/// (<see cref="Hash" />), and a key is muted when its hash is in the list; no raw key reaches a JS call. It is a
-/// plain hash: it takes the ids off the list, and it does not stop somebody who can already guess a whole key from
-/// confirming the guess, which is all a mute is worth.
+/// <b>Hashed, under a key the browser cannot use, before it leaves the circuit.</b> A finding's key can carry what its gate
+/// guards - E03's subject is <c>tenant/streamName</c> - and <c>localStorage</c> is readable by every script on the host's
+/// origin and by the next person at a shared machine. So the browser is handed, and keeps, only the HMAC-SHA256 of each key
+/// under its own random key (<see cref="HealthMuteKeys" />), as lowercase hex, beside that key in the form the host's Data
+/// Protection protects it in; a key is muted when its hash is in the list, and no raw key - mute key or HMAC key - reaches a
+/// JS call. Nobody who reads the list can confirm a guess at a key without the host's Data Protection keys.
 /// </para>
 /// <para>
 /// <b>Correct without it.</b> A private window, blocked storage, a prerender or a closed tab all answer as an
 /// empty list, and every access is behind <see cref="StudioLiveUpdates.IsInteropUnavailable" /> on this side
-/// and a <c>try</c> on the browser's: what that costs is that nothing is muted, never a broken page.
+/// and a <c>try</c> on the browser's: what that costs is that nothing is muted, never a broken page. A key the host can no
+/// longer open - its key ring lost, or never persisted - is the same: a new key, and nothing muted.
 /// </para>
 /// <para>
 /// Scoped: one circuit is one browser tab. Bounded at <see cref="MaxKeys" />, newest kept, so the list in
@@ -42,12 +142,22 @@ internal sealed class HealthMutes
     /// <summary>The most mute keys a browser keeps.</summary>
     public const int MaxKeys = 200;
 
-    /// <summary>How long a stored entry is: a SHA-256, in hex.</summary>
+    /// <summary>How long a stored entry is: an HMAC-SHA256, in hex.</summary>
     private const int HashLength = 64;
 
+    private readonly HealthMuteKeys keys;
     private readonly List<string> hashes = [];
     private readonly Lock gate = new();
+    private byte[]? key;
+    private string? protectedKey;
     private bool loaded;
+
+    /// <summary>A circuit's mutes, keyed through the host's Data Protection.</summary>
+    /// <param name="keys">
+    /// The process's mute keys, as the studio's registration makes them - or <see langword="null" />, for a circuit built by
+    /// hand as a test builds one, to key through the in-process provider (<see cref="HealthMuteKeys.InProcess" />).
+    /// </param>
+    public HealthMutes(HealthMuteKeys? keys = null) => this.keys = keys ?? HealthMuteKeys.InProcess;
 
     /// <summary>Raised after the list changed, so the sidebar's badge and the page both redraw.</summary>
     public event Func<Task>? Changed;
@@ -67,29 +177,37 @@ internal sealed class HealthMutes
         }
     }
 
-    /// <summary>What the browser keeps for <paramref name="muteKey" />: its SHA-256 over UTF-8, as lowercase hex.</summary>
-    internal static string Hash(string muteKey)
+    /// <summary>
+    /// What the browser keeps for <paramref name="muteKey" />: its HMAC under this browser's key, or <see langword="null" />
+    /// before the browser's key is known.
+    /// </summary>
+    internal string? Hash(string muteKey)
     {
         ArgumentNullException.ThrowIfNull(muteKey);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(muteKey)));
+
+        lock (gate)
+        {
+            return key is null ? null : HealthMuteKeys.Hash(key, muteKey);
+        }
     }
 
     /// <summary>Whether <paramref name="muteKey" /> is muted in this browser.</summary>
     public bool IsMuted(string muteKey)
     {
-        string hash = Hash(muteKey);
+        ArgumentNullException.ThrowIfNull(muteKey);
 
         lock (gate)
         {
-            return hashes.Contains(hash, StringComparer.Ordinal);
+            return key is not null && hashes.Contains(HealthMuteKeys.Hash(key, muteKey), StringComparer.Ordinal);
         }
     }
 
     /// <summary>Reads the browser's list, once per circuit. A browser that cannot answer has muted nothing.</summary>
     /// <remarks>
-    /// A list that held anything but hashes - in practice the raw keys a pre-release 0.4 build stored - is written back
-    /// at once without it, so a raw key does not wait in <c>localStorage</c> for the next mute to overwrite it. Those
-    /// mutes are dropped, not carried over: nothing is migrated.
+    /// Anything stored that this host cannot use - a list from before wave 6 (plain SHA-256 hashes, or the raw keys a
+    /// pre-release 0.4 build stored), a key another key ring protected, a value that is not the studio's - is written back
+    /// at once as a new key and an empty list, so nothing stale waits in <c>localStorage</c> for the next mute to overwrite
+    /// it. Those mutes are dropped, not carried over: nothing is migrated.
     /// </remarks>
     public async Task LoadAsync(IJSRuntime jsRuntime, CancellationToken cancellationToken = default)
     {
@@ -111,18 +229,32 @@ internal sealed class HealthMutes
             // Prerendering, blocked storage, a tab that has gone: nothing is muted.
         }
 
-        IReadOnlyList<string> kept = Parse(stored, out bool dropped);
+        StoredMutes parsed = Parse(stored, out bool dropped);
+        byte[]? opened = keys.Open(parsed.Key);
         string? cleaned = null;
 
         lock (gate)
         {
             hashes.Clear();
-            hashes.AddRange(kept);
+
+            if (opened is not null)
+            {
+                key = opened;
+                protectedKey = parsed.Key;
+                hashes.AddRange(parsed.Muted?.OfType<string>() ?? []);
+            }
+            else
+            {
+                // No key, or one this host cannot open: whatever hashes came with it were made under another key.
+                (key, protectedKey) = keys.Create();
+                dropped |= stored is { Length: > 0 };
+            }
+
             loaded = true;
 
             if (dropped)
             {
-                cleaned = JsonSerializer.Serialize(hashes);
+                cleaned = SerializeLocked();
             }
         }
 
@@ -140,11 +272,15 @@ internal sealed class HealthMutes
         ArgumentNullException.ThrowIfNull(jsRuntime);
         ArgumentException.ThrowIfNullOrEmpty(muteKey);
 
-        string hash = Hash(muteKey);
+        // The browser's key first: a mute set before the list was read would otherwise start a key of its own and write
+        // over whatever the browser already kept.
+        await LoadAsync(jsRuntime, cancellationToken).ConfigureAwait(false);
+
         string json;
 
         lock (gate)
         {
+            string hash = HealthMuteKeys.Hash(key!, muteKey);
             hashes.RemoveAll(x => string.Equals(x, hash, StringComparison.Ordinal));
 
             if (muted)
@@ -157,14 +293,17 @@ internal sealed class HealthMutes
                 }
             }
 
-            json = JsonSerializer.Serialize(hashes);
+            json = SerializeLocked();
         }
 
         await WriteAsync(jsRuntime, json, cancellationToken).ConfigureAwait(false);
         await RaiseChangedAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Hands the browser the list of hashes to keep. A browser that cannot keep it simply forgets.</summary>
+    /// <summary>What the browser keeps: the protected key and the hashes, as JSON. Called under <see cref="gate" />.</summary>
+    private string SerializeLocked() => JsonSerializer.Serialize(new StoredMutes(protectedKey, [.. hashes]));
+
+    /// <summary>Hands the browser what to keep. A browser that cannot keep it simply forgets.</summary>
     private static async Task WriteAsync(IJSRuntime jsRuntime, string json, CancellationToken cancellationToken)
     {
         try
@@ -177,49 +316,61 @@ internal sealed class HealthMutes
         }
     }
 
-    /// <summary>The stored JSON list of hashes, or nothing for anything that is not one.</summary>
-    internal static IReadOnlyList<string> Parse(string? stored) => Parse(stored, out _);
+    /// <summary>What the browser stored, or nothing for anything that is not the studio's.</summary>
+    internal static StoredMutes Parse(string? stored) => Parse(stored, out _);
 
     /// <summary>
-    /// The stored JSON list of hashes, newest <see cref="MaxKeys" />, and whether anything stored was left out: an
-    /// entry that is not a SHA-256 in lowercase hex (a raw key from a pre-release build, dropped rather than
-    /// migrated), a duplicate, one past the bound, or a value that is not a list at all.
+    /// What the browser stored - its protected key and its hashes, newest <see cref="MaxKeys" /> - and whether anything
+    /// stored was left out: an entry that is not an HMAC-SHA256 in lowercase hex, a duplicate, one past the bound, or a value
+    /// that is not the studio's object at all (a list from before wave 6 among them, dropped rather than migrated).
     /// </summary>
-    internal static IReadOnlyList<string> Parse(string? stored, out bool dropped)
+    internal static StoredMutes Parse(string? stored, out bool dropped)
     {
         dropped = false;
 
         if (string.IsNullOrWhiteSpace(stored))
         {
-            return [];
+            return StoredMutes.None;
         }
 
-        string?[]? parsed;
+        StoredMutes? parsed;
 
         try
         {
-            parsed = JsonSerializer.Deserialize<string?[]>(stored);
+            parsed = JsonSerializer.Deserialize<StoredMutes>(stored);
         }
         catch (JsonException)
         {
             dropped = true;
-            return [];
+            return StoredMutes.None;
         }
 
         if (parsed is null)
         {
             dropped = true;
-            return [];
+            return StoredMutes.None;
         }
 
-        List<string> kept = [.. parsed.OfType<string>().Where(IsHash).Distinct(StringComparer.Ordinal).TakeLast(MaxKeys)];
-        dropped = kept.Count != parsed.Length;
-        return kept;
+        string?[] muted = parsed.Muted ?? [];
+        List<string> kept = [.. muted.OfType<string>().Where(IsHash).Distinct(StringComparer.Ordinal).TakeLast(MaxKeys)];
+        dropped = kept.Count != muted.Length || parsed.Muted is null;
+        return new StoredMutes(parsed.Key, [.. kept]);
     }
 
-    /// <summary>Whether <paramref name="entry" /> has the shape <see cref="Hash" /> gives: 64 lowercase hex digits.</summary>
+    /// <summary>Whether <paramref name="entry" /> has the shape <see cref="HealthMuteKeys.Hash" /> gives: 64 lowercase hex digits.</summary>
     private static bool IsHash(string entry) =>
         entry.Length == HashLength && entry.All(static c => c is (>= '0' and <= '9') or (>= 'a' and <= 'f'));
+
+    /// <summary>What <c>localStorage</c> keeps: the browser's key as the host's Data Protection protected it, and the hashes.</summary>
+    /// <param name="Key">The protected key, base64.</param>
+    /// <param name="Muted">The hashes, oldest first.</param>
+    internal sealed record StoredMutes(
+        [property: JsonPropertyName("key")] string? Key,
+        [property: JsonPropertyName("muted")] string?[]? Muted)
+    {
+        /// <summary>Nothing stored.</summary>
+        public static StoredMutes None { get; } = new(null, []);
+    }
 
     /// <summary>
     /// Tells every listener, one at a time, and lets none of them break the others - the
