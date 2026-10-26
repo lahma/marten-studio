@@ -174,6 +174,24 @@ internal sealed class StudioText
     /// <summary>The Relationships legend's line for a key between plain tables.</summary>
     public required string RelationshipTableKey { get; init; }
 
+    /// <summary>The caption of the Relationships table, the diagram's accessible form: what each of its rows is.</summary>
+    public required string RelationshipTableCaption { get; init; }
+
+    /// <summary>The accessible name of the list, under the Relationships diagram, of what no foreign key reaches.</summary>
+    public required string RelationshipIsolatedLabel { get; init; }
+
+    /// <summary>The Relationships screen's note above the foreign keys it cannot draw.</summary>
+    public required string RelationshipUnmatchedNote { get; init; }
+
+    /// <summary>
+    /// The object detail's Relationships tab on the foreign keys it cannot draw, after "Its foreign keys have" or "These
+    /// foreign keys have".
+    /// </summary>
+    public required string RelationshipNeighbourhoodUnmatched { get; init; }
+
+    /// <summary>What the Relationships screen says when the tables could not be read, before the reason.</summary>
+    public required string RelationshipTablesUnavailable { get; init; }
+
     // ---------------------------------------------------------------------------------------------------------------
     // Health.
 
@@ -487,6 +505,16 @@ internal sealed class StudioText
         ExamplesIntro = "Built from this store's own aliases and tables. Click one to load it.",
         ExamplesEmpty = "This store has no document type to build an example from.",
         RelationshipTableKey = "A key on a table Marten does not map - enforced by Postgres.",
+        RelationshipTableCaption =
+            "Every foreign key between the document types and tables on the diagram, with the end that points, the end pointed "
+            + "at, the columns, whether the database has the constraint, and what a delete does.",
+        RelationshipIsolatedLabel = "Document types and tables with no foreign key",
+        RelationshipUnmatchedNote =
+            "These foreign keys have an end that is not a document type of this store, so there is nothing to draw them between.",
+        RelationshipNeighbourhoodUnmatched =
+            "an end that is not a document type of this store or a table the studio can place, so there is nothing to draw them "
+            + "between.",
+        RelationshipTablesUnavailable = "Only document types are drawn:",
 
         StatementsOnSessionsPage = SessionEvidence.StatementsOnSessionsPage,
         ServerSettingComment = "A server setting, not a StoreOptions one",

@@ -110,6 +110,14 @@ internal static class PostgresStudioText
         ExamplesIntro = "Catalog reads that run against any database. Click one to load it.",
         ExamplesEmpty = "There is no example to offer.",
         RelationshipTableKey = "A foreign key - enforced by Postgres.",
+        RelationshipTableCaption =
+            "Every foreign key between the tables on the diagram, with the end that points, the end pointed at, the columns, "
+            + "whether the database has the constraint, and what a delete does.",
+        RelationshipIsolatedLabel = "Tables with no foreign key",
+        RelationshipUnmatchedNote =
+            "These foreign keys have an end in a table this studio does not draw, so there is nothing to draw them between.",
+        RelationshipNeighbourhoodUnmatched = "an end in a table this studio does not draw, so there is nothing to draw them between.",
+        RelationshipTablesUnavailable = "No table is drawn:",
 
         StatementsOnSessionsPage =
             "The statements themselves are on Database › Sessions, behind PostgresStudioOptions.Capabilities.ViewDatabaseActivity, "

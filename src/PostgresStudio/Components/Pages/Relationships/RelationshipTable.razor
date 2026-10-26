@@ -1,6 +1,8 @@
 @using PostgresStudio.Services.Relationships
+@using PostgresStudio.Services.Settings
 @using GraphModel = PostgresStudio.Services.Relationships.RelationshipGraph
 @using PostgresStudio.Components.Shared
+@inject IStudioSettings Settings
 
 @*
     The same relationships the diagram draws, as a table.
@@ -14,14 +16,15 @@
     A key between two document types reads as it always has. A key with a table at either end names the
     table as a square chip linking to its object detail, shows its label with every column of the key
     beneath it, and says whether Postgres has validated it.
+
+    The caption is the studio's own (StudioText): a studio over plain data sources has no document type to
+    name. The drift states' titles below name StoreOptions and stay as they are: only a key between
+    document types is ever in one, and only MartenStudio has those.
 *@
 
 <TableScroll Label="Relationships table">
     <table class="ms-table ms-graph-table @(Compact ? "ms-graph-table-compact" : null)">
-        <caption class="ms-sr-only">
-            Every foreign key between the document types and tables on the diagram, with the end that points,
-            the end pointed at, the columns, whether the database has the constraint, and what a delete does.
-        </caption>
+        <caption class="ms-sr-only">@Settings.Text.RelationshipTableCaption</caption>
         <thead>
             <tr>
                 <th scope="col">From</th>
