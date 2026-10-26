@@ -121,6 +121,33 @@ public class PostgresStudioOptionsTests
             .Should().Throw<OptionsValidationException>().WithMessage("*AddDataSource and AddDatabaseSource names must each be*");
     }
 
+    /// <summary>
+    /// A name that ends in a line break is refused by the same check and with the same sentence: .NET's <c>$</c> matches
+    /// before a final line feed, so the pattern is anchored with <c>\z</c>, and "tenant_a\n" is not a key of its own.
+    /// </summary>
+    [Theory]
+    [InlineData("tenant_a\n", false)]
+    [InlineData("tenant_a\r\n", false)]
+    [InlineData("tenant_a\u2028", false)]
+    [InlineData("tenant_a\n", true)]
+    [InlineData("tenant_a\r\n", true)]
+    [InlineData("tenant_a\u2028", true)]
+    public void A_source_name_ending_in_a_line_break_fails(string name, bool databaseSource)
+    {
+        ResolveAction(options =>
+            {
+                if (databaseSource)
+                {
+                    options.AddDatabaseSource(name, static _ => null!);
+                }
+                else
+                {
+                    options.AddDataSource(name, static _ => null!);
+                }
+            })
+            .Should().Throw<OptionsValidationException>().WithMessage("*AddDataSource and AddDatabaseSource names must each be*");
+    }
+
     [Fact]
     public void A_source_name_longer_than_64_characters_fails()
     {
@@ -188,6 +215,18 @@ public class PostgresStudioOptionsTests
         ResolveAction(static options => options.HealthInterval = TimeSpan.FromSeconds(1)).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.HealthInterval*");
         ResolveAction(static options => options.Capabilities = null!).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioCapabilities.All()*");
         ResolveAction(static options => options.BrowsableSchemas.Add("a\"b")).Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.BrowsableSchemas*");
+    }
+
+    /// <summary>The console's role is anchored the same way: a line break after a plain identifier is not one.</summary>
+    [Theory]
+    [InlineData("studio_reader\n")]
+    [InlineData("studio_reader\r\n")]
+    [InlineData("studio_reader\u2028")]
+    public void A_sql_console_role_ending_in_a_line_break_fails(string role)
+    {
+        ResolveAction(options => options.SqlConsoleRole = role)
+            .Should().Throw<OptionsValidationException>().WithMessage("*PostgresStudioOptions.SqlConsoleRole must be a plain Postgres identifier*");
+        Resolve(static options => options.SqlConsoleRole = "studio_reader").SqlConsoleRole.Should().Be("studio_reader");
     }
 
     [Fact]

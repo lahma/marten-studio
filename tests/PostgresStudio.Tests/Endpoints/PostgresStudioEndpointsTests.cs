@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
@@ -170,14 +171,43 @@ public class PostgresStudioEndpointsTests
         studio.Should().OnlyContain(static x => x.Metadata.GetOrderedMetadata<IAuthorizeData>().Any(static y => y.Policy == "ops"));
     }
 
+    /// <summary>
+    /// Registering the studio and never mapping it changes nothing about how the host starts, as MartenStudio's twin
+    /// (<c>BrowseDatabaseOptionsTests</c>) holds: no options are built (the configure callback never runs), the
+    /// application's data source is never resolved, and nothing is logged at Warning or above - with <c>"*"</c> and no
+    /// <c>SqlConsoleRole</c> configured, which a host that did map the studio would be warned about (event 9230).
+    /// </summary>
     [Fact]
     public async Task Registering_without_mapping_changes_nothing_and_starts()
     {
-        await using WebApplication app = CreateApp();
+        CapturingLoggerProvider logs = new();
+        int configured = 0;
+        int resolved = 0;
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        builder.Logging.ClearProviders();
+        builder.Logging.AddProvider(logs);
+        builder.Services.AddSingleton(_ =>
+        {
+            Interlocked.Increment(ref resolved);
+            return NpgsqlDataSource.Create(ConnectionString);
+        });
+        builder.Services.AddPostgresStudio(options =>
+        {
+            Interlocked.Increment(ref configured);
+            options.BrowsableSchemas.Add("*");
+        });
+
+        await using WebApplication app = builder.Build();
 
         await app.StartAsync(Token);
         await app.StopAsync(Token);
 
         RouteEndpoints(app).Should().BeEmpty("nothing is mapped until the host maps it");
+        configured.Should().Be(0, "nothing built PostgresStudioOptions for a host that never mapped the studio");
+        resolved.Should().Be(0, "nothing resolved the application's NpgsqlDataSource for a studio nobody can open");
+        logs.Entries.Should().NotBeEmpty("the capture is the host's own logger, and the host logged its start through it");
+        logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);
     }
 }

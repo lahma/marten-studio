@@ -329,6 +329,7 @@ internal sealed partial class HealthCheckRegistry
         return false;
     }
 
-    [GeneratedRegex("^[DETCRSK][0-9]{2}$", RegexOptions.CultureInvariant)]
+    // \A and \z, because .NET's $ also matches before a final line feed.
+    [GeneratedRegex(@"\A[DETCRSK][0-9]{2}\z", RegexOptions.CultureInvariant)]
     private static partial Regex CodeShape();
 }
