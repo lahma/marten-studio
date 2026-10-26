@@ -9,6 +9,9 @@ whole - because that is what the Configuration page asks before it lists a datab
 the studio's own options the same way, in both studios. K08 is the one that reads the server too: three timeouts in
 `pg_settings`, a catalog read, so it is shown at the database-wide gate. Back to the [index](../health.md).
 
+**Studios.** K05, K06 and K07 run in both studios. K01 to K04 and K08 read a Marten store's configuration, and run
+only in Marten Studio ([codes.md](codes.md)).
+
 ## K01 AutoCreate in Production
 
 **Warning.** The database's `AutoCreate` is `All` or `CreateOrUpdate` and the host's `IHostEnvironment`

@@ -4,7 +4,8 @@ namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
 /// Keeps the code blocks in <c>README.md</c> equal to the <c>#region</c> bodies they were taken from in
-/// <c>samples/MartenStudio.Sample/Program.cs</c>.
+/// <c>samples/MartenStudio.Sample/Program.cs</c>, and those in <c>src/PostgresStudio/README.md</c> - Postgres Studio's
+/// package readme - equal to the regions of <c>samples/PostgresStudio.Sample/Program.cs</c>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -44,47 +45,63 @@ public class ReadmeSnippetTests
         RegexOptions.Multiline | RegexOptions.Compiled,
         TimeSpan.FromSeconds(5));
 
-    [Fact]
-    public void Every_marked_readme_snippet_equals_its_region_in_the_sample()
+    /// <summary>The Marten Studio readme, the repository's own, and the Postgres Studio package's readme.</summary>
+    public static TheoryData<string, string> Readmes => new()
     {
-        var snippets = ReadmeSnippets();
+        { "README.md", "samples/MartenStudio.Sample/Program.cs" },
+        { "src/PostgresStudio/README.md", "samples/PostgresStudio.Sample/Program.cs" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Readmes))]
+    public void Every_marked_readme_snippet_equals_its_region_in_the_sample(string readme, string sample)
+    {
+        var snippets = ReadmeSnippets(readme);
 
         snippets.Count.Should().BeGreaterThanOrEqualTo(
             MinimumSnippets,
-            "README.md has to carry at least {0} '<!-- snippet: name -->' blocks, or this test proves nothing",
+            "{0} has to carry at least {1} '<!-- snippet: name -->' blocks, or this test proves nothing",
+            readme,
             MinimumSnippets);
 
-        var regions = SampleRegions();
+        var regions = SampleRegions(sample);
 
         foreach ((string name, string body) in snippets)
         {
             regions.Should().ContainKey(
                 name,
-                "README.md names snippet '{0}', so samples/MartenStudio.Sample/Program.cs must have a " +
-                "'#region {0}'",
-                name);
+                "{0} names snippet '{1}', so {2} must have a '#region {1}'",
+                readme,
+                name,
+                sample);
 
             Normalize(body).Should().Be(
                 Normalize(regions[name]),
-                "the README block for '{0}' must be the '#region {0}' body in " +
-                "samples/MartenStudio.Sample/Program.cs, character for character - a README nobody " +
-                "compiles is a README that stops being true",
-                name);
+                "the {0} block for '{1}' must be the '#region {1}' body in {2}, character for character - a " +
+                "README nobody compiles is a README that stops being true",
+                readme,
+                name,
+                sample);
         }
     }
 
     /// <summary>
-    /// The two snippets the "Register and mount" section is built from, by name, so deleting one is a
+    /// The snippets each "Register and mount" section is built from, by name, so deleting one is a
     /// failure rather than a quietly smaller test.
     /// </summary>
     [Theory]
-    [InlineData("readme_register")]
-    [InlineData("readme_map")]
-    public void The_readme_carries_the_registration_and_the_mapping(string name)
+    [InlineData("README.md", "readme_register")]
+    [InlineData("README.md", "readme_map")]
+    [InlineData("README.md", "readme_health")]
+    [InlineData("src/PostgresStudio/README.md", "readme_register")]
+    [InlineData("src/PostgresStudio/README.md", "readme_map")]
+    [InlineData("src/PostgresStudio/README.md", "readme_health")]
+    public void The_readme_carries_the_registration_and_the_mapping(string readme, string name)
     {
-        ReadmeSnippets().Should().ContainKey(
+        ReadmeSnippets(readme).Should().ContainKey(
             name,
-            "the README's registration section is compiled from '{0}'",
+            "{0}'s registration section is compiled from '{1}'",
+            readme,
             name);
     }
 
@@ -165,12 +182,11 @@ public class ReadmeSnippetTests
         Normalize(regions["License"]).Should().Be("// not a snippet");
     }
 
-    private static Dictionary<string, string> ReadmeSnippets() =>
-        Parse(File.ReadAllText(RepositoryRoot.Combine("README.md")));
+    private static Dictionary<string, string> ReadmeSnippets(string readme) =>
+        Parse(File.ReadAllText(RepositoryRoot.Combine(readme.Split('/'))));
 
-    private static Dictionary<string, string> SampleRegions() =>
-        ReadRegions(File.ReadAllText(
-            RepositoryRoot.Combine("samples", "MartenStudio.Sample", "Program.cs")));
+    private static Dictionary<string, string> SampleRegions(string sample) =>
+        ReadRegions(File.ReadAllText(RepositoryRoot.Combine(sample.Split('/'))));
 
     private static Dictionary<string, string> Parse(string markdown)
     {

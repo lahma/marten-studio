@@ -27,7 +27,7 @@ committed change.
 6. **Never hand-edit `tests/**/Verify/*.verified.txt`.** If your change moves the public API, run the test,
    read the diff deliberately, say in your report exactly what moved and why, then accept the baseline.
 7. **No MudBlazor and no third-party UI, CSS or icon library, ever.** Styling is hand-rolled, prefixed
-   `ms-`, driven by the design tokens in `wwwroot/css/marten-studio.css`.
+   `ms-`, driven by the design tokens in `src/PostgresStudio/wwwroot/css/studio.css`.
 8. **No `async void`.** Component events are `Func<Task>` dispatched through `InvokeAsync` with a
    `try`/`catch` that surfaces the failure in the UI.
 9. **No raw SQL outside the `Internal/Sql` builders**; identifiers quoted, values parameters. Every mutating

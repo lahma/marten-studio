@@ -12,14 +12,45 @@ namespace PostgresStudio.Services;
 /// in MartenStudio's <c>MartenLog</c>: the schema apply (9206), projection rebuilds and daemon control (9207-9209), the
 /// document round trip (9211), the daemon, tracker, projection and event-store anomalies (9212, 9215-9218) and LINQ
 /// mode (9260-9264). No id moved and no message changed; what changed is only which class declares an event, which no
-/// host can see. Every event a later packet needs is already declared on one side or the other, so no packet after
-/// this one adds a method here: a shared event is here, and a Marten one is in <c>MartenLog</c>.
+/// host can see. A shared event is here, and a Marten one is in <c>MartenLog</c>; a later feature adds its events in a
+/// partial file of its own (<c>StudioLog.Storage.cs</c>, <c>MartenLog.Query.cs</c>), never by renumbering. Postgres
+/// Studio logs every shared event under the same id, level and properties in its own words (<c>PostgresStudioLog</c>), so
+/// an id names one event whichever studio logged it.
 /// </para>
 /// <para>
 /// Here: 9200-9205 (audit, the SQL console), 9210 (a source that will not build), 9213, 9214, 9219-9222 (listing,
 /// version, tenant discovery and policy, live-update and health-check anomalies), 9230 (the database browser's
-/// configuration notice), 9235-9237 (row reads), 9245-9246 (Sessions), 9270 (the health export), 9280-9281 (the
-/// statement checks) and 9290 (platform detection).
+/// configuration notice), 9235-9237 (row reads), 9245-9246 (Sessions), 9250-9251 (the diagnostics API: one call, at
+/// Debug, and a snapshot section it could not read; 9252-9254 are held for it), 9270 (the health export), 9280-9281
+/// (the statement checks) and 9290 (platform detection). Outside this class: 9300-9301 are Postgres Studio's own
+/// (<c>PostgresLog</c>: an unkeyed data source not listed, and database names a host source listed that were left out),
+/// and 9320-9329 MartenStudio's (<c>MartenLog.Deps.cs</c>: 9320, a subscription rewind Marten refused).
+/// </para>
+/// <para>
+/// <b>9400-9519 are 0.5's pages and checks</b> (issue #8), in blocks of ten, each declared in its feature's own partial
+/// file, in both studios' words:
+/// </para>
+/// <list type="bullet">
+/// <item>9400-9409 (the PostgreSQL version facts) are reserved and unused.</item>
+/// <item>9410 is the Storage page's throttled read failure (9410-9419, <c>StudioLog.Storage.cs</c>,
+/// <c>PostgresStudioLog.Storage.cs</c>).</item>
+/// <item>9420 (Warning) is a bloat measure a visitor pressed that failed for an unexpected reason, and 9421 (Debug) one
+/// refused for an expected one (9420-9429, Maintenance; 9422-9429 are free).</item>
+/// <item>9430-9431 are the Replication page's: a facts section that failed, at the throttle's level, and a tablespace
+/// size the visitor asked for that failed, one line per click.</item>
+/// <item>9440 is the Server page's: its facts read, a section of which failed, at the throttle's level (9440-9449;
+/// 9441-9449 are unassigned).</item>
+/// <item>9450-9452 are the Statements page's: refused by its gate (Debug), its throttled read failure, and its first read
+/// in a circuit (Information, the audit line).</item>
+/// <item>9460-9489 are held for plan insights, hypothetical indexes and the Partitions page, which were cut to 0.6, and
+/// are unused.</item>
+/// <item>9490-9499 (the index and browser lints) are reserved and unused: those checks log nothing of their own.</item>
+/// <item>9500 and 9501 are Aurora's (9500-9509): the host's capacity source that threw, and Aurora's own reads that
+/// failed, both throttled.</item>
+/// <item>9510-9519 (MartenStudio's whole-database table set) are reserved and unused.</item>
+/// </list>
+/// <para>
+/// A value a visitor could shape reaches any of these only through <see cref="StudioLogValue" /> (AGENTS.md hard rule 5).
 /// </para>
 /// <para>
 /// The first twelve ids (9200-9211) are the audit events

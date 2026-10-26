@@ -1,104 +1,193 @@
 # 0.5.0
 
-- Marten 9.54.1 is the latest-tested Marten (from 9.50.2); the package still depends on Marten 9.39.0 or later.
-- On a store with `Events.UseTenantPartitionedEvents`, the dead-letter page's Skip event works from Marten 9.51: it
-  marks the dead letter's own tenant's event skipped and no other tenant's event of that number, and is asked as that
-  tenant (with "All tenants" selected, the dead letter's). Below 9.51 it stays refused, because Marten skips by number
-  alone.
-- Rewind subscription on such a store works from Marten 9.51 with JasperFx 2.91: it stops, rewinds and restarts the
-  dead letter's tenant's agents alone and deletes only that tenant's dead letters, so it is authorized for that tenant
-  rather than for the database as a whole, and it is offered only where the async daemon in this process runs that
-  tenant's agent of the projection (on HotCold's cold node or a distributed host it would otherwise start a second
-  one). The database-wide rewind is never offered on such a store; below 9.51 the rewind stays refused. A tenant id
-  with a `:` in it is not rewound, because its agents' name does not read back as that tenant's and Marten would
-  refuse only after the daemon had stopped them; and neither rewind lets Marten's "Unknown subscription name ...
-  Available options are ..." - every subscription the store has - reach the page or the audit log.
-- Compacting a stream whose folded events carry DCB tags works from Marten 9.51, which deletes their tag rows with
-  them; the snapshot keeps the last event's tags. Below 9.51 Postgres still refuses and nothing changes, and the
-  dialog says which this host's Marten does.
-- The Schema screen's Check schema, Preview migration and Generate script say what they may create on the host's
-  Marten: Marten's HiLo objects (`mt_hilo`, `mt_get_next_hi`) below 9.50.3, nothing from it.
-- The apply section lists notes beside the destructive statements: an index built without `CONCURRENTLY` on an
-  existing table, which makes writers wait while it builds (Marten 9.51's new `seq_id` index on each DCB tag table
-  built before it is one, and every tagged append waits for it), and Weasel 9.46's partition-index rebuild, whose
-  `DROP INDEX CONCURRENTLY IF EXISTS` is no longer listed as "drops an index". Any other `drop index` still is.
-- The Configuration page shows `HighWaterProgressStallThreshold` beside "High water staleness" where the host's
-  JasperFx has it (2.91, Marten 9.51).
-- A requirement first met by a patch release names the patch: "Marten 9.50.3+", not "Marten 9.50+". The
-  transient/permanent classification of a shard failure is known to arrive with Marten 9.50.3.
-- LINQ mode: from JasperFx 2.91 (Marten 9.51) a date with no offset is read as UTC by JasperFx itself, and the
-  studio's own correction stays idle, as measured.
-- From Marten 9.52 a rebuild replays from the projection's start floor rather than from the first event, and the
-  rebuild dialog says so: it names the floor stored for the projection in `mt_event_projection_floors` (read with
-  the studio's own SQL, never through Marten's floor read, which can create the event store), takes it off the
-  events to replay, says that a document only the events at or below it built is deleted and not rebuilt, and
-  where none is stored, that a floor the projection's code sets (`SubscribeFromSequence`, `SubscribeFromTime`)
-  may still apply. A store migrated below 9.52 shows the new table as one non-destructive `CREATE TABLE` on the
-  Schema screen.
-- D05 no longer offers `SkipApplyErrors = true` for a database error in projection code (a missing column or
-  table, a permission), which from Marten 9.52 pauses the shard at any setting and is never dead-lettered: where
-  the daemon in this process says the failure is one, the finding says what to fix instead; where nothing can
-  tell, the line names that exception.
-- The Advance high water mark dialog says what the advance skips: every sequence number below the new mark with
-  no committed event, an append still in flight included - not the events a projection has still to process.
-  From Marten 9.52 it also says that the advance first ensures the event store's storage - with no tenant
-  selected in every database of the store, each under its own `AutoCreate` - and on a store that numbers events
-  per tenant, which tenants' marks it moves; the button's hover text says what the first press may create.
-- A composite projection's members are listed under their composite, and no longer as "Unregistered shards"
-  that nothing advances; they offer no Start or Stop of their own.
-- **Postgres Studio**, a second package (`PostgresStudio`): the studio for an application that uses plain Npgsql and
-  no Marten. `services.AddPostgresStudio()` and `app.MapPostgresStudio()` serve it at `/postgres`, with the same
-  authorization layers (`AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy`) and startup
-  guard as Marten Studio. It lists the application's unkeyed singleton `NpgsqlDataSource` by itself, as the source
-  `default`; a keyed one only through `AddDataSource(name, resolve)`; and a host's own set of databases, one per
-  tenant say, through `AddDatabaseSource(name, resolve)` and an `IPostgresDatabaseSource`. It shows the Overview, the
-  database browser (tables, views, functions, triggers, sequences and types, and their rows), Sessions,
-  Relationships, Health, the SQL console and Activity. `BrowseDatabase`, `ViewDatabaseActivity` and `RunSql` are off
-  by default. `BrowsableSchemas` defaults to `public`, whose structure anyone the studio admits may see; rows and
-  definitions need `BrowseDatabase` and the write policy. It never reads a Marten table's rows (`mt_`) and references
-  no Marten package. It needs Npgsql 8.0.3 or later and is tested at 8.0.3 and 10.0.3; in a Marten Studio
-  application Npgsql stays the one Marten brings. `samples/PostgresStudio.Sample` runs it over an admin database and
-  three tenant databases.
+0.5 makes the studio two packages, and adds the health and diagnostics work of issue #8. Postgres Studio
+(`PostgresStudio`) is the studio for any application that registers an `NpgsqlDataSource`, Marten or not, and Marten
+Studio is now built on it. Issue #8 brings five pages (Statements, Maintenance, Storage, Replication and Server), 24 new
+health checks, Amazon Aurora awareness, PostgreSQL 14 to 18 as a tested range, and a public diagnostics API,
+`IPostgresDiagnostics`, that gives the host's own code what the studio reads.
+
+- Marten Studio is two packages. The screens that need no Marten - the shell, the database browser, Sessions, Health
+  and the pages beside it, the SQL console, Relationships, Activity and the JSON viewer - moved into PostgresStudio, a
+  Razor Class Library that references Npgsql and no Marten, and MartenStudio references it. A host that references
+  MartenStudio gets PostgresStudio transitively and changes nothing in its code. Upgrade the two together: a central
+  `PackageVersion` for PostgresStudio, if the host has one, must equal MartenStudio's, or be removed.
 - MartenStudio depends on exactly its own PostgresStudio, `PostgresStudio [0.5.0]` in the nuspec rather than
   `>= 0.5.0`: the two assemblies are one program, and PostgresStudio grants MartenStudio its internals.
   `AddMartenStudio()` and `AddHealthChecks().AddMartenStudio()` throw an `InvalidOperationException` when the
   application loads no PostgresStudio or another build of it, and say which version to pin. The usual cause is a
   central `PackageVersion` for PostgresStudio at another version under `CentralPackageTransitivePinningEnabled`,
   which makes NuGet drop it from the graph without a warning.
-- One studio per application. `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and the
-  reverse. `MapMartenStudio()` throws in an application that registered Postgres Studio, and `MapPostgresStudio()` in
-  one that registered Marten Studio, each naming the map call to make instead.
-- A link to another store's database opens that database: `?store=B&db=X` opens B's database `X` when B lists it,
-  where it opened B's first database before. On Documents, a document, and the database browser's object list,
-  object and row pages, `?store=B` with no `db=` now opens B's database of the same name as the one open, if B lists
-  one, and B's first database otherwise.
-- The Marten sample checks its database before Marten touches it. When another build of the sample seeded it, or its
-  demo document tables hold rows with no seed marker, startup drops `studio_sample` and `studio_sample_events`
-  (`drop schema … cascade`, which also drops whatever in other schemas depends on them) and seeds them again: on the
-  throwaway container, and on any database when the host is started with `--allow-data-generation`. Any other
-  database is left alone, and the host stops with one line that says what to do.
-- `SqlConsoleRole` with a trailing line break is refused at startup like any other value that is not a plain
-  identifier (.NET's `$` matched before a final line feed). Relationships logs a scope that is refused or names
-  nothing at Debug, not Warning. A scope change that names a tenant the new store or database does not list keeps
-  the previous tenant only when the new store lists it too, and otherwise opens all tenants; before, it carried the
-  previous store's tenant over unchecked.
+- The studio's static assets moved from `{Path}/_content/MartenStudio/` to `{Path}/_content/PostgresStudio/`, and the
+  two files were renamed: `css/marten-studio.css` is `css/studio.css` and `js/marten-studio.js` is `js/studio.js`. A
+  Content-Security-Policy, WAF rule or proxy allow-list that names the old path must name the new one. Every page's
+  URL under `{Path}` is unchanged, and `{Path}/_framework/blazor.web.js` still comes from the host's own static web
+  assets.
+- The shared services log under `PostgresStudio.*` categories instead of `MartenStudio.*`: the action log, the
+  database browser and its row reads, Sessions, the health advisor and its export, the SQL console (9204 and 9205, for
+  `RunSql` and for Mode A's `EXPLAIN`, under `PostgresStudio.Services.Query.SqlConsoleService`), Relationships, live
+  updates and the scope state. Event ids, levels and message templates are unchanged, so a filter or alert on an event
+  id keeps working; one on the category prefix `MartenStudio` should add `PostgresStudio`. Event 9213 from the health
+  export now logs under `MartenStudio.Services.MartenStudioSourceProvider`.
+- Marten 9.54.1 is the latest-tested Marten (from 9.50.2); the package still depends on Marten 9.39.0 or later.
+- PostgresStudio depends on Npgsql 8.0.3 or later and is tested at 8.0.3 and at 10.0.3: 7.x reports no pool
+  instruments, and 8.0.0 to 8.0.2 carry CVE-2024-32655. In a Marten Studio application Npgsql stays the one Marten
+  brings, which is never lower than PostgresStudio's floor; Marten Studio on Npgsql 10 is not a tested combination.
 - PostgreSQL 14 is the documented floor, and 14 to 18 are supported, each tested by a version matrix that also runs
   PostgreSQL 19's release candidate as a preview (`docs/postgres-versions.md`). A server below 14 is still read; S01's
   finding and the Overview's server line in both studios say it is below the supported floor (14). S01 knows
   PostgreSQL 19 and says its dates are planned until postgresql.org lists them.
-- The database browser's Constraints tab no longer lists a `…_not_null` constraint of kind "Other" for every NOT NULL
-  column on PostgreSQL 18, which stores NOT NULL in `pg_constraint` (the Columns tab already says which columns are
-  NOT NULL), and on 17 and later the Types list no longer shows a domain's NOT NULL as one of its constraints (the
-  domain's NOT NULL flag already says it).
+- Postgres Studio, the second package: the studio for an application that uses plain Npgsql and no Marten.
+  `services.AddPostgresStudio()` and `app.MapPostgresStudio()` serve it at `/postgres`, with the same authorization
+  layers (`AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy`, asked about a
+  `PostgresStudioResource`) and startup guard as Marten Studio. It lists the application's unkeyed singleton
+  `NpgsqlDataSource` by itself, as the source `default`; a keyed one only through `AddDataSource(name, resolve)`; and a
+  host's own set of databases, one per tenant say, through `AddDatabaseSource(name, resolve)` and an
+  `IPostgresDatabaseSource`. It never takes a connection string. It shows the Overview, the SQL console, the database
+  browser (tables, views, functions, triggers, sequences and types, and their rows), Sessions, Relationships, Health,
+  Statements, Maintenance, Storage, Replication, Server and Activity. `BrowseDatabase`, `ViewDatabaseActivity` and
+  `RunSql` are off by default. `BrowsableSchemas` defaults to `public`, whose structure anyone the source policy admits
+  may see; rows and definitions need `BrowseDatabase` and the write policy. It never reads a Marten table's rows
+  (`mt_`) and references no Marten package. See `docs/postgresstudio.md`.
+- One studio per application. `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and the
+  reverse. `MapMartenStudio()` throws in an application that registered Postgres Studio, and `MapPostgresStudio()` in
+  one that registered Marten Studio, each naming the map call to make instead.
+- Postgres Studio's health advisor judges every table of the schemas `BrowsableSchemas` admits (issue #8, G1). Each
+  table is the application's own, a recognised library's (Quartz.NET, Wolverine, EF Core's and FluentMigrator's
+  history; exempt from the index-design rules only), or somebody else's; a Marten store's `mt_` table is that store's,
+  and the advisor says so. The set is capped at the 2,000 largest tables by estimated size, and every table check says
+  what was left out.
+- Postgres Studio's table remedies are migration SQL (`ALTER TABLE … SET (…)`, `CREATE`, `DROP` or
+  `REINDEX INDEX CONCURRENTLY`), shown under "For your own migrations - the studio never runs this" (issue #8, G12).
+  Every name is quoted. A name that cannot be quoted, or that carries a line break, a control or format character, or
+  a Unicode line or paragraph separator, gets no statement, and nor does a Marten table. Marten Studio's
+  configuration-line remedies apply the same rule to the index names they print.
+- Postgres Studio never reads a Marten table's rows or a view over one, and shows a Marten object's definition only
+  with `BrowseDatabase`. Its database page says once that the database holds a Marten store, and points to Marten
+  Studio.
+- Postgres Studio speaks of data sources, never of a store. Its health checks, their titles and status rows, the
+  health export's description and the Health, Sessions and Server pages' empty states no longer say "store", name
+  Marten's API or `StoreOptions`, or give Marten code as a remedy on a plain Postgres host. It logs Marten Studio's
+  event ids, at the same levels and with the same properties, in its own words ("Postgres Studio … data source
+  {StoreKey}"). Marten Studio's sentences, remedies, log templates and event ids are unchanged.
+- The health advisor knows since when a database's counters have counted (the statistics window), and whether a crash,
+  a restore, a failover, a new cluster or a statistics reset started them again. The window starts at the later of
+  `pg_stat_database.stats_reset` and the earlier of the two shared views' `stats_reset`, so a
+  `pg_stat_reset_shared('archiver')` or `('bgwriter')` never shortens it. A clean restart is not a reset, nor is the
+  watched standby's promotion or a standby following one upstream; a failover starts the window at the promoted
+  server's own reset times; a server seen for the first time reads "since the server started", and "a new cluster" is
+  said only when the system identifier or the major version is seen to change. Every per-day rate waits for a day of
+  counting, and nothing is judged per day in the sweep that first sees a reset. `pg_control_checkpoint()` and
+  `pg_control_system()` are read apart and never called where refused, so a platform without them loses only the
+  timeline and the system identifier.
+- The Health page says once, in the sweep that first sees it, that the statistics look reset since the last sweep, for
+  every reason the statistics window recognises and on every platform (another Aurora instance answering included),
+  rather than showing a quiet database.
+- A health check whose platform does what it judges is listed as not applicable, with the provider's reason, and never
+  run (issue #8, A2). The managed-platform detector counts only markers a role short of a superuser cannot plant:
+  Aurora's `aurora_version()` only in `pg_catalog`, a provider's setting only as `pg_settings` lists it and only when
+  it comes from the server's own configuration, and `neon_superuser` only with the attributes Neon gives it. So a
+  planted marker can no longer silence R02 to R04 or S02.
 - "Not checked" names who was refused and who can grant it: a health check Postgres refuses a privilege (42501) names
   the role it ran as (`SqlConsoleRole`, or the store's own login for the statement checks), leaves what was refused to
   Postgres' own words, says a table, schema or sequence is its owner's to grant and a statistics view is covered by
   `pg_monitor`, and names who can grant that on the platform the server runs on. A role counts as holding
   `pg_monitor` or `pg_read_all_stats` only when it has their privileges, not as a `NOINHERIT` or `INHERIT FALSE`
   member. The studio never suggests a `GRANT` to paste.
-- The index checks (T03–T06) no longer wait behind a migration: while a table is locked for a schema change they judge
-  every other table and say how many they left out, and T02's index advice skips that table; they used to wait out
-  the lock timeout.
+- "Mute in this browser" keeps an HMAC-SHA256 of each finding's key, under a random key of the browser's own, which
+  the browser holds only as the host's ASP.NET Core Data Protection protected it. Before, it kept a plain SHA-256,
+  which anybody who could guess a whole key could confirm. Mutes survive a restart, on every instance that shares the
+  key ring, for as long as the host's Data Protection keys do; an instance that cannot open the browser's key shows
+  nothing muted, and leaves the list alone until you mute something there. The studio registers no Data Protection of
+  its own (Blazor Server already does).
+- Every mute set before 0.5 is reset once. The list a browser kept is dropped, not migrated, because the HMAC replaces
+  the hash. Several keys change in the same release, so a visitor sees one reset: T07's findings gain the variants
+  `dead-rows` and `inserts`, and T08's `stale`, `never-analysed` and `since-restart`; `S02|<setting>` becomes
+  `S02|setting|<setting>`, `T03|<index>` becomes `T03|index|<index>`, `T03|<table>#partitions` becomes
+  `T03|partitions|<table>`, and C03's server-wide finding `C03|server`. C08's, R01's and D02's keys, and S02's
+  `pending-restart`, are unchanged. From now on, a T07 finding that began as `inserts` takes the `dead-rows` key, and
+  needs muting again, once the table's dead rows are behind too.
+- Two checks are raised higher than in 0.4. C08 raises a Warning for 1 GiB or more of temporary files a day over the
+  statistics window, where it was Info; below that, the hour's Info is unchanged. T07 is Critical past ten times its
+  trigger, or when the table's own `autovacuum_enabled = false`, where it was only ever a Warning; a server with
+  `autovacuum = off` leaves each table at Warning, and S02 is the Critical. The opt-in health check reports `Degraded`
+  for C08's per-day Warning and for C11, as for every Warning.
+- The Studio cost line now counts every connection the studio opens to a database, from open to close: the documents,
+  events, projections, Query and schema reads, which it did not count before, as well as the health checks, the SQL
+  console and the database browser. So the number it shows grows. Marten's own sessions for writes and daemon control
+  are still not counted, and C08's subtraction of the studio's rollbacks is unchanged.
+- The opt-in health check rotates. Each run checks every single-database source first, then continues each
+  multi-database source from where the last run stopped, 25 databases in all, and asks a database source only for the
+  databases it checks. It reports each database's latest result for one full rotation and one run more, counted in runs
+  rather than time, so findings do not flap however long a run takes; a database a page swept within the interval is
+  not swept again. `databasesSkipped` changes meaning: it now counts only the databases never yet checked in this
+  process, not every database past the first 25, and the description says they are "not yet reached by the rotation"
+  where it said "past the most one run checks". A platform that lacks or refuses `pg_control_checkpoint()` or
+  `pg_control_system()` does not make it `Degraded`.
+- The health advisor keeps per-database state for at most 64 databases - history, T14's first-seen marks, cached sweeps
+  and statement texts - and forgets the least recently used database's state all together. A database that is read
+  again starts its "Watching for" window afresh.
+- New check C11 Low cache hit ratio (Warning), in both studios: fewer than 95% of the blocks read found in shared
+  buffers, with at least a million blocks read a day, judged once the statistics have counted for a day (issue #8,
+  G5). C08's deadlock finding adds the deadlocks per day, and its status row says when the per-day rates were not
+  checked. Muting C08's temporary-files Info also mutes its per-day Warning: both use the key `C08|temp-files`.
+- C03 also judges the login role's and the database's `CONNECTION LIMIT` (variants `role` and `database`), and compares
+  this process's pool ceiling with the role's limit. C02 compares the role's limit with the store's pools on the server
+  that log in as that role, read from their connection strings.
+- C06 names a VACUUM at the head of a lock chain, and says that an anti-wraparound autovacuum does not give way to a
+  migration's lock.
+- C01 (connection pool saturated) and Database › Sessions' "This process's pool" read Npgsql 10's pool instruments,
+  which Npgsql 10 renamed (`db.client.connection.count` and `db.client.connection.max`, tagged
+  `db.client.connection.pool.name` and `db.client.connection.state`), as well as Npgsql 8's and 9's. Before, on a host
+  running Npgsql 10 both showed nothing, and said nothing about why. C01's caveat names the instruments it read.
+- T07 and T08 judge each table against autovacuum's own triggers: the table's storage parameters over the server's
+  settings, PostgreSQL 18's `autovacuum_vacuum_max_threshold` cap and unfrozen share. A table is behind when a counter
+  is at least 10,000 past twice its trigger and its last vacuum (or analyze) is more than an hour old. The 0.4 rules of
+  20% dead and one day are gone, so a table tuned to a low scale factor is caught at a few percent dead, and an
+  append-only table is judged on its inserts. This is host-visible: findings appear and disappear differently. A table
+  behind on both dead rows and inserts is one finding, the `dead-rows` one, with both counters.
+- When a table is behind, T07's and T08's remedies say what keeps autovacuum away, as far as the sweep can see: a lock
+  autovacuum gives way to, held or waited for, by a session or by an orphaned prepared transaction; every worker busy
+  (T16), with `autovacuum_max_workers` offered only where the role can count autovacuum's workers; or cost throttling,
+  set back to Postgres' default. A lower scale factor is offered only where it would at least halve the trigger.
+- T08 `never-analysed` counts rows read only when sequential scans read 1,000 rows on average, judges each partition
+  on its own and never sums them, so small tenants, Marten tables read by key and small tables after a counter reset
+  stay quiet. It also catches the shape `pg_upgrade` leaves - a table with no statistics that is read but not written -
+  and advises `vacuumdb --analyze-in-stages`; a partitioned parent never analysed is Info. T08 `since-restart` is said
+  for the first day after the statistics window shows that autovacuum's counters began again (a crash, a restore, a
+  failover, `pg_upgrade` or a statistics reset), while tables of at least 10,000 estimated rows that hold half the rows
+  have not been analysed since.
+- New checks T16 Autovacuum workers saturated (every worker busy for three samples running; with `pg_read_all_stats`
+  it counts autovacuum's workers, without it every running VACUUM or ANALYZE, as "at least") and T24 Autovacuum
+  switched off for a table (the table's or its TOAST table's `autovacuum_enabled = false`; Critical past half of
+  `autovacuum_freeze_max_age`).
+- T14 dates each holder from when it was first seen, so its "held for at least" grows past the history ring. It
+  matches replication slots to holders by raw transaction id, and names a standby whose feedback goes through a slot
+  as "a standby, through slot X".
+- T01, T05 and T06 give no usage verdict over statistics that are under 7 days old or that look reset, and their status
+  rows say "Withheld: …". After a reset, a restore or a failover they say nothing for 7 days. T05 reads `last_idx_scan`
+  from PostgreSQL 16 and no longer keeps its own sample history.
+- T05 is no longer Info for its first day. On PostgreSQL 15 or later, against a long-running database whose statistics
+  were never reset, it can be a Warning from the first sweep, where 0.4 waited for a day of its own samples.
+- New check T15 Foreign key without a covering index, on tables of 8 MiB or more: Warning for `uncovered`, Info for
+  `partly-covered`, an index that leads with only some of the key's columns. Marten's default conjoined
+  `ForeignKey<TRef>`, keyed on `(member, tenant_id)` and indexed on the member, counts as covered. The Marten remedy is
+  `Duplicate(...)`, keeping `notNull: true`, or the `TenancyScope.PerTenant` index configuration; nothing is offered for
+  a table Marten creates, and a key into a hidden type's table is never described.
+- New check T17 Orphaned document tables, in Marten Studio: `mt_doc_` tables no registered store declares, counted and
+  never named.
+- New check T19 Partitions against the lock table. It counts PostgreSQL 18's fast-path slots as the power of two at or
+  above `max_locks_per_transaction`.
+- New check T20 Range partitions running out. It finds a `timestamptz` range's months in the session's time zone, and
+  says to create each missed period. A range Marten keeps ahead (`ByRollingRange`) is warned of only within one
+  partition width, so the recommended `periodsAhead: 1` is quiet. The remedy is `RollPartitionsForwardAsync` for a
+  rolling range, the `CREATE TABLE … PARTITION OF` for `ByExternallyManagedRangePartitions()` or a host's own table, and
+  a configuration comment for a static `ByRange`.
+- New check T25 Bloated index, b-tree only, estimated from the catalog's entry counts: Warning on the issue's rule, Info
+  on key width, counting INCLUDE columns in an entry. The remedy is `REINDEX CONCURRENTLY`.
+- New check T26 Integer key running out: a key a sequence feeds that is past half its range - a `smallint` or `integer`
+  column, or a `bigint` one on a narrower sequence or on one capped by its own `MAXVALUE` - Warning at half, Critical
+  at four fifths. The remedy widens the column or the sequence to `bigint`, or lifts a sequence's own cap with
+  `NO MAXVALUE`.
 - MartenStudio's table checks (T01–T08, T10–T14, and T02/T22/T23 behind Run statement checks) now judge every ordinary
   and partitioned table in the store's own schemas and - while `Capabilities.BrowseDatabase` is on - in the schemas
   `BrowsableSchemas` admits, not only the tables the store declares (issue #8, G1). A table the store declares is
@@ -117,7 +206,46 @@
   configuration cannot be read, the sweep judges the declared tables alone and says so.
 - T12 and T13 call the judged tables "tables the studio judges" rather than "Marten tables", and T01's and T03's notes
   for an empty store say "No table the studio judges".
-- New check **D09 Event sequence and daemon progression disagree** (Critical), in three variants: `mark-ahead` and
+- The index checks (T03–T06) no longer wait behind a migration: while a table is locked for a schema change they judge
+  every other table and say how many they left out, and T02's index advice skips that table; they used to wait out
+  the lock timeout.
+- The statement checks' one read of `pg_stat_statements` now also keeps the hundred statements with the most execution
+  time (and on Aurora the most storage reads) for the Statements page, still fenced to the store's own role and this
+  database. On pg_stat_statements 1.8, a statement's top-level and nested runs are summed into one row.
+- New check R02 WAL archiving failing: `failing` (Critical) when the archive command fails, and `backlog` when a hung,
+  slow or empty command lets the archiver fall 64 segments and 1 GiB behind and keep falling, Critical at 10 GiB or
+  after an hour without a success. The distance is measured from the last archived segment, or from a `.partial`
+  file's segment; a `.history` file or a base backup's `.backup` label names no position, and with nothing to measure
+  from, R02 counts the WAL written while the archiver archived nothing. A `pg_wal` that cannot be read is said in the
+  evidence, and R02 still judges. Not applicable on Aurora, Amazon RDS, Azure and Cloud SQL, which archive WAL
+  themselves.
+- New check R03 Standby lag: Warning at 5 minutes or 1 GiB behind, Critical at an hour. Only physical senders are
+  judged; a subscription or a change data capture connector is not a standby. From the primary it is measured with
+  `pg_read_all_stats`, and without it the check says "not checked" and names the grant; a standby that delays replay
+  on purpose shows its delay as lag there. From a standby the data source reaches no grant is needed, and the time is
+  how long WAL the standby received has gone unreplayed, read from the advisor's samples, never the age of its last
+  commit; on a delayed standby only the time beyond `recovery_min_apply_delay` counts. The start of a stall is carried
+  from sweep to sweep, so a delay longer than the hour of samples the advisor keeps is judged too; until replay is
+  first seen to pass a position the advisor sampled, the status row says "not judged yet" and why. A paused replay is
+  its own Warning.
+- New check R04 Requested checkpoints: requested checkpoints are 20% or more of at least 10 checkpoints in the
+  advisor's window, counted each release's own way (up to 17 the timed count includes checkpoints an idle server
+  skipped; from 18 it is `num_done`), or there are more requested checkpoints than `checkpoint_timeout` allows. The
+  remedy doubles `max_wal_size`, worded for the platform. Not applicable on Aurora.
+- New checks in both studios S04 Connecting as a superuser, S05 Connection without TLS, S06 Anyone may create in an
+  application schema, S07 Outdated extension, S08 Connecting role's password expires, S09 Planner method switched off
+  and S10 Store connections cannot write (issue #8, G7 and A7). S07 is raised only for an extension the server can
+  update, meaning there is an update path from its version to the default; an extension at another version with no
+  such path gets a note on its status line.
+- S02 also judges `autovacuum = off` (Critical) and `track_activities = off` (Warning).
+- New checks in both studios K05 SQL console without a narrowed role, K06 Database browser open to every schema without
+  a narrowed role, and K07 Studio open to anonymous visitors with a capability on.
+- New check K08 Server timeouts end the daemon's leadership, in Marten Studio only. It judges
+  `idle_in_transaction_session_timeout`, `transaction_timeout` and `idle_session_timeout` against the HotCold leader's
+  idle stretch, which depends on the lock monitor the process loads: DistributedLock's keepalive from Weasel 9.34
+  (Marten 9.39.1), read off the DistributedLock assembly itself, or the `pg_sleep` monitor before it. Measured at Marten
+  9.39.0, 9.45.0 and 9.54.1.
+- New check D09 Event sequence and daemon progression disagree (Critical), in three variants: `mark-ahead` and
   `shard-ahead`, where the high-water mark or a registered shard is ahead of what the event sequence has handed out,
   so new events take numbers the daemon has already passed (judged only for a store with an async projection or
   subscription); and `sequence-behind`, where the sequence is behind the highest committed event, so the next append
@@ -135,6 +263,183 @@
   "A one-off repair, run by hand - the studio never runs this" and names the database to run it in. It is not checked
   under `UseTenantPartitionedEvents`. The high-water read adds one backward primary-key probe of `mt_events`, and
   reads the sequence's `last_value` and `is_called` once.
+- D05 no longer offers `SkipApplyErrors = true` for a database error in projection code (a missing column or
+  table, a permission), which from Marten 9.52 pauses the shard at any setting and is never dead-lettered: where
+  the daemon in this process says the failure is one, the finding says what to fix instead; where nothing can
+  tell, the line names that exception.
+- On Amazon Aurora, the Health page, both Overviews and the Server page say which instance answered the advisor's last
+  sweep, and the Aurora version ("Answered by instance db-1-instance-2 (a reader), Aurora 16.4.1"). If another
+  instance answers between sweeps, the Health page says so once, as a reset of the statistics window.
+- On Aurora, R03 Standby lag gains the `aurora-reader` variant: each Aurora reader's `replica_lag_in_msec` from
+  `aurora_replica_status()`, Warning at 5 minutes and Critical at an hour; the Replication page shows "Aurora replicas"
+  in place of the standbys. S03 Checksum failures is not applicable on Aurora, whose storage layer manages the pages;
+  R02 and R04 are not applicable there either.
+- On Aurora, server-setting remedies name the DB cluster parameter group, or an instance's DB parameter group as well,
+  per parameter as AWS's parameter reference lists it, and say what Serverless v2 derives from its capacity. C08's
+  temporary-file findings say the files use the instance's local storage, and C11 says whether a cache miss is billed
+  as I/O, from `PostgresComputeCapacity.IoOptimized`.
+- On Aurora, C03 names what raises `max_connections` there, and each remedy says that a `max_connections` set in a
+  custom parameter group replaces Aurora's formula: "Raise the cluster's minimum capacity to 1 ACU or more" when a
+  minimum of 0 or 0.5 ACU holds it at 2,000; "Lower the pool ceilings … or put RDS Proxy or PgBouncer in front of it"
+  at Aurora's ceiling (a maximum of 32 ACU or more, or `max_connections` at 5,000); otherwise "Raise the cluster's
+  maximum capacity (now N ACU)"; and, without a capacity reading, all three.
+- On Aurora, R01, T14 and the Replication page read the slots without asking for a WAL position Aurora refuses
+  (`pg_current_wal_lsn()` below `wal_level = logical`, or on a reader), and R01 then says that no slot's retention is
+  measured.
+- A host can report compute capacity that SQL cannot see, such as Aurora Serverless v2's ACU, by registering an
+  `IPostgresCapacitySource` as a singleton. It is asked once per `HealthInterval` per database and instance and given
+  five seconds; its answer is shown on the Overviews, the Health page and the Server page, and C03 and C11 read it. A
+  throw, the source's own timeout included, is event 9500, and a source the container cannot build is treated as no
+  source and logged once as 9500. `PostgresComputeCapacity.AuroraServerlessV2` accepts 0 to 384 ACU, platform version
+  4's range. See `docs/aurora.md`.
+- Operations › Statements, in both studios (issue #8, G6 and A5): the top 10 to 100 statements of the database by
+  execution time, over the window the statement checks watched or, before that, the time since the counters began, and
+  it says which. It shows share, calls, mean, rows, shared blocks hit and read, and temp written, and every column
+  sorts. It sums by group: in Marten Studio by Marten operation and document type, in Postgres Studio by verb and
+  table. It sits behind `ViewDatabaseActivity` and the write policy; texts follow T02's rules and each visitor's mask,
+  and a hidden document type is never named. On Aurora it can rank by storage reads, from `aurora_stat_statements`. It
+  runs the statement checks' read only when the page is opened or refreshed: an open tab's polls start no statement
+  checks.
+- Operations › Maintenance, in both studios (`/postgres/maintenance`, and `/marten/maintenance`): autovacuum's
+  triggers per table, with bars and due, behind and off badges; maintenance running now (a command on a table the page
+  does not name is only counted); the workers; the freeze forecast; and the vacuum horizon. It reads nothing of its
+  own: its numbers are the health sweep's. An on-demand, audited bloat measure with `pgstattuple` reads the heap first,
+  then up to the five largest indexes, smallest first, within `QueryTimeout`, and keeps what it has measured.
+- Operations › Storage, in both studios (issue #8, G3): the database's size; its growth a day and a month, once the
+  statistics have counted for a day; and the fifteen largest tables, split into heap, indexes and TOAST, with rows,
+  share and HOT %. It points at Maintenance for autovacuum's view of the same tables. The figures come from the
+  catalog's page counts, which lock nothing they list. A table in a schema the database browser does not show the
+  visitor is listed without its name, and with its owner as `‹withheld›`. When the statistics window cannot be read
+  the page still shows the size and the largest tables, with growth "not available" and the reason, and it stops
+  saying the statistics were reset once they have counted for a day.
+- Operations › Replication, in both studios (issue #8, G8): replication slots, with logical decoding statistics and,
+  from PostgreSQL 17, failover and synced; the WAL senders streaming from the server, each marked physical or logical,
+  with their lag, or on a standby its own replay and pause state and any downstream standbys, listed but not judged;
+  the archiver; WAL volume and full-page-image share over the advisor's window; checkpoints; `pg_stat_io` by backend
+  type and object (16+); and tablespaces, with a size measured only on demand, one at a time per database. Numbers need
+  the store (or source) policy for the database as a whole. Standby names, client addresses, slot names and the
+  archive command need `ViewDatabaseActivity`. Another database's logical senders and slots are counted, and never
+  named, whatever the visitor may see.
+- System › Server, in both studios (issue #8, G7 and A7): the server's version, platform, checksums and uptime; what
+  the studio's reading role can see, grant by grant, and which role reads what; a curated `pg_settings` view in seven
+  groups, with each setting's source, a pending-restart badge and where it changes on the platform; extension chips
+  (pg_stat_statements, pgstattuple, pg_buffercache, pg_repack, pg_squeeze, timescaledb and `track_io_timing`) that
+  say what stands in the way, naming the grant; and the security posture, as the Health page shows it. On Aurora it
+  has a section of its own: the instance's ten longest waits over the advisor's window (`IO:XactSync` and the rest),
+  commit latency and DML by kind, and, behind `ViewDatabaseActivity`, each session's waits as counts and shares.
+- Database › Sessions has "By application": sessions per `application_name`, by state, with the server's connection
+  budget. The totals show at the database-wide gate; application names need `ViewDatabaseActivity`.
+- The Health page has a Snapshot menu: View, Copy and Download of what your pages show of this database, as the
+  diagnostics API's JSON. It is built from each page as you see it, and a section you may not see is named under
+  `withheld` with that page's sentence. It starts no deeper or statement sweep, and stores nothing.
+- On a store with `Events.UseTenantPartitionedEvents`, the dead-letter page's Skip event works from Marten 9.51: it
+  marks the dead letter's own tenant's event skipped and no other tenant's event of that number, and is asked as that
+  tenant (with "All tenants" selected, the dead letter's). Below 9.51 it stays refused, because Marten skips by number
+  alone.
+- Rewind subscription on such a store works from Marten 9.51 with JasperFx 2.91: it stops, rewinds and restarts the
+  dead letter's tenant's agents alone and deletes only that tenant's dead letters, so it is authorized for that tenant
+  rather than for the database as a whole, and it is offered only where the async daemon in this process runs that
+  tenant's agent of the projection (on HotCold's cold node or a distributed host it would otherwise start a second
+  one). The database-wide rewind is never offered on such a store; below 9.51 the rewind stays refused. A tenant id
+  with a `:` in it is not rewound, because its agents' name does not read back as that tenant's and Marten would
+  refuse only after the daemon had stopped them; and neither rewind lets Marten's "Unknown subscription name ...
+  Available options are ..." - every subscription the store has - reach the page or the audit log.
+- Compacting a stream whose folded events carry DCB tags works from Marten 9.51, which deletes their tag rows with
+  them; the snapshot keeps the last event's tags. Below 9.51 Postgres still refuses and nothing changes, and the
+  dialog says which this host's Marten does.
+- From Marten 9.52 a rebuild replays from the projection's start floor rather than from the first event, and the
+  rebuild dialog says so: it names the floor stored for the projection in `mt_event_projection_floors` (read with
+  the studio's own SQL, never through Marten's floor read, which can create the event store), takes it off the
+  events to replay, says that a document only the events at or below it built is deleted and not rebuilt, and
+  where none is stored, that a floor the projection's code sets (`SubscribeFromSequence`, `SubscribeFromTime`)
+  may still apply. A store migrated below 9.52 shows the new table as one non-destructive `CREATE TABLE` on the
+  Schema screen.
+- The Advance high water mark dialog says what the advance skips: every sequence number below the new mark with
+  no committed event, an append still in flight included - not the events a projection has still to process.
+  From Marten 9.52 it also says that the advance first ensures the event store's storage - with no tenant
+  selected in every database of the store, each under its own `AutoCreate` - and on a store that numbers events
+  per tenant, which tenants' marks it moves; the button's hover text says what the first press may create.
+- The Schema screen's Check schema, Preview migration and Generate script say what they may create on the host's
+  Marten: Marten's HiLo objects (`mt_hilo`, `mt_get_next_hi`) below 9.50.3, nothing from it.
+- The apply section lists notes beside the destructive statements: an index built without `CONCURRENTLY` on an
+  existing table, which makes writers wait while it builds (Marten 9.51's new `seq_id` index on each DCB tag table
+  built before it is one, and every tagged append waits for it), and Weasel 9.46's partition-index rebuild, whose
+  `DROP INDEX CONCURRENTLY IF EXISTS` is no longer listed as "drops an index". Any other `drop index` still is.
+- The Configuration page shows `HighWaterProgressStallThreshold` beside "High water staleness" where the host's
+  JasperFx has it (2.91, Marten 9.51). A requirement first met by a patch release names the patch: "Marten 9.50.3+",
+  not "Marten 9.50+". The transient/permanent classification of a shard failure is known to arrive with Marten 9.50.3.
+- LINQ mode: from JasperFx 2.91 (Marten 9.51) a date with no offset is read as UTC by JasperFx itself, and the
+  studio's own correction stays idle, as measured.
+- The SQL console's Run is no longer blocked by a Mode A run in flight: the two run independently, each gated. If the
+  `RunSql` write policy throws, its message now appears in the SQL editor rather than as a page-level alert; the
+  service still refuses.
+- The diagnostics API (AGENTS.md D31): `IPostgresDiagnostics`, registered by `AddPostgresStudio()` and
+  `AddMartenStudio()`, gives the host's own code what the studio reads, one database at a time. `ListDatabasesAsync`
+  lists the databases the studio would list, building no data source and enumerating no tenancy. `GetSnapshotAsync`
+  returns the findings, with stable codes and variants, and Storage, Statements, Settings and Connections sections; it
+  never throws for an unknown, unreachable or failing database, and a database that cannot be reached is read no
+  further, each section asked for coming back `Failed`. `IncludeActivity` is off by default, and gates statement texts,
+  application names, other sessions' evidence and findings about one tenant. Calls share the pages' caches, and fresh
+  reads that API calls start run at most two at a time; cancelling a call stops its wait at once, but a read it has
+  already started keeps its place among the two until it finishes. A check's and a finding's `Title` is the studio's
+  own wording; key on `Code`. `snapshot.ToJson()` writes `schemaVersion` 1. See `docs/diagnostics.md`.
+- PostgresStudio's public surface is its six registration types (`PostgresStudioServiceCollectionExtensions`,
+  `PostgresStudioEndpointRouteBuilderExtensions`, `PostgresStudioHealthChecksBuilderExtensions`,
+  `PostgresStudioOptions`, `PostgresStudioCapabilities` and `PostgresStudioResource`), its six inbound types
+  (`IPostgresDatabaseSource`, `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`,
+  `PostgresServerInfo` and `PostgresPlatformKind`) and the nineteen types of the diagnostics read model, all in
+  namespace `PostgresStudio`. MartenStudio's public surface is unchanged.
+- Health check codes are a documented contract: `docs/health/codes.md` lists every code with its area, variants,
+  subject kind, studios and the release that shipped it. A code is never reused, renamed or moved, and a retired code
+  keeps its row. C08, R01, S02, D02 and T03 now report their fixed kinds of finding as a `Variant` rather than in
+  `Subject`, and C03's server-wide finding gains the `server` variant.
+- The database browser flags a foreign key with no covering index, and a `SECURITY DEFINER` function without a pinned
+  `search_path`, and shows a sequence's headroom on demand, with a rate taken from two reads.
+- The database browser's Constraints tab no longer lists a `…_not_null` constraint of kind "Other" for every NOT NULL
+  column on PostgreSQL 18, which stores NOT NULL in `pg_constraint` (the Columns tab already says which columns are
+  NOT NULL), and on 17 and later the Types list no longer shows a domain's NOT NULL as one of its constraints (the
+  domain's NOT NULL flag already says it).
+- `samples/PostgresStudio.Sample` (`dotnet run`, http://localhost:5211) is a Postgres Studio host with no Marten: an
+  admin database as the application's own `NpgsqlDataSource` and three tenant databases listed through its own
+  `IPostgresDatabaseSource` (`AddDatabaseSource("tenants", …)`), cookie sign-in as `admin`, `ops` or `viewer` with a
+  write policy asked per capability, `public` named in `BrowsableSchemas` beside the admin database's schemas, and a
+  fresh throwaway Postgres when nothing is configured (`MARTENSTUDIO_PG_REUSE=true` reuses one of its own).
+- The demo data with no Marten in it - Quartz.NET's job store, the `legacy` schema and `studio_sample.app_settings`,
+  and now the tenant databases with one deliberately unindexed foreign key - moved to
+  `samples/PostgresStudio.SampleData`, which both samples share. The demo's `legacy.sensor_readings` gets its
+  half-year partitions through next year, plus one beyond, every time it is applied, so it never ages into T20.
+- The Marten sample checks its database before Marten touches it. When another build of the sample seeded it, or its
+  demo document tables hold rows with no seed marker, startup drops `studio_sample` and `studio_sample_events`
+  (`drop schema … cascade`, which also drops whatever in other schemas depends on them) and seeds them again: on the
+  throwaway container, and on any database when the host is started with `--allow-data-generation`. Any other
+  database is left alone, and the host stops with one line that says what to do. Its throwaway Postgres has a
+  container reuse identity of its own, so `dotnet run` no longer opens the integration suite's reused container.
+- The Marten sample's SQL console, database browser and health checks read as its own narrowed role,
+  `studio_sample_reader`, so K05 shows its remedy applied. The role is created only on the sample's throwaway
+  database, or on one that `--allow-data-generation` names, and the sample creates no role and grants nothing anywhere
+  else. The role is a member of `pg_monitor`, which reads every session's statement text server-wide. Its Health page
+  shows S04 as Info: it logs in to its throwaway server as the superuser.
+- A rebuild of the Marten sample's ShipmentTracker skips its poisoned event into a dead letter and finishes
+  (`Projections.RebuildErrors.SkipApplyErrors`).
+- Audit and refusal log lines escape and bound every value a visitor could shape, so a typed `?store=` or `?db=` cannot
+  write a log line of any length, or forge a second one. This covers 9200 to 9207, 9209, 9235, 9236, 9245 and 9452,
+  LINQ mode's 9260 to 9263, and every Warning that names a document id, a collection or a scope from the address.
+  Control characters, format characters, line and paragraph separators and backslashes are escaped; a name is bounded
+  at 256 characters, and a refused statement, a reason or an outcome at 4,000, saying how long a cut value was. 9204
+  keeps the statement that ran whole and escaped up to 32,768 characters, the most one circuit message carries by
+  default, and past that its first and last 16,384 characters around a count of what was cut, so no padding can keep
+  the statement out of the record. The Activity page is unchanged.
+- A link to another store's database opens that database: `?store=B&db=X` opens B's database `X` when B lists it,
+  where it opened B's first database before, and in Postgres Studio `?store=tenants&db=tenant_b` opens that source's
+  database. On Documents, a document, and the database browser's object list, object and row pages, `?store=B` with
+  no `db=` now opens B's database of the same name as the one open, if B lists one, and B's first database otherwise.
+- `SqlConsoleRole` with a trailing line break is refused at startup like any other value that is not a plain
+  identifier (.NET's `$` matched before a final line feed). Relationships logs a scope that is refused or names
+  nothing at Debug, not Warning. A scope change that names a tenant the new store or database does not list keeps
+  the previous tenant only when the new store lists it too, and otherwise opens all tenants; before, it carried the
+  previous store's tenant over unchecked.
+- A composite projection's members are listed under their composite, and no longer as "Unregistered shards"
+  that nothing advances; they offer no Start or Stop of their own.
 
 # 0.4.0
 

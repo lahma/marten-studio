@@ -84,9 +84,9 @@ internal sealed record HealthExportLimits(int MaxDatabases, TimeSpan? Budget = n
 /// </para>
 /// <para>
 /// <b>Twenty-five a run, in rotation</b> (<see cref="HealthExportRotation" />, API design §3.4): every one-database source,
-/// then the others from a cursor per source, and each database's latest result reported while it is younger than one
-/// rotation and one interval - so a host with two hundred tenant databases has every one checked within eight intervals,
-/// and a Critical stays reported until a sweep clears it.
+/// then the others from a cursor per source, and each database's latest result reported for one full rotation and one run
+/// more, counted in runs (<see cref="HealthExportPlan.RunsKept" />) - so a host with two hundred tenant databases has every
+/// one checked within eight runs, and a Critical stays reported until a sweep clears it.
 /// </para>
 /// <para>
 /// <b>No visitor, so no authorization - and so nothing that would need one.</b> A store and database are resolved
