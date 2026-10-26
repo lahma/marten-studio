@@ -85,7 +85,7 @@ public class DaemonLightUpTests
 
     /// <summary>
     /// The 2.89 classifier is first in Marten 9.50.3 (JasperFx 2.90.1): absent at the floor, where the studio says nothing,
-    /// and present at the latest tested, 9.51.0, where it classifies.
+    /// and present at the latest tested, 9.54.1, where it classifies.
     /// </summary>
     [Fact]
     public void Without_the_transient_classifier_nothing_is_called_transient_or_permanent()

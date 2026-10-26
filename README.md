@@ -500,7 +500,9 @@ process-wide — it stops the coordinator's leadership runner and then every age
 process hosts for that store — and it is the only stop that holds: with the coordinator running, it
 restarts any agent it finds missing within `LeadershipPollingTime`, so per-agent Start and Stop are
 offered only while the daemon is paused and are refused with that reason while it is not. A rebuild
-outlives the circuit that started it and is tracked by name. Where no daemon is hosted in this process,
+outlives the circuit that started it and is tracked by name. A composite projection's members, whose
+progression rows its own shard advances in one batch, are listed under it and offer no Start or Stop of their
+own. Where no daemon is hosted in this process,
 the page says so — that is a value, not an error, and the studio never starts a daemon of its own. Each
 shard also shows when it last progressed and a trend with an estimated catch-up, a rebuild in progress is a
 state on its row, Pause, Stop and Rebuild quote the store's `StopAndDrainTimeout`, and below Marten 9.50
@@ -813,7 +815,14 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   has. Compacting a stream whose folded events carry DCB tags needs 9.51 too; below it Postgres refuses the
   delete and nothing changes. The Schema screen's Check, Preview and Generate script buttons create
   Marten's HiLo objects (`mt_hilo`, `mt_get_next_hi`) below 9.50.3 and nothing from it, and each says which.
-- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.51.0.
+  From 9.52 a rebuild replays from the projection's start floor rather than from the first event, so the
+  rebuild dialog names the floor stored for it in `mt_event_projection_floors` (read with the studio's own SQL)
+  and says that a floor set in code may apply; D05 stops offering `SkipApplyErrors` for a database error in
+  projection code, which from 9.52 pauses the shard at any setting and is never dead-lettered; and the
+  Advance high water mark dialog says that the advance first ensures the event store's storage - with no tenant
+  selected in every database of the store, each under its own `AutoCreate` - and, on a store that numbers events per
+  tenant, which tenants' marks it moves.
+- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.54.1.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,
   and a single-server tenancy creates every configured database that does not exist yet. The lookup table's

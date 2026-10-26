@@ -305,7 +305,7 @@ internal sealed record CompactionPlan
 /// <remarks>
 /// <para>
 /// <b>What Marten does</b>, read from <c>EventStore.StreamCompacting.cs</c> at 9.39.0 and 9.50.2, which are
-/// byte for byte the same file, and at 9.51.0, which adds two things and changes nothing else: an empty key or
+/// byte for byte the same file, and at 9.51.0 (unchanged again at 9.54.1), which adds two things and changes nothing else: an empty key or
 /// <see cref="Guid.Empty" /> is refused with <c>ArgumentOutOfRangeException</c> before anything is read (#5695), and
 /// the delete of the folded events deletes their DCB tag rows first, in the same statement (#5694, see
 /// <see cref="CompactionPlan.TagRowsFoldWithEvents" />). <c>FetchStreamAsync</c> reads the stream's events - never archived ones, and

@@ -641,6 +641,12 @@ internal sealed record DaemonShardRow(
 /// </param>
 /// <param name="FailureEventSequence">The event its failure was attributed to (<c>ShardFailure.Event</c>), when there is one.</param>
 /// <param name="FailureEventType">That event's type.</param>
+/// <param name="SystemicDatabaseFailure">
+/// Whether its failure is a database error in projection code that JasperFx never dead-letters (JasperFx.Events 2.93,
+/// Marten 9.52 - <c>DaemonLightUp.IsSystemicDatabaseFailure</c>): <see langword="null" /> when that cannot be told, which
+/// below 2.93 is always.
+/// </param>
+/// <param name="FailureRootExceptionType">The failure's innermost exception type (<c>ShardFailure.RootExceptionType</c>).</param>
 internal sealed record DaemonAgentFact(
     string ShardName,
     string Status,
@@ -649,7 +655,9 @@ internal sealed record DaemonAgentFact(
     DateTimeOffset? PausedAt,
     long? Position = null,
     long? FailureEventSequence = null,
-    string? FailureEventType = null);
+    string? FailureEventType = null,
+    bool? SystemicDatabaseFailure = null,
+    string? FailureRootExceptionType = null);
 
 /// <summary>What this process knows about the daemon: whether it hosts one, and what that one is doing.</summary>
 /// <param name="Hosting">The accessor's answer.</param>
@@ -810,7 +818,9 @@ internal sealed record DaemonInProcess(
                 Read(() => agent.PausedTime, null),
                 Read<long?>(() => agent.Position, null),
                 failure?.Event?.Sequence,
-                failure?.Event?.EventTypeName));
+                failure?.Event?.EventTypeName,
+                Read(() => DaemonLightUp.IsSystemicDatabaseFailure(failure), null),
+                failure?.RootExceptionType));
         }
 
         List<string> rebuilding = [];

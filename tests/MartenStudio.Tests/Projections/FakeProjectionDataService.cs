@@ -133,6 +133,22 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     }
 
     /// <summary>
+    /// Adds a member row of the composite <paramref name="composite" /> (already added with <see cref="WithProjection" />):
+    /// a progression row its own agent advances, drawn under it, with no agent of its own.
+    /// </summary>
+    public FakeProjectionDataService WithCompositeMember(string composite, string memberShardName, long sequence = 900)
+    {
+        progress.Add(new ShardProgress(
+            memberShardName, composite, sequence, HighWaterMark, null, null, null,
+            DateTimeOffset.UnixEpoch, null, null, true, false)
+        {
+            IsCompositeMember = true,
+        });
+
+        return this;
+    }
+
+    /// <summary>
     /// Adds a progression row no registered projection claims - a projection that was removed or renamed.
     /// </summary>
     public FakeProjectionDataService WithUnregisteredShard(string shardName, long sequence = 10)
@@ -261,8 +277,19 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
             {
                 Trends = Trends,
                 HealthHistory = HealthHistory,
+                TenantPartitionedEvents = TenantPartitionedEvents,
+                DatabaseAutoCreate = DatabaseAutoCreate,
             });
     }
+
+    /// <summary>What the view says of <c>UseTenantPartitionedEvents</c>.</summary>
+    public bool TenantPartitionedEvents { get; set; }
+
+    /// <summary>The resolved database's <c>AutoCreate</c>, as the view carries it.</summary>
+    public string? DatabaseAutoCreate { get; set; } = "CreateOrUpdate";
+
+    /// <summary>The start floor <see cref="DescribeRebuildAsync" /> reports - <see langword="null" />, a Marten below 9.52.</summary>
+    public RebuildFloor? RebuildFloor { get; set; }
 
     /// <summary>The trends the view carries - what the real service judges from the advisor's samples behind the database gate.</summary>
     public Dictionary<string, ShardTrend> Trends { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -315,11 +342,14 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
 
         return Task.FromResult(new RebuildScope(
             projectionName,
-            HighWaterMark,
+            RebuildFloor?.EventsToReplay(HighWaterMark) ?? HighWaterMark,
             projection.ShardNames,
             ["studio_sample.mt_doc_" + projectionName.ToLowerInvariant()],
             projection.Lifecycle,
-            ShardTimeout));
+            ShardTimeout)
+        {
+            Floor = RebuildFloor,
+        });
     }
 
     /// <inheritdoc />

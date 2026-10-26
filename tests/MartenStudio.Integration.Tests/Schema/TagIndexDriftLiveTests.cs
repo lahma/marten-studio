@@ -80,6 +80,12 @@ public class TagIndexDriftLiveTests(PostgresFixture postgres)
 
         bool declared = RuntimeFeature.TaggedStreamCompaction.Probe() == true;
 
+        // The probe against the version, not only against itself: its first anchor (a private method marten#5720 moved in
+        // 9.52) answered "absent" at every Marten after it, and this test then asserted the floor's half on a store that
+        // has the index.
+        declared.Should().Be(MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 51, 0),
+            "#5694 declares the index from Marten 9.51.0, and the probe has to say so at every Marten from it");
+
         // The premise, each end's: from 9.51 the index exists once the schema is applied; below it, it is never declared.
         (await IndexExistsAsync()).Should().Be(declared, "Marten 9.51 (#5694) declares the tag table's seq_id index, and below it nothing does");
 

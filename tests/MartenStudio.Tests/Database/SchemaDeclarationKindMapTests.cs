@@ -42,6 +42,28 @@ public class SchemaDeclarationKindMapTests
     }
 
     /// <summary>
+    /// Marten 9.52's projection-floor table (#5740) is the event store's own: an <c>EventTable</c> because its type lives
+    /// in Marten's assembly - so the database browser never reads it raw - and a managed table, so the Schema screen and
+    /// the table health checks see it through the feature schema they already read. Below 9.52 nothing declares it.
+    /// </summary>
+    [Fact]
+    public void The_projection_floors_table_is_the_event_stores_own_from_9_52()
+    {
+        SchemaDeclarations declarations = SchemaDeclarationReader.Read(DefaultStore(), IsVisible);
+        bool declared = MartenStudio.Services.Configuration.MartenRuntime.Current
+            .VersionOf(MartenStudio.Services.Configuration.RuntimePackage.Marten) >= new Version(9, 52, 0);
+
+        if (!declared)
+        {
+            Kind(declarations, EventSchema, "mt_event_projection_floors").Should().BeNull("Marten below 9.52 declares no such table");
+            return;
+        }
+
+        Kind(declarations, EventSchema, "mt_event_projection_floors")!.Kind.Should().Be(MartenObjectKind.EventTable);
+        declarations.ManagedTables.Should().Contain(EventSchema + ".mt_event_projection_floors");
+    }
+
+    /// <summary>
     /// The feature schemas' <c>Sequence</c> objects, which the Schema screen has never listed, are in the
     /// map now: <c>mt_events_sequence</c> is Marten's.
     /// </summary>

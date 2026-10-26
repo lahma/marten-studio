@@ -199,7 +199,10 @@ internal static class ProjectionTrend
     /// </summary>
     /// <param name="trend">The arithmetic.</param>
     /// <param name="pausedByStudio">Marten Studio's coordinator pause is recorded for the store: every lag grows, by design.</param>
-    /// <param name="rebuilding">The shard's projection is known to be being rebuilt: its position restarted from zero.</param>
+    /// <param name="rebuilding">
+    /// The shard's projection is known to be being rebuilt: its position restarted from zero - from Marten 9.52, from its
+    /// start floor, which the daemon seeds the progression row at before the replay.
+    /// </param>
     /// <param name="agentStatusHere">The status of the shard's agent in the daemon hosted here, when one runs it.</param>
     /// <remarks>
     /// A growth claim also needs the shard to have moved over the window - one that stands still while events arrive is
@@ -213,7 +216,7 @@ internal static class ProjectionTrend
 
         string? reason =
             pausedByStudio ? "not judged: Marten Studio paused the projection coordinator, and every lag grows until it is resumed"
-            : rebuilding ? "not judged: being rebuilt, which starts the shard again from the beginning"
+            : rebuilding ? "not judged: being rebuilt, which starts the shard again from the beginning (from Marten 9.52, from its start floor)"
             : agentStatusHere is { Length: > 0 } status && !string.Equals(status, "Running", StringComparison.OrdinalIgnoreCase)
                 ? "not judged: its agent here is " + status + " (D05)"
             : trend.Direction is LagDirection.Growing or LagDirection.Steady && trend.ProcessedPerSecond is not > 0
