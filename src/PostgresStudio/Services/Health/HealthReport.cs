@@ -104,7 +104,16 @@ internal sealed record HealthCheckStatus(
     string? SqlState,
     string DocsUrl,
     IReadOnlyList<HealthStatement> Statements,
-    bool FindingsWithheld = false);
+    bool FindingsWithheld = false)
+{
+    /// <summary>
+    /// What it would take to see this check's row, when the visitor is short of the check's own gate - "needs
+    /// <c>ViewDatabaseActivity</c>" - or <see langword="null" /> for a row they pass. Kept apart from
+    /// <see cref="FindingsWithheld" />, which is also set for a row they pass when findings about tenants were withheld one by
+    /// one: the studio's snapshot download says "withheld" for the first and counts the second (W5-API).
+    /// </summary>
+    public string? BelowGate { get; init; }
+}
 
 /// <summary>
 /// Which server answered the regular sweep, and the compute capacity the host's source reported for it (issue #8 A1, A8) - one
@@ -119,6 +128,9 @@ internal sealed record HealthCheckStatus(
 /// <param name="CapacityUnknown">Why a registered source gave none this interval, or <see langword="null" />.</param>
 internal sealed record HealthServerLine(string? AnsweredBy, DateTimeOffset? StartedAt, string? Capacity, string? CapacityUnknown)
 {
+    /// <summary>The capacity <see cref="Capacity" /> words, as the host's source reported it, for the studio's snapshot download.</summary>
+    public PostgresComputeCapacity? Compute { get; init; }
+
     /// <summary>
     /// What the regular sweep read of the server and its capacity (its shared reads), or <see langword="null" /> when it read
     /// nothing worth a line: no instance to name, and no capacity source registered.
@@ -136,7 +148,7 @@ internal sealed record HealthServerLine(string? AnsweredBy, DateTimeOffset? Star
 
         return answeredBy is null && reading is null && unknown is null
             ? null
-            : new HealthServerLine(answeredBy, answeredBy is null ? null : server?.StartedAt, reading, unknown);
+            : new HealthServerLine(answeredBy, answeredBy is null ? null : server?.StartedAt, reading, unknown) { Compute = capacity?.Capacity };
     }
 }
 

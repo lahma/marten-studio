@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Runtime.CompilerServices;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -84,20 +83,6 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             () => [.. registry.All.Select(static x => DiagnosticsMapper.Check(x.Info)).OrderBy(static x => x.Code, StringComparer.Ordinal)]);
     }
 
-    /// <summary>
-    /// What <see cref="PostgresDiagnosticsSnapshot.Producer" /> says: the package and its release, <c>PostgresStudio 0.5.0</c> -
-    /// both studios ship at one version, so PostgresStudio's assembly says it for either.
-    /// </summary>
-    internal static string ProducerFor(StudioProduct product) =>
-        (product == StudioProduct.MartenStudio ? "MartenStudio " : "PostgresStudio ") + Release;
-
-    private static readonly string Release = ReleaseOf(
-        typeof(PostgresDiagnosticsService).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
-
-    /// <summary>A release from an informational version: <c>0.5.0+abc</c> is <c>0.5.0</c>.</summary>
-    internal static string ReleaseOf(string? informationalVersion) =>
-        informationalVersion is { Length: > 0 } version ? version.Split('+')[0].Trim() : "0.0.0";
-
     /// <inheritdoc />
     public IReadOnlyList<PostgresCheck> Checks => catalogue.Value;
 
@@ -157,7 +142,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         PostgresDiagnosticsSnapshot empty = new()
         {
             SchemaVersion = DiagnosticsJson.SchemaVersion,
-            Producer = ProducerFor(settings.Text.Product),
+            Producer = DiagnosticsJson.ProducerFor(settings.Text.Product),
             GeneratedAt = timeProvider.GetUtcNow(),
             Database = asked,
         };

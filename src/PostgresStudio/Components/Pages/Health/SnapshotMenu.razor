@@ -1,0 +1,150 @@
+@using Microsoft.Extensions.DependencyInjection
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Diagnostics
+@using PostgresStudio.Services.Live
+@implements IDisposable
+@inject IServiceProvider Services
+@inject StudioState State
+@inject IJSRuntime JsRuntime
+
+@*
+    The Health page's Snapshot menu (W5-API, API design §2.4 and §4.3): what this visitor's pages show of the database, as one
+    schemaVersion 1 file - viewed here, copied, or downloaded. It is built in this circuit, on click, by VisitorSnapshotBuilder
+    from each page's own service as this visitor, handed to the browser and dropped: no file, no cache entry, no endpoint. It
+    never reaches the diagnostics API, which is for host code alone (DiagnosticsApiIsNotServedTests).
+
+    The builder is resolved on click rather than injected, so a Health page nobody asks a snapshot of builds none of the five
+    page services it reads.
+*@
+
+<MenuButton Items="items"
+            Text="Snapshot"
+            Label="Snapshot of this database, as you see it"
+            Title="What your pages show of this database, as one JSON file"
+            WrapperClass="ms-menu-button ms-snapshot-menu"
+            ButtonClass="ms-button ms-snapshot-menu-button"
+            PopoverClass="ms-menu-popover ms-snapshot-menu-popover" />
+
+@if (message is not null)
+{
+    <span class="ms-snapshot-message" role="status">@message</span>
+}
+
+@if (viewed is { } snapshot)
+{
+    <section class="ms-snapshot-view" aria-label="Snapshot JSON">
+        <header class="ms-snapshot-view-header">
+            <h2 class="ms-snapshot-view-title">Snapshot</h2>
+            <code class="ms-snapshot-view-name">@snapshot.FileName</code>
+            <button type="button" class="ms-btn ms-btn-sm ms-snapshot-view-close" @onclick="Close">Close</button>
+        </header>
+        <p class="ms-snapshot-view-note">
+            What your pages show of this database, masked as they mask it. A section you may not see is named under
+            <code>withheld</code>, with what it would take.
+        </p>
+        <JsonView Json="@snapshot.Json" Label="Snapshot JSON" DownloadFileName="@snapshot.FileName" />
+    </section>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> items = [];
+    private VisitorSnapshot? viewed;
+    private string? message;
+
+    protected override void OnInitialized() =>
+        items =
+        [
+            ("View JSON", "Open it here, in the JSON viewer", () => RunAsync(ViewAsync)),
+            ("Copy JSON", "Put it on the clipboard", () => RunAsync(CopyAsync)),
+            ("Download JSON", "Save it as a file", () => RunAsync(DownloadAsync)),
+        ];
+
+    /// <summary>
+    /// One item, then this component's render: the menu's items are plain delegates the MenuButton runs, not event callbacks,
+    /// so nothing re-renders the menu's owner on their behalf.
+    /// </summary>
+    private async Task RunAsync(Func<Task> action)
+    {
+        await action();
+        StateHasChanged();
+    }
+
+    private async Task<VisitorSnapshot?> BuildAsync()
+    {
+        if (State.ActiveScope is not { } scope)
+        {
+            message = "Choose a database first.";
+            return null;
+        }
+
+        message = null;
+
+        try
+        {
+            return await Services.GetRequiredService<VisitorSnapshotBuilder>().BuildAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (Exception)
+        {
+            // The page services answer a failure as a value; anything that still escapes is a bug, and its words are not
+            // the visitor's to read - the server log has it.
+            message = "The snapshot could not be built.";
+            return null;
+        }
+    }
+
+    private async Task ViewAsync()
+    {
+        viewed = await BuildAsync();
+    }
+
+    private async Task CopyAsync()
+    {
+        if (await BuildAsync() is not { } snapshot)
+        {
+            return;
+        }
+
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", lifetime.Token, snapshot.Json);
+            message = copied ? "Copied the snapshot." : "The browser did not allow the copy.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The copy did not reach the browser.";
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (await BuildAsync() is not { } snapshot)
+        {
+            return;
+        }
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, snapshot.FileName, "application/json", snapshot.Json);
+            message = "Saved " + snapshot.FileName + ".";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The download did not reach the browser.";
+        }
+    }
+
+    private void Close() => viewed = null;
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

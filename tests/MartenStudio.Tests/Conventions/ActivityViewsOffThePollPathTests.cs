@@ -311,9 +311,26 @@ public class ActivityViewsOffThePollPathTests
             static x => x == "src/PostgresStudio/Components/Pages/Database/Sessions.razor"
                 || x == PostgresOverview
                 || x == "src/PostgresStudio/Services/Settings/StudioCoreRegistration.cs"
+                || x == SnapshotBuilder
                 || StudioProjects.IsUnder(x, "Services", "Database"),
             "the sidebar, MartenStudio's Overview and every other page poll every RefreshInterval; PostgresStudio's Overview "
-            + "reads the summary at HealthInterval only (the fact below)");
+            + "reads the summary at HealthInterval only (the fact below), and the Health page's Snapshot menu once per click");
+    }
+
+    /// <summary>
+    /// The Health page's Snapshot download (W5-API): it reads the sessions summary and details as the visitor, once per click of
+    /// the menu - never on a timer, and the builder is resolved only when the menu is used.
+    /// </summary>
+    private const string SnapshotBuilder = "src/PostgresStudio/Services/Diagnostics/VisitorSnapshotBuilder.cs";
+
+    [Fact]
+    public void The_snapshot_download_reads_the_sessions_only_when_its_menu_is_used()
+    {
+        string menu = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Components", "Pages", "Health", "SnapshotMenu.razor")));
+
+        menu.Should().NotContain("@inject VisitorSnapshotBuilder", "the builder is resolved on click, so a Health page builds none of its services");
+        menu.Should().NotContain("PeriodicTimer").And.NotContain("StudioLiveUpdates.Create", "a snapshot is taken when asked, never polled");
     }
 
     /// <summary>PostgresStudio's Overview, the one page besides Sessions that reads the sessions summary (PS-3a).</summary>

@@ -210,5 +210,9 @@ internal static class StudioCoreRegistration
         // visitor is shown of them, and which first read this circuit has audited, are the circuit's.
         services.TryAddSingleton<IStatementFacts, StatementFactsReader>();
         services.TryAddScoped<IStatementsService, StatementsService>();
+
+        // W5-API: the Health page's Snapshot menu. The circuit's, because it asks each page's service as this visitor; it never
+        // reaches the diagnostics API, which each Add*Studio registers for host code alone.
+        services.TryAddScoped<Diagnostics.VisitorSnapshotBuilder>();
     }
 }

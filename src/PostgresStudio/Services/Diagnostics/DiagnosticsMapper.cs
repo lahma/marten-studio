@@ -1,4 +1,6 @@
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Diagnostics;
@@ -22,6 +24,9 @@ namespace PostgresStudio.Services.Diagnostics;
 /// </remarks>
 internal static class DiagnosticsMapper
 {
+    /// <summary>The most statements a statements section lists, in the API's snapshot and the studio's download alike.</summary>
+    public const int MaxStatements = 100;
+
     /// <summary>A severity.</summary>
     public static PostgresSeverity Severity(HealthSeverity severity) => severity switch
     {
@@ -164,6 +169,129 @@ internal static class DiagnosticsMapper
             Evidence = [.. finding.Evidence.Select(gate.Evidence)],
             DocsUrl = info.DocsUrl,
             MeasuredAt = finding.MeasuredAt,
+        };
+    }
+
+    /// <summary>
+    /// A finding as one visitor's Health page shows it, for the studio's snapshot download (API design §2.4): the report's own
+    /// evidence, which the Health service has already gated value by value for that visitor and whose statement texts it has
+    /// already masked with that visitor's screen - never the sweep's.
+    /// </summary>
+    /// <param name="shown">The finding as the report shows it.</param>
+    public static PostgresFinding Finding(HealthReportFinding shown)
+    {
+        ArgumentNullException.ThrowIfNull(shown);
+
+        HealthFinding finding = shown.Finding;
+
+        return new PostgresFinding
+        {
+            Code = finding.Code,
+            Variant = finding.Variant,
+            Subject = finding.Subject,
+            TenantId = finding.TenantId,
+            Severity = Severity(finding.Severity),
+            Category = Category(finding.Area),
+            Title = finding.Title,
+            Detail = finding.WhyItMatters,
+            Caveat = finding.Caveat,
+            Action = finding.Remedy?.Code,
+            ActionExplanation = finding.Remedy?.Explanation,
+            ActionKind = finding.Remedy is { } remedy ? ActionKind(remedy.Kind) : null,
+            ActionRequires = shown.RemedyAvailable ? null : finding.Remedy?.Requires?.Needs,
+            Evidence = [.. shown.Evidence.Select(static x => new KeyValuePair<string, string>(x.Label, x.Value))],
+            DocsUrl = shown.DocsUrl,
+            MeasuredAt = finding.MeasuredAt,
+        };
+    }
+
+    /// <summary>
+    /// A check's row as one visitor's Health page shows it, for the studio's snapshot download:
+    /// <see cref="PostgresReadOutcome.Withheld" /> with the page's own sentence for a row past the visitor's gate, otherwise
+    /// its outcome, the page's words for a problem, and how many findings the visitor is shown.
+    /// </summary>
+    /// <param name="status">The row.</param>
+    /// <param name="info">The check, from the registry, for its variants and gate; <see langword="null" /> when unknown.</param>
+    public static PostgresCheck Check(HealthCheckStatus status, HealthCheckInfo? info)
+    {
+        ArgumentNullException.ThrowIfNull(status);
+
+        PostgresCheck check = new()
+        {
+            Code = status.Code,
+            Category = Category(status.Area),
+            Title = status.Title,
+            Variants = info is null ? [] : [.. info.Variants],
+            RequiresActivity = info?.Gate == HealthGate.Activity,
+            DocsUrl = status.DocsUrl,
+        };
+
+        if (status.BelowGate is { } gate)
+        {
+            return check with { Outcome = PostgresReadOutcome.Withheld, Reason = "withheld - " + gate };
+        }
+
+        return check with
+        {
+            Outcome = Outcome(status.Outcome),
+            Reason = status.Problem ?? (status.Outcome == HealthCheckOutcome.Checked ? null : status.Note),
+            SqlState = status.SqlState,
+            Findings = status.FindingCount,
+        };
+    }
+
+    /// <summary>One row of connection counts, as the public type has it.</summary>
+    /// <param name="counts">The row.</param>
+    public static PostgresConnectionCounts Counts(SessionApplicationCounts counts)
+    {
+        ArgumentNullException.ThrowIfNull(counts);
+
+        return new PostgresConnectionCounts
+        {
+            ApplicationName = counts.Application,
+            Total = Count(counts.Total),
+            Active = Count(counts.Active),
+            Idle = Count(counts.Idle),
+            IdleInTransaction = Count(counts.IdleInTransaction),
+            Waiting = Count(counts.Waiting),
+            StateUnknown = Count(counts.StateUnknown),
+            OldestTransaction = counts.OldestTransaction,
+        };
+    }
+
+    /// <summary>A count as the public type's <see cref="int" />, clamped.</summary>
+    internal static int Count(long value) => (int) Math.Clamp(value, 0, int.MaxValue);
+
+    /// <summary>One curated setting, as the Server page lists it.</summary>
+    /// <param name="row">The row.</param>
+    public static PostgresSetting Setting(ServerSettingRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return new PostgresSetting
+        {
+            Name = row.Name,
+            Group = row.Group,
+            Value = row.Setting?.Value,
+            Unit = row.Setting?.Unit,
+            Source = row.Setting?.Source,
+            PendingRestart = row.Setting?.PendingRestart == true,
+        };
+    }
+
+    /// <summary>One extension chip, as the Server page shows it.</summary>
+    /// <param name="chip">The chip.</param>
+    public static PostgresExtension Extension(ServerExtensionStatus chip)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+
+        return new PostgresExtension
+        {
+            Name = chip.Name,
+            InstalledVersion = chip.InstalledVersion,
+            AvailableVersion = chip.AvailableVersion,
+            Usable = chip.Usable,
+            Note = chip.Note,
         };
     }
 

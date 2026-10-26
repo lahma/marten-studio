@@ -177,6 +177,9 @@ public class StudioRegistrationTests
         // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
         (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
         (typeof(PostgresStudio.Services.Statements.IStatementsService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Statements.StatementsService)),
+
+        // W5-API: the Health page's Snapshot menu, the circuit's - built from the page services as the visitor.
+        (typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

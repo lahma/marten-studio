@@ -1,7 +1,10 @@
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Diagnostics;
 
@@ -46,6 +49,21 @@ internal static class DiagnosticsJson
         Indented = true,
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
+
+    /// <summary>
+    /// What <see cref="PostgresDiagnosticsSnapshot.Producer" /> says: the package and its release, <c>PostgresStudio 0.5.0</c> -
+    /// both studios ship at one version, so PostgresStudio's assembly says it for either. The API's snapshot and the studio's
+    /// download say it the same way.
+    /// </summary>
+    internal static string ProducerFor(StudioProduct product) =>
+        (product == StudioProduct.MartenStudio ? "MartenStudio " : "PostgresStudio ") + Release;
+
+    private static readonly string Release = ReleaseOf(
+        typeof(DiagnosticsJson).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion);
+
+    /// <summary>A release from an informational version: <c>0.5.0+abc</c> is <c>0.5.0</c>.</summary>
+    internal static string ReleaseOf(string? informationalVersion) =>
+        informationalVersion is { Length: > 0 } version ? version.Split('+')[0].Trim() : "0.0.0";
 
     /// <summary>The snapshot, as indented JSON.</summary>
     /// <param name="snapshot">The snapshot.</param>

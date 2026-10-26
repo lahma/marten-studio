@@ -848,7 +848,7 @@ internal sealed class HealthService : IHealthService
                     null,
                     result.Check.DocsUrl,
                     [],
-                    FindingsWithheld: true));
+                    FindingsWithheld: true) { BelowGate = gate.WhyNot(result.Check.Gate) });
 
                 continue;
             }

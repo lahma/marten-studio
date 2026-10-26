@@ -18,7 +18,7 @@ namespace PostgresStudio.Services.Diagnostics;
 internal static class DiagnosticsSnapshotBuilder
 {
     /// <summary>The most statements the statements section lists: the Statements page's own most.</summary>
-    public const int MaxStatements = 100;
+    public const int MaxStatements = DiagnosticsMapper.MaxStatements;
 
     /// <summary>The most characters of a statement's text: the statement checks' read, as the Statements page shows it.</summary>
     public const int StatementCharacters = HealthStatementQueries.MaxTextCharacters;
@@ -226,29 +226,8 @@ internal static class DiagnosticsSnapshotBuilder
             Outcome = read ? PostgresReadOutcome.Read : PostgresReadOutcome.Failed,
             Reason = facts.Failures.Count == 0 ? null : string.Join(" ", facts.Failures.Select(static x => x.EndsWith('.') ? x : x + ".")),
             MeasuredAt = facts.ReadAt,
-            Settings =
-            [
-                .. facts.CuratedSettings().Select(static x => new PostgresSetting
-                {
-                    Name = x.Name,
-                    Group = x.Group,
-                    Value = x.Setting?.Value,
-                    Unit = x.Setting?.Unit,
-                    Source = x.Setting?.Source,
-                    PendingRestart = x.Setting?.PendingRestart == true,
-                }),
-            ],
-            Extensions =
-            [
-                .. facts.Chips().Select(static x => new PostgresExtension
-                {
-                    Name = x.Name,
-                    InstalledVersion = x.InstalledVersion,
-                    AvailableVersion = x.AvailableVersion,
-                    Usable = x.Usable,
-                    Note = x.Note,
-                }),
-            ],
+            Settings = [.. facts.CuratedSettings().Select(DiagnosticsMapper.Setting)],
+            Extensions = [.. facts.Chips().Select(DiagnosticsMapper.Extension)],
         };
     }
 
@@ -286,31 +265,13 @@ internal static class DiagnosticsSnapshotBuilder
             MaxConnections = connections.MaxConnections,
             ReservedConnections = connections.Reserved,
             ServerConnections = Count(connections.ServerConnections),
-            Database = Counts(connections.Database),
-            ByApplication = gate.IncludeActivity ? [.. connections.Applications.Select(Counts)] : [],
+            Database = DiagnosticsMapper.Counts(connections.Database),
+            ByApplication = gate.IncludeActivity ? [.. connections.Applications.Select(DiagnosticsMapper.Counts)] : [],
             AllSessionsVisible = connections.AllSessionsVisible,
         };
     }
 
-    /// <summary>One row of counts, as the public type has it.</summary>
-    internal static PostgresConnectionCounts Counts(SessionApplicationCounts counts)
-    {
-        ArgumentNullException.ThrowIfNull(counts);
-
-        return new PostgresConnectionCounts
-        {
-            ApplicationName = counts.Application,
-            Total = Count(counts.Total),
-            Active = Count(counts.Active),
-            Idle = Count(counts.Idle),
-            IdleInTransaction = Count(counts.IdleInTransaction),
-            Waiting = Count(counts.Waiting),
-            StateUnknown = Count(counts.StateUnknown),
-            OldestTransaction = counts.OldestTransaction,
-        };
-    }
-
-    private static int Count(long value) => (int) Math.Clamp(value, 0, int.MaxValue);
+    private static int Count(long value) => DiagnosticsMapper.Count(value);
 
     private static long? Whole(double? value) => value is { } number && double.IsFinite(number) ? (long) Math.Round(number) : null;
 }
