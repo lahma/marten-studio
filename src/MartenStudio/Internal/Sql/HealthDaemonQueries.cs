@@ -98,15 +98,17 @@ internal static class HealthDaemonQueries
     /// <para>
     /// Columns: <c>server_now</c>, <c>highest_sequence</c>, <c>mark</c>, <c>mark_updated</c>, <c>stuck_mark</c>,
     /// <c>stuck_since</c>, <c>fence_mark</c>, <c>fence_updated</c>, <c>latest_write</c>, <c>next_committed</c>,
-    /// <c>allocated_high</c>, <c>highest_committed</c>.
+    /// <c>allocated_high</c>, <c>highest_committed</c>, <c>sequence_last_value</c>.
     /// </para>
     /// <para>
-    /// The last two are D09's. <c>allocated_high</c> is Marten's own reading of the highest number the sequence has handed
-    /// out (#5091's <c>AllocatedSequenceHigh</c>, <c>HighWaterStatisticsDetector</c> at V9.39.0 and v9.51.0):
+    /// The last three are D09's. <c>allocated_high</c> is Marten's own reading of the highest number the sequence has handed
+    /// out (#5091's <c>AllocatedSequenceHigh</c>, <c>HighWaterStatisticsDetector</c> at V9.39.0, v9.51.0 and V9.54.1):
     /// <c>last_value</c> once called, <c>last_value - 1</c> before - which a sequence restarted at <c>n</c> reads as
     /// <c>n - 1</c>, where <c>highest_sequence</c> reads 0 and would call the next number already passed.
     /// <c>highest_committed</c> is <c>max(seq_id)</c>, the other end of the same primary key the <c>next_committed</c> probe
     /// descends: one backward index descent, under the <c>AccessShareLock</c> that probe already takes.
+    /// <c>sequence_last_value</c> is the raw <c>last_value</c>, which is what Marten's own correction compares the mark with
+    /// and moves progression to (its <c>HighestSequence</c>), so D09 can tell when that correction has nothing left to do.
     /// </para>
     /// <para>
     /// <c>highest_sequence</c> is <c>case when is_called then last_value else 0 end</c>, the projections screen's
@@ -138,7 +140,8 @@ internal static class HealthDaemonQueries
             + "  (select pg_catalog.max(p.last_updated) from " + progression + " p) as latest_write,\n"
             + "  (select pg_catalog.min(e.seq_id) from " + events + " e where e.seq_id > h.last_seq_id) as next_committed,\n"
             + "  (select case when s.is_called then s.last_value else s.last_value - 1 end from " + sequence + " s) as allocated_high,\n"
-            + "  (select pg_catalog.max(e.seq_id) from " + events + " e) as highest_committed\n"
+            + "  (select pg_catalog.max(e.seq_id) from " + events + " e) as highest_committed,\n"
+            + "  (select s.last_value from " + sequence + " s) as sequence_last_value\n"
             + "from (values (1)) as one(x)\n"
             + "left join " + progression + " h on h.name = @mark_row\n"
             + "left join " + progression + " g on g.name = @stuck_row\n"

@@ -134,11 +134,16 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         string table = SqlIdentifier.Qualify(Sample, "g1m_orders");
         string key = SchemaKey.For(Sample, "g1m_orders");
 
+        // Two batches, each ending with a forced statistics flush: the insert's pending counters must reach shared memory
+        // before ANALYZE sets n_live_tup, or - on a machine fast enough to finish the insert inside the one-second flush
+        // interval - they land after it and add the 220,000 rows a second time.
         await fixture.ExecuteAsync(
             "drop table if exists " + table,
             "create table " + table + " (id bigint primary key, customer int not null, note text not null) with (autovacuum_enabled = false)",
             "create index g1m_orders_by_note on " + table + " (note)",
-            "insert into " + table + " select g, g % 1000, 'note ' || g from generate_series(1, 220000) as g",
+            "insert into " + table + " select g, g % 1000, 'note ' || g from generate_series(1, 220000) as g");
+
+        await fixture.ExecuteAsync(
             // ANALYZE refreshes the index's relpages, which T05 sizes it by.
             "analyze " + table,
             "delete from " + table + " where id % 4 = 0");
@@ -278,6 +283,9 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
             {
                 hiding = await ReportAsync(host);
             }
+
+            HealthCheckStatus t07 = HealthLiveHost.Status(hiding, "T07");
+            t07.Outcome.Should().Be(HealthCheckOutcome.Checked, "T07 has to have looked for its silence about both tables to mean anything: {0}", t07.Problem);
 
             foreach (string name in new[] { "mt_doc_healthsecretthing", "mt_doc_g1m_orphan", "healthsecretthing", "HealthSecretThing" })
             {
@@ -422,10 +430,22 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
     /// the output, so a run says what the demo opens on. (Tables this class makes for its own conditions are named
     /// <c>*g1m*</c> and are not the demo's.)
     /// </summary>
+    /// <remarks>
+    /// Twelve minutes of regular sweeps, two apart, by the host's clock: T07 and T08 speak only once a condition has held
+    /// for ten minutes of samples, so a single sweep would be quiet about the library's tables whatever they held.
+    /// </remarks>
     [PostgresFact]
     public async Task The_seeded_samples_relational_schemas_raise_no_table_finding()
     {
-        await using HealthLiveHost host = Host(new ManualClock(Start));
+        ManualClock clock = new(Start);
+        await using HealthLiveHost host = Host(clock);
+
+        for (int minutes = 0; minutes < 12; minutes += 2)
+        {
+            await ReportAsync(host);
+            clock.Advance(TimeSpan.FromMinutes(2));
+        }
+
         HealthReport report = await ReportAsync(host, deeper: true);
 
         foreach (HealthReportFinding finding in report.Findings)
@@ -449,6 +469,49 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
         foreach (HealthCheckStatus status in report.Checks.Where(static x => x.Code.StartsWith('T') && x.Tier != HealthCostTier.Statements))
         {
             status.Outcome.Should().Be(HealthCheckOutcome.Checked, "{0} has to run for its silence to mean anything: {1}", status.Code, status.Problem);
+        }
+    }
+
+    /// <summary>
+    /// T09's sample reads rows, so it keeps to the store's own collections: with nothing hidden, an undeclared
+    /// <c>mt_doc_*</c> table is in the judged set as Marten's - and still never sampled (D27: Marten's tables are never
+    /// read raw), while a declared collection of the same size is.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_deeper_sample_reads_a_declared_collection_and_never_an_undeclared_document_table()
+    {
+        string orphan = SqlIdentifier.Qualify(Sample, "mt_doc_g1m_sampled");
+        string customers = SqlIdentifier.Qualify(Sample, "mt_doc_customer");
+
+        await fixture.ExecuteAsync(
+            "drop table if exists " + orphan,
+            "create table " + orphan + " (id uuid primary key, data jsonb not null)",
+            "insert into " + orphan + " select gen_random_uuid(), jsonb_build_object('n', g) from generate_series(1, 2000) as g",
+            "insert into " + customers + " (id, data) select gen_random_uuid(), jsonb_build_object('Email', 'g1m' || g || '@example.invalid') "
+            + "from generate_series(1, 2000) as g");
+
+        try
+        {
+            await using HealthLiveHost host = Host(new ManualClock(Start));
+
+            (await SetAsync(host)).Find(Sample, "mt_doc_g1m_sampled").Should().BeEquivalentTo(
+                new { Ownership = StudioTableOwnership.Library, Kind = StudioTableKind.DocumentTable, Library = "Marten" },
+                "the precondition: nothing is hidden, so the orphan is judged as Marten's");
+
+            HealthReport report = await ReportAsync(host, deeper: true);
+            HealthCheckStatus t09 = HealthLiveHost.Status(report, "T09");
+
+            t09.Outcome.Should().Be(HealthCheckOutcome.Checked, t09.Problem);
+            t09.Statements.Should().Contain(static x => x.Sql.Contains("tablesample", StringComparison.Ordinal)
+                && x.Sql.Contains("mt_doc_customer", StringComparison.Ordinal), "a declared collection of this size is sampled");
+            t09.Statements.Should().NotContain(static x => x.Sql.Contains("mt_doc_g1m_sampled", StringComparison.Ordinal),
+                "a document table no store declares is never sampled");
+        }
+        finally
+        {
+            await fixture.ExecuteAsync(
+                "drop table if exists " + orphan,
+                "delete from " + customers + " where data ->> 'Email' like 'g1m%'");
         }
     }
 

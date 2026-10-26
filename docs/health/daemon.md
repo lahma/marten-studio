@@ -371,8 +371,8 @@ probe).
   event. Where the events are partitioned by archive status, a number that only an archived event holds is no conflict
   at all, and two events then share it.
 
-"Handed out" is Marten's own reading of the sequence (#5091's `AllocatedSequenceHigh`, read at `V9.39.0` and
-`v9.51.0`): `last_value` once the sequence has been called, `last_value - 1` before. So a sequence restarted at `n` has
+"Handed out" is Marten's own reading of the sequence (#5091's `AllocatedSequenceHigh`, read at `V9.39.0`, `v9.51.0` and
+`V9.54.1`): `last_value` once the sequence has been called, `last_value - 1` before. So a sequence restarted at `n` has
 handed out `n - 1`, and the next append takes `n`. A sequence is not transactional, so an append that drew a number at
 the instant of the read counts as handed out. That can only make the sequence look further ahead. In a healthy store the
 mark, every shard and every committed event are at or below the sequence, and nothing fires.
@@ -384,20 +384,32 @@ These are what leave a store like this:
 - a cut-over to a database that logical replication filled: it copies rows, and before PostgreSQL 19 it does not copy a
   sequence's position.
 
-What to do, read at `V9.39.0` and `v9.51.0`:
+What to do, read at `V9.39.0`, `v9.51.0` and `V9.54.1`:
 
 - **`mark-ahead`**: the projections screen's **Correct progression** (`Capabilities.CorrectProgression`), which runs
   Marten's own `store.Advanced.TryCorrectProgressInDatabaseAsync`. Marten sets the mark and every shard's row back to
   the sequence's `last_value`, leaving its own allocation-fence and stuck-gap rows alone, and it does so only while the
   mark is above that value. Every event appended since the reset at a number at or below it is then treated as
-  processed, so rebuild the projections that should hold those events. Right after a `RESTART`, before anything is
-  appended, `last_value` is the number the sequence hands out next: the mark ends one past what it has handed out, D09
-  goes on reporting it, and the first event appended afterwards is treated as processed too.
-- **`shard-ahead`**: Correct progression does nothing here, because the mark is not ahead. Rebuild the projection, or
-  rewind the subscription; either leaves the shard where the events are.
+  processed, so rebuild the projections that should hold those events - a rebuild empties the projection's tables
+  before it replays.
+  - Right after a `RESTART`, before anything is appended, `last_value` is the number the sequence hands out next. So the
+    correction leaves the mark exactly there, one past what has been handed out, and has done all it can. D09 then no
+    longer offers it, and says that the next event appended takes the mark's own number and is treated as already
+    processed.
+  - The remedy then is a DBA's: with appends stopped, move the sequence on by that one number (`setval` it to the mark),
+    so the next append takes the number after it.
+- **`shard-ahead`**: Correct progression does nothing here, because the mark is not ahead. Either fix leaves the shard
+  where the events are:
+  - rebuild the projection, which empties its tables and replays from the first event to the mark;
+  - or rewind the subscription to the highest number the sequence has handed out (one less than the number it hands out
+    next). JasperFx replays from the number after the floor it is given, so a rewind to the number handed out next would
+    lose that event.
 - **`sequence-behind`**: a DBA's repair, with appends stopped: `setval` the sequence to `max(seq_id)` of `mt_events`.
   When both this and a progression finding are reported, do this first. The correction moves progression to the
   sequence's position, and that position has to be past the events, or the daemon processes them all again.
 
-A shard whose projection writes a document type `IsDocumentTypeVisible` hides is never named. Like D01-D04, a store with
-`Events.UseTenantPartitionedEvents` is not checked, because every tenant draws from a sequence of its own there.
+`mark-ahead` and `shard-ahead` are judged only for a store that registers an async projection or subscription, as D02,
+D03, D05, D07 and D08 are: without one, nothing waits on a progression row. `sequence-behind` is judged for any store
+with events, because an append fails either way. A shard whose projection writes a document type `IsDocumentTypeVisible`
+hides is never named. Like D01-D04, a store with `Events.UseTenantPartitionedEvents` is not checked, because every
+tenant draws from a sequence of its own there.

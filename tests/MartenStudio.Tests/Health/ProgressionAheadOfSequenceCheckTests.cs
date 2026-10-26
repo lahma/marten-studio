@@ -1,4 +1,14 @@
+using Marten;
+
+using MartenStudio.Services;
+using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health.Checks;
+using MartenStudio.Tests.Sql;
+
+using Microsoft.Extensions.DependencyInjection;
+
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 
 using static MartenStudio.Tests.Health.HighWaterPinnedCheckTests;
@@ -11,8 +21,11 @@ namespace MartenStudio.Tests.Health;
 /// </summary>
 public class ProgressionAheadOfSequenceCheckTests
 {
-    /// <summary>A store whose sequence has handed out <paramref name="allocated" />, with the mark and the highest event given.</summary>
-    private static HighWaterReading Reading(long allocated, long? mark, long? highest) => new(
+    /// <summary>
+    /// A store whose sequence has handed out <paramref name="allocated" />, with the mark and the highest event given, and
+    /// the raw <c>last_value</c> when the test is about Marten's correction.
+    /// </summary>
+    private static HighWaterReading Reading(long allocated, long? mark, long? highest, long? lastValue = null) => new(
         Now,
         HighestSequence: allocated,
         Mark: mark,
@@ -26,6 +39,7 @@ public class ProgressionAheadOfSequenceCheckTests
     {
         AllocatedHigh = allocated,
         HighestCommitted = highest,
+        SequenceLastValue = lastValue,
     };
 
     private static DaemonShardRow Shard(string name, long position) => new(name, position, Now);
@@ -102,6 +116,80 @@ public class ProgressionAheadOfSequenceCheckTests
         finding.Title.Should().StartWith("Shard DailySales:All (40) is ahead of the event sequence, which hands out 21 next");
         finding.Remedy!.Explanation.Should().StartWith("Correct progression does nothing here",
             "Marten corrects progression only while the mark itself is ahead");
+    }
+
+    /// <summary>
+    /// Right after a RESTART, before anything has drawn from the sequence, Marten's correction leaves the mark at
+    /// <c>last_value</c> - the number handed out next - and acts no further, so D09 does not offer it again: it says the
+    /// correction has done what it can, that the next append is treated as processed, and moves the sequence on by one.
+    /// </summary>
+    [Fact]
+    public void A_mark_at_the_number_handed_out_next_after_a_restart_is_past_what_the_correction_can_do()
+    {
+        HealthFinding done = Evaluate(Reading(0, mark: 1, highest: null, lastValue: 1), null, Shard("DailySales:All", 1))
+            .Findings.Should().ContainSingle().Subject;
+
+        done.Variant.Should().Be("mark-ahead");
+        done.Remedy!.Code.Should().NotContain("TryCorrectProgressInDatabaseAsync", "the correction has nothing left to do")
+            .And.Contain("setval it to 1").And.Contain("so the next append takes 2");
+        done.Remedy.Code.Split('\n').Should().OnlyContain(static x => x.StartsWith("//", StringComparison.Ordinal));
+        done.Remedy.Explanation.Should().StartWith("Correct progression has done what it can")
+            .And.Contain("the next event appended takes 1, which the daemon treats as already processed");
+
+        // Above last_value, the correction still acts, and is what is offered.
+        Evaluate(Reading(0, mark: 50, highest: null, lastValue: 1)).Findings.Should().ContainSingle()
+            .Which.Remedy!.Code.Should().Contain("await store.Advanced.TryCorrectProgressInDatabaseAsync(cancellationToken);");
+    }
+
+    [Fact]
+    public void With_no_async_work_registered_progression_is_not_judged_and_the_sequence_still_is()
+    {
+        DaemonCheckConfiguration none = DaemonConfiguration(shards: []);
+
+        HealthVerdict progression = Evaluate(Reading(0, mark: 50, highest: null), none, Shard("DailySales:All", 50));
+        progression.Findings.Should().BeEmpty("mark-ahead needs a store with an async projection or subscription, as D02-D08 do");
+        progression.Note.Should().Contain("no async projection or subscription");
+
+        Evaluate(Reading(20, mark: 20, highest: 20), none, Shard("DailySales:All", 40))
+            .Findings.Should().BeEmpty("so does shard-ahead");
+
+        Evaluate(Reading(0, mark: 50, highest: 50), none).Findings.Should().ContainSingle()
+            .Which.Variant.Should().Be("sequence-behind", "an append fails whether or not anything projects the events");
+    }
+
+    [Fact]
+    public async Task A_store_that_partitions_its_events_by_tenant_is_not_checked()
+    {
+        using DocumentStore store = DocumentStore.For(options =>
+        {
+            options.Connection(SqlTestStore.Unreachable);
+            options.Events.TenancyStyle = JasperFx.MultiTenancy.TenancyStyle.Conjoined;
+            options.Events.UseTenantPartitionedEvents = true;
+        });
+        await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+
+        HealthCheckContext context = new(
+            new ResolvedScope(
+                new StudioScope("default", string.Empty, null),
+                new MartenStoreRegistration("default", "Default", typeof(IDocumentStore)),
+                store,
+                store.Storage.Database),
+            MartenStudioSettings.Of(new MartenStudioOptions()),
+            MartenStudioRuntime.Current,
+            services,
+            new HealthSqlRunner(
+                new HealthConnection(MartenStudioDatabase.Of(store.Storage.Database)),
+                new ReadOnlySqlOptions(),
+                null),
+            Now,
+            new HealthSweepMemo(),
+            CancellationToken.None);
+
+        Func<Task> gather = () => new ProgressionAheadOfSequenceCheck().GatherAsync(context, CancellationToken.None);
+
+        (await gather.Should().ThrowAsync<HealthCheckUnavailableException>()).Which.Message
+            .Should().Be(DaemonCheckConfiguration.TenantPartitionedReason);
+        context.Sql.Statements.Should().BeEmpty("it refuses before reading anything");
     }
 
     [Fact]

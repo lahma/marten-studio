@@ -262,7 +262,11 @@ internal static class MartenDatabaseTables
         ArgumentNullException.ThrowIfNull(classifier);
 
         HashSet<string> storeSchemas = new(scope.StoreSchemas, StringComparer.Ordinal);
-        HashSet<string> taken = new(declared.Tables.Select(static x => x.Key), StringComparer.OrdinalIgnoreCase);
+
+        // A declared name is matched as Marten's own sets match it, ignoring case; the catalog's own names are distinct
+        // as Postgres keeps them, so "Orders" and orders beside the store are two tables, each judged and counted.
+        HashSet<string> declaredKeys = new(declared.Tables.Select(static x => x.Key), StringComparer.OrdinalIgnoreCase);
+        HashSet<string> taken = new(StringComparer.Ordinal);
         List<StudioTable> undeclared = [];
 
         foreach (HealthRelationalTableRow row in rows)
@@ -272,7 +276,9 @@ internal static class MartenDatabaseTables
                 break;
             }
 
-            if (Classify(row.Schema, row.Table, storeSchemas, classifier) is { } table && taken.Add(table.Key))
+            if (Classify(row.Schema, row.Table, storeSchemas, classifier) is { } table
+                && !declaredKeys.Contains(table.Key)
+                && taken.Add(table.Key))
             {
                 undeclared.Add(table);
             }
@@ -328,9 +334,16 @@ internal static class MartenDatabaseTables
 /// origin-aware index rules and <c>StoreOptions</c> remedies exactly as before, and every other table of the admitted
 /// schemas beside them, classified as the host's, a library's or somebody else's.
 /// </summary>
+/// <remarks>
+/// <b>Names, as each half has them.</b> Every table is found by its exact name first (ordinal), so two tables the catalog
+/// lists as <c>"Orders"</c> and <c>orders</c> are two tables. A declared table is also found ignoring case, as Marten's own
+/// sets find it (<see cref="MartenTableSet" />), and an undeclared table whose name differs from a declared one only in
+/// case is the declared one - the statement already leaves it out of the list on the same terms.
+/// </remarks>
 internal sealed class MartenDatabaseTableSet : IStudioTableSet
 {
-    private readonly Dictionary<string, StudioTable> byKey = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, StudioTable> exact = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, StudioTable> declaredIgnoringCase = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The set over <paramref name="declared" /> and <paramref name="undeclared" />.</summary>
     /// <param name="declared">The store's declared tables.</param>
@@ -346,9 +359,18 @@ internal sealed class MartenDatabaseTableSet : IStudioTableSet
 
         List<StudioTable> tables = [];
 
-        foreach (StudioTable table in declared.Tables.Concat(undeclared))
+        foreach (StudioTable table in declared.Tables)
         {
-            if (byKey.TryAdd(table.Key, table))
+            if (declaredIgnoringCase.TryAdd(table.Key, table))
+            {
+                exact.TryAdd(table.Key, table);
+                tables.Add(table);
+            }
+        }
+
+        foreach (StudioTable table in undeclared)
+        {
+            if (!declaredIgnoringCase.ContainsKey(table.Key) && exact.TryAdd(table.Key, table))
             {
                 tables.Add(table);
             }
@@ -373,7 +395,11 @@ internal sealed class MartenDatabaseTableSet : IStudioTableSet
     public string? Coverage { get; }
 
     /// <inheritdoc />
-    public StudioTable? Find(string schema, string table) => byKey.GetValueOrDefault(SchemaKey.For(schema, table));
+    public StudioTable? Find(string schema, string table)
+    {
+        string key = SchemaKey.For(schema, table);
+        return exact.GetValueOrDefault(key) ?? declaredIgnoringCase.GetValueOrDefault(key);
+    }
 
     /// <inheritdoc />
     /// <remarks>
