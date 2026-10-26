@@ -1,0 +1,131 @@
+/* ==========================================================================
+   W5-R2 - Operations › Replication: slots, standbys, the archiver, WAL,
+   checkpoints, pg_stat_io and tablespaces. Folded into studio.css by the
+   orchestrator in D26 order (W5-index §4); tokens only, every rule ms-.
+   ========================================================================== */
+
+.ms-repl-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-repl-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+/* The counts: a row of five that wraps, one per line on a phone - Sessions' shape. */
+.ms-repl-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-repl-stat {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-repl-stat dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-stat dd {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-repl-stat-note {
+    display: block;
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-repl-note,
+.ms-repl-gate,
+.ms-repl-measured {
+    max-width: 80ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-refusal,
+.ms-repl-finding {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-repl-finding-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* A section that does not apply here, or is not on this release, reads as a
+   quiet line in its place - never as an error. */
+.ms-repl-unavailable {
+    color: var(--ms-color-text-muted);
+}
+
+.ms-repl-not-checked {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-alert {
+    color: var(--ms-color-warning);
+}
+
+.ms-repl-section {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-repl-heading {
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* Label-value pairs in two columns, one on a phone. */
+.ms-repl-facts {
+    display: grid;
+    grid-template-columns: minmax(10rem, max-content) minmax(0, 1fr);
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-repl-facts dt {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-repl-facts dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-repl-table td {
+    vertical-align: top;
+}
+
+.ms-repl-number {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-repl-io-wal td {
+    background: var(--ms-color-surface);
+}
+
+@media (max-width: 640px) {
+    .ms-repl-stats,
+    .ms-repl-facts {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

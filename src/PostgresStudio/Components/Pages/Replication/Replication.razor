@@ -1,0 +1,757 @@
+@page "/postgres/replication"
+@using System.Globalization
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Health.Checks
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Replication
+@using PostgresStudio.Services.Settings
+@implements IAsyncDisposable
+@inject IReplicationService ReplicationData
+@inject IHealthService Health
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioCapabilityGuard Capabilities
+
+@*
+    Operations › Replication (W5-R2, issue #8 G8 and A2): what the server's replication and WAL machinery is doing - its
+    slots, the standbys and their lag, the archiver, WAL volume and the full-page-image share, checkpoints, I/O by backend
+    type and the tablespaces - for the database the scope names, read through IReplicationService.
+
+    Two gates. Every number is shown to a visitor the store policy passes for the database as a whole; names - a standby's
+    application name, client address and role, a slot's name (R01's rule: another database's logical slot is never named)
+    and the archive command - need ViewDatabaseActivity and the write policy, and the service blanks them otherwise.
+
+    Read once interactive (a prerender reads nothing), every HealthInterval while the page stays open - never
+    RefreshInterval: pg_stat_replication reads the WAL senders' state - and on Refresh; the facts are shared, so two
+    visitors within an interval share one read. A tablespace's size is read only behind its button, one at a time. The
+    rates are the health advisor's samples, which this page reads and never takes: the Health page and the Overview do.
+*@
+
+<PageTitle>Replication</PageTitle>
+
+<div class="ms-page ms-repl">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Replication</h1>
+        <div class="ms-repl-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-repl-lead">
+        What the server's replication and write-ahead log are doing: slots, standbys and their lag, the archiver, WAL volume,
+        checkpoints, I/O and tablespaces - read when this page opens, once per <code>HealthInterval</code> while it stays open,
+        and on Refresh. It changes nothing.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a source and database in the header to see its replication.</p>
+        </div>
+    }
+    else if (view.Refusal != ReplicationRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-repl-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <dl class="ms-repl-stats">
+            <div class="ms-repl-stat">
+                <dt>Server</dt>
+                <dd>PostgreSQL @view.Server?.Version <span class="ms-repl-stat-note">@view.Server?.Platform.Name</span></dd>
+            </div>
+            <div class="ms-repl-stat">
+                <dt>This server is</dt>
+                <dd>@RoleText(view.Role.Value)</dd>
+            </div>
+            <div class="ms-repl-stat">
+                <dt>Slots</dt>
+                <dd>@(view.Slots.Value is { } slotCount ? SessionText.Number(slotCount.Total) : "–")</dd>
+            </div>
+            <div class="ms-repl-stat">
+                <dt>Standbys streaming</dt>
+                <dd>@(view.Standbys.Value is { } standbyCount ? SessionText.Number(standbyCount.Total) : "–")</dd>
+            </div>
+            <div class="ms-repl-stat">
+                <dt>Archiving</dt>
+                <dd>@ArchivingText(view.Archiver)</dd>
+            </div>
+        </dl>
+
+        @if (view.ReadsAs is { } readsAs)
+        {
+            <p class="ms-repl-note">Read as role <code>@readsAs</code>, a member of @view.MemberOf.</p>
+        }
+
+        @foreach (HealthReportFinding finding in findings)
+        {
+            bool critical = finding.Severity == HealthSeverity.Critical;
+
+            <section class="@("ms-alert ms-repl-finding" + (critical ? " ms-alert-error" : " ms-alert-warning"))"
+                     role="@(critical ? "alert" : "status")"
+                     aria-label="@("Health finding " + finding.Code)"
+                     @key="finding.MuteKey">
+                <div class="ms-alert-content">
+                    <p class="ms-repl-finding-title"><code>@finding.Code</code> @finding.Finding.Title</p>
+                    <p class="ms-muted">
+                        From the health advisor's check at @State.FormatInSelectedTimeZone(finding.Finding.MeasuredAt).
+                        <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, finding)">Why, and what to change</a>
+                    </p>
+                </div>
+            </section>
+        }
+
+        @if (!view.NamesShown)
+        {
+            @if (Capabilities.IsEnabled(StudioCapability.ViewDatabaseActivity))
+            {
+                <p class="ms-muted ms-repl-gate">@view.NamesWithheld</p>
+            }
+            else
+            {
+                <CapabilityDisabled Capability="ViewDatabaseActivity" Action="Standby and slot names" />
+                <p class="ms-muted ms-repl-gate">
+                    Without it this page shows every count, size, lag and state - never a standby's application name, client
+                    address or role, a slot's name, or the archive command.
+                </p>
+            }
+        }
+
+        @* ---- Slots ---------------------------------------------------------------------------------------- *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-slots">
+            <h2 class="ms-repl-heading" id="ms-repl-slots">Slots</h2>
+            @if (view.Slots.Value is not { } slots)
+            {
+                @Unavailable(view.Slots.Note)
+            }
+            else
+            {
+                <p class="ms-repl-note">
+                    @SessionText.Count(slots.Total, "replication slot") on this server.
+                    <code>max_slot_wal_keep_size</code> @WalText.Setting(slots.MaxSlotWalKeepBytes);
+                    <code>wal_keep_size</code> @WalText.Setting(slots.WalKeepBytes);
+                    <code>idle_replication_slot_timeout</code> @slots.IdleSlotTimeout.
+                </p>
+                @if (slots.Rows.Count > 0)
+                {
+                    <TableScroll Label="Replication slots">
+                        <table class="ms-table ms-repl-table ms-repl-slots">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Slot</th>
+                                    <th scope="col">Active</th>
+                                    <th scope="col">Holds</th>
+                                    <th scope="col">wal_status</th>
+                                    <th scope="col">Safe WAL left</th>
+                                    <th scope="col">xmin age</th>
+                                    <th scope="col">catalog_xmin age</th>
+                                    <th scope="col">Inactive for</th>
+                                    <th scope="col">Invalidated</th>
+                                    <th scope="col">Failover</th>
+                                    <th scope="col">Decoded</th>
+                                    <th scope="col">Spilled</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < slots.Rows.Count; i++)
+                                {
+                                    SlotView slot = slots.Rows[i];
+                                    <tr @key="i">
+                                        <td>@slot.Description</td>
+                                        <td>@(slot.Slot.Active ? "yes" : "no")</td>
+                                        <td class="ms-repl-number">@Bytes(slot.Slot.RetainedBytes)</td>
+                                        <td>@(slot.Slot.WalStatus ?? "–")</td>
+                                        <td class="ms-repl-number">@Bytes(slot.Slot.SafeWalSize)</td>
+                                        <td class="ms-repl-number">@(slot.Slot.XminAge is { } xmin ? SessionText.Number(xmin) : "–")</td>
+                                        <td class="ms-repl-number">@(slot.Slot.CatalogXminAge is { } catalogXmin ? SessionText.Number(catalogXmin) : "–")</td>
+                                        <td>@(slot.Slot.InactiveAtRead is { } inactive ? SessionText.Duration(inactive) : "–")</td>
+                                        <td>@(slot.Slot.IsLost ? (slot.Slot.InvalidationReason ?? (slot.Slot.Conflicting == true ? "conflict" : "lost")) : "–")</td>
+                                        <td>@Flags(slot.Statistics)</td>
+                                        <td class="ms-repl-number">@Bytes(slot.Statistics?.TotalBytes)</td>
+                                        <td class="ms-repl-number">@Bytes(slot.Statistics?.SpillBytes)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+            }
+        </section>
+
+        @* ---- Standbys ------------------------------------------------------------------------------------- *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-standbys">
+            <h2 class="ms-repl-heading" id="ms-repl-standbys">Standbys</h2>
+            @if (view.Standbys.Outcome != ReplicationReadOutcome.NotApplicable && view.Role.Value is { InRecovery: true } standbyRole)
+            {
+                <dl class="ms-repl-facts">
+                    <dt>Received up to</dt>
+                    <dd class="ms-mono">@(standbyRole.ReceiveLsn ?? "nothing by streaming")</dd>
+                    <dt>Replayed up to</dt>
+                    <dd class="ms-mono">@(standbyRole.ReplayLsn ?? "–")</dd>
+                    <dt>Behind what it received</dt>
+                    <dd>@Bytes(standbyRole.ReplayBehindBytes)</dd>
+                    <dt>Last replayed commit</dt>
+                    <dd>@(standbyRole.LastReplayAt is { } at ? State.FormatInSelectedTimeZone(at) + (standbyRole.ReplayAgeAtRead is { } age ? ", " + SessionText.Duration(age) + " ago" : string.Empty) : "none yet")</dd>
+                    <dt>Replay</dt>
+                    <dd>@(standbyRole.PauseState ?? "–")</dd>
+                </dl>
+                <p class="ms-repl-note">
+                    This server is a standby: what it has received less what it has replayed is exact, and needs no grant. The
+                    age of the last replayed commit grows on an idle primary too, so it is lag only while the standby holds WAL
+                    it has not replayed.
+                </p>
+            }
+
+            @if (view.Standbys.Value is not { } standbys)
+            {
+                @Unavailable(view.Standbys.Note)
+            }
+            else if (standbys.Total == 0)
+            {
+                <p class="ms-repl-note">No standby streams from this server.</p>
+            }
+            else
+            {
+                @if (standbys.NotChecked is { } notChecked)
+                {
+                    <p class="ms-repl-note ms-repl-not-checked">@notChecked</p>
+                }
+                <TableScroll Label="Standbys streaming from this server">
+                    <table class="ms-table ms-repl-table ms-repl-standbys">
+                        <thead>
+                            <tr>
+                                <th scope="col">Standby</th>
+                                <th scope="col">Client</th>
+                                <th scope="col">State</th>
+                                <th scope="col">Sync</th>
+                                <th scope="col">Behind</th>
+                                <th scope="col">Sent, not replayed</th>
+                                <th scope="col">Replay lag</th>
+                                <th scope="col">Write lag</th>
+                                <th scope="col">Flush lag</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < standbys.Rows.Count; i++)
+                            {
+                                StandbyView standby = standbys.Rows[i];
+                                <tr @key="i">
+                                    <td>@(standby.Name is { } name ? "'" + name + "'" + (standby.User is { } user ? " (role " + user + ")" : string.Empty) : "withheld")</td>
+                                    <td class="ms-mono">@(view.NamesShown ? standby.Client ?? "local socket" : "withheld")</td>
+                                    <td>@(standby.Row.Readable ? standby.Row.State : "not readable")</td>
+                                    <td>@(standby.Row.SyncState ?? "–")</td>
+                                    <td class="ms-repl-number">@Bytes(standby.Row.BehindBytes)</td>
+                                    <td class="ms-repl-number">@Bytes(standby.Row.SentBehindBytes)</td>
+                                    <td>@Lag(standby.Row.ReplayLag)</td>
+                                    <td>@Lag(standby.Row.WriteLag)</td>
+                                    <td>@Lag(standby.Row.FlushLag)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </section>
+
+        @* ---- Archiver ------------------------------------------------------------------------------------- *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-archiver">
+            <h2 class="ms-repl-heading" id="ms-repl-archiver">Archiver</h2>
+            @if (view.Archiver.Value is not { } archiver)
+            {
+                @Unavailable(view.Archiver.Note)
+            }
+            else
+            {
+                <dl class="ms-repl-facts">
+                    <dt>archive_mode</dt>
+                    <dd>@(archiver.Facts.Settings.ArchiveMode ?? "not readable")</dd>
+                    <dt>@(archiver.Facts.Settings.ArchiveLibrary is null ? "archive_command" : "archive_library")</dt>
+                    <dd>@CommandText(archiver)</dd>
+                    <dt>Archived</dt>
+                    <dd>@SessionText.Number(archiver.Facts.ArchivedCount), the last @(archiver.Facts.LastArchivedWal ?? "–") @When(archiver.Facts.LastArchivedAt, archiver.Facts.LastArchivedAgeAtRead)</dd>
+                    <dt>Failed</dt>
+                    <dd class="@(archiver.Facts.LastAttemptFailed ? "ms-repl-alert" : null)">@SessionText.Number(archiver.Facts.FailedCount), the last @(archiver.Facts.LastFailedWal ?? "–") @When(archiver.Facts.LastFailedAt, archiver.Facts.LastFailedAgeAtRead)</dd>
+                    <dt>Being written</dt>
+                    <dd class="ms-mono">@(archiver.Facts.CurrentWal ?? "not named in recovery")</dd>
+                    <dt>Behind</dt>
+                    <dd>@BacklogText(archiver.Facts.Backlog)</dd>
+                    <dt>Waiting in pg_wal</dt>
+                    <dd>
+                        @if (archiver.Directory is { } directory)
+                        {
+                            @(SessionText.Count(directory.ReadyFiles, "file") + " ready for the archiver; pg_wal holds " + SessionText.Count(directory.Files, "file") + ", " + WalText.Bytes(directory.Bytes))
+                        }
+                        else
+                        {
+                            <span class="ms-repl-not-checked">@(archiver.DirectoryNotChecked ?? "–")</span>
+                        }
+                    </dd>
+                    <dt>Statistics since</dt>
+                    <dd>@(archiver.Facts.StatsReset is { } reset ? State.FormatInSelectedTimeZone(reset) : "–")</dd>
+                </dl>
+            }
+        </section>
+
+        @* ---- WAL ------------------------------------------------------------------------------------------ *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-wal">
+            <h2 class="ms-repl-heading" id="ms-repl-wal">WAL</h2>
+            @if (view.Wal.Value is not { } wal)
+            {
+                @Unavailable(view.Wal.Note)
+            }
+            else
+            {
+                <dl class="ms-repl-facts">
+                    <dt>Written</dt>
+                    <dd>@WalText.Bytes((long) wal.Totals.Bytes) in @SessionText.Count(wal.Totals.Records, "record"), @SessionText.Count(wal.Totals.FullPageImages, "full-page image")</dd>
+                    <dt>WAL buffers full</dt>
+                    <dd>@SessionText.Number(wal.Totals.BuffersFull)</dd>
+                    @if (wal.Totals.Writes is { } writes)
+                    {
+                        <dt>Writes and syncs</dt>
+                        <dd>@SessionText.Number(writes) writes, @SessionText.Number(wal.Totals.Syncs ?? 0) syncs</dd>
+                    }
+                    <dt>Rate</dt>
+                    <dd>@(wal.BytesPerSecond is { } rate ? WalText.Bytes((long) rate) + " a second over the last " + SessionText.Duration(wal.Window!.Span) : NoWindow)</dd>
+                    <dt>Full-page images</dt>
+                    <dd>@(wal.FullPageImageShare is { } share ? SessionText.Percent(share) + " of the records written over the last " + SessionText.Duration(wal.Window!.Span) : NoWindow)</dd>
+                    <dt>Statistics since</dt>
+                    <dd>@(wal.Totals.StatsReset is { } reset ? State.FormatInSelectedTimeZone(reset) : "–")</dd>
+                </dl>
+            }
+        </section>
+
+        @* ---- Checkpoints ---------------------------------------------------------------------------------- *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-checkpoints">
+            <h2 class="ms-repl-heading" id="ms-repl-checkpoints">Checkpoints</h2>
+            @if (view.Checkpoints.Value is not { } checkpoints)
+            {
+                @Unavailable(view.Checkpoints.Note)
+            }
+            else
+            {
+                <dl class="ms-repl-facts">
+                    <dt>Timed</dt>
+                    <dd>@SessionText.Number(checkpoints.Totals.Timed)@(checkpoints.Totals.Counting == CheckpointCounting.CheckpointerWithSkipped ? " (skipped ones included)" : string.Empty)</dd>
+                    <dt>Requested</dt>
+                    <dd>@SessionText.Number(checkpoints.Totals.Requested)@(checkpoints.Totals.RequestedShare is { } share ? " (" + SessionText.Percent(share) + " since the counters were reset)" : string.Empty)</dd>
+                    @if (checkpoints.Totals.Done is { } done)
+                    {
+                        <dt>Done</dt>
+                        <dd>@SessionText.Number(done)</dd>
+                    }
+                    @if (checkpoints.Totals.RestartpointsDone is { } restartpoints)
+                    {
+                        <dt>Restartpoints done</dt>
+                        <dd>@SessionText.Number(restartpoints)</dd>
+                    }
+                    <dt>In the advisor's window</dt>
+                    <dd>
+                        @if (checkpoints.Judgement is { } judged)
+                        {
+                            @(SessionText.Count((long) judged.Requested, "requested checkpoint") + " of " + SessionText.Number((long) judged.Denominator) + " over the last " + SessionText.Duration(judged.Span) + (judged.Share is { } windowShare ? " (" + SessionText.Percent(windowShare) + ")" : string.Empty))
+                        }
+                        else
+                        {
+                            @NoWindow
+                        }
+                    </dd>
+                    <dt>checkpoint_timeout</dt>
+                    <dd>@(checkpoints.CheckpointTimeout is { } timeout ? SessionText.Duration(timeout) : "not readable")</dd>
+                    <dt>max_wal_size</dt>
+                    <dd>@Bytes(checkpoints.MaxWalSizeBytes)</dd>
+                    <dt>Background writer</dt>
+                    <dd>@SessionText.Number(checkpoints.Totals.BuffersClean ?? 0) buffers cleaned, stopped @SessionText.Number(checkpoints.Totals.MaxwrittenClean ?? 0) times at its limit</dd>
+                    <dt>Counted in</dt>
+                    <dd><code>@checkpoints.Totals.Source</code></dd>
+                </dl>
+            }
+        </section>
+
+        @* ---- I/O ------------------------------------------------------------------------------------------ *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-io">
+            <h2 class="ms-repl-heading" id="ms-repl-io">I/O by backend type</h2>
+            @if (view.Io.Value is not { } io)
+            {
+                @Unavailable(view.Io.Note)
+            }
+            else
+            {
+                <p class="ms-repl-note">
+                    <code>pg_stat_io</code>, summed by backend type and object since the statistics were reset.
+                    @(io.BytesFromOpBytes ? "Bytes are operations times op_bytes (PostgreSQL 16 and 17)." : "Bytes are PostgreSQL 18's own byte counters; WAL is its own object.")
+                </p>
+                <TableScroll Label="I/O by backend type">
+                    <table class="ms-table ms-repl-table ms-repl-io">
+                        <thead>
+                            <tr>
+                                <th scope="col">Backend type</th>
+                                <th scope="col">Object</th>
+                                <th scope="col">Reads</th>
+                                <th scope="col">Read</th>
+                                <th scope="col">Writes</th>
+                                <th scope="col">Written</th>
+                                <th scope="col">Extends</th>
+                                <th scope="col">Hits</th>
+                                <th scope="col">Evictions</th>
+                                <th scope="col">fsyncs</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (IoGroup group in io.Groups.OrderBy(static x => x.IsWal))
+                            {
+                                <tr @key="group.BackendType + '|' + group.Object" class="@(group.IsWal ? "ms-repl-io-wal" : null)">
+                                    <td>@group.BackendType</td>
+                                    <td>@group.Object</td>
+                                    <td class="ms-repl-number">@Count(group.Reads)</td>
+                                    <td class="ms-repl-number">@Bytes(group.ReadBytes)</td>
+                                    <td class="ms-repl-number">@Count(group.Writes)</td>
+                                    <td class="ms-repl-number">@Bytes(group.WriteBytes)</td>
+                                    <td class="ms-repl-number">@Count(group.Extends)</td>
+                                    <td class="ms-repl-number">@Count(group.Hits)</td>
+                                    <td class="ms-repl-number">@Count(group.Evictions)</td>
+                                    <td class="ms-repl-number">@Count(group.Fsyncs)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </section>
+
+        @* ---- Tablespaces ---------------------------------------------------------------------------------- *@
+        <section class="ms-repl-section" aria-labelledby="ms-repl-tablespaces">
+            <h2 class="ms-repl-heading" id="ms-repl-tablespaces">Tablespaces</h2>
+            @if (view.Tablespaces.Value is not { } tablespaces)
+            {
+                @Unavailable(view.Tablespaces.Note)
+            }
+            else
+            {
+                <TableScroll Label="Tablespaces">
+                    <table class="ms-table ms-repl-table ms-repl-tablespaces">
+                        <thead>
+                            <tr>
+                                <th scope="col">Tablespace</th>
+                                <th scope="col">Location</th>
+                                <th scope="col">This database's default</th>
+                                <th scope="col"><span class="ms-sr-only">Size</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (TablespaceRow tablespace in tablespaces.Rows)
+                            {
+                                <tr @key="tablespace.Name">
+                                    <td>@tablespace.Name</td>
+                                    <td class="ms-mono">@(string.IsNullOrEmpty(tablespace.Location) ? "the data directory" : tablespace.Location)</td>
+                                    <td>@(tablespace.ThisDatabase ? "yes" : "no")</td>
+                                    <td>
+                                        <button type="button" class="ms-button ms-btn-sm" disabled="@(measuring is not null)"
+                                                @onclick="() => MeasureAsync(tablespace.Name)">
+                                            @(measuring == tablespace.Name ? "Measuring…" : "Measure")
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+                <p class="ms-repl-note">
+                    A size is read only when asked, one tablespace at a time: <code>pg_tablespace_size</code> walks the whole
+                    directory, and a role without <code>CREATE</code> on it or <code>pg_read_all_stats</code> may not read it.
+                </p>
+                @if (measured is { } size)
+                {
+                    <p class="ms-repl-measured" role="status">
+                        @if (size.Bytes is { } bytes)
+                        {
+                            <span><strong>@size.Tablespace</strong> is @WalText.Bytes(bytes).</span>
+                        }
+                        else
+                        {
+                            <span><strong>@size.Tablespace</strong>: @size.Problem</span>
+                        }
+                    </p>
+                }
+            }
+        </section>
+
+        @foreach (HealthStatement statement in view.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+
+        <p class="ms-repl-measured">
+            Read @State.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />). Rates and windows are the
+            health advisor's samples, taken while <a href="@HealthLinks.ToPage(Settings, Descriptor.SourceQueryParameter, State.ActiveScope)">Health</a>
+            or the Overview is open.
+        </p>
+    }
+</div>
+
+@code {
+    /// <summary>The checks whose findings this page shows above its sections: R01's slots and R2's three.</summary>
+    internal static readonly string[] FindingCodes = ["R01", "R02", "R03", "R04"];
+
+    /// <summary>What a rate says before the advisor has two samples to measure it over.</summary>
+    internal const string NoWindow = "not measured yet: it needs two of the health advisor's samples, an interval apart";
+
+    private readonly CancellationTokenSource lifetime = new();
+
+    private StudioLiveUpdates? live;
+    private ReplicationView? view;
+    private IReadOnlyList<HealthReportFinding> findings = [];
+    private TablespaceSize? measured;
+    private string? measuring;
+    private string? error;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+        await LoadAsync();
+
+        // Leaving the page during the first read disposes it under the await, and the lifetime's token with it.
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        findings = [];
+        measured = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync(CancellationToken poll = default)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            ReplicationView? read = scope is null ? null : await ReplicationData.GetAsync(scope, token);
+
+            // The advisor's findings for these checks, from its last sweep - never one this page starts.
+            IReadOnlyList<HealthReportFinding> found = scope is not null && read is { Refusal: ReplicationRefusal.None }
+                ? await Health.CachedFindingsAsync(scope, FindingCodes, token)
+                : [];
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                view = read;
+                findings = found;
+                error = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task MeasureAsync(string tablespace)
+    {
+        if (State.ActiveScope is not { } scope || measuring is not null)
+        {
+            return;
+        }
+
+        measuring = tablespace;
+        measured = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            measured = await ReplicationData.MeasureTablespaceAsync(scope, tablespace, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            measured = new TablespaceSize(tablespace, null, exception.Message);
+        }
+        finally
+        {
+            measuring = null;
+
+            if (!disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private RenderFragment Unavailable(string? note) => __builder =>
+    {
+        <p class="ms-repl-note ms-repl-unavailable">@(note ?? "Not read.")</p>
+    };
+
+    private static string RoleText(ReplicationRole? role) => role switch
+    {
+        null => "not readable",
+        { InRecovery: true, IsPaused: true } => "a standby, replay paused",
+        { InRecovery: true } => "a standby",
+        _ => "a primary",
+    };
+
+    private static string ArchivingText(ReplicationSectionView<ArchiverView> archiver) => archiver switch
+    {
+        { Outcome: ReplicationReadOutcome.NotApplicable } => "the provider's",
+        { Value: { } value } when value.Facts.Archives => value.Facts.LastAttemptFailed ? "failing" : "on",
+        { Value: { } value } => value.Facts.Settings.ArchiveMode ?? "–",
+        _ => "–",
+    };
+
+    private string CommandText(ArchiverView archiver)
+    {
+        if (archiver.Facts.Settings.ArchiveLibrary is { } library)
+        {
+            return library;
+        }
+
+        return archiver.Facts.Settings.ArchiveCommand switch
+        {
+            ArchiveCommandState.Set => archiver.CommandText ?? "set; " + (archiver.CommandWithheld ?? "withheld"),
+            ArchiveCommandState.Empty => "empty: every WAL segment is kept and none archived",
+            ArchiveCommandState.Disabled => "disabled",
+            _ => "not shown to role " + (view?.ReadsAs ?? "the studio's role"),
+        };
+    }
+
+    private string When(DateTimeOffset? at, TimeSpan? ago) =>
+        at is { } time
+            ? State.FormatInSelectedTimeZone(time) + (ago is { } age ? " (" + SessionText.Duration(age) + " ago)" : string.Empty)
+            : "never";
+
+    private static string BacklogText(ArchiveBacklog? backlog) => backlog switch
+    {
+        null => "not measured",
+        { NothingArchived: true } => "nothing archived yet",
+        _ => SessionText.Count(backlog.Segments, "segment") + " (" + WalText.Bytes(backlog.Bytes) + ")",
+    };
+
+    private static string Bytes(long? value) => value is { } bytes ? WalText.Bytes(bytes) : "–";
+
+    private static string Bytes(double? value) => value is { } bytes ? WalText.Bytes((long) bytes) : "–";
+
+    private static string Count(double? value) => value is { } count ? SessionText.Number((long) count) : "–";
+
+    private static string Lag(TimeSpan? value) =>
+        value is { } lag
+            ? lag < TimeSpan.FromSeconds(1)
+                ? lag.TotalMilliseconds.ToString("0", CultureInfo.InvariantCulture) + " ms"
+                : SessionText.Duration(lag)
+            : "–";
+
+    private static string Flags(SlotStatisticsRow? statistics) => statistics switch
+    {
+        null => "–",
+        { Failover: true, Synced: true } => "failover, synced",
+        { Failover: true } => "failover",
+        { Synced: true } => "synced",
+        _ => "–",
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

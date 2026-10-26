@@ -72,7 +72,8 @@ public class HealthSourceKindTests
     /// MartenStudio's own registry: every check runs against a Marten store, and every check in MartenStudio's own
     /// assembly runs against nothing else. While the shared engine and MartenStudio are one assembly (before PS-2) that is
     /// all 49, the shared checks included - every source MartenStudio has is a Marten store; from the move on, the 23 in
-    /// the shared assembly run against every kind and MartenStudio's against Marten stores alone: 26, and 27 with W5's D09.
+    /// the shared assembly run against every kind and MartenStudio's against Marten stores alone: 26 shared (23, and W5-R2's
+    /// R02-R04) and 27 MartenStudio's (26, and W5's D09).
     /// </summary>
     [Fact]
     public void MartenStudios_own_checks_run_against_Marten_stores_only()
@@ -81,19 +82,19 @@ public class HealthSourceKindTests
         HealthCheckDescriptor[] marten = [.. registry.All.Where(static x => x.Info.CheckType.Assembly == typeof(MartenStudioDescriptor).Assembly)];
         HealthCheckDescriptor[] restricted = [.. registry.All.Where(static x => x.SourceKinds is not null)];
 
-        registry.All.Should().HaveCount(50);
+        registry.All.Should().HaveCount(53);
         registry.All.Should().OnlyContain(static x => x.RunsAgainst(StudioSourceKind.MartenStore));
         marten.Should().NotBeEmpty().And.OnlyContain(
             static x => !x.RunsAgainst(StudioSourceKind.DataSource) && !x.RunsAgainst(StudioSourceKind.HostProvider));
 
         if (typeof(HealthCheckRegistry).Assembly == typeof(MartenStudioDescriptor).Assembly)
         {
-            restricted.Should().HaveCount(50, "one assembly: a check found by both entries runs against what both admit");
+            restricted.Should().HaveCount(53, "one assembly: a check found by both entries runs against what both admit");
         }
         else
         {
             marten.Should().HaveCount(27, "MartenStudio keeps 26 of the 49 checks (design Appendix B), and W5 adds D09");
-            restricted.Should().BeEquivalentTo(marten, "the shared engine's 23 run against every kind of source");
+            restricted.Should().BeEquivalentTo(marten, "the shared engine's 26 (23, and W5-R2's R02-R04) run against every kind of source");
         }
     }
 }

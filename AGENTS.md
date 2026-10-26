@@ -1270,6 +1270,17 @@ tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per
 tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
                                          the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
                                          server per major, started on first use (an assembly fixture)
+src/PostgresStudio/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
+                                         WAL, checkpoints, pg_stat_io, tablespaces), A2's not-applicable rules, the
+                                         advisor's counter windows, and the per-visitor service
+src/PostgresStudio/Components/Pages/Replication/  Operations › Replication: slots, standbys, the archiver, WAL,
+                                         checkpoints, I/O by backend type and tablespaces
+src/PostgresStudio/wwwroot/css/parts/     A W5 packet's stylesheet section until the orchestrator folds it into studio.css
+                                         (W5-index §4); never reaches main
+tests/PostgresStudio.Tests/Replication/   R02-R04's evaluators at every edge, WAL file names, the facts' version shapes,
+                                         the per-visitor view and the page
+tests/PostgresStudio.Integration.Tests/Replication/  Live primary and standby pairs (17 and 18): R02-R04 fire and stay
+                                         quiet, the page's facts, and Aurora's not-applicable sections
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

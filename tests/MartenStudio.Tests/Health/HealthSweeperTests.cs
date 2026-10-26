@@ -152,6 +152,28 @@ public class HealthSweeperTests
     }
 
     /// <summary>
+    /// W5-R2 (issue #8 A2): a check whose platform does what it judges says so with
+    /// <see cref="HealthCheckNotApplicableException" /> - a not-applicable row with the platform's reason as its note, no
+    /// problem, no finding, and nothing logged: it is the platform's design, not a state anybody chose.
+    /// </summary>
+    [Fact]
+    public async Task A_check_the_platform_makes_moot_is_not_applicable_with_its_reason_and_logs_nothing()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+        harness.Script.Throws("K90", new HealthCheckNotApplicableException("Not applicable on Aurora: Aurora's storage layer does this, and its readers do not stream."));
+
+        HealthSweep sweep = await harness.SweepAsync();
+        HealthCheckResult result = sweep.Results.Single(static x => x.Check.Code == "K90");
+
+        result.Outcome.Should().Be(HealthCheckOutcome.NotApplicable);
+        result.Note.Should().Be("Not applicable on Aurora: Aurora's storage layer does this, and its readers do not stream.");
+        result.Problem.Should().BeNull();
+        result.Findings.Should().BeEmpty();
+        harness.Warnings.Should().BeEmpty();
+        harness.Logs.Entries.Should().NotContain(static x => x.Message.Contains("K90", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// A real anomaly on a polled path: event 9222 at Warning the first time, and Debug for the same check,
     /// database and kind of failure for the rest of the throttle's window.
     /// </summary>

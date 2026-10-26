@@ -110,3 +110,132 @@ platform the studio detected (see [Server, Managed platforms](server.md#managed-
 | Supabase | the project's Postgres configuration, where Supabase allows it |
 
 The studio never changes a setting and never drops a slot itself.
+
+## R02 WAL archiving failing
+
+Runs in both studios, Marten Studio and Postgres Studio. Variants: `failing`, `backlog`.
+
+With `archive_mode` on, Postgres keeps every WAL file until the archive command has copied it. An archiver that
+fails, hangs or falls behind fills `pg_wal` until the WAL volume is full and the server stops accepting writes, and
+every point-in-time restore from the archive ends at the last file it did copy.
+
+R02 reads `pg_stat_archiver`, the settings `archive_mode`, `archive_command` (or `archive_library` from 15) and
+`wal_segment_size`, and - on a server not in recovery - `pg_walfile_name(pg_current_wal_lsn())`. None of them needs a
+role or takes a lock. It judges a server only when `archive_mode` archives there: `on` on a primary, `always`
+anywhere.
+
+- **`failing`, Critical**: `failed_count` rose within the advisor's window, the last failure is later than the last
+  success, or there are failures and no success at all. The evidence is the failed count (and how many in the
+  window), the last failed WAL file and when, and the last success and how long ago. The archive command is failing,
+  and WAL accumulates in `pg_wal` until it succeeds. Postgres logs each failure with what the command said, so the
+  server log is where to look first. There is no remedy line: the command is the host's own.
+- **`backlog`, Warning; Critical at 10 GiB, or with no successful archive for an hour while it grows**: the distance
+  from the last archived segment to the segment being written is 64 segments or more **and** 1 GiB or more, and has
+  grown across 10 minutes of the advisor's samples. A hung or slow `archive_command` (an upload that stalls), and
+  `archive_mode = on` with an empty `archive_command` - which, per the manual, "continues to accumulate WAL segment
+  files" - never raise `failed_count`, so only the distance says so.
+
+The distance is parsed from the two file names in the studio, the same way on every release (`pg_split_walfile_name`
+exists only from 16): a WAL file name is a timeline and a segment number, and the numbering continues across a
+timeline change. A last archived file that is no segment - none yet, or a `.history`, `.partial` or `.backup` file,
+which the archiver copies at a promotion or a base backup - counts as "nothing archived yet", and the backlog is then
+the segments the advisor has seen written in its window: a lower bound, never sized by the whole WAL sequence. A
+standby is not judged for a backlog, because `pg_walfile_name` cannot run in recovery. A `failing` archiver has a
+backlog too, and is said once, as `failing`.
+
+With `pg_monitor` (or as a superuser), the evidence and the Replication page add how many files wait in
+`archive_status` (`.ready`, from `pg_ls_archive_statusdir()`) and the size of `pg_wal` (`pg_ls_waldir()`). Without it
+they say "not checked", naming `pg_monitor`, the role the studio reads as and who can grant it. They are never the
+trigger.
+
+`archive_command`'s text is shown only with `ViewDatabaseActivity` and the write policy, like every other name: a
+command line may carry a host, a bucket or a key.
+
+**Not applicable** (listed, never run) on Amazon Aurora, whose storage layer does the archiving, and on Amazon RDS,
+Azure Database for PostgreSQL and Google Cloud SQL, which archive WAL themselves for their own backups and
+point-in-time restore:
+
+| Platform | What its own page says |
+|---|---|
+| Amazon RDS | "RDS uploads transaction logs for DB instances to Amazon S3 every five minutes" (*Restoring a DB instance to a specified time for Amazon RDS*) |
+| Azure Database for PostgreSQL | "The server also backs up transaction logs when the write-ahead log (WAL) file is ready to be archived" (*Backup and Restore in Azure Database for PostgreSQL Flexible Server*) |
+| Google Cloud SQL | point-in-time recovery reads the instance logs stored in Cloud Storage (*Perform point-in-time recovery (PITR)*) |
+
+**History.** R02 adds `replication.archiver-failed`, `replication.archiver-archived` and `replication.archiver-backlog`
+to the database's samples while the server archives.
+
+## R03 Standby lag
+
+Runs in both studios, Marten Studio and Postgres Studio. Variants: `primary-view`, `standby-view`, `paused`.
+
+A standby that is behind is behind for whatever reads it, and if it is the failover target, everything it has not
+replayed is what a failover loses or waits for. The thresholds are issue #8 G8's: **Warning** at 5 minutes or 1 GiB
+behind, **Critical** at an hour.
+
+- **`primary-view`**: the data source answered as a primary, and `pg_stat_replication` has each standby's replay
+  position and `replay_lag`. The bytes are the primary's WAL position less the standby's replay position;
+  `replay_lag` is empty once a standby has caught up and nothing new arrives, so an idle primary never makes it grow.
+  **This needs `pg_read_all_stats`** (or `pg_monitor`, which includes it): without it, `pg_stat_replication` shows a
+  sender's process id, role and application name and nothing else, so R03 is "not checked", naming the grant, the
+  role the studio reads as and who can grant it - and a physical slot's `restart_lsn` is no substitute, because it
+  tracks flush, not replay.
+- **`standby-view`**: the data source answered in recovery - a multi-host data source that reaches a standby. What
+  the standby has received less what it has replayed is exact and needs no grant, and the time is the age of its last
+  replayed commit. That age grows on an idle primary with no lag at all, so the time is judged only while the bytes
+  are above zero.
+- **`paused`**, Warning: replay is paused (`pg_wal_replay_pause()`, `pg_get_wal_replay_pause_state()` from 14). The
+  standby keeps receiving WAL and applies none of it until somebody runs `pg_wal_replay_resume()`.
+
+One finding per variant, about every standby it judges, with the worst lag as its numbers; a standby's application
+name, client address and role are evidence shown only with `ViewDatabaseActivity` and the write policy.
+
+**Not applicable** on Amazon Aurora: its readers share the cluster volume and do not stream WAL.
+
+## R04 Requested checkpoints
+
+Runs in both studios, Marten Studio and Postgres Studio.
+
+A checkpoint is *requested* rather than timed when WAL reaches `max_wal_size` before `checkpoint_timeout` comes round
+(or a `CHECKPOINT`, a base backup or `CREATE DATABASE` asks for one). Checkpoints then come closer together than
+configured; each writes every dirty buffer, and the first change to each page after it writes the whole page to WAL
+again, so frequent checkpoints raise both write I/O and WAL volume.
+
+R04 judges the advisor's own window of samples - never "since a reset nobody remembers" - and fires, at **Warning**,
+on either of two triggers:
+
+1. **The share** (issue #8 G8): requested checkpoints are 20% or more of at least 10 checkpoints in the window. The
+   denominator is the release's own count:
+   - up to PostgreSQL 16, `pg_stat_bgwriter`'s `checkpoints_timed + checkpoints_req`;
+   - on 17, `pg_stat_checkpointer`'s `num_timed + num_requested` - where `num_timed` counts the checkpoints an idle
+     server **skipped** too, so idle time dilutes the share;
+   - from 18, `num_done`, the checkpoints that ran.
+2. **More than the timeout allows**, on every release: at least 10 requested checkpoints in the window, and more than
+   the window divided by `checkpoint_timeout`. It does not depend on 17's skipped-inclusive `num_timed`.
+
+The remedy doubles `max_wal_size`, worded for the platform that runs the server (see
+[Server, Managed platforms](server.md#managed-platforms)); it costs `pg_wal` disk and a longer crash recovery.
+
+**Not applicable** on Amazon Aurora, whose storage layer checkpoints.
+
+**History.** R04 adds `replication.checkpoints-timed`, `replication.checkpoints-requested` and (18)
+`replication.checkpoints-done` to the samples, and `replication.wal-bytes`, `replication.wal-records` and
+`replication.wal-fpi`, which the Replication page's WAL rate and full-page-image share are read from.
+
+## The Replication page
+
+Operations › Replication shows, for the database the scope names: the slots (R01's read, with each logical slot's
+decoding statistics from `pg_stat_replication_slots` and, from 17, `failover` and `synced`), the standbys streaming
+from the server (or, on a standby, its own replay), the archiver, WAL volume and the full-page-image share, the
+checkpoints, I/O by backend type (`pg_stat_io`, 16+; byte columns are 18's own, and operations times `op_bytes` on 16
+and 17), and the tablespaces. Numbers are shown to anybody the store policy passes for the database as a whole;
+names follow R01's rule and `ViewDatabaseActivity`. A tablespace's size is read only behind its button, one at a time:
+`pg_tablespace_size` walks the whole directory, and is refused to a role without `CREATE` on the tablespace or
+`pg_read_all_stats` (`pg_global` among them), which the page says as "not readable by this role".
+
+On Amazon Aurora the checkpoint, WAL, archiver, tablespace and standby sections each say "Not applicable on Aurora:
+Aurora's storage layer does this, and its readers do not stream", and the slots and I/O stay. On Amazon RDS, Azure and
+Cloud SQL the archiver section says the provider archives WAL itself.
+
+**Standby feedback moved to slots** (B0 §4). R1 read a standby's `hot_standby_feedback` horizon from
+`pg_stat_replication.backend_xmin`, which is null even for `pg_monitor` when the standby uses a slot: the feedback
+lands on the slot's `xmin`, which R01 already reads. Moving T14's horizon reading to it is V1's fix, in T14.

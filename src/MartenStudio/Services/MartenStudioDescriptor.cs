@@ -112,6 +112,9 @@ internal static class MartenStudioDescriptor
             // Health is first in its section: it is where a person starts when something is wrong, and its
             // badge reads the last sweep a Health page or the Overview ran - it never starts one.
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+
+            // W5-R2: the shared Replication page, after Health until Storage lands (W5-index §4: after Storage).
+            new("Replication", "replication", "replication", Title: "Slots, standbys, the archiver, WAL, checkpoints and I/O"),
             new("Projections", "projections", "projection", ProjectionsBadge),
 
             // Schema deliberately carries no badge. Finding drift costs a CreateMigrationAsync, which is

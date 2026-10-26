@@ -64,7 +64,7 @@ internal static class PostgresStudioDescriptor
             """,
     };
 
-    /// <summary>The sidebar: Overview and Query, the database section, Health and Activity.</summary>
+    /// <summary>The sidebar: Overview and Query, the database section, Health, Replication and Activity.</summary>
     private static IReadOnlyList<StudioNavSection> Navigation() =>
     [
         new("Data",
@@ -81,6 +81,9 @@ internal static class PostgresStudioDescriptor
         new("Operations",
         [
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+
+            // W5-R2: after Health, until Storage lands (W5-index §4: [Operations] after Storage).
+            new("Replication", "replication", "replication", Title: "Slots, standbys, the archiver, WAL, checkpoints and I/O"),
         ]),
         new("System",
         [

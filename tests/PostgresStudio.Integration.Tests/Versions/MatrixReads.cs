@@ -4,6 +4,7 @@ using Npgsql;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Integration.Tests.Versions;
@@ -91,7 +92,25 @@ internal static class MatrixReads
         new("sessions: snapshot", true, static (x, t) => x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t)),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
+
+        // ---- W5-R2: the Replication page's facts - every section, as the read the page makes ---------------------
+        new("replication: facts", true, static async (x, t) => Clean(
+            await x.Services.GetRequiredService<IReplicationFactsReader>().ReadAsync(x.Resolved, t))),
+        new("replication: this database's tablespace size", false, static async (x, t) => Found(
+            await x.Services.GetRequiredService<IReplicationFactsReader>().TablespaceSizeAsync(x.Resolved, "pg_default", t), "pg_default's size")),
     ];
+
+    /// <summary>
+    /// Fails a facts read any section of which failed: on every release each section reads, or says it does not apply or is
+    /// not on that release - never a SQLSTATE.
+    /// </summary>
+    private static void Clean(ReplicationFacts facts)
+    {
+        if (facts.Failures.Count > 0)
+        {
+            throw new InvalidOperationException("The replication facts read failed: " + string.Join("; ", facts.Failures));
+        }
+    }
 
     /// <summary>Fails a by-name read that found nothing: the fixture made the object, so "nothing" is a read that did not read.</summary>
     private static void Found(object? value, string what)
