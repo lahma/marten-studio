@@ -75,7 +75,9 @@ internal sealed class ConfigurationService : IConfigurationService
         (IReadOnlyList<ConfiguredDatabase> databases, string? notice) =
             await DescribeDatabasesAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-        string? postgresVersion = await PostgresVersionAsync(resolved.Scope.StoreKey, cancellationToken).ConfigureAwait(false);
+        // By the registered key, as the Overview's store card asks and logs it (9214) - never the link's spelling of it,
+        // which the line would otherwise print and the throttle key on.
+        string? postgresVersion = await PostgresVersionAsync(resolved.Source.Key, cancellationToken).ConfigureAwait(false);
 
         StoreConfiguration store = ConfigurationDescriber.DescribeStore(
             resolved.Registration.Key,

@@ -141,6 +141,12 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
+        return await ViewAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The projections view of a scope that has resolved.</summary>
+    private async Task<ProjectionsView> ViewAsync(StudioScope scope, ResolvedScope resolved, CancellationToken cancellationToken)
+    {
         // The database read is shared; the daemon and the tracker are in-process and are read fresh, so a
         // start or a stop shows on the next render rather than a second later.
         StoredProjections stored = await cache
@@ -168,9 +174,14 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// <inheritdoc />
     public async Task<ProjectionSummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
+        ResolvedScope? resolved = null;
+
         try
         {
-            ProjectionsView view = await GetProjectionsAsync(scope, cancellationToken).ConfigureAwait(false);
+            ArgumentNullException.ThrowIfNull(scope);
+
+            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+            ProjectionsView view = await ViewAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
 
             ShardProgress? worst = view.Progress.Count > 0 ? view.Progress[0] : null;
 
@@ -189,7 +200,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             // "Cannot report" is a value the Overview draws differently from zero (plan section 4.8).
-            LogSummaryFailure(scope, exception);
+            LogSummaryFailure(scope, resolved, exception);
 
             return new ProjectionSummary(
                 0, 0, 0, null, 0, 0,
@@ -214,11 +225,17 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// instant, an SQLSTATE nobody expected - is an anomaly: event 9216, at Warning once per store,
     /// database and kind of failure per <see cref="StudioLogThrottle.Window" />, and at Debug between.
     /// </para>
+    /// <para>
+    /// Once the scope has resolved, the store and the database are named - in the line and in the throttle's key - by the
+    /// registered key and the database's identity, as every other site names them, and never by the visitor's spelling:
+    /// a link that spelled them another way, or named no database, would otherwise be another line and another key. A
+    /// failure before that (the Debug cases, or an enumeration that threw) has only the spelling, capped.
+    /// </para>
     /// </remarks>
-    private void LogSummaryFailure(StudioScope? scope, Exception exception)
+    private void LogSummaryFailure(StudioScope? scope, ResolvedScope? resolved, Exception exception)
     {
-        string storeKey = scope?.StoreKey ?? string.Empty;
-        string databaseId = scope?.DatabaseId ?? string.Empty;
+        string storeKey = resolved?.Source.Key ?? StudioLogValue.Cap(scope?.StoreKey) ?? string.Empty;
+        string databaseId = resolved?.Target.Identity ?? StudioLogValue.Cap(scope?.DatabaseId) ?? string.Empty;
 
         if (exception is StudioNotAuthorizedException or StudioStoreUnavailableException or KeyNotFoundException)
         {

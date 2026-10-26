@@ -438,6 +438,30 @@ public class DaemonLogHygieneTests
         harness.Ring.GetLatest().Should().HaveCount(6).And.OnlyContain(static x => !x.Succeeded);
     }
 
+    /// <summary>
+    /// SEC-fix 6: a summary that cannot be read is logged (9216) - and throttled - by the store's registered key and the
+    /// database's identity, never by the link's spelling of them: <c>?store=DEFAULT</c> with no <c>?db=</c> is the default
+    /// store's first database, and is named as that. The one database here refuses every connection at once.
+    /// </summary>
+    [Fact]
+    public async Task A_summary_that_cannot_be_read_is_logged_by_the_names_the_scope_resolved_to()
+    {
+        await using Harness harness = await Harness.CreateAsync(
+            static options => options.Connection("Host=127.0.0.1;Port=1;Database=none;Username=none;Password=none;Timeout=1"),
+            configureServices: null);
+
+        ProjectionSummary summary = await harness.ProjectionData.GetSummaryAsync(new StudioScope("DEFAULT", string.Empty, null), Token);
+
+        summary.Error.Should().NotBeNull("the premise: the read failed");
+
+        string identity = harness.Scope.Database.Id.Identity;
+        CapturedLogEntry logged = harness.Logs.Of(9216).Should().ContainSingle().Which;
+
+        logged.Level.Should().Be(LogLevel.Warning);
+        logged.Message.Should().Contain("store default, database " + identity);
+        logged.Message.Should().NotContain("DEFAULT");
+    }
+
     // ------------------------------------------------------------------------------------------------
     // The harness
     // ------------------------------------------------------------------------------------------------

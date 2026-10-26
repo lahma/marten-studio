@@ -678,7 +678,7 @@ internal sealed class MaintenanceService : IMaintenanceService
         }
         catch (Exception exception)
         {
-            logger.BloatMeasureFailed(settings.Text.Product, exception, whole.Scope.StoreKey, whole.Scope.DatabaseId, (exception as PostgresException)?.SqlState);
+            logger.BloatMeasureFailed(settings.Text.Product, exception, whole.Source.Key, whole.Target.Identity, (exception as PostgresException)?.SqlState);
             audit.Record(MeasureAction, key, succeeded: false, "The measure failed: " + exception.GetType().Name + ".", capability, whole.Scope);
 
             return new BloatMeasureResult(key, null, "The measure failed (" + exception.GetType().Name + "); the server log has the details.", now);
@@ -689,7 +689,7 @@ internal sealed class MaintenanceService : IMaintenanceService
     private BloatMeasureResult Refuse(ResolvedSource whole, string key, StudioCapability? capability, string reason, DateTimeOffset now)
     {
         audit.Record(MeasureAction, key, succeeded: false, reason, capability, whole.Scope);
-        logger.BloatMeasureRefused(settings.Text.Product, whole.Scope.StoreKey, whole.Scope.DatabaseId, reason);
+        logger.BloatMeasureRefused(settings.Text.Product, whole.Source.Key, whole.Target.Identity, reason);
         return new BloatMeasureResult(key, null, reason, now);
     }
 }
