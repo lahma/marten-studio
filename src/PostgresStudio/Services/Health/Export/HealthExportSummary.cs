@@ -350,7 +350,7 @@ internal sealed record HealthExportSummary
             if (DatabasesSkipped > 0)
             {
                 text.Append("; ").Append(Count(DatabasesSkipped, "database", "databases"))
-                    .Append(" skipped: past the most one run checks");
+                    .Append(" skipped: listed, but not yet checked in this process");
             }
 
             if (DatabasesUnnamed > 0)

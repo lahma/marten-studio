@@ -166,15 +166,18 @@ public class HealthExportSummaryTests
         HealthExportSummary.From(Now, [], databasesTimedOut: 2).Level.Should().Be(HealthExportLevel.Degraded);
     }
 
-    /// <summary>What the export chose not to check is said, and is not a fault.</summary>
+    /// <summary>
+    /// What the export has not checked yet is said, and is not a fault. Said for the rotation (SEC-fix F4): a skipped database
+    /// is one the sources list that no run in this process has reached yet, not one a fixed limit leaves out for good.
+    /// </summary>
     [Fact]
-    public void Databases_past_the_limit_and_stores_not_yet_loaded_are_said_and_change_nothing()
+    public void Databases_not_yet_checked_and_stores_not_yet_loaded_are_said_and_change_nothing()
     {
         HealthExportSummary summary = HealthExportSummary.From(Now, [Sweep(Quiet("K01"))], databasesSkipped: 3, storesNotEnumerated: 1);
 
         summary.Level.Should().Be(HealthExportLevel.Healthy);
         summary.Describe(TimeSpan.FromSeconds(60)).Should().Be(
-            "No findings on 1 database; 3 databases skipped: past the most one run checks; "
+            "No findings on 1 database; 3 databases skipped: listed, but not yet checked in this process; "
             + "1 store not enumerated: it holds no database it can name without building one. Refreshed after 60 s, served for at most 120 s.");
     }
 
@@ -190,7 +193,7 @@ public class HealthExportSummaryTests
         summary.Level.Should().Be(HealthExportLevel.Healthy);
         summary.ToData()["databasesSkipped"].Should().Be(3);
         summary.Describe(TimeSpan.FromSeconds(60)).Should().Be(
-            "No findings on 1 database; 1 database skipped: past the most one run checks; "
+            "No findings on 1 database; 1 database skipped: listed, but not yet checked in this process; "
             + "2 held databases skipped: naming them would read the master table. Refreshed after 60 s, served for at most 120 s.");
     }
 
