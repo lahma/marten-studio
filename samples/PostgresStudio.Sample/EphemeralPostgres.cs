@@ -65,6 +65,7 @@ internal static class EphemeralPostgres
         }
 
         string connectionString = container.GetConnectionString();
+        Started = connectionString;
 
         Console.WriteLine();
         Console.WriteLine("  ┌───────────────────────────────────────────────────────────────────────────┐");
@@ -96,6 +97,18 @@ internal static class EphemeralPostgres
             // well; without it this is simply a new container each run.
             .WithReuse(reuse)
             .Build();
+
+    /// <summary>The connection string of the container this process started, or <see langword="null" /> when it started none.</summary>
+    private static string? Started { get; set; }
+
+    /// <summary>
+    /// Whether <paramref name="connectionString" /> is the throwaway container this process started - as opposed to a
+    /// database somebody configured, which may be shared and may matter. The demo's databases and schemas are written only
+    /// on this one, unless the host was started with <c>--allow-data-generation</c> (<see cref="SampleArguments" />).
+    /// </summary>
+    /// <param name="connectionString">The admin database's connection string.</param>
+    public static bool IsThrowaway(string? connectionString) =>
+        Started is { } started && string.Equals(started, connectionString, StringComparison.Ordinal);
 
     /// <summary>The environment variable that asks for a reused container.</summary>
     /// <remarks>

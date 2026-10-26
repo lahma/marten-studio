@@ -37,11 +37,12 @@ public class PostgresStudioSampleHostTests
     [PostgresFact]
     public async Task With_nothing_configured_it_starts_its_own_postgres_and_serves_the_studio_with_every_database_in_the_picker()
     {
-        await using SampleHost host = await SampleHost.StartAsync(connectionString: null, Token);
+        await using SampleHost host = await SampleHost.StartAsync(connectionString: null, cancellationToken: Token);
 
         host.StudioPath.Should().Be("/postgres");
         host.Log.Should().Contain("throwaway PostgreSQL container was started", "D18's banner says what the sample did");
         host.Log.Should().Contain("no - a fresh container", "this sample does not reuse a container unless asked");
+        host.Log.Should().NotContain(PostgresStudio.Sample.SampleArguments.ReadOnlyNotice, "its own throwaway container is the demo's to write to");
 
         using (HttpClient anonymous = Client(host))
         {
@@ -87,14 +88,14 @@ public class PostgresStudioSampleHostTests
         }
     }
 
-    private static HttpClient Client(SampleHost host)
+    internal static HttpClient Client(SampleHost host)
     {
         HttpClientHandler handler = new() { CookieContainer = new CookieContainer(), UseCookies = true, AllowAutoRedirect = false };
         return new HttpClient(handler, disposeHandler: true) { BaseAddress = host.BaseAddress, Timeout = TimeSpan.FromMinutes(2) };
     }
 
     /// <summary>Signs in through the sample's own form, as the Marten sample's host tests do.</summary>
-    private static async Task<HttpClient> SignInAsync(SampleHost host, string user)
+    internal static async Task<HttpClient> SignInAsync(SampleHost host, string user)
     {
         HttpClient client = Client(host);
 
