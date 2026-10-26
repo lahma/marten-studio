@@ -51,7 +51,7 @@ internal sealed record IndexBloatEstimate(long Bytes, double Entries, double Ent
 /// <b>Not index design</b>, so a library's table is judged too (issue #8 G1: size rules apply), and so is a primary key.
 /// </para>
 /// </remarks>
-[HealthCheck("T25", HealthArea.Tables, HealthCostTier.Catalog, "Bloated index", Variants = [IssueRuleVariant, KeyWidthVariant])]
+[HealthCheck("T25", HealthArea.Tables, HealthCostTier.Catalog, "Bloated index", Variants = [IssueRuleVariant, KeyWidthVariant], Gate = HealthGate.Database)]
 internal sealed class BloatedIndexCheck : HealthCheck<BloatedIndexFacts>
 {
     /// <summary>The variant of the issue's own rule, at Warning.</summary>
@@ -220,7 +220,7 @@ internal sealed class BloatedIndexCheck : HealthCheck<BloatedIndexFacts>
                 new HealthEvidence("Size", TableText.Bytes(estimate.Bytes) + " (relpages)"),
                 new HealthEvidence("Entries", TableText.Rows((long) estimate.Entries) + " (reltuples)"),
                 new HealthEvidence("Bytes an entry", (estimate.Bytes / Math.Max(estimate.Entries, 1)).ToString("N1", CultureInfo.InvariantCulture)),
-                new HealthEvidence("Packed, its keys need", estimate.EntryBytes.ToString("N0", CultureInfo.InvariantCulture) + " bytes an entry - " + keys),
+                new HealthEvidence("Packed, an entry needs", estimate.EntryBytes.ToString("N0", CultureInfo.InvariantCulture) + " bytes - " + keys + " (INCLUDE columns counted: a leaf entry stores them)"),
                 new HealthEvidence("Against the issue's 64 bytes an entry", Times(estimate.IssueRuleRatio)),
                 new HealthEvidence("Against its keys packed", Times(estimate.KeyWidthRatio)),
             ],

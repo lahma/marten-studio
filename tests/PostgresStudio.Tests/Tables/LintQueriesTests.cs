@@ -7,7 +7,8 @@ namespace PostgresStudio.Tests.Tables;
 /// <summary>
 /// W5-B1's statements hold D27 in their text: a list locks nothing it lists - no size function, no <c>pg_partition_tree</c>,
 /// no sequence value, no deparse that opens what it describes - and every built-in is <c>pg_catalog</c>-qualified. The live
-/// half is <c>IndexLintLiveTests</c> and <c>PartitionChecksLiveTests</c>, behind a held <c>ACCESS EXCLUSIVE</c> on 14 and 18.
+/// half is <c>LintMatrixLiveTests</c>, behind a held <c>ACCESS EXCLUSIVE</c> on 14 and 18, and the version matrix's
+/// <c>MatrixReads</c> on every leg; <c>IndexLintLiveTests</c> runs the sweep under the probe that sees any lock.
 /// </summary>
 public partial class LintQueriesTests
 {
@@ -54,6 +55,11 @@ public partial class LintQueriesTests
         // The columns W5-B1 adds to the shared index read are catalog values: the deparse stays behind the pg_locks guard.
         string added = HealthTableQueries.IndexesSql[HealthTableQueries.IndexesSql.IndexOf("i.table_oid in (select lk.oid from locked lk),", StringComparison.Ordinal)..];
         added.Should().NotContain("pg_get_indexdef").And.Contain("last_idx_scan").And.Contain("avg_width");
+
+        // T25's widths are every stored column's, INCLUDE ones too; the coverage keys stay the key columns (W5-B1 review F6).
+        added.Should().Contain("a.attnum between 1 and i.indnatts").And.Contain("[1:i.indnatts]").And.Contain("::pg_catalog.int2[])[1:i.indnkeyatts],");
+        IndexLintQueries.IntegerKeysSql.Should().Contain("q.seqmax < 9223372036854775807", "a bigint sequence capped by its own MAXVALUE is judged (F8)");
+        PartitionQueries.PartitionsSql.Should().Contain("pg_catalog.current_setting('TimeZone')", "months are looked for in the session's zone (F10)");
     }
 
     [Fact]

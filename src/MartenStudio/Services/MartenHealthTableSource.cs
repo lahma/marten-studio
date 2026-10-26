@@ -468,13 +468,17 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
             return Design(table, () => Migration.IndexTheForeignKey(table, columns, partitioned));
         }
 
-        if (table is not { Kind: StudioTableKind.DocumentTable, TypeName: { } type } || columns.Count != 1 || table.DocumentType is not { } documentType)
+        // A conjoined table's key may end with tenant_id, which an index need not lead with (W5-B1 review F1).
+        string[] members = [.. columns.Where(x => !table.TrailingKeyColumns.Contains(x, StringComparer.Ordinal))];
+        bool tenantTrailing = members.Length < columns.Count;
+
+        if (table is not { Kind: StudioTableKind.DocumentTable, TypeName: { } type } || members.Length != 1 || table.DocumentType is not { } documentType)
         {
             return null;
         }
 
         Marten.Linq.Members.DuplicatedField? field = MartenDuplicatedFields.Physical(documentType)
-            .FirstOrDefault(x => string.Equals(x.ColumnName, columns[0], StringComparison.Ordinal));
+            .FirstOrDefault(x => string.Equals(x.ColumnName, members[0], StringComparison.Ordinal));
 
         if (field is null || field.Members.Length == 0 || field.Members.Any(static x => !MigrationSqlText.IsPrintableName(x.Name)))
         {
@@ -483,11 +487,33 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
 
         string member = string.Join(".", field.Members.Select(static x => x.Name));
 
+        // The key ForeignKey<TRef> made between two conjoined types (DocumentForeignKey: (member, tenant_id)): its own index is
+        // the member alone unless its indexConfiguration says PerTenant (DocumentIndex.TenancyScope, V9.39.0 and V9.54.1),
+        // which indexes (member, tenant_id) - the whole key.
+        if (tenantTrailing
+            && table.Mapping?.ForeignKeys.OfType<Marten.Schema.DocumentForeignKey>().FirstOrDefault(x => x.ColumnNames.SequenceEqual(columns, StringComparer.Ordinal)) is { } declared
+            && PostgresStudio.Services.Schema.SchemaTypeName.Of(declared.ReferenceDocumentType) is { } reference
+            && MigrationSqlText.IsPrintableName(reference))
+        {
+            return new HealthRemedy(
+                "// The key is (" + string.Join(", ", columns) + "): index the pair by giving the ForeignKey declaration a per-tenant index:\n"
+                + "opts.Schema.For<" + type + ">().ForeignKey<" + reference + ">(x => x." + member
+                + ", indexConfiguration: i => i.TenancyScope = TenancyScope.PerTenant);",
+                "Replaces the ForeignKey<" + reference + ">(x => x." + member + ") line already there: TenancyScope.PerTenant indexes "
+                + "(" + members[0] + ", tenant_id) under the same name, and the next apply rebuilds it - under a lock that blocks "
+                + "writes to the table for as long as the build runs.");
+        }
+
+        // DuplicateField(..., notNull) sets NotNull on the field it adds or finds (DocumentMapping, V9.39.0:889-895 and
+        // V9.54.1:935-941): a Duplicate(...) without notNull: true would declare the column nullable again (W5-B1 review F9).
+        string notNull = field.NotNull ? ", notNull: true" : string.Empty;
+
         return new HealthRemedy(
-            "// The foreign key reads the duplicated column " + columns[0] + "; declaring the field indexes it:\n"
-            + "opts.Schema.For<" + type + ">().Duplicate(x => x." + member + ");",
+            "// The foreign key reads the duplicated column " + members[0] + "; declaring the field indexes it:\n"
+            + "opts.Schema.For<" + type + ">().Duplicate(x => x." + member + notNull + ");",
             "Duplicate(...) adds the column's index, as ForeignKey<TReference>(x => x." + member + ") does beside the key it adds, "
-            + "and the next apply builds it - under a lock that blocks writes to the table for as long as the build runs.");
+            + "and the next apply builds it - under a lock that blocks writes to the table for as long as the build runs."
+            + (tenantTrailing ? " The key also carries tenant_id, which the index on " + members[0] + " leaves to a filter: one tenant's share of a value's rows." : string.Empty));
     }
 
     /// <inheritdoc />
@@ -565,6 +591,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
                     "The table is partitioned with ByExternallyManagedRangePartitions(), so Marten's apply neither creates nor drops "
                     + "its partitions: the next period is the application's to create, as above or on its own schedule, named "
                     + "as the application names them. "
+                    + (next.CatchUp is { } catchUp ? catchUp + " " : string.Empty)
                     + (next.HasDefault
                         ? "Creating it scans the DEFAULT partition under an ACCESS EXCLUSIVE lock for rows of the new range, and "
                           + "fails if there are any."
@@ -585,7 +612,8 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
                 "// opts.Schema.For<" + type + ">() partitions this table by fixed ranges (ByRange()): add the next period's range\n"
                 + "// to that declaration (.AddRange(...)) and apply the configuration - or move it to ByRollingRange(...), which\n"
                 + "// Marten keeps ahead by itself.",
-                "Marten creates exactly the ranges the configuration declares, so the next one is a line of configuration and an apply.");
+                "Marten creates exactly the ranges the configuration declares, so the next one is a line of configuration and an apply."
+                + (next.PeriodsAfter > 0 ? " The newest bound passed more than a period ago: declare the next range and each period up to now." : string.Empty));
     }
 }
 

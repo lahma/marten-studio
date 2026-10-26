@@ -66,6 +66,40 @@ public class MartenLintRemediesTests
         Marten.IndexTheForeignKey(readings, ["not_a_duplicated_column"], partitioned: false).Should().BeNull();
     }
 
+    [Fact]
+    public void A_not_null_duplicated_field_is_declared_not_null_again()
+    {
+        // DocumentMapping.DuplicateField sets NotNull from its argument (V9.39.0:889-895, V9.54.1:935-941): without
+        // notNull: true the remedy's line would declare the column nullable (W5-B1 review F9).
+        MartenTable readings = Document<HealthReadingDoc>(static o => o.Schema.For<HealthReadingDoc>().Duplicate(x => x.CustomerId, notNull: true));
+        string column = MartenDuplicatedFields.Physical(readings.DocumentType!).Single().ColumnName;
+
+        Marten.IndexTheForeignKey(readings, [column], partitioned: false)!.Code
+            .Should().EndWith("opts.Schema.For<HealthReadingDoc>().Duplicate(x => x.CustomerId, notNull: true);");
+    }
+
+    [Fact]
+    public void A_conjoined_key_to_a_conjoined_type_trails_tenant_id_and_is_given_the_per_tenant_index()
+    {
+        // ForeignKey<TRef> between two conjoined types keys (member, tenant_id) and indexes the member alone (W5-B1 review F1).
+        MartenTable readings = Document<HealthReadingDoc>(static o =>
+        {
+            o.Schema.For<HealthOrderDoc>().MultiTenanted();
+            o.Schema.For<HealthReadingDoc>().MultiTenanted().ForeignKey<HealthOrderDoc>(x => x.CustomerId);
+        });
+
+        readings.TrailingKeyColumns.Should().Equal("tenant_id");
+        global::Marten.Schema.DocumentForeignKey key = readings.Mapping!.ForeignKeys.OfType<global::Marten.Schema.DocumentForeignKey>().Single();
+        key.ColumnNames.Should().HaveCount(2).And.EndWith("tenant_id");
+
+        HealthRemedy remedy = Marten.IndexTheForeignKey(readings, key.ColumnNames, partitioned: false)!;
+        remedy.Code.Should().EndWith(
+            "opts.Schema.For<HealthReadingDoc>().ForeignKey<HealthOrderDoc>(x => x.CustomerId, indexConfiguration: i => i.TenancyScope = TenancyScope.PerTenant);");
+        remedy.Explanation.Should().Contain("TenancyScope.PerTenant indexes (" + key.ColumnNames[0] + ", tenant_id)");
+
+        Document<HealthOrderDoc>().TrailingKeyColumns.Should().BeEmpty("a single-tenanted table's keys trail nothing");
+    }
+
     // ---- T20 ------------------------------------------------------------------------------------------------------------
 
     [Fact]

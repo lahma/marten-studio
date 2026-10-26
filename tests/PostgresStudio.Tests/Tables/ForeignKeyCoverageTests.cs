@@ -12,6 +12,30 @@ public class ForeignKeyCoverageTests
     private static CoveringIndexCandidate BTree(params short[] keys) => new(keys, IsValid: true, IsPartial: false, "btree");
 
     [Fact]
+    public void A_conjoined_Marten_key_on_its_member_and_tenant_id_is_covered_by_the_members_index_where_tenant_id_trails()
+    {
+        // ForeignKey<TRef> between two conjoined types: key (customer_id = 3, tenant_id = 4), index (customer_id) only - the
+        // review's 13-buffer bitmap index scan, not a read of the whole table (W5-B1 review F1).
+        ForeignKeyCoverage.Judge([3, 4], [], [BTree(1), BTree(3)], trailing: [4]).Should().Be(ForeignKeyCover.Covered);
+
+        ForeignKeyCoverage.Judge([3, 4], [], [BTree(1), BTree(3)]).Should().Be(ForeignKeyCover.Partly, "without the source's word, an index on some of the key narrows it");
+        ForeignKeyCoverage.Judge([3, 4], [], [BTree(1)], trailing: [4]).Should().Be(ForeignKeyCover.None, "nothing leads with customer_id or tenant_id");
+        ForeignKeyCoverage.Judge([4], [], [BTree(1)], trailing: [4]).Should().Be(ForeignKeyCover.None, "a key that is all trailing column is judged whole");
+        ForeignKeyCoverage.Judge([3, 4], [], [BTree(3, 4)]).Should().Be(ForeignKeyCover.Covered, "TenancyScope.PerTenant's (customer_id, tenant_id)");
+    }
+
+    [Fact]
+    public void An_index_leading_with_some_of_the_keys_columns_partly_covers_it_and_one_leading_with_none_does_not()
+    {
+        ForeignKeyCoverage.Judge([2, 3], [], [BTree(2)]).Should().Be(ForeignKeyCover.Partly);
+        ForeignKeyCoverage.Judge([2, 3], [], [BTree(3, 7)]).Should().Be(ForeignKeyCover.Partly);
+        ForeignKeyCoverage.Judge([2, 3], [], [BTree(7, 2)]).Should().Be(ForeignKeyCover.None, "an index that does not lead with a key column is no help");
+        ForeignKeyCoverage.Judge([2, 3], [], [BTree(2) with { IsValid = false }]).Should().Be(ForeignKeyCover.None, "an invalid index is never used");
+        ForeignKeyCoverage.Judge([2, 3], [], [BTree(2) with { IsPartial = true }]).Should().Be(ForeignKeyCover.None);
+        ForeignKeyCoverage.Judge([2], [], []).Should().Be(ForeignKeyCover.None);
+    }
+
+    [Fact]
     public void A_key_with_no_index_on_its_table_is_not_covered()
     {
         ForeignKeyCoverage.IsCovered([2], [], []).Should().BeFalse("store.child (parent_id), with no index: B0 §9 flags it");

@@ -259,16 +259,31 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
     }
 
     /// <summary>
-    /// The features no catalog read can show: a JIT plan's shape, which needs a plan costly enough to compile; and what one
-    /// transaction locks and how many of its locks take the fast path (B0 §8a measured both on every release; W5-B1's
-    /// <c>PartitionChecksLiveTests</c> counts the locks a generic plan takes).
+    /// The features no catalog read can show: a JIT plan's shape, which needs a plan costly enough to compile. What one
+    /// statement locks, and how many of its locks take the fast path, are read from <c>pg_locks</c> by the statement itself
+    /// (W5-B1 review F11): its own locks are taken while it is parsed and planned, before it reads them.
     /// </summary>
     private static readonly HashSet<PostgresFeature> Unprobed =
     [
         PostgresFeature.ExplainGenerationObject,
-        PostgresFeature.PartitionedIndexLocks,
-        PostgresFeature.FastPathSlotsFromMaxLocks,
     ];
+
+    /// <summary>
+    /// Twenty-five non-shared catalogs, each named in a sublink so the statement takes an <c>AccessShareLock</c> on every one -
+    /// weak locks on relations of this database, which take the fast path while a slot is free: 16 slots a backend up to 17,
+    /// and from 18 the smallest power of two at or above <c>max_locks_per_transaction</c> (64 on these servers, 128 on 19).
+    /// </summary>
+    private static readonly string FastPathProbe =
+        "select (select pg_catalog.count(*) from pg_catalog.pg_locks l where l.pid = pg_catalog.pg_backend_pid() and l.fastpath) > 16 where "
+        + string.Join(
+            " or ",
+            new[]
+            {
+                "pg_class", "pg_attribute", "pg_type", "pg_proc", "pg_namespace", "pg_index", "pg_constraint", "pg_depend",
+                "pg_description", "pg_attrdef", "pg_trigger", "pg_rewrite", "pg_inherits", "pg_statistic", "pg_am", "pg_amop",
+                "pg_amproc", "pg_opclass", "pg_opfamily", "pg_operator", "pg_cast", "pg_collation", "pg_conversion",
+                "pg_language", "pg_aggregate",
+            }.Select(static x => "exists (select 1 from pg_catalog." + x + ")"));
 
     /// <summary>How the matrix sees each feature, as one boolean query; the null ones are answered in code.</summary>
     private static readonly Dictionary<PostgresFeature, string?> Probes = new()
@@ -326,6 +341,13 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         [PostgresFeature.PgStatLock] = Relation("pg_catalog.pg_stat_lock"),
         [PostgresFeature.JitOffByDefault] = "select coalesce((select s.boot_val = 'off' from pg_catalog.pg_settings s where s.name = 'jit'), false)",
         [PostgresFeature.MaxLocksDefault128] = "select (select s.boot_val from pg_catalog.pg_settings s where s.name = 'max_locks_per_transaction') = '128'",
+
+        // W5-B1: an unpruned read of store.r locks its partitioned index r_id too from 16 (B0's 601 against 603), and the
+        // statement's own locks are held by the time it reads pg_locks.
+        [PostgresFeature.PartitionedIndexLocks] =
+            "select (select pg_catalog.count(*) from store.r where id = 1) >= 0 and exists (select 1 from pg_catalog.pg_locks l "
+            + "join pg_catalog.pg_class c on c.oid = l.relation where l.pid = pg_catalog.pg_backend_pid() and c.relkind = 'I')",
+        [PostgresFeature.FastPathSlotsFromMaxLocks] = FastPathProbe,
         [PostgresFeature.WaitTypeBufferRenamed] = null,
         [PostgresFeature.SubscriptionSyncTableErrorCount] = Column("pg_catalog.pg_stat_subscription_stats", "sync_table_error_count"),
     };

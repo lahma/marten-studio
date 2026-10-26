@@ -75,6 +75,13 @@ internal sealed record HealthPartitionedTableRow
     /// <summary><c>server_version_num</c>.</summary>
     public int ServerVersion { get; init; } = 170_000;
 
+    /// <summary>
+    /// The session's <c>TimeZone</c> - the database's or role's default unless the connection sets one - which a
+    /// <c>timestamptz</c> bound written without an offset was read in, so month boundaries are looked for in it (W5-B1 review
+    /// F10). <see langword="null" /> reads as UTC.
+    /// </summary>
+    public string? TimeZone { get; init; }
+
     /// <summary>The table's key.</summary>
     public string Key => Schema + "." + Table;
 }
@@ -93,12 +100,15 @@ internal sealed record HealthPartitionedTableRow
 /// <c>pg_get_partkeydef</c> does behind a lock on the parent (W5-B1, 14.24 and 18.6). A bound holds no column reference, so
 /// <c>pg_get_expr(relpartbound, 0)</c> deparses it with no relation at all - no context, no open, no lock: measured on 14.24
 /// and 18.6 (W5-B1, 2026-10-26) returning at once while another session held <c>ACCESS EXCLUSIVE</c> on the partition and on
-/// the parent, and proved on every leg by the version matrix and <c>PartitionChecksLiveTests</c>. The key column comes from
+/// the parent, and proved by the version matrix's <c>MatrixReads</c> on every leg (a partition held) and by
+/// <c>LintMatrixLiveTests</c> on 14 and 18 (the parent held, beside the two deparses that queue). The key column comes from
 /// <c>pg_partitioned_table.partattrs</c> and <c>pg_attribute</c>, never deparsed.
 /// </para>
 /// <para>
 /// <b>Read back in the same session.</b> A time bound is deparsed in the session's <c>DateStyle</c> and <c>TimeZone</c> and cast
-/// back to its type in the same statement, so it round-trips whatever they are; a <c>timestamp</c> key is read as UTC.
+/// back to its type in the same statement, so it round-trips whatever they are; a <c>timestamp</c> key is read as UTC. The
+/// session's <c>TimeZone</c> comes back beside it, so a <c>timestamptz</c> range cut at local midnights is recognised as months
+/// in that zone (W5-B1 review F10).
 /// </para>
 /// </remarks>
 internal static class PartitionQueries
@@ -193,7 +203,8 @@ internal static class PartitionQueries
                    pg_catalog.current_setting('max_connections')::int as max_connections,
                    pg_catalog.current_setting('max_prepared_transactions')::int as max_prepared,
                    (select s.context::text from pg_catalog.pg_settings s where s.name = 'max_locks_per_transaction') as max_locks_context,
-                   pg_catalog.current_setting('server_version_num')::int as server_version
+                   pg_catalog.current_setting('server_version_num')::int as server_version,
+                   pg_catalog.current_setting('TimeZone') as time_zone
         )
         select k.nspname::text,
                k.relname::text,
@@ -218,7 +229,8 @@ internal static class PartitionQueries
                st.max_connections,
                st.max_prepared,
                st.max_locks_context,
-               st.server_version
+               st.server_version,
+               st.time_zone
         from keyed k
         cross join settings st
         left join lateral (
@@ -283,6 +295,7 @@ internal static class PartitionQueries
             MaxPreparedTransactions = reader.GetInt32(17),
             MaxLocksContext = reader.IsDBNull(18) ? null : reader.GetString(18),
             ServerVersion = reader.GetInt32(19),
+            TimeZone = reader.IsDBNull(20) ? null : reader.GetString(20),
         };
     }
 }

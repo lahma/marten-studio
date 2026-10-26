@@ -30,6 +30,31 @@ public class BloatedIndexCheckTests
     }
 
     [Fact]
+    public void An_INCLUDE_column_is_counted_in_the_entry_a_leaf_stores()
+    {
+        // (id) INCLUDE (payload), payload text averaging 101 bytes: the index read now returns every stored column (indnatts),
+        // so the entry is 8 + 4 + 101 = 113, aligned to 120, + 4 - not the key's 20 (W5-B1 review F6).
+        BloatedIndexCheck.EntryBytesFor([4, -1], [-1, 101]).Should().Be(124);
+
+        StudioTable ledger = Host("ledger");
+        HealthIndexRow covering = IndexRow(ledger, "ledger_by_id_inc", 1) with
+        {
+            KeyWidths = [4, -1],
+            KeyTypes = ["integer", "text"],
+            KeyAverageWidths = [-1, 101],
+            EstimatedTuples = 600_000,
+            Bytes = 83L * MiB,
+        };
+
+        IndexBloatEstimate estimate = BloatedIndexCheck.Estimate(covering)!;
+        estimate.KeyWidthRatio.Should().BeLessThan(BloatedIndexCheck.KeyWidthFactor, "600,000 entries of 124 bytes at fillfactor 90 is ~79 MiB: dense");
+        BloatedIndexCheck.VariantOf(estimate).Should().BeNull();
+
+        BloatedIndexCheck.VariantOf(BloatedIndexCheck.Estimate(covering with { KeyWidths = [4], KeyTypes = ["integer"], KeyAverageWidths = [-1] })!)
+            .Should().Be(BloatedIndexCheck.KeyWidthVariant, "counting the key alone, it would read as six times bloated");
+    }
+
+    [Fact]
     public void A_dense_int4_key_reads_as_its_calibration_and_is_quiet()
     {
         // 200,000 entries in 4,513,792 bytes measured on 17: 22.6 an entry against 22.2 expected - scaled up past 64 MiB.

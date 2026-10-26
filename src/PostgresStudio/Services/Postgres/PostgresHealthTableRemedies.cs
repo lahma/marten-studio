@@ -251,6 +251,8 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
 
         bool narrowColumn = key.ColumnType is "smallint" or "integer";
         bool narrowSequence = key.SequenceType is "smallint" or "integer";
+        bool explicitMaximum = IntegerKeyHeadroomCheck.ExplicitMaximum(key);
+        bool identity = key.FedBy == "identity";
         List<string> statements = [];
 
         if (narrowColumn)
@@ -263,15 +265,28 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
             statements.Add(column);
         }
 
-        // An identity column's sequence follows the column's type when the column is altered (measured on 17); a serial's or
-        // a default's does not, and is altered on its own.
-        if (narrowSequence && !(narrowColumn && key.FedBy == "identity"))
+        // An identity column's sequence follows the column's type when the column is altered (measured on 14 and 18,
+        // LintMatrixLiveTests); a serial's or a default's does not, and is altered on its own. An explicit MAXVALUE survives
+        // both, and is lifted with NO MAXVALUE: through the column for an identity, on the sequence otherwise (W5-B1 review F8).
+        string? sequence = (identity && narrowColumn, narrowSequence, explicitMaximum) switch
         {
-            if (MigrationSqlText.WidenSequenceToBigint(key.SequenceSchema, key.Sequence) is not { } sequence)
-            {
-                return null;
-            }
+            (true, _, true) => MigrationSqlText.IdentityNoMaxValue(table.Schema, table.Table, key.Column),
+            (true, _, false) => string.Empty,
+            (false, true, false) => MigrationSqlText.WidenSequenceToBigint(key.SequenceSchema, key.Sequence),
+            (false, _, true) when identity => MigrationSqlText.IdentityNoMaxValue(table.Schema, table.Table, key.Column) is { } lift
+                ? (narrowSequence ? MigrationSqlText.WidenSequenceToBigint(key.SequenceSchema, key.Sequence) + "\n" : string.Empty) + lift
+                : null,
+            (false, _, true) => MigrationSqlText.SequenceNoMaxValue(key.SequenceSchema, key.Sequence, widen: narrowSequence),
+            _ => string.Empty,
+        };
 
+        if (sequence is null)
+        {
+            return null;
+        }
+
+        if (sequence.Length > 0)
+        {
             statements.Add(sequence);
         }
 
@@ -286,7 +301,11 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
                   + "EXCLUSIVE lock that every read and write waits for: plan a maintenance window, or add a bigint column, "
                   + "backfill it in batches and swap it in. Widen every column that references this one too. "
                 : string.Empty)
-            + (narrowSequence ? "ALTER SEQUENCE ... AS bigint raises the sequence's maximum to bigint's with its type." : string.Empty);
+            + (narrowSequence && !(identity && narrowColumn) ? "ALTER SEQUENCE ... AS bigint raises the sequence's maximum to bigint's with its type. " : string.Empty)
+            + (explicitMaximum
+                ? "The sequence's MAXVALUE was set below its type's, and a change of type keeps it: NO MAXVALUE lifts it to the "
+                  + "type's own."
+                : string.Empty);
 
         return HealthRemedy.ForMigration(string.Join("\n", statements), explanation.TrimEnd());
     }
@@ -303,6 +322,7 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
             ? HealthRemedy.ForMigration(
                 sql,
                 "Creates the next period's partition, named as the studio would name it - rename it to match yours. "
+                + (next.CatchUp is { } catchUp ? catchUp + " " : string.Empty)
                 + (next.HasDefault
                     ? "Creating it scans the DEFAULT partition under an ACCESS EXCLUSIVE lock for rows of the new range, and fails "
                       + "if there are any: move those out of the default first. "

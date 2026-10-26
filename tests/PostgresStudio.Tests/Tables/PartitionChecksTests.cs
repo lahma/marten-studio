@@ -137,6 +137,40 @@ public class PartitionChecksTests
     }
 
     [Fact]
+    public void A_timestamptz_range_cut_at_local_midnights_is_months_in_the_sessions_time_zone()
+    {
+        // Helsinki's months: 2026-10-01 00:00+03 is 09-30 21:00 UTC, 2026-11-01 00:00+02 is 10-31 22:00 UTC (W5-B1 review F10).
+        HealthPartitionedTableRow helsinki = Monthly(new(2026, 9, 30, 21, 0, 0, TimeSpan.Zero), new(2026, 10, 31, 22, 0, 0, TimeSpan.Zero)) with { TimeZone = "Europe/Helsinki" };
+
+        RangePartitionNext next = RangePartitionsCheck.Next(helsinki)!;
+        next.Suffix.Should().Be("p20261101", "named for the local date it starts on");
+        next.To.Should().Be(Epoch(new(2026, 11, 30, 22, 0, 0, TimeSpan.Zero)), "December starts at 00:00+02 in Helsinki");
+        MigrationSqlText.CreateRangePartition("app", "events", "events_" + next.Suffix, next.KeyType, next.From, next.To)
+            .Should().Be("CREATE TABLE \"app\".\"events_p20261101\" PARTITION OF \"app\".\"events\" FOR VALUES FROM ('2026-10-31 22:00:00+00') TO ('2026-11-30 22:00:00+00');");
+
+        // Read in UTC, the same bounds are no month's: the next one is the newest one's width.
+        RangePartitionsCheck.Next(helsinki with { TimeZone = "UTC" })!.To.Should().Be(Epoch(new(2026, 12, 1, 23, 0, 0, TimeSpan.Zero)));
+        RangePartitionsCheck.UnknownZone(helsinki).Should().BeFalse();
+
+        HealthPartitionedTableRow unknown = helsinki with { TimeZone = "Mars/Olympus_Mons" };
+        RangePartitionsCheck.UnknownZone(unknown).Should().BeTrue();
+        Range(unknown).Findings.Single().Caveat.Should().Contain("Mars/Olympus_Mons is not a zone this host knows, so they were looked for in UTC");
+    }
+
+    [Fact]
+    public void A_bound_several_periods_past_is_remedied_with_the_next_one_and_each_period_up_to_now()
+    {
+        // [2026-06-01, 2026-07-01) on 2026-10-26: July is next, and August, September and October have passed too.
+        HealthFinding finding = Range(Monthly(new(2026, 6, 1, 0, 0, 0, TimeSpan.Zero), new(2026, 7, 1, 0, 0, 0, TimeSpan.Zero))).Findings.Single();
+
+        finding.Remedy!.Code.Should().Contain("\"events_p20260701\"");
+        finding.Remedy.Explanation.Should().Contain("create this one and each period up to now - 3 more after it");
+
+        Range(Monthly(new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero), new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero))).Findings.Single().Remedy!.Explanation
+            .Should().NotContain("each period up to now", "October's partition is the one now needs");
+    }
+
+    [Fact]
     public void A_partition_name_postgres_would_cut_or_a_hostile_one_gets_no_statement()
     {
         MigrationSqlText.CreateRangePartition("app", "events", new string('e', 64), "integer", 0, 1).Should().BeNull("Postgres would cut it at 63 bytes without a word");
@@ -180,6 +214,21 @@ public class PartitionChecksTests
         budget.Locks.Should().Be(locks);
         budget.Capacity.Should().Be(6_400, "64 × (100 + 0)");
         budget.FastPathSlots.Should().Be(fastPath);
+    }
+
+    [Theory]
+    [InlineData(10, 16)]
+    [InlineData(16, 16)]
+    [InlineData(64, 64)]
+    [InlineData(100, 128)]
+    [InlineData(128, 128)]
+    [InlineData(1_000_000, 16_384)]
+    public void From_18_a_backends_fast_path_slots_are_the_power_of_two_at_or_above_max_locks_per_transaction(int maxLocks, int slots)
+    {
+        // pg_nextpower2_32(max_locks_per_transaction) / 16 groups of 16, 1 to 1,024 groups: 18.6 measured 128 at 100 (W5-B1 review F7).
+        PartitionLockBudgetCheck.FastPathSlots(maxLocks).Should().Be(slots);
+        PartitionLockBudgetCheck.Budget(TwoHundred(180_006, maxLocks: maxLocks)).FastPathSlots.Should().Be(slots);
+        PartitionLockBudgetCheck.Budget(TwoHundred(170_011, maxLocks: maxLocks)).FastPathSlots.Should().Be(16, "16 a backend up to 17");
     }
 
     [Fact]

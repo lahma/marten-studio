@@ -90,6 +90,13 @@ internal sealed record StudioTable(string Schema, string Table, StudioTableKind 
     /// </summary>
     public bool RangePartitionsManaged { get; init; }
 
+    /// <summary>
+    /// Columns a foreign key on this table may end with that an index need not lead with - <c>tenant_id</c> on a conjoined
+    /// Marten document table, whose <c>ForeignKey&lt;TRef&gt;</c> keys <c>(member, tenant_id)</c> and indexes the member alone
+    /// (W5-B1 review F1). T15 judges such a key covered by an index on the rest (<c>ForeignKeyCoverage.Judge</c>).
+    /// </summary>
+    public IReadOnlyList<string> TrailingKeyColumns { get; init; } = [];
+
     /// <summary>The target the table statements bind.</summary>
     public HealthTableTarget Target => new(Schema, Table);
 }

@@ -242,8 +242,9 @@ internal static class IndexLintQueries
     /// Every <c>smallint</c> or <c>integer</c> column of the listed tables that a sequence feeds - an identity column, a
     /// <c>serial</c> (an owned sequence: <c>pg_depend</c> deptype <c>i</c> or <c>a</c>), or a default whose <c>pg_attrdef</c>
     /// row depends on a sequence (deptype <c>n</c>, never a <c>nextval</c> matched in text) - and every <c>bigint</c> one fed
-    /// by a <c>smallint</c> or <c>integer</c> sequence, with the sequence's catalog row, the table's row count and the
-    /// largest value <c>pg_stats</c> holds (T26).
+    /// by a <c>smallint</c> or <c>integer</c> sequence, or by an ascending sequence whose <c>MAXVALUE</c> is set below
+    /// <c>bigint</c>'s (W5-B1 review F8), with the sequence's catalog row, the table's row count and the largest value
+    /// <c>pg_stats</c> holds (T26).
     /// </summary>
     /// <remarks>
     /// The value <c>pg_stats</c> holds is visible only to a role with <c>SELECT</c> on the column (B0 §8c), and checked per
@@ -343,6 +344,7 @@ internal static class IndexLintQueries
         join pg_catalog.pg_sequence q on q.seqrelid = sc.oid
         where f.atttypid in ('pg_catalog.int2'::pg_catalog.regtype, 'pg_catalog.int4'::pg_catalog.regtype)
            or q.seqtypid in ('pg_catalog.int2'::pg_catalog.regtype, 'pg_catalog.int4'::pg_catalog.regtype)
+           or (q.seqincrement > 0 and q.seqmax < 9223372036854775807)
         order by 1, 2, 3, 5, 6, 8
         """;
 

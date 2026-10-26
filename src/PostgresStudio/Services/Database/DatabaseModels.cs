@@ -759,8 +759,9 @@ internal sealed record DatabaseForeignKeyInfo(
     string OnUpdate)
 {
     /// <summary>
-    /// Whether an index on the pointing table covers it - T15's rule, <c>ForeignKeyCoverage.IsCovered</c> (W5-B1) - or
-    /// <see langword="null" /> when that was not read, so the Keys tab says nothing either way.
+    /// Whether an index on the pointing table serves its lookup - <see langword="false" /> only when none leads with any of
+    /// its columns (<c>ForeignKeyCoverage.Judge</c>, T15's rule, W5-B1) - or <see langword="null" /> when that was not read,
+    /// so the Keys tab says nothing either way.
     /// </summary>
     public bool? Covered { get; init; }
 }

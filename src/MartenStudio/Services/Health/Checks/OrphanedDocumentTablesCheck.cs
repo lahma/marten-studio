@@ -32,7 +32,7 @@ internal sealed record OrphanedDocumentTablesFacts(int Tables, long EstimatedByt
 /// nothing it lists. Info: an orphaned table costs disk and backups, nothing else.
 /// </para>
 /// </remarks>
-[HealthCheck("T17", HealthArea.Tables, HealthCostTier.Catalog, "Orphaned document tables")]
+[HealthCheck("T17", HealthArea.Tables, HealthCostTier.Catalog, "Orphaned document tables", Gate = HealthGate.Database)]
 internal sealed class OrphanedDocumentTablesCheck : HealthCheck<OrphanedDocumentTablesFacts>
 {
     /// <summary>What the status row says when another store's declarations cannot be read.</summary>

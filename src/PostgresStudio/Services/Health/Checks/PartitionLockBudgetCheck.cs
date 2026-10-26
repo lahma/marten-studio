@@ -43,7 +43,7 @@ internal sealed record PartitionLockFacts(PartitionFacts Partitions, PostgresPla
 /// (<see cref="PostgresFeature.MaxLocksDefault128" />), so the documented capacity is close to the real one.
 /// </para>
 /// </remarks>
-[HealthCheck("T19", HealthArea.Tables, HealthCostTier.Catalog, "Partitions against the lock table", Variants = [PerTransactionVariant, CapacityVariant])]
+[HealthCheck("T19", HealthArea.Tables, HealthCostTier.Catalog, "Partitions against the lock table", Variants = [PerTransactionVariant, CapacityVariant], Gate = HealthGate.Database)]
 internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
 {
     /// <summary>The variant past <c>max_locks_per_transaction</c>.</summary>
@@ -78,11 +78,27 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
 
         long capacity = (long) row.MaxLocksPerTransaction * (row.MaxConnections + row.MaxPreparedTransactions);
 
+        // 18 sizes a backend's fast-path groups as pg_nextpower2_32(max_locks_per_transaction) / 16, between 1 and 1024 groups of
+        // 16 slots (InitializeFastPathLocks): the smallest power of two at or above the setting, at least 16 - measured on 18.6,
+        // 128 slots at max_locks_per_transaction = 100 (W5-B1 review F7).
         int fastPath = PostgresFeatures.Has(PostgresFeature.FastPathSlotsFromMaxLocks, row.ServerVersion)
-            ? Math.Clamp(row.MaxLocksPerTransaction / 16, 1, 1024) * 16
+            ? FastPathSlots(row.MaxLocksPerTransaction)
             : 16;
 
         return new PartitionLockBudget(locks, row.MaxLocksPerTransaction, capacity, fastPath);
+    }
+
+    /// <summary>A backend's fast-path lock slots from PostgreSQL 18: the smallest power of two at or above the setting, 16 to 16,384.</summary>
+    internal static int FastPathSlots(int maxLocksPerTransaction)
+    {
+        int slots = 16;
+
+        while (slots < maxLocksPerTransaction && slots < 1024 * 16)
+        {
+            slots *= 2;
+        }
+
+        return slots;
     }
 
     /// <summary>

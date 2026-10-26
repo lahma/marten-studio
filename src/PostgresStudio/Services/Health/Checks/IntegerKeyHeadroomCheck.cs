@@ -54,7 +54,7 @@ internal sealed record IntegerKeyHeadroom(double Estimate, bool FromStatistics, 
 /// value - the caveat says so, and the database browser's Sequences list reads one sequence's value when asked.
 /// </para>
 /// </remarks>
-[HealthCheck("T26", HealthArea.Tables, HealthCostTier.Catalog, "Integer key running out", Variants = [ColumnVariant, SequenceVariant])]
+[HealthCheck("T26", HealthArea.Tables, HealthCostTier.Catalog, "Integer key running out", Variants = [ColumnVariant, SequenceVariant], Gate = HealthGate.Database)]
 internal sealed class IntegerKeyHeadroomCheck : HealthCheck<IntegerKeyFacts>
 {
     /// <summary>The variant where the column's own range is the limit.</summary>
@@ -123,6 +123,16 @@ internal sealed class IntegerKeyHeadroomCheck : HealthCheck<IntegerKeyFacts>
         "bigint" => long.MaxValue,
         _ => null,
     };
+
+    /// <summary>
+    /// Whether the sequence's <c>MAXVALUE</c> was set below its type's own - which <c>ALTER SEQUENCE … AS bigint</c> and an
+    /// identity column's <c>ALTER COLUMN … TYPE bigint</c> both keep, so widening needs <c>NO MAXVALUE</c> too (W5-B1 review F8).
+    /// </summary>
+    internal static bool ExplicitMaximum(HealthIntegerKeyRow key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return ColumnMaximum(key.SequenceType) is { } typeMaximum && key.Maximum < typeMaximum;
+    }
 
     /// <summary>
     /// The estimate for one key, or <see langword="null" /> when it is not judged - a cycling, descending or negative-start
@@ -213,7 +223,9 @@ internal sealed class IntegerKeyHeadroomCheck : HealthCheck<IntegerKeyFacts>
         string sequence = key.SequenceSchema + "." + key.Sequence;
         string limit = headroom.LimitIsColumn
             ? Number(headroom.Limit) + ", the largest " + key.ColumnType + " value"
-            : Number(headroom.Limit) + ", the sequence's maximum (AS " + key.SequenceType + ")";
+            : ExplicitMaximum(key)
+                ? Number(headroom.Limit) + ", the sequence's own MAXVALUE (it is " + key.SequenceType + ")"
+                : Number(headroom.Limit) + ", the sequence's maximum (AS " + key.SequenceType + ")";
 
         return new HealthFinding
         {

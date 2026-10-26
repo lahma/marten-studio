@@ -35,8 +35,70 @@ internal sealed record CoveringIndexCandidate(IReadOnlyList<short> KeyAttributes
 /// made only of the partition key's columns still reads its whole partition, and is judged by the full rule.
 /// </para>
 /// </remarks>
+/// <summary>How far an index on a foreign key's own table serves the referential lookup (<see cref="ForeignKeyCoverage.Judge" />).</summary>
+internal enum ForeignKeyCover
+{
+    /// <summary>No usable index leads with any of the key's columns: the lookup reads the whole table.</summary>
+    None,
+
+    /// <summary>
+    /// A usable index leads with some of the key's columns, not all: the lookup reads the rows matching those and filters
+    /// the rest - narrower than the whole table, wider than a covering index.
+    /// </summary>
+    Partly,
+
+    /// <summary>An index leads with every column the lookup needs (<see cref="ForeignKeyCoverage.IsCovered" />).</summary>
+    Covered,
+}
+
 internal static class ForeignKeyCoverage
 {
+    /// <summary>
+    /// How far <paramref name="indexes" /> serve a foreign key on <paramref name="keyAttributes" />: covered, partly, or not
+    /// at all.
+    /// </summary>
+    /// <param name="keyAttributes">The foreign key's columns (<c>conkey</c>).</param>
+    /// <param name="partitionKey">The table's partition key columns, as <see cref="IsCovered" /> takes them.</param>
+    /// <param name="indexes">The indexes on the table itself.</param>
+    /// <param name="trailing">
+    /// Key columns the table's source says an index need not lead with (W5-B1 review F1): the <c>tenant_id</c> a conjoined
+    /// Marten table's <c>ForeignKey&lt;TRef&gt;</c> adds to the key (<c>DocumentForeignKey</c>, V9.39.0) while indexing only
+    /// the member's column (<c>MartenRegistry.ForeignKey</c>: <c>AddIndex(ColumnNames[0])</c>, <c>TenancyScope.Global</c> by
+    /// default). An index on the rest covers the key: one tenant's share of a member value's rows is what it filters.
+    /// </param>
+    public static ForeignKeyCover Judge(
+        IReadOnlyList<short> keyAttributes,
+        IReadOnlyList<short> partitionKey,
+        IEnumerable<CoveringIndexCandidate> indexes,
+        IReadOnlyCollection<short>? trailing = null)
+    {
+        ArgumentNullException.ThrowIfNull(keyAttributes);
+        ArgumentNullException.ThrowIfNull(partitionKey);
+        ArgumentNullException.ThrowIfNull(indexes);
+
+        IReadOnlyList<CoveringIndexCandidate> candidates = [.. indexes];
+
+        if (IsCovered(keyAttributes, partitionKey, candidates))
+        {
+            return ForeignKeyCover.Covered;
+        }
+
+        if (trailing is { Count: > 0 })
+        {
+            short[] leading = [.. keyAttributes.Where(x => !trailing.Contains(x))];
+
+            if (leading.Length > 0 && leading.Length < keyAttributes.Count && IsCovered(leading, [], candidates))
+            {
+                return ForeignKeyCover.Covered;
+            }
+        }
+
+        HashSet<short> key = [.. keyAttributes];
+        return candidates.Any(x => Usable(x) && x.KeyAttributes.Count > 0 && key.Contains(x.KeyAttributes[0]))
+            ? ForeignKeyCover.Partly
+            : ForeignKeyCover.None;
+    }
+
     /// <summary>Whether <paramref name="indexes" /> holds one that covers a foreign key on <paramref name="keyAttributes" />.</summary>
     /// <param name="keyAttributes">The foreign key's columns (<c>conkey</c>), as attribute numbers of its table.</param>
     /// <param name="partitionKey">

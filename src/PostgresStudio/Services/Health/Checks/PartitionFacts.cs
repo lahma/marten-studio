@@ -29,7 +29,23 @@ internal sealed record PartitionFacts(DateTimeOffset ReadAt, IReadOnlyList<Healt
 /// <param name="To">Its upper bound, likewise.</param>
 /// <param name="Suffix">What the studio would name it after its table: <c>p20261201</c>.</param>
 /// <param name="HasDefault">Whether the table has a <c>DEFAULT</c> partition, which creating the new one scans.</param>
-internal sealed record RangePartitionNext(string KeyType, double From, double To, string Suffix, bool HasDefault);
+internal sealed record RangePartitionNext(string KeyType, double From, double To, string Suffix, bool HasDefault)
+{
+    /// <summary>
+    /// How many more whole periods have passed since the newest bound beyond this one - each needing a partition of its own
+    /// before the table is caught up to now - or 0 (W5-B1 review F10).
+    /// </summary>
+    public int PeriodsAfter { get; init; }
+
+    /// <summary>The sentence a remedy adds when <see cref="PeriodsAfter" /> is not 0.</summary>
+    public string? CatchUp => PeriodsAfter switch
+    {
+        <= 0 => null,
+        1 => "The newest bound passed more than a period ago: create this one and each period up to now - one more after it.",
+        int more => "The newest bound passed more than a period ago: create this one and each period up to now - "
+            + more.ToString(System.Globalization.CultureInfo.InvariantCulture) + " more after it.",
+    };
+}
 
 /// <summary>The partition facts' one read per sweep, whichever of T19 and T20 asks first (W5-B1, from W5-P1's step 1).</summary>
 /// <remarks>

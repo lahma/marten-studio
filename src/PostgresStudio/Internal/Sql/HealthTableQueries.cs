@@ -424,16 +424,20 @@ internal sealed record HealthIndexRow
     /// <summary>Whether it has a predicate (<c>indpred</c>): a partial index covers only the rows its <c>WHERE</c> admits.</summary>
     public bool IsPartial { get; init; }
 
-    /// <summary>Each key column's <c>attlen</c> on the index relation: its width in bytes, or <c>-1</c> (and <c>-2</c>) for a variable-width type.</summary>
+    /// <summary>
+    /// Each column the index stores - its key columns and then its <c>INCLUDE</c> columns, attributes 1 to <c>indnatts</c>,
+    /// since a leaf entry carries both (W5-B1 review F6) - as its <c>attlen</c> on the index relation: its width in bytes, or
+    /// <c>-1</c> (and <c>-2</c>) for a variable-width type.
+    /// </summary>
     public IReadOnlyList<short> KeyWidths { get; init; } = [];
 
-    /// <summary>Each key column's type, as <c>format_type</c> prints it.</summary>
+    /// <summary>Each column the index stores, <c>INCLUDE</c> columns too, as <c>format_type</c> prints its type.</summary>
     public IReadOnlyList<string> KeyTypes { get; init; } = [];
 
     /// <summary>
-    /// Each key column's <c>pg_stats.avg_width</c> - the table column's, for a plain key column the reading role may read the
-    /// statistics of - or <c>-1</c> where there is none: an expression, a column never analysed, or a role without column
-    /// <c>SELECT</c> (B0 §8c).
+    /// Each column the index stores, <c>INCLUDE</c> columns too, as its <c>pg_stats.avg_width</c> - the table column's, for a
+    /// plain column the reading role may read the statistics of - or <c>-1</c> where there is none: an expression, a column
+    /// never analysed, or a role without column <c>SELECT</c> (B0 §8c).
     /// </summary>
     public IReadOnlyList<int> KeyAverageWidths { get; init; } = [];
 
@@ -1088,11 +1092,11 @@ internal static class HealthTableQueries
                i.partial,
                array(select a.attlen
                      from pg_catalog.pg_attribute a
-                     where a.attrelid = i.oid and a.attnum between 1 and i.indnkeyatts
+                     where a.attrelid = i.oid and a.attnum between 1 and i.indnatts
                      order by a.attnum),
                array(select pg_catalog.format_type(a.atttypid, a.atttypmod)
                      from pg_catalog.pg_attribute a
-                     where a.attrelid = i.oid and a.attnum between 1 and i.indnkeyatts
+                     where a.attrelid = i.oid and a.attnum between 1 and i.indnatts
                      order by a.attnum),
                array(select coalesce((select st.avg_width
                                       from pg_catalog.pg_attribute ta
@@ -1100,7 +1104,7 @@ internal static class HealthTableQueries
                                         on st.schemaname = i.nspname and st.tablename = i.table_name
                                        and st.attname = ta.attname and not st.inherited
                                       where ta.attrelid = i.table_oid and ta.attnum = k.attnum and k.attnum > 0), -1)
-                     from pg_catalog.unnest((pg_catalog.string_to_array(i.indkey::text, ' ')::pg_catalog.int2[])[1:i.indnkeyatts])
+                     from pg_catalog.unnest((pg_catalog.string_to_array(i.indkey::text, ' ')::pg_catalog.int2[])[1:i.indnatts])
                           with ordinality as k(attnum, ord)
                      order by k.ord),
                case when i.relkind = 'I' then r.tuples

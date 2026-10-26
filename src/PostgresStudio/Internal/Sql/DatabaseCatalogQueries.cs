@@ -210,12 +210,14 @@ internal sealed record CatalogForeignKey(
     public IReadOnlyList<PostgresStudio.Services.Schema.CoveringIndexCandidate> Indexes { get; init; } = [];
 
     /// <summary>
-    /// Whether an index covers it (<c>ForeignKeyCoverage.IsCovered</c>, T15's rule) - <see langword="null" /> when its columns
-    /// were not read, so nothing is said either way.
+    /// Whether an index serves its lookup at all (<c>ForeignKeyCoverage.Judge</c>, T15's rule): <see langword="false" /> only
+    /// when no usable index leads with any of its columns, so the lookup reads the whole table - one that leads with some of
+    /// them narrows it, and the badge's "no index covers" would not be true of it (W5-B1 review F1). <see langword="null" />
+    /// when its columns were not read, so nothing is said either way.
     /// </summary>
     public bool? Covered => Attributes.Count == 0
         ? null
-        : PostgresStudio.Services.Schema.ForeignKeyCoverage.IsCovered(Attributes, PartitionKey, Indexes);
+        : PostgresStudio.Services.Schema.ForeignKeyCoverage.Judge(Attributes, PartitionKey, Indexes) != PostgresStudio.Services.Schema.ForeignKeyCover.None;
 
     /// <summary>The indexes <see cref="DatabaseCatalogQueries.ForeignKeysSql" /> aggregates as <c>jsonb</c>: <c>k</c> keys, <c>v</c> valid, <c>p</c> partial, <c>m</c> method.</summary>
     internal static IReadOnlyList<PostgresStudio.Services.Schema.CoveringIndexCandidate> ParseIndexes(string json)

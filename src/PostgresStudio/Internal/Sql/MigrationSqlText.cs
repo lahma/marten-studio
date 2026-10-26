@@ -168,6 +168,28 @@ internal static partial class MigrationSqlText
         Qualified(schema, sequence) is { } qualified ? "ALTER SEQUENCE " + qualified + " AS bigint;" : null;
 
     /// <summary>
+    /// <c>ALTER SEQUENCE schema.sequence [AS bigint] NO MAXVALUE;</c> (T26), or <see langword="null" />: an explicit
+    /// <c>MAXVALUE</c> survives <c>AS bigint</c>, which raises only a maximum that was the old type's own (W5-B1 review F8).
+    /// </summary>
+    /// <param name="schema">The sequence's schema.</param>
+    /// <param name="sequence">The sequence.</param>
+    /// <param name="widen">Whether to widen it to <c>bigint</c> in the same statement.</param>
+    public static string? SequenceNoMaxValue(string schema, string sequence, bool widen) =>
+        Qualified(schema, sequence) is { } qualified ? "ALTER SEQUENCE " + qualified + (widen ? " AS bigint" : string.Empty) + " NO MAXVALUE;" : null;
+
+    /// <summary>
+    /// <c>ALTER TABLE schema.table ALTER COLUMN column SET NO MAXVALUE;</c> (T26): an identity column's sequence, through its
+    /// column, back to its type's maximum - or <see langword="null" />.
+    /// </summary>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="column">The identity column.</param>
+    public static string? IdentityNoMaxValue(string schema, string table, string column) =>
+        IsQuotable(column) && Qualified(schema, table) is { } qualified
+            ? "ALTER TABLE " + qualified + " ALTER COLUMN " + SqlIdentifier.Quote(column) + " SET NO MAXVALUE;"
+            : null;
+
+    /// <summary>
     /// <c>CREATE TABLE schema.partition PARTITION OF schema.table FOR VALUES FROM (from) TO (to);</c> (T20), the bounds
     /// literals this builder formats (<see cref="RangeBoundLiteral" />) - or <see langword="null" /> when a name cannot be
     /// printed honestly, is longer than Postgres keeps (63 bytes, which it would cut without a word), or a bound cannot be

@@ -62,6 +62,27 @@ public class IntegerKeyHeadroomCheckTests
     }
 
     [Fact]
+    public void An_explicit_maxvalue_is_the_limit_and_every_widening_lifts_it_with_no_maxvalue()
+    {
+        // W5-B1 review F8: AS bigint and an identity's ALTER COLUMN ... TYPE bigint both keep a MAXVALUE set below the type's.
+        HealthFinding capped = Judge(Identity(700_000, columnType: "bigint", sequenceType: "bigint", maximum: 1_000_000)).Findings.Single();
+        capped.Variant.Should().Be("sequence");
+        capped.Severity.Should().Be(HealthSeverity.Warning);
+        capped.Evidence.Should().Contain(new HealthEvidence("Limit", "1,000,000, the sequence's own MAXVALUE (it is bigint)"));
+        capped.Remedy!.Code.Should().Be("ALTER TABLE \"app\".\"orders\" ALTER COLUMN \"id\" SET NO MAXVALUE;");
+        capped.Remedy.Explanation.Should().Contain("a change of type keeps it");
+
+        Judge(Identity(700_000, maximum: 1_000_000)).Findings.Single().Remedy!.Code.Should().Be(
+            "ALTER TABLE \"app\".\"orders\" ALTER COLUMN \"id\" TYPE bigint;\nALTER TABLE \"app\".\"orders\" ALTER COLUMN \"id\" SET NO MAXVALUE;");
+        Judge(Identity(700_000, maximum: 1_000_000) with { FedBy = "serial" }).Findings.Single().Remedy!.Code.Should().Be(
+            "ALTER TABLE \"app\".\"orders\" ALTER COLUMN \"id\" TYPE bigint;\nALTER SEQUENCE \"app\".\"orders_id_seq\" AS bigint NO MAXVALUE;");
+        Judge(Identity(700_000, columnType: "bigint", sequenceType: "bigint", maximum: 1_000_000) with { FedBy = "default" }).Findings.Single().Remedy!.Code
+            .Should().Be("ALTER SEQUENCE \"app\".\"orders_id_seq\" NO MAXVALUE;");
+
+        IntegerKeyHeadroomCheck.ExplicitMaximum(Identity(0)).Should().BeFalse("integer's own maximum is no explicit one");
+    }
+
+    [Fact]
     public void A_smallint_serial_widens_the_column_and_its_sequence()
     {
         HealthIntegerKeyRow serial = Identity(27_000, columnType: "smallint", sequenceType: "smallint", maximum: short.MaxValue) with { FedBy = "serial" };

@@ -47,7 +47,7 @@ internal sealed record RangeRunway(double Upper, double? Width, double Ahead)
 /// opens no relation; a <c>timestamp</c> key is read as UTC.
 /// </para>
 /// </remarks>
-[HealthCheck("T20", HealthArea.Tables, HealthCostTier.Catalog, "Range partitions running out", Variants = [RunningOutVariant, DefaultRowsVariant])]
+[HealthCheck("T20", HealthArea.Tables, HealthCostTier.Catalog, "Range partitions running out", Variants = [RunningOutVariant, DefaultRowsVariant], Gate = HealthGate.Database)]
 internal sealed class RangePartitionsCheck : HealthCheck<PartitionFacts>
 {
     /// <summary>The variant of a newest bound that has passed or is close.</summary>
@@ -84,7 +84,7 @@ internal sealed class RangePartitionsCheck : HealthCheck<PartitionFacts>
     /// The partition the next period needs: from the newest upper bound, one width on - a calendar month (or several) when the
     /// newest partition spans whole months from midnight on the first, so a February is not given January's 31 days.
     /// </summary>
-    internal static RangePartitionNext? Next(HealthPartitionedTableRow row)
+    internal static RangePartitionNext? Next(HealthPartitionedTableRow row, DateTimeOffset? now = null)
     {
         ArgumentNullException.ThrowIfNull(row);
 
@@ -93,27 +93,81 @@ internal sealed class RangePartitionsCheck : HealthCheck<PartitionFacts>
             return null;
         }
 
+        double width = upper - lower;
+        double behind = now is { } at ? (at.ToUnixTimeMilliseconds() / 1000d) - upper : 0;
+        int after = behind >= width ? (int) Math.Min(Math.Floor(behind / width), int.MaxValue) : 0;
+
         if (IsIntegerKey(type))
         {
-            return new RangePartitionNext(type, upper, upper + (upper - lower), "p" + upper.ToString("0", CultureInfo.InvariantCulture), row.HasDefault);
+            return new RangePartitionNext(type, upper, upper + width, "p" + upper.ToString("0", CultureInfo.InvariantCulture), row.HasDefault)
+            {
+                PeriodsAfter = after,
+            };
         }
 
-        DateTimeOffset from = DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(upper * 1000d));
-        DateTimeOffset start = DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(lower * 1000d));
-        DateTimeOffset to = MonthsBetween(start, from) is { } months and > 0
-            ? from.AddMonths(months)
-            : from.AddSeconds(upper - lower);
+        // Month boundaries are looked for where the bounds were cut: a timestamptz range in the session's TimeZone, which a
+        // bound written without an offset was read in (W5-B1 review F10); a timestamp or date range on its own wall clock.
+        TimeZoneInfo zone = ZoneOf(row) ?? TimeZoneInfo.Utc;
+        DateTime from = Local(upper, zone);
+        DateTime start = Local(lower, zone);
+        double to = MonthsBetween(start, from) is { } months and > 0
+            ? Instant(from.AddMonths(months), zone)
+            : upper + width;
 
-        return new RangePartitionNext(type, upper, to.ToUnixTimeMilliseconds() / 1000d, "p" + from.UtcDateTime.ToString("yyyyMMdd", CultureInfo.InvariantCulture), row.HasDefault);
+        return new RangePartitionNext(type, upper, to, "p" + from.ToString("yyyyMMdd", CultureInfo.InvariantCulture), row.HasDefault)
+        {
+            PeriodsAfter = after,
+        };
     }
 
-    /// <summary>Whole calendar months between two midnights on the first of a month, or <see langword="null" />.</summary>
-    private static int? MonthsBetween(DateTimeOffset from, DateTimeOffset to)
+    /// <summary>
+    /// The zone a <c>timestamptz</c> key's month boundaries are looked for in - the session's <c>TimeZone</c> - or
+    /// <see langword="null" /> for UTC: another key type, no zone read, UTC itself, or a zone this host does not know
+    /// (<see cref="UnknownZone" />).
+    /// </summary>
+    internal static TimeZoneInfo? ZoneOf(HealthPartitionedTableRow row)
     {
-        static bool FirstOfMonth(DateTimeOffset at) => at.UtcDateTime is { Day: 1, TimeOfDay.Ticks: 0 };
+        ArgumentNullException.ThrowIfNull(row);
+
+        return row is { KeyType: "timestamp with time zone", TimeZone: { Length: > 0 } id }
+               && !string.Equals(id, "UTC", StringComparison.OrdinalIgnoreCase)
+               && !string.Equals(id, "Etc/UTC", StringComparison.OrdinalIgnoreCase)
+               && TimeZoneInfo.TryFindSystemTimeZoneById(id, out TimeZoneInfo? zone)
+            ? zone
+            : null;
+    }
+
+    /// <summary>Whether a <c>timestamptz</c> key's session zone could not be resolved here, so months were looked for in UTC.</summary>
+    internal static bool UnknownZone(HealthPartitionedTableRow row) =>
+        row is { KeyType: "timestamp with time zone", TimeZone: { Length: > 0 } id }
+        && !string.Equals(id, "UTC", StringComparison.OrdinalIgnoreCase)
+        && !string.Equals(id, "Etc/UTC", StringComparison.OrdinalIgnoreCase)
+        && ZoneOf(row) is null;
+
+    /// <summary>A bound's wall-clock time in <paramref name="zone" />.</summary>
+    private static DateTime Local(double seconds, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(seconds * 1000d)).UtcDateTime, zone);
+
+    /// <summary>A wall-clock time in <paramref name="zone" /> as Unix seconds - an hour on where a clock change skips it.</summary>
+    private static double Instant(DateTime local, TimeZoneInfo zone)
+    {
+        DateTime unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+
+        if (zone.IsInvalidTime(unspecified))
+        {
+            unspecified = unspecified.AddHours(1);
+        }
+
+        return new DateTimeOffset(TimeZoneInfo.ConvertTimeToUtc(unspecified, zone), TimeSpan.Zero).ToUnixTimeMilliseconds() / 1000d;
+    }
+
+    /// <summary>Whole calendar months between two wall-clock midnights on the first of a month, or <see langword="null" />.</summary>
+    private static int? MonthsBetween(DateTime from, DateTime to)
+    {
+        static bool FirstOfMonth(DateTime at) => at is { Day: 1, TimeOfDay.Ticks: 0 };
 
         return FirstOfMonth(from) && FirstOfMonth(to)
-            ? (to.UtcDateTime.Year * 12) + to.UtcDateTime.Month - ((from.UtcDateTime.Year * 12) + from.UtcDateTime.Month)
+            ? (to.Year * 12) + to.Month - ((from.Year * 12) + from.Month)
             : null;
     }
 
@@ -194,8 +248,13 @@ internal sealed class RangePartitionsCheck : HealthCheck<PartitionFacts>
             ],
             Caveat =
                 "Judged by the studio's clock against the newest partition's own width; a timestamp key (without time zone) is read "
-                + "as UTC. The bounds are read from the catalog without opening a partition.",
-            Remedy = Next(row) is { } next ? evaluation.TableRemedies?.ExtendRangePartitions(table, next) : null,
+                + "as UTC, and a timestamptz range's months are looked for in the session's TimeZone"
+                + (UnknownZone(row)
+                    ? " - but " + row.TimeZone + " is not a zone this host knows, so they were looked for in UTC, and a range cut at "
+                      + "local midnights is given a next partition of the newest one's width instead"
+                    : string.Empty)
+                + ". The bounds are read from the catalog without opening a partition.",
+            Remedy = Next(row, evaluation.Now) is { } next ? evaluation.TableRemedies?.ExtendRangePartitions(table, next) : null,
         };
     }
 

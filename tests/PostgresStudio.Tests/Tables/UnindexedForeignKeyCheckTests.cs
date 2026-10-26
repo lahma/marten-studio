@@ -19,6 +19,50 @@ public class UnindexedForeignKeyCheckTests
         new([Table(table, heapBytes)], [table, Host("parent")], keys, indexes);
 
     [Fact]
+    public void A_key_an_index_leads_with_part_of_is_info_that_says_the_lookup_is_narrowed_not_a_whole_table_read()
+    {
+        StudioTable child = Host("child");
+        HealthFinding finding = new UnindexedForeignKeyCheck().Evaluate(
+                Facts(child, Large, [Key(child, "child_region_parent_fkey", [2, 3], ["region", "parent_id"])], Index(child, IndexRow(child, "child_by_region", 2))),
+                Evaluation())
+            .Findings.Single();
+
+        finding.Severity.Should().Be(HealthSeverity.Info, "W5-B1 review F1: an index on some of the key narrows the lookup");
+        finding.Variant.Should().Be(UnindexedForeignKeyCheck.PartlyCoveredVariant);
+        finding.Title.Should().EndWith("is only partly covered by an index");
+        finding.WhyItMatters.Should().Contain("the index child_by_region leads with only some of (region, parent_id)")
+            .And.Contain("narrower than the whole table").And.NotContain("reads the whole table");
+        finding.Evidence.Should().Contain(new HealthEvidence("Narrowed by", "child_by_region (c2)"));
+        finding.Remedy!.Code.Should().Be("CREATE INDEX CONCURRENTLY ON \"app\".\"child\" (\"region\", \"parent_id\");");
+    }
+
+    [Fact]
+    public void A_key_whose_trailing_column_the_source_names_is_covered_by_an_index_on_the_rest()
+    {
+        // A conjoined Marten table's ForeignKey<TRef>: (customer_id, tenant_id), indexed on customer_id alone.
+        StudioTable orders = Host("orders") with { TrailingKeyColumns = ["tenant_id"] };
+        HealthForeignKeyRow key = Key(orders, "orders_customer_id_tenant_id_fkey", [3, 4], ["customer_id", "tenant_id"]);
+
+        new UnindexedForeignKeyCheck().Evaluate(Facts(orders, Large, [key], Index(orders, IndexRow(orders, "orders_idx_customer_id", 3))), Evaluation())
+            .Findings.Should().BeEmpty("W5-B1 review F1: the lookup is a bitmap index scan on customer_id, filtered on tenant_id");
+
+        new UnindexedForeignKeyCheck().Evaluate(Facts(Host("orders"), Large, [key], Index(Host("orders"), IndexRow(Host("orders"), "orders_idx_customer_id", 3))), Evaluation())
+            .Findings.Single().Severity.Should().Be(HealthSeverity.Info, "a table whose source names nothing trailing is judged partly covered");
+    }
+
+    [Fact]
+    public void A_key_into_a_document_table_the_set_does_not_hold_is_never_described_nor_counted()
+    {
+        StudioTable child = Host("child");
+        HealthVerdict verdict = new UnindexedForeignKeyCheck().Evaluate(
+            Facts(child, Large, [Key(child, "child_secret_fkey", [2], ["secret_id"], "app", "mt_doc_secret", deletes: 99)]),
+            Evaluation());
+
+        verdict.Findings.Should().BeEmpty("D27, as the database browser drops a key into a hidden type's table (W5-B1 review F2)");
+        (verdict.Note ?? string.Empty).Should().NotContainEquivalentOf("secret").And.NotContain("99");
+    }
+
+    [Fact]
     public void An_uncovered_key_on_a_table_of_8_MiB_or_more_is_a_warning_with_a_concurrent_index_for_the_hosts_migrations()
     {
         StudioTable child = Host("child");
