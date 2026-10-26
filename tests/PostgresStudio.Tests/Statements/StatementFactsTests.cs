@@ -161,13 +161,13 @@ public class StatementFactsTests
             Platform = new PostgresPlatform(PostgresStudio.PostgresPlatformKind.AmazonAurora, "aurora_version()"),
         };
 
-        StatementFacts facts = StatementFacts.Build("default", "default", Now, notInstalled, null, HealthHistoryView.Empty, null, Tables, null);
+        StatementFacts facts = StatementFacts.Build("default", "default", Now, notInstalled, null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
         facts.State.Should().Be(StatementsState.NotInstalled);
         facts.Platform!.Kind.Should().Be(PostgresStudio.PostgresPlatformKind.AmazonAurora);
         facts.Statements.Should().BeEmpty();
 
-        StatementFacts failed = StatementFacts.Build("default", "default", Now, null, "T02 timed out.", HealthHistoryView.Empty, null, Tables, null);
+        StatementFacts failed = StatementFacts.Build("default", "default", Now, null, "T02 timed out.", HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
         (failed.State, failed.Failure).Should().Be((StatementsState.Failed, "T02 timed out."));
     }
 }

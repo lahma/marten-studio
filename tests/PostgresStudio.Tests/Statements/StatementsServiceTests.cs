@@ -212,7 +212,7 @@ public class StatementsServiceTests
         StatementFacts facts = StatementFacts.Build(
             "default", "default", Now,
             new StatementReadOutcome(StatementReadState.NotInstalled, new StatementExtension(170011, null, null), null) { Platform = new PostgresPlatform(kind, null) },
-            null, HealthHistoryView.Empty, null, Tables, null);
+            null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
         string status = StatementsService.Status(facts, PostgresStudioText.Instance)!;
 
@@ -225,7 +225,7 @@ public class StatementsServiceTests
     {
         StatementFacts nothing = StatementFacts.Build(
             "default", "default", Now,
-            new StatementReadOutcome(StatementReadState.NothingRecorded, Pg17, null), null, HealthHistoryView.Empty, null, Tables, null);
+            new StatementReadOutcome(StatementReadState.NothingRecorded, Pg17, null), null, HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
 
         StatementsService.Status(nothing, PostgresStudioText.Instance).Should().Contain("of the data source's own role");
         StatementsService.Status(nothing, StudioText.Marten).Should().Contain("of the store's own role");
@@ -331,7 +331,7 @@ public class StatementsServiceTests
 
         StatementFacts old = StatementFacts.Build(
             "default", "default", Now, Outcome(read with { Extension = new StatementExtension(140000, "public", "1.8") }), null,
-            HealthHistoryView.Empty, null, Tables, PostgresStatementClassifier.Instance);
+            HealthHistoryView.Empty, null, StatementsTestFacts.Tables, PostgresStatementClassifier.Instance);
 
         old.FoldsNested.Should().BeTrue();
         StatementsService.Caveat(old, PostgresStudioText.Instance).Should()

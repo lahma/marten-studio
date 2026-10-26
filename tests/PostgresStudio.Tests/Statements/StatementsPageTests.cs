@@ -135,7 +135,7 @@ public class StatementsPageTests
         StatementFacts facts = StatementFacts.Build(
             "default", "default", Now,
             new StatementReadOutcome(StatementReadState.NotPreloaded, Pg17, null) { Platform = PostgresStudio.Services.Health.PostgresPlatform.SelfHosted },
-            null, PostgresStudio.Services.Health.HealthHistoryView.Empty, null, Tables, null);
+            null, PostgresStudio.Services.Health.HealthHistoryView.Empty, null, StatementsTestFacts.Tables, null);
         (PostgresStudioComponentContext context, _) = await ContextAsync(Shown(facts));
         await using PostgresStudioComponentContext owned = context;
 
