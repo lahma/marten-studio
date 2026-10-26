@@ -125,6 +125,12 @@ internal sealed record MaintenanceRunningView(bool Read, IReadOnlyList<Maintenan
 {
     /// <summary>Nothing read.</summary>
     public static MaintenanceRunningView NotRead { get; } = new(false, [], 0, null);
+
+    /// <summary>
+    /// How many run on a table the role can see but this page does not name to this visitor - withheld, hidden, or not one
+    /// it judges: counted, never listed, so no block count or ETA tells how big the table is.
+    /// </summary>
+    public int Unnamed { get; init; }
 }
 
 /// <summary>The server's autovacuum workers.</summary>

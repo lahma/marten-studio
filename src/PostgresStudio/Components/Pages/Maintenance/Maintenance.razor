@@ -243,10 +243,19 @@
                             </TableScroll>
                         }
 
+                        @if (measure.IndexesNotMeasured > 0)
+                        {
+                            <p class="ms-muted">
+                                @SessionText.Number(measure.IndexesNotMeasured) more index@(measure.IndexesNotMeasured == 1 ? string.Empty : "es") not measured: the measure reads the
+                                @MaintenanceQueries.MeasuredIndexes largest, within the one statement_timeout.
+                            </p>
+                        }
+
                         <p class="ms-muted">
-                            Measured @State.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex: an estimate of the
-                            heap from the visibility map and an exact read of every b-tree page. A leaf density far below the index's
-                            fillfactor (90% by default) is space a REINDEX CONCURRENTLY would give back.
+                            Measured @State.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex, in one statement under
+                            QueryTimeout: an estimate of the heap from the visibility map and an exact read of every page of the largest
+                            indexes, each holding an ACCESS SHARE lock for as long as it reads - which a migration's ALTER waits behind. A leaf
+                            density far below the index's fillfactor (90% by default) is space a REINDEX CONCURRENTLY would give back.
                         </p>
                     }
                     else
@@ -264,7 +273,7 @@
             {
                 <p class="ms-muted">The progress views were not read in this sweep; the Health page's T16 row says why.</p>
             }
-            else if (view.Running.Rows.Count == 0 && view.Running.Unseen == 0)
+            else if (view.Running.Rows.Count == 0 && view.Running.Unseen == 0 && view.Running.Unnamed == 0)
             {
                 <p class="ms-muted">No VACUUM, ANALYZE, index build or CLUSTER was running in this database when the sweep read it.</p>
             }
@@ -310,6 +319,13 @@
                             </tbody>
                         </table>
                     </TableScroll>
+                }
+
+                @if (view.Running.Unnamed > 0)
+                {
+                    <p class="ms-maint-unseen">
+                        @SessionText.Number(view.Running.Unnamed) more on @(view.Running.Unnamed == 1 ? "a table" : "tables") this page does not name to you.
+                    </p>
                 }
 
                 @if (view.Running.Unseen > 0)

@@ -3,6 +3,7 @@ using System.Globalization;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Schema;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -760,6 +761,231 @@ internal static class Autovacuum
 
         return partly + " No StoreOptions line the studio can suggest sets this table's autovacuum settings; a DBA's ALTER TABLE ... SET ("
             + parameter + " = " + value + ") does, and " + apply;
+    }
+}
+
+/// <summary>What keeps autovacuum from a table already past its trigger, as far as the sweep can tell (W5-V1 review).</summary>
+internal enum AutovacuumHindrance
+{
+    /// <summary>Nothing the sweep can see.</summary>
+    None,
+
+    /// <summary>Another session holds a lock autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with, and autovacuum skips a table it cannot lock.</summary>
+    Locked,
+
+    /// <summary>Every autovacuum worker on the server is busy (T16).</summary>
+    WorkersBusy,
+
+    /// <summary>Cost-based throttling - the table's own or the server's - makes each worker sleep more than it works.</summary>
+    Throttled,
+
+    /// <summary>A transaction has held the vacuum horizon back for over an hour (T14), so vacuum cannot remove the dead rows.</summary>
+    HorizonHeld,
+}
+
+/// <summary>
+/// Why a table past twice its own trigger is still not vacuumed or analysed, and the remedy that answers it (W5-V1 review):
+/// once a table is behind, a lower scale factor changes nothing - it is already past its trigger - so the remedy is for
+/// what keeps autovacuum away, and a scale factor is offered only where it would at least halve the trigger, so that the
+/// next pass starts sooner.
+/// </summary>
+internal static class AutovacuumHindrances
+{
+    /// <summary>The cost delay, in milliseconds, at and above which autovacuum counts as throttled (PostgreSQL 12's default is 2).</summary>
+    public const double ThrottledDelayMilliseconds = 10;
+
+    /// <summary>The cost limit at and below which autovacuum counts as throttled (the default is 200).</summary>
+    public const int ThrottledCostLimit = 100;
+
+    /// <summary>
+    /// The series T14 writes in every sweep it runs in: how long, in seconds and as Postgres' own timestamps bound it, the
+    /// oldest session or prepared transaction holding the store's tables back has done so. A number about the database, no name.
+    /// </summary>
+    internal const string HorizonHeldSeries = "tables.horizon-held-for";
+
+    /// <summary>How long the horizon must have been held for T07 to blame it - T14's own line.</summary>
+    public static readonly TimeSpan HorizonHeldFor = TimeSpan.FromHours(1);
+
+    /// <summary>What keeps autovacuum from <paramref name="unit" />, in the order the evidence is surest.</summary>
+    /// <param name="table">The table.</param>
+    /// <param name="unit">The decision it is behind on.</param>
+    /// <param name="workers">The sweep's workers read, or <see langword="null" /> where the check did not read it.</param>
+    /// <param name="history">The database's samples: T16's saturated run and T14's held horizon.</param>
+    /// <param name="horizonMatters">Whether a held horizon explains it: dead rows only - inserts leave none for it to keep.</param>
+    public static AutovacuumHindrance Of(TableFacts table, AutovacuumUnit unit, MaintenanceWorkersRow? workers, HealthHistoryView history, bool horizonMatters)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(unit);
+        ArgumentNullException.ThrowIfNull(history);
+
+        if (unit.Locked)
+        {
+            return AutovacuumHindrance.Locked;
+        }
+
+        if (WorkersBusy(workers, history))
+        {
+            return AutovacuumHindrance.WorkersBusy;
+        }
+
+        if (Throttle(table, workers) is not null)
+        {
+            return AutovacuumHindrance.Throttled;
+        }
+
+        return horizonMatters && HorizonHeld(history) ? AutovacuumHindrance.HorizonHeld : AutovacuumHindrance.None;
+    }
+
+    /// <summary>Whether every worker is busy now, or was in T16's latest sample.</summary>
+    public static bool WorkersBusy(MaintenanceWorkersRow? workers, HealthHistoryView history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+
+        return (workers is { Autovacuum: true } read && new AutovacuumWorkersFacts(DateTimeOffset.MinValue, read, [], PostgresPlatform.SelfHosted).Saturated)
+            || AutovacuumWorkersCheck.SaturatedRun(history) > 0;
+    }
+
+    /// <summary>Whether T14's latest sample says the horizon has been held for over an hour.</summary>
+    public static bool HorizonHeld(HealthHistoryView history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+
+        HealthTrend trend = history.Trend(HorizonHeldSeries);
+        return trend.Points.Count > 0 && trend.Points[^1].Value >= HorizonHeldFor.TotalSeconds;
+    }
+
+    /// <summary>
+    /// The cost setting that throttles the table's workers - its own storage parameter over the server's setting - with its
+    /// value and Postgres' default, or <see langword="null" /> when neither is past the line.
+    /// </summary>
+    public static (string Parameter, string Current, string Suggested, bool TableOwn)? Throttle(TableFacts table, MaintenanceWorkersRow? workers)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        IReadOnlyDictionary<string, string> own = StorageParameters.Parse(table.Row.StorageOptions);
+        double? ownDelay = own.TryGetValue("autovacuum_vacuum_cost_delay", out string? delayText)
+            && double.TryParse(delayText, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDelay) && parsedDelay >= 0 ? parsedDelay : null;
+        int? ownLimit = own.TryGetValue("autovacuum_vacuum_cost_limit", out string? limitText)
+            && int.TryParse(limitText, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedLimit) && parsedLimit > 0 ? parsedLimit : null;
+
+        double delay = ownDelay ?? workers?.CostDelayMilliseconds ?? 2;
+        int limit = ownLimit ?? workers?.CostLimit ?? 200;
+
+        if (delay >= ThrottledDelayMilliseconds)
+        {
+            return ("autovacuum_vacuum_cost_delay", Autovacuum.Number(delay), "2", ownDelay is not null);
+        }
+
+        return limit <= ThrottledCostLimit
+            ? ("autovacuum_vacuum_cost_limit", limit.ToString(CultureInfo.InvariantCulture), "200", ownLimit is not null)
+            : null;
+    }
+
+    /// <summary>The evidence line: what keeps autovacuum away.</summary>
+    public static string Label(AutovacuumHindrance hindrance, TableFacts table, MaintenanceWorkersRow? workers) => hindrance switch
+    {
+        AutovacuumHindrance.Locked => "a lock another session holds on the table, which autovacuum skips",
+        AutovacuumHindrance.WorkersBusy => "every autovacuum worker is busy (T16)",
+        AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle =>
+            "cost-based throttling: " + throttle.Parameter + " = " + throttle.Current + (throttle.TableOwn ? ", the table's own storage parameter" : ", the server's setting"),
+        AutovacuumHindrance.HorizonHeld => "the vacuum horizon, held back for over an hour (T14)",
+        _ => "nothing the sweep can see",
+    };
+
+    /// <summary>The sentence the finding's "why" says about it.</summary>
+    public static string Sentence(AutovacuumHindrance hindrance, TableFacts table, MaintenanceWorkersRow? workers) => hindrance switch
+    {
+        AutovacuumHindrance.Locked =>
+            " Another session holds a lock on it that autovacuum's SHARE UPDATE EXCLUSIVE lock conflicts with, and autovacuum skips a "
+            + "table it cannot lock rather than wait - a long migration, a LOCK TABLE, a CREATE INDEX without CONCURRENTLY. It passes the "
+            + "table by until that lock goes; Database › Sessions shows who holds it.",
+        AutovacuumHindrance.WorkersBusy =>
+            " Every autovacuum worker on the server is busy (T16), so a table past its trigger waits for one to come free, however far "
+            + "past it it goes.",
+        AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle =>
+            " Autovacuum's cost-based throttling holds it back: " + throttle.Parameter + " = " + throttle.Current
+            + (throttle.TableOwn ? ", the table's own storage parameter," : ", the server's setting,")
+            + " makes each worker sleep more than it works on a table this size.",
+        AutovacuumHindrance.HorizonHeld =>
+            " A transaction has held the vacuum horizon back for over an hour (T14): vacuum cannot remove a dead row any transaction may "
+            + "still see, so even when it runs these stay, and autovacuum keeps coming back to them.",
+        _ =>
+            " Nothing the sweep can see explains it - no lock on the table, no shortage of workers (T16), no throttling and no held "
+            + "horizon (T14). Autovacuum's own log (log_autovacuum_min_duration) says what it did with the table, and when.",
+    };
+
+    /// <summary>
+    /// The remedy for <paramref name="hindrance" />: more workers, or the cost setting back to Postgres' default - or none, for
+    /// a lock or a held horizon, whose holder is somebody to talk to rather than a setting to change.
+    /// </summary>
+    public static HealthRemedy? Remedy(
+        AutovacuumHindrance hindrance,
+        TableFacts table,
+        MaintenanceWorkersRow? workers,
+        PostgresPlatform platform,
+        HealthEvaluation evaluation)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(platform);
+        ArgumentNullException.ThrowIfNull(evaluation);
+
+        switch (hindrance)
+        {
+            case AutovacuumHindrance.WorkersBusy when workers is { } read:
+                string more = (read.MaxWorkers * 2).ToString(CultureInfo.InvariantCulture);
+                return ServerSettingRemedy.Build(
+                    platform,
+                    "autovacuum_max_workers",
+                    more,
+                    evaluation.Text,
+                    read.MaxWorkersContext,
+                    ":",
+                    where => "Twice the workers, so a table past its trigger is not left waiting for one; raise autovacuum_vacuum_cost_limit with "
+                        + "it, which the workers share. Set it in " + where + ".");
+
+            case AutovacuumHindrance.Throttled when Throttle(table, workers) is { } throttle:
+                return throttle.TableOwn
+                    ? Autovacuum.Remedy(evaluation.TableRemedies, table, throttle.Parameter, throttle.Suggested,
+                        "Postgres' own default, so the table's workers are not throttled harder than every other table's.")
+                    : ServerSettingRemedy.Build(
+                        platform,
+                        throttle.Parameter,
+                        throttle.Suggested,
+                        evaluation.Text,
+                        "sighup",
+                        ":",
+                        where => "Postgres' own default, which a reload applies. Set it in " + where + ".");
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// The next scale factor down, offered only when the trigger it gives is at most half the one in force - the only thing a
+    /// lower scale factor can do for a table already past its trigger is make the next pass start sooner - or
+    /// <see langword="null" />.
+    /// </summary>
+    /// <param name="unit">The decision.</param>
+    /// <param name="share">The share of the table the scale part counts: 1, or 18's unfrozen share for the insert trigger.</param>
+    /// <param name="cap">PostgreSQL 18's cap on the dead-row trigger, or <see langword="null" />.</param>
+    public static (double ScaleFactor, double Trigger)? HalvingScaleFactor(AutovacuumUnit unit, double share, double? cap)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+
+        if (Autovacuum.LowerScaleFactor(unit.ScaleFactor) is not { } lower)
+        {
+            return null;
+        }
+
+        double trigger = unit.Threshold + (lower * unit.Tuples * share);
+
+        if (cap is { } limit and >= 0)
+        {
+            trigger = Math.Min(trigger, limit);
+        }
+
+        return trigger <= unit.Trigger / 2 ? (lower, trigger) : null;
     }
 }
 

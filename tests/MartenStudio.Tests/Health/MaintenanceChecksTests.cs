@@ -185,10 +185,119 @@ public class MaintenanceChecksTests
         finding.Evidence.Should().Contain(x => x.Label == "Its dead-row trigger"
             && x.Value.Contains("autovacuum_vacuum_scale_factor 0.01, the table's own storage parameter", StringComparison.Ordinal)
             && x.Value.Contains("autovacuum_vacuum_threshold 50, the server's setting", StringComparison.Ordinal));
-        finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().StorageParameter(\"autovacuum_vacuum_scale_factor\", 0.005);");
-        finding.Remedy.Requires.Should().BeSameAs(RuntimeFeature.DocumentStorageParameter);
-        finding.Remedy.Explanation.Should().Contain("is now 10,050").And.Contain("at 0.005 it would be 5,050").And.Contain("Below Marten 9.47");
         finding.Caveat.Should().Contain("Seen for 12 min").And.Contain("inflated");
+
+        // Past its trigger, a lower scale factor changes nothing, and 0.005 would not halve 10,050 (W5-V1 review): with nothing
+        // the sweep can see keeping autovacuum away, the finding says so and offers no line.
+        finding.Remedy.Should().BeNull();
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "nothing the sweep can see"));
+        finding.WhyItMatters.Should().Contain("a lower scale factor would not change that").And.Contain("log_autovacuum_min_duration");
+    }
+
+    /// <summary>
+    /// A scale factor is offered only where the next rung down at least halves the trigger - 0.05 to 0.02 on a million rows,
+    /// 50,050 to 20,050 - and says it only makes the next pass start sooner (W5-V1 review).
+    /// </summary>
+    [Fact]
+    public void A_lower_scale_factor_is_offered_only_where_it_halves_the_trigger_and_says_it_starts_the_next_pass_sooner()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts tuned = Tuned(orders, dead: 120_000, options: ["autovacuum_vacuum_scale_factor=0.05"]);
+        TableFacts table = tuned with { Row = tuned.Row with { Vacuum = Unit(120_000, 50_050, Now.AddDays(-3), scale: 0.05, tuples: 1_000_000) } };
+
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(new VacuumFacts(Now, [table]), Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().StorageParameter(\"autovacuum_vacuum_scale_factor\", 0.02);");
+        finding.Remedy.Explanation.Should().Contain("is now 50,050").And.Contain("at 0.02 it would be 20,050").And.Contain("starts sooner next time");
+    }
+
+    [Fact]
+    public void A_lock_another_session_holds_is_what_the_finding_says_keeps_autovacuum_away_with_no_setting_to_change()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts tuned = Tuned(orders);
+        TableFacts table = tuned with { Row = tuned.Row with { Vacuum = tuned.Row.Vacuum! with { Locked = true } } };
+
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(new VacuumFacts(Now, [table]), Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "a lock another session holds on the table, which autovacuum skips"));
+        finding.WhyItMatters.Should().Contain("autovacuum skips a table it cannot lock");
+        finding.Remedy.Should().BeNull("a lock's holder is somebody to talk to, not a setting");
+    }
+
+    [Fact]
+    public void Every_worker_busy_is_what_keeps_autovacuum_away_and_the_remedy_is_more_workers()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        MaintenanceWorkersRow busy = new() { MaxWorkers = 3, MaxWorkersContext = "sighup", CanReadAllStats = true, WorkersSeen = 3 };
+
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(
+                new VacuumFacts(Now, [Tuned(orders)]) { Workers = busy },
+                Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "every autovacuum worker is busy (T16)"));
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
+        finding.Remedy.Code.Should().Contain("autovacuum_max_workers = 6");
+    }
+
+    [Theory]
+    [InlineData("autovacuum_vacuum_cost_delay=20", "autovacuum_vacuum_cost_delay", "2")]
+    [InlineData("autovacuum_vacuum_cost_limit=10", "autovacuum_vacuum_cost_limit", "200")]
+    public void A_table_throttled_by_its_own_cost_setting_gets_it_back_at_Postgres_default(string option, string parameter, string value)
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(
+                new VacuumFacts(Now, [Tuned(orders, options: ["autovacuum_vacuum_scale_factor=0.01", option])]),
+                Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Evidence.Single(static x => x.Label == "What keeps autovacuum away").Value.Should()
+            .StartWith("cost-based throttling: " + parameter).And.EndWith("the table's own storage parameter");
+        finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().StorageParameter(\"" + parameter + "\", " + value + ");");
+    }
+
+    [Fact]
+    public void A_server_that_throttles_autovacuum_gets_its_cost_delay_back_at_the_default()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        MaintenanceWorkersRow throttled = new() { MaxWorkers = 3, CanReadAllStats = true, WorkersSeen = 1, CostDelayMilliseconds = 20 };
+
+        HealthFinding finding = new VacuumBehindCheck()
+            .Evaluate(
+                new VacuumFacts(Now, [Tuned(orders)]) { Workers = throttled },
+                Evaluation(Held(VacuumBehindCheck.SweptSeries, VacuumBehindCheck.BehindSeries + orders.Key, TimeSpan.FromMinutes(11))))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
+        finding.Remedy.Code.Should().Contain("autovacuum_vacuum_cost_delay = 2");
+    }
+
+    [Fact]
+    public void A_horizon_T14_saw_held_for_over_an_hour_is_what_keeps_the_dead_rows_and_never_the_inserts()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        string condition = VacuumBehindCheck.BehindSeries + orders.Key;
+
+        HealthHistoryView history = History(
+            (TimeSpan.FromMinutes(11), [(VacuumBehindCheck.SweptSeries, 1), (condition, 1), (AutovacuumHindrances.HorizonHeldSeries, 7_200)]),
+            (TimeSpan.Zero, [(VacuumBehindCheck.SweptSeries, 1), (condition, 1), (AutovacuumHindrances.HorizonHeldSeries, 7_800)]));
+
+        HealthFinding finding = new VacuumBehindCheck().Evaluate(new VacuumFacts(Now, [Tuned(orders)]), Evaluation(history))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autovacuum away", "the vacuum horizon, held back for over an hour (T14)"));
+        finding.Remedy.Should().BeNull();
+
+        AutovacuumHindrances.Of(Tuned(orders), Unit(40_000, 10_050), null, history, horizonMatters: false)
+            .Should().Be(AutovacuumHindrance.None, "inserts leave no dead rows for a horizon to keep");
     }
 
     [Theory]
@@ -239,16 +348,22 @@ public class MaintenanceChecksTests
         finding.Evidence.Should().Contain(x => x.Label == "Its insert trigger" && x.Value.Contains("0% of its pages not all-frozen", StringComparison.Ordinal));
     }
 
+    /// <summary>Behind on both decisions is one finding - the dead-row one - with both counters in it (W5-V1 review).</summary>
     [Fact]
-    public void Both_decisions_behind_are_two_findings_with_keys_of_their_own()
+    public void Both_decisions_behind_are_one_finding_with_both_counters()
     {
         MartenTable orders = Document<HealthOrderDoc>();
         TableFacts tuned = Tuned(orders, options: ["autovacuum_enabled=false"]);
         TableFacts table = tuned with { Row = tuned.Row with { Insert = Unit(25_000, 3_000, Now.AddDays(-3)) } };
 
-        HealthVerdict verdict = new VacuumBehindCheck().Evaluate(new VacuumFacts(Now, [table]), Evaluation());
+        HealthFinding finding = new VacuumBehindCheck().Evaluate(new VacuumFacts(Now, [table]), Evaluation())
+            .Findings.Should().ContainSingle().Subject;
 
-        verdict.Findings.Select(static x => x.Key).Should().BeEquivalentTo(["T07|dead-rows|" + orders.Key, "T07|inserts|" + orders.Key]);
+        finding.Key.Should().Be("T07|dead-rows|" + orders.Key);
+        finding.Title.Should().Contain("40,000 dead rows").And.Contain(", and 25,000 rows inserted since its last vacuum, 8.3 times the 3,000");
+        finding.Evidence.Should().Contain(new HealthEvidence("Inserted since the last vacuum", "25,000"));
+        finding.Evidence.Should().Contain(x => x.Label == "Its insert trigger");
+        finding.Evidence.Should().Contain(new HealthEvidence("Past its insert trigger", "8.3 times"));
     }
 
     [Fact]
@@ -265,8 +380,9 @@ public class MaintenanceChecksTests
         finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().StorageParameter(\"autovacuum_enabled\", true);");
     }
 
+    /// <summary>The server's <c>autovacuum = off</c> is S02's Critical; each table behind stays a Warning (W5-V1 review).</summary>
     [Fact]
-    public void Autovacuum_switched_off_for_the_server_is_Critical_and_offers_no_StoreOptions_line()
+    public void Autovacuum_switched_off_for_the_server_keeps_the_table_at_Warning_and_offers_no_StoreOptions_line()
     {
         MartenTable orders = Document<HealthOrderDoc>();
 
@@ -274,7 +390,7 @@ public class MaintenanceChecksTests
             .Evaluate(new VacuumFacts(Now, [Tuned(orders, serverAutovacuum: false)]), Evaluation())
             .Findings.Should().ContainSingle().Subject;
 
-        finding.Severity.Should().Be(HealthSeverity.Critical);
+        finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.WhyItMatters.Should().Contain("autovacuum = off");
         finding.Remedy.Should().BeNull();
     }
@@ -325,7 +441,7 @@ public class MaintenanceChecksTests
             .Findings.Should().ContainSingle().Subject;
 
         finding.Remedy.Should().BeNull();
-        finding.WhyItMatters.Should().Contain("is already 0.001").And.Contain("T16").And.Contain("T14");
+        finding.WhyItMatters.Should().Contain("Nothing the sweep can see").And.Contain("T16").And.Contain("T14");
     }
 
     [Theory]
@@ -484,6 +600,33 @@ public class MaintenanceChecksTests
         }
     }
 
+    /// <summary>
+    /// Rows read are a size signal only with one beside them (W5-V1 review): a table whose indexes were built while it was empty
+    /// keeps <c>reltuples = -1</c> - every Marten document table - so five rows read two thousand times by their key, or
+    /// scanned four hundred times, are not a table never analysed; scans that read a thousand rows each are.
+    /// </summary>
+    [Theory]
+    [InlineData(5, 0, 0, 2_000, false)]
+    [InlineData(5, 400, 2_000, 0, false)]
+    [InlineData(500, 2, 2_400, 0, true)]
+    [InlineData(0, 0, 0, 2_000, true)]
+    public void Rows_read_count_toward_never_analysed_only_with_a_sign_the_table_is_that_big(long live, long scans, long seqRead, long indexFetched, bool flagged)
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts table = Table(orders, row => row with
+        {
+            EstimatedRows = -1,
+            LiveRows = live,
+            SequentialScans = scans,
+            SequentialRowsRead = seqRead,
+            IndexRowsFetched = indexFetched,
+            LastAnalyze = null,
+            LastAutoanalyze = null,
+        });
+
+        StaleStatisticsCheck.ProblemOf(table, Now).Should().Be(flagged ? StatisticsProblem.NeverAnalysed : StatisticsProblem.None);
+    }
+
     [Fact]
     public void A_freshly_loaded_table_with_autovacuum_on_is_watched_not_reported()
     {
@@ -520,9 +663,32 @@ public class MaintenanceChecksTests
         finding.Variant.Should().Be(StaleStatisticsCheck.StaleVariant);
         finding.Key.Should().Be("T08|stale|" + orders.Key);
         finding.Title.Should().Be("30,200 rows of " + orders.Key + " have changed since it was last analysed, 3 times the 10,050 that trigger its autoanalyze");
-        finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().StorageParameter(\"autovacuum_analyze_scale_factor\", 0.05);");
-        finding.Remedy.Requires.Should().BeSameAs(RuntimeFeature.DocumentStorageParameter);
-        finding.Remedy.Explanation.Should().Contain("is now 10,050").And.Contain("it would be 5,050");
+        // 0.05 would make 10,050 into 5,050, not half of it: past its trigger, no scale factor is the answer (W5-V1 review).
+        finding.Remedy.Should().BeNull();
+        finding.Evidence.Should().Contain(new HealthEvidence("What keeps autoanalyze away", "nothing the sweep can see"));
+    }
+
+    [Fact]
+    public void A_stale_table_whose_analyze_scale_factor_would_halve_its_trigger_is_offered_it()
+    {
+        MartenTable orders = Document<HealthOrderDoc>();
+        TableFacts table = Table(orders, row => row with
+        {
+            EstimatedRows = 1_000_000,
+            LiveRows = 1_000_000,
+            ModifiedSinceAnalyze = 120_000,
+            LastAutoanalyze = Now.AddHours(-2),
+            Analyze = Unit(120_000, 50_050, Now.AddHours(-2), scale: 0.05, tuples: 1_000_000),
+        });
+
+        HealthFinding finding = new StaleStatisticsCheck()
+            .Evaluate(
+                new StatisticsFacts(Now, [table]),
+                Evaluation(Held(StaleStatisticsCheck.SweptSeries, StaleStatisticsCheck.WrongSeries + orders.Key, TimeSpan.FromMinutes(15))))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().StorageParameter(\"autovacuum_analyze_scale_factor\", 0.02);");
+        finding.Remedy.Explanation.Should().Contain("it would be 20,050").And.Contain("starts sooner next time");
     }
 
     [Theory]

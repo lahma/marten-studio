@@ -77,7 +77,7 @@ public class HorizonFollowUpTests
     {
         HorizonHolder writer = Writer();
 
-        HealthSamplePart part = new HorizonHeldCheck().Sample(Facts(writer)).Should().ContainSingle().Subject;
+        HealthSamplePart part = new HorizonHeldCheck().Sample(Facts(writer)).Should().ContainSingle(static x => x.Remembered).Subject;
 
         part.Remembered.Should().BeTrue();
         part.Series.Should().StartWith(HorizonHeldCheck.SightingSeries).And.NotContain("4242").And.NotContain("700000");

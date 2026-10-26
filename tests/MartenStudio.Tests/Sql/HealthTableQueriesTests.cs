@@ -77,7 +77,8 @@ public partial class HealthTableQueriesTests
     {
         foreach (HealthQuery query in new[] { HealthTableQueries.Tables(Targets), HealthTableQueries.Indexes(Targets), HealthTableQueries.SoftDeleteShares(Targets) })
         {
-            query.ParameterNames.Should().Equal("@schemas", "@tables");
+            // The table read binds T08's line too (W5-V1 review), so each partition is judged against it in the statement.
+            query.ParameterNames.Take(2).Should().Equal("@schemas", "@tables");
             query.Parameters[0].NpgsqlDbType.Should().Be(NpgsqlDbType.Array | NpgsqlDbType.Text);
             query.Parameters[0].Value.Should().BeEquivalentTo(TargetSchemas);
             query.Parameters[1].Value.Should().BeEquivalentTo(TargetTables);

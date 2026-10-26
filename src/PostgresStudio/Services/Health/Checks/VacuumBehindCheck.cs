@@ -15,7 +15,14 @@ namespace PostgresStudio.Services.Health.Checks;
 /// while a <c>VACUUM</c> whose table it cannot see is running in this database - or <see langword="null" /> when nothing
 /// running is hidden from it.
 /// </param>
-internal sealed record VacuumFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFacts> Tables, string? ProgressHidden = null);
+internal sealed record VacuumFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFacts> Tables, string? ProgressHidden = null)
+{
+    /// <summary>The sweep's workers read - what says every worker is busy, and the server's cost settings - or <see langword="null" />.</summary>
+    public MaintenanceWorkersRow? Workers { get; init; }
+
+    /// <summary>Who runs the server, for a server setting's wording.</summary>
+    public PostgresPlatform Platform { get; init; } = PostgresPlatform.SelfHosted;
+}
 
 /// <summary>Which of autovacuum's two vacuum decisions a table is behind on.</summary>
 internal enum VacuumBehindKind
@@ -51,8 +58,15 @@ internal enum VacuumBehindKind
 /// off for the table or the server, when there is nothing to wait for. Until then the status row says it is watching.
 /// </para>
 /// <para>
-/// <b>Severity.</b> Warning; Critical past ten times the trigger, or with autovacuum switched off for the table or the
-/// server and the table behind.
+/// <b>Severity.</b> Warning; Critical past ten times the trigger, or with autovacuum switched off by the table's own
+/// <c>autovacuum_enabled = false</c>. A server with <c>autovacuum = off</c> keeps each table at Warning: S02 is that Critical.
+/// Behind on both decisions is one finding, the dead-row one, with both counters.
+/// </para>
+/// <para>
+/// <b>The remedy is for what keeps autovacuum away</b> (W5-V1 review): a table behind is already past its trigger, so a lower
+/// scale factor changes nothing. A lock autovacuum skips, every worker busy (T16), throttling, a horizon held for an hour
+/// (T14) - each named from what the sweep read, with a setting where one answers it - and a scale factor only where it
+/// would at least halve the trigger, so the next pass starts sooner.
 /// </para>
 /// </remarks>
 [HealthCheck("T07", HealthArea.Tables, HealthCostTier.Catalog, "Vacuum falling behind", Variants = [DeadRowsVariant, InsertsVariant])]
@@ -91,7 +105,20 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
         ArgumentNullException.ThrowIfNull(context);
 
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
-        return new VacuumFacts(context.Now, tables, await ProgressHiddenAsync(context, tables).ConfigureAwait(false));
+
+        VacuumFacts facts = new(context.Now, tables, await ProgressHiddenAsync(context, tables).ConfigureAwait(false));
+
+        // Only for a table behind: T16's workers read and the server facts, which the sweep reads once for every check that
+        // asks - what explains it (every worker busy, the server's throttling) and who runs the server, for a setting's wording.
+        if (!tables.Any(x => IsBehind(x, VacuumBehindKind.DeadRows, context.Now) || IsBehind(x, VacuumBehindKind.Inserts, context.Now)))
+        {
+            return facts;
+        }
+
+        MaintenanceWorkersRow workers = await AutovacuumWorkersCheck.WorkersAsync(context).ConfigureAwait(false);
+        PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+
+        return facts with { Workers = workers, Platform = server.Platform };
     }
 
     /// <summary>
@@ -166,6 +193,8 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
 
         foreach (TableFacts table in facts.Tables)
         {
+            List<(VacuumBehindKind Kind, TimeSpan Held)> reported = [];
+
             foreach (VacuumBehindKind kind in (VacuumBehindKind[]) [VacuumBehindKind.DeadRows, VacuumBehindKind.Inserts])
             {
                 if (!IsBehind(table, kind, facts.ReadAt))
@@ -183,7 +212,13 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
                     continue;
                 }
 
-                findings.Add(Finding(table, kind, held, facts, evaluation));
+                reported.Add((kind, held));
+            }
+
+            // Behind on both is one finding, with both counters (W5-V1 review): one table, one thing to do about it.
+            if (reported.Count > 0)
+            {
+                findings.Add(Finding(table, reported, facts, evaluation));
             }
         }
 
@@ -199,57 +234,80 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
               + TableText.Span(PersistFor) + ", because autovacuum usually catches up within a minute of a batch delete or a bulk load.");
     }
 
-    private static HealthFinding Finding(TableFacts table, VacuumBehindKind kind, TimeSpan held, VacuumFacts facts, HealthEvaluation evaluation)
+    /// <summary>"40,000 dead rows, 19.5 times the 2,050 that trigger its autovacuum".</summary>
+    private static string Counted(VacuumBehindKind kind, AutovacuumUnit unit) =>
+        (kind == VacuumBehindKind.DeadRows
+            ? TableText.Count(unit.Counter) + " dead rows"
+            : TableText.Count(unit.Counter) + " rows inserted since its last vacuum")
+        + ", " + Times(unit).ToString("0.#", CultureInfo.InvariantCulture) + " times the " + TableText.Count(Autovacuum.Rounded(unit.Trigger))
+        + " that trigger its autovacuum";
+
+    private static double Times(AutovacuumUnit unit) => unit.Trigger > 0 ? unit.Counter / unit.Trigger : double.PositiveInfinity;
+
+    private static HealthFinding Finding(TableFacts table, List<(VacuumBehindKind Kind, TimeSpan Held)> reported, VacuumFacts facts, HealthEvaluation evaluation)
     {
         StudioTable declared = table.Table;
-        AutovacuumUnit unit = UnitOf(table, kind)!;
         bool partitioned = table.Row.IsPartitioned;
+
+        (VacuumBehindKind kind, TimeSpan held) = reported[0];
         bool dead = kind == VacuumBehindKind.DeadRows;
+        AutovacuumUnit unit = UnitOf(table, kind)!;
+        AutovacuumUnit? inserts = reported.Count > 1 ? UnitOf(table, reported[1].Kind) : null;
 
         string parameter = dead ? "autovacuum_vacuum_scale_factor" : "autovacuum_vacuum_insert_scale_factor";
-        double? lower = Autovacuum.LowerScaleFactor(unit.ScaleFactor);
-        double times = unit.Trigger > 0 ? unit.Counter / unit.Trigger : double.PositiveInfinity;
-        bool critical = times > CriticalTimesTrigger || table.AutovacuumOff;
+        bool critical = Times(unit) > CriticalTimesTrigger || (inserts is { } other && Times(other) > CriticalTimesTrigger) || table.AutovacuumOffForTable;
 
-        string trigger = Autovacuum.Explain(
-            unit,
-            dead ? "autovacuum_vacuum" : "autovacuum_vacuum_insert",
-            table.Row.StorageOptions,
-            partitioned,
-            dead ? table.Row.VacuumMaxThreshold : null,
-            dead ? null : table.Row.UnfrozenShare);
+        AutovacuumHindrance hindrance = table.AutovacuumOff
+            ? AutovacuumHindrance.None
+            : AutovacuumHindrances.Of(table, unit, facts.Workers, evaluation.History, horizonMatters: dead);
 
         string what = partitioned ? "A partition of " + declared.Key : declared.Key;
-        string counted = dead
-            ? TableText.Count(unit.Counter) + " dead rows"
-            : TableText.Count(unit.Counter) + " rows inserted since its last vacuum";
-
         string vacuumed = unit.Last is { } last
             ? "was last vacuumed " + TableText.Span(facts.ReadAt - last) + " ago"
             : "has never been vacuumed";
 
-        HealthRemedy? remedy = lower is { } suggested
-            ? Autovacuum.Remedy(
-                evaluation.TableRemedies,
-                table,
-                parameter,
-                Autovacuum.Number(suggested),
-                "Its " + (dead ? "dead-row" : "insert") + " trigger is now " + TableText.Count(Autovacuum.Rounded(unit.Trigger))
-                + (partitioned ? " on the partition furthest behind" : string.Empty) + "; at " + Autovacuum.Number(suggested) + " it would be "
-                + TableText.Count(Autovacuum.Rounded(unit.Threshold + (suggested * unit.Tuples * (dead ? 1 : table.Row.UnfrozenShare))))
-                + ", so autovacuum vacuums the table in smaller, more frequent passes.")
-            : table.AutovacuumOff ? Autovacuum.Remedy(evaluation.TableRemedies, table, parameter, Autovacuum.Number(unit.ScaleFactor), "Autovacuum is switched off for it.")
-            : null;
+        (double ScaleFactor, double Trigger)? halving = AutovacuumHindrances.HalvingScaleFactor(
+            unit, dead ? 1 : table.Row.UnfrozenShare, dead ? table.Row.VacuumMaxThreshold : null);
 
-        List<HealthEvidence> evidence =
-        [
-            new("Table", declared.Describe()),
-            new(dead ? "Dead rows" : "Inserted since the last vacuum", TableText.Count(unit.Counter)
-                + (partitioned ? " in the partition furthest behind" : string.Empty)),
-            new(dead ? "Its dead-row trigger" : "Its insert trigger", trigger),
-            new("Past its trigger", times.ToString("0.#", CultureInfo.InvariantCulture) + " times"),
-            new("Last vacuum (either kind)", TableText.When(unit.Last)),
-        ];
+        HealthRemedy? remedy;
+
+        if (table.AutovacuumOffForTable)
+        {
+            remedy = Autovacuum.Remedy(evaluation.TableRemedies, table, parameter, Autovacuum.Number(unit.ScaleFactor), "Autovacuum is switched off for it.");
+        }
+        else if (!table.Row.AutovacuumEnabled)
+        {
+            // The server's autovacuum is off: S02's remedy, not one per table.
+            remedy = null;
+        }
+        else if (hindrance != AutovacuumHindrance.None)
+        {
+            remedy = AutovacuumHindrances.Remedy(hindrance, table, facts.Workers, facts.Platform, evaluation);
+        }
+        else
+        {
+            remedy = halving is { } lower
+                ? Autovacuum.Remedy(
+                    evaluation.TableRemedies,
+                    table,
+                    parameter,
+                    Autovacuum.Number(lower.ScaleFactor),
+                    "Its " + (dead ? "dead-row" : "insert") + " trigger is now " + TableText.Count(Autovacuum.Rounded(unit.Trigger))
+                    + (partitioned ? " on the partition furthest behind" : string.Empty) + "; at " + Autovacuum.Number(lower.ScaleFactor)
+                    + " it would be " + TableText.Count(Autovacuum.Rounded(lower.Trigger)) + ", so autovacuum starts sooner next time - "
+                    + "which is all a lower scale factor can do for a table already past its trigger.")
+                : null;
+        }
+
+        List<HealthEvidence> evidence = [new("Table", declared.Describe())];
+        AddDecision(evidence, table, kind, unit, primary: true);
+
+        if (inserts is { } second)
+        {
+            AddDecision(evidence, table, VacuumBehindKind.Inserts, second, primary: false);
+        }
+
+        evidence.Add(new HealthEvidence("Last vacuum (either kind)", TableText.When(unit.Last)));
 
         if (partitioned)
         {
@@ -264,6 +322,11 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
         evidence.Add(new HealthEvidence("Storage parameters", table.Row.StorageOptions.Count == 0 ? "none" : string.Join(", ", table.Row.StorageOptions)));
         evidence.Add(new HealthEvidence("Being vacuumed now", facts.ProgressHidden is null ? "no" : "not known - this role cannot see autovacuum's progress"));
 
+        if (!table.AutovacuumOff)
+        {
+            evidence.Add(new HealthEvidence("What keeps autovacuum away", AutovacuumHindrances.Label(hindrance, table, facts.Workers)));
+        }
+
         List<string> caveat =
         [
             "Counters and vacuum times are the statistics collector's, which a pg_stat_reset() or a crash clears; one read just after a "
@@ -276,8 +339,6 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
             caveat.Add("It may be under way now: " + hidden);
         }
 
-        caveat.Add("A long-running transaction stops vacuum removing dead rows even when it runs (T14), and busy workers (T16) delay it.");
-
         return new HealthFinding
         {
             Code = "T07",
@@ -286,8 +347,9 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
             Subject = declared.Key,
             DocumentTypes = declared.DocumentTypes,
             GatedSchemas = declared.GatedSchemas,
-            Title = what + " has " + counted + ", " + times.ToString("0.#", CultureInfo.InvariantCulture) + " times the "
-                + TableText.Count(Autovacuum.Rounded(unit.Trigger)) + " that trigger its autovacuum, and " + vacuumed,
+            Title = what + " has " + Counted(kind, unit)
+                + (inserts is { } also ? ", and " + Counted(VacuumBehindKind.Inserts, also) : string.Empty)
+                + ", and " + vacuumed,
             WhyItMatters =
                 (dead
                     ? "A dead row is an old version an update or a delete left behind, and only vacuum makes its space reusable. Until it "
@@ -297,17 +359,35 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
                       + "only for its inserts: that pass sets the visibility map that index-only scans read, and freezes pages while they are "
                       + "still in memory, so the anti-wraparound vacuum that must come for every table later is cheap rather than a scan of "
                       + "everything at once.")
-                + " Autovacuum acts on its own trigger, " + TableText.Count(Autovacuum.Rounded(unit.Trigger)) + " for this table, and this one is "
-                + "more than twice past it, so autovacuum is not keeping up."
-                + (lower is null && !table.AutovacuumOff
-                    ? " Its scale factor is already " + Autovacuum.Number(unit.ScaleFactor) + ", so a lower one is not the answer: what keeps "
-                      + "autovacuum from the table is elsewhere - workers busy elsewhere (T16), its cost limit, or a transaction holding the "
-                      + "horizon (T14)."
-                    : string.Empty)
-                + Autovacuum.State(table, parameter, Autovacuum.Number(lower ?? unit.ScaleFactor), evaluation.Text),
+                + " Autovacuum acts on the table's own trigger, " + TableText.Count(Autovacuum.Rounded(unit.Trigger)) + " here, and this one is "
+                + "more than twice past it, so autovacuum is not keeping up - and a lower scale factor would not change that, because the "
+                + "table is already past its trigger."
+                + (table.AutovacuumOff ? string.Empty : AutovacuumHindrances.Sentence(hindrance, table, facts.Workers))
+                + Autovacuum.State(table, parameter, Autovacuum.Number(halving?.ScaleFactor ?? unit.ScaleFactor), evaluation.Text),
             Evidence = evidence,
             Caveat = string.Join(" ", caveat),
             Remedy = remedy,
         };
+    }
+
+    /// <summary>One decision's evidence: its counter, its trigger and where each part comes from, and how far past it is.</summary>
+    private static void AddDecision(List<HealthEvidence> evidence, TableFacts table, VacuumBehindKind kind, AutovacuumUnit unit, bool primary)
+    {
+        bool dead = kind == VacuumBehindKind.DeadRows;
+        bool partitioned = table.Row.IsPartitioned;
+
+        string trigger = Autovacuum.Explain(
+            unit,
+            dead ? "autovacuum_vacuum" : "autovacuum_vacuum_insert",
+            table.Row.StorageOptions,
+            partitioned,
+            dead ? table.Row.VacuumMaxThreshold : null,
+            dead ? null : table.Row.UnfrozenShare);
+
+        evidence.Add(new HealthEvidence(dead ? "Dead rows" : "Inserted since the last vacuum", TableText.Count(unit.Counter)
+            + (partitioned ? " in the partition furthest behind" : string.Empty)));
+        evidence.Add(new HealthEvidence(dead ? "Its dead-row trigger" : "Its insert trigger", trigger));
+        evidence.Add(new HealthEvidence(primary ? "Past its trigger" : "Past its insert trigger",
+            Times(unit).ToString("0.#", CultureInfo.InvariantCulture) + " times"));
     }
 }

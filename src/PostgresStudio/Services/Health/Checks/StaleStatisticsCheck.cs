@@ -85,7 +85,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
     public const string SinceRestartVariant = "since-restart";
 
     /// <summary>Live rows - or rows read - below which a never-analysed table is not worth a finding.</summary>
-    public const long MinRows = 1_000;
+    public const long MinRows = HealthTableQueries.UnanalyzedMinRows;
 
     /// <summary>How far past twice its analyze trigger <c>n_mod_since_analyze</c> must be.</summary>
     public const long MinRowsPast = 10_000;
@@ -144,13 +144,34 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
 
         HealthTableRow row = table.Row;
 
+        // A partitioned table: the statement judged each partition on its own and counted the ones past the line - never a
+        // sum, so many small tenants' partitions are not one big table never analysed (W5-V1 review).
         if (row.IsPartitioned)
         {
-            return row.UnanalyzedLeaves > 0 && (row.UnanalyzedLiveRows >= MinRows || row.UnanalyzedRowsRead >= MinRows);
+            return row.UnanalyzedLeaves > 0;
         }
 
+        return row.EstimatedRows < 0 && table.LastAnalyzeOfAnyKind is null && BigEnough(row);
+    }
+
+    /// <summary>
+    /// Whether a table never analysed is big enough for that to matter: <see cref="MinRows" /> live rows, or that many read
+    /// with a sign the table is that big - a sequential scan that reads that many on average, or counters that say nothing
+    /// lives in it, the shape <c>pg_upgrade</c> leaves. Rows read alone are not one: a table whose indexes were built while it
+    /// was empty keeps <c>reltuples = -1</c> - every Marten document table - and a five-row table read by its key two
+    /// thousand times has read two thousand rows (W5-V1 review). <see cref="HealthTableQueries.TablesSql" /> applies the same
+    /// rule to each partition.
+    /// </summary>
+    internal static bool BigEnough(HealthTableRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        long live = row.LiveRows ?? 0;
         long read = (row.SequentialRowsRead ?? 0) + (row.IndexRowsFetched ?? 0);
-        return row.EstimatedRows < 0 && table.LastAnalyzeOfAnyKind is null && (row.LiveRows >= MinRows || read >= MinRows);
+        long scans = row.SequentialScans ?? 0;
+
+        return live >= MinRows
+            || (read >= MinRows && (live == 0 || (scans > 0 && (row.SequentialRowsRead ?? 0) >= MinRows * scans)));
     }
 
     /// <summary>What is wrong with a table's statistics at <paramref name="at" />, before persistence is considered.</summary>
@@ -377,8 +398,15 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
         HealthTableRow row = table.Row;
         AutovacuumUnit analyze = row.Analyze!;
         bool partitioned = row.IsPartitioned;
-        double? lower = Autovacuum.LowerScaleFactor(analyze.ScaleFactor);
         double times = analyze.Trigger > 0 ? analyze.Counter / analyze.Trigger : double.PositiveInfinity;
+
+        // As T07's (W5-V1 review): past its trigger, a lower scale factor changes nothing; what keeps autoanalyze away is
+        // named from what the sweep read - a lock it skips, every worker busy (T16), throttling - and a scale factor is
+        // offered only where it would at least halve the trigger. No workers read here: the server's own throttling is T07's.
+        AutovacuumHindrance hindrance = table.AutovacuumOff
+            ? AutovacuumHindrance.None
+            : AutovacuumHindrances.Of(table, analyze, workers: null, evaluation.History, horizonMatters: false);
+        (double ScaleFactor, double Trigger)? halving = AutovacuumHindrances.HalvingScaleFactor(analyze, 1, cap: null);
 
         List<HealthEvidence> evidence =
         [
@@ -389,6 +417,11 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
             new("Estimated rows (reltuples)", row.EstimatedRows < 0 ? "not analysed" : TableText.Rows(row.EstimatedRows)),
             new("Last analyze (either kind)", TableText.When(analyze.Last)),
         ];
+
+        if (!table.AutovacuumOff)
+        {
+            evidence.Add(new HealthEvidence("What keeps autoanalyze away", AutovacuumHindrances.Label(hindrance, table, workers: null)));
+        }
 
         if (partitioned)
         {
@@ -414,21 +447,28 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
                 "Autoanalyze acts on its own trigger, " + TableText.Count(Autovacuum.Rounded(analyze.Trigger)) + " changed rows for this table, "
                 + "and this one is more than twice past it with no analyze in the last hour - so the planner is choosing plans for a table "
                 + "that is no longer there, and the studio's ~ counts are off by as much. A wrong row estimate is how a query that should "
-                + "use an index ends up scanning the table, or a join picks a nested loop over a million rows."
-                + Autovacuum.State(table, "autovacuum_analyze_scale_factor", Autovacuum.Number(lower ?? analyze.ScaleFactor), evaluation.Text),
+                + "use an index ends up scanning the table, or a join picks a nested loop over a million rows. A lower scale factor would "
+                + "not change that, because the table is already past its trigger."
+                + (table.AutovacuumOff ? string.Empty : AutovacuumHindrances.Sentence(hindrance, table, workers: null))
+                + Autovacuum.State(table, "autovacuum_analyze_scale_factor", Autovacuum.Number(halving?.ScaleFactor ?? analyze.ScaleFactor), evaluation.Text),
             Evidence = evidence,
             Caveat = Caveat(table, held),
-            Remedy = lower is { } suggested
-                ? Autovacuum.Remedy(
-                    evaluation.TableRemedies,
-                    table,
-                    "autovacuum_analyze_scale_factor",
-                    Autovacuum.Number(suggested),
-                    "Its analyze trigger is now " + TableText.Count(Autovacuum.Rounded(analyze.Trigger)) + "; at " + Autovacuum.Number(suggested)
-                    + " it would be " + TableText.Count(Autovacuum.Rounded(analyze.Threshold + (suggested * analyze.Tuples)))
-                    + ". A DBA's ANALYZE fixes the statistics now; this keeps them fixed.")
-                : table.AutovacuumOffForTable ? Autovacuum.Remedy(evaluation.TableRemedies, table, "autovacuum_analyze_scale_factor", "0.1", "Autovacuum is switched off for it.")
-                : null,
+            Remedy = table.AutovacuumOffForTable
+                ? Autovacuum.Remedy(evaluation.TableRemedies, table, "autovacuum_analyze_scale_factor", "0.1", "Autovacuum is switched off for it.")
+                : !row.AutovacuumEnabled
+                    ? null
+                    : hindrance != AutovacuumHindrance.None
+                        ? AutovacuumHindrances.Remedy(hindrance, table, workers: null, PostgresPlatform.SelfHosted, evaluation)
+                        : halving is { } lower
+                            ? Autovacuum.Remedy(
+                                evaluation.TableRemedies,
+                                table,
+                                "autovacuum_analyze_scale_factor",
+                                Autovacuum.Number(lower.ScaleFactor),
+                                "Its analyze trigger is now " + TableText.Count(Autovacuum.Rounded(analyze.Trigger)) + "; at "
+                                + Autovacuum.Number(lower.ScaleFactor) + " it would be " + TableText.Count(Autovacuum.Rounded(lower.Trigger))
+                                + ", so autoanalyze starts sooner next time. A DBA's ANALYZE fixes the statistics now.")
+                            : null,
         };
     }
 
