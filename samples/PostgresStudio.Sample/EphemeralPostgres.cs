@@ -52,10 +52,12 @@ internal static class EphemeralPostgres
                 connection string is configured, and Docker did not answer. Either:
 
                   - start Docker (or Podman with the Docker-compatible socket) and run again, or
-                  - point the sample at a database you already have, on a server where its role may
-                    create the three tenant databases (tenant_a, tenant_b and tenant_c) beside it:
+                  - point the sample at a database you already have. It writes nothing there unless told to:
+                    --allow-data-generation creates the three tenant databases (tenant_a, tenant_b and
+                    tenant_c) beside it, which needs a role that may create databases, and the demo's
+                    schemas in it:
 
-                        dotnet run --project samples/PostgresStudio.Sample \
+                        dotnet run --project samples/PostgresStudio.Sample -- --allow-data-generation \
                           --ConnectionStrings:Postgres "Host=localhost;Database=admin;Username=postgres;Password=postgres"
 
                 The sample will not quietly fall back to localhost: connecting to a database nobody asked
