@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Health.Checks;
 
@@ -124,7 +125,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
         if (aged.Count == 0 && database is null)
         {
-            return HealthVerdict.Quiet(facts.Tables.Count == 0 ? "No table this store declares exists yet." : null);
+            return HealthVerdict.Quiet(facts.Tables.Count == 0 ? evaluation.Text.NoJudgedTable : null);
         }
 
         TableFacts? oldest = aged.Count > 0 ? aged[0] : null;
@@ -153,7 +154,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
         if (age <= warning && !forecastHeld)
         {
-            string note = QuietNote(oldest, tableAge, database, freezeMaxAge, forecast, toForced, toRefusal, pastForced);
+            string note = QuietNote(oldest, tableAge, database, freezeMaxAge, forecast, toForced, toRefusal, pastForced, evaluation.Text);
 
             return HealthVerdict.Quiet(pastForced && toRefusal is { } soon
                 ? note + " " + Capitalised(forecast!.AtTheRate) + ", writes would be refused in " + HorizonForecast.Span(soon)
@@ -184,12 +185,12 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
             // schema the browser withholds, so such a table is named generically (StudioTableText.NoteName) throughout.
             Title = forecastOnly
                 ? Capitalised(forecast!.AtTheRate) + ", Postgres would stop accepting writes in " + HorizonForecast.Span(toRefusal!.Value)
-                  + ": " + Whose(origin, oldest) + " is past autovacuum_freeze_max_age and has not been frozen"
-                : (origin == Origin.StoreTable && !oldest!.Table.OutsideOwnSchemas ? oldest.Key : Capitalised(Whose(origin, oldest))) + " is " + Wraparound.Count(age)
+                  + ": " + Whose(origin, oldest, evaluation.Text) + " is past autovacuum_freeze_max_age and has not been frozen"
+                : (origin == Origin.StoreTable && !oldest!.Table.OutsideOwnSchemas ? oldest.Key : Capitalised(Whose(origin, oldest, evaluation.Text))) + " is " + Wraparound.Count(age)
                   + " transactions from its last freeze; Postgres stops accepting writes at about 2.1 billion",
-            WhyItMatters = WhyItMatters(origin, freezeMaxAge, database),
-            Evidence = Evidence(oldest, tableAge, database, freezeMaxAge, warning, critical, past, forecast, toForced, toRefusal),
-            Caveat = Caveat(database, forecast),
+            WhyItMatters = WhyItMatters(origin, freezeMaxAge, database, evaluation.Text),
+            Evidence = Evidence(oldest, tableAge, database, freezeMaxAge, warning, critical, past, forecast, toForced, toRefusal, evaluation.Text),
+            Caveat = Caveat(database, forecast, evaluation.Text),
         });
     }
 
@@ -201,16 +202,16 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
         Server,
     }
 
-    private static string Whose(Origin origin, TableFacts? oldest) => origin switch
+    private static string Whose(Origin origin, TableFacts? oldest, StudioText text) => origin switch
     {
         Origin.StoreTable => oldest!.Table.NoteName,
-        Origin.Database => "this database (a table that is not the store's)",
+        Origin.Database => "this database (a table that is " + text.NotJudged + ")",
         _ => "another database on this server",
     };
 
     private static string Capitalised(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
 
-    private static string WhyItMatters(Origin origin, long freezeMaxAge, HealthWraparoundDatabase? database)
+    private static string WhyItMatters(Origin origin, long freezeMaxAge, HealthWraparoundDatabase? database, StudioText text)
     {
         string why =
             "Postgres numbers transactions with 32-bit ids, so vacuum must freeze every row before the counter wraps round. "
@@ -223,9 +224,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
 
         if (origin == Origin.Database)
         {
-            why += " The oldest table in this database is not one the store declares - a legacy schema, another library's job store, "
-                + "a document type the studio hides - and wraparound protection counts every table in the database, so it holds the "
-                + "whole database back as surely as a Marten table would.";
+            why += text.UnjudgedOldest;
         }
         else if (origin == Origin.Server)
         {
@@ -252,7 +251,8 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
         List<TableFacts> past,
         HorizonForecast? forecast,
         TimeSpan? toForced,
-        TimeSpan? toRefusal)
+        TimeSpan? toRefusal,
+        StudioText text)
     {
         List<HealthEvidence> evidence = [];
 
@@ -275,7 +275,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
         evidence.Add(new HealthEvidence("autovacuum_freeze_max_age", freezeMaxAge.ToString("N0", CultureInfo.InvariantCulture)));
         evidence.Add(new HealthEvidence("Warning and Critical lines", warning.ToString("N0", CultureInfo.InvariantCulture) + " and "
             + critical.ToString("N0", CultureInfo.InvariantCulture)));
-        evidence.Add(new HealthEvidence("Marten tables past the warning line", past.Count.ToString("N0", CultureInfo.InvariantCulture)));
+        evidence.Add(new HealthEvidence(text.JudgedTables + " past the warning line", past.Count.ToString("N0", CultureInfo.InvariantCulture)));
 
         if (past.Count > 0)
         {
@@ -287,7 +287,7 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
         {
             evidence.Add(new HealthEvidence("Other tables past autovacuum_freeze_max_age", Wraparound.Number(database.OtherPastForcedXid)
                 + (database.OtherTemporaryPastForcedXid > 0 ? " (" + Wraparound.Number(database.OtherTemporaryPastForcedXid) + " of them temporary)" : string.Empty)
-                + ", never named: they are not the store's"));
+                + ", never named: they are " + text.NotJudged));
 
             if (database.SystemPastForcedXid > 0)
             {
@@ -319,13 +319,13 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
         return evidence;
     }
 
-    private static string Caveat(HealthWraparoundDatabase? database, HorizonForecast? forecast)
+    private static string Caveat(HealthWraparoundDatabase? database, HorizonForecast? forecast, StudioText text)
     {
         string caveat =
-            "Read from pg_class.relfrozenxid of the store's own tables, their TOAST tables and their partitions"
+            "Read from pg_class.relfrozenxid of " + text.JudgedTablesRead + ", their TOAST tables and their partitions"
             + (database is null ? string.Empty : ", and from pg_database.datfrozenxid of this database and the server's oldest")
             + ". The lines sit " + TableText.Percent(WarningShare) + " and " + TableText.Percent(CriticalShare) + " of the way from "
-            + "autovacuum_freeze_max_age to wraparound. Tables that are not the store's are counted and never named.";
+            + "autovacuum_freeze_max_age to wraparound. Tables that are " + text.NotJudged + " are counted and never named.";
 
         if (forecast is not null)
         {
@@ -347,13 +347,14 @@ internal sealed class TransactionIdAgeCheck : HealthCheck<TransactionIdAgeFacts>
         HorizonForecast? forecast,
         TimeSpan? toForced,
         TimeSpan? toRefusal,
-        bool pastForced)
+        bool pastForced,
+        StudioText text)
     {
         List<string> parts = [];
 
         if (oldest is not null)
         {
-            parts.Add("The oldest Marten table, " + oldest.Table.NoteName + ", is " + tableAge.ToString("N0", CultureInfo.InvariantCulture)
+            parts.Add("The oldest " + text.JudgedTable + ", " + oldest.Table.NoteName + ", is " + tableAge.ToString("N0", CultureInfo.InvariantCulture)
                 + " transactions from its last freeze.");
         }
 

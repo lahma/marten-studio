@@ -6,6 +6,8 @@ using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using PostgresStudio.Internal.Sql;
+
 namespace PostgresStudio.Services.Json;
 
 /// <summary>
@@ -107,14 +109,24 @@ internal static class JsonPathExpressions
 
     /// <summary>
     /// Appends one step to a Postgres jsonb expression, using <c>-&gt;&gt;</c> for a value read as text
-    /// and <c>-&gt;</c> for one that stays jsonb.
+    /// and <c>-&gt;</c> for one that stays jsonb - or <see langword="null" /> when there is no expression to append to,
+    /// or the step's member name cannot be printed as itself (<see cref="QuoteLiteral" />).
     /// </summary>
-    public static string AppendPostgres(string parent, JsonPathSegment segment, bool asText)
+    public static string? AppendPostgres(string? parent, JsonPathSegment segment, bool asText)
     {
+        if (parent is null)
+        {
+            return null;
+        }
+
         var arrow = asText ? " ->> " : " -> ";
-        return segment.IsIndex
-            ? parent + arrow + segment.Index.ToString(CultureInfo.InvariantCulture)
-            : parent + arrow + QuoteLiteral(segment.Key ?? string.Empty);
+
+        if (segment.IsIndex)
+        {
+            return parent + arrow + segment.Index.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return QuoteLiteral(segment.Key ?? string.Empty) is { } key ? parent + arrow + key : null;
     }
 
     /// <summary>The JSONPath expression for a whole segment list, for example <c>$.items[0].sku</c>.</summary>
@@ -143,12 +155,13 @@ internal static class JsonPathExpressions
 
     /// <summary>
     /// The Postgres expression for a whole segment list; <paramref name="asText"/> makes the last step
-    /// <c>-&gt;&gt;</c> so the result is <c>text</c> rather than <c>jsonb</c>.
+    /// <c>-&gt;&gt;</c> so the result is <c>text</c> rather than <c>jsonb</c>. <see langword="null" /> when a member
+    /// name on the way cannot be printed as itself (<see cref="QuoteLiteral" />).
     /// </summary>
-    public static string ToPostgresExpression(IReadOnlyList<JsonPathSegment> segments, bool asText, string column = DefaultColumn)
+    public static string? ToPostgresExpression(IReadOnlyList<JsonPathSegment> segments, bool asText, string column = DefaultColumn)
     {
-        var result = column;
-        for (var i = 0; i < segments.Count; i++)
+        string? result = column;
+        for (var i = 0; i < segments.Count && result is not null; i++)
         {
             result = AppendPostgres(result, segments[i], asText && i == segments.Count - 1);
         }
@@ -158,9 +171,15 @@ internal static class JsonPathExpressions
 
     /// <summary>
     /// The <c>#&gt;&gt;</c> alternative, for example <c>data #&gt;&gt; '{address,city}'</c> - one operator
-    /// and one path array instead of a chain of arrows, which is what an index definition wants.
+    /// and one path array instead of a chain of arrows, which is what an index definition wants. <see langword="null" />
+    /// when a member name on the way cannot be printed as itself (<see cref="QuoteLiteral" />).
     /// </summary>
-    public static string ToPostgresTextPath(IReadOnlyList<JsonPathSegment> segments, string column = DefaultColumn)
+    /// <remarks>
+    /// The array literal escapes a quote or a backslash inside an element with a backslash, so a path through such a
+    /// member is written as an <c>E'…'</c> literal with the backslashes doubled, which Postgres reads the same whatever
+    /// <c>standard_conforming_strings</c> says.
+    /// </remarks>
+    public static string? ToPostgresTextPath(IReadOnlyList<JsonPathSegment> segments, string column = DefaultColumn)
     {
         if (segments.Count == 0)
         {
@@ -183,7 +202,7 @@ internal static class JsonPathExpressions
         }
 
         builder.Append('}');
-        return column + " #>> " + QuoteLiteral(builder.ToString());
+        return QuoteLiteral(builder.ToString()) is { } path ? column + " #>> " + path : null;
     }
 
     /// <summary>
@@ -212,9 +231,21 @@ internal static class JsonPathExpressions
     /// <summary>The JSON literal for a string value, escaped the way it would appear in a document.</summary>
     public static string ToJsonStringLiteral(string value) => JsonSerializer.Serialize(value, LiteralOptions);
 
-    /// <summary>Wraps <paramref name="value"/> in single quotes as a Postgres string literal.</summary>
-    public static string QuoteLiteral(string value) =>
-        "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+    /// <summary>
+    /// <paramref name="value"/> as a Postgres string literal in a copied expression - <c>'city'</c>, <c>'it''s'</c>, or
+    /// <c>E'a\\b'</c> for a value with a backslash in it, so that it reads the same whatever the session's
+    /// <c>standard_conforming_strings</c> says (<see cref="SqlLiteralText.Literal" />, the studio's one literal writer) -
+    /// or <see langword="null" /> for a value that would not read as itself on screen: a NUL, a tab, a line break, a
+    /// control or format character, U+2028 or U+2029 (<see cref="SqlLiteralText.IsPrintableText" />). A member name like
+    /// that gets no expression, never a lookalike.
+    /// </summary>
+    /// <param name="value">A member name, or a path array literal built from member names.</param>
+    public static string? QuoteLiteral(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        return SqlLiteralText.IsPrintableText(value) ? SqlLiteralText.Literal(value) : null;
+    }
 
     /// <summary>
     /// Resolves a JSON path against a CLR type, producing the Marten LINQ path a query would use.

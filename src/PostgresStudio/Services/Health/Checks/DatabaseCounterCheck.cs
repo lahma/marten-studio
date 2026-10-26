@@ -162,9 +162,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 Title = SessionText.Count(deadlocks, "deadlock") + " in the last " + SessionText.Duration(window),
                 WhyItMatters =
                     "Postgres resolved each deadlock by rolling one of the two transactions back, so each is a write that failed for "
-                    + "the application. In a Marten store they come from two transactions taking the same rows in different orders: "
-                    + "documents saved in a different order by two code paths, a projection and a request writing the same documents, "
-                    + "an inline projection updating rows another session holds.",
+                    + "the application. " + evaluation.Text.DeadlockCause,
                 Evidence =
                 [
                     new("Deadlocks in the window", SessionText.Number(deadlocks)),
@@ -211,8 +209,8 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 Title = "Statements wrote " + SessionText.Count(tempFiles, "temporary file") + " to disk in the last " + SessionText.Duration(window),
                 WhyItMatters =
                     "A sort or a hash that does not fit in work_mem spills to temporary files on disk, which is slower by orders of "
-                    + "magnitude. In a Marten store it is usually an ORDER BY on a document field no index covers, or a large "
-                    + "aggregation; an index for the sort removes the spill, and a larger work_mem is the DBA's lever.",
+                    + "magnitude. " + evaluation.Text.TempSpillCause + "; an index for the sort removes the spill, and a larger work_mem "
+                    + "is the DBA's lever.",
                 Evidence =
                 [
                     new("Temporary files", SessionText.Number(tempFiles)),

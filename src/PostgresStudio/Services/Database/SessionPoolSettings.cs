@@ -56,7 +56,8 @@ internal sealed record DatabasePoolSettings(bool Pooling, int MaxPoolSize, strin
     }
 
     /// <summary>
-    /// Whether <paramref name="poolName" /> - Npgsql's <c>pool.name</c> tag - is <paramref name="database" />'s
+    /// Whether <paramref name="poolName" /> - Npgsql's pool name tag, <c>pool.name</c> (from Npgsql 10
+    /// <c>db.client.connection.pool.name</c>) - is <paramref name="database" />'s
     /// pool. Npgsql names a data source after its connection string unless the host gave it a name of its own
     /// (<c>NpgsqlDataSourceBuilder.Name</c>, which Npgsql keeps internal); such a pool cannot be matched, and
     /// C01 says so rather than guessing.

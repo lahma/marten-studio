@@ -1,3 +1,6 @@
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+
 @*
     What the page shows before anything has been run.
 
@@ -5,16 +8,18 @@
     store's aliases, tables and duplicated fields - which is the whole reason a studio beats pgAdmin: a person
     who has never seen this database gets statements that already run against it. Generic examples would have
     to be edited before they did anything, which is the same as no examples. This component only draws them.
+    Its two sentences default to the studio's own (IStudioSettings.Text), so a caller that says nothing gets the words
+    of the studio it is in.
 *@
 
 <div class="ms-query-examples">
     <h2 class="ms-query-examples-title">@Title</h2>
-    <p class="ms-muted ms-query-examples-intro">@Intro</p>
+    <p class="ms-muted ms-query-examples-intro">@(Intro ?? Settings.Text.ExamplesIntro)</p>
 
     @if (Examples.Count == 0)
     {
         <p class="ms-muted ms-query-examples-empty">
-            @EmptyText
+            @(EmptyText ?? Settings.Text.ExamplesEmpty)
         </p>
     }
     else
@@ -44,13 +49,13 @@
     [Parameter]
     public string Title { get; set; } = "Examples";
 
-    /// <summary>One line saying where the examples came from.</summary>
+    /// <summary>One line saying where the examples came from, or <see langword="null" /> for the studio's own.</summary>
     [Parameter]
-    public string Intro { get; set; } = "Built from this store's own aliases and tables. Click one to load it.";
+    public string? Intro { get; set; }
 
-    /// <summary>What the panel says when there is no example to offer.</summary>
+    /// <summary>What the panel says when there is no example to offer, or <see langword="null" /> for the studio's own.</summary>
     [Parameter]
-    public string EmptyText { get; set; } = "This store has no document type to build an example from.";
+    public string? EmptyText { get; set; }
 
     /// <summary>The examples: what each demonstrates, the text, and the alias it is about.</summary>
     [Parameter]

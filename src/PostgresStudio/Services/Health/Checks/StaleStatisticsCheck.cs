@@ -130,7 +130,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
                 continue;
             }
 
-            findings.Add(Finding(table, problem, held, evaluation.TableRemedies));
+            findings.Add(Finding(table, problem, held, evaluation));
         }
 
         if (findings.Count > 0)
@@ -145,7 +145,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
               + ", because autovacuum analyses a freshly loaded table within a minute or two.");
     }
 
-    private static HealthFinding Finding(TableFacts table, StatisticsProblem problem, TimeSpan held, IHealthTableRemedies? remedies)
+    private static HealthFinding Finding(TableFacts table, StatisticsProblem problem, TimeSpan held, HealthEvaluation evaluation)
     {
         StudioTable declared = table.Table;
         string scale = SuggestedScaleFactor.ToString(CultureInfo.InvariantCulture);
@@ -170,7 +170,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
                       + "plans for a table that is no longer there, and the studio's ~ counts are off by as much.")
                 + " A wrong row estimate is how a query that should use an index ends up scanning the table, or a join picks a "
                 + "nested loop over a million rows."
-                + Autovacuum.State(table, "autovacuum_analyze_scale_factor", scale),
+                + Autovacuum.State(table, "autovacuum_analyze_scale_factor", scale, evaluation.Text),
             Evidence =
             [
                 new HealthEvidence("Table", declared.Describe()),
@@ -188,7 +188,7 @@ internal sealed class StaleStatisticsCheck : HealthCheck<StatisticsFacts>
                       + "partitioned parent."
                     : string.Empty),
             Remedy = Autovacuum.Remedy(
-                remedies,
+                evaluation.TableRemedies,
                 table,
                 "autovacuum_analyze_scale_factor",
                 scale,

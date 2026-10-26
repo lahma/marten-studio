@@ -69,6 +69,67 @@ public class JsonPathExpressionsTests
             .Should().Be("data ->> 'it''s'");
     }
 
+    /// <summary>
+    /// A key with a backslash is an <c>E'…'</c> literal with quotes and backslashes doubled, so the copied expression
+    /// reads the member it names whatever <c>standard_conforming_strings</c> says; every other key is the plain literal,
+    /// as before.
+    /// </summary>
+    [Theory]
+    [InlineData("city", "data ->> 'city'")]
+    [InlineData("'", "data ->> ''''")]
+    [InlineData("a\\b", "data ->> E'a\\\\b'")]
+    [InlineData("\\", "data ->> E'\\\\'")]
+    [InlineData("\\'", "data ->> E'\\\\'''")]
+    [InlineData("trailing\\", "data ->> E'trailing\\\\'")]
+    [InlineData("C:\\temp", "data ->> E'C:\\\\temp'")]
+    public void A_key_with_a_backslash_is_an_escape_string_that_reads_the_same_under_either_setting(string key, string expression)
+    {
+        JsonPathExpressions.ToPostgresExpression([JsonPathSegment.ForKey(key)], asText: true).Should().Be(expression);
+    }
+
+    [Fact]
+    public void A_path_array_with_an_escaped_element_is_an_escape_string_too()
+    {
+        // The array literal escapes a quote or a backslash in an element with a backslash of its own, so the string that
+        // carries it doubles that backslash again.
+        JsonPathExpressions.ToPostgresTextPath([JsonPathSegment.ForKey("a\"b")]).Should().Be("data #>> E'{\"a\\\\\"b\"}'");
+        JsonPathExpressions.ToPostgresTextPath([JsonPathSegment.ForKey("a\\b"), JsonPathSegment.ForIndex(0)])
+            .Should().Be("data #>> E'{\"a\\\\\\\\b\",0}'");
+        JsonPathExpressions.ToPostgresTextPath([JsonPathSegment.ForKey("it's")]).Should().Be("data #>> '{it''s}'", "no backslash, plain form");
+    }
+
+    /// <summary>
+    /// Member names that would not read as themselves in copied SQL - a NUL, a tab, a line break, a right-to-left override,
+    /// a zero-width space, a Unicode line or paragraph separator - built at run time, so that this file holds none of them.
+    /// </summary>
+    public static TheoryData<string> UnprintableKeys() =>
+    [
+        "nul\0key",
+        "tab\tkey",
+        "line\nbreak",
+        "carriage\rreturn",
+        "rlo" + char.ConvertFromUtf32(0x202E) + "txt",
+        "zero" + char.ConvertFromUtf32(0x200B) + "width",
+        "line" + char.ConvertFromUtf32(0x2028) + "separator",
+        "paragraph" + char.ConvertFromUtf32(0x2029) + "separator",
+        "back\\slash\0and nul",
+    ];
+
+    [Theory]
+    [MemberData(nameof(UnprintableKeys))]
+    public void A_key_that_would_not_read_as_itself_gets_no_Postgres_expression(string key)
+    {
+        JsonPathSegment[] path = [JsonPathSegment.ForKey("outer"), JsonPathSegment.ForKey(key), JsonPathSegment.ForKey("inner")];
+
+        JsonPathExpressions.QuoteLiteral(key).Should().BeNull();
+        JsonPathExpressions.AppendPostgres("data", JsonPathSegment.ForKey(key), asText: true).Should().BeNull();
+        JsonPathExpressions.ToPostgresExpression(path, asText: true).Should().BeNull("a lookalike is worse than nothing");
+        JsonPathExpressions.ToPostgresTextPath(path).Should().BeNull();
+        JsonPathExpressions.AppendPostgres(null, JsonPathSegment.ForKey("inner"), asText: true)
+            .Should().BeNull("a step below a member that has no expression has none either");
+        JsonPathExpressions.AppendPostgres(null, JsonPathSegment.ForIndex(0), asText: true).Should().BeNull();
+    }
+
     [Fact]
     public void The_path_form_is_one_operator_and_one_array_literal()
     {

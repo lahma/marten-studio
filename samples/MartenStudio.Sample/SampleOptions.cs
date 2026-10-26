@@ -58,6 +58,9 @@ namespace MartenStudio.Sample;
 /// <c>--allow-data-generation</c>: map the demo-data panel and its endpoints even outside Development.
 /// Generating a million documents is a write, and a long one, so outside a developer's own machine it
 /// has to be asked for on the command line rather than implied by being signed in as an admin.
+/// It also lets startup run <c>drop schema … cascade</c> on <c>studio_sample</c> and
+/// <c>studio_sample_events</c> when another build seeded them or their rows carry no seed marker
+/// (<see cref="SampleDatabaseCheck" />), and the cascade drops whatever in other schemas depends on them too.
 /// </param>
 /// <param name="NoDaemon">
 /// <c>--no-daemon</c>: register the store without hosting its async daemon here, the shape of a

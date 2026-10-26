@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- PostgresStudio's live suite: a Postgres of its own (PostgresFixture, with a container reuse identity of its own, so
+       it never shares a reused container with MartenStudio.Integration.Tests), the core pages' services against it, and
+       Playwright over samples/PostgresStudio.Sample. No Marten anywhere in its graph: it references PostgresStudio, the
+       sample data and the sample, each of which sets PostgresStudioPinsNpgsql, so the latest-Npgsql pass over
+       postgres-studio.slnf runs it too (PostgresStudioSolutionFilterTests). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props, as PostgresStudio.csproj does. -->
+    <PostgresStudioPinsNpgsql>true</PostgresStudioPinsNpgsql>
+  </PropertyGroup>
+
+  <!-- Global usings, as in MartenStudio.Integration.Tests: no Verify here, so `Xunit` is declared rather than inherited. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Microsoft.Playwright" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PostgresStudio/PostgresStudio.csproj" />
+    <ProjectReference Include="../../samples/PostgresStudio.SampleData/PostgresStudio.SampleData.csproj" />
+    <!-- Referenced as an assembly for its throwaway-Postgres switch and its demo users (it declares InternalsVisibleTo this
+         project), and built, so the browser suite can start it from its own bin as SampleHost does. -->
+    <ProjectReference Include="../../samples/PostgresStudio.Sample/PostgresStudio.Sample.csproj" />
+  </ItemGroup>
+
+  <!-- Two of the fast suite's test doubles, compiled in rather than copied, as tests/PostgresStudio.Tests does: each one
+       names only PostgresStudio's and ASP.NET Core's types. -->
+  <ItemGroup>
+    <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
+  </ItemGroup>
+
+</Project>

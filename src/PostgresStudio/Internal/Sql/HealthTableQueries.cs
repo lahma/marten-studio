@@ -9,6 +9,14 @@ namespace PostgresStudio.Internal.Sql;
 /// <param name="Table">The table.</param>
 internal sealed record HealthTableTarget(string Schema, string Table);
 
+/// <summary>One table a plain data source's checks judge, as <see cref="HealthTableQueries.RelationalTables" /> listed it.</summary>
+/// <param name="Schema">The schema.</param>
+/// <param name="Table">The table.</param>
+/// <param name="Kind"><c>relkind</c>: <c>r</c>, or <c>p</c> for a partitioned table.</param>
+/// <param name="EstimatedPages"><c>relpages</c>, summed over the partitions of a partitioned table - an estimate.</param>
+/// <param name="Total">How many tables the admitted schemas hold in all, the ones past the cap included.</param>
+internal sealed record HealthRelationalTableRow(string Schema, string Table, string Kind, long EstimatedPages, int Total);
+
 /// <summary>
 /// One Marten table as the catalog and the statistics collector see it, its partitions rolled in - what
 /// <see cref="HealthTableQueries.Tables" /> reads.
@@ -708,8 +716,121 @@ internal static class HealthTableQueries
               and c.relkind in ('r', 'p'))
         """;
 
+    /// <summary>
+    /// The ordinary and partitioned tables of the schemas a plain data source's <c>BrowsableSchemas</c> admits - its own,
+    /// named exactly, and, under <c>"*"</c>, every other schema the reading role has <c>USAGE</c> on that no extension
+    /// owns - largest first by estimated size, at most <c>@cap</c> of them, each row carrying how many there are in all
+    /// (issue #8 G1; design R5).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The same admission as the database browser's</b> (<c>BrowsableSchemaMatcher.Match</c>): never a system schema,
+    /// never one without <c>USAGE</c>, and <c>"*"</c> never an extension's schema while an exact name may be. A table an
+    /// extension owns is no host's. A partition is judged through its partitioned table, so it is not a row of its own.
+    /// </para>
+    /// <para>
+    /// <b>Estimates only, and locks nothing it lists</b> (D27; B0: a size function waits behind a migration's lock).
+    /// The size is <c>relpages</c> - summed over the partition tree, walked through <c>pg_inherits</c>, for a partitioned
+    /// table - never <c>pg_relation_size</c>. A database of ten thousand tables is capped at the largest
+    /// <c>@cap</c>, and the total (<c>count(*) over ()</c>, computed before the limit) is what the coverage sentence
+    /// says was left out.
+    /// </para>
+    /// </remarks>
+    internal const string RelationalTablesSql =
+        """
+        with recursive admitted as (
+            select n.oid, n.nspname
+            from pg_catalog.pg_namespace n
+            where pg_catalog.left(n.nspname::text, 3) <> 'pg_'
+              and not (n.nspname = any(@system))
+              and coalesce(pg_catalog.has_schema_privilege(n.oid, 'USAGE'), false)
+              and (n.nspname = any(@names)
+                   or (@everything and not exists (
+                       select 1
+                       from pg_catalog.pg_depend d
+                       where d.classid = 'pg_catalog.pg_namespace'::pg_catalog.regclass
+                         and d.objid = n.oid
+                         and d.deptype = 'e')))
+        ),
+        candidates as (
+            select c.oid, a.nspname, c.relname, c.relkind, c.relpages
+            from pg_catalog.pg_class c
+            join admitted a on a.oid = c.relnamespace
+            where c.relkind in ('r', 'p')
+              and not c.relispartition
+              and not exists (
+                  select 1
+                  from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+                    and d.objid = c.oid
+                    and d.deptype = 'e')
+        ),
+        tree (root, relid) as (
+            select t.oid, i.inhrelid
+            from candidates t
+            join pg_catalog.pg_inherits i on i.inhparent = t.oid
+            where t.relkind = 'p'
+            union all
+            select tree.root, i.inhrelid
+            from tree
+            join pg_catalog.pg_inherits i on i.inhparent = tree.relid
+        ),
+        partitioned (root, pages) as (
+            select tree.root, pg_catalog.sum(x.relpages::bigint)
+            from tree
+            join pg_catalog.pg_class x on x.oid = tree.relid
+            group by tree.root
+        )
+        select t.nspname::text,
+               t.relname::text,
+               t.relkind::text,
+               case when t.relkind = 'p' then coalesce(p.pages, 0)::bigint else t.relpages::bigint end,
+               (pg_catalog.count(*) over ())::int
+        from candidates t
+        left join partitioned p on p.root = t.oid
+        order by 4 desc, 1, 2
+        limit @cap
+        """;
+
     /// <summary>Every list statement - the ones that must lock nothing they list - for the tests that hold them to it.</summary>
-    internal static IReadOnlyList<string> ListStatements { get; } = [TablesSql, IndexesSql, SoftDeleteSql, HiloExistsSql];
+    internal static IReadOnlyList<string> ListStatements { get; } = [TablesSql, IndexesSql, SoftDeleteSql, HiloExistsSql, RelationalTablesSql];
+
+    /// <summary>
+    /// The tables a plain data source's health checks judge (<see cref="RelationalTablesSql" />): every table in
+    /// <paramref name="names" />, and with <paramref name="everything" /> every schema <c>"*"</c> admits, the largest
+    /// <paramref name="cap" /> by estimated size.
+    /// </summary>
+    /// <param name="names">The schemas named exactly.</param>
+    /// <param name="everything">Whether <c>"*"</c> is configured.</param>
+    /// <param name="cap">How many tables at most.</param>
+    public static HealthQuery RelationalTables(IReadOnlyList<string> names, bool everything, int cap)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cap);
+
+        return new HealthQuery(
+            RelationalTablesSql,
+            [
+                new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = names as string[] ?? [.. names] },
+                new NpgsqlParameter("everything", NpgsqlDbType.Boolean) { Value = everything },
+                new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = cap },
+                new NpgsqlParameter("system", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = SystemSchemasBeyondPrefix },
+            ]);
+    }
+
+    /// <summary>
+    /// The system schemas whose names do not start <c>pg_</c> - which the statement refuses by prefix - as
+    /// <c>BrowsableSchemaMatcher.IsSystemSchema</c> names them: bound, so the statement and the browser cannot disagree.
+    /// </summary>
+    internal static string[] SystemSchemasBeyondPrefix => ["information_schema"];
+
+    /// <summary>Maps one row of <see cref="RelationalTablesSql" />.</summary>
+    public static HealthRelationalTableRow ReadRelationalTable(NpgsqlDataReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        return new HealthRelationalTableRow(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt32(4));
+    }
 
     /// <summary>The listed tables, rolled up (<see cref="TablesSql" />).</summary>
     public static HealthQuery Tables(IReadOnlyList<HealthTableTarget> tables) => new(TablesSql, TargetParameters(tables));

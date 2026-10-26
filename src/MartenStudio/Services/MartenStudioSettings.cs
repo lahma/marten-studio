@@ -45,6 +45,9 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public string CapabilitiesTypeName => nameof(MartenStudioCapabilities);
 
     /// <inheritdoc />
+    public StudioText Text => StudioText.Marten;
+
+    /// <inheritdoc />
     public string Title => Value.Title;
 
     /// <inheritdoc />
@@ -86,6 +89,9 @@ internal sealed class MartenStudioSettings : IStudioSettings
 
     /// <inheritdoc />
     public int MaxInlineValueBytes => Value.MaxInlineDocumentBytes;
+
+    /// <inheritdoc />
+    public string MaxInlineValueBytesMember => nameof(MartenStudioOptions.MaxInlineDocumentBytes);
 
     /// <inheritdoc />
     public TimeSpan QueryTimeout => Value.QueryTimeout;

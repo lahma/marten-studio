@@ -132,8 +132,36 @@
     <PackageVersion Include="Microsoft.Playwright" Version="1.62.0" />
   </ItemGroup>
 
+  <!--
+    The Npgsql version of the PostgresStudio-only projects, defined once and tested at both ends, like
+    Marten's above.
+
+    PostgresStudioNpgsqlFloor is what the PostgresStudio package depends on (`Npgsql >= floor` in its
+    nuspec). It must never be above the Npgsql the Marten floor resolves, or PostgresStudio would raise
+    every MartenStudio host's Npgsql through the ProjectReference (NpgsqlVersionTests reads
+    src/MartenStudio's restore to check). 9.0.4 is that Npgsql. 8.0.3 is the lowest the shared studio
+    passes at, measured by PS-7 (AGENTS.md, Package budget changes, 2026-10-26): 8.0.0-8.0.2 carry
+    CVE-2024-32655, and 7.x has no db.client.connections.* pool instruments, which C01 and Sessions read.
+
+    PostgresStudioNpgsqlLatest is the newest Npgsql CI tests PostgresStudio at: the marten-latest
+    workflow sets NPGSQL_VERSION=latest, the Fallout parameter `npgsql-version`. It applies ONLY to the
+    second pass over postgres-studio.slnf (build/Build.Npgsql.cs), which holds the projects that set
+    PostgresStudioPinsNpgsql. Passed to the whole solution it would raise MartenStudio and its tests to
+    that Npgsql through the ProjectReference, with no diagnostic, and MartenStudio on Npgsql 10 is not
+    a tested combination.
+
+    PostgresStudioNpgsqlVersion is what those projects restore. Empty means the floor. Pack packs
+    PostgresStudio at the floor only: the build's Pack target and src/PostgresStudio/PostgresStudio.csproj
+    both refuse anything else.
+  -->
+  <PropertyGroup Label="PostgresStudio Npgsql version">
+    <PostgresStudioNpgsqlFloor>8.0.3</PostgresStudioNpgsqlFloor>
+    <PostgresStudioNpgsqlLatest>10.0.3</PostgresStudioNpgsqlLatest>
+    <PostgresStudioNpgsqlVersion Condition="'$(PostgresStudioNpgsqlVersion)' == ''">$(PostgresStudioNpgsqlFloor)</PostgresStudioNpgsqlVersion>
+  </PropertyGroup>
+
   <ItemGroup Label="PostgresStudio-only projects (they set PostgresStudioPinsNpgsql)">
-    <PackageVersion Include="Npgsql" Version="9.0.4" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />
+    <PackageVersion Include="Npgsql" Version="$(PostgresStudioNpgsqlVersion)" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />
   </ItemGroup>
 
 </Project>

@@ -432,7 +432,8 @@ internal sealed class DatabaseAccess
                 settings.SqlConsoleRole,
                 answer.Refusal == DatabaseRefusal.StorePolicy ? DatabaseRefusal.StorePolicy : DatabaseRefusal.WritePolicy,
                 resolved.Source.Key,
-                others),
+                others,
+                settings.Text),
             DatabaseRefusal.None,
             null);
     }
@@ -465,7 +466,7 @@ internal sealed class DatabaseAccess
             return new DatabaseBrowseGrant(
                 null,
                 denied.Reason == CapabilityDenialReason.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
-                denied.Reason == CapabilityDenialReason.ReadOnly ? DatabaseGate.ReadOnlyDenial : DatabaseGate.CapabilityDenial);
+                denied.Reason == CapabilityDenialReason.ReadOnly ? settings.Text.BrowseReadOnlyDenial : settings.Text.BrowseCapabilityDenial);
         }
 
         // 2. The two policies, of the database as a whole - nothing here is tenant-scoped - and asked one at a
@@ -478,7 +479,7 @@ internal sealed class DatabaseAccess
             // Named BrowseDatabase in the ring, as the write policy's refusal below is: the store policy saying
             // no is no reason to show the name somebody asked the browser for to everybody it says yes to.
             audit.RecordScopeDenied(tenantless, StorePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
-            return new DatabaseBrowseGrant(null, DatabaseRefusal.StorePolicy, DatabaseGate.StorePolicyDenial);
+            return new DatabaseBrowseGrant(null, DatabaseRefusal.StorePolicy, settings.Text.BrowseStorePolicyDenial);
         }
 
         if (!await authorization.IsAuthorizedAsync(tenantless, StudioCapability.BrowseDatabase, cancellationToken).ConfigureAwait(false))
@@ -486,7 +487,7 @@ internal sealed class DatabaseAccess
             // Named BrowseDatabase in the ring, so the Activity screen shows the refusal - and the name it was
             // aimed at - only to a visitor who may browse too (StudioActionLog.GetVisibleAsync).
             audit.RecordScopeDenied(tenantless, WritePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
-            return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
+            return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, settings.Text.BrowseWritePolicyDenial);
         }
 
         // 3. The scope, resolved with no tenant - so no tenant is discovered - and the capability named. The
@@ -503,7 +504,7 @@ internal sealed class DatabaseAccess
         catch (StudioNotAuthorizedException)
         {
             audit.RecordScopeDenied(tenantless, WritePolicyName(settings), action, target, StudioCapability.BrowseDatabase);
-            return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, DatabaseGate.WritePolicyDenial);
+            return new DatabaseBrowseGrant(null, DatabaseRefusal.WritePolicy, settings.Text.BrowseWritePolicyDenial);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
@@ -585,7 +586,7 @@ internal sealed class DatabaseAccess
 
         if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
         {
-            return Refuse(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial(schema, entries));
+            return Refuse(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial(schema, entries, settings.Text));
         }
 
         DatabaseGate? known = null;

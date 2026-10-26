@@ -175,6 +175,7 @@ internal sealed class SessionLockLabels
     private readonly long? daemonLockId;
     private readonly Dictionary<long, string> shardLocks;
     private readonly DatabaseObjectClassifier? classifier;
+    private readonly SessionLockWording wording;
 
     private SessionLockLabels(
         string storeKey,
@@ -182,7 +183,8 @@ internal sealed class SessionLockLabels
         long? daemonLockId,
         Dictionary<long, string> shardLocks,
         IReadOnlyList<long> daemonLockIds,
-        DatabaseObjectClassifier? classifier)
+        DatabaseObjectClassifier? classifier,
+        SessionLockWording wording)
     {
         this.storeKey = storeKey;
         this.applyChangesLockId = applyChangesLockId;
@@ -190,6 +192,7 @@ internal sealed class SessionLockLabels
         this.shardLocks = shardLocks;
         DaemonLockIds = daemonLockIds;
         this.classifier = classifier;
+        this.wording = wording;
     }
 
     /// <summary>
@@ -231,17 +234,23 @@ internal sealed class SessionLockLabels
             shards.TryAdd(id, shard);
         }
 
-        return new SessionLockLabels(storeKey, applyChangesLockId, daemonLockId, shards, daemonLockIds, classifier);
+        return new SessionLockLabels(storeKey, applyChangesLockId, daemonLockId, shards, daemonLockIds, classifier, SessionLockWording.Marten);
     }
 
     /// <summary>
-    /// The labels for a source that takes no advisory lock of its own: every advisory lock is "not Marten's", and the
-    /// relations are labelled through <paramref name="classifier" /> alone.
+    /// The labels for a source that takes no advisory lock of its own: every advisory lock is the application's, and the
+    /// relations are labelled through <paramref name="classifier" /> alone, in <paramref name="wording" />.
     /// </summary>
     /// <param name="storeKey">The source's registration key.</param>
     /// <param name="classifier">The classifier, or <see langword="null" />, which names no relation at all.</param>
-    public static SessionLockLabels RelationsOnly(string storeKey, DatabaseObjectClassifier? classifier) =>
-        Create(storeKey, null, null, [], [], classifier);
+    /// <param name="wording">The studio's words for a lock that is nobody's it knows.</param>
+    public static SessionLockLabels RelationsOnly(string storeKey, DatabaseObjectClassifier? classifier, SessionLockWording wording)
+    {
+        ArgumentNullException.ThrowIfNull(storeKey);
+        ArgumentNullException.ThrowIfNull(wording);
+
+        return new SessionLockLabels(storeKey, null, null, [], [], classifier, wording);
+    }
 
     /// <summary>What one lock is on.</summary>
     /// <param name="lockType"><c>pg_locks.locktype</c>.</param>
@@ -286,7 +295,7 @@ internal sealed class SessionLockLabels
     {
         if (key is not { } value)
         {
-            return new LockTarget(LockTargetKind.OtherAdvisoryLock, "an advisory lock that is not Marten's");
+            return new LockTarget(LockTargetKind.OtherAdvisoryLock, wording.OtherAdvisoryLock);
         }
 
         if (value == applyChangesLockId)
@@ -308,7 +317,7 @@ internal sealed class SessionLockLabels
             return new LockTarget(LockTargetKind.ShardLock, "the async daemon's lock for shard " + shard);
         }
 
-        return new LockTarget(LockTargetKind.OtherAdvisoryLock, "an advisory lock that is not Marten's");
+        return new LockTarget(LockTargetKind.OtherAdvisoryLock, wording.OtherAdvisoryLock);
     }
 
     /// <summary>A relation, or one of its rows, by the owner the lock read resolved it to.</summary>
@@ -390,7 +399,7 @@ internal sealed class SessionLockLabels
             DatabaseObjectOwner.MartenProjectionOrExtended => new LockTarget(
                 LockTargetKind.MartenManagedTable, part + "the Marten-managed table " + schema + "." + name, schema, name, row),
 
-            _ => new LockTarget(LockTargetKind.OtherRelation, part + "a relation Marten does not own", schema, name, row),
+            _ => new LockTarget(LockTargetKind.OtherRelation, part + wording.OtherRelation, schema, name, row),
         };
     }
 
@@ -407,10 +416,28 @@ internal sealed class SessionLockLabels
     private static LockTarget Unnamed(bool row) =>
         new(LockTargetKind.UnnamedRelation, row ? "a row of a relation" : "a relation", Row: row);
 
-    private static LockTarget Undeclared(string part, bool row) =>
-        new(LockTargetKind.UndeclaredMartenRelation, part + "a Marten relation this store does not declare", Row: row);
+    private LockTarget Undeclared(string part, bool row) =>
+        new(LockTargetKind.UndeclaredMartenRelation, part + wording.UndeclaredMartenRelation, Row: row);
 
     /// <summary>Whether <paramref name="ownership" /> is this store's own declaration, the first store to declare it.</summary>
     private bool IsThisStores(DatabaseObjectOwnership ownership) =>
         string.Equals(ownership.StoreKey, storeKey, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// A studio's words for a lock that is nobody's it knows - which differ by studio, because "not Marten's" is a fact only
+/// MartenStudio can state.
+/// </summary>
+/// <param name="OtherAdvisoryLock">An advisory lock that is not one of the source's own.</param>
+/// <param name="OtherRelation">A relation nobody here owns, after any part words ("an index of ").</param>
+/// <param name="UndeclaredMartenRelation">
+/// A relation the <c>mt_</c> rule calls Marten's that is not the resolved source's own declaration, named to nobody.
+/// </param>
+internal sealed record SessionLockWording(string OtherAdvisoryLock, string OtherRelation, string UndeclaredMartenRelation)
+{
+    /// <summary>MartenStudio's words, as 0.4 wrote them.</summary>
+    public static SessionLockWording Marten { get; } = new(
+        "an advisory lock that is not Marten's",
+        "a relation Marten does not own",
+        "a Marten relation this store does not declare");
 }

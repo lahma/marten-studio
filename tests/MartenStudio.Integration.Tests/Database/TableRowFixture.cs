@@ -27,7 +27,7 @@ namespace MartenStudio.Integration.Tests.Database;
 /// <remarks>
 /// <para>
 /// <b>A database, not a schema</b>, for the reason <see cref="RelationalDemoFixture" /> gives:
-/// <see cref="SampleDomain.Relational.RelationalDemoSchema" /> creates the fixed schemas <c>quartz</c> and
+/// <see cref="PostgresStudio.SampleData.RelationalDemoSchema" /> creates the fixed schemas <c>quartz</c> and
 /// <c>legacy</c> and anchors to the sample's own <c>studio_sample</c>. Seeded through the sample's own
 /// seeder, so the rows are the ones the demo host shows.
 /// </para>

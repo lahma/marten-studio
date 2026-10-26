@@ -1,5 +1,6 @@
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Query;
 
@@ -18,35 +19,35 @@ public class QuerySqlErrorsTests
     [Fact]
     public void The_read_only_transaction_refusal_says_that_is_what_it_is()
     {
-        QuerySqlErrors.Describe(Error("25006"), TimeSpan.FromSeconds(30))
+        QuerySqlErrors.Describe(Error("25006"), TimeSpan.FromSeconds(30), StudioText.Marten)
             .Should().Contain("read-only transaction").And.Contain("changes nothing");
     }
 
     [Fact]
     public void The_timeout_names_the_seconds_and_the_option_that_sets_them()
     {
-        QuerySqlErrors.Describe(Error("57014"), TimeSpan.FromSeconds(12))
+        QuerySqlErrors.Describe(Error("57014"), TimeSpan.FromSeconds(12), StudioText.Marten)
             .Should().Contain("timed out after 12 s").And.Contain("MartenStudioOptions.QueryTimeout");
     }
 
     [Fact]
     public void The_lock_timeout_says_the_console_never_queues_behind_a_migration()
     {
-        QuerySqlErrors.Describe(Error("55P03"), TimeSpan.FromSeconds(30)).Should().Contain("lock");
+        QuerySqlErrors.Describe(Error("55P03"), TimeSpan.FromSeconds(30), StudioText.Marten).Should().Contain("lock");
     }
 
     [Fact]
     public void A_narrowed_role_refusal_names_the_option_that_narrowed_it()
     {
-        QuerySqlErrors.Describe(Error("42501"), TimeSpan.FromSeconds(30))
+        QuerySqlErrors.Describe(Error("42501"), TimeSpan.FromSeconds(30), StudioText.Marten)
             .Should().Contain("MartenStudioOptions.SqlConsoleRole");
     }
 
     [Fact]
     public void An_ordinary_syntax_error_needs_no_headline_of_ours()
     {
-        QuerySqlErrors.Describe(Error("42601"), TimeSpan.FromSeconds(30)).Should().BeNull();
-        QuerySqlErrors.Describe(null, TimeSpan.FromSeconds(30)).Should().BeNull();
+        QuerySqlErrors.Describe(Error("42601"), TimeSpan.FromSeconds(30), StudioText.Marten).Should().BeNull();
+        QuerySqlErrors.Describe(null, TimeSpan.FromSeconds(30), StudioText.Marten).Should().BeNull();
     }
 
     [Fact]

@@ -37,7 +37,7 @@ public sealed class SessionPoolObserverTests : IDisposable
         timeouts = meter.CreateCounter<int>("db.client.connections.timeouts");
         duration = meter.CreateHistogram<double>("db.client.commands.duration");
 
-        usage = meter.CreateObservableUpDownCounter(SessionPoolObserver.UsageInstrument, () =>
+        usage = meter.CreateObservableUpDownCounter(NpgsqlPoolInstruments.UpToNpgsql9.Usage, () =>
         {
             Interlocked.Increment(ref usageCalls);
             return new[]
@@ -49,7 +49,7 @@ public sealed class SessionPoolObserverTests : IDisposable
             };
         });
 
-        max = meter.CreateObservableUpDownCounter(SessionPoolObserver.MaxInstrument, () =>
+        max = meter.CreateObservableUpDownCounter(NpgsqlPoolInstruments.UpToNpgsql9.Max, () =>
         {
             Interlocked.Increment(ref maxCalls);
             return new[]
@@ -164,7 +164,7 @@ public sealed class SessionPoolObserverTests : IDisposable
             ? new Measurement<int>(value, new KeyValuePair<string, object?>("pool.name", pool))
             : new Measurement<int>(value, new KeyValuePair<string, object?>("pool.name", pool), new KeyValuePair<string, object?>("state", state));
 
-        shared.CreateObservableUpDownCounter(SessionPoolObserver.UsageInstrument, static () => new[]
+        shared.CreateObservableUpDownCounter(NpgsqlPoolInstruments.UpToNpgsql9.Usage, static () => new[]
         {
             // Marten's and the host's, one connection string: one busy, one idle.
             Of(0, "shared", "idle"), Of(9, "shared", "used"),
@@ -177,7 +177,7 @@ public sealed class SessionPoolObserverTests : IDisposable
             Of(1, "alone", "idle"), Of(2, "alone", "used"),
         });
 
-        shared.CreateObservableUpDownCounter(SessionPoolObserver.MaxInstrument, static () => new[]
+        shared.CreateObservableUpDownCounter(NpgsqlPoolInstruments.UpToNpgsql9.Max, static () => new[]
         {
             Of(10, "shared"), Of(10, "shared"),
             Of(20, "twins"), Of(20, "twins"),
@@ -243,7 +243,7 @@ public sealed class SessionPoolObserverTests : IDisposable
 
         using Meter later = new(meterName);
         ObservableUpDownCounter<int> lateUsage = later.CreateObservableUpDownCounter(
-            SessionPoolObserver.UsageInstrument, static () => Array.Empty<Measurement<int>>());
+            NpgsqlPoolInstruments.UpToNpgsql9.Usage, static () => Array.Empty<Measurement<int>>());
         UpDownCounter<int> lateExecuting = later.CreateUpDownCounter<int>("db.client.commands.executing");
 
         lateUsage.Enabled.Should().BeTrue("a data source created after the page opened is a pool like any other");
@@ -276,7 +276,8 @@ public sealed class SessionPoolObserverTests : IDisposable
     /// <summary>
     /// The facts the design rests on, read off the real Npgsql: the meter's name, the two observable pool
     /// instruments, and that pending_requests is synchronous - so a later Npgsql that changes any of them fails
-    /// here rather than quietly reporting nothing.
+    /// here rather than quietly reporting nothing. This is the Npgsql Marten brings, 9.0.4 at both Marten ends;
+    /// PostgresStudio.Tests' <c>NpgsqlPoolInstrumentsTests</c> pins Npgsql 10's names in the Npgsql pass.
     /// </summary>
     [Fact]
     public void Npgsqls_own_instruments_are_the_shapes_the_observer_assumes()
@@ -302,8 +303,8 @@ public sealed class SessionPoolObserverTests : IDisposable
             survey.Start();
         }
 
-        published.Should().Contain(SessionPoolObserver.UsageInstrument, true);
-        published.Should().Contain(SessionPoolObserver.MaxInstrument, true);
+        published.Should().Contain(NpgsqlPoolInstruments.UpToNpgsql9.Usage, true);
+        published.Should().Contain(NpgsqlPoolInstruments.UpToNpgsql9.Max, true);
         published.Should().Contain("db.client.connections.pending_requests", false,
             "Npgsql 9.0.4 keeps pending requests as a synchronous UpDownCounter, which the observer never enables");
         published.Should().Contain("db.client.commands.prepared_ratio", true);

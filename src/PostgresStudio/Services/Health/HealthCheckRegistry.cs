@@ -71,18 +71,24 @@ internal sealed partial class HealthCheckRegistry
     /// <param name="descriptor">The studio's descriptor.</param>
     /// <param name="runtime">The studio's runtime, or <see langword="null" /> for a studio that registers none.</param>
     public HealthCheckRegistry(StudioDescriptor descriptor, IStudioRuntime? runtime = null)
-        : this(DiscoverAll((descriptor ?? throw new ArgumentNullException(nameof(descriptor))).HealthCheckAssemblies), runtime ?? NoStudioRuntime.Instance)
+        : this(
+            DiscoverAll((descriptor ?? throw new ArgumentNullException(nameof(descriptor))).HealthCheckAssemblies),
+            runtime ?? NoStudioRuntime.Instance,
+            descriptor.ProductName)
     {
     }
 
-    private HealthCheckRegistry(IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks, IStudioRuntime runtime)
+    private HealthCheckRegistry(
+        IReadOnlyList<(Type Type, IReadOnlySet<StudioSourceKind>? SourceKinds)> checks,
+        IStudioRuntime runtime,
+        string productName = "Marten Studio")
     {
         IReadOnlyList<string> problems = Problems([.. checks.Select(static x => x.Type)], runtime);
 
         if (problems.Count > 0)
         {
             throw new InvalidOperationException(
-                "Marten Studio's health checks are not well-formed: " + string.Join(" | ", problems));
+                productName + "'s health checks are not well-formed: " + string.Join(" | ", problems));
         }
 
         All =
@@ -323,6 +329,7 @@ internal sealed partial class HealthCheckRegistry
         return false;
     }
 
-    [GeneratedRegex("^[DETCRSK][0-9]{2}$", RegexOptions.CultureInvariant)]
+    // \A and \z, because .NET's $ also matches before a final line feed.
+    [GeneratedRegex(@"\A[DETCRSK][0-9]{2}\z", RegexOptions.CultureInvariant)]
     private static partial Regex CodeShape();
 }

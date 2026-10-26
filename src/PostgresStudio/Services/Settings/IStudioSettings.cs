@@ -35,6 +35,16 @@ internal interface IStudioSettings
     /// <summary>The public capabilities type's name: <c>MartenStudioCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
     string CapabilitiesTypeName { get; }
 
+    /// <summary>
+    /// Every sentence the shared studio says in this studio's own words (<see cref="StudioText" />): MartenStudio's is
+    /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. This member has no default implementation, so
+    /// a studio's settings must say. A few shared services take the settings optionally, only so that a test can build
+    /// them by hand, and fall back to MartenStudio's words when given none (<see cref="StudioText.Of" />); every studio's
+    /// registration supplies its settings, which <c>PostgresStudioWiringTests</c> holds a real <c>AddPostgresStudio()</c>
+    /// host to.
+    /// </summary>
+    StudioText Text { get; }
+
     /// <summary>The browser title.</summary>
     string Title { get; }
 
@@ -93,6 +103,13 @@ internal interface IStudioSettings
     /// <summary>The largest value rendered inline before it is offered on demand (MartenStudio's <c>MaxInlineDocumentBytes</c>).</summary>
     int MaxInlineValueBytes { get; }
 
+    /// <summary>
+    /// The options member <see cref="MaxInlineValueBytes" /> is read from, as a sentence names it through
+    /// <see cref="OptionName" />: <c>MaxInlineDocumentBytes</c> in MartenStudio, <c>MaxInlineValueBytes</c> in
+    /// PostgresStudio - the one option the two studios spell differently.
+    /// </summary>
+    string MaxInlineValueBytesMember { get; }
+
     /// <summary>The <c>statement_timeout</c> every studio statement runs under.</summary>
     TimeSpan QueryTimeout { get; }
 
@@ -119,6 +136,13 @@ internal interface IStudioSettings
     Func<Type, bool>? IsDocumentTypeVisible { get; }
 
     /// <summary>
+    /// The source picker's label for this configuration, or <see langword="null" /> for the descriptor's own
+    /// (<see cref="StudioDescriptor.SourceLabel" />). PostgresStudio says "Source" once a host or <c>AddDataSource</c>
+    /// source exists, so the source picker and the database picker are never both called "Database".
+    /// </summary>
+    string? SourceLabel => null;
+
+    /// <summary>
     /// <paramref name="member" /> spelled the way a host's registration spells it: <c>MartenStudioOptions.ReadOnly</c>,
     /// <c>MartenStudioOptions.Capabilities.RunSql</c>.
     /// </summary>
@@ -141,6 +165,16 @@ internal static class StudioSettingsText
     {
         ArgumentNullException.ThrowIfNull(settings);
         return settings.OptionName("ReadOnly");
+    }
+
+    /// <summary>
+    /// The source picker's label: what <paramref name="settings" /> says for this configuration, or the descriptor's.
+    /// </summary>
+    public static string SourceLabelOf(this IStudioSettings settings, StudioDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(descriptor);
+        return settings.SourceLabel ?? descriptor.SourceLabel;
     }
 
     /// <summary>The one-line opt-in that turns every capability on: <c>MartenStudioCapabilities.All()</c>.</summary>

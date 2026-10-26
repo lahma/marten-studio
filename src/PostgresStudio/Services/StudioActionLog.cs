@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Logging;
 
+using PostgresStudio.Services.Settings;
+
 namespace PostgresStudio.Services;
 
 /// <summary>
@@ -30,17 +32,25 @@ internal sealed class StudioActionLog
     private readonly ILogger<StudioActionLog> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
     private readonly StudioState state;
+    private readonly StudioText text;
 
+    /// <param name="store">The ring.</param>
+    /// <param name="logger">Where events 9200-9203 go.</param>
+    /// <param name="authenticationStateProvider">Who is asking.</param>
+    /// <param name="state">The circuit's active scope.</param>
+    /// <param name="settings">The studio's settings, whose words the events are logged in (<see cref="StudioText.Of" />).</param>
     public StudioActionLog(
         StudioActionLogService store,
         ILogger<StudioActionLog> logger,
         AuthenticationStateProvider authenticationStateProvider,
-        StudioState state)
+        StudioState state,
+        IStudioSettings? settings = null)
     {
         this.store = store;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
         this.state = state;
+        text = StudioText.Of(settings);
     }
 
     /// <summary>
@@ -80,11 +90,11 @@ internal sealed class StudioActionLog
 
         if (succeeded)
         {
-            logger.ActionPerformed(user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message ?? "done");
+            logger.ActionPerformed(text.Product, user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message ?? "done");
         }
         else
         {
-            logger.ActionFailed(user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message);
+            logger.ActionFailed(text.Product, user, action, target, storeKey, databaseId, tenantId ?? AllTenants, message);
         }
     }
 
@@ -97,7 +107,7 @@ internal sealed class StudioActionLog
         ArgumentNullException.ThrowIfNull(denial);
 
         Record(action, target, succeeded: false, denial.Message, denial.Capability);
-        logger.CapabilityDenied(UserName(), denial.Capability.ToString(), denial.CapabilityOption);
+        logger.CapabilityDenied(text.Product, UserName(), denial.Capability.ToString(), denial.CapabilityOption);
     }
 
     /// <summary>
@@ -126,8 +136,8 @@ internal sealed class StudioActionLog
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        Record(action, target, succeeded: false, "Not authorized for this store, database or tenant.", capability, scope);
-        logger.ScopeAuthorizationDenied(UserName(), scope.StoreKey, scope.DatabaseId, scope.TenantId ?? AllTenants, policyName);
+        Record(action, target, succeeded: false, text.ScopeDeniedEntry, capability, scope);
+        logger.ScopeAuthorizationDenied(text.Product, UserName(), scope.StoreKey, scope.DatabaseId, scope.TenantId ?? AllTenants, policyName);
     }
 
     /// <summary>

@@ -122,9 +122,9 @@ partial class Build
         var value = values[0];
 
         Assert.True(ExactVersion.IsMatch(value),
-            $"{name} in Directory.Packages.props is '{value}', which is not an exact version. Both Marten " +
-            "versions are pinned exactly, never floating: a red main caused by an upstream release would be " +
-            "nobody's pull request's fault.");
+            $"{name} in Directory.Packages.props is '{value}', which is not an exact version. The Marten and the " +
+            "Npgsql versions are all pinned exactly, never floating: a red main caused by an upstream release would " +
+            "be nobody's pull request's fault.");
 
         return value;
     }

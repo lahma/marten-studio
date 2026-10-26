@@ -72,7 +72,9 @@ public class RowDetailPageTests
 
         row = page.FindAll(".ms-row-kv-row")[calendar];
         row.QuerySelector(".ms-row-value-text")!.TextContent.Should().HaveLength(600);
-        row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("MaxInlineDocumentBytes");
+        // MartenStudio's own spelling, unchanged since the option became a settings member (PS-3a); PostgresStudio's
+        // sentence names PostgresStudioOptions.MaxInlineValueBytes instead.
+        row.QuerySelector(".ms-row-value-note")!.TextContent.Should().Contain("(MartenStudioOptions.MaxInlineDocumentBytes)");
     }
 
     [Fact]

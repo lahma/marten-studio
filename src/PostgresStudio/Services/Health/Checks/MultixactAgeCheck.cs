@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Health.Checks;
@@ -154,7 +155,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
 
         if (age <= warning && !forecastHeld)
         {
-            string note = QuietNote(oldest, database, forecast, toForced, toRefusal, pastForced);
+            string note = QuietNote(oldest, database, forecast, toForced, toRefusal, pastForced, evaluation.Text);
 
             return HealthVerdict.Quiet(pastForced && toRefusal is { } soon
                 ? note + " " + Capitalised(forecast!.AtTheRate) + ", new multixacts would be refused in " + HorizonForecast.Span(soon)
@@ -165,7 +166,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
 
         string whose = tableAge >= Math.Max(databaseAge, serverAge) && oldest is not null
             ? oldest.Table.NoteName
-            : databaseAge >= serverAge ? "this database (a table that is not the store's)" : "another database on this server";
+            : databaseAge >= serverAge ? "this database (a table that is " + evaluation.Text.NotJudged + ")" : "another database on this server";
 
         bool forecastOnly = age <= warning;
         HealthSeverity severity = age > critical || (toRefusal is { } left && left <= HorizonForecast.CriticalWithin)
@@ -194,7 +195,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
             ? Wraparound.Number(failsafe)
             : "not on this server (PostgreSQL 14+)"));
         evidence.Add(new HealthEvidence("Warning and Critical lines", Wraparound.Number(warning) + " and " + Wraparound.Number(critical)));
-        evidence.Add(new HealthEvidence("Marten tables past the warning line", Wraparound.Number(past.Count)));
+        evidence.Add(new HealthEvidence(evaluation.Text.JudgedTables + " past the warning line", Wraparound.Number(past.Count)));
 
         if (past.Count > 0)
         {
@@ -206,7 +207,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
             + (database.OtherTemporaryPastForcedMultixact > 0
                 ? " (" + Wraparound.Number(database.OtherTemporaryPastForcedMultixact) + " of them temporary)"
                 : string.Empty)
-            + ", never named: they are not the store's"));
+            + ", never named: they are " + evaluation.Text.NotJudged));
 
         if (forecast is not null)
         {
@@ -249,8 +250,8 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
                 + "transaction is gone, is the cure.",
             Evidence = evidence,
             Caveat =
-                "Read from pg_class.relminmxid of the store's own tables, their TOAST tables and their partitions, and from "
-                + "pg_database.datminmxid of this database and the server's oldest. Tables that are not the store's are counted and "
+                "Read from pg_class.relminmxid of " + evaluation.Text.JudgedTablesRead + ", their TOAST tables and their partitions, and from "
+                + "pg_database.datminmxid of this database and the server's oldest. Tables that are " + evaluation.Text.NotJudged + " are counted and "
                 + "never named. Multixact member storage, which can run out before the ids do, is not read: Postgres has no view of it."
                 + (forecast is null
                     ? " No forecast yet: a rate needs two samples, an interval apart, in which multixacts were created."
@@ -266,13 +267,14 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
         HorizonForecast? forecast,
         TimeSpan? toForced,
         TimeSpan? toRefusal,
-        bool pastForced)
+        bool pastForced,
+        StudioText text)
     {
         List<string> parts = [];
 
         if (oldest is not null)
         {
-            parts.Add("The oldest Marten table, " + oldest.Table.NoteName + ", is " + Wraparound.Number(oldest.Age) + " multixacts from its last freeze.");
+            parts.Add("The oldest " + text.JudgedTable + ", " + oldest.Table.NoteName + ", is " + Wraparound.Number(oldest.Age) + " multixacts from its last freeze.");
         }
 
         parts.Add("This database's mxid_age(datminmxid) is " + Wraparound.Number(database.DatabaseMultixactAge) + ".");

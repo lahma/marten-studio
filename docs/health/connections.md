@@ -83,17 +83,27 @@ connections held too long (C04, C05, sessions never disposed) than a ceiling too
 
 C01 is read **in process**, from Npgsql's own counters, by a `MeterListener` the studio starts when a sweep (or
 an open Sessions page) takes a lease and **disposes when the last lease is given back**. It enables exactly two
-of Npgsql's instruments, both **observable** - `db.client.connections.usage` (tagged `state` idle/used) and
-`db.client.connections.max`, each tagged `pool.name` (Npgsql 9.0.4's `MetricsReporter`) - and reads them with
-`RecordObservableInstruments` when the check runs:
+of Npgsql's instruments, both **observable**, under whichever of their two names the application's Npgsql
+publishes, and reads them with `RecordObservableInstruments` when the check runs:
+
+| Npgsql | Connections per state | Ceiling | Pool tag | State tag |
+|---|---|---|---|---|
+| 8.x, 9.x | `db.client.connections.usage` | `db.client.connections.max` | `pool.name` | `state` |
+| 10.x | `db.client.connection.count` | `db.client.connection.max` | `db.client.connection.pool.name` | `db.client.connection.state` |
+
+Npgsql 10 renamed them to OpenTelemetry's current database client names; the kinds and values (`idle`, `used`) are
+the same (measured at 8.0.3, 9.0.4 and 10.0.0 to 10.0.3). The studio never asks which Npgsql it runs beside: it
+listens for both and recognises a pool by either tag, so a host on Npgsql 10 - Postgres Studio's own, or a Marten
+Studio host that brings it - is read as one on 9 is. The finding's caveat names the two it read.
 
 - **No synchronous instrument is ever enabled**, so nothing is recorded per command: Npgsql records
-  `db.client.commands.*` on every command the host runs, and a listener on any of them would add a callback to
-  each one. That includes `db.client.connections.pending_requests`, which is a synchronous counter in Npgsql
-  9.0.4 - so C01 judges "saturated" by the pool reaching its ceiling on consecutive checks instead.
-- **Not `db.client.commands.prepared_ratio` either**, though it is observable: while it is enabled Npgsql counts
-  every command it starts, and reading it resets the counters - which would take the studio's reads out of the
-  host's own exporter's numbers.
+  `db.client.commands.*` (from 10, `db.client.operation.*`) on every command the host runs, and a listener on any
+  of them would add a callback to each one. That includes `db.client.connections.pending_requests`, which is a
+  synchronous counter in Npgsql 9.0.4 - and, as `db.client.connection.npgsql.pending_requests`, in 10.0.3 - so C01
+  judges "saturated" by the pool reaching its ceiling on consecutive checks instead.
+- **Not `db.client.commands.prepared_ratio` either** (from 10, `db.client.operation.npgsql.prepared_ratio`), though
+  it is observable: while it is enabled Npgsql counts every command it starts, and reading it resets the counters -
+  which would take the studio's reads out of the host's own exporter's numbers.
 - The host's own `MeterProvider`, if it has one, is unaffected: a listener is a passive subscriber, Npgsql
   changes nothing it does for the two instruments being enabled, and a reading runs Npgsql's two-integer
   callback on the studio's thread and delivers only to the studio's listener.
@@ -101,8 +111,10 @@ of Npgsql's instruments, both **observable** - `db.client.connections.usage` (ta
 `SessionPoolObserverTests` (fast suite) prove those statements against a meter of the test's own - and pin
 the shapes of Npgsql's own instruments, so a later Npgsql that changes one fails there - and
 `ConnectionPoolLiveTests` that a burst of commands through a watched pool delivers nothing to the listener.
+`NpgsqlPoolInstrumentsTests` and `NpgsqlPoolLiveTests` in `PostgresStudio.Tests` do the same for both sets of names,
+and read a real pool - C01's report and the Sessions panel - at the Npgsql floor and at the latest-tested Npgsql 10.
 
-The pool is matched to the database by its `pool.name`, which is the data source's connection string unless the
+The pool is matched to the database by its pool name tag, which is the data source's connection string unless the
 host named the data source (`NpgsqlDataSourceBuilder.Name`); a named pool cannot be matched, and the check says
 so instead of guessing. Two pools built from one connection string - the host's own `AddNpgsqlDataSource(cs)`
 beside Marten's, or `new NpgsqlConnection(cs)` with Marten's connection string, which Npgsql pools on its own -

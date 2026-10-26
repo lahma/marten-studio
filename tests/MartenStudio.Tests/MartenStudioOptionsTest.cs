@@ -158,6 +158,9 @@ public class MartenStudioOptionsTest
     [InlineData("role name")]
     [InlineData("role\"; drop table x; --")]
     [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("studio_reader\n")]
+    [InlineData("studio_reader\r\n")]
+    [InlineData("studio_reader\u2028")]
     public void A_sql_console_role_that_is_not_a_plain_identifier_is_refused(string role)
     {
         ResolveAction(options => options.SqlConsoleRole = role)

@@ -25,6 +25,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using MartenStudio.Components;
+using MartenStudio.Services;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Internal;
 
@@ -47,9 +48,12 @@ public static class MartenStudioEndpointRouteBuilderExtensions
     /// </remarks>
     /// <param name="builder">The endpoint route builder.</param>
     /// <exception cref="ArgumentNullException"><paramref name="builder" /> is null.</exception>
+    /// <exception cref="InvalidOperationException">The application registered Postgres Studio, not Marten Studio.</exception>
     public static IEndpointConventionBuilder MapMartenStudio(this IEndpointRouteBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        StudioEndpointMapper.RequireRegistered(builder, MartenStudioDescriptor.Marker, "MapMartenStudio()");
 
         return StudioEndpointMapper.Map<MartenStudioApp>(builder);
     }
@@ -73,9 +77,12 @@ public static class MartenStudioEndpointRouteBuilderExtensions
     /// <param name="pattern">The path the studio is served under, for example <c>/ops/marten</c>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="builder" /> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="pattern" /> is not a plain rooted URL path.</exception>
+    /// <exception cref="InvalidOperationException">The application registered Postgres Studio, not Marten Studio.</exception>
     public static IEndpointConventionBuilder MapMartenStudio(this IEndpointRouteBuilder builder, string pattern)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        StudioEndpointMapper.RequireRegistered(builder, MartenStudioDescriptor.Marker, "MapMartenStudio()");
 
         if (string.IsNullOrWhiteSpace(pattern) || !pattern.StartsWith('/'))
         {

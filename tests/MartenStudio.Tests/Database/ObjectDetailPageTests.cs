@@ -3,6 +3,7 @@ using AngleSharp.Dom;
 using Bunit;
 
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
@@ -514,7 +515,7 @@ public class ObjectDetailPageTests
     public void A_link_outside_the_gate_gets_the_same_neutral_panel_and_leaks_nothing()
     {
         using var context = DatabasePageData.Context();
-        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"]);
+        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], StudioText.Marten);
         context.DatabaseObjects.Detail = DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, sentence);
 
         var page = DatabasePageData.RenderObject(context, "secret", "payroll");
@@ -546,7 +547,7 @@ public class ObjectDetailPageTests
         context.DatabaseObjects.Detail = why switch
         {
             "policy" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.WritePolicy, "Your account may not browse the database here."),
-            "withheld schema" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"])),
+            "withheld schema" => DatabaseObjectDetail.Unavailable(DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], StudioText.Marten)),
             _ => null,
         };
 
@@ -611,7 +612,7 @@ public class ObjectDetailPageTests
     {
         using var context = DatabasePageData.Context();
         context.DatabaseObjects.Detail = DatabaseObjectDetail.Unavailable(
-            DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"]));
+            DatabaseRefusal.SchemaNotBrowsable, DatabaseGate.SchemaDenial("secret", ["quartz", "legacy"], StudioText.Marten));
 
         var page = DatabasePageData.RenderObject(context, "secret", "payroll");
 

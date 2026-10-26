@@ -255,7 +255,7 @@ internal sealed class TableRowService : ITableRowService
                 Verdict = verdict,
             };
 
-            if (!request.RunAnyway && ShouldWithhold(relation, verdict, value.ExactCountThreshold) is { } withheld)
+            if (!request.RunAnyway && ShouldWithhold(relation, verdict, value.ExactCountThreshold, value.Text) is { } withheld)
             {
                 return page with { State = TableRowPageState.Withheld, Reason = withheld };
             }
@@ -569,7 +569,11 @@ internal sealed class TableRowService : ITableRowService
                                     .MayCountExactlyAsync(connection, relation.Schema, relation.Name, estimate, token)
                                     .ConfigureAwait(false))
                             {
-                                return shell with { Count = DocumentCount.RefusedExact(estimate, threshold) };
+                                return shell with
+                                {
+                                    Count = DocumentCount.RefusedExact(
+                                        estimate, threshold, DocumentCount.RefusedAboveNote(threshold, value.OptionName("ExactCountThreshold"))),
+                                };
                             }
                         }
 
@@ -670,7 +674,8 @@ internal sealed class TableRowService : ITableRowService
             // unchecked rather than queued - a row with forty inbound keys is not forty QueryTimeouts.
             var budget = new ReferenceBudget(
                 ReferenceStatementTimeout(settings.QueryTimeout),
-                ReferenceBudgetFor(settings.QueryTimeout));
+                ReferenceBudgetFor(settings.QueryTimeout),
+                settings.OptionName("QueryTimeout"));
 
             TableRowReferences references = await Session(statementTimeout: budget.PerStatement)
                 .InTransactionAsync(
@@ -838,7 +843,7 @@ internal sealed class TableRowService : ITableRowService
 
             // A bounded count still reads every row of a large table when no index finds the pointing rows:
             // "limit 1000" stops at the thousandth match, and a table with none scans to the end.
-            return UnindexedInboundCount(child, key.Columns, settings.ExactCountThreshold) is { } unindexed
+            return UnindexedInboundCount(child, key.Columns, settings.ExactCountThreshold, settings.Text) is { } unindexed
                 ? new InboundCheck(key, RowInboundState.NotChecked, ownership, unindexed)
                 : new InboundCheck(key, RowInboundState.Counted, ownership, null);
         }
@@ -1531,10 +1536,11 @@ internal sealed class TableRowService : ITableRowService
     /// the studio's <c>ExactCountThreshold</c> option (or, never analysed, above the heap size a
     /// speculative count would scan) and a filter or sort column is one no index serves.
     /// </summary>
-    internal static string? ShouldWithhold(CatalogRelation relation, RowFilterVerdict verdict, long threshold)
+    internal static string? ShouldWithhold(CatalogRelation relation, RowFilterVerdict verdict, long threshold, StudioText text)
     {
         ArgumentNullException.ThrowIfNull(relation);
         ArgumentNullException.ThrowIfNull(verdict);
+        ArgumentNullException.ThrowIfNull(text);
 
         if (verdict.FilterLevel != IndexVerdictLevel.Red && verdict.SortLevel != IndexVerdictLevel.Red)
         {
@@ -1557,7 +1563,7 @@ internal sealed class TableRowService : ITableRowService
 
         string what = verdict.FilterLevel == IndexVerdictLevel.Red ? "a filter" : "the sort";
 
-        return "Not read yet: " + Target(relation) + " holds " + size + " (more than MartenStudioOptions.ExactCountThreshold, " +
+        return "Not read yet: " + Target(relation) + " holds " + size + " (more than " + text.OptionName("ExactCountThreshold") + ", " +
                Math.Max(threshold, 0).ToString("N0", CultureInfo.InvariantCulture) + "), and " + what +
                " no index serves would read every one of them. Run anyway to read it, or filter on an indexed column.";
     }
@@ -1790,6 +1796,7 @@ internal sealed class TableRowService : ITableRowService
         }
 
         logger.TableRowsRead(
+            settings.Text.Product,
             UserName(),
             action,
             target,
@@ -1827,6 +1834,7 @@ internal sealed class TableRowService : ITableRowService
         }
 
         logger.TableRowsRead(
+            settings.Text.Product,
             UserName(),
             CountAction,
             target,
@@ -1857,6 +1865,7 @@ internal sealed class TableRowService : ITableRowService
             : string.Join(", ", key.Columns.Select((column, i) => column + "=" + key.Values[i]));
 
         logger.TableRowOpened(
+            settings.Text.Product,
             UserName(),
             action,
             Target(grant.Relation.Relation),
@@ -1885,7 +1894,18 @@ internal sealed class TableRowService : ITableRowService
                 grant.Resolved.Target.Identity,
                 StudioLogThrottle.KindOf(exception));
 
-        if (logger.IsEnabled(level))
+        if (logger.IsEnabled(level) && settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioTableRowReadFailed(
+                level,
+                exception,
+                action,
+                Target(grant.Relation.Relation),
+                grant.Resolved.Source.Key,
+                grant.Resolved.Target.Identity,
+                error.SqlState.Length > 0 ? error.SqlState : null);
+        }
+        else if (logger.IsEnabled(level))
         {
             logger.TableRowReadFailed(
                 level,
@@ -2017,10 +2037,12 @@ internal sealed class TableRowService : ITableRowService
     /// <param name="child">The pointing table's catalog detail, indexes included.</param>
     /// <param name="columns">Its foreign key's columns.</param>
     /// <param name="threshold">The studio's <c>ExactCountThreshold</c> option.</param>
-    internal static string? UnindexedInboundCount(CatalogRelationDetail child, IReadOnlyList<string> columns, long threshold)
+    /// <param name="text">The studio's words, for the option's name.</param>
+    internal static string? UnindexedInboundCount(CatalogRelationDetail child, IReadOnlyList<string> columns, long threshold, StudioText text)
     {
         ArgumentNullException.ThrowIfNull(child);
         ArgumentNullException.ThrowIfNull(columns);
+        ArgumentNullException.ThrowIfNull(text);
 
         CatalogRelation relation = child.Relation;
         long limit = Math.Max(threshold, 0);
@@ -2049,7 +2071,7 @@ internal sealed class TableRowService : ITableRowService
             ? "about " + estimate.ToString("N0", CultureInfo.InvariantCulture) + " rows"
             : "a large table Postgres has never analysed";
 
-        return "Not counted: " + Target(relation) + " holds " + size + " (more than MartenStudioOptions.ExactCountThreshold, " +
+        return "Not counted: " + Target(relation) + " holds " + size + " (more than " + text.OptionName("ExactCountThreshold") + ", " +
                limit.ToString("N0", CultureInfo.InvariantCulture) + ") and no index leads with " + string.Join(", ", columns) +
                ", so counting the rows that point here would read every one of them. Filter its rows by the key instead.";
     }
@@ -2100,7 +2122,8 @@ internal sealed class TableRowService : ITableRowService
     /// </summary>
     /// <param name="perStatement">Each check's <c>statement_timeout</c>.</param>
     /// <param name="total">All of them together.</param>
-    private sealed class ReferenceBudget(TimeSpan perStatement, TimeSpan total)
+    /// <param name="timeoutOption">The query-timeout option as the host's registration spells it.</param>
+    private sealed class ReferenceBudget(TimeSpan perStatement, TimeSpan total, string timeoutOption)
     {
         private readonly System.Diagnostics.Stopwatch clock = new();
 
@@ -2124,12 +2147,12 @@ internal sealed class TableRowService : ITableRowService
         /// <summary>What a check left unchecked for want of time says.</summary>
         public string Sentence =>
             "Not checked: this row's reference checks had " + Seconds(Total) + " between them (the lesser of " +
-            "MartenStudioOptions.QueryTimeout and " + Seconds(ReferenceBudgetCap) + "), and the checks before this one used it.";
+            timeoutOption + " and " + Seconds(ReferenceBudgetCap) + "), and the checks before this one used it.";
 
         /// <summary>What a check its own <c>statement_timeout</c> stopped says.</summary>
         public string TimeoutSentence =>
             "The check took longer than the " + Seconds(PerStatement) + " each reference check is given (the lesser of " +
-            "MartenStudioOptions.QueryTimeout and " + Seconds(ReferenceStatementCap) + "), and Postgres cancelled it.";
+            timeoutOption + " and " + Seconds(ReferenceStatementCap) + "), and Postgres cancelled it.";
 
         /// <summary>Starts the clock, once.</summary>
         public void Start()

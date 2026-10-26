@@ -359,7 +359,7 @@ else
                 wholeCut = value.Truncated;
                 wholeNote = value.Truncated
                     ? "Cut at " + SqlCellFormat.Bytes(value.Cap) + " of " + SqlCellFormat.Bytes(value.FullLength) +
-                      " (" + Settings.OptionName("MaxInlineDocumentBytes") + "); the SQL console reads the rest."
+                      " (" + Settings.OptionName(Settings.MaxInlineValueBytesMember) + "); the SQL console reads the rest."
                     : null;
             }
         }

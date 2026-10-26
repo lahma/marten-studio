@@ -1,5 +1,6 @@
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.Logging;
@@ -112,10 +113,27 @@ internal sealed class RelationshipDataService : IRelationshipDataService
                 Truncated = graph.Truncated || keys.Truncated,
             };
         }
+        catch (Exception exception) when (exception is StudioNotAuthorizedException or KeyNotFoundException)
+        {
+            // A refused scope, or one that names nothing, is a value the page already renders: usually the scope moved
+            // under the page between the visitor's click and this read. Debug, as the other pages log a refused scope;
+            // the audit and the resolver's own records say the rest.
+            LogUnresolvedScope(scope, exception);
+
+            return RelationshipGraph.Failed(RelationshipReads.Describe(exception, gate), readAt);
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogWarning(
-                exception, "Marten Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+            if (reads.Product == StudioProduct.PostgresStudio)
+            {
+                logger.LogWarning(
+                    exception, "Postgres Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+            }
+            else
+            {
+                logger.LogWarning(
+                    exception, "Marten Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+            }
 
             return RelationshipGraph.Failed(RelationshipReads.Describe(exception, gate), readAt);
         }
@@ -155,4 +173,30 @@ internal sealed class RelationshipDataService : IRelationshipDataService
         IReadOnlyList<string> columns,
         IReadOnlyList<string> values) =>
         TableRowQueryBuilder.BuildInboundCount(schema, table, columns, values, RelationshipQueries.DefaultInboundCap);
+
+    /// <summary>A scope the resolver refused or could not find, at Debug: see <see cref="GetGraphAsync" />.</summary>
+    private void LogUnresolvedScope(StudioScope scope, Exception exception)
+    {
+        if (!logger.IsEnabled(LogLevel.Debug))
+        {
+            return;
+        }
+
+        if (reads.Product == StudioProduct.PostgresStudio)
+        {
+            logger.LogDebug(
+                exception,
+                "Postgres Studio read no relationships for source {StoreKey}, database {DatabaseId}: the scope is refused or names nothing",
+                scope.StoreKey,
+                scope.DatabaseId);
+        }
+        else
+        {
+            logger.LogDebug(
+                exception,
+                "Marten Studio read no relationships for store {StoreKey}, database {DatabaseId}: the scope is refused or names nothing",
+                scope.StoreKey,
+                scope.DatabaseId);
+        }
+    }
 }

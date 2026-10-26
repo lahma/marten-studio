@@ -1,4 +1,5 @@
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Components.Pages.Database;
 
@@ -55,14 +56,14 @@ internal static class DatabaseDefinitionWithheld
     /// <summary>The sentence for one object in a list or on its detail page.</summary>
     /// <param name="item">The object, whose <c>DefinitionAvailable</c> is <see langword="false" />.</param>
     /// <param name="access">The gate as the service described it with the list or the detail, when known.</param>
-    /// <param name="configuredEntries"><c>BrowsableSchemas</c>, for the per-schema sentence.</param>
+    /// <param name="settings">The studio's settings: <c>BrowsableSchemas</c> and the words for the per-schema sentence.</param>
     public static string For(
         DatabaseObjectSummary item,
         DatabaseAccessState? access,
-        IEnumerable<string> configuredEntries)
+        IStudioSettings settings)
     {
         ArgumentNullException.ThrowIfNull(item);
-        ArgumentNullException.ThrowIfNull(configuredEntries);
+        ArgumentNullException.ThrowIfNull(settings);
 
         if (item.Kind == DatabaseObjectKind.Aggregate)
         {
@@ -83,7 +84,7 @@ internal static class DatabaseDefinitionWithheld
         // Open, but not for this schema - the store's own, say, with BrowsableSchemas not listing it.
         if (access is not null && !access.BrowsableSchemas.Contains(item.Schema, StringComparer.Ordinal))
         {
-            return DatabaseGate.SchemaDenial(item.Schema, [.. configuredEntries]);
+            return DatabaseGate.SchemaDenial(item.Schema, [.. settings.BrowsableSchemas], settings.Text);
         }
 
         // A view whose query would name what it reads: a hidden type's table, a withheld schema, a function.

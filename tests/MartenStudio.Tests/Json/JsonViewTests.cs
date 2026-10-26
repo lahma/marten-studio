@@ -338,6 +338,36 @@ public class JsonViewTests
     }
 
     [Fact]
+    public void A_member_whose_name_would_not_read_as_itself_gets_no_Postgres_offers_in_the_copy_menu()
+    {
+        using var context = new JsonTestContext();
+
+        // A right-to-left override inside the member name, written as a JSON escape so this file holds none.
+        var view = context.Render<JsonView>(p => p.Add(c => c.Json, """{"rlo‮txt":1}"""));
+
+        view.FindAll(".ms-json-key")[1].Click();
+
+        view.FindAll(".ms-copy-menu .ms-menu-item-label").Select(static x => x.TextContent).Should().Equal(
+            ["Copy value", "Copy JSONPath", "Copy Marten LINQ path", "Copy containment filter"],
+            "a lookalike Postgres expression is worse than none");
+    }
+
+    [Fact]
+    public void A_member_with_a_backslash_is_copied_as_an_escape_string()
+    {
+        using var context = new JsonTestContext();
+
+        var view = context.Render<JsonView>(p => p.Add(c => c.Json, """{"a\\b":1}"""));
+
+        view.FindAll(".ms-json-key")[1].Click();
+
+        var items = view.FindAll(".ms-copy-menu .ms-menu-item");
+        items.Should().HaveCount(6);
+        items[2].TextContent.Should().Contain("data ->> E'a\\\\b'");
+        items[3].TextContent.Should().Contain("data #>> E'{\"a\\\\\\\\b\"}'");
+    }
+
+    [Fact]
     public void The_copy_menu_is_one_tab_stop_with_the_arrow_keys_inside_it()
     {
         using var context = new JsonTestContext();

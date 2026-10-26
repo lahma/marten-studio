@@ -136,6 +136,13 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
 
         string name = index.Name;
 
+        // Both names are printed into the lines a person pastes: one that could end a comment line or a C# string -
+        // a line break, a quote, a control or format character - gets no line at all (MigrationSqlText.IsPrintableName).
+        if (!MigrationSqlText.IsPrintableName(name) || !MigrationSqlText.IsPrintableName(coveredBy.Name))
+        {
+            return null;
+        }
+
         return origin switch
         {
             IndexOrigin.Declared when table.TypeName is { } type => new HealthRemedy(
@@ -160,6 +167,11 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(index);
+
+        if (!MigrationSqlText.IsPrintableName(index.Name))
+        {
+            return null;
+        }
 
         return origin switch
         {

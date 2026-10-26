@@ -1,3 +1,4 @@
+using PostgresStudio;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;

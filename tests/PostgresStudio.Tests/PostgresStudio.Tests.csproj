@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <!-- PostgresStudio's own fast suite: no Docker, and no Marten anywhere in its graph. It references the PostgresStudio
+       project alone, so a host with only Npgsql is what these tests build against (PostgresStudioFenceTests proves the
+       assembly and its output folder hold no Marten family). Sdk.Razor, not Sdk: bUnit renders components declared in
+       .razor test files. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>true</IsTestProject>
+    <!-- Selects the conditional Npgsql PackageVersion row in Directory.Packages.props, as PostgresStudio.csproj does, so
+         this project restores the Npgsql PostgresStudio is pinned to and nothing else decides it. -->
+    <PostgresStudioPinsNpgsql>true</PostgresStudioPinsNpgsql>
+  </PropertyGroup>
+
+  <!-- Global usings, as in MartenStudio.Tests: `Xunit` comes from Verify.XunitV3's build props. -->
+  <ItemGroup>
+    <Using Include="AwesomeAssertions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="GitHubActionsTestLogger" />
+    <PackageReference Include="AwesomeAssertions" />
+    <PackageReference Include="bunit" />
+    <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="PublicApiGenerator" />
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PostgresStudio/PostgresStudio.csproj" />
+  </ItemGroup>
+
+  <!-- The shared studio's test doubles, compiled in from MartenStudio.Tests rather than copied: each one names only
+       PostgresStudio's types, and compiling it here keeps it that way - a Marten type added to one breaks this build.
+       A shared test-support project can replace the links later. -->
+  <ItemGroup>
+    <Compile Include="../MartenStudio.Tests/Support/FakeDatabaseObjectService.cs" Link="Support/Linked/FakeDatabaseObjectService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeDatabaseObjects.cs" Link="Support/Linked/FakeDatabaseObjects.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeTableRowService.cs" Link="Support/Linked/FakeTableRowService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeTableRows.cs" Link="Support/Linked/FakeTableRows.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/FakeRelationshipDataService.cs" Link="Support/Linked/FakeRelationshipDataService.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationHandler.cs" Link="Support/Linked/TestAuthenticationHandler.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestFileProvider.cs" Link="Support/Linked/TestFileProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/TestPersistentComponentStateStore.cs" Link="Support/Linked/TestPersistentComponentStateStore.cs" />
+    <Compile Include="../MartenStudio.Tests/Health/FakeHealthService.cs" Link="Support/Linked/FakeHealthService.cs" />
+    <Compile Include="../MartenStudio.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
+  </ItemGroup>
+
+</Project>

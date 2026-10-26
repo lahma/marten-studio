@@ -101,10 +101,11 @@ internal sealed class NavIndicatorService : INavIndicatorService
     private readonly StudioSnapshotCache cache;
     private readonly ILogger<NavIndicatorService> logger;
     private readonly IHealthService? health;
+    private readonly StudioProduct product;
 
     /// <remarks>
-    /// <paramref name="health" /> is optional so that a test of the contributed badges can build this by hand; the
-    /// container always supplies one.
+    /// <paramref name="health" /> and <paramref name="settings" /> are optional so that a test of the contributed
+    /// badges can build this by hand; the container always supplies both.
     /// </remarks>
     public NavIndicatorService(
         StudioState state,
@@ -112,8 +113,10 @@ internal sealed class NavIndicatorService : INavIndicatorService
         IEnumerable<INavIndicatorContributor> contributors,
         StudioSnapshotCache cache,
         ILogger<NavIndicatorService> logger,
-        IHealthService? health = null)
+        IHealthService? health = null,
+        IStudioSettings? settings = null)
     {
+        product = StudioText.Of(settings).Product;
         ArgumentNullException.ThrowIfNull(contributors);
 
         this.state = state;
@@ -156,7 +159,15 @@ internal sealed class NavIndicatorService : INavIndicatorService
         }
         catch (Exception exception)
         {
-            logger.LogDebug(exception, "Marten Studio could not read the navigation indicators");
+            if (product == StudioProduct.PostgresStudio)
+            {
+                logger.LogDebug(exception, "Postgres Studio could not read the navigation indicators");
+            }
+            else
+            {
+                logger.LogDebug(exception, "Marten Studio could not read the navigation indicators");
+            }
+
             return NavIndicators.None;
         }
     }
@@ -170,7 +181,15 @@ internal sealed class NavIndicatorService : INavIndicatorService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            logger.LogDebug(exception, "Marten Studio could not read the health badge");
+            if (product == StudioProduct.PostgresStudio)
+            {
+                logger.LogDebug(exception, "Postgres Studio could not read the health badge");
+            }
+            else
+            {
+                logger.LogDebug(exception, "Marten Studio could not read the health badge");
+            }
+
             return null;
         }
     }

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using PostgresStudio.Services.Health.Export;
+using PostgresStudio.Services.Settings;
 
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
@@ -196,11 +197,11 @@ public class HealthExportSummaryTests
     [Fact]
     public void A_run_that_could_not_check_anything_says_why_in_the_studios_own_words()
     {
-        HealthExportSummary.NotRegistered(Now).Level.Should().Be(HealthExportLevel.Degraded);
-        HealthExportSummary.NotRegistered(Now).Describe(TimeSpan.FromSeconds(60)).Should().Contain("services.AddMartenStudio()");
-        HealthExportSummary.NoStores(Now).Level.Should().Be(HealthExportLevel.Degraded);
+        HealthExportSummary.NotRegistered(Now, StudioText.Marten).Level.Should().Be(HealthExportLevel.Degraded);
+        HealthExportSummary.NotRegistered(Now, StudioText.Marten).Describe(TimeSpan.FromSeconds(60)).Should().Contain("services.AddMartenStudio()");
+        HealthExportSummary.NoStores(Now, StudioText.Marten).Level.Should().Be(HealthExportLevel.Degraded);
 
-        HealthExportSummary broken = HealthExportSummary.Broken(Now, nameof(InvalidOperationException));
+        HealthExportSummary broken = HealthExportSummary.Broken(Now, nameof(InvalidOperationException), StudioText.Marten);
         broken.Level.Should().Be(HealthExportLevel.Degraded);
         broken.Describe(TimeSpan.FromSeconds(60)).Should().Be(
             "Marten Studio could not check: its health export failed with InvalidOperationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");

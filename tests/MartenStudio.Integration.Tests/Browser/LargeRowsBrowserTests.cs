@@ -3,12 +3,12 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 
 using MartenStudio.Integration.Tests.Generation;
-using MartenStudio.SampleDomain.Relational;
 
 using Microsoft.Playwright;
 
 using Npgsql;
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.SampleData;
 
 namespace MartenStudio.Integration.Tests.Browser;
 

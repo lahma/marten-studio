@@ -18,8 +18,36 @@
 {
     <div class="ms-alert ms-alert-info ms-capability-disabled ms-db-access" role="note" data-refusal="@access.Refusal">
         <div class="ms-alert-content">
-            <p class="ms-db-access-title">@Headline(access.Refusal)</p>
+            <p class="ms-db-access-title">@(Settings.Text.Product == StudioProduct.MartenStudio ? Headline(access.Refusal) : SourceHeadline(access.Refusal))</p>
             <p class="ms-muted">@denial</p>
+            @if (Settings.Text.Product != StudioProduct.MartenStudio)
+            {
+                @* A studio over plain data sources: its own schemas are the ones BrowsableSchemas names exactly, and
+                   nothing in them is any store's. *@
+                <p class="ms-muted">
+                    @switch (access.Refusal)
+                    {
+                        case DatabaseRefusal.CapabilityOff:
+                        case DatabaseRefusal.ReadOnly:
+                            <text>
+                                What is shown is the structure of the schemas <code>@Settings.OptionName("BrowsableSchemas")</code>
+                                names. With <code>Capabilities.BrowseDatabase</code> on, this screen would also show the
+                                schemas it admits through "*"@(WithheldPhrase(access)), the definitions of views,
+                                functions and triggers, and the rows of tables.
+                            </text>
+                            break;
+
+                        default:
+                            <text>
+                                The structure of the schemas <code>@Settings.OptionName("BrowsableSchemas")</code> names is
+                                still shown. The policy is asked about the database as a whole.
+                            </text>
+                            break;
+                    }
+                </p>
+            }
+            else
+            {
             <p class="ms-muted">
                 @switch (access.Refusal)
                 {
@@ -51,6 +79,7 @@
                         break;
                 }
             </p>
+            }
         </div>
     </div>
 }
@@ -69,6 +98,16 @@
         DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Your account may not browse beyond this store's own schemas.",
         DatabaseRefusal.SchemaNotBrowsable => "No schema is browsable yet.",
         _ => "The database browser is limited to this store's own schemas.",
+    };
+
+    /// <summary>The headline in a studio over plain data sources, whose own schemas are the ones BrowsableSchemas names.</summary>
+    private static string SourceHeadline(DatabaseRefusal refusal) => refusal switch
+    {
+        DatabaseRefusal.ReadOnly => "The database browser shows only the structure of the browsable schemas: the studio is read-only.",
+        DatabaseRefusal.CapabilityOff => "Browsing rows and definitions is not enabled.",
+        DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Your account may not browse rows and definitions here.",
+        DatabaseRefusal.SchemaNotBrowsable => "No schema is browsable yet.",
+        _ => "The database browser shows only the structure of the browsable schemas.",
     };
 
     /// <summary>How many schemas are withheld, as an aside - a count, never their names.</summary>

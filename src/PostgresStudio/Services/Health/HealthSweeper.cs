@@ -344,6 +344,7 @@ internal sealed class HealthSweeper
                 {
                     TableRemedies = tableRemedies,
                     PlanAdvisor = planAdvisor,
+                    Text = settings.Text,
                 };
                 evaluations[gate] = evaluation;
             }
@@ -351,8 +352,11 @@ internal sealed class HealthSweeper
             return evaluation;
         }
 
+        // What a capped table set left out, said by every Tables-area check (HealthTables.WithCoverage, design R5).
+        string? tableCoverage = memo.TryGetCompleted<IStudioTableSet>(HealthTables.SetKey, out var judged) ? judged.Coverage : null;
+
         List<HealthCheckResult> results =
-            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId))];
+            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage))];
 
         return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results);
 
@@ -418,7 +422,7 @@ internal sealed class HealthSweeper
     }
 
     /// <summary>Judges one check's facts, and stamps what it found.</summary>
-    private HealthCheckResult Evaluate(Gathered gathered, HealthEvaluation evaluation, string storeKey, string databaseId)
+    private HealthCheckResult Evaluate(Gathered gathered, HealthEvaluation evaluation, string storeKey, string databaseId, string? tableCoverage)
     {
         HealthCheckInfo info = gathered.Descriptor.Info;
 
@@ -430,6 +434,11 @@ internal sealed class HealthSweeper
         try
         {
             HealthVerdict verdict = gathered.Descriptor.Check.Evaluate(gathered.Facts, evaluation);
+
+            if (info.Area == HealthArea.Tables)
+            {
+                verdict = HealthTables.WithCoverage(verdict, tableCoverage);
+            }
 
             // A key holds the finding's Subject, and a label can hold a name: both sit at the finding's gate, which can
             // be stricter than the check's that the status row is shown at. So the page's sentence names the code and
@@ -592,7 +601,14 @@ internal sealed class HealthSweeper
             // An expected state: the page says so, and the log only for whoever turned Debug on.
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug(exception, "Marten Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogDebug(exception, "Postgres Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
+                }
+                else
+                {
+                    logger.LogDebug(exception, "Marten Studio's health check {Code} was not checked on {DatabaseId}", info.Code, databaseId);
+                }
             }
 
             return;
@@ -601,7 +617,15 @@ internal sealed class HealthSweeper
         // A database that will not take a connection is one problem, told once - not once per check.
         string site = PostgresFailure.IsConnectionFailure(exception) ? "Health.Connection" : "Health.Check." + info.Code;
         LogLevel level = throttle.WarningOrDebug(site, storeKey, databaseId, StudioLogThrottle.KindOf(exception));
-        logger.HealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
+
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioHealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
+        }
+        else
+        {
+            logger.HealthCheckFailed(level, exception, info.Code, storeKey, databaseId);
+        }
     }
 
     /// <summary>What one gatherer left for the evaluation phase.</summary>

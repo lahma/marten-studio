@@ -103,7 +103,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
                 continue;
             }
 
-            findings.Add(Finding(table, held, facts.ReadAt, evaluation.TableRemedies));
+            findings.Add(Finding(table, held, facts.ReadAt, evaluation));
         }
 
         if (findings.Count > 0)
@@ -118,13 +118,13 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
               + ", because autovacuum usually catches up within a minute of a batch delete.");
     }
 
-    private static HealthFinding Finding(TableFacts table, TimeSpan held, DateTimeOffset now, IHealthTableRemedies? remedies)
+    private static HealthFinding Finding(TableFacts table, TimeSpan held, DateTimeOffset now, HealthEvaluation evaluation)
     {
         StudioTable declared = table.Table;
         string scale = SuggestedScaleFactor.ToString(CultureInfo.InvariantCulture);
 
         HealthRemedy? remedy = Autovacuum.Remedy(
-            remedies,
+            evaluation.TableRemedies,
             table,
             "autovacuum_vacuum_scale_factor",
             scale,
@@ -146,7 +146,7 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
                 "A dead row is an old version an update or a delete left behind, and only vacuum makes its space reusable. Until "
                 + "it runs, every sequential scan reads the dead rows, every index still points at them, the table and its "
                 + "indexes keep growing, and the visibility map that index-only scans need goes stale."
-                + Autovacuum.State(table, "autovacuum_vacuum_scale_factor", scale),
+                + Autovacuum.State(table, "autovacuum_vacuum_scale_factor", scale, evaluation.Text),
             Evidence =
             [
                 new HealthEvidence("Table", declared.Describe()),

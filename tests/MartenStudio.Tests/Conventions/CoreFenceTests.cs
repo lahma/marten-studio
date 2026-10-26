@@ -14,7 +14,8 @@ namespace MartenStudio.Tests.Conventions;
 /// read the files a manifest said were bound for the shared one. Since PS-2 the shared studio is <c>PostgresStudio.dll</c>,
 /// which references neither Marten nor MartenStudio, so the whole of <c>src/PostgresStudio/</c> is the boundary and no
 /// manifest is needed for scope: every file under it is fenced, a file added there tomorrow included. A lean in code no
-/// longer compiles, and <see cref="PostgresStudioFenceTests" /> holds the assembly and package half of that. What the
+/// longer compiles, and <c>PostgresStudioFenceTests</c> (in PostgresStudio.Tests since PS-3a) holds the assembly and
+/// package half of that. What the
 /// compiler cannot see is text it does not bind: Razor markup text - <c>&lt;code&gt;MartenStudioOptions.ReadOnly&lt;/code&gt;</c>
 /// builds with 0 warnings, and would tell a host of the shared studio to set an option it does not have - and an
 /// attribute value Razor takes as a literal. Those are the residual this fence exists for; the rest it keeps because it

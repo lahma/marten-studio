@@ -163,12 +163,19 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     /// <summary>What the studio can say about a sequential scan of one of its tables (T02), or <see langword="null" />.</summary>
     public IHealthPlanAdvisor? PlanAdvisor { get; init; }
 
-    /// <summary>An evaluation at <paramref name="now" />, for a unit test.</summary>
+    /// <summary>
+    /// The studio's own words for a finding (<see cref="IStudioSettings.Text" />) - an option it names, a remedy that is
+    /// code, the tables it judges. The sweep sets it from its settings; there is no default to forget.
+    /// </summary>
+    public required StudioText Text { get; init; }
+
+    /// <summary>An evaluation at <paramref name="now" />, for a unit test - in MartenStudio's words unless it says otherwise.</summary>
     /// <param name="now">When.</param>
     /// <param name="runtime">The runtime, or <see langword="null" /> for none (<see cref="NoStudioRuntime" />).</param>
     /// <param name="history">The history, or none.</param>
-    public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null) =>
-        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty);
+    /// <param name="text">The studio's words, or <see langword="null" /> for MartenStudio's.</param>
+    public static HealthEvaluation At(DateTimeOffset now, IStudioRuntime? runtime = null, HealthHistoryView? history = null, StudioText? text = null) =>
+        new(now, runtime ?? NoStudioRuntime.Instance, history ?? HealthHistoryView.Empty) { Text = text ?? StudioText.Marten };
 }
 
 /// <summary>
@@ -196,6 +203,32 @@ internal sealed class HealthSweepMemo
 
     /// <summary>How many shared reads ran, for a test and for nothing else.</summary>
     internal int Reads { get; private set; }
+
+    /// <summary>
+    /// The answer of a shared read that has already finished, for the sweep itself after its gatherers ran - never a
+    /// read started here, and nothing for one that failed, is still running, or was asked for as another type.
+    /// </summary>
+    /// <typeparam name="T">What the read answers.</typeparam>
+    /// <param name="key">The read's key.</param>
+    /// <param name="value">Its answer.</param>
+    internal bool TryGetCompleted<T>(string key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
+    {
+        lock (gate)
+        {
+            if (entries.TryGetValue(key, out Entry? entry)
+                && entry.Type == typeof(T)
+                && entry.Work is { IsValueCreated: true } work
+                && work.Value.IsCompletedSuccessfully
+                && work.Value.Result is T answer)
+            {
+                value = answer;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
 
     /// <summary>The shared read for <paramref name="key" />: started by the first caller, awaited by every one.</summary>
     public async Task<T> GetAsync<T>(string key, HealthSqlRunner caller, Func<CancellationToken, Task<T>> read, CancellationToken sweepToken)

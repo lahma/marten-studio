@@ -10,11 +10,12 @@ using MartenStudio.Sample;
 using MartenStudio.Sample.Auth;
 using MartenStudio.Sample.Generation;
 using MartenStudio.SampleDomain;
-using MartenStudio.SampleDomain.Relational;
 
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+
+using PostgresStudio.SampleData;
 
 SampleOptions sample = SampleOptions.Parse(args);
 
@@ -30,6 +31,19 @@ string? connectionString = builder.Configuration.GetConnectionString("Marten");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     connectionString = await EphemeralPostgres.StartAsync();
+}
+
+// Also before AddMarten, and before anything else touches the database: a reused container can hold what another
+// build of the sample seeded, in tables Marten cannot migrate over their rows. The throwaway container, or a database
+// --allow-data-generation names as the demo's, has the demo's schemas dropped and seeded again; any other database is
+// left alone, and the host stops with one line that says what to do.
+if (await SampleDatabaseCheck.PrepareAsync(
+        connectionString,
+        mayReseed: EphemeralPostgres.IsThrowaway(connectionString) || sample.AllowDataGeneration,
+        Console.Out) is { } refusal)
+{
+    await Console.Error.WriteLineAsync(refusal);
+    return 1;
 }
 
 builder.Services
@@ -232,3 +246,5 @@ app.MapGet("/", async (HttpContext context, IAntiforgery antiforgery, IAuthoriza
 }).AllowAnonymous();
 
 await app.RunAsync();
+
+return 0;

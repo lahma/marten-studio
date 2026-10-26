@@ -1,5 +1,6 @@
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Schema;
+using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Database;
 
@@ -63,6 +64,7 @@ internal sealed class DatabaseGate
     private readonly string? sqlConsoleRole;
     private readonly string? storeKey;
     private readonly IReadOnlyDictionary<string, DatabaseStoreAccess> otherStores;
+    private readonly StudioText text;
 
     /// <summary>Builds the gate from what the service has established.</summary>
     /// <param name="storeSchemas">The store's own schemas, declaration order.</param>
@@ -82,6 +84,11 @@ internal sealed class DatabaseGate
     /// What this visitor may know and read of every other registered store, by key. A store missing from it
     /// is shown as the classifier has it.
     /// </param>
+    /// <param name="text">
+    /// The studio's own words for each refusal (<see cref="IStudioSettings.Text" />). <c>DatabaseAccess</c>, the gate's one
+    /// builder, always hands the settings' over; <see langword="null" /> is MartenStudio's, for a test that builds a gate
+    /// by hand.
+    /// </param>
     public DatabaseGate(
         IReadOnlyList<string> storeSchemas,
         IReadOnlyList<CatalogSchema> liveSchemas,
@@ -93,14 +100,18 @@ internal sealed class DatabaseGate
         string? sqlConsoleRole = null,
         DatabaseRefusal policyRefusal = DatabaseRefusal.WritePolicy,
         string? storeKey = null,
-        IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null)
+        IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null,
+        StudioText? text = null)
     {
         ArgumentNullException.ThrowIfNull(storeSchemas);
         ArgumentNullException.ThrowIfNull(liveSchemas);
         ArgumentNullException.ThrowIfNull(configuredEntries);
         ArgumentNullException.ThrowIfNull(classifier);
 
+        text ??= StudioText.Marten;
+
         Classifier = classifier;
+        this.text = text;
         this.configuredEntries = configuredEntries;
         this.sqlConsoleRole = sqlConsoleRole;
         this.storeKey = storeKey;
@@ -108,13 +119,13 @@ internal sealed class DatabaseGate
         this.storeSchemas = new HashSet<string>(storeSchemas, StringComparer.Ordinal);
 
         (closedBy, closedDenial) = readOnly
-            ? (DatabaseRefusal.ReadOnly, ReadOnlyDenial)
+            ? (DatabaseRefusal.ReadOnly, text.BrowseReadOnlyDenial)
             : !capabilityEnabled
-                ? (DatabaseRefusal.CapabilityOff, CapabilityDenial)
+                ? (DatabaseRefusal.CapabilityOff, text.BrowseCapabilityDenial)
                 : authorized != true
                     ? policyRefusal == DatabaseRefusal.StorePolicy
-                        ? (DatabaseRefusal.StorePolicy, StorePolicyDenial)
-                        : (DatabaseRefusal.WritePolicy, WritePolicyDenial)
+                        ? (DatabaseRefusal.StorePolicy, text.BrowseStorePolicyDenial)
+                        : (DatabaseRefusal.WritePolicy, text.BrowseWritePolicyDenial)
                     : (DatabaseRefusal.None, null);
 
         browsable = closedBy == DatabaseRefusal.None
@@ -149,7 +160,7 @@ internal sealed class DatabaseGate
 
         string? stateDenial = closedBy != DatabaseRefusal.None
             ? closedDenial
-            : configuredEntries.Count == 0 ? EmptyListDenial : null;
+            : configuredEntries.Count == 0 ? text.BrowseEmptyListDenial : null;
 
         State = new DatabaseAccessState(
             capabilityEnabled && !readOnly,
@@ -163,24 +174,28 @@ internal sealed class DatabaseGate
             stateDenial);
     }
 
-    /// <summary>What <c>ReadOnly</c> says.</summary>
+    /// <summary>What <c>ReadOnly</c> says in MartenStudio (<see cref="StudioText.BrowseReadOnlyDenial" />).</summary>
     public const string ReadOnlyDenial =
         "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.BrowseDatabase off " +
         "with every other capability.";
 
-    /// <summary>What a capability that is off says.</summary>
+    /// <summary>What a capability that is off says in MartenStudio (<see cref="StudioText.BrowseCapabilityDenial" />).</summary>
     public const string CapabilityDenial =
         "Other schemas, and the rows and definitions of objects Marten does not own, need " +
         "MartenStudioOptions.Capabilities.BrowseDatabase.";
 
-    /// <summary>What the write policy's refusal says: the account, and the policy that answered for it.</summary>
+    /// <summary>
+    /// What the write policy's refusal says in MartenStudio: the account, and the policy that answered for it
+    /// (<see cref="StudioText.BrowseWritePolicyDenial" />).
+    /// </summary>
     public const string WritePolicyDenial =
         "Your account may not browse the database here. The write policy (MartenStudioOptions." +
         "WriteAuthorizationPolicy, or StoreAuthorizationPolicy when no write policy is set) refused " +
         "BrowseDatabase for this store and database as a whole, with no tenant selected.";
 
     /// <summary>
-    /// What the store policy's refusal says: asked first, for the database as a whole, before the write
+    /// What the store policy's refusal says in MartenStudio (<see cref="StudioText.BrowseStorePolicyDenial" />): asked
+    /// first, for the database as a whole, before the write
     /// policy is asked at all.
     /// </summary>
     public const string StorePolicyDenial =
@@ -219,7 +234,10 @@ internal sealed class DatabaseGate
         "This view reads a table some of whose rows are stored in a partition or child table in a schema you " +
         "cannot see, so its rows are not shown.";
 
-    /// <summary>What a view that reads one of Marten's own tables says about its rows.</summary>
+    /// <summary>
+    /// What a view that reads one of Marten's own tables says about its rows in MartenStudio
+    /// (<see cref="StudioText.MartenDependencyDenial" />).
+    /// </summary>
     public const string MartenDependencyDenial =
         "This view reads one of Marten's own tables - a document or event table, or Marten's bookkeeping - " +
         "whose rows are never read raw: open them in Documents or Events, where tenancy, soft delete and the " +
@@ -252,7 +270,7 @@ internal sealed class DatabaseGate
         "or StoreAuthorizationPolicy when no write policy is set) refused BrowseDatabase for that store, with " +
         "no tenant selected.";
 
-    /// <summary>What an empty <c>BrowsableSchemas</c> says.</summary>
+    /// <summary>What an empty <c>BrowsableSchemas</c> says in MartenStudio (<see cref="StudioText.BrowseEmptyListDenial" />).</summary>
     public const string EmptyListDenial =
         "MartenStudioOptions.BrowsableSchemas is empty, so no schema's non-Marten rows or definitions are " +
         "browsable. List the schema names, or \"*\".";
@@ -445,20 +463,28 @@ internal sealed class DatabaseGate
             return DatabaseRowAccess.Granted;
         }
 
-        return DatabaseRowAccess.Refused(DatabaseRefusal.SchemaNotBrowsable, SchemaDenial(schema, configuredEntries));
+        return DatabaseRowAccess.Refused(DatabaseRefusal.SchemaNotBrowsable, SchemaDenial(schema, configuredEntries, text));
     }
 
     /// <summary>Whether this visitor may read the definition of an object in <paramref name="schema" />.</summary>
     /// <remarks>
     /// Marten's own objects in the store's own schemas are what the Schema screen already shows; anything
-    /// else is the host's code, and reading it is a <c>BrowseDatabase</c> read.
+    /// else is the host's code, and reading it is a <c>BrowseDatabase</c> read. The exemption needs a registered
+    /// store (<see cref="ExemptsMartensOwnDefinitions" />): a studio over plain data sources has no Schema screen, and an
+    /// object only named like Marten's is gated like every other definition there.
     /// </remarks>
     public DatabaseRowAccess DefinitionAccess(string schema, DatabaseObjectOwnership ownership)
     {
         ArgumentNullException.ThrowIfNull(ownership);
 
-        return IsStoreSchema(schema) && ownership.IsMarten ? DatabaseRowAccess.Granted : DataAccess(schema);
+        return ExemptsMartensOwnDefinitions && IsStoreSchema(schema) && ownership.IsMarten ? DatabaseRowAccess.Granted : DataAccess(schema);
     }
+
+    /// <summary>
+    /// Whether Marten's own definitions in the source's own schemas are structure, free without the capability: only
+    /// where a registered store declares them, whose Schema screen shows them anyway.
+    /// </summary>
+    public bool ExemptsMartensOwnDefinitions => Classifier.Stores.Count > 0;
 
     /// <summary>Whether this visitor may read <paramref name="relation" />'s rows, and the sentence when not.</summary>
     /// <param name="relation">The relation, as the catalog has it.</param>
@@ -607,8 +633,8 @@ internal sealed class DatabaseGate
             return DatabaseRowAccess.Refused(
                 DatabaseRefusal.NoPrivilege,
                 sqlConsoleRole is null
-                    ? "The store's Postgres role has no SELECT privilege on it."
-                    : "The role '" + sqlConsoleRole + "' (MartenStudioOptions.SqlConsoleRole) has no SELECT " +
+                    ? text.NoSelectPrivilege
+                    : "The role '" + sqlConsoleRole + "' (" + text.OptionName("SqlConsoleRole") + ") has no SELECT " +
                       "privilege on it.");
         }
 
@@ -665,7 +691,7 @@ internal sealed class DatabaseGate
             if (Classifier.ClassifyRelation(read.Schema, read.Name) is
                 { Owner: DatabaseObjectOwner.MartenDocument or DatabaseObjectOwner.MartenEventStore or DatabaseObjectOwner.MartenInfrastructure })
             {
-                return DatabaseRowAccess.Refused(DatabaseRefusal.MartenOwned, MartenDependencyDenial);
+                return DatabaseRowAccess.Refused(DatabaseRefusal.MartenOwned, text.MartenDependencyDenial);
             }
         }
 
@@ -753,16 +779,18 @@ internal sealed class DatabaseGate
     /// <remarks>
     /// Said the same way whether or not the schema exists, so the sentence tells nobody what is there.
     /// </remarks>
-    internal static string SchemaDenial(string schema, IReadOnlyList<string> configuredEntries)
+    internal static string SchemaDenial(string schema, IReadOnlyList<string> configuredEntries, StudioText text)
     {
+        ArgumentNullException.ThrowIfNull(text);
+
         if (BrowsableSchemaMatcher.IsSystemSchema(schema))
         {
             return "'" + schema + "' is a system schema, which the database browser never reads.";
         }
 
         return configuredEntries.Count == 0
-            ? EmptyListDenial
-            : "Schema '" + schema + "' is not one MartenStudioOptions.BrowsableSchemas admits (it must be " +
+            ? text.BrowseEmptyListDenial
+            : "Schema '" + schema + "' is not one " + text.OptionName("BrowsableSchemas") + " admits (it must be " +
               "listed by exact name, or \"*\" must be listed and the studio's role must have USAGE on it).";
     }
 }

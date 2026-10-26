@@ -303,7 +303,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
 
                 // One statement's plan is that statement's evidence, not the check's failure: the others are still judged.
                 context.Services.GetService<ILoggerFactory>()?.CreateLogger<ExpensiveStatementsCheck>()
-                    .StatementPlanFailed(exception, statement.QueryId, context.StoreKey, context.DatabaseId, exception.SqlState);
+                    .StatementPlanFailed(context.Settings.Text.Product, exception, statement.QueryId, context.StoreKey, context.DatabaseId, exception.SqlState);
 
                 return new StatementPlan(statement.QueryId, [], "Not planned: Postgres refused the plan (SQLSTATE " + exception.SqlState + ")"
                     + exception.SqlState switch
@@ -379,7 +379,7 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         catch (Exception exception)
         {
             context.Services.GetService<ILoggerFactory>()?.CreateLogger<ExpensiveStatementsCheck>()
-                .StatementPlanNotTakenBack(exception, queryId, context.StoreKey, context.DatabaseId, HealthStatementQueries.PlanStatementName);
+                .StatementPlanNotTakenBack(context.Settings.Text.Product, exception, queryId, context.StoreKey, context.DatabaseId, HealthStatementQueries.PlanStatementName);
         }
     }
 

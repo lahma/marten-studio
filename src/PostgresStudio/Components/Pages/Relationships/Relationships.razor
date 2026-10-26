@@ -36,7 +36,15 @@
         <h1 class="ms-page-title">Relationships</h1>
     </div>
 
-    @if (graph.Tables.Count > 0)
+    @if (Settings.Text.Product != StudioProduct.MartenStudio)
+    {
+        @* A studio over plain data sources declares no key of its own: what is drawn is what Postgres has. *@
+        <p class="ms-schema-note">
+            Every foreign key between the tables of this database that you may see, as Postgres has them. Counts
+            are <code>pg_class</code> estimates; nothing on this screen writes anything.
+        </p>
+    }
+    else if (graph.Tables.Count > 0)
     {
         <p class="ms-schema-note">
             Every foreign key between this store's document types, as <code>StoreOptions</code> declares them

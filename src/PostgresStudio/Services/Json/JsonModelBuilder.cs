@@ -240,7 +240,7 @@ internal static class JsonModelBuilder
             int nodeIndex,
             string path,
             string jsonPath,
-            string pg,
+            string? pg,
             JsonModelOptions modelOptions)
         {
             var kind = element.ValueKind;
@@ -490,7 +490,7 @@ internal static class JsonModelBuilder
         public int ChildCount;
         public string Path;
         public string JsonPath;
-        public string Pg;
+        public string? Pg;
         public JsonElement Element;
     }
 }

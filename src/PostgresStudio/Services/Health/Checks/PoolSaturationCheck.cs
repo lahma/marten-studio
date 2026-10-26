@@ -23,6 +23,12 @@ internal sealed record PoolFacts(
     int PoolsInProcess,
     DateTimeOffset ReadAt)
 {
+    /// <summary>
+    /// The Npgsql instruments the pool was read from, which the caveat names: Npgsql 8 and 9's unless the process's
+    /// Npgsql published 10's.
+    /// </summary>
+    public NpgsqlPoolInstruments Instruments { get; init; } = NpgsqlPoolInstruments.UpToNpgsql9;
+
     /// <summary>The ceiling the pool is judged against.</summary>
     public int Max => ReportedMax is > 0 ? ReportedMax.Value : ConfiguredMax;
 
@@ -36,16 +42,19 @@ internal sealed record PoolFacts(
 /// </summary>
 /// <remarks>
 /// <para>
-/// Tier 0: no SQL. <see cref="SessionPoolObserver" /> listens to Npgsql's two observable pool instruments for
-/// as long as this gatherer holds a lease, and reads them once. Synchronous instruments are never enabled, so
-/// nothing is recorded per command - which is also why "pending requests" is not read: Npgsql 9.0.4 keeps that
+/// Tier 0: no SQL. <see cref="SessionPoolObserver" /> listens to Npgsql's two observable pool instruments - by
+/// either of their names, Npgsql 8 and 9's or Npgsql 10's (<see cref="NpgsqlPoolInstruments" />) - for as long as
+/// this gatherer holds a lease, and reads them once. Synchronous instruments are never enabled, so nothing is
+/// recorded per command - which is also why "pending requests" is not read: Npgsql 9.0.4 and 10.0.3 both keep that
 /// one as a synchronous counter. A pool lent out to its ceiling on two consecutive samples is the same
 /// condition seen from the other side: every request that wants a connection then is waiting.
 /// </para>
 /// <para>
-/// The pool is matched to the database by Npgsql's <c>pool.name</c> tag, which is the data source's connection
-/// string unless the host named the data source; a named one cannot be matched, and the check says so
-/// (<see cref="HealthCheckUnavailableException" />) rather than guessing.
+/// The pool is matched to the database by Npgsql's pool name tag (<c>pool.name</c>, from Npgsql 10
+/// <c>db.client.connection.pool.name</c>), which is the data source's connection string unless the host named the
+/// data source; a named one cannot be matched, and the check says so (<see cref="HealthCheckUnavailableException" />)
+/// rather than guessing. The caveat names the instruments that were read, so a host on Npgsql 9 reads what it always
+/// has.
 /// </para>
 /// </remarks>
 [HealthCheck("C01", HealthArea.Connections, HealthCostTier.InProcess, "Connection pool saturated")]
@@ -96,7 +105,10 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
                 + "Application Name of their own, tells them apart.");
         }
 
-        return Task.FromResult(new PoolFacts(true, settings.MaxPoolSize, mine.Used, mine.Idle, mine.Max, pools.Count, context.Now));
+        return Task.FromResult(new PoolFacts(true, settings.MaxPoolSize, mine.Used, mine.Idle, mine.Max, pools.Count, context.Now)
+        {
+            Instruments = mine.Instruments,
+        });
     }
 
     /// <inheritdoc />
@@ -188,7 +200,7 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
                 + "disposed) than a ceiling that is too low.",
             Evidence = evidence,
             Caveat =
-                "Read in this process from Npgsql's own pool counters (db.client.connections.usage and db.client.connections.max) at "
+                "Read in this process from Npgsql's own pool counters (" + facts.Instruments.Usage + " and " + facts.Instruments.Max + ") at "
                 + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture) + ", including the studio's own connection while it "
                 + "checks. Other processes on this database have pools of their own, which this does not see. Npgsql counts waiting "
                 + "requests only per request, which the studio never listens to, so \"fully in use\" is read from the pool reaching its "

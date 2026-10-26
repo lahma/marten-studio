@@ -2,6 +2,7 @@ using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Schema;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -40,6 +41,13 @@ internal enum IndexOrigin
     /// apply drops it, and only whoever owns the schema changes it.
     /// </summary>
     Host,
+
+    /// <summary>
+    /// One on a table a Marten store manages that this studio has no configuration of - an <c>mt_</c> table seen by a
+    /// studio over plain data sources. That store's next apply decides it, so it is changed in that store's
+    /// <c>StoreOptions</c>, never by a migration here.
+    /// </summary>
+    StoreManaged,
 }
 
 /// <summary>One judged table and what the catalog read about it.</summary>
@@ -139,6 +147,30 @@ internal static class HealthTables
 
     /// <summary>What a status row says when the studio registered no table source.</summary>
     internal const string NoSource = "This studio registers no table source, so no table is judged.";
+
+    /// <summary>
+    /// <paramref name="verdict" /> with what the judged set left out said in it - every finding's caveat and the status
+    /// note end with "Judged: the 2,000 largest of 3,412 tables by estimated size …" - so that a capped set's quiet is
+    /// never read as a clean bill for the tables it did not judge (design R5). The sweep applies it to every check of
+    /// the Tables area; with no <paramref name="coverage" />, the set is every table, and nothing is added.
+    /// </summary>
+    /// <param name="verdict">A Tables-area check's verdict.</param>
+    /// <param name="coverage">The set's <see cref="IStudioTableSet.Coverage" />.</param>
+    public static HealthVerdict WithCoverage(HealthVerdict verdict, string? coverage)
+    {
+        ArgumentNullException.ThrowIfNull(verdict);
+
+        if (string.IsNullOrWhiteSpace(coverage))
+        {
+            return verdict;
+        }
+
+        string sentence = "Judged: " + coverage + ".";
+
+        return new HealthVerdict(
+            [.. verdict.Findings.Select(finding => finding with { Caveat = finding.Caveat is { Length: > 0 } caveat ? caveat + " " + sentence : sentence })],
+            verdict.Note is { Length: > 0 } note ? note + " " + sentence : sentence);
+    }
 
     /// <summary>The tables the sweep judges, built once per sweep by the studio's source.</summary>
     /// <exception cref="HealthCheckUnavailableException">The studio registered no <see cref="IHealthTableSource" />.</exception>
@@ -396,9 +428,14 @@ internal static class Autovacuum
     }
 
     /// <summary>The sentence about the table's autovacuum state that a finding's "why" ends with, or nothing.</summary>
-    public static string State(TableFacts table, string parameter, string value)
+    /// <param name="table">The table.</param>
+    /// <param name="parameter">The scale factor's storage parameter.</param>
+    /// <param name="value">Its suggested value.</param>
+    /// <param name="text">The studio's words (<see cref="HealthEvaluation.Text" />): where a Marten table's partitions are compared.</param>
+    public static string State(TableFacts table, string parameter, string value, StudioText text)
     {
         ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(text);
 
         if (!table.Row.AutovacuumEnabled)
         {
@@ -425,9 +462,16 @@ internal static class Autovacuum
             };
         }
 
+        // Where a person sees which parameters differ: the catalog for a relational table, which no Schema screen describes,
+        // and for a Marten table the studio's own words - MartenStudio's Schema screen, or, in a studio over plain data
+        // sources, Marten Studio's over the store whose StoreOptions declare the table.
         string partly = table.Row.DifferingStorageOptions.Contains("autovacuum_enabled", StringComparer.OrdinalIgnoreCase)
             ? " Its partitions do not all have the same autovacuum_enabled setting, so autovacuum may be switched off for some "
-              + "of them (the Schema screen's Tables tab shows which parameters the partitions differ on)."
+              + "of them ("
+              + (table.Table.Kind == StudioTableKind.Relational
+                  ? "each partition's pg_class.reloptions says which"
+                  : text.MartenTablePartitionParameters)
+              + ")."
             : string.Empty;
 
         if (table.Table.Kind is StudioTableKind.DocumentTable or StudioTableKind.Relational)

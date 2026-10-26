@@ -124,4 +124,32 @@
            Text="MartenStudio is packed only at the Marten floor ($(MartenStudioMartenFloor)), but the last restore ('$(ProjectAssetsFile)') resolved another Marten - it has no $(_MartenStudioFloorLibraryKey) library. NuGet writes the package's dependency range from that file, so this pack would raise every host's floor. Restore at the floor first: pack without --no-restore and without MartenStudioMartenVersion." />
   </Target>
 
+  <!--
+    MartenStudio depends on exactly its own PostgresStudio: `PostgresStudio [0.5.0]` in the nuspec, not
+    NuGet's default `>= 0.5.0`. The two assemblies are one program split in two files - PostgresStudio
+    grants MartenStudio its internals - so MartenStudio 0.5.0 beside PostgresStudio 0.5.1 is a
+    MissingMethodException on the first internal signature that moved. Measured by PS-0 (2026-10-20, SDK
+    10.0.402): with this target the nuspec says version="[1.2.3]", without it version="1.2.3".
+
+    How: GenerateNuspec hands PackTask @(_ProjectReferencesWithVersions), which _GetProjectReferenceVersions
+    fills with each referenced project's $(PackageVersion) as ProjectVersion metadata, and PackTask reads
+    that metadata as a version RANGE. Bracketing it after that target is the whole change. Both names are
+    NuGet-private, so the build's Pack target also asserts the nuspec text: a NuGet that renames them fails
+    the build instead of shipping `>=`. The Error is the second half of the same defence: a pack that finds
+    no PostgresStudio project reference to pin refuses rather than shipping a package with no pin at all.
+
+    A host that ends up with another PostgresStudio anyway - a central PackageVersion under transitive
+    pinning drops it from the graph with no NuGet diagnostic at all (PS-0) - is stopped at startup by
+    Internal/PostgresStudioVersionGuard.cs.
+  -->
+  <Target Name="MartenStudioPinsPostgresStudioExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'PostgresStudio'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'PostgresStudio'))' == ''"
+           Text="MartenStudio must depend on exactly its own PostgresStudio build, and pack found no PostgresStudio project reference to pin." />
+  </Target>
+
 </Project>

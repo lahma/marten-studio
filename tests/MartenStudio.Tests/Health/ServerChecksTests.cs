@@ -1,3 +1,4 @@
+using PostgresStudio;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 

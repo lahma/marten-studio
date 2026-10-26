@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.AspNetCore.Http;
@@ -35,19 +36,29 @@ internal sealed class StudioState
 
     private readonly IStudioScopeCatalog catalog;
     private readonly ILogger<StudioState> logger;
+    private readonly StudioProduct product;
 
     private string selectedTheme = "system";
     private string selectedTimeZoneId = TimeZoneInfo.Local.Id;
     private long preferenceVersion;
     private bool initialized;
 
+    /// <param name="catalog">The sources, databases and tenants this visitor may see.</param>
+    /// <param name="logger">Where a page's failed scope-change handler goes.</param>
+    /// <param name="httpContextAccessor">The request that opened the circuit, for the remembered preferences.</param>
+    /// <param name="settings">
+    /// The studio's settings, whose words that line is logged in - optional so that a test can build the state by hand;
+    /// the container always supplies them (<see cref="StudioText.Of" />).
+    /// </param>
     public StudioState(
         IStudioScopeCatalog catalog,
         ILogger<StudioState> logger,
-        IHttpContextAccessor httpContextAccessor)
+        IHttpContextAccessor httpContextAccessor,
+        IStudioSettings? settings = null)
     {
         this.catalog = catalog;
         this.logger = logger;
+        product = StudioText.Of(settings).Product;
 
         HttpContext? httpContext = httpContextAccessor.HttpContext;
         if (httpContext is null)
@@ -186,9 +197,21 @@ internal sealed class StudioState
     /// carry.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Silently rather than loudly: the values arrive from a <c>change</c> event, and a browser that names
     /// something it was not offered is either a stale tab or someone probing. Neither deserves an error
     /// message that says which of the three was wrong.
+    /// </para>
+    /// <para>
+    /// <b>A database named with a new store is kept</b> when the new store lists it, so a pasted link to another
+    /// store's database reopens that database (D9) rather than the store's first. A name the new store does not list
+    /// falls back to its first database, as any unknown name does; the scope selector names none when the visitor
+    /// picks another store, so picking one always opens its first.
+    /// </para>
+    /// <para>
+    /// <b>A tenant the new listing does not carry</b> falls back to the previous scope's tenant only if the new store and
+    /// database accept that one too; otherwise to all tenants.
+    /// </para>
     /// </remarks>
     public async Task SetScopeAsync(
         string? storeKey,
@@ -208,7 +231,6 @@ internal sealed class StudioState
         if (storeChanged)
         {
             AvailableDatabases = await catalog.ListDatabasesAsync(store.Key, cancellationToken).ConfigureAwait(false);
-            databaseId = null;
         }
 
         string resolvedDatabaseId = PickDatabase(databaseId ?? (storeChanged ? null : previous?.DatabaseId));
@@ -218,9 +240,12 @@ internal sealed class StudioState
             ApplyFacts(await catalog.DescribeAsync(store.Key, resolvedDatabaseId, cancellationToken).ConfigureAwait(false));
         }
 
+        // A tenant the listing does not carry falls back to the previous one only while this store and database still
+        // accept it: after a store or database change the previous tenant is the old scope's, and is checked against the
+        // new listing like any other name - or dropped, as RefreshAsync drops one.
         string? resolvedTenantId = TenantList.IsAcceptable(AvailableTenants, tenantId)
             ? NullIfBlank(tenantId)
-            : NullIfBlank(previous?.TenantId);
+            : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
         await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous).ConfigureAwait(false);
     }
@@ -252,7 +277,14 @@ internal sealed class StudioState
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                logger.LogError(exception, "A Marten Studio page failed to handle a scope change");
+                if (product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogError(exception, "A Postgres Studio page failed to handle a scope change");
+                }
+                else
+                {
+                    logger.LogError(exception, "A Marten Studio page failed to handle a scope change");
+                }
             }
         }
     }

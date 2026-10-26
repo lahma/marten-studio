@@ -44,11 +44,19 @@ public sealed class PostgresFixture : IAsyncLifetime
     /// <summary>The variable that turns container reuse off for one run.</summary>
     public const string ReuseEnvironmentVariable = "MARTENSTUDIO_PG_REUSE";
 
-    private readonly PostgreSqlContainer container = new PostgreSqlBuilder("postgres:17-alpine")
-        .WithReuse(ShouldReuse)
-        .Build();
+    private readonly PostgreSqlContainer container = CreateContainer(ShouldReuse);
 
     private bool started;
+
+    /// <summary>
+    /// The container this fixture starts, built and not started - for <c>EphemeralPostgresReuseTests</c>, which proves the
+    /// Marten sample's throwaway container no longer shares its reuse identity.
+    /// </summary>
+    /// <param name="reuse">Whether to ask for reuse; Testcontainers' reuse hash does not depend on it.</param>
+    internal static PostgreSqlContainer CreateContainer(bool reuse) =>
+        new PostgreSqlBuilder("postgres:17-alpine")
+            .WithReuse(reuse)
+            .Build();
 
     /// <summary>
     /// Whether this run shares a container with the ones around it: never on CI, and not when

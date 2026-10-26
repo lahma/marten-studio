@@ -69,7 +69,7 @@ internal sealed class StudioHealthCheck : AspNetCoreHealthCheck
 
             return new AspNetCoreHealthCheckResult(
                 StatusOf(HealthExportLevel.Degraded, failureStatus),
-                description: "Marten Studio could not check: " + exception.GetType().Name + ", logged as event 9270.");
+                description: runner.Text.ProductName + " could not check: " + exception.GetType().Name + ", logged as event 9270.");
         }
     }
 

@@ -78,7 +78,7 @@ internal sealed class DatabaseBrowserConfigurationNotice : IHostedLifecycleServi
 
             if (ShouldWarn(settings) && Interlocked.Exchange(ref logged, 1) == 0)
             {
-                logger.DatabaseBrowserOpenToEverySchemaWithoutRole();
+                logger.DatabaseBrowserOpenToEverySchemaWithoutRole(settings.Text.Product);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

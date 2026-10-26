@@ -274,6 +274,20 @@ public class JsonModelBuilderTests
     }
 
     [Fact]
+    public void A_member_whose_name_would_not_read_as_itself_has_no_Postgres_expression_and_nor_has_anything_below_it()
+    {
+        // "bad\nkey" in the document, a line break inside the member name.
+        var model = JsonModelBuilder.Build("""{"ok":{"bad\nkey":{"inner":1},"fine":"a\\b"},"top":2}""");
+
+        NodeFor(model, "ok").PgExpression.Should().Be("data -> 'ok'");
+        NodeFor(model, "bad\nkey").PgExpression.Should().BeNull("a line break in a copied literal reads as two lines");
+        NodeFor(model, "inner").PgExpression.Should().BeNull("the path to it runs through that member");
+        NodeFor(model, "fine").PgExpression.Should().Be("data -> 'ok' ->> 'fine'");
+        NodeFor(model, "top").PgExpression.Should().Be("data ->> 'top'");
+        NodeFor(model, "inner").JsonPath.Should().NotBeEmpty("only the SQL forms are withheld");
+    }
+
+    [Fact]
     public void The_column_the_expressions_start_from_is_configurable()
     {
         var model = JsonModelBuilder.Build("""{"a":1}""", column: "d.data");

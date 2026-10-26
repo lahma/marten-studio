@@ -7,6 +7,7 @@ using Marten;
 using PostgresStudio.Components.Pages.Database;
 using MartenStudio.Services;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Support;
 
@@ -466,7 +467,7 @@ public class DatabaseObjectsPageTests
         await Expander(page, "host_fn").ClickAsync(new MouseEventArgs());
 
         page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
-            .Should().Be(DatabaseGate.SchemaDenial(FakeDatabaseObjects.StoreSchema, [FakeDatabaseObjects.Legacy, FakeDatabaseObjects.Quartz]));
+            .Should().Be(DatabaseGate.SchemaDenial(FakeDatabaseObjects.StoreSchema, [FakeDatabaseObjects.Legacy, FakeDatabaseObjects.Quartz], StudioText.Marten));
         context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
     }
 
@@ -729,7 +730,7 @@ public class DatabaseObjectsPageTests
     public void A_schema_the_gate_refuses_is_a_neutral_message_with_a_way_back()
     {
         using var context = DatabasePageData.Context();
-        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz"]);
+        string sentence = DatabaseGate.SchemaDenial("secret", ["quartz"], StudioText.Marten);
         context.DatabaseObjects.List = DatabaseObjectList.Refused(
             new DatabaseObjectQuery(DatabaseObjectCategory.Tables, "secret"), DatabaseRefusal.SchemaNotBrowsable, sentence);
 

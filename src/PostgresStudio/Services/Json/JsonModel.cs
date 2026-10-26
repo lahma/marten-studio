@@ -63,7 +63,11 @@ internal enum JsonSemanticKind
 /// <param name="ChildCount">Number of children.</param>
 /// <param name="Path">The dotted path used for display and CLR resolution, for example <c>address.city</c> or <c>items[0].sku</c>.</param>
 /// <param name="JsonPath">The JSONPath expression, for example <c>$.address.city</c>.</param>
-/// <param name="PgExpression">The Postgres expression that yields this node, for example <c>data -&gt; 'address' -&gt;&gt; 'city'</c>.</param>
+/// <param name="PgExpression">
+/// The Postgres expression that yields this node, for example <c>data -&gt; 'address' -&gt;&gt; 'city'</c> - or
+/// <see langword="null" /> when a member name on the way would not print as itself (a NUL, a tab, a line break, a
+/// control or format character), so the copy menu offers none (<see cref="JsonPathExpressions.QuoteLiteral" />).
+/// </param>
 internal readonly record struct JsonViewNode(
     int Id,
     int ParentId,
@@ -78,7 +82,7 @@ internal readonly record struct JsonViewNode(
     int ChildCount,
     string Path,
     string JsonPath,
-    string PgExpression)
+    string? PgExpression)
 {
     /// <summary>Whether this node is an object or an array.</summary>
     public bool IsContainer => Kind is JsonValueKind.Object or JsonValueKind.Array;

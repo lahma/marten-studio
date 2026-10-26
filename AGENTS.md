@@ -74,7 +74,11 @@ model, the phased delivery plan — lives in the approved plan at
    three static classes, two classes and one record; anything else appearing in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt` is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
-   what moved and why, then accept the baseline.
+   what moved and why, then accept the baseline. PostgresStudio's public surface is its own six registration types
+   (three static classes, two classes, one record) and six inbound types (`IPostgresDatabaseSource`,
+   `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`, `PostgresServerInfo`,
+   `PostgresPlatformKind`), snapshot-tested in `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt`
+   under the same rule.
 8. **`.gitignore` must never contain a bare `build` rule.** The Fallout orchestrator lives in `build/`,
    and a stock Visual Studio .gitignore silently untracks the whole thing.
 9. **LF line endings everywhere** (`.gitattributes` enforces it), UTF-8 without BOM.
@@ -573,7 +577,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 |---|---|---|---|
 | `src/MartenStudio` | `Marten` | `9.39.0` (latest tested `9.54.1`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. 9.39.0 is a **security** floor: it fixes GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, and the code itself still needs nothing above 9.31.0 (bisected 2026-09-19; see *Package budget changes*, 2026-10-15). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`; the package is packed only at the floor. JasperFx / JasperFx.Events 2.74.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.33.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
 | `src/PostgresStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it reaches a MartenStudio host through MartenStudio's `ProjectReference` to PostgresStudio (two hops, measured by PS-0, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. |
-| `src/PostgresStudio` | `Npgsql` | `9.0.4` (floor to be measured, PS-7) | The shared studio's database driver: PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). |
+| `src/PostgresStudio` | `Npgsql` | `8.0.3` (latest tested `10.0.3`) | The shared studio's database driver: PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin, measured by PS-7 (*Package budget changes* 2026-10-26); a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`). |
 | `samples/`, `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container the integration suite runs against. |
 | both test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | both test projects | `xunit.v3` | `3.2.2` | Held — see below. |
@@ -1001,6 +1005,42 @@ Behavioural differences between 9.51.0 and 9.54.1, read from the source at `v9.5
 
 **Exit condition:** unchanged.
 
+**2026-10-26 — PostgresStudio's `Npgsql` floor moves *down*, from the `9.0.4` placeholder to `8.0.3`.** PS-7 measured it
+as the 2026-09-19 entry measured Marten's. At each candidate it ran four gates over `postgres-studio.slnf`, with
+`-p:PostgresStudioNpgsqlVersion=<v>` on every command:
+
+- `dotnet restore` with `TreatWarningsAsErrors`, confirming `"Npgsql/<v>"` in `src/PostgresStudio/obj/project.assets.json`;
+- `dotnet build`;
+- `tests/PostgresStudio.Tests`;
+- `tests/PostgresStudio.Integration.Tests`, with `MARTENSTUDIO_PG_REUSE=false`.
+
+The base was `a46e257c`.
+
+| Npgsql | restore | build | fast | live | pool instruments |
+|---|---|---|---|---|---|
+| **8.0.3** | 0 NU warnings | 0 warnings | 332 of 332 | 72 of 72, no skips | read (`NpgsqlPoolLiveTests`) |
+| 7.0.7 | 0 NU warnings | 0 warnings | 3 failed | 1 failed | absent |
+| 10.0.3 (latest tested) | 0 NU warnings | 0 warnings | 332 of 332 | 72 of 72, no skips | read |
+
+There are two walls, and each is a reason no lower floor is reachable:
+
+- **7.x has no `db.client.connections.usage`/`.max` instruments.** Npgsql reported its pool through EventCounters
+  before 8.0, so at 7.0.7 the pool observer finds no pool. Three `NpgsqlPoolInstrumentsTests` fail, and so does
+  `NpgsqlPoolLiveTests.The_Sessions_pool_panel_and_C01_read_a_real_pool`: C01 reports "This database's Npgsql pool is
+  not among the pools Npgsql reports in this process", and Sessions' pool panel is empty. Everything else passes at
+  7.0.7, so the pool reading is the one member the studio needs from 8.0.
+- **8.0.0 through 8.0.2 carry CVE-2024-32655** (GHSA-x9vc-6hfv-hg8c, fixed in 8.0.3), so they were not taken as
+  candidates. A package should not set its floor on a vulnerable driver.
+
+Nothing changes for a MartenStudio host. Marten's floor resolves Npgsql 9.0.4 through Weasel.Postgresql, and NuGet takes
+the higher of that and PostgresStudio's `>= 8.0.3`; `NpgsqlVersionTests` keeps the floor at or below what the Marten
+floor resolves. A host without Marten may now stay on Npgsql 8.0.3 or later. Of 8.0.3 against 10.0.3, the live suite
+takes 21.6 s against 28.8 s, so the latest leg costs CI little.
+
+**Exit condition:** raise the floor when a member the studio needs is absent below the new value, or when a published
+advisory makes restore at the floor fail (`NU1901`-`NU1904`), and say here which. Bump `PostgresStudioNpgsqlLatest` in a
+pull request of its own, with both PostgresStudio suites green at it.
+
 **Held deliberately, and not stale.**
 
 - `xunit.v3` / `xunit.runner.visualstudio` stay at **3.2.2 / 3.1.5** because xunit.v3 4.0.0 drops
@@ -1066,16 +1106,45 @@ src/MartenStudio/Components/             MartenStudioApp (the root component) an
 src/MartenStudio/Internal/               the duplicated-field enumeration, and the Marten SQL builders below
 src/MartenStudio/Services/               store registry, scope resolver, tenant discovery, the source provider,
                                          descriptor, settings and links, and the bridges onto the shared seams
-samples/                                 Demo host and demo domain; never packed
+samples/                                 Demo hosts and their demo data; never packed
 samples/MartenStudio.Sample/             The sample ASP.NET Core host (D18) - README snippet regions
 samples/MartenStudio.SampleDomain/       The demo domain, shared with the integration tests; deliberately
                                          does NOT reference MartenStudio (D17)
+samples/PostgresStudio.SampleData/       The demo data with no Marten in it, shared by both samples and the integration
+                                         tests: Quartz.NET's job store (vendored, Apache-2.0), the "legacy" catalog
+                                         edge-case schema, studio_sample.app_settings, and the tenant databases with
+                                         their directory - all idempotent. References no studio (D17)
+samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), no Marten: an admin database and three
+                                         tenant databases through its own IPostgresDatabaseSource - README snippet regions
+samples/PostgresStudio.Sample/Auth/      Cookie auth, the three demo users, the studio policy and the per-capability one
+samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5211
 tests/                                   Both test projects match *.Tests, so one Test run covers both
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
+src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the source provider over the application's NpgsqlDataSources
+                                         and host database sources, settings, descriptor, the Overview's server read, and
+                                         the seams' plain-Postgres implementations (declarations, tables, remedies, locks, links)
+tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
+tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests
+tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
+tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
+tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
+tests/PostgresStudio.Tests/Support/      PostgresStudio's own test doubles (the shared ones are linked from MartenStudio.Tests)
+tests/PostgresStudio.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
+tests/PostgresStudio.Integration.Tests/  PostgresStudio's live suite: Testcontainers Postgres under a reuse label of its own
+                                         (never the Marten suite's container) + Playwright. Needs Docker; no Marten
+tests/PostgresStudio.Integration.Tests/Browser/  Playwright over samples/PostgresStudio.Sample on real Kestrel: six
+                                         scenarios, the D19 gate, and the zero-config start
+tests/PostgresStudio.Integration.Tests/Database/  Live Postgres: first navigation writes nothing, the D27 gate and its
+                                         audit, Sessions, the pool panel at both Npgsql majors, the sample's tenant databases
+tests/PostgresStudio.Integration.Tests/Health/  Live Postgres: the table checks fire and stay quiet over the
+                                         whole-database table source, and the export over a host source past its budget
+tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console example runs
+tests/PostgresStudio.Integration.Tests/Sources/  Live Postgres: discovery, and isolation between a host source's
+                                         databases through every cache
 src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
                                          Postgres identifier becomes SQL text (hard rule 4)
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
@@ -1136,9 +1205,6 @@ tests/MartenStudio.Tests/Query/            Composer, guard, export, saved querie
 tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
 samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
                                          truncation, the word lists and the run marker
-samples/MartenStudio.SampleDomain/Relational/  Non-Marten demo schemas beside the store: Quartz.NET's job
-                                         store (vendored, Apache-2.0), the "legacy" catalog edge-case
-                                         schema, studio_sample.app_settings, and their idempotent seeding
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag; and the
                                          "make it unhealthy" switches, their board, endpoints and panel
 tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in; the

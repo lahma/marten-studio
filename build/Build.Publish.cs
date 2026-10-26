@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.IO.Compression;
+using System.Linq;
 using System.Net.Http;
+using System.Xml.Linq;
 
 using Fallout.Common;
 using Fallout.Common.CI.GitHubActions;
@@ -14,12 +18,13 @@ using Serilog;
 using static Fallout.Common.Tools.DotNet.DotNetTasks;
 
 /// <summary>
-/// The NuGet distribution channel (D17): <c>Pack</c> builds the framework-dependent MartenStudio Razor
-/// Class Library package and <c>Publish</c> pushes it to nuget.org with a short-lived API key minted from
-/// the workflow's GitHub OIDC token (trusted publishing - no stored NuGet API key anywhere).
+/// The NuGet distribution channel (D17): <c>Pack</c> builds the two Razor Class Library packages, PostgresStudio
+/// and MartenStudio - which depends on exactly the PostgresStudio packed beside it - and <c>Publish</c> pushes both
+/// to nuget.org with one short-lived API key minted from the workflow's GitHub OIDC token (trusted publishing - no
+/// stored NuGet API key anywhere).
 /// </summary>
 /// <remarks>
-/// nuget.org is the <em>only</em> distribution channel. MartenStudio is a Razor Class Library consumed
+/// nuget.org is the <em>only</em> distribution channel. Each package is a Razor Class Library consumed
 /// through a <c>PackageReference</c>; there are no binaries to run, nothing to download and unpack, and
 /// therefore no assets on the GitHub Release either - <c>ICreateGitHubRelease.AssetFiles</c> in
 /// <c>Build.cs</c> is deliberately empty and the release carries only the changelog notes. There is no
@@ -55,40 +60,90 @@ partial class Build
 
     AbsolutePath PackagesDirectory => ArtifactsDirectory / "packages";
 
+    const string PostgresStudioPackageId = "PostgresStudio";
+    const string MartenStudioPackageId = "MartenStudio";
+
+    /// <summary>
+    /// The two packages a release consists of, in the order they are packed and pushed: PostgresStudio first, because
+    /// MartenStudio depends on exactly it. Pushing in this order means a failed PostgresStudio push stops the run before
+    /// any MartenStudio is uploaded. It does not make the two appear together: nuget.org validates and indexes each
+    /// package on its own, so for a few minutes MartenStudio can be listed while its PostgresStudio is not yet
+    /// restorable, and a host restoring in that window gets NU1102 until it is.
+    /// </summary>
+    AbsolutePath[] ReleasePackages =>
+    [
+        PackagesDirectory / $"{PostgresStudioPackageId}.{Version}.nupkg",
+        PackagesDirectory / $"{MartenStudioPackageId}.{Version}.nupkg",
+    ];
+
     Target Pack => _ => _
-        .Description("Packs the MartenStudio Razor Class Library NuGet package into artifacts/packages")
+        .Description("Packs the PostgresStudio and MartenStudio NuGet packages into artifacts/packages")
         .Produces(PackagesDirectory / "*.nupkg")
         .Executes(() =>
         {
-            // At the Marten floor or not at all (Build.Marten.cs): a package packed against a newer
-            // Marten would depend on that newer Marten and raise every host's floor.
+            // At both floors or not at all (Build.Marten.cs, Build.Npgsql.cs): a package packed against a newer
+            // Marten or Npgsql would depend on it and raise every host's floor.
             AssertPackingAtTheMartenFloor();
+            AssertPackingAtTheNpgsqlFloor();
 
             // Independent of Compile for the same reason PublishAot is: this is a Release build of
-            // one project, and `dotnet pack` of a tool package runs its own publish anyway.
+            // two projects, and `dotnet pack` runs its own build anyway.
             PackagesDirectory.CreateOrCleanDirectory();
 
-            DotNetPack(_ => _
-                .SetProject(StudioProject)
-                .SetConfiguration(Configuration.Release)
-                .SetOutputDirectory(PackagesDirectory)
-                .SetProperty("Version", Version)
-                // Said explicitly, so that MSBuild's environment-as-properties rule cannot pack at
-                // anything else either.
-                .SetProperty(MartenVersionProperty, MartenFloor));
+            // One project at a time, PostgresStudio first, in a plain loop rather than the combinatorial overload
+            // (PLINQ, no order promised): MartenStudio's pack builds PostgresStudio again through its
+            // ProjectReference, and two packs writing one obj/ folder at once is a race.
+            foreach (var project in new[] { PostgresStudioProject, StudioProject })
+            {
+                DotNetPack(_ => _
+                    .SetProject(project)
+                    .SetConfiguration(Configuration.Release)
+                    .SetOutputDirectory(PackagesDirectory)
+                    .SetProperty("Version", Version)
+                    // Both said explicitly, so that MSBuild's environment-as-properties rule cannot pack at
+                    // anything else either.
+                    .SetProperty(MartenVersionProperty, MartenFloor)
+                    .SetProperty(NpgsqlVersionProperty, NpgsqlFloor));
+            }
 
-            var packages = PackagesDirectory.GlobFiles("*.nupkg");
-            Assert.NotEmpty(packages, $"dotnet pack produced no .nupkg in '{PackagesDirectory}'");
+            AssertTheReleasePackagesAndNothingElse();
 
-            foreach (var package in packages)
+            foreach (var package in ReleasePackages)
             {
                 Log.Information("Packed {Package}", package.Name);
             }
 
+            // MartenStudio depends on exactly its own PostgresStudio and on the Marten floor. The exact range comes
+            // from MartenStudioPinsPostgresStudioExactly in MartenStudio.csproj, which works through two NuGet-private
+            // names; this is what turns a NuGet that renamed them into a failed build rather than a shipped `>=`.
+            // The assets pack is there too without MartenStudio referencing it: under transitive pinning NuGet writes
+            // a centrally pinned transitive package (project.assets.json's centralTransitiveDependencyGroups) into the
+            // nuspec - the same line MartenStudio 0.4.0 carried when it referenced the pack directly. Npgsql is not,
+            // because its central row applies only to projects that set PostgresStudioPinsNpgsql.
+            var assetsPack = CentralPackageVersion("Microsoft.AspNetCore.App.Internal.Assets");
+
+            AssertNuspecDependencies(PackagesDirectory / $"{MartenStudioPackageId}.{Version}.nupkg",
+                new Dictionary<string, string>
+                {
+                    ["Marten"] = MartenFloor,
+                    [PostgresStudioPackageId] = $"[{Version}]",
+                    ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
+                });
+
+            // PostgresStudio depends on Npgsql at its floor and on the assets pack that carries blazor.web.js (D22),
+            // and on no part of the Marten family: a host without Marten must not get it through this package.
+            AssertNuspecDependencies(PackagesDirectory / $"{PostgresStudioPackageId}.{Version}.nupkg",
+                new Dictionary<string, string>
+                {
+                    ["Npgsql"] = NpgsqlFloor,
+                    ["Microsoft.AspNetCore.App.Internal.Assets"] = assetsPack,
+                });
+
             ReportSummary(_ => _
                 .AddPair("Version", Version)
                 .AddPair("Marten floor", MartenFloor)
-                .AddPair("Packages", packages.Count.ToString()));
+                .AddPair("Npgsql floor", NpgsqlFloor)
+                .AddPair("Packages", ReleasePackages.Length.ToString()));
         });
 
     Target Publish => _ => _
@@ -99,25 +154,109 @@ partial class Build
         {
             AssertPublishContext();
 
-            var packages = PackagesDirectory.GlobFiles("*.nupkg");
-            Assert.NotEmpty(packages, $"Nothing to publish: no .nupkg in '{PackagesDirectory}'");
+            // Both packages or neither: a MartenStudio on nuget.org whose exact PostgresStudio is not there cannot
+            // be restored by anybody. Checked before the key is minted, so a wrong set wastes nothing that expires.
+            AssertTheReleasePackagesAndNothingElse();
+            var packages = ReleasePackages;
 
             // Minted here rather than in an earlier target or job: the key lives 15-60 minutes and
-            // one OIDC token mints exactly one key.
+            // one OIDC token mints exactly one key - which pushes both packages, in ReleasePackages' order.
             var apiKey = GetTrustedPublishingApiKey();
 
-            DotNetNuGetPush(_ => _
+            // One push per package, in order, and the first failure ends the run: a single DotNetNuGetPush throws
+            // on a non-zero exit, so a PostgresStudio push that fails never reaches MartenStudio's - which would
+            // put on nuget.org a MartenStudio nobody can restore, because it depends on exactly that PostgresStudio.
+            // Deliberately not the combinatorial overload: it runs its items through PLINQ, which promises no order
+            // even at a degree of parallelism of 1, and with completeOnFailure it pushes the rest after a failure.
+            // --skip-duplicate keeps a re-run after a partial failure safe: the package that did land is skipped,
+            // the one that did not is pushed. ReleasePushOrderTests pins all of this.
+            var pushed = 0;
+
+            foreach (var package in packages)
+            {
+                DotNetNuGetPush(_ => _
                     .SetSource(NuGetSource)
                     .SetApiKey(apiKey)
                     .EnableSkipDuplicate()
-                    .CombineWith(packages, (_, v) => _.SetTargetPath(v)),
-                degreeOfParallelism: 1,
-                completeOnFailure: true);
+                    .SetTargetPath(package));
+
+                pushed++;
+                Log.Information("Pushed {Package} ({Pushed} of {Count})", package.Name, pushed, packages.Length);
+            }
 
             ReportSummary(_ => _
-                .AddPair("Pushed", packages.Count.ToString())
+                .AddPair("Pushed", pushed.ToString())
                 .AddPair("Version", Version));
         });
+
+    /// <summary>
+    /// <c>artifacts/packages</c> holds exactly the two release packages at the CHANGELOG version - no third
+    /// package, no stale version left behind, neither one missing.
+    /// </summary>
+    void AssertTheReleasePackagesAndNothingElse()
+    {
+        var found = PackagesDirectory.GlobFiles("*.nupkg").Select(x => x.Name).Order(StringComparer.Ordinal).ToList();
+        var expected = ReleasePackages.Select(x => x.Name).Order(StringComparer.Ordinal).ToList();
+
+        Assert.True(found.SequenceEqual(expected),
+            $"'{PackagesDirectory}' must hold exactly {string.Join(" and ", expected)}; it holds " +
+            $"[{string.Join(", ", found)}]. Run Pack, which packs both at the CHANGELOG version {Version}.");
+    }
+
+    /// <summary>
+    /// The dependencies a packed nuspec declares are exactly <paramref name="expected" /> - each id at exactly that
+    /// version string as NuGet wrote it (<c>9.39.0</c> means <c>&gt;= 9.39.0</c>, <c>[0.5.0]</c> means exactly 0.5.0),
+    /// in every dependency group, and no other id.
+    /// </summary>
+    static void AssertNuspecDependencies(AbsolutePath package, IReadOnlyDictionary<string, string> expected)
+    {
+        Assert.True(package.FileExists(), $"'{package}' does not exist");
+
+        using var archive = ZipFile.OpenRead(package);
+        var entry = archive.Entries.SingleOrDefault(x => !x.FullName.Contains('/') && x.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+            .NotNull($"{package.Name} has no .nuspec at its root");
+
+        XDocument nuspec;
+        using (var stream = entry.Open())
+        {
+            nuspec = XDocument.Load(stream);
+        }
+
+        var groups = nuspec.Descendants().Where(x => x.Name.LocalName == "group" && x.Parent?.Name.LocalName == "dependencies").ToList();
+        Assert.NotEmpty(groups, $"{package.Name}'s nuspec declares no dependency group");
+
+        foreach (var group in groups)
+        {
+            var declared = group.Elements().Where(x => x.Name.LocalName == "dependency")
+                .Select(x => $"{(string) x.Attribute("id")} {(string) x.Attribute("version")}")
+                .Order(StringComparer.Ordinal)
+                .ToList();
+            var wanted = expected.Select(x => $"{x.Key} {x.Value}").Order(StringComparer.Ordinal).ToList();
+            var framework = (string) group.Attribute("targetFramework") ?? "(any)";
+
+            Assert.True(declared.SequenceEqual(wanted),
+                $"{package.Name} ({framework}) must depend on exactly [{string.Join(", ", wanted)}], and its nuspec says " +
+                $"[{string.Join(", ", declared)}]");
+
+            foreach (var line in declared)
+            {
+                Log.Information("{Package} ({Framework}) depends on {Dependency}", package.Name, framework, line);
+            }
+        }
+    }
+
+    /// <summary>A package's version from its <c>PackageVersion</c> row in <c>Directory.Packages.props</c>.</summary>
+    string CentralPackageVersion(string id)
+    {
+        var rows = XDocument.Load(PackagesPropsFile).Descendants()
+            .Where(x => x.Name.LocalName == "PackageVersion" && (string) x.Attribute("Include") == id)
+            .Select(x => (string) x.Attribute("Version"))
+            .ToList();
+
+        Assert.True(rows.Count == 1, $"Directory.Packages.props must have exactly one PackageVersion row for {id}; found {rows.Count}");
+
+        return rows[0];
+    }
 
     /// <summary>
     /// The tag gate. There is exactly one thing a <c>Publish</c> run can legitimately be - a v* tag

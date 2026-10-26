@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The demo data both sample hosts share, with no Marten in it: Quartz.NET's job store and a hand-made "legacy"
+    schema (RelationalDemoSchema), and the Postgres Studio sample's tenant databases (TenantDemo). The Marten sample's
+    domain references it and applies the relational half beside its store; the Postgres Studio sample applies both to
+    a database with no Marten at all. Like MartenStudio.SampleDomain it references no studio (D17): the studios must
+    work against data that knows nothing about them.
+
+    It sets PostgresStudioPinsNpgsql, as every PostgresStudio-only project does, so it restores the Npgsql the
+    PostgresStudio package is pinned to and joins the latest-Npgsql pass over postgres-studio.slnf (AGENTS.md D30).
+  -->
+  <PropertyGroup>
+    <PostgresStudioPinsNpgsql>true</PostgresStudioPinsNpgsql>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" />
+  </ItemGroup>
+
+  <!--
+    The relational demo's scripts, embedded under a fixed logical name, so the resource name does not depend on how
+    the SDK derives one from a folder path.
+  -->
+  <ItemGroup>
+    <None Remove="*.sql" />
+    <EmbeddedResource Include="*.sql" LogicalName="PostgresStudio.SampleData.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

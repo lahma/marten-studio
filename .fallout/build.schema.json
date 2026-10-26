@@ -28,6 +28,7 @@
         "Clean",
         "Compile",
         "CreateGitHubRelease",
+        "NpgsqlPass",
         "Pack",
         "Publish",
         "Restore",
@@ -129,7 +130,11 @@
         },
         "MartenVersion": {
           "type": "string",
-          "description": "The Marten version to restore, compile and test against: 'floor' (the default - the version the package depends on, and the only one Pack packs at), 'latest' (the newest 9.x CI tests, pinned in Directory.Packages.props), or an exact version such as 9.50.2. (env: MARTEN_VERSION)"
+          "description": "The Marten version to restore, compile and test against: 'floor' (the default - the version the package depends on, and the only one Pack packs at), 'latest' (the newest 9.x CI tests, pinned in Directory.Packages.props), or an exact version such as 9.54.1. (env: MARTEN_VERSION)"
+        },
+        "NpgsqlVersion": {
+          "type": "string",
+          "description": "The Npgsql version the PostgresStudio-only projects (postgres-studio.slnf) are tested against: 'floor' (the default - the version the PostgresStudio package depends on, the only one Pack packs at, and the one the whole-solution pass always uses), 'latest' (the newest Npgsql CI tests, pinned in Directory.Packages.props), or an exact version such as 10.0.3. Anything but the floor adds a second restore, build and test pass over postgres-studio.slnf after Test. (env: NPGSQL_VERSION)"
         },
         "NuGetUser": {
           "type": "string",
