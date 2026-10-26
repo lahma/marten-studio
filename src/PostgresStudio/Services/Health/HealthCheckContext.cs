@@ -164,6 +164,15 @@ internal sealed record HealthEvaluation(DateTimeOffset Now, IStudioRuntime Studi
     public IHealthPlanAdvisor? PlanAdvisor { get; init; }
 
     /// <summary>
+    /// The database's statistics window (W5-CAP): since when its counters have counted, and whether they look reset. The sweep
+    /// computes it once, after its gatherers, whenever one of them read its signals (<see cref="StatisticsWindow.ReadingAsync" />),
+    /// and hands it only to an evaluator at or above <see cref="HealthGate.Database" />, the gate its series are written at.
+    /// <see langword="null" /> when no gatherer read it, and in a unit test that does not set it - an evaluator then computes it
+    /// from its own facts and <see cref="History" /> (<see cref="StatisticsWindow.Compute" />).
+    /// </summary>
+    public StatisticsWindow? Statistics { get; init; }
+
+    /// <summary>
     /// The studio's own words for a finding (<see cref="IStudioSettings.Text" />) - an option it names, a remedy that is
     /// code, the tables it judges. The sweep sets it from its settings; there is no default to forget.
     /// </summary>

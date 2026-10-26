@@ -91,6 +91,11 @@ public class StudioTextPinTests
             + "or StoreAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this store and database "
             + "as a whole, with no tenant selected.");
 
+        // W5-CAP's, new in 0.5 rather than moved: pinned so the Storage page's refusal cannot drift either.
+        Marten.StorageStorePolicyDenial.Should().Be(
+            "Your account may not see this database's storage. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            + "refused this store and database as a whole, with no tenant selected: a table's size belongs to no tenant.");
+
         Marten.ExamplesIntro.Should().Be("Built from this store's own aliases and tables. Click one to load it.");
         Marten.ExamplesEmpty.Should().Be("This store has no document type to build an example from.");
         Marten.RelationshipTableKey.Should().Be("A key on a table Marten does not map - enforced by Postgres.");

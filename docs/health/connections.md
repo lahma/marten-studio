@@ -2,8 +2,9 @@
 
 These checks look at who is connected to the store's database and what they hold: this process's connection
 pool (C01, C09), the server's connection budget (C02, C03), sessions and statements that hold things back (C04,
-C05, C06, C07), the database's own counters (C08), and whether a transaction-mode pooler stands between the
-HotCold daemon and its lock (C10). Back to the [index](../health.md).
+C05, C06, C07), the database's own counters (C08), whether a transaction-mode pooler stands between the
+HotCold daemon and its lock (C10), and how much of what the database reads its shared buffers hold (C11). Back to the
+[index](../health.md).
 
 ## What these checks read, and when
 
@@ -275,7 +276,47 @@ From `pg_stat_database`'s counters, as rates over the advisor's history - which 
 - **Info** when statements wrote temporary files: a sort or a hash that did not fit `work_mem`, usually an
   `ORDER BY` on a document field no index covers.
 
-Each finding says when the statistics were last reset.
+And per day, over the statistics window - the same counters, cumulative since the database's statistics began, divided
+by how long they have counted - once that window is at least a day long and the counters do not look reset (see
+[the statistics window](#the-statistics-window) below):
+
+- **Warning** when statements wrote **1 GiB or more of temporary files a day**. It stands on its own: a database that
+  spills this much is told so whether or not it spilled in the last hour, and it takes the place of the hour's Info for
+  the temp files. Under it, the hour's Info stays as it was.
+- A deadlock finding adds the window's **deadlocks per day** to its evidence. Its severity is unchanged: any deadlock in
+  the hour is already a Warning.
+- Nothing per day is said while the window is under a day, or in the check in which the counters first look reset; the
+  status row says how long the window has counted so far.
+
+The kinds of finding are `deadlocks`, `rollbacks` and `temp-files`, as before. Each finding says when the statistics
+were last reset. Both studios run it.
+
+### The statistics window
+
+The one place every rate per day - C08's and C11's, and the Storage page's growth - asks since when this database's
+counters have counted, and whether they were reset:
+
+- **Since** is the latest of `pg_stat_database.stats_reset` and the shared views' `stats_reset` (`pg_stat_bgwriter` up
+  to PostgreSQL 16, `pg_stat_checkpointer` from 17, and `pg_stat_archiver`). From 15, `pg_stat_database.stats_reset`
+  stays null through a crash that zeroes every counter, while the shared views' times move on a crash on 14 and 17
+  alike, so the latest of them is never later than the counters began.
+- **A clean restart is not a reset.** 14 and 15+ keep their statistics across a clean shutdown and start; a crash, an
+  immediate shutdown or a restore discards them. So the server's start (`pg_postmaster_start_time()`) moving counts
+  only together with a counter going down or a reset time moving.
+- **Reset**, for the one check that first sees it, when against the previous check: the timeline went up
+  (`pg_control_checkpoint().timeline_id`; a promotion is read once the new timeline has had a checkpoint), the cluster's
+  system identifier or major version changed (`pg_upgrade`, a restore from a dump), the server restarted without its
+  statistics, a reset time moved, or `xact_commit` or `blks_read` went down. After a failover the window starts at the
+  promoted server's start; after a counter went down with nothing to say when, at the check that saw it.
+- A `pg_stat_reset_shared()` of one view, seen live with this database's counters still climbing, is not a reset of the
+  window. Seen only after the fact - by a process that started since - it is taken as one, which errs towards a
+  shorter window.
+- The page and each finding say where **Since** came from and what the counters' start looks like: the server's start,
+  a reset, a crash, a restore, a failover, a new cluster, or nothing at all.
+
+Known limit: from PostgreSQL 15 a database created after the shared views were last reset reads as having counted
+since then, because its own `stats_reset` is null and no view an unprivileged role can read says when it was created. Its
+rates per day then read low, never high.
 
 ## C09 Async shards against the pool
 
@@ -336,6 +377,22 @@ Never probed for `Solo` (no lock), `ExternallyManaged` (not Marten's lock), a pr
 or a transaction-scoped lock. The two process ids are the studio's own sessions, and still behind
 `ViewDatabaseActivity`. This measures what this process's configuration meets; a daemon node with another
 connection string may not go through the pooler.
+
+## C11 Low cache hit ratio
+
+**Warning** when fewer than **95 %** of the blocks this database read were found in shared buffers
+(`blks_hit / (blks_hit + blks_read)` in `pg_stat_database`) and at least **a million blocks a day** were read from outside
+them - both over [the statistics window](#the-statistics-window), so only once it has counted for a day and does not
+look reset. Until then the status row says how many hours of statistics there are so far, and nothing is found: a ratio
+over an hour after a restart is a cold cache, not a small one.
+
+A block not found in shared buffers is read from the operating system, from its page cache if it is lucky and from
+storage if not, so `blks_read` measures the database's own cache, not the disk's. What helps is more memory for the
+database, or less to hold in it: an index that reads fewer pages, dead rows vacuumed away, data nobody reads any more moved
+out. The finding names no setting and no value: a size derived from the machine's memory is not advice the studio gives.
+
+Its evidence is the ratio, the blocks read a day, both totals, the window and where its start came from. One finding per
+database, with no kinds. Both studios run it; every role can read what it reads.
 
 ## Database › Sessions
 

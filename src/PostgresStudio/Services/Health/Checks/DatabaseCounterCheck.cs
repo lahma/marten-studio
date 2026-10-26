@@ -29,7 +29,14 @@ internal sealed record DatabaseCounterFacts(
     long TempFiles,
     long TempBytes,
     DateTimeOffset? StatsReset,
-    long StudioRollbacks);
+    long StudioRollbacks)
+{
+    /// <summary>
+    /// The sweep's statistics window signals (W5-CAP), for the rates per day - or <see langword="null" /> when they could not
+    /// be read, which leaves the hour's rules as they are.
+    /// </summary>
+    public StatisticsReading? Statistics { get; init; }
+}
 
 /// <summary>C08: deadlocks, a high share of rollbacks, and sorts spilling to disk, over the advisor's history.</summary>
 /// <remarks>
@@ -50,10 +57,20 @@ internal sealed record DatabaseCounterFacts(
 /// A share is judged only over <see cref="ConnectionThresholds.RollbackMinimumTransactions" /> transactions or
 /// more.
 /// </para>
+/// <para>
+/// <b>And per day, over the statistics window</b> (issue #8 G5, W5-CAP). The same counters are cumulative since
+/// <see cref="StatisticsWindow.Since" />, so once the window has counted for a day and does not look reset, they are a rate
+/// too: <see cref="TempBytesPerDayWarning" /> or more of temporary files a day is a Warning of its own - the hour's Info
+/// stays below it - and a deadlock finding adds the window's deadlocks per day to its evidence. Nothing per day is said
+/// while the window is under a day or looks reset.
+/// </para>
 /// </remarks>
 [HealthCheck("C08", HealthArea.Connections, HealthCostTier.Catalog, "Deadlocks, rollbacks and temp spills")]
 internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
 {
+    /// <summary>At least this many bytes of temporary files a day over the statistics window is a Warning (G5): 1 GiB.</summary>
+    internal const long TempBytesPerDayWarning = 1L << 30;
+
     internal const string CommitSeries = "connections.xact-commit";
 
     internal const string RollbackSeries = "connections.xact-rollback";
@@ -95,9 +112,26 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
 
         (long commits, long rollbacks, long deadlocks, long tempFiles, long tempBytes, DateTimeOffset? reset) = rows[0];
 
+        // The window's signals, shared with C11 and read once for the sweep.
+        StatisticsReading? statistics = null;
+
+        try
+        {
+            statistics = await StatisticsWindow.ReadingAsync(context).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A failure there costs only the rates per day: the hour's rules stand on this check's own read, and the window's
+            // failure is C11's row to show, with its reason.
+            statistics = null;
+        }
+
         // Read after the statement, so its own rollback is counted on both samples alike.
         return new DatabaseCounterFacts(
-            context.Now, commits, rollbacks, deadlocks, tempFiles, tempBytes, reset, StudioDatabaseTime.Shared.RollbacksEver(meterKey));
+            context.Now, commits, rollbacks, deadlocks, tempFiles, tempBytes, reset, StudioDatabaseTime.Shared.RollbacksEver(meterKey))
+        {
+            Statistics = statistics,
+        };
     }
 
     /// <inheritdoc />
@@ -124,18 +158,31 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             ? "since the statistics were last reset, at " + reset.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
             : "since the server's statistics began";
 
+        // Per day, over the statistics window (G5): only once it has counted for a day and does not look reset.
+        StatisticsWindow? window = evaluation.Statistics
+            ?? (facts.Statistics is { } reading ? StatisticsWindow.Compute(reading, evaluation.History) : null);
+        PerDay? perDay = window is { CoversADay: true } covered ? new PerDay(covered, facts) : null;
+
         List<HealthSample> run = Run(evaluation.History);
+        List<HealthFinding> findings = [];
+
+        if (perDay is { TempBytes: >= TempBytesPerDayWarning } spilling)
+        {
+            findings.Add(TempWarning(spilling, run, evaluation, since));
+        }
 
         if (run.Count < 2)
         {
-            return HealthVerdict.Quiet(
-                "Watching: deadlocks, rollbacks and temp files are judged as rates, which need two checks one HealthInterval apart "
-                + "while a page is open. Counted " + since + ".");
+            return findings.Count > 0
+                ? new HealthVerdict(findings)
+                : HealthVerdict.Quiet(
+                    "Watching: deadlocks, rollbacks and temp files are judged as rates, which need two checks one HealthInterval apart "
+                    + "while a page is open. Counted " + since + "." + PerDayNote(window, perDay));
         }
 
         HealthSample first = run[0];
         HealthSample last = run[^1];
-        TimeSpan window = last.At - first.At;
+        TimeSpan span = last.At - first.At;
 
         long deadlocks = Delta(first, last, DeadlockSeries);
         long commits = Delta(first, last, CommitSeries);
@@ -147,27 +194,32 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         long ownRollbacks = Math.Max(0, rollbacks - studio);
         long transactions = commits + ownRollbacks;
 
-        string measured = "Measured in pg_stat_database between two checks " + SessionText.Duration(window) + " apart ("
+        string measured = "Measured in pg_stat_database between two checks " + SessionText.Duration(span) + " apart ("
             + SessionText.Count(run.Count, "sample") + ", taken only while a page was open), counted " + since + ".";
-
-        List<HealthFinding> findings = [];
 
         if (deadlocks > 0)
         {
+            List<HealthEvidence> evidence =
+            [
+                new("Deadlocks in the window", SessionText.Number(deadlocks)),
+                new("Window", SessionText.Duration(span)),
+            ];
+
+            if (perDay is { } day)
+            {
+                evidence.Add(new("Deadlocks per day " + day.Window.SinceText, Rate(day.Deadlocks)));
+            }
+
             findings.Add(new HealthFinding
             {
                 Code = "C08",
                 Subject = "deadlocks",
                 Severity = HealthSeverity.Warning,
-                Title = SessionText.Count(deadlocks, "deadlock") + " in the last " + SessionText.Duration(window),
+                Title = SessionText.Count(deadlocks, "deadlock") + " in the last " + SessionText.Duration(span),
                 WhyItMatters =
                     "Postgres resolved each deadlock by rolling one of the two transactions back, so each is a write that failed for "
                     + "the application. " + evaluation.Text.DeadlockCause,
-                Evidence =
-                [
-                    new("Deadlocks in the window", SessionText.Number(deadlocks)),
-                    new("Window", SessionText.Duration(window)),
-                ],
+                Evidence = evidence,
                 Caveat = measured + " Postgres logs each deadlock with both statements, in the server's log.",
             });
         }
@@ -182,7 +234,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 Code = "C08",
                 Subject = "rollbacks",
                 Severity = HealthSeverity.Warning,
-                Title = SessionText.Percent(share) + " of this database's transactions rolled back in the last " + SessionText.Duration(window),
+                Title = SessionText.Percent(share) + " of this database's transactions rolled back in the last " + SessionText.Duration(span),
                 WhyItMatters =
                     "A rolled-back transaction is work the database did and threw away. A share this high is most often failures the "
                     + "application retries - optimistic concurrency on documents, an expected version on an event stream, unique "
@@ -191,7 +243,7 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
                 [
                     new("Rolled back", SessionText.Number(ownRollbacks) + " of " + SessionText.Number(transactions)),
                     new("The studio's own, subtracted", SessionText.Number(Math.Min(studio, rollbacks))),
-                    new("Window", SessionText.Duration(window)),
+                    new("Window", SessionText.Duration(span)),
                 ],
                 Caveat = measured + " Every read the studio makes is a read-only transaction that rolls back; the rollbacks this "
                     + "process's studio sent to this database over the window are subtracted. Another process's studio, if one "
@@ -199,24 +251,32 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
             });
         }
 
-        if (tempFiles > 0)
+        // The hour's Info, unless the day's Warning already speaks for the temp files: one finding per subject.
+        if (tempFiles > 0 && !findings.Any(static x => x.Subject == "temp-files"))
         {
+            List<HealthEvidence> evidence =
+            [
+                new("Temporary files", SessionText.Number(tempFiles)),
+                new("Written", Bytes(tempBytes)),
+                new("Window", SessionText.Duration(span)),
+            ];
+
+            if (perDay is { } day)
+            {
+                evidence.Add(new("Written a day " + day.Window.SinceText, Bytes((long) day.TempBytes)));
+            }
+
             findings.Add(new HealthFinding
             {
                 Code = "C08",
                 Subject = "temp-files",
                 Severity = HealthSeverity.Info,
-                Title = "Statements wrote " + SessionText.Count(tempFiles, "temporary file") + " to disk in the last " + SessionText.Duration(window),
+                Title = "Statements wrote " + SessionText.Count(tempFiles, "temporary file") + " to disk in the last " + SessionText.Duration(span),
                 WhyItMatters =
                     "A sort or a hash that does not fit in work_mem spills to temporary files on disk, which is slower by orders of "
                     + "magnitude. " + evaluation.Text.TempSpillCause + "; an index for the sort removes the spill, and a larger work_mem "
                     + "is the DBA's lever.",
-                Evidence =
-                [
-                    new("Temporary files", SessionText.Number(tempFiles)),
-                    new("Written", Bytes(tempBytes)),
-                    new("Window", SessionText.Duration(window)),
-                ],
+                Evidence = evidence,
                 Caveat = measured,
             });
         }
@@ -225,10 +285,86 @@ internal sealed class DatabaseCounterCheck : HealthCheck<DatabaseCounterFacts>
         {
             return HealthVerdict.Quiet(
                 "No deadlock, no temporary file and " + SessionText.Number(ownRollbacks) + " of " + SessionText.Number(transactions)
-                + " transactions rolled back in the last " + SessionText.Duration(window) + " (the studio's own subtracted).");
+                + " transactions rolled back in the last " + SessionText.Duration(span) + " (the studio's own subtracted)."
+                + PerDayNote(window, perDay));
         }
 
-        return new HealthVerdict(findings);
+        // Deadlocks, rollbacks, temp files: the order the page has always drawn them in.
+        return new HealthVerdict([.. findings.OrderBy(static x => Array.IndexOf(SubjectOrder, x.Subject))]);
+    }
+
+    /// <summary>The order C08's findings are listed in, whichever rule found them.</summary>
+    private static readonly string?[] SubjectOrder = ["deadlocks", "rollbacks", "temp-files"];
+
+    /// <summary>
+    /// The per-day Warning (G5): at least <see cref="TempBytesPerDayWarning" /> of temporary files a day over the statistics
+    /// window - on its own, so a database that spills this much is told so whether or not it spilled in the last hour, with the
+    /// hour's figure beside it when there are two samples to take it from.
+    /// </summary>
+    private static HealthFinding TempWarning(PerDay day, List<HealthSample> run, HealthEvaluation evaluation, string since)
+    {
+        List<HealthEvidence> evidence =
+        [
+            new("Written a day", Bytes((long) day.TempBytes)),
+            new("Temporary files a day", Rate(day.TempFiles)),
+            new("Window", SessionText.Duration(day.Window.Length) + ", " + day.Window.SinceText),
+            new("Counting since", day.Window.BasisText),
+        ];
+
+        if (run.Count >= 2)
+        {
+            TimeSpan span = run[^1].At - run[0].At;
+            evidence.Add(new("Written in the last " + SessionText.Duration(span), Bytes(Delta(run[0], run[^1], TempBytesSeries))));
+        }
+
+        return new HealthFinding
+        {
+            Code = "C08",
+            Subject = "temp-files",
+            Severity = HealthSeverity.Warning,
+            Title = "Statements write " + Bytes((long) day.TempBytes) + " of temporary files a day " + day.Window.SinceText,
+            WhyItMatters =
+                "A sort or a hash that does not fit in work_mem spills to temporary files on disk, which is slower by orders of "
+                + "magnitude - and at a gigabyte a day or more it is a steady load on the disk the database itself writes to. "
+                + evaluation.Text.TempSpillCause + "; an index for the sort removes the spill, and a larger work_mem is the DBA's lever.",
+            Evidence = evidence,
+            Caveat = "Measured in pg_stat_database's temp_bytes over the statistics window, which began " + day.Window.ReasonText
+                + " - counted " + since + ".",
+        };
+    }
+
+    /// <summary>What the window adds to a note: the rates per day, or how long it has to go.</summary>
+    private static string PerDayNote(StatisticsWindow? window, PerDay? perDay)
+    {
+        if (window is null)
+        {
+            return string.Empty;
+        }
+
+        if (perDay is not { } day)
+        {
+            return " " + window.Watching("the rate per day of deadlocks and temporary files", StatisticsWindow.Day);
+        }
+
+        return " Per day " + day.Window.SinceText + ": " + Rate(day.Deadlocks) + " deadlocks and " + Bytes((long) day.TempBytes)
+            + " of temporary files.";
+    }
+
+    /// <summary>A rate per day: two decimals below ten, grouped and whole above.</summary>
+    private static string Rate(double perDay) => perDay.ToString(perDay < 10 ? "0.##" : "N0", CultureInfo.InvariantCulture);
+
+    /// <summary>The window's rates per day, read only once it covers a day.</summary>
+    /// <param name="Window">The window, covering a day.</param>
+    /// <param name="Deadlocks">Deadlocks a day.</param>
+    /// <param name="TempFiles">Temporary files a day.</param>
+    /// <param name="TempBytes">Bytes of temporary files a day.</param>
+    private sealed record PerDay(StatisticsWindow Window, double Deadlocks, double TempFiles, double TempBytes)
+    {
+        /// <summary>The rates of <paramref name="facts" /> over <paramref name="window" />.</summary>
+        public PerDay(StatisticsWindow window, DatabaseCounterFacts facts)
+            : this(window, facts.Deadlocks / window.Days, facts.TempFiles / window.Days, facts.TempBytes / window.Days)
+        {
+        }
     }
 
     /// <summary>

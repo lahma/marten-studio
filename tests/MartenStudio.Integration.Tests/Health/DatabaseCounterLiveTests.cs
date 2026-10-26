@@ -85,6 +85,45 @@ public class DatabaseCounterLiveTests(PostgresFixture postgres)
         status.Note.Should().Contain("No deadlock");
     }
 
+    /// <summary>
+    /// The per-day rule (W5-CAP, issue #8 G5): over a gibibyte of temporary files written - a function scan's result spilled at
+    /// <c>work_mem = 64kB</c> - and the studio's clock a day and a minute past the statistics window's start, which is read from
+    /// the server first, C08's temp files are a Warning on the first check, with no hour of samples to wait for.
+    /// </summary>
+    [PostgresFact]
+    [HealthFires("C08")]
+    public async Task A_gibibyte_of_temp_files_a_day_over_the_statistics_window_is_a_warning()
+    {
+        string database = await ConnectionsLiveHost.CreateDatabaseAsync(postgres.ConnectionString, "health_c08_per_day");
+        const long Target = (1L << 30) + (64L << 20);
+
+        for (int spill = 0; spill < 4 && await CounterAsync(database, "temp_bytes") < Target; spill++)
+        {
+            await using NpgsqlConnection connection = new(Unpooled(database));
+            await connection.OpenAsync(Token);
+            await using NpgsqlTransaction transaction = await connection.BeginTransactionAsync(Token);
+
+            await ExecuteAsync(connection, transaction, "set local work_mem = '64kB'");
+            await ExecuteAsync(connection, transaction, "select count(*) from generate_series(1, 50000000::bigint) g");
+            await transaction.CommitAsync(Token);
+        }
+
+        await LiveWait.UntilAsync(async () => await CounterAsync(database, "temp_bytes") >= Target, TimeSpan.FromSeconds(60), "a gibibyte of temp_bytes");
+
+        ManualClock clock = new(DateTimeOffset.UtcNow);
+        await using ConnectionsLiveHost host = await ConnectionsLiveHost.CreateAsync(database, clock: clock);
+
+        StatisticsReading reading = await host.GatherAsync(StatisticsWindow.ReadAsync);
+        clock.Advance(StatisticsWindow.Compute(reading, HealthHistoryView.Empty).Since + StatisticsWindow.Day + TimeSpan.FromMinutes(1) - clock.GetUtcNow());
+
+        HealthReport report = await host.ReportAsync();
+
+        HealthReportFinding finding = report.Findings.Should().ContainSingle(static x => x.Code == "C08" && x.Finding.Subject == "temp-files").Subject;
+        finding.Severity.Should().Be(HealthSeverity.Warning, "at least a gibibyte a day over the window (G5)");
+        finding.Finding.Title.Should().StartWith("Statements write ").And.Contain(" of temporary files a day since ");
+        finding.Finding.Evidence.Select(static x => x.Label).Should().Contain(["Written a day", "Window", "Counting since"]);
+    }
+
     /// <summary>Two transactions taking two rows in opposite orders; Postgres ends one of them after deadlock_timeout.</summary>
     private static async Task DeadlockAsync(string database)
     {

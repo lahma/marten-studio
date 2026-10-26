@@ -69,7 +69,7 @@ public class PostgresStudioWordsRenderTests
     private static readonly string[] MartenStudioWords =
         ["MartenStudioOptions", "StoreOptions", "Marten Studio", "the store's", "this store", "LightweightSession", "AddMartenStudio"];
 
-    public static TheoryData<string> Pages() => ["overview", "query", "database", "sessions", "health", "activity"];
+    public static TheoryData<string> Pages() => ["overview", "query", "database", "sessions", "health", "storage", "activity"];
 
     [Theory]
     [MemberData(nameof(Pages))]
@@ -84,6 +84,7 @@ public class PostgresStudioWordsRenderTests
             "database" => RenderDatabase(context),
             "sessions" => Rendered(context.Render<Sessions>(), ".ms-sessions-stats"),
             "health" => Rendered(context.Render<HealthPage>(), ".ms-health-lead"),
+            "storage" => Rendered(context.Render<PostgresStudio.Components.Pages.Storage.Storage>(), ".ms-storage-withheld"),
             _ => Rendered(context.Render<Activity>(), ".ms-page-title"),
         };
 

@@ -81,6 +81,9 @@ internal static class PostgresStudioDescriptor
         new("Operations",
         [
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+
+            // W5-CAP: the database's size, growth and largest tables - after Maintenance once W5-V1 lands, after Health until then.
+            new("Storage", "storage", "storage", Title: "Database size, growth and the largest tables"),
         ]),
         new("System",
         [

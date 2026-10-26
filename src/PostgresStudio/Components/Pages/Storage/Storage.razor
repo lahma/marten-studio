@@ -1,0 +1,371 @@
+@page "/postgres/storage"
+@using System.Globalization
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Schema
+@using PostgresStudio.Services.Settings
+@using PostgresStudio.Services.Sources
+@using PostgresStudio.Services.Storage
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject IStorageService StorageData
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+
+@*
+    Storage (W5-CAP, issue #8 G3): how big this database is, how fast it grows, and which tables hold the space - read
+    through IStorageService, whose facts are the catalog's own estimates and lock nothing they list (D27).
+
+    One audience: anybody the store policy passes for the database as a whole (TenantId = null), as the health advisor's
+    database-wide findings are. A table outside the source's own schemas is named only to a visitor the database browser's
+    gate shows that schema, and otherwise listed with its sizes and without its name; a hidden document type's table is
+    absent. Both are the service's to decide.
+
+    Read when the page becomes interactive and every HealthInterval while it stays open (never RefreshInterval: the facts
+    are kept that long, single flight, whoever asks), and on Refresh.
+*@
+
+<PageTitle>Storage</PageTitle>
+
+<div class="ms-page ms-storage">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Storage</h1>
+        <div class="ms-storage-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-storage-lead">
+        How big this database is, how fast it grows and which tables hold the space - read from the catalog's own estimates,
+        which lock nothing, when this page opens and once per <code>HealthInterval</code> while it stays open.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        @* A static render reads nothing: the read waits for the circuit, so a prerender is never a second read. *@
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a database in the header to see its storage.</p>
+        </div>
+    }
+    else if (view.Refusal != DatabaseRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-storage-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <dl class="ms-storage-tiles">
+            <div class="ms-storage-tile">
+                <dt>Database size</dt>
+                <dd class="ms-storage-tile-value">@(view.DatabaseBytes is { } bytes ? SchemaFormat.Bytes(bytes) : "not measured")</dd>
+                <dd class="ms-storage-tile-note">
+                    @if (view.DatabaseBytesNotRead is { Length: > 0 } notRead)
+                    {
+                        @notRead
+                    }
+                    else
+                    {
+                        @("~" + SchemaFormat.Bytes(view.EstimatedDatabaseBytes) + " by the catalog's page counts")
+                    }
+                </dd>
+            </div>
+            <div class="ms-storage-tile">
+                <dt>Growth a day</dt>
+                <dd class="ms-storage-tile-value">@Growth(view.GrowthBytesPerDay)</dd>
+                <dd class="ms-storage-tile-note">@(view.GrowthPending ?? "estimated from the rows inserted and deleted since " + Since(view.Window))</dd>
+            </div>
+            <div class="ms-storage-tile">
+                <dt>Growth a month</dt>
+                <dd class="ms-storage-tile-value">@Growth(view.GrowthBytesPerMonth)</dd>
+                <dd class="ms-storage-tile-note">@(view.GrowthPending ?? "at the current daily rate, thirty days of it")</dd>
+            </div>
+            <div class="ms-storage-tile">
+                <dt>Statistics since</dt>
+                <dd class="ms-storage-tile-value">@Since(view.Window)</dd>
+                <dd class="ms-storage-tile-note">
+                    @if (view.Window is { } window)
+                    {
+                        @("From " + window.BasisText + ": the counters began " + window.ReasonText + ".")
+                    }
+                </dd>
+            </div>
+            <div class="ms-storage-tile">
+                <dt>Tables</dt>
+                <dd class="ms-storage-tile-value">@SessionText.Number(view.TableCount)</dd>
+                <dd class="ms-storage-tile-note">@Coverage(view)</dd>
+            </div>
+        </dl>
+
+        <p class="ms-storage-estimates">
+            Sizes are the catalog's page counts, as of each table's last <code>VACUUM</code> or <code>ANALYZE</code>, so they lag
+            the files - TOAST most of all. The exact size of one table is on its page in the database browser, which measures it
+            when you open it.
+        </p>
+
+        <section class="ms-storage-section" aria-labelledby="ms-storage-largest">
+            <h2 class="ms-storage-heading" id="ms-storage-largest">Largest tables</h2>
+
+            @if (view.WithheldReason is { Length: > 0 } withheld)
+            {
+                <p class="ms-storage-withheld" role="note">@withheld</p>
+            }
+
+            @if (view.Tables.Count == 0)
+            {
+                <p class="ms-muted">@(view.TablesNotRead ?? "No table here is one the studio judges.")</p>
+            }
+            else
+            {
+                <TableScroll Label="The largest tables of this database">
+                    <table class="ms-table ms-storage-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Table</th>
+                                <th scope="col">Owner</th>
+                                <th scope="col" class="ms-storage-number">Total</th>
+                                <th scope="col" class="ms-storage-number">Heap</th>
+                                <th scope="col" class="ms-storage-number">Indexes</th>
+                                <th scope="col" class="ms-storage-number">TOAST</th>
+                                <th scope="col" class="ms-storage-number">Rows</th>
+                                <th scope="col">Share</th>
+                                <th scope="col" class="ms-storage-number" title="@HotTitle(view)">HOT</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < view.Tables.Count; i++)
+                            {
+                                StorageTableView row = view.Tables[i];
+                                <tr @key="i" class="@(row.Withheld ? "ms-storage-withheld-row" : null)">
+                                    <td class="ms-mono">
+                                        @if (row is { Link: { } link, Schema: { } schema, Name: { } name })
+                                        {
+                                            <a href="@link">@DatabaseLinks.QualifiedName(schema, name)</a>
+                                        }
+                                        else
+                                        {
+                                            @WithheldNames.Token
+                                        }
+                                    </td>
+                                    <td>@Owner(row)</td>
+                                    <td class="ms-storage-number">@SchemaFormat.Bytes(row.TotalBytes)</td>
+                                    <td class="ms-storage-number">@SchemaFormat.Bytes(row.HeapBytes)</td>
+                                    <td class="ms-storage-number">@SchemaFormat.Bytes(row.IndexBytes)</td>
+                                    <td class="ms-storage-number">@SchemaFormat.Bytes(row.ToastBytes)</td>
+                                    <td class="ms-storage-number">@(row.EstimatedRows < 0 ? "never analysed" : "~" + SessionText.Number(row.EstimatedRows))</td>
+                                    <td class="ms-storage-share">
+                                        @if (row.ShareOfDatabase is { } share)
+                                        {
+                                            <span class="ms-storage-bar" style="--ms-storage-share: @Width(share)" aria-hidden="true"></span>
+                                            <span class="ms-storage-share-value">@Percent(share)</span>
+                                        }
+                                        else
+                                        {
+                                            @("–")
+                                        }
+                                    </td>
+                                    <td class="ms-storage-number" title="@NewPageTitle(row)">@(row.HotUpdateRatio is { } hot ? Percent(hot) : "–")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        </section>
+
+        @foreach (HealthStatement statement in view.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+
+        @if (view.MeasuredAt is { } measured)
+        {
+            <p class="ms-storage-measured">
+                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
+            </p>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>The page's own polling loop, at <c>HealthInterval</c>; built rather than injected.</summary>
+    private StudioLiveUpdates? live;
+
+    private StorageView? view;
+    private string? error;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+
+        await LoadAsync();
+
+        // Leaving the page during the first read disposes it under the await: the lifetime's source is gone, and reading its
+        // token would throw out of OnAfterRenderAsync and end the circuit.
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, lifetime.Token);
+    }
+
+    /// <summary>One poll, under the loop's token as well as the page's.</summary>
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync(CancellationToken poll = default)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StorageView? read = scope is null ? null : await StorageData.GetAsync(scope, token);
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                view = read;
+                error = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string Growth(double? bytes) => bytes switch
+    {
+        null => "–",
+        < 0 => "-" + SchemaFormat.Bytes((long) Math.Round(-bytes.Value)),
+        _ => "+" + SchemaFormat.Bytes((long) Math.Round(bytes.Value)),
+    };
+
+    private string Since(StatisticsWindow? window) => window is null ? "–" : State.FormatInSelectedTimeZone(window.Since, "yyyy-MM-dd HH:mm");
+
+    private static string Coverage(StorageView view) => view.Coverage is { Length: > 0 } coverage
+        ? "Judged: " + coverage + "."
+        : view.TablesNotRead ?? "Every table of the schemas the studio judges, the largest " + StorageFacts.LargestCount.ToString(CultureInfo.InvariantCulture) + " below.";
+
+    /// <summary>Whose design the table is (issue #8 G1), as the API names it: the application's, a library's, or another's.</summary>
+    private static string Owner(StorageTableView row) => row.Ownership switch
+    {
+        StudioTableOwnership.Library => row.Owner ?? "a library",
+        StudioTableOwnership.Other => "other",
+        _ => "application",
+    };
+
+    private static string Percent(double share) =>
+        (share * 100).ToString(share < 0.1 ? "0.0" : "0", CultureInfo.InvariantCulture) + "%";
+
+    private static string Width(double share) =>
+        Math.Clamp(share * 100, 0, 100).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+
+    private static string HotTitle(StorageView view) => view.NewPageUpdatesRead
+        ? "The share of updates that were HOT - no index entry written. Hover a value for the share that went to another page."
+        : "The share of updates that were HOT - no index entry written.";
+
+    private static string? NewPageTitle(StorageTableView row) => row.NewPageShare is { } share
+        ? Percent(share) + " of updates went to another page: no room on the page (fillfactor) kept them from being HOT."
+        : null;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

@@ -130,6 +130,12 @@ internal sealed class StudioText
     public required string SessionsWritePolicyDenial { get; init; }
 
     // ---------------------------------------------------------------------------------------------------------------
+    // Storage (W5-CAP).
+
+    /// <summary>What the scope policy's refusal of the database's storage says: its sizes and growth belong to no tenant.</summary>
+    public required string StorageStorePolicyDenial { get; init; }
+
+    // ---------------------------------------------------------------------------------------------------------------
     // Query and Relationships.
 
     /// <summary>The examples panel's lead.</summary>
@@ -225,6 +231,10 @@ internal sealed class StudioText
         SessionsReadOnlyDenial = SessionActivityService.ReadOnlyDenial,
         SessionsStorePolicyDenial = SessionActivityService.StorePolicyDenial,
         SessionsWritePolicyDenial = SessionActivityService.WritePolicyDenial,
+
+        StorageStorePolicyDenial =
+            "Your account may not see this database's storage. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
+            + "refused this store and database as a whole, with no tenant selected: a table's size belongs to no tenant.",
 
         ExamplesIntro = "Built from this store's own aliases and tables. Click one to load it.",
         ExamplesEmpty = "This store has no document type to build an example from.",

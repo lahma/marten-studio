@@ -139,6 +139,113 @@ public class DatabaseCounterCheckTests
         ])).Should().HaveCount(2);
     }
 
+    // ---- per day, over the statistics window (W5-CAP, issue #8 G5) ------------------------------------------------------
+
+    private const long GiB = 1L << 30;
+
+    /// <summary>C08 judged with a statistics window of <paramref name="window" /> ending at the last sample.</summary>
+    private static HealthVerdict EvaluatePerDay(TimeSpan window, bool looksReset, params (int Minute, Counters Counters)[] samples)
+    {
+        HealthHistoryView history = new([.. samples.Select(static x => Sample(x.Minute, x.Counters))]);
+        (int minute, Counters last) = samples[^1];
+        DateTimeOffset at = Start.AddMinutes(minute);
+
+        DatabaseCounterFacts facts = new(at, last.Commits, last.Rollbacks, last.Deadlocks, last.TempFiles, last.TempBytes, last.StatsReset ?? Reset, last.Studio);
+        StatisticsWindow statistics = new()
+        {
+            MeasuredAt = at,
+            Since = at - window,
+            Basis = StatisticsBasis.ServerReset,
+            LooksReset = looksReset,
+        };
+
+        return new DatabaseCounterCheck().Evaluate(facts, HealthEvaluation.At(at, history: history) with { Statistics = statistics });
+    }
+
+    [Fact]
+    public void A_gibibyte_of_temp_files_a_day_over_the_window_is_a_warning_on_one_sample()
+    {
+        // Two days of counters, 2 GiB written: one a day.
+        HealthFinding finding = EvaluatePerDay(TimeSpan.FromDays(2), looksReset: false, (0, new Counters(100, 0, TempFiles: 40, TempBytes: 2 * GiB)))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Subject.Should().Be("temp-files", "the variant name is kept exactly");
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Title.Should().Be("Statements write 1.0 GiB of temporary files a day since 2026-10-13 09:00 UTC");
+        finding.Evidence.Should().Contain(new HealthEvidence("Written a day", "1.0 GiB"));
+        finding.Evidence.Should().Contain(new HealthEvidence("Temporary files a day", "20"));
+        finding.Evidence.Select(static x => x.Label).Should().Contain(["Window", "Counting since"]);
+    }
+
+    [Fact]
+    public void Just_under_a_gibibyte_a_day_leaves_the_hours_info_as_it_was()
+    {
+        HealthVerdict verdict = EvaluatePerDay(
+            TimeSpan.FromDays(2),
+            looksReset: false,
+            (0, new Counters(100, 0, TempFiles: 2, TempBytes: 2 * GiB - 1_000)),
+            (5, new Counters(120, 0, TempFiles: 3, TempBytes: 2 * GiB - 2)));
+
+        HealthFinding finding = verdict.Findings.Should().ContainSingle().Subject;
+        finding.Subject.Should().Be("temp-files");
+        finding.Severity.Should().Be(HealthSeverity.Info, "under 1 GiB a day the hour's rule stands");
+        finding.Evidence.Select(static x => x.Label).Should().Contain("Written a day since 2026-10-13 09:05 UTC");
+    }
+
+    [Fact]
+    public void Under_a_day_of_statistics_nothing_is_judged_per_day()
+    {
+        HealthVerdict verdict = EvaluatePerDay(TimeSpan.FromHours(23), looksReset: false, (0, new Counters(100, 0, TempFiles: 900, TempBytes: 500 * GiB)));
+
+        verdict.Findings.Should().BeEmpty("a day's rate needs a day, and one sample is no hour");
+        verdict.Note.Should().Contain("Watching: 23 h of statistics so far")
+            .And.Contain("the rate per day of deadlocks and temporary files is judged once they have counted for a day");
+    }
+
+    [Fact]
+    public void While_the_statistics_look_reset_nothing_is_judged_per_day()
+    {
+        EvaluatePerDay(TimeSpan.FromDays(30), looksReset: true, (0, new Counters(100, 0, TempFiles: 900, TempBytes: 500 * GiB)))
+            .Findings.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_deadlock_in_the_hour_adds_the_windows_deadlocks_per_day_and_stays_a_warning()
+    {
+        HealthFinding finding = EvaluatePerDay(
+                TimeSpan.FromDays(4),
+                looksReset: false,
+                (0, new Counters(1_000, 10, Deadlocks: 6)),
+                (5, new Counters(1_200, 12, Deadlocks: 7)))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Subject.Should().Be("deadlocks");
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Should().Contain(new HealthEvidence("Deadlocks per day since 2026-10-11 09:05 UTC", "1.75"));
+    }
+
+    [Fact]
+    public void The_per_day_warning_keeps_the_findings_in_their_order()
+    {
+        HealthVerdict verdict = EvaluatePerDay(
+            TimeSpan.FromDays(1),
+            looksReset: false,
+            (0, new Counters(10_000, 1_000, Deadlocks: 0, TempFiles: 0)),
+            (5, new Counters(12_000, 1_400, Deadlocks: 2, TempFiles: 1, TempBytes: 2 * GiB)));
+
+        verdict.Findings.Select(static x => x.Key).Should().Equal("C08|deadlocks", "C08|rollbacks", "C08|temp-files");
+        verdict.Findings.Single(static x => x.Subject == "temp-files").Severity.Should().Be(HealthSeverity.Warning);
+    }
+
+    [Fact]
+    public void A_quiet_hour_over_a_day_long_window_says_the_rates_per_day()
+    {
+        HealthVerdict verdict = EvaluatePerDay(TimeSpan.FromDays(2), looksReset: false, (0, new Counters(100, 0, Deadlocks: 3)), (5, new Counters(150, 0, Deadlocks: 3)));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("Per day since 2026-10-13 09:05 UTC: 1.5 deadlocks and 0 bytes of temporary files.");
+    }
+
     [Fact]
     public void A_studio_count_the_server_has_not_caught_up_with_never_makes_the_rollbacks_negative()
     {

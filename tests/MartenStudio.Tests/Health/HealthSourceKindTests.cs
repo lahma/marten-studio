@@ -81,14 +81,14 @@ public class HealthSourceKindTests
         HealthCheckDescriptor[] marten = [.. registry.All.Where(static x => x.Info.CheckType.Assembly == typeof(MartenStudioDescriptor).Assembly)];
         HealthCheckDescriptor[] restricted = [.. registry.All.Where(static x => x.SourceKinds is not null)];
 
-        registry.All.Should().HaveCount(50);
+        registry.All.Should().HaveCount(51);
         registry.All.Should().OnlyContain(static x => x.RunsAgainst(StudioSourceKind.MartenStore));
         marten.Should().NotBeEmpty().And.OnlyContain(
             static x => !x.RunsAgainst(StudioSourceKind.DataSource) && !x.RunsAgainst(StudioSourceKind.HostProvider));
 
         if (typeof(HealthCheckRegistry).Assembly == typeof(MartenStudioDescriptor).Assembly)
         {
-            restricted.Should().HaveCount(50, "one assembly: a check found by both entries runs against what both admit");
+            restricted.Should().HaveCount(51, "one assembly: a check found by both entries runs against what both admit");
         }
         else
         {

@@ -82,6 +82,10 @@ internal static class PostgresStudioText
             + "or SourceAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this data source and "
             + "database.",
 
+        StorageStorePolicyDenial =
+            "Your account may not see this database's storage. The source policy "
+            + "(PostgresStudioOptions.SourceAuthorizationPolicy) refused this data source and database.",
+
         ExamplesIntro = "Catalog reads that run against any database. Click one to load it.",
         ExamplesEmpty = "There is no example to offer.",
         RelationshipTableKey = "A foreign key - enforced by Postgres.",

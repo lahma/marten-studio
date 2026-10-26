@@ -1262,6 +1262,16 @@ tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per
 tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
                                          the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
                                          server per major, started on first use (an assembly fixture)
+src/PostgresStudio/Services/Storage/      The Storage page's facts (sizes from relpages, growth over the statistics
+                                         window, the largest tables) and its per-visitor view (W5-CAP)
+src/PostgresStudio/Components/Pages/Storage/  The Storage page: the tiles and the largest tables
+src/PostgresStudio/wwwroot/css/parts/     W5 packets' stylesheet parts, folded into studio.css in D26 order when each
+                                         packet is integrated (never on main)
+tests/PostgresStudio.Tests/Storage/       The statistics window over hand-built histories, the growth arithmetic, the
+                                         Storage builder's D27 fence - no database
+tests/MartenStudio.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
+tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 14-18: the Storage facts, behind a held lock, no DDL,
+                                         and the statistics window across a real crash
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
