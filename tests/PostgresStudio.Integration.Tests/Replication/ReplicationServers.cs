@@ -100,6 +100,16 @@ internal sealed class ReplicationServer : IAsyncDisposable
     /// <summary>Reads one value as the superuser.</summary>
     public Task<T> ScalarAsync<T>(string sql) => Scalar<T>(SuperuserConnectionString, sql);
 
+    /// <summary>The size of this server's <c>pg_wal</c>, in KiB, for the disk measurement.</summary>
+    public Task<long> WalKibAsync() => KibAsync(Container, "\"$PGDATA/pg_wal\"");
+
+    /// <summary>The size of <paramref name="path" /> inside <paramref name="container" />, in KiB (BusyBox <c>du -sk</c>).</summary>
+    internal static async Task<long> KibAsync(IContainer container, string path)
+    {
+        ExecResult result = await container.ExecAsync(["sh", "-c", "du -sk " + path + " | cut -f1"], TestContext.Current.CancellationToken);
+        return long.TryParse(result.Stdout.Trim(), CultureInfo.InvariantCulture, out long kib) ? kib : -1;
+    }
+
     /// <summary>Writes WAL a segment at a time: <paramref name="segments" /> times a row and <c>pg_switch_wal()</c>.</summary>
     public async Task SwitchSegmentsAsync(int segments)
     {
@@ -222,7 +232,8 @@ internal sealed class ReplicationPair : IAsyncDisposable
 
         try
         {
-            primary = await ReplicationServer.StartAsync(image, network, "primary", "wal_level=replica", "max_wal_senders=10");
+            // A small max_wal_size on both, so a checkpoint after a test gives back what the test wrote (W5-R2-fix 8).
+            primary = await ReplicationServer.StartAsync(image, network, "primary", "wal_level=replica", "max_wal_senders=10", "max_wal_size=64MB", "min_wal_size=32MB");
 
             await primary.Container.ExecAsync(["sh", "-c", "echo 'host replication all all trust' >> \"$PGDATA/pg_hba.conf\""], token);
             await primary.ExecuteAsync("select pg_catalog.pg_reload_conf()");
@@ -236,7 +247,8 @@ internal sealed class ReplicationPair : IAsyncDisposable
                 .WithCommand(
                     "-c",
                     "pg_basebackup -h primary -U postgres -D /tmp/standby -R -X stream -S standby1 && chmod 0700 /tmp/standby "
-                    + "&& exec postgres -D /tmp/standby -c hot_standby_feedback=on -c archive_mode=off -c listen_addresses='*'")
+                    + "&& exec postgres -D /tmp/standby -c hot_standby_feedback=on -c archive_mode=off -c max_wal_size=64MB -c min_wal_size=32MB "
+                    + "-c listen_addresses='*'")
                 .WithPortBinding(5432, true)
                 .WithWaitStrategy(Wait.ForUnixContainer().UntilMessageIsLogged("database system is ready to accept read-only connections"))
                 .Build();
@@ -264,6 +276,20 @@ internal sealed class ReplicationPair : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Gives back the WAL a test wrote: a checkpoint on the primary and a restartpoint on the standby, once it has caught up,
+    /// so a recycled segment is not still on disk when the next test writes its own (W5-R2-fix 8).
+    /// </summary>
+    public async Task CheckpointBothAsync()
+    {
+        await CaughtUpAsync();
+        await Primary.ExecuteAsync("checkpoint");
+        await ReplicationServer.Execute(StandbyConnectionString(MatrixRole.Superuser), "checkpoint");
+    }
+
+    /// <summary>The size of the standby's <c>pg_wal</c>, in KiB, for the disk measurement.</summary>
+    public async Task<long> StandbyWalKibAsync() => await ReplicationServer.KibAsync(Standby, "/tmp/standby/pg_wal");
+
     /// <summary>Waits until the standby has replayed everything the primary has written.</summary>
     public Task CaughtUpAsync() =>
         ReplicationServer.UntilAsync(
@@ -281,13 +307,34 @@ internal sealed class ReplicationPair : IAsyncDisposable
     }
 }
 
-/// <summary>One pair per image, started on first use by any test of the class and shared by them.</summary>
-public sealed class ReplicationPairFixture : IAsyncLifetime
+/// <summary>
+/// The heavy live classes of this folder - the primary and standby pairs, the archiver's and the checkpoints' servers - in one
+/// collection, so that they run one after another and their disk peaks never add up next to the version matrix's servers on
+/// a 14 GB CI runner (W5-R2-fix 8). A class fixture is disposed when its class ends, so the 17 pair is gone before the 18
+/// pair starts.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class ReplicationHeavySuite
 {
-    private readonly ConcurrentDictionary<string, Lazy<Task<ReplicationPair>>> pairs = new(StringComparer.Ordinal);
+    /// <summary>The collection's name.</summary>
+    public const string Name = "replication-heavy";
+}
 
-    internal Task<ReplicationPair> PairAsync(string image) =>
-        pairs.GetOrAdd(image, key => new Lazy<Task<ReplicationPair>>(() => ReplicationPair.StartAsync(key), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+/// <summary>One primary and standby pair of <see cref="Image" />, started on first use by the class's tests and shared by them.</summary>
+public abstract class ReplicationPairFixture : IAsyncLifetime
+{
+    private readonly Lazy<Task<ReplicationPair>> pair;
+
+    protected ReplicationPairFixture(string image)
+    {
+        Image = image;
+        pair = new Lazy<Task<ReplicationPair>>(() => ReplicationPair.StartAsync(image), LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    /// <summary>The image both servers run.</summary>
+    public string Image { get; }
+
+    internal Task<ReplicationPair> PairAsync() => pair.Value;
 
     /// <inheritdoc />
     public ValueTask InitializeAsync()
@@ -299,16 +346,26 @@ public sealed class ReplicationPairFixture : IAsyncLifetime
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        foreach (Lazy<Task<ReplicationPair>> pair in pairs.Values.Where(static x => x.IsValueCreated))
+        if (!pair.IsValueCreated)
         {
-            try
-            {
-                await (await pair.Value).DisposeAsync();
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                // A pair that never started has nothing to dispose; Testcontainers' reaper removes anything left.
-            }
+            return;
         }
+
+        try
+        {
+            await (await pair.Value).DisposeAsync();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A pair that never started has nothing to dispose; Testcontainers' reaper removes anything left.
+        }
+
+        GC.SuppressFinalize(this);
     }
 }
+
+/// <summary>The PostgreSQL 17 pair: the gibibyte of lag, and the release's shapes.</summary>
+public sealed class ReplicationPair17Fixture() : ReplicationPairFixture(ReplicationServer.DefaultImage);
+
+/// <summary>The PostgreSQL 18 pair: the checkpointer's num_done and pg_stat_io's byte columns - no gibibyte of lag.</summary>
+public sealed class ReplicationPair18Fixture() : ReplicationPairFixture(ReplicationServer.Image18);
