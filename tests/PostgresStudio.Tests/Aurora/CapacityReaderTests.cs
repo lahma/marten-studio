@@ -84,7 +84,12 @@ public sealed class CapacityReaderTests : IDisposable
             services.AddSingleton(source);
         }
 
-        ServiceProvider provider = services.BuildServiceProvider();
+        return ReaderOver(services, timeout);
+    }
+
+    private CapacityReader ReaderOver(ServiceCollection services, TimeSpan? timeout = null)
+    {
+        ServiceProvider provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
         PostgresStudioOptions options = new() { HealthInterval = TimeSpan.FromSeconds(60) };
 
         return new CapacityReader(
@@ -201,10 +206,23 @@ public sealed class CapacityReaderTests : IDisposable
         Source source = new((_, _, _) => new ValueTask<PostgresComputeCapacity?>(release.Task));
         CapacityReader reader = Reader(source);
 
-        Task<CapacityReading>[] callers = [.. Enumerable.Range(0, 20).Select(_ => Task.Run(() => reader.GetAsync(Resolved, Server(), TestContext.Current.CancellationToken)))];
+        int entered = 0;
+        Task<CapacityReading>[] callers =
+        [
+            .. Enumerable.Range(0, 20).Select(_ => Task.Run(() =>
+            {
+                // GetAsync hands back its task once it has started the ask or joined it (StudioSnapshotCache's Lazy), so a
+                // caller counted here is one the source is already holding.
+                Task<CapacityReading> waiting = reader.GetAsync(Resolved, Server(), TestContext.Current.CancellationToken);
+                Interlocked.Increment(ref entered);
+                return waiting;
+            })),
+        ];
 
-        // Released once the one ask has begun - whoever arrives after takes the same answer from the interval's cache.
-        SpinWait.SpinUntil(() => source.Calls >= 1, TimeSpan.FromSeconds(10)).Should().BeTrue();
+        // Released only once all twenty are waiting on the ask (W5-AUR-fix F8): a caller arriving after the release would
+        // take the cached answer and prove nothing about the single flight.
+        SpinWait.SpinUntil(() => Volatile.Read(ref entered) == callers.Length, TimeSpan.FromSeconds(10)).Should().BeTrue();
+        source.Calls.Should().Be(1, "twenty callers are waiting and the source has been asked once");
         release.SetResult(PostgresComputeCapacity.Of(2, 1, 4, "vCPU", Start));
 
         CapacityReading[] readings = await Task.WhenAll(callers);
@@ -256,5 +274,53 @@ public sealed class CapacityReaderTests : IDisposable
             .Should().Equal(LogLevel.Warning, LogLevel.Debug, LogLevel.Warning);
         logs.Entries.Where(static x => x.EventId.Id == 9500).Should().OnlyContain(static x => !x.Message.Contains("CloudWatch said no", StringComparison.Ordinal),
             "the source's own words are the exception's, never the message");
+    }
+
+    /// <summary>
+    /// W5-AUR-fix F4: only the reader's own five seconds are "took longer". A source's own <see cref="TimeoutException" /> - its
+    /// SDK's HTTP timeout - and a cancellation of its own are failures like any other: event 9500.
+    /// </summary>
+    [Fact]
+    public async Task A_sources_own_timeout_or_cancellation_is_a_failure_and_event_9500()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        CapacityReading timedOut = await Reader(new Source((_, _, _) => throw new TimeoutException("CloudWatch timed out"))).GetAsync(Resolved, Server(), token);
+        timedOut.Unknown.Should().Be("the capacity source failed (TimeoutException)");
+
+        CapacityReading cancelled = await Reader(new Source((_, _, _) => ValueTask.FromCanceled<PostgresComputeCapacity?>(new CancellationToken(canceled: true))))
+            .GetAsync(Resolved, Server("studio-test-instance-2"), token);
+        cancelled.Unknown.Should().StartWith("the capacity source failed (", "the reader's own token did not fire").And.NotContain("took longer");
+
+        logs.Entries.Where(static x => x.EventId.Id == 9500).Should().HaveCount(2);
+    }
+
+    /// <summary>
+    /// W5-AUR-fix F4: a source the container cannot hand over - one registered scoped, resolved from the root, or one whose
+    /// construction throws - is said once as event 9500 and read as no source, so nothing that asks for the capacity fails.
+    /// </summary>
+    [Fact]
+    public async Task A_source_the_container_cannot_build_is_no_source_and_event_9500_once()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        ServiceCollection throwing = new();
+        throwing.AddSingleton<IPostgresCapacitySource>(_ => throw new NotSupportedException("no credentials"));
+        CapacityReader reader = ReaderOver(throwing);
+
+        CapacityReading reading = await reader.GetAsync(Resolved, Server(), token);
+        reader.SourceRegistered.Should().BeFalse();
+        await reader.GetAsync(Resolved, Server(), token);
+
+        reading.Should().Be(new CapacityReading(null, Start, null, false));
+        logs.Entries.Where(static x => x.EventId.Id == 9500).Should().ContainSingle("the container is asked once, and the answer kept")
+            .Which.Level.Should().Be(LogLevel.Warning);
+
+        ServiceCollection scoped = new();
+        scoped.AddScoped<IPostgresCapacitySource>(_ => new Source((_, _, _) => ValueTask.FromResult<PostgresComputeCapacity?>(null)));
+        CapacityReader fromRoot = ReaderOver(scoped);
+
+        (await fromRoot.GetAsync(Resolved, Server(), token)).SourceRegistered.Should().BeFalse("a scoped source cannot be resolved from the root container");
+        logs.Entries.Where(static x => x.EventId.Id == 9500).Should().HaveCount(2);
     }
 }

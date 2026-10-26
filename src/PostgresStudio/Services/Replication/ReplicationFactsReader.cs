@@ -183,7 +183,11 @@ internal sealed class ReplicationFactsReader : IReplicationFactsReader
 
         ReplicationRead<PostgresGrants> grants = await ReadAsync(context, "grants", PostgresGrants.SharedAsync, cancellationToken).ConfigureAwait(false);
         ReplicationRead<ReplicationSettings> replicationSettings = await ReadAsync(context, "settings", ReplicationSettings.SharedAsync, cancellationToken).ConfigureAwait(false);
-        ReplicationRead<ReplicationRole> role = await ReadAsync(context, "recovery", ReplicationRole.SharedAsync, cancellationToken).ConfigureAwait(false);
+        // On Aurora the role is the platform read's pg_is_in_recovery() alone: a reader does not stream, and a standby's WAL
+        // functions (pg_last_wal_receive_lsn(), pg_get_wal_replay_pause_state()) describe nothing there (W5-AUR-fix F2).
+        ReplicationRead<ReplicationRole> role = platform.Kind == PostgresPlatformKind.AmazonAurora
+            ? ReplicationRead<ReplicationRole>.Of(new ReplicationRole(server.InRecovery, null, null, null, null, null, null, context.Now))
+            : await ReadAsync(context, "recovery", ReplicationRole.SharedAsync, cancellationToken).ConfigureAwait(false);
 
         ReplicationRead<ReplicationSlotSnapshot> slots = await ReadAsync(context, "slots", ReplicationSlotSnapshot.SharedAsync, cancellationToken).ConfigureAwait(false);
         ReplicationRead<SlotStatisticsList> slotStatistics = await ReadAsync(context, "slot statistics", x => SlotStatisticsList.ReadAsync(x, cancellationToken), cancellationToken).ConfigureAwait(false);

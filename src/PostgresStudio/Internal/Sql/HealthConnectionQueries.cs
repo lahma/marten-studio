@@ -174,9 +174,6 @@ internal static class HealthConnectionQueries
     /// <c>reserved_connections</c>. C02 and C03.
     /// </summary>
     /// <remarks>
-    /// Every backend has a row in <c>pg_stat_activity</c> for every role, whatever it may read of it - but a role
-    /// without <c>pg_read_all_stats</c> reads another role's row with its <c>backend_type</c> null, so the counts
-    /// take <see cref="ClientSession" />, which counts such a row rather than dropping it. A hidden background
     /// <para>
     /// Every backend has a row in <c>pg_stat_activity</c> for every role, whatever it may read of it - but a role
     /// without <c>pg_read_all_stats</c> reads another role's row with its <c>backend_type</c> null, so the counts

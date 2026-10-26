@@ -160,9 +160,21 @@ internal sealed class ReplicationSlotCheck : HealthCheck<ReplicationSlotFacts>
 
         ReplicationSlotSnapshot snapshot = facts.Slots;
 
+        // Aurora's reader, or its writer below logical WAL (W5-AUR-fix F2): no WAL position to measure against.
+        string unmeasured = snapshot.PositionRead
+            ? string.Empty
+            : snapshot.InRecovery
+                ? " An Aurora reader has no WAL position of its own, so no slot's retention is measured here."
+                : " Aurora gives no WAL position below wal_level = logical (rds.logical_replication off), so no slot's retention is measured.";
+
         if (snapshot.Slots.Count == 0)
         {
-            return HealthVerdict.Quiet("This server has no replication slots.");
+            return HealthVerdict.Quiet("This server has no replication slots." + unmeasured);
+        }
+
+        if (!snapshot.PositionRead)
+        {
+            return HealthVerdict.Quiet(SessionText.Count(snapshot.Total, "replication slot") + " on this server." + unmeasured);
         }
 
         List<(ReplicationSlot Slot, string Why)> nearLimit = [];

@@ -140,8 +140,69 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
             results[code].Outcome.Should().NotBe(HealthCheckOutcome.NotApplicable, code + " applies on Aurora");
         }
 
+        results["R01"].Outcome.Should().Be(HealthCheckOutcome.Checked, "the slot read asks for a WAL position on Aurora only under logical WAL (W5-AUR-fix F2)");
+        results["T14"].Outcome.Should().Be(HealthCheckOutcome.Checked, "T14 shares that read");
+
         results.Values.Where(static x => x.Outcome == HealthCheckOutcome.NotApplicable).Select(static x => x.Check.Code)
             .Should().BeEquivalentTo(["R02", "R04", "S03"], "A2's review: these three and no other shared check stand down on Aurora");
+    }
+
+    /// <summary>
+    /// Aurora's writer below <c>wal_level = logical</c> raises <c>55000</c> from <c>pg_current_wal_lsn()</c> (W5-AUR-fix F2), and
+    /// the slot read R01, T14 and the Replication page share never calls it there. The shim's superuser makes this database's
+    /// <c>pg_current_wal_lsn()</c> one that raises <c>55000</c> when it runs - in this database alone, as <c>pg_proc</c> is per
+    /// database. Not by replacing the built-in's row, which changes nothing (<c>fmgr_info</c> runs a built-in OID from its own
+    /// table without reading <c>pg_proc</c>), nor by revoking it (a privilege fails the statement at plan time, guarded call or
+    /// not): the built-in is renamed, and a PL/pgSQL function of a new OID takes its name.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_WAL_position_Aurora_refuses_is_never_asked_for_and_R01_T14_and_the_slots_still_answer()
+    {
+        MatrixServer server = await ServerAsync();
+        string database = await AuroraShim.ApplyAsync(server, "aur_no_wal", Token);
+        await server.ExecuteAsync(
+            """
+            alter function pg_catalog.pg_current_wal_lsn() rename to studio_test_builtin_current_wal_lsn;
+            create function pg_catalog.pg_current_wal_lsn() returns pg_lsn language plpgsql volatile as $$
+            begin
+              raise exception 'recovery is in progress' using errcode = '55000', hint = 'WAL control functions cannot be executed during recovery.';
+            end $$;
+            """,
+            database,
+            Token);
+
+        await using (NpgsqlConnection probe = await server.OpenAsync(MatrixRole.App, database, Token))
+        {
+            await using NpgsqlCommand walLevel = new("select pg_catalog.current_setting('wal_level')", probe);
+            ((string) (await walLevel.ExecuteScalarAsync(Token))!).Should().NotBe("logical", "the shim stands for an Aurora cluster with rds.logical_replication off");
+
+            await using NpgsqlCommand refused = new("select pg_catalog.pg_current_wal_lsn()", probe);
+            Func<Task> call = async () => await refused.ExecuteScalarAsync(Token);
+            (await call.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("55000", "the stand-in raises what Aurora raises");
+
+            // And the statement off Aurora - the self-hosted slot read, which asks for the position - meets it.
+            await using NpgsqlCommand unguarded = new(Internal.Sql.HealthServerQueries.ReplicationSlots().Sql.Replace("@limit", "200", StringComparison.Ordinal), probe);
+            Func<Task> read = async () => await unguarded.ExecuteScalarAsync(Token);
+            (await read.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("55000");
+        }
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+        HealthSweep sweep = await host.SweepAsync(HealthSweepKind.Regular);
+
+        HealthCheckResult r01 = sweep.Results.Single(static x => x.Check.Code == "R01");
+        r01.Outcome.Should().Be(HealthCheckOutcome.Checked);
+        r01.Note.Should().Contain("Aurora gives no WAL position below wal_level = logical");
+        sweep.Results.Single(static x => x.Check.Code == "T14").Outcome.Should().Be(HealthCheckOutcome.Checked);
+        sweep.Results.Where(static x => x.Problem?.SqlState == "55000")
+            .Select(static x => x.Check.Code)
+            .Should().BeEmpty("no other shared check reads a WAL function on Aurora");
+
+        ReplicationFacts facts = await host.Services.GetRequiredService<IReplicationFactsReader>().ReadAsync(host.Resolved, Token);
+        facts.Failures.Should().BeEmpty();
+        facts.Slots.Outcome.Should().Be(ReplicationReadOutcome.Read);
+        facts.Slots.Value!.PositionRead.Should().BeFalse();
+        facts.Statements.Should().Contain(static x => x.Sql.Contains("current_setting('wal_level') = 'logical'", StringComparison.Ordinal));
+        facts.Statements.Should().NotContain(static x => x.Sql.Contains("pg_last_wal_", StringComparison.Ordinal), "on Aurora the role is the platform read's");
     }
 
     [PostgresFact]
@@ -206,7 +267,7 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
     }
 
     [PostgresFact]
-    public async Task C03s_remedy_names_the_maximum_ACU_with_a_capacity_source_and_is_the_pool_line_it_always_was_off_the_shim()
+    public async Task C03s_remedy_follows_the_capacity_source_on_each_branch_and_is_the_pool_line_it_always_was_off_the_shim()
     {
         MatrixServer server = await ServerAsync();
         string database = await AuroraShim.ApplyAsync(server, "aur_c03", Token);
@@ -217,16 +278,32 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
         ServerConnectionHeadroomFacts gathered = await GatherAsync(aurora, new ServerConnectionHeadroomCheck());
         gathered.Platform.Kind.Should().Be(PostgresPlatformKind.AmazonAurora);
         gathered.Capacity!.IsAcu.Should().BeTrue();
+        gathered.Limits.MaxConnections.Should().BeLessThan(ServerConnectionHeadroomCheck.AuroraLowMinimumCap, "the matrix server runs Postgres' default");
         source.Asked.Should().ContainSingle().Which.Should().Be((new PostgresDatabaseRef("default", "default"), AuroraShim.InstanceIdentifier));
 
-        // The live gather, judged as though its server were nearly full: the threshold is unit-tested, the wiring is proven here.
+        // The live gather, judged as though its server were nearly full: the thresholds are unit-tested, the wiring is proven
+        // here - one case per branch of W5-AUR-fix F1, the server's max_connections stated where only Aurora could set it.
         HealthRemedy remedy = Full(gathered).Remedy!;
         remedy.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
-        remedy.Code.Should().Be("Raise the cluster's maximum capacity (now 16 ACU)");
+        remedy.Code.Should().Be("Raise the cluster's maximum capacity (now 16 ACU)", "max_connections is below both of Aurora's caps");
+
+        Full(gathered, maxConnections: 2_000).Remedy!.Code
+            .Should().Be("Raise the cluster's minimum capacity to 1 ACU or more (now 0.5 ACU)", "a minimum of 0.5 ACU caps max_connections at 2,000");
+
+        await using MatrixHost large = await MatrixHost.CreateAsync(
+            server,
+            MatrixRole.App,
+            database,
+            services: s => s.AddSingleton<IPostgresCapacitySource>(new FixedCapacity(PostgresComputeCapacity.AuroraServerlessV2(40, 1, 64, DateTimeOffset.UtcNow))));
+        Full(await GatherAsync(large, new ServerConnectionHeadroomCheck())).Remedy!.Code
+            .Should().Be("Lower the pool ceilings of the applications that share the cluster, or put RDS Proxy or PgBouncer in front of it",
+                "from 32 ACU Aurora's default is its ceiling, 5,000");
 
         await using MatrixHost aurora2 = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
-        Full(await GatherAsync(aurora2, new ServerConnectionHeadroomCheck())).Remedy!.Code
-            .Should().StartWith("On Aurora Serverless v2: raise the cluster's maximum capacity (ACU)\n", "without a reading it says both cases");
+        ServerConnectionHeadroomFacts unread = await GatherAsync(aurora2, new ServerConnectionHeadroomCheck());
+        Full(unread).Remedy!.Code
+            .Should().StartWith("On Aurora Serverless v2: raise the cluster's maximum capacity (ACU), or its minimum to 1 ACU or more", "without a reading it says both cases");
+        Full(unread, maxConnections: 5_000).Remedy!.Code.Should().StartWith("Lower the pool ceilings", "5,000 is the ceiling whatever the capacity");
 
         await using MatrixHost selfHosted = await MatrixHost.CreateAsync(server, MatrixRole.App);
         HealthRemedy plain = Full(await GatherAsync(selfHosted, new ServerConnectionHeadroomCheck())).Remedy!;
@@ -234,10 +311,44 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
         plain.Explanation.Should().Contain("max_connections itself is the server's setting, which the studio never changes",
             "off Aurora C03's remedy is its own pool line, word for word");
 
-        static HealthFinding Full(ServerConnectionHeadroomFacts facts) =>
-            new ServerConnectionHeadroomCheck()
-                .Evaluate(facts with { Limits = facts.Limits with { ClientBackends = facts.Limits.Available } }, HealthEvaluation.At(DateTimeOffset.UtcNow))
+        static HealthFinding Full(ServerConnectionHeadroomFacts facts, int? maxConnections = null)
+        {
+            ServerConnectionLimits limits = facts.Limits with { MaxConnections = maxConnections ?? facts.Limits.MaxConnections };
+
+            return new ServerConnectionHeadroomCheck()
+                .Evaluate(facts with { Limits = limits with { ClientBackends = limits.Available } }, HealthEvaluation.At(DateTimeOffset.UtcNow))
                 .Findings.Single(static x => x.Variant is null);
+        }
+    }
+
+    /// <summary>
+    /// W5-AUR-fix F4: the platform and the capacity only word C03, so a platform read that fails - here because
+    /// <c>pg_postmaster_start_time()</c> is revoked from <c>PUBLIC</c> in this database alone - judges the budget as on a server
+    /// of somebody's own, with no capacity, rather than failing the check.
+    /// </summary>
+    [PostgresFact]
+    public async Task C03_judges_the_budget_when_the_platform_read_fails()
+    {
+        MatrixServer server = await ServerAsync();
+        string database = await server.CreateDatabaseAsync("aur_c03_no_platform", Token);
+        await server.ExecuteAsync("revoke execute on function pg_catalog.pg_postmaster_start_time() from public", database, Token);
+
+        await using (NpgsqlConnection probe = await server.OpenAsync(MatrixRole.App, database, Token))
+        {
+            await using NpgsqlCommand started = new("select pg_catalog.pg_postmaster_start_time()", probe);
+            Func<Task> call = async () => await started.ExecuteScalarAsync(Token);
+            (await call.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("42501", "the platform read reads it, so it fails here");
+        }
+
+        FixedCapacity source = new(PostgresComputeCapacity.AuroraServerlessV2(4.5, 0.5, 16, DateTimeOffset.UtcNow));
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database, services: s => s.AddSingleton<IPostgresCapacitySource>(source));
+
+        ServerConnectionHeadroomFacts facts = await GatherAsync(host, new ServerConnectionHeadroomCheck());
+
+        facts.Platform.Should().Be(PostgresPlatform.SelfHosted);
+        facts.Capacity.Should().BeNull();
+        facts.Limits.MaxConnections.Should().BePositive("the budget itself was read");
+        source.Asked.Should().BeEmpty("the capacity is asked for with the server facts, which could not be read");
     }
 
     [PostgresFact]

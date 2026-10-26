@@ -153,16 +153,18 @@ internal sealed class CapacityReader
 
         try
         {
-            // WaitAsync as well as the token: a source that ignores its token still costs this read no more than the timeout.
+            // WaitAsync on the same token as well: a source that ignores its token still costs this read no more than the
+            // timeout. Only the reader's own token firing is "took longer"; a source's own TimeoutException, or a cancellation
+            // of its own, is a failure like any other (event 9500, W5-AUR-fix F4).
             PostgresComputeCapacity? capacity = await capacitySource
                 .GetCapacityAsync(database, server, timeout.Token)
                 .AsTask()
-                .WaitAsync(Timeout, CancellationToken.None)
+                .WaitAsync(timeout.Token)
                 .ConfigureAwait(false);
 
             return new CapacityReading(capacity, askedAt, capacity is null ? "the capacity source does not know this database" : null, true);
         }
-        catch (Exception exception) when (exception is TimeoutException || (exception is OperationCanceledException && timeout.IsCancellationRequested))
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
@@ -194,9 +196,11 @@ internal sealed class CapacityReader
         {
             return services.GetService<IPostgresCapacitySource>();
         }
-        catch (Exception exception) when (exception is InvalidOperationException)
+        catch (Exception exception)
         {
-            // A source registered scoped is not resolvable from the root container: said once, and read as no source.
+            // A source registered scoped is not resolvable from the root container, and one whose construction throws never
+            // will be: said once - the Lazy keeps this answer for the process - and read as no source, so nothing that asks for
+            // the capacity fails for it (W5-AUR-fix F4).
             LogLevel level = throttle.WarningOrDebug("Aurora.Capacity", null, null, StudioLogThrottle.KindOf(exception));
 
             if (settings.Text.Product == StudioProduct.PostgresStudio)

@@ -193,11 +193,17 @@ the database, and the studio never words it as a statement.
 **On Aurora** `max_connections` is not a setting to raise: Aurora derives it from the instance's memory, and on Serverless
 v2 from the memory of the cluster's *maximum* capacity, held while the instance scales ("it uses the memory size based on
 the maximum Aurora capacity units (ACUs) for the DB instance, not the current ACU value" - *Performance and scaling for
-Aurora serverless*, Aurora User Guide). So with an `ACU` reading from the host's capacity source
-([`IPostgresCapacitySource`](../aurora.md#the-capacity-source)) the remedy is "Raise the cluster's maximum capacity (now
-16 ACU)", a change on the platform; without one it names both cases - the maximum ACU on Serverless v2, a larger instance
-class or `max_connections` in the DB cluster parameter group on a provisioned instance - and asks for a capacity source.
-A capacity reading, on any platform, is one more line of evidence. Every other platform's remedy is the text above.
+Aurora serverless*, Aurora User Guide). Two caps sit on top: a minimum capacity of 0 or 0.5 ACU caps `max_connections`
+at 2,000, and its default stops at 5,000 from a maximum of 32 ACU. So with an `ACU` reading from the host's capacity
+source ([`IPostgresCapacitySource`](../aurora.md#the-capacity-source)) the remedy is "Raise the cluster's minimum capacity
+to 1 ACU or more" when a minimum of 0.5 ACU or less holds it at 2,000; "Lower the pool ceilings of the applications that
+share the cluster, or put RDS Proxy or PgBouncer in front of it" at Aurora's ceiling - a maximum of 32 ACU or more, or
+`max_connections` at 5,000 - where more capacity adds no connections; and otherwise "Raise the cluster's maximum capacity
+(now 16 ACU)". Without one it names the Serverless v2 cases - the maximum, or the minimum if it is 0 or 0.5 - and the
+provisioned one, a larger instance class or `max_connections` in the DB cluster parameter group, and asks for a capacity
+source; at 5,000 it is the ceiling's remedy whatever the capacity. Each says that a `max_connections` set in a custom
+parameter group replaces Aurora's formula. A capacity reading, on any platform, is one more line of evidence. Every other
+platform's remedy is the text above.
 
 The count is whole without `pg_read_all_stats` too, but not because Postgres lists everything plainly: a role
 that is not a member reads another role's row with its `backend_type` null, and a filter on `client backend`

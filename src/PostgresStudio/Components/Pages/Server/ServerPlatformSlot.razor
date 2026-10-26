@@ -48,26 +48,39 @@ else
             return;
         }
 
-        loaded = (Scope, Revision);
+        (StudioScope? Scope, DateTimeOffset? Revision) asked = (Scope, Revision);
+        loaded = asked;
 
         if (Scope is not { } scope)
         {
             view = null;
+            error = null;
             return;
         }
 
         try
         {
-            view = await Aurora.GetAsync(scope, lifetime.Token);
-            error = null;
+            AuroraView read = await Aurora.GetAsync(scope, lifetime.Token);
+
+            // A read for a scope the page has since moved on from is dropped: the newer read draws its own (W5-AUR-fix F7).
+            if (loaded == asked)
+            {
+                view = read;
+                error = null;
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception exception)
         {
-            // On the page, not only in the log: a failure the visitor cannot see is a section that silently shows nothing.
-            error = "The Aurora section could not be read: " + exception.Message;
+            // On the page, not only in the log: a failure the visitor cannot see is a section that silently shows nothing. Its
+            // type or SQLSTATE only - an exception's own words can name what the gates withhold (D27).
+            if (loaded == asked)
+            {
+                error = "The Aurora section could not be read ("
+                    + (exception is Npgsql.PostgresException postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name) + ").";
+            }
         }
     }
 

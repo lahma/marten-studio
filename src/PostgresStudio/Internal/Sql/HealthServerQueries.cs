@@ -161,13 +161,24 @@ internal static class HealthServerQueries
     /// application's - and a visitor admitted to this database is never shown them (H10 review, B1). They are still
     /// read, because a row is a row, and the check withholds them.
     /// </para>
+    /// <para>
+    /// <b>On Aurora, a WAL position only with logical WAL</b> (W5-AUR-fix F2). Aurora's own storage layer replicates and its
+    /// readers do not stream, so an Aurora instance below <c>wal_level = logical</c> refuses <c>pg_current_wal_lsn()</c>
+    /// (<c>55000</c>), and the WAL functions of a standby mean nothing on a reader. There the position is read only where
+    /// <c>wal_level</c> is <c>logical</c> - the one setting under which Aurora has a slot to measure (a logical one) - and is
+    /// null otherwise; <c>position_read</c> says which, and a slot's retention is then not measured, never an error.
+    /// </para>
     /// </remarks>
-    public static HealthQuery ReplicationSlots() => new(
+    /// <param name="aurora">Whether the platform read called the server Aurora.</param>
+    public static HealthQuery ReplicationSlots(bool aurora = false) => new(
         "with server as (\n" +
         "  select pg_catalog.current_setting('server_version_num')::int4 as server_version,\n" +
         "         pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
-        "         case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_wal_replay_lsn()\n" +
-        "              else pg_catalog.pg_current_wal_lsn() end as current_lsn,\n" +
+        (aurora
+            ? "         case when not pg_catalog.pg_is_in_recovery() and pg_catalog.current_setting('wal_level') = 'logical'\n" +
+              "              then pg_catalog.pg_current_wal_lsn() end as current_lsn,\n"
+            : "         case when pg_catalog.pg_is_in_recovery() then pg_catalog.pg_last_wal_replay_lsn()\n" +
+              "              else pg_catalog.pg_current_wal_lsn() end as current_lsn,\n") +
         "         " + SizeSetting("max_slot_wal_keep_size") + " as max_slot_wal_keep_bytes,\n" +
         "         " + SizeSetting("wal_keep_size") + " as wal_keep_bytes\n" +
         "),\n" +
@@ -195,7 +206,8 @@ internal static class HealthServerQueries
         "select v.server_version, v.in_recovery, v.max_slot_wal_keep_bytes, v.wal_keep_bytes,\n" +
         "       r.slot_name, r.slot_type, r.plugin, r.database, r.temporary, r.active, r.retained_bytes,\n" +
         "       r.wal_status, r.safe_wal_size, r.xmin_age, r.catalog_xmin_age, r.inactive_seconds,\n" +
-        "       r.invalidation_reason, r.conflicting, r.total, r.this_database, r.xmin, r.catalog_xmin\n" +
+        "       r.invalidation_reason, r.conflicting, r.total, r.this_database, r.xmin, r.catalog_xmin,\n" +
+        "       v.current_lsn is not null as position_read\n" +
         "  from server v left join slots r on true",
         [Integer("limit", MaxSlots)]);
 

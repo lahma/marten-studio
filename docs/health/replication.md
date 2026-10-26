@@ -63,6 +63,10 @@ deployment and never restarted, or a replica that went away without its slot, is
   it says so.
 - **Never** an active slot, unless it is unreserved. A connected consumer that is behind is replication lag,
   not a forgotten slot. A server with no slots has nothing to say.
+- **On Aurora** below `wal_level = logical` (`rds.logical_replication` off) there is no WAL position to measure against:
+  Aurora's instance refuses `pg_current_wal_lsn()` there (`55000`), and its readers replay no WAL. The read asks for the
+  position only under logical WAL on the writer, and otherwise the status row says no slot's retention is measured - a
+  sentence, never a failure, and T14 reads the same slots.
 
 The evidence gives the counts, the WAL held, both settings and, from 13, how much may still be written before
 the first slot is lost. Each slot, behind the activity gate, is listed with what it holds, its `wal_status`, and

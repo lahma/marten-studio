@@ -19,26 +19,70 @@ public class AuroraWordingTests
 
     private static HealthEvaluation At() => HealthEvaluation.At(Now);
 
-    private static ServerConnectionLimits Limits(long clients = 96, long thisDatabase = 10) => new(clients, thisDatabase, 100, 3, 0, 170004);
+    private static ServerConnectionLimits Limits(long clients = 96, long thisDatabase = 10, int max = 100) => new(clients, thisDatabase, max, 3, 0, 170004);
 
-    private static CapacityReading Acu(double maximum = 16, bool? ioOptimized = null) =>
-        new(PostgresComputeCapacity.AuroraServerlessV2(4.5, 0.5, maximum, Now.AddMinutes(-1)) with { IoOptimized = ioOptimized }, Now, null, true);
+    private static CapacityReading Acu(double maximum = 16, bool? ioOptimized = null, double minimum = 0.5) =>
+        new(PostgresComputeCapacity.AuroraServerlessV2(4.5, minimum, maximum, Now.AddMinutes(-1)) with { IoOptimized = ioOptimized }, Now, null, true);
 
-    // ---- C03 on Aurora: the capacity, not postgresql.conf (A6, A8) ----------------------------------------
+    private static HealthRemedy AuroraC03(ServerConnectionLimits limits, CapacityReading? capacity) =>
+        new ServerConnectionHeadroomCheck()
+            .Evaluate(new ServerConnectionHeadroomFacts(limits, Aurora, capacity, null), At())
+            .Findings.Single().Remedy!;
+
+    private const string Override = "A max_connections set in a custom DB cluster or DB parameter group replaces Aurora's formula";
+
+    // ---- C03 on Aurora: the capacity, not postgresql.conf (A6, A8, W5-AUR-fix F1) ---------------------
 
     [Fact]
-    public void With_an_ACU_reading_C03_says_raise_the_clusters_maximum_capacity_and_names_it()
+    public void With_an_ACU_reading_below_Auroras_caps_C03_says_raise_the_clusters_maximum_capacity_and_names_it()
     {
-        HealthFinding finding = new ServerConnectionHeadroomCheck()
-            .Evaluate(new ServerConnectionHeadroomFacts(Limits(), Aurora, Acu(16), 100), At())
-            .Findings.Single();
+        foreach (double minimum in new[] { 0.5, 1 })
+        {
+            HealthFinding finding = new ServerConnectionHeadroomCheck()
+                .Evaluate(new ServerConnectionHeadroomFacts(Limits(), Aurora, Acu(16, minimum: minimum), 100), At())
+                .Findings.Single();
 
-        finding.Variant.Should().BeNull("the server's own finding keeps its key until the API packet's split");
-        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
-        finding.Remedy.Code.Should().Be("Raise the cluster's maximum capacity (now 16 ACU)");
-        finding.Remedy.Explanation.Should().StartWith("On Aurora Serverless v2 max_connections follows the maximum capacity.")
-            .And.Contain("Performance and scaling for Aurora serverless").And.NotContain("postgresql.conf");
-        finding.Evidence.Should().Contain(new HealthEvidence("Compute capacity", "4.5 ACU (min 0.5, max 16), measured 11:59 UTC"));
+            finding.Variant.Should().BeNull("the server's own finding keeps its key until the API packet's split");
+            finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
+            finding.Remedy.Code.Should().Be("Raise the cluster's maximum capacity (now 16 ACU)", "max_connections 100 is below the 2,000 cap a low minimum sets");
+            finding.Remedy.Explanation.Should().StartWith("On Aurora Serverless v2 max_connections follows the maximum capacity:")
+                .And.Contain("Performance and scaling for Aurora serverless").And.Contain(Override).And.NotContain("postgresql.conf");
+        }
+
+        new ServerConnectionHeadroomCheck()
+            .Evaluate(new ServerConnectionHeadroomFacts(Limits(), Aurora, Acu(16), 100), At())
+            .Findings.Single().Evidence.Should().Contain(new HealthEvidence("Compute capacity", "4.5 ACU (min 0.5, max 16), measured 11:59 UTC"));
+    }
+
+    [Theory]
+    [InlineData(0.5, 16)]
+    [InlineData(0, 16)]
+    [InlineData(0.5, 64)]
+    public void A_minimum_of_half_an_ACU_or_less_at_the_2000_cap_says_raise_the_minimum(double minimum, double maximum)
+    {
+        HealthRemedy remedy = AuroraC03(Limits(clients: 1_990, max: 2_000), Acu(maximum, minimum: minimum));
+
+        remedy.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
+        remedy.Code.Should().Be(
+            "Raise the cluster's minimum capacity to 1 ACU or more (now " + CapacityReading.Amount(minimum) + " ACU)",
+            "a maximum adds nothing while the minimum caps max_connections at 2,000");
+        remedy.Explanation.Should().StartWith("max_connections is 2,000, Aurora's cap for a minimum capacity of 0 or 0.5 ACU")
+            .And.Contain("once the instances reboot").And.Contain(Override).And.NotContain("postgresql.conf");
+    }
+
+    [Theory]
+    [InlineData(1, 64, 3_000)]
+    [InlineData(1, 32, 5_000)]
+    [InlineData(0.5, 16, 5_000)]
+    public void At_Auroras_ceiling_C03_says_fewer_connections_or_a_pooler(double minimum, double maximum, int maxConnections)
+    {
+        HealthRemedy remedy = AuroraC03(Limits(clients: maxConnections - 10, max: maxConnections), Acu(maximum, minimum: minimum));
+
+        remedy.Code.Should().Be(
+            "Lower the pool ceilings of the applications that share the cluster, or put RDS Proxy or PgBouncer in front of it",
+            "from 32 ACU, or at 5,000, more capacity adds no connections");
+        remedy.Explanation.Should().Contain("with a maximum capacity of " + CapacityReading.Amount(maximum) + " ACU: at Aurora's ceiling")
+            .And.Contain(Override).And.NotContain("Raise the cluster's maximum");
     }
 
     [Fact]
@@ -46,15 +90,21 @@ public class AuroraWordingTests
     {
         foreach (CapacityReading? capacity in new CapacityReading?[] { null, new(null, Now, null, false), new(PostgresComputeCapacity.Of(8, 8, 8, "vCPU", Now), Now, null, true) })
         {
-            HealthRemedy remedy = new ServerConnectionHeadroomCheck()
-                .Evaluate(new ServerConnectionHeadroomFacts(Limits(), Aurora, capacity, null), At())
-                .Findings.Single().Remedy!;
+            foreach (int maxConnections in new[] { 100, 2_000 })
+            {
+                HealthRemedy remedy = AuroraC03(Limits(clients: maxConnections - 4, max: maxConnections), capacity);
 
-            remedy.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
-            remedy.Code.Should().Be(
-                "On Aurora Serverless v2: raise the cluster's maximum capacity (ACU)\n"
-                + "On a provisioned instance: a larger instance class, or max_connections in the DB cluster parameter group");
-            remedy.Explanation.Should().Contain("register an IPostgresCapacitySource (docs/aurora.md)").And.NotContain("postgresql.conf");
+                remedy.Kind.Should().Be(HealthRemedyKind.ManagedPlatform);
+                remedy.Code.Should().Be(
+                    "On Aurora Serverless v2: raise the cluster's maximum capacity (ACU), or its minimum to 1 ACU or more if it is 0 or 0.5\n"
+                    + "On a provisioned instance: a larger instance class, or max_connections in the DB cluster parameter group");
+                remedy.Explanation.Should().Contain("caps it at 2,000").And.Contain("5,000, Aurora's ceiling").And.Contain(Override)
+                    .And.Contain("register an IPostgresCapacitySource (docs/aurora.md)").And.NotContain("postgresql.conf");
+            }
+
+            HealthRemedy ceiling = AuroraC03(Limits(clients: 4_990, max: 5_000), capacity);
+            ceiling.Code.Should().StartWith("Lower the pool ceilings", "5,000 is Aurora's ceiling, whatever the capacity");
+            ceiling.Explanation.Should().StartWith("max_connections is 5,000: at Aurora's ceiling.");
         }
     }
 

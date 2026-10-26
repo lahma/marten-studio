@@ -2,6 +2,7 @@ using Bunit;
 
 using PostgresStudio.Components.Pages.Server;
 using PostgresStudio.Components.Shared;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Aurora;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Server;
@@ -165,5 +166,48 @@ public class AuroraSectionTests
 
         line.Should().Be(new HealthServerLine("instance i-1 (the writer), Aurora 16.4.1", Now.AddDays(-2), null,
             "capacity unknown this interval: the capacity source failed (InvalidOperationException)"));
+    }
+
+    /// <summary>W5-AUR-fix F7: a failure names its type or SQLSTATE, never the exception's own words (D27).</summary>
+    [Fact]
+    public async Task A_failed_read_is_drawn_by_its_type_or_SQLSTATE_and_never_its_message()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        context.Aurora.Answer = static _ => throw new InvalidOperationException("relation \"secret_schema.payroll\" does not exist");
+
+        var slot = context.Render<ServerPlatformSlot>(parameters => parameters.Add(static x => x.Model, new StudioScope("default", "default", null)));
+
+        slot.WaitForAssertion(() => slot.Find(".ms-aur-unavailable").TextContent.Should().Be("The Aurora section could not be read (InvalidOperationException)."));
+        slot.Markup.Should().NotContain("secret_schema");
+
+        context.Aurora.Answer = static _ => throw new Npgsql.PostgresException("permission denied for schema secret_schema", "ERROR", "ERROR", "42501");
+        slot.Render(parameters => parameters.Add(static x => x.Model, new StudioScope("default", "other", null)));
+
+        slot.WaitForAssertion(() => slot.Find(".ms-aur-unavailable").TextContent.Should().Be("The Aurora section could not be read (SQLSTATE 42501)."));
+        slot.Markup.Should().NotContain("secret_schema");
+    }
+
+    /// <summary>W5-AUR-fix F7: a read that ends after the page has moved to another scope draws nothing over the newer one.</summary>
+    [Fact]
+    public async Task A_read_for_a_scope_the_page_has_left_is_dropped()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+
+        TaskCompletionSource<AuroraView> first = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.Aurora.Answer = scope => scope.DatabaseId == "first" ? first.Task : Task.FromResult(new AuroraView { Refused = "the second database's answer" });
+
+        var slot = context.Render<ServerPlatformSlot>(parameters => parameters.Add(static x => x.Model, new StudioScope("default", "first", null)));
+        slot.Render(parameters => parameters.Add(static x => x.Model, new StudioScope("default", "second", null)));
+
+        slot.WaitForAssertion(() => slot.Find(".ms-aur-unavailable").TextContent.Should().Be("the second database's answer"));
+
+        // Released on the renderer's dispatcher, then flushed: the first read's continuation is posted there before the empty
+        // action, so it has run - and been dropped - by the time the markup is read.
+        await slot.InvokeAsync(() => first.SetResult(new AuroraView { Refused = "the first database's answer" }));
+        await slot.InvokeAsync(static () => { });
+
+        context.Aurora.Requests.Select(static x => x.DatabaseId).Should().Equal("first", "second");
+        first.Task.IsCompleted.Should().BeTrue();
+        slot.Find(".ms-aur-unavailable").TextContent.Should().Be("the second database's answer", "the first read ended after the page moved on");
     }
 }

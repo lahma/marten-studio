@@ -73,7 +73,7 @@ documentation:
 | C04-C07 | Idle in transaction, long statements, lock waits, prepared transactions | apply | sessions and locks are Postgres' own |
 | C08 | Deadlocks, rollbacks and temp spills | applies, reworded | temporary files use the instance's local storage (A6) |
 | C11 | Low cache hit ratio | applies, reworded | on Aurora Standard a miss is billed I/O (A5) |
-| R01 | Replication slot retaining WAL | applies | Aurora has logical slots |
+| R01 | Replication slot retaining WAL | applies | Aurora has logical slots; below `wal_level = logical` (`rds.logical_replication` off) it refuses `pg_current_wal_lsn()`, so the read asks for a WAL position only under logical WAL, and otherwise says no slot's retention is measured |
 | R02 | WAL archiving failing | **not applicable** | Aurora's storage layer archives; its readers do not stream (*Replication with Amazon Aurora PostgreSQL*) |
 | R03 | Standby lag | applies, reworked | `aurora-reader`: Aurora's own `replica_lag_in_msec` (A3) |
 | R04 | Requested checkpoints | **not applicable** | Aurora's storage layer checkpoints |
@@ -88,8 +88,8 @@ documentation:
 MartenStudio's own checks (the daemon, events, documents) read the store and apply unchanged. The Replication page's
 checkpoint, WAL, archiver and tablespace sections say "Not applicable on Aurora"; its standbys become **Aurora replicas**
 (A3). `pg_control_checkpoint()` and `pg_control_system()`, which the statistics window reads for the timeline and the
-system identifier, are not documented by AWS for Aurora either way; a platform that refuses them only loses those two
-signals, never the window.
+system identifier, are not documented by AWS for Aurora either way; a revoked or failing call nulls only the timeline and
+system id, never the rest of the window.
 
 ## Reader lag (A3)
 
@@ -134,9 +134,22 @@ The profile raises **no finding**: issue #8 names no threshold for a wait.
   `autovacuum_work_mem`, `effective_cache_size` and `maintenance_work_mem` default from it; and `shared_buffers` is sized
   as the instance scales and ignores a set value (*Performance and scaling for Aurora serverless*). Every other platform's
   wording is unchanged.
-- **C03** on Aurora: with an ACU reading, "Raise the cluster's maximum capacity (now 16 ACU)" - a change on the platform,
-  which takes effect when the instances reboot (`max_connections` "is a static parameter for Aurora serverless"); without
-  one, both cases and a pointer to the capacity source below. See [C03](health/connections.md#c03-server-connection-headroom).
+- **C03** on Aurora names the knob that raises `max_connections` there, from the capacity range and `max_connections`
+  itself (*Performance and scaling for Aurora serverless*): Serverless v2 derives it from the memory of the cluster's
+  *maximum* capacity; "when you specify a minimum capacity of 0 or 0.5 ACUs on PostgreSQL-compatible DB instances, the
+  maximum value of `max_connections` is capped at 2,000"; and its default stops at 5,000 from 32 ACU. So:
+  - a minimum of 0.5 ACU or less with `max_connections` at the 2,000 cap: "Raise the cluster's minimum capacity to 1 ACU or
+    more (now 0.5 ACU)";
+  - a maximum of 32 ACU or more, or `max_connections` at 5,000: Aurora's ceiling - "Lower the pool ceilings of the
+    applications that share the cluster, or put RDS Proxy or PgBouncer in front of it", since more capacity adds no
+    connections;
+  - otherwise, with an ACU reading: "Raise the cluster's maximum capacity (now 16 ACU)";
+  - without one: both Serverless v2 cases and the provisioned one, and a pointer to the capacity source below.
+
+  Each says that a `max_connections` set in a custom DB cluster or DB parameter group replaces the formula whatever the
+  capacity (AWS recommends "a variation of the formula instead of specifying a constant value"), and a new range takes
+  effect when the instances reboot (`max_connections` "is a static parameter for Aurora serverless"). See
+  [C03](health/connections.md#c03-server-connection-headroom).
 - **C08**: temporary files "share local storage with other log files" (*Managing temporary files with PostgreSQL*) - watch
   `FreeLocalStorage`, and `temp_file_limit` stops one statement from filling it.
 - **C11** (A5): on Aurora Standard a read that misses the cache is billed I/O; on I/O-Optimized it is not. The finding
@@ -170,12 +183,14 @@ public interface IPostgresCapacitySource
 The studio's side of the contract:
 
 - It finds the source in the container once, lazily (`GetService`). **Register it as a singleton**: the studio asks it from
-  the root container, so a scoped registration is not found (said once in the log, as event 9500).
+  the root container, so a scoped registration is not found - nor is one whose construction throws - and either is said
+  once in the log, as event 9500, and read as no source.
 - It asks at most **once per `HealthInterval` per database and instance**, one call at a time however many pages and sweeps
   want it, and gives it **five seconds** - the token it is handed is cancelled then.
 - An answer of `null` (the source does not know this database - it is not Aurora, say), a timeout or an exception means
   "capacity unknown" for that interval, and the page says so. An exception is **event 9500**, at Warning once in ten minutes
-  per database and Debug in between.
+  per database and Debug in between - the source's own `TimeoutException` or cancellation included: only the studio's five
+  seconds running out is "took longer".
 - `server.Instance` is the instance that answered - `aurora_db_instance_identifier()` - so a cluster with several instances
   reads the right one, and a failover asks again. `server.Platform` is `AmazonAurora` on Aurora; answer null elsewhere.
 
@@ -189,8 +204,8 @@ The studio's side of the contract:
    `ServerlessV2ScalingConfiguration` has `MinCapacity` and `MaxCapacity`, and its `StorageType` is `aurora-iopt1` for
    I/O-Optimized.
 4. Return `PostgresComputeCapacity.AuroraServerlessV2(current, minimum, maximum, measuredAt) with { IoOptimized = storageType == "aurora-iopt1" }`.
-   `AuroraServerlessV2` checks 0 to 256 ACU; for a larger maximum (AWS's table lists 384 for platform version 4) use
-   `PostgresComputeCapacity.Of(current, minimum, maximum, "ACU", measuredAt)` - C03 keys on the unit.
+   `AuroraServerlessV2` checks 0 to 384 ACU, platform version 4's range (earlier platform versions stop at 256). C03 keys on
+   the unit, `ACU`.
 5. Cache your own reads for a minute or more: CloudWatch calls cost money, and the studio asks every `HealthInterval` for
    every database a visitor is watching.
 

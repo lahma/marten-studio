@@ -78,12 +78,25 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
         ArgumentNullException.ThrowIfNull(context);
 
         ServerConnectionLimits limits = await ServerConnectionLimits.SharedAsync(context).ConfigureAwait(false);
-        PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
-        CapacityReading capacity = await CapacityReading.SharedAsync(context).ConfigureAwait(false);
+
+        // The platform and the capacity only word the finding: a failure of either judges the budget as on a server of
+        // somebody's own, with no capacity, as C08 does (W5-AUR-fix F4) - S01's row says why the platform read failed.
+        PostgresPlatform platform = PostgresPlatform.SelfHosted;
+        CapacityReading? capacity = null;
+
+        try
+        {
+            platform = (await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false)).Platform;
+            capacity = await CapacityReading.SharedAsync(context).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            capacity = null;
+        }
 
         int? pool = DatabasePoolSettings.Of(context.Target) is { Pooling: true } settings ? settings.MaxPoolSize : null;
 
-        return new ServerConnectionHeadroomFacts(limits, server.Platform, capacity, pool);
+        return new ServerConnectionHeadroomFacts(limits, platform, capacity, pool);
     }
 
     /// <inheritdoc />
@@ -161,7 +174,7 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
                 + "runs for a role can be counted with them. Background workers it can see, autovacuum and replication have slots of "
                 + "their own and are not counted. A moment's reading: a burst can come and go between two checks.",
             Remedy = facts.Platform.Kind == PostgresPlatformKind.AmazonAurora
-                ? AuroraRemedy(facts.Capacity)
+                ? AuroraRemedy(facts.Capacity, limits)
                 : new HealthRemedy(
                     """
                     // Fewer connections per process - every data source Marten builds from a connection string:
@@ -173,32 +186,89 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
         };
     }
 
-    /// <summary>
-    /// What raises Aurora's connections (A6): the cluster's maximum capacity with an <c>ACU</c> reading, and both cases
-    /// without one - never <c>max_connections</c> in a file nobody on Aurora has.
-    /// </summary>
-    internal static HealthRemedy AuroraRemedy(CapacityReading? capacity)
-    {
-        const string Derived =
-            "Aurora derives max_connections from the instance's memory - \"derived from a formula based on the memory size of the DB "
-            + "instance\" - and on Serverless v2 from the memory of the cluster's maximum capacity, which it holds while the instance "
-            + "scales: \"it uses the memory size based on the maximum Aurora capacity units (ACUs) for the DB instance, not the "
-            + "current ACU value\" (Performance and scaling for Aurora serverless, Aurora User Guide). A new maximum takes effect "
-            + "when the instances reboot, and with a minimum capacity of 0 or 0.5 ACU max_connections is capped at 2,000. Or lower "
-            + "the pool ceilings of the applications that share the cluster.";
+    /// <summary>Aurora caps <c>max_connections</c> at this with a minimum capacity of 0 or 0.5 ACU.</summary>
+    internal const int AuroraLowMinimumCap = 2_000;
 
-        if (capacity is { IsAcu: true, Capacity: { } acu })
+    /// <summary>Aurora PostgreSQL's default <c>max_connections</c> from <see cref="AuroraCeilingAcu" /> upward: its ceiling.</summary>
+    internal const int AuroraCeiling = 5_000;
+
+    /// <summary>The maximum capacity from which Aurora PostgreSQL's default <c>max_connections</c> is <see cref="AuroraCeiling" />.</summary>
+    internal const double AuroraCeilingAcu = 32;
+
+    /// <summary>
+    /// What raises Aurora's connections (A6, W5-AUR-fix F1), from the capacity range and <c>max_connections</c> - never
+    /// <c>max_connections</c> in a file nobody on Aurora has.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// From <i>Performance and scaling for Aurora serverless</i>, Aurora User Guide
+    /// (https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.setting-capacity.html, read 2026-10-26):
+    /// "When Aurora serverless evaluates the formula, it uses the memory size based on the maximum Aurora capacity units (ACUs)
+    /// for the DB instance, not the current ACU value"; "when you specify a minimum capacity of 0 or 0.5 ACUs on
+    /// PostgreSQL-compatible DB instances, the maximum value of <c>max_connections</c> is capped at 2,000"; the default table
+    /// gives 5,000 from 32 ACU upward on every platform version; <c>max_connections</c> "is a static parameter for Aurora
+    /// serverless", so a new range takes effect when the instances reboot; and "If you change the default value, we recommend
+    /// using a variation of the formula instead of specifying a constant value" - a custom parameter group's value replaces
+    /// the formula.
+    /// </para>
+    /// <list type="number">
+    /// <item>A minimum of 0.5 ACU or less with <c>max_connections</c> at the 2,000 cap: raise the minimum to 1 ACU or more.</item>
+    /// <item>A maximum of 32 ACU or more, or <c>max_connections</c> at 5,000: Aurora's ceiling - fewer connections, or a pooler.</item>
+    /// <item>Otherwise, with an ACU reading: raise the maximum.</item>
+    /// <item>Without one: both cases, and a capacity source to tell them apart.</item>
+    /// </list>
+    /// </remarks>
+    internal static HealthRemedy AuroraRemedy(CapacityReading? capacity, ServerConnectionLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+
+        const string Source = "(Performance and scaling for Aurora serverless, Aurora User Guide)";
+        const string Override =
+            "A max_connections set in a custom DB cluster or DB parameter group replaces Aurora's formula whatever the capacity, and "
+            + "AWS recommends \"a variation of the formula instead of specifying a constant value\".";
+        const string Pools = "Or lower the pool ceilings of the applications that share the cluster.";
+
+        string now = "max_connections is " + limits.MaxConnections.ToString("N0", CultureInfo.InvariantCulture);
+        PostgresComputeCapacity? acu = capacity is { IsAcu: true, Capacity: { } reading } ? reading : null;
+
+        if (acu is not null && acu.Minimum <= 0.5 && limits.MaxConnections >= AuroraLowMinimumCap && limits.MaxConnections < AuroraCeiling)
+        {
+            return HealthRemedy.ForManagedPlatform(
+                "Raise the cluster's minimum capacity to 1 ACU or more (now " + CapacityReading.Amount(acu.Minimum) + " ACU)",
+                now + ", Aurora's cap for a minimum capacity of 0 or 0.5 ACU: \"the maximum value of max_connections is capped at "
+                + "2,000\" whatever the maximum " + Source + ". With a minimum of 1 ACU or more it follows the maximum capacity (now "
+                + CapacityReading.Amount(acu.Maximum) + " ACU) again, up to 5,000, once the instances reboot - max_connections \"is a "
+                + "static parameter for Aurora serverless\". " + Override + " " + Pools);
+        }
+
+        if (limits.MaxConnections >= AuroraCeiling || acu?.Maximum >= AuroraCeilingAcu)
+        {
+            return HealthRemedy.ForManagedPlatform(
+                "Lower the pool ceilings of the applications that share the cluster, or put RDS Proxy or PgBouncer in front of it",
+                now + (acu is null ? string.Empty : " with a maximum capacity of " + CapacityReading.Amount(acu.Maximum) + " ACU")
+                + ": at Aurora's ceiling. Its default max_connections is 5,000 from a maximum of 32 ACU upward " + Source
+                + ", so more capacity adds no connections; a pooler shares fewer server connections among more clients. " + Override);
+        }
+
+        if (acu is not null)
         {
             return HealthRemedy.ForManagedPlatform(
                 "Raise the cluster's maximum capacity (now " + CapacityReading.Amount(acu.Maximum) + " ACU)",
-                "On Aurora Serverless v2 max_connections follows the maximum capacity. " + Derived);
+                "On Aurora Serverless v2 max_connections follows the maximum capacity: \"it uses the memory size based on the maximum "
+                + "Aurora capacity units (ACUs) for the DB instance, not the current ACU value\" " + Source + ". Its default grows with "
+                + "the maximum up to 5,000 at 32 ACU, and a new maximum takes effect when the instances reboot - max_connections \"is "
+                + "a static parameter for Aurora serverless\". " + Override + " " + Pools);
         }
 
         return HealthRemedy.ForManagedPlatform(
-            "On Aurora Serverless v2: raise the cluster's maximum capacity (ACU)\n"
+            "On Aurora Serverless v2: raise the cluster's maximum capacity (ACU), or its minimum to 1 ACU or more if it is 0 or 0.5\n"
             + "On a provisioned instance: a larger instance class, or max_connections in the DB cluster parameter group",
-            Derived + " The studio cannot tell which this cluster is, nor its capacity: register an IPostgresCapacitySource "
-            + "(docs/aurora.md) and this remedy names its maximum.");
+            "Aurora derives max_connections from the instance's memory - \"derived from a formula based on the memory size of the DB "
+            + "instance\" - and on Serverless v2 from the memory of the cluster's maximum capacity, which it holds while the instance "
+            + "scales " + Source + ". On Serverless v2 a minimum capacity of 0 or 0.5 ACU caps it at 2,000, and from 32 ACU it is "
+            + "5,000, Aurora's ceiling, where only fewer connections or a pooler such as RDS Proxy or PgBouncer helps. " + Override
+            + " The studio cannot tell which this cluster is, nor its capacity: register an IPostgresCapacitySource (docs/aurora.md) "
+            + "and this remedy says which applies.");
     }
 
     private static HealthFinding RoleFinding(ServerConnectionHeadroomFacts facts, bool critical, string used)

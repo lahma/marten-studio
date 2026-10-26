@@ -133,6 +133,12 @@ internal sealed record ReplicationSlotSnapshot(
     /// <summary>Whether <c>max_slot_wal_keep_size</c> caps what a slot may hold.</summary>
     public bool HasSlotCap => MaxSlotWalKeepBytes is > 0;
 
+    /// <summary>
+    /// Whether the server's WAL position was read, so each slot's retention is measured. False only on Aurora below
+    /// <c>wal_level = logical</c>, which refuses <c>pg_current_wal_lsn()</c> and has no logical slot to measure (W5-AUR-fix F2).
+    /// </summary>
+    public bool PositionRead { get; init; } = true;
+
     /// <summary>The sweep's one read (<see cref="HealthCheckContext.Shared{T}" />).</summary>
     public static Task<ReplicationSlotSnapshot> SharedAsync(HealthCheckContext context)
     {
@@ -145,8 +151,22 @@ internal sealed record ReplicationSlotSnapshot(
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        // The platform first (the sweep's shared read): Aurora below logical WAL refuses pg_current_wal_lsn() (W5-AUR-fix F2).
+        // A failed platform read reads the slots as any other server's, whose own read then says what went wrong.
+        bool aurora;
+
+        try
+        {
+            aurora = (await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false)).Platform.Kind == PostgresPlatformKind.AmazonAurora;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            aurora = false;
+        }
+
+        var query = HealthServerQueries.ReplicationSlots(aurora);
         IReadOnlyList<Row> rows = await context.Sql
-            .QueryAsync(HealthServerQueries.ReplicationSlots(), Map, cancellationToken)
+            .QueryAsync(query, Map, cancellationToken)
             .ConfigureAwait(false);
 
         if (rows.Count == 0)
@@ -163,7 +183,10 @@ internal sealed record ReplicationSlotSnapshot(
             first.MaxSlotWalKeepBytes,
             first.WalKeepBytes,
             first.Total,
-            [.. rows.Where(static x => x.Slot is not null).Select(static x => x.Slot!)]);
+            [.. rows.Where(static x => x.Slot is not null).Select(static x => x.Slot!)])
+        {
+            PositionRead = first.PositionRead,
+        };
     }
 
     private static Row Map(NpgsqlDataReader reader)
@@ -199,7 +222,10 @@ internal sealed record ReplicationSlotSnapshot(
             reader.IsDBNull(2) ? null : reader.GetInt64(2),
             reader.IsDBNull(3) ? null : reader.GetInt64(3),
             reader.IsDBNull(18) ? 0 : reader.GetInt64(18),
-            slot);
+            slot)
+        {
+            PositionRead = reader.IsDBNull(22) || reader.GetBoolean(22),
+        };
     }
 
     private static string? NullableString(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
@@ -210,7 +236,10 @@ internal sealed record ReplicationSlotSnapshot(
             ? null
             : xid;
 
-    private sealed record Row(int ServerVersion, bool InRecovery, long? MaxSlotWalKeepBytes, long? WalKeepBytes, long Total, ReplicationSlot? Slot);
+    private sealed record Row(int ServerVersion, bool InRecovery, long? MaxSlotWalKeepBytes, long? WalKeepBytes, long Total, ReplicationSlot? Slot)
+    {
+        public bool PositionRead { get; init; } = true;
+    }
 }
 
 /// <summary>Sizes, worded once for the replication checks: "1.4 GiB".</summary>

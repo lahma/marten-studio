@@ -293,10 +293,12 @@ public class PostgresStudioOptionsTests
     }
 
     [Fact]
-    public void A_capacity_needs_a_unit_and_Aurora_is_bounded_at_256_ACU()
+    public void A_capacity_needs_a_unit_and_Aurora_is_bounded_at_384_ACU()
     {
         ((Action) (() => PostgresComputeCapacity.Of(1, 0, 2, " ", DateTimeOffset.UnixEpoch))).Should().Throw<ArgumentException>();
-        ((Action) (() => PostgresComputeCapacity.AuroraServerlessV2(1, 0.5, 257, DateTimeOffset.UnixEpoch))).Should().Throw<ArgumentOutOfRangeException>();
+        ((Action) (() => PostgresComputeCapacity.AuroraServerlessV2(1, 0.5, 385, DateTimeOffset.UnixEpoch))).Should().Throw<ArgumentOutOfRangeException>();
+        PostgresComputeCapacity.AuroraServerlessV2(1, 0.5, 384, DateTimeOffset.UnixEpoch).Maximum.Should().Be(384,
+            "platform version 4 allows 384 ACU (Performance and scaling for Aurora serverless)");
 
         PostgresComputeCapacity aurora = PostgresComputeCapacity.AuroraServerlessV2(8, 0.5, 16, DateTimeOffset.UnixEpoch) with { IoOptimized = true };
         aurora.Unit.Should().Be("ACU");

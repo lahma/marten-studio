@@ -158,10 +158,13 @@ internal sealed class FakeAurora : PostgresStudio.Services.Aurora.IAuroraService
     /// <summary>What the section is handed.</summary>
     public PostgresStudio.Services.Aurora.AuroraView View { get; set; } = new();
 
+    /// <summary>When set, answers in place of <see cref="View" /> - to hold a read, or to fail it.</summary>
+    public Func<StudioScope, Task<PostgresStudio.Services.Aurora.AuroraView>>? Answer { get; set; }
+
     public Task<PostgresStudio.Services.Aurora.AuroraView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         Requests.Add(scope);
-        return Task.FromResult(View);
+        return Answer is { } answer ? answer(scope) : Task.FromResult(View);
     }
 }
 

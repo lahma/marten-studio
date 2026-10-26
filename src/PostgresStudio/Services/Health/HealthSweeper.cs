@@ -369,8 +369,9 @@ internal sealed class HealthSweeper
         }
 
         // Aurora's wait profile and this database's commit latency (issue #8 A4, W5-AUR): no check judges them, so a regular sweep
-        // of an Aurora database reads them itself, once its gatherers have run - through the memo, which the Server page's facts
-        // reuse - and samples them at the database-wide gate for the page's window deltas.
+        // of an Aurora database reads them itself, once its gatherers have run - through this sweep's memo, so the platform read
+        // the checks made is not repeated - and samples them at the database-wide gate for the page's window deltas. The Server
+        // page reads its own facts (AuroraFactsCache, one read per HealthInterval) and takes only these samples from the sweep.
         if (kind == HealthSweepKind.Regular
             && !sweepBudget.IsCancellationRequested
             && memo.TryGetCompleted<PostgresServerFacts>(HealthServerQueries.PlatformKey, out PostgresServerFacts? server)
