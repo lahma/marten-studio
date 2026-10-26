@@ -76,6 +76,15 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string ReplicationBuilder = "src/PostgresStudio/Internal/Sql/ReplicationQueries.cs";
 
+    /// <summary>
+    /// The Aurora builder (W5-AUR, issue #8 A4): its per-session read lists this database's client sessions from
+    /// <c>pg_stat_activity</c> to ask <c>aurora_stat_backend_waits(pid)</c> of each. It is called only by the Aurora facts
+    /// reader's session read (the net below), which <c>AuroraService</c> calls only for a visitor through the activity gate and
+    /// only through <c>AuroraFactsCache</c>'s single flight of <c>HealthInterval</c> time to live, and the Server page that
+    /// shows it polls at <c>HealthInterval</c>.
+    /// </summary>
+    private const string AuroraBuilder = "src/PostgresStudio/Internal/Sql/AuroraQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -91,7 +100,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder or ReplicationBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -108,6 +117,31 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the table builder reads pg_locks for its index read, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ReplicationBuilder.Split('/'))))
             .Should().BeTrue("the replication builder joins pg_stat_activity for the senders' databases, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(AuroraBuilder.Split('/'))))
+            .Should().BeTrue("the Aurora builder lists this database's sessions for their waits, so its exemption is not an exemption for nothing");
+    }
+
+    [Fact]
+    public void The_aurora_builders_session_read_is_called_only_by_the_aurora_facts_session_read()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != AuroraBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("AuroraQueries.BackendWaits(", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().Equal(["src/PostgresStudio/Services/Aurora/AuroraFacts.cs"],
+            "the per-session waits are read by AuroraFactsReader.ReadSessionsAsync alone, which only the activity gate reaches");
+
+        string service = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", "Aurora", "AuroraService.cs")));
+        int gate = service.IndexOf("SessionsGateAsync(whole", StringComparison.Ordinal);
+        int read = service.IndexOf("facts.GetSessionsAsync(", StringComparison.Ordinal);
+
+        gate.Should().BePositive();
+        read.Should().BeGreaterThan(gate, "the sessions are read only after the activity gate has passed");
     }
 
     [Fact]

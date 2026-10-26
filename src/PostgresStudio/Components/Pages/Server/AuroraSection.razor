@@ -1,0 +1,278 @@
+@using System.Globalization
+@using PostgresStudio.Services.Aurora
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@inject StudioState State
+
+@*
+    The Server page's Aurora section (issue #8 A1, A3, A4, A8; W5-AUR), drawn in S2's platform slot from IAuroraService's view:
+    which instance answered, the capacity the host's source reports, the cluster's instances, the instance's cumulative waits
+    and this database's commit latency - all database-wide (D29) - and each session's waits only through the activity gate.
+    On a server that is not Aurora it draws a capacity reading if a source gave one, and nothing otherwise.
+
+    No finding: issue #8 names no threshold for a wait, and parity with host A's page is the user's question. Every time Aurora
+    reports here is cumulative; a window is the difference between this read and the health advisor's oldest sample on the same
+    instance, and before two samples the totals since the instance started are shown and said to be.
+*@
+
+@if (View is not { } view)
+{
+}
+else if (view.Refused is { Length: > 0 } refused)
+{
+    <section class="ms-section ms-aur" aria-label="Aurora">
+        <h2 class="ms-section-title">Aurora</h2>
+        <p class="ms-aur-note ms-aur-unavailable">@refused</p>
+    </section>
+}
+else if (!view.IsAurora)
+{
+    @if (view.Capacity?.Text is { Length: > 0 } capacity)
+    {
+        <section class="ms-section ms-aur" aria-label="Compute capacity">
+            <h2 class="ms-section-title">Compute capacity</h2>
+            <p class="ms-aur-note">@capacity, as the host's capacity source reports it.</p>
+        </section>
+    }
+}
+else
+{
+    <section class="ms-section ms-aur" aria-label="Aurora">
+        <h2 class="ms-section-title">Aurora</h2>
+
+        <dl class="ms-aur-facts">
+            <div class="ms-aur-fact">
+                <dt>Answered by</dt>
+                <dd>
+                    @(view.AnsweredBy ?? "not known")
+                    @if (view.StartedAt is { } started)
+                    {
+                        <span class="ms-aur-fact-note">up since @State.FormatInSelectedTimeZone(started)</span>
+                    }
+                    @if (view.InstanceNotRead is { Length: > 0 } notRead)
+                    {
+                        <span class="ms-aur-fact-note">@notRead</span>
+                    }
+                </dd>
+            </div>
+            <div class="ms-aur-fact">
+                <dt>Capacity</dt>
+                <dd>@CapacityText(view.Capacity)</dd>
+            </div>
+        </dl>
+
+        <h3 class="ms-aur-subtitle">Instances</h3>
+        @if (view.Replicas is not { } replicas)
+        {
+            <p class="ms-aur-note ms-aur-unavailable">Not read.</p>
+        }
+        else if (replicas.Value is not { } status)
+        {
+            <p class="ms-aur-note ms-aur-unavailable">@replicas.Note</p>
+        }
+        else
+        {
+            <TableScroll Label="Aurora instances">
+                <table class="ms-table ms-aur-instances">
+                    <thead>
+                        <tr>
+                            <th scope="col">Instance</th>
+                            <th scope="col">Role</th>
+                            <th scope="col">Lag behind the writer</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (AuroraReplica replica in status.Instances)
+                        {
+                            <tr class="ms-table-row" @key="replica.Instance">
+                                <td class="ms-table-cell ms-table-cell-mono">@replica.Instance</td>
+                                <td class="ms-table-cell">@(replica.Writer ? "writer" : "reader")</td>
+                                <td class="ms-table-cell ms-aur-number">@(replica.Writer ? "–" : replica.Lag is { } lag ? Duration(lag) : "not reported")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        <h3 class="ms-aur-subtitle">Waits</h3>
+        @if (view.Waits is not { } waits)
+        {
+            <p class="ms-aur-note ms-aur-unavailable">Not read.</p>
+        }
+        else if (waits.Value is not { } profile)
+        {
+            <p class="ms-aur-note ms-aur-unavailable">@waits.Note</p>
+        }
+        else
+        {
+            <p class="ms-aur-note">
+                What this instance's processes have waited for, from aurora_stat_system_waits(): @WindowText(profile.Window), most time first.
+                The idle background loops (Activity) are left out@(profile.IdleLeftOut > 0 ? " - " + SessionText.Count(profile.IdleLeftOut, "event") : string.Empty).
+                A commit waiting for Aurora's storage is IO:XactSync.
+            </p>
+
+            @if (profile.Rows.Count == 0)
+            {
+                <p class="ms-aur-note">No wait was reported.</p>
+            }
+            else
+            {
+                <TableScroll Label="Aurora waits">
+                    <table class="ms-table ms-aur-waits">
+                        <thead>
+                            <tr>
+                                <th scope="col">Wait</th>
+                                <th scope="col">@(profile.Window is null ? "Time" : "Time in the window")</th>
+                                <th scope="col">@(profile.Window is null ? "Waits" : "Waits in the window")</th>
+                                <th scope="col">Since the instance started</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (AuroraWaitRow row in profile.Rows)
+                            {
+                                <tr class="ms-table-row" @key="row.Event.Name">
+                                    <td class="ms-table-cell ms-table-cell-mono">@row.Event.Name</td>
+                                    <td class="ms-table-cell ms-aur-number">@Microseconds(profile.Window is null ? row.Event.TimeMicroseconds : row.WindowMicroseconds)</td>
+                                    <td class="ms-table-cell ms-aur-number">@Count(profile.Window is null ? row.Event.Waits : row.WindowWaits)</td>
+                                    <td class="ms-table-cell ms-aur-number">@Microseconds(row.Event.TimeMicroseconds), @Count(row.Event.Waits) waits</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        }
+
+        <h3 class="ms-aur-subtitle">Commits and DML in this database</h3>
+        @if (view.Database is not { } database)
+        {
+            <p class="ms-aur-note ms-aur-unavailable">Not read.</p>
+        }
+        else if (database.Value is not { } activity)
+        {
+            <p class="ms-aur-note ms-aur-unavailable">@database.Note</p>
+        }
+        else
+        {
+            <p class="ms-aur-note">
+                Mean commit latency @MeanText(activity.WindowCommitMeanMicroseconds, activity.Activity.MeanCommitMicroseconds, activity.Window)
+                (aurora_stat_get_db_commit_latency over xact_commit). Successful statements only, as aurora_stat_dml_activity() counts them.
+            </p>
+            <TableScroll Label="Aurora DML activity">
+                <table class="ms-table ms-aur-dml">
+                    <thead>
+                        <tr>
+                            <th scope="col">Statement</th>
+                            <th scope="col">In the window</th>
+                            <th scope="col">Mean latency in the window</th>
+                            <th scope="col">Since the statistics were reset</th>
+                            <th scope="col">Mean latency since then</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (AuroraDmlRow row in activity.Dml)
+                        {
+                            <tr class="ms-table-row" @key="row.Kind.Kind">
+                                <td class="ms-table-cell ms-table-cell-mono">@row.Kind.Kind</td>
+                                <td class="ms-table-cell ms-aur-number">@Count(row.WindowCount)</td>
+                                <td class="ms-table-cell ms-aur-number">@Microseconds(row.WindowMeanMicroseconds)</td>
+                                <td class="ms-table-cell ms-aur-number">@Count(row.Kind.Count)</td>
+                                <td class="ms-table-cell ms-aur-number">@Microseconds(row.Kind.MeanMicroseconds)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        <h3 class="ms-aur-subtitle">Sessions</h3>
+        @if (!view.SessionsShown)
+        {
+            <p class="ms-aur-note ms-aur-withheld">@(view.SessionsWithheld ?? "Not shown to you.")</p>
+        }
+        else if (view.Sessions is not { Value: { } sessions })
+        {
+            <p class="ms-aur-note ms-aur-unavailable">@(view.Sessions?.Note ?? "Not read.")</p>
+        }
+        else if (sessions.Sessions.Count == 0)
+        {
+            <p class="ms-aur-note">No other client session of this database that the studio's role may see.</p>
+        }
+        else
+        {
+            <p class="ms-aur-note">
+                Each session's waits since it connected (aurora_stat_backend_waits), as counts and shares of its own wait time - never a
+                time: AWS documents that function's unit differently from the instance's, so it is not relied on.
+            </p>
+            <TableScroll Label="Aurora session waits">
+                <table class="ms-table ms-aur-sessions">
+                    <thead>
+                        <tr>
+                            <th scope="col">Session</th>
+                            <th scope="col">State</th>
+                            <th scope="col">Waits</th>
+                            <th scope="col">Most of its wait time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (AuroraSession session in sessions.Sessions)
+                        {
+                            <tr class="ms-table-row" @key="session.ProcessId">
+                                <td class="ms-table-cell">
+                                    pid @session.ProcessId.ToString(CultureInfo.InvariantCulture), role @(session.User ?? "(not readable)")@(string.IsNullOrEmpty(session.Application) ? string.Empty : ", '" + session.Application + "'")
+                                </td>
+                                <td class="ms-table-cell">@(session.State ?? "–")</td>
+                                <td class="ms-table-cell ms-aur-number">@Count(session.Waits)</td>
+                                <td class="ms-table-cell">@string.Join("; ", session.Top.Select(static x => x.Name + " " + Share(x.Share) + " (" + SessionText.Number((long) x.Waits) + ")"))</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+
+        @foreach (HealthStatement statement in view.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The visitor's view, as an <c>AuroraView</c>, or <see langword="null" /> before it was read. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private AuroraView? View => Model as AuroraView;
+
+    private static string CapacityText(CapacityReading? capacity) => capacity switch
+    {
+        { Text: { } text } => text,
+        { SourceRegistered: true } => "unknown this interval: " + capacity.Unknown,
+        _ => "not known - SQL cannot see Aurora Serverless v2's capacity; a host that registers an IPostgresCapacitySource (docs/aurora.md) has it shown here",
+    };
+
+    private static string WindowText(TimeSpan? window) =>
+        window is { } span ? "over the last " + SessionText.Duration(span) + " of the health advisor's samples" : "since the instance started (the window needs two of the health advisor's samples)";
+
+    private static string MeanText(double? window, double? total, TimeSpan? span) =>
+        window is { } inWindow
+            ? Microseconds(inWindow) + " over the last " + SessionText.Duration(span ?? TimeSpan.Zero) + (total is { } all ? ", " + Microseconds(all) + " since the statistics were reset" : string.Empty)
+            : total is { } since ? Microseconds(since) + " since the statistics were reset" : "not known yet";
+
+    private static string Microseconds(double? value) => value switch
+    {
+        null => "–",
+        < 1_000 => value.Value.ToString("0.#", CultureInfo.InvariantCulture) + " µs",
+        < 1_000_000 => (value.Value / 1_000).ToString("0.#", CultureInfo.InvariantCulture) + " ms",
+        _ => SessionText.Duration(TimeSpan.FromMicroseconds(value.Value)),
+    };
+
+    private static string Duration(TimeSpan span) =>
+        span < TimeSpan.FromSeconds(1) ? span.TotalMilliseconds.ToString("0.#", CultureInfo.InvariantCulture) + " ms" : SessionText.Duration(span);
+
+    private static string Count(double? value) => value is { } count ? SessionText.Number((long) Math.Round(count)) : "–";
+
+    private static string Share(double? share) => share is { } value ? (value * 100).ToString("0", CultureInfo.InvariantCulture) + "%" : "–";
+}

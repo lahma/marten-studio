@@ -281,6 +281,16 @@ public class LogLevelsTests
             "A read of a database's storage failed by connection, an unexpected SQLSTATE or a table source that threw; privilege and timeouts are Debug, and the Storage page re-reads every HealthInterval."),
         ["src/PostgresStudio/Services/PostgresStudioLog.Storage.cs : 9410 PostgresStudioStorageReadFailed"] = (Verdict.Throttled,
             "9410 in Postgres Studio's words: a storage read failed by connection or an unexpected SQLSTATE, re-read every HealthInterval."),
+
+        // ---- W5-AUR ---------------------------------------------------------------------------------
+        ["src/PostgresStudio/Services/StudioLog.Aurora.cs : 9500 CapacitySourceFailed"] = (Verdict.Throttled,
+            "The host's IPostgresCapacitySource threw; asked once per database and instance per HealthInterval, so Warning once in ten minutes and Debug in between, and the capacity reads as unknown."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Aurora.cs : 9500 PostgresStudioCapacitySourceFailed"] = (Verdict.Throttled,
+            "9500 in Postgres Studio's words: the host's capacity source threw, asked once per HealthInterval."),
+        ["src/PostgresStudio/Services/StudioLog.Aurora.cs : 9501 AuroraReadFailed"] = (Verdict.Throttled,
+            "One of Aurora's own reads failed by connection or an unexpected SQLSTATE; a privilege or a timeout is Debug, and the sweep and the Server page re-read every HealthInterval."),
+        ["src/PostgresStudio/Services/PostgresStudioLog.Aurora.cs : 9501 PostgresStudioAuroraReadFailed"] = (Verdict.Throttled,
+            "9501 in Postgres Studio's words: one of Aurora's own reads failed, re-read every HealthInterval."),
     };
 
     [Fact]

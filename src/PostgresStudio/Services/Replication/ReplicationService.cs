@@ -150,6 +150,12 @@ internal sealed record ReplicationView
     /// <summary>The standbys.</summary>
     public ReplicationSectionView<StandbysView> Standbys { get; init; } = Empty<StandbysView>();
 
+    /// <summary>
+    /// On Aurora, the cluster's instances and each reader's lag (A3) - shown to whoever the page's database-wide gate admits,
+    /// because an instance's identifier is the cluster's own name for it (D29) - and <see langword="null" /> elsewhere.
+    /// </summary>
+    public ReplicationSectionView<Aurora.AuroraReplicaStatus>? AuroraReplicas { get; init; }
+
     /// <summary>The archiver.</summary>
     public ReplicationSectionView<ArchiverView> Archiver { get; init; } = Empty<ArchiverView>();
 
@@ -384,6 +390,12 @@ internal sealed class ReplicationService : IReplicationService
             Standbys = read.Standbys.Value is { } standbys
                 ? ReplicationSectionView<StandbysView>.Of(Standbys(standbys, names, platform, readsAs, read.Role.Value?.InRecovery == true))
                 : ReplicationSectionView<StandbysView>.Without(read.Standbys),
+            AuroraReplicas = read.AuroraReplicas switch
+            {
+                null => null,
+                { Value: { } replicas } => ReplicationSectionView<Aurora.AuroraReplicaStatus>.Of(replicas),
+                { } failed => ReplicationSectionView<Aurora.AuroraReplicaStatus>.Without(failed),
+            },
             Archiver = read.Archiver.Value is { } archiver
                 ? ReplicationSectionView<ArchiverView>.Of(Archiver(archiver, read.WalDirectory, names, withheld, platform, readsAs))
                 : ReplicationSectionView<ArchiverView>.Without(read.Archiver),

@@ -37,15 +37,18 @@ internal static partial class ServerSettingRemedy
 
     /// <summary>
     /// Where <paramref name="setting" /> changes on <paramref name="platform" />, as the end of "set it in ...". The one switch
-    /// on <c>(platform, setting)</c> that AUR refines for Aurora's own cases (A6); every other pair is the platform's place.
+    /// on <c>(platform, setting)</c>: on Aurora, per parameter, the DB cluster parameter group or an instance's DB parameter
+    /// group as the Aurora User Guide's parameter reference lists it, and what Serverless v2 derives from its capacity
+    /// (<see cref="Aurora.AuroraParameters" />, issue #8 A6, W5-AUR); every other pair is the platform's place, word for word.
     /// </summary>
     public static string WhereToSet(PostgresPlatform platform, string setting)
     {
         ArgumentNullException.ThrowIfNull(platform);
         ArgumentException.ThrowIfNullOrWhiteSpace(setting);
 
-        return (platform.Kind, setting) switch
+        return platform.Kind switch
         {
+            PostgresPlatformKind.AmazonAurora => Aurora.AuroraParameters.WhereToSet(setting),
             _ => platform.WhereSettingsChange,
         };
     }

@@ -170,6 +170,35 @@ Counts every client backend on the server, every database included - only the co
 The remedy is fewer connections per process, or a pooler in front of the server; `max_connections` is the
 server's own setting and the studio never changes it.
 
+Runs in both studios, Marten Studio and Postgres Studio. Variants: `server`, `role`, `database`.
+
+**The limits Postgres enforces first.** A role's `CONNECTION LIMIT` refuses "too many connections for role", and a
+database's "too many connections for database", while `max_connections` still has room. So C03 also judges, on the same
+80 % and 95 % lines:
+
+- **`role`**: the login role's `pg_roles.rolconnlimit` against that role's client sessions on the whole server
+  (`pg_stat_activity.usename`, which every role may read). The login role is `session_user` - the role a new connection
+  is counted against - whatever `SqlConsoleRole` the studio's reads run as.
+- **`database`**: this database's `pg_database.datconnlimit` against its client sessions, every role's.
+
+`-1`, the default, is no limit. Neither limit is enforced against a superuser, so a superuser login is judged against
+the server alone (S04's `superuser` variant is the problem there). The finding names the nearest of the three; the
+server's own finding keeps the key it always had (its variant is unset until the API's split). This process's pool
+ceiling - C01's `Maximum Pool Size` - is compared with the role's limit: "this process alone may open 100 connections
+as role app, which may open 50", in the role finding's evidence and the quiet row. The remedy for a role or database
+limit is a `Maximum Pool Size` that keeps one process under the limit's warning line; raising the limit itself
+(`ALTER ROLE ... CONNECTION LIMIT`, `ALTER DATABASE ... CONNECTION LIMIT`) is for whoever administers the role or owns
+the database, and the studio never words it as a statement.
+
+**On Aurora** `max_connections` is not a setting to raise: Aurora derives it from the instance's memory, and on Serverless
+v2 from the memory of the cluster's *maximum* capacity, held while the instance scales ("it uses the memory size based on
+the maximum Aurora capacity units (ACUs) for the DB instance, not the current ACU value" - *Performance and scaling for
+Aurora serverless*, Aurora User Guide). So with an `ACU` reading from the host's capacity source
+([`IPostgresCapacitySource`](../aurora.md#the-capacity-source)) the remedy is "Raise the cluster's maximum capacity (now
+16 ACU)", a change on the platform; without one it names both cases - the maximum ACU on Serverless v2, a larger instance
+class or `max_connections` in the DB cluster parameter group on a provisioned instance - and asks for a capacity source.
+A capacity reading, on any platform, is one more line of evidence. Every other platform's remedy is the text above.
+
 The count is whole without `pg_read_all_stats` too, but not because Postgres lists everything plainly: a role
 that is not a member reads another role's row with its `backend_type` null, and a filter on `client backend`
 alone would drop every such row. So a row whose backend type is withheld and that has a role behind it and a
@@ -301,6 +330,12 @@ by how long they have counted - once that window is at least a day long and the 
 The kinds of finding are `deadlocks`, `rollbacks` and `temp-files`, as before. Each finding says when the statistics
 were last reset. Both studios run it.
 
+**On Aurora** a temp-file finding says where the files go: "In Aurora PostgreSQL, these files share local storage with
+other log files" (*Managing temporary files with PostgreSQL*, Aurora User Guide), not the cluster volume, and "The local
+storage size depends on the instance class that you use" (*Amazon Aurora storage*). So the day's Warning speaks of a steady
+load on the instance's local storage rather than on the database's own disk, and both findings point at CloudWatch's
+`FreeLocalStorage` and at `temp_file_limit` in the DB cluster parameter group.
+
 ### The statistics window
 
 The one place every rate per day - C08's and C11's, and the Storage page's growth - asks since when this database's
@@ -419,6 +454,13 @@ out. The finding names no setting and no value: a size derived from the machine'
 
 Its evidence is the ratio, the blocks read a day, both totals, the window and where its start came from. One finding per
 database, with no kinds. Both studios run it; every role can read what it reads.
+
+**On Aurora a miss can be a bill** (issue #8 A5). A read that misses shared buffers goes to the cluster volume, and on
+*Aurora Standard* "you also pay a standard rate per 1 million requests for I/O operations", while *Aurora I/O-Optimized*
+has "no additional charges for read and write I/O operations" (*Amazon Aurora storage*, Aurora User Guide). Which one a
+cluster uses is not visible from SQL, so the finding says so from the host's capacity source's
+`PostgresComputeCapacity.IoOptimized` when it is set, and names both when it is not
+([the capacity source](../aurora.md#the-capacity-source)). The threshold is the same on every platform.
 
 ## Database › Sessions
 

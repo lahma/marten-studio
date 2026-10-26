@@ -81,7 +81,10 @@ internal static class HealthServerQueries
         "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_version' and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'azure.extensions' and " + ServerConfigured + ") as azure,\n" +
         "       exists (select 1 from pg_catalog.pg_settings s where s.name like 'cloudsql.%' and " + ServerConfigured + ") as cloud_sql,\n" +
-        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon");
+        "       exists (select 1 from pg_catalog.pg_roles r where r.rolname = 'neon_superuser' and r.rolreplication and r.rolbypassrls and not r.rolcanlogin) as neon,\n" +
+        "       pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
+        "       pg_catalog.pg_postmaster_start_time() as started_at,\n" +
+        "       exists (select 1 from pg_catalog.pg_proc p where p.proname = 'aurora_db_instance_identifier' and p.pronargs = 0 and p.pronamespace = 'pg_catalog'::pg_catalog.regnamespace) as aurora_instance");
 
     private static readonly HealthQuery ChecksumsQuery = new(
         "select pg_catalog.current_setting('data_checksums') = 'on' as enabled,\n" +
@@ -126,6 +129,15 @@ internal static class HealthServerQueries
     /// and from 16 only a <c>CREATEROLE</c> role that holds both itself.</item>
     /// <item>A host (<c>*.neon.tech</c>, <c>*.supabase.co</c>) is the data source's own connection string, the host's.</item>
     /// </list>
+    /// <para>
+    /// <b>And which server answered</b> (issue #8 A1, W5-AUR): <c>pg_is_in_recovery()</c>, <c>pg_postmaster_start_time()</c>,
+    /// and whether Aurora's <c>aurora_db_instance_identifier()</c> exists - fenced to <c>pg_catalog</c> exactly as
+    /// <c>aurora_version()</c> is, because the instance it names decides whether the statistics window looks reset, and a
+    /// window that looks reset holds back every verdict that needs a long one. Neither Aurora function is called here: an
+    /// Aurora server's instance is read by <see cref="AuroraQueries.Instance" />, only once this read has said Aurora, and a
+    /// release before 13.7, 12.11, 11.16 or 10.21 has no identifier function (<i>aurora_db_instance_identifier</i>, Aurora
+    /// User Guide, read 2026-10-26), so its instance is unknown rather than a failure.
+    /// </para>
     /// </remarks>
     public static HealthQuery Platform() => PlatformQuery;
 

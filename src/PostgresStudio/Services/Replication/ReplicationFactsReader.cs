@@ -86,6 +86,12 @@ internal sealed record ReplicationFacts(
     ReplicationRead<ReplicationSettings> Settings,
     IReadOnlyList<HealthStatement> Statements)
 {
+    /// <summary>
+    /// On Aurora, every instance as <c>aurora_replica_status()</c> reports it - the "Aurora replicas" section in place of the
+    /// standbys (issue #8 A3, W5-AUR) - and <see langword="null" /> on every other platform.
+    /// </summary>
+    public ReplicationRead<Aurora.AuroraReplicaStatus>? AuroraReplicas { get; init; }
+
     /// <summary>The sections that failed, by name, for a test and the matrix: empty when every section read or said why not.</summary>
     public IReadOnlyList<string> Failures =>
     [
@@ -96,6 +102,7 @@ internal sealed record ReplicationFacts(
                 ("archiver", Archiver.Outcome, Archiver.Note), ("pg_wal", WalDirectory.Outcome, WalDirectory.Note),
                 ("wal", Wal.Outcome, Wal.Note), ("checkpoints", Checkpoints.Outcome, Checkpoints.Note), ("io", Io.Outcome, Io.Note),
                 ("tablespaces", Tablespaces.Outcome, Tablespaces.Note), ("settings", Settings.Outcome, Settings.Note),
+                ("aurora replicas", AuroraReplicas?.Outcome ?? ReplicationReadOutcome.Read, AuroraReplicas?.Note),
             }
             .Where(static x => x.Outcome == ReplicationReadOutcome.Failed)
             .Select(static x => x.Name + ": " + x.Note),
@@ -185,6 +192,11 @@ internal sealed class ReplicationFactsReader : IReplicationFactsReader
             ? ReplicationRead<StandbySnapshot>.NotApplicable(noStandbys)
             : await ReadAsync(context, "standbys", StandbySnapshot.SharedAsync, cancellationToken).ConfigureAwait(false);
 
+        // Aurora's readers in place of the standbys (A3): R03's own read of aurora_replica_status().
+        ReplicationRead<Aurora.AuroraReplicaStatus>? auroraReplicas = platform.Kind == PostgresPlatformKind.AmazonAurora
+            ? await ReadAsync(context, "aurora replicas", Aurora.AuroraReplicaStatus.SharedAsync, cancellationToken).ConfigureAwait(false)
+            : null;
+
         ReplicationRead<ArchiverFacts> archiver;
         ReplicationRead<WalDirectoryFacts> directory;
 
@@ -232,7 +244,10 @@ internal sealed class ReplicationFactsReader : IReplicationFactsReader
             io,
             tablespaces,
             replicationSettings,
-            context.Sql.Statements);
+            context.Sql.Statements)
+        {
+            AuroraReplicas = auroraReplicas,
+        };
     }
 
     /// <inheritdoc />

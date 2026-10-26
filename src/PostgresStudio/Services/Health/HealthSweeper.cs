@@ -173,6 +173,12 @@ internal sealed record HealthSweep(
     /// </summary>
     public IReadOnlyDictionary<string, object> Shared { get; init; } = NoShared;
 
+    /// <summary>
+    /// The statistics window a regular sweep computed (W5-CAP), when a gatherer read its signals: database-wide, so only ever
+    /// shown at <see cref="HealthGate.Database" /> - the Health page's "the statistics look reset" line (W5-AUR, A1's failover).
+    /// </summary>
+    public StatisticsWindow? Statistics { get; init; }
+
     /// <summary>The shared read under <paramref name="key" />, when the sweep finished it as a <typeparamref name="T" />.</summary>
     public bool TryShared<T>(string key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
     {
@@ -362,6 +368,26 @@ internal sealed class HealthSweeper
                 : await GatherAsync(descriptor).ConfigureAwait(false);
         }
 
+        // Aurora's wait profile and this database's commit latency (issue #8 A4, W5-AUR): no check judges them, so a regular sweep
+        // of an Aurora database reads them itself, once its gatherers have run - through the memo, which the Server page's facts
+        // reuse - and samples them at the database-wide gate for the page's window deltas.
+        if (kind == HealthSweepKind.Regular
+            && !sweepBudget.IsCancellationRequested
+            && memo.TryGetCompleted<PostgresServerFacts>(HealthServerQueries.PlatformKey, out PostgresServerFacts? server)
+            && server.Platform.Kind == PostgresPlatformKind.AmazonAurora)
+        {
+            HealthSqlRunner platformSql = new(connection, sessionOptions, observer);
+            HealthCheckContext platform = new(resolved, settings, runtime, scope.ServiceProvider, platformSql, now, memo, sweepBudget.Token);
+
+            foreach (HealthSamplePart part in await AuroraSamplesAsync(platform, server, cancellationToken).ConfigureAwait(false))
+            {
+                if (sample.TryAdd(part.Series, part.Value))
+                {
+                    sampleGates[part.Series] = part.Gate;
+                }
+            }
+        }
+
         // Phase 2: one sample, from every check that read something - a regular sweep's into the database's history,
         // a statement sweep's into a history of its own that only statement sweeps read, and a deeper sweep's nowhere -
         // so that nothing a gated tier reads becomes history an ungated evaluator can see.
@@ -425,6 +451,7 @@ internal sealed class HealthSweeper
         return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results)
         {
             Shared = kind == HealthSweepKind.Regular ? memo.Completed() : new Dictionary<string, object>(),
+            Statistics = kind == HealthSweepKind.Regular ? statistics : null,
         };
 
         async Task<Gathered> GatherAsync(HealthCheckDescriptor descriptor)
@@ -587,6 +614,60 @@ internal sealed class HealthSweeper
                 : new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null);
 
             return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
+        }
+    }
+
+    /// <summary>
+    /// What an Aurora database adds to the sweep's sample (<see cref="Aurora.AuroraSamples" />): what of the waits and the
+    /// commit latency could be read - asked only once a check has read the server facts and they say Aurora, so the sweep
+    /// never reads anything on another platform. A failure is a value - fewer series this sweep - at Debug for a state the
+    /// host chose and event 9501 at the throttle's level otherwise; nothing escapes but cancellation of the sweep itself.
+    /// </summary>
+    private async Task<IReadOnlyList<HealthSamplePart>> AuroraSamplesAsync(HealthCheckContext context, PostgresServerFacts server, CancellationToken cancellationToken)
+    {
+        Aurora.AuroraWaitProfile? waits = await AuroraReadAsync(context, "waits", Aurora.AuroraWaitProfile.SharedAsync, cancellationToken).ConfigureAwait(false);
+        Aurora.AuroraDatabaseActivity? database = await AuroraReadAsync(context, "commit latency", Aurora.AuroraDatabaseActivity.SharedAsync, cancellationToken).ConfigureAwait(false);
+
+        return [.. Aurora.AuroraSamples.Of(server, waits, database)];
+    }
+
+    private async Task<T?> AuroraReadAsync<T>(HealthCheckContext context, string section, Func<HealthCheckContext, Task<T>> read, CancellationToken cancellationToken)
+        where T : class
+    {
+        try
+        {
+            return await read(context).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            (HealthCheckOutcome outcome, HealthCheckProblem problem) = Classify(exception, false);
+
+            if (outcome != HealthCheckOutcome.Failed)
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "{Product} did not sample Aurora's {Section} of {DatabaseId}", settings.Text.ProductName, section, context.DatabaseId);
+                }
+            }
+            else
+            {
+                LogLevel level = throttle.WarningOrDebug("Aurora.Read", context.StoreKey, context.DatabaseId, StudioLogThrottle.KindOf(exception));
+
+                if (settings.Text.Product == StudioProduct.PostgresStudio)
+                {
+                    logger.PostgresStudioAuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
+                }
+                else
+                {
+                    logger.AuroraReadFailed(level, exception, section, context.StoreKey, context.DatabaseId, problem.SqlState);
+                }
+            }
+
+            return null;
         }
     }
 

@@ -86,10 +86,20 @@
                 <dt>Slots</dt>
                 <dd>@(view.Slots.Value is { } slotCount ? SessionText.Number(slotCount.Total) : "–")</dd>
             </div>
-            <div class="ms-repl-stat">
-                <dt>Standbys streaming</dt>
-                <dd>@(view.Standbys.Value is { } standbyCount ? SessionText.Number(standbyCount.Total) : "–")</dd>
-            </div>
+            @if (view.AuroraReplicas is { } auroraCount)
+            {
+                <div class="ms-repl-stat">
+                    <dt>Aurora readers</dt>
+                    <dd>@(auroraCount.Value is { } instances ? SessionText.Number(instances.Readers.Count) : "–")</dd>
+                </div>
+            }
+            else
+            {
+                <div class="ms-repl-stat">
+                    <dt>Standbys streaming</dt>
+                    <dd>@(view.Standbys.Value is { } standbyCount ? SessionText.Number(standbyCount.Total) : "–")</dd>
+                </div>
+            }
             <div class="ms-repl-stat">
                 <dt>Archiving</dt>
                 <dd>@ArchivingText(view.Archiver)</dd>
@@ -198,7 +208,7 @@
 
         @* ---- Standbys ------------------------------------------------------------------------------------- *@
         <section class="ms-repl-section" aria-labelledby="ms-repl-standbys">
-            <h2 class="ms-repl-heading" id="ms-repl-standbys">Standbys</h2>
+            <h2 class="ms-repl-heading" id="ms-repl-standbys">@(view.AuroraReplicas is null ? "Standbys" : "Aurora replicas")</h2>
             @if (view.Standbys.Outcome != ReplicationReadOutcome.NotApplicable && view.Role.Value is { InRecovery: true } standbyRole)
             {
                 <dl class="ms-repl-facts">
@@ -220,7 +230,11 @@
                 </p>
             }
 
-            @if (view.Standbys.Value is not { } standbys)
+            @if (view.AuroraReplicas is { } aurora)
+            {
+                @AuroraReplicaTable(aurora)
+            }
+            else if (view.Standbys.Value is not { } standbys)
             {
                 @Unavailable(view.Standbys.Note)
             }
@@ -678,6 +692,63 @@
     private RenderFragment Unavailable(string? note) => __builder =>
     {
         <p class="ms-repl-note ms-repl-unavailable">@(note ?? "Not read.")</p>
+    };
+
+    /// <summary>
+    /// Aurora's instances in place of the standbys (issue #8 A3, W5-AUR): each one's identifier - the cluster's own name for it,
+    /// database-wide information (D29) - whether it is the writer, and a reader's lag, as aurora_replica_status() reports them.
+    /// </summary>
+    private RenderFragment AuroraReplicaTable(ReplicationSectionView<PostgresStudio.Services.Aurora.AuroraReplicaStatus> section) => __builder =>
+    {
+        if (section.Value is not { } status)
+        {
+            <p class="ms-repl-note ms-repl-unavailable">@(section.Note ?? "Not read.")</p>
+            return;
+        }
+
+        <p class="ms-repl-note ms-aur-replicas-note">
+            Aurora's readers do not stream WAL: they read the cluster volume, and their lag behind the writer is Aurora's own
+            replica_lag_in_msec, which R03 judges at 5 minutes (Warning) and an hour (Critical). There is no byte figure.
+        </p>
+
+        @if (status.Instances.Count == 0)
+        {
+            <p class="ms-repl-note">aurora_replica_status() listed no instance.</p>
+            return;
+        }
+
+        <TableScroll Label="Aurora instances">
+            <table class="ms-table ms-repl-table ms-aur-replicas">
+                <thead>
+                    <tr>
+                        <th scope="col">Instance</th>
+                        <th scope="col">Role</th>
+                        <th scope="col">Lag behind the writer</th>
+                        <th scope="col">Replay expected to take</th>
+                        <th scope="col">Feedback xmin</th>
+                        <th scope="col">Status updated</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (PostgresStudio.Services.Aurora.AuroraReplica replica in status.Instances)
+                    {
+                        <tr @key="replica.Instance">
+                            <td class="ms-mono">@replica.Instance</td>
+                            <td>@(replica.Writer ? "writer" : "reader")</td>
+                            <td class="ms-repl-number">@(replica.Writer ? "–" : replica.Lag is { } lag ? StandbyLagCheck.Milliseconds(lag) : "not reported")</td>
+                            <td class="ms-repl-number">@(replica.ReplayLatency is { } replay ? StandbyLagCheck.Milliseconds(replay) : "–")</td>
+                            <td class="ms-mono">@(replica.FeedbackXmin ?? "–")</td>
+                            <td>@(replica.LastUpdate is { } updated ? State.FormatInSelectedTimeZone(updated) : "–")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        @if (status.Total > status.Instances.Count)
+        {
+            <p class="ms-repl-note">Only @SessionText.Number(status.Instances.Count) of @SessionText.Number(status.Total) rows were read.</p>
+        }
     };
 
     private static string RoleText(ReplicationRole? role) => role switch

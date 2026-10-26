@@ -145,7 +145,8 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
             return HealthVerdict.Quiet(
                 SessionText.Count(facts.PooledOnServer, "database") + " on this server can open" + estimated + " at most "
                 + SessionText.Number(facts.CeilingsOnServer) + " connections between them, within the server's "
-                + available.ToString("N0", CultureInfo.InvariantCulture) + ".");
+                + available.ToString("N0", CultureInfo.InvariantCulture) + "."
+                + (RoleSentence(facts) is { } role ? " " + char.ToUpperInvariant(role[0]) + role[1..] + "." : string.Empty));
         }
 
         List<HealthEvidence> evidence =
@@ -163,6 +164,11 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
         if (facts.UnpooledOnServer > 0)
         {
             evidence.Add(new HealthEvidence("Without a pool", SessionText.Count(facts.UnpooledOnServer, "database") + ", which have no ceiling at all"));
+        }
+
+        if (RoleSentence(facts) is { } roleLimit)
+        {
+            evidence.Add(new HealthEvidence("The login role's limit", roleLimit));
         }
 
         return HealthVerdict.Of(new HealthFinding
@@ -200,5 +206,22 @@ internal sealed class ConnectionBudgetCheck : HealthCheck<ConnectionBudgetFacts>
                 + "such as PgBouncer in front of the server is the other way out; raising max_connections is the server's own "
                 + "setting, and the studio never changes it."),
         });
+    }
+
+    /// <summary>
+    /// "this process alone may open 300 connections as role app, which may open 50" - when the login role has a
+    /// <c>CONNECTION LIMIT</c> the store's pools on this server can pass together (W5-AUR, C03's role limit), or
+    /// <see langword="null" />. Not enforced against a superuser, so never said for one.
+    /// </summary>
+    internal static string? RoleSentence(ConnectionBudgetFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        ServerConnectionLimits server = facts.Server;
+
+        return server.RoleLimited && facts.CeilingsOnServer > server.RoleLimit
+            ? "this process alone may open " + SessionText.Number(facts.CeilingsOnServer) + " connections as role "
+              + (server.LoginRole ?? "(the login role)") + ", which may open " + SessionText.Number(server.RoleLimit)
+            : null;
     }
 }

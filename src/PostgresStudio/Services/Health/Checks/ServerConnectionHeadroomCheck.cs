@@ -1,12 +1,28 @@
 using System.Globalization;
 
+using PostgresStudio.Services.Aurora;
 using PostgresStudio.Services.Database;
 
 namespace PostgresStudio.Services.Health.Checks;
 
+/// <summary>What C03 reads.</summary>
+/// <param name="Limits">The server's connection budget, and the login role's and this database's limits (C02's read too).</param>
+/// <param name="Platform">Who runs the server, for where its connections are raised (issue #8 A6).</param>
+/// <param name="Capacity">What the host's capacity source said this interval (A8), or <see langword="null" /> when not asked.</param>
+/// <param name="PoolCeiling">This process's pool ceiling for the database (C01's <c>Max Pool Size</c>), or <see langword="null" /> unpooled or unknown.</param>
+internal sealed record ServerConnectionHeadroomFacts(
+    ServerConnectionLimits Limits,
+    PostgresPlatform Platform,
+    CapacityReading? Capacity,
+    int? PoolCeiling)
+{
+    /// <summary>A self-hosted server's limits and nothing else - what a unit test of the budget alone states.</summary>
+    public static implicit operator ServerConnectionHeadroomFacts(ServerConnectionLimits limits) => new(limits, PostgresPlatform.SelfHosted, null, null);
+}
+
 /// <summary>
 /// C03: the server's connections are nearly used up - every client backend on the server against
-/// <c>max_connections</c> less what is reserved.
+/// <c>max_connections</c> less what is reserved - or the login role's, or this database's, own connection limit is.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -27,32 +43,106 @@ namespace PostgresStudio.Services.Health.Checks;
 /// not counted against <c>max_connections</c>, so they are left out. A superuser may use the reserved slots,
 /// which is how the count can pass what an ordinary role may open.
 /// </para>
+/// <para>
+/// <b>The limits Postgres enforces first</b> (W5-AUR, the 2026-10-26 health-gap analysis). A role's <c>CONNECTION LIMIT</c>
+/// refuses "too many connections for role" and a database's "too many connections for database" while
+/// <c>max_connections</c> still has room - so the login role's (against its sessions on the whole server) and this database's
+/// (against its client sessions) are judged on the same 80 % and 95 % lines, and the finding names the nearest of the three:
+/// variant <c>role</c> or <c>database</c>, and the server's own finding as it always was (its variant stays unset until the
+/// API packet's split, VERS's ruling). Neither limit is enforced against a superuser, so a superuser login is judged against
+/// the server alone (S04's <c>superuser</c> variant says why that is a problem of its own). This process's pool ceiling - C01's
+/// - is compared with the role's limit: "this process alone may open 100 connections as role app, which may open 50".
+/// </para>
+/// <para>
+/// <b>Worded for the platform</b> (issue #8 A6, A8). On Aurora <c>max_connections</c> is not a setting to raise: Aurora derives
+/// it from the instance's memory, and on Serverless v2 from the memory of the cluster's maximum capacity, which it holds while
+/// the instance scales - "When Aurora serverless evaluates the formula, it uses the memory size based on the maximum Aurora
+/// capacity units (ACUs) for the DB instance, not the current ACU value" (<i>Performance and scaling for Aurora serverless</i>,
+/// Aurora User Guide, read 2026-10-26). So with an <c>ACU</c> reading from the host's capacity source the remedy is the
+/// cluster's maximum capacity, named; without one it says both cases and asks for a source. Every other platform's remedy is
+/// the text it always was. A capacity reading, on any platform, is evidence.
+/// </para>
 /// </remarks>
-[HealthCheck("C03", HealthArea.Connections, HealthCostTier.Catalog, "Server connection headroom")]
-internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnectionLimits>
+[HealthCheck("C03", HealthArea.Connections, HealthCostTier.Catalog, "Server connection headroom", Variants = ["server", "role", "database"])]
+internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnectionHeadroomFacts>
 {
-    /// <inheritdoc />
-    public override Task<ServerConnectionLimits> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken) =>
-        ServerConnectionLimits.SharedAsync(context);
+    /// <summary>The variant of a finding about the login role's own limit.</summary>
+    public const string RoleVariant = "role";
+
+    /// <summary>The variant of a finding about this database's own limit.</summary>
+    public const string DatabaseVariant = "database";
 
     /// <inheritdoc />
-    public override HealthVerdict Evaluate(ServerConnectionLimits facts, HealthEvaluation evaluation)
+    public override async Task<ServerConnectionHeadroomFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        ServerConnectionLimits limits = await ServerConnectionLimits.SharedAsync(context).ConfigureAwait(false);
+        PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
+        CapacityReading capacity = await CapacityReading.SharedAsync(context).ConfigureAwait(false);
+
+        int? pool = DatabasePoolSettings.Of(context.Target) is { Pooling: true } settings ? settings.MaxPoolSize : null;
+
+        return new ServerConnectionHeadroomFacts(limits, server.Platform, capacity, pool);
+    }
+
+    /// <inheritdoc />
+    public override HealthVerdict Evaluate(ServerConnectionHeadroomFacts facts, HealthEvaluation evaluation)
     {
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(evaluation);
 
-        double share = (double) facts.ClientBackends / facts.Available;
-        string used = facts.ClientBackends.ToString("N0", CultureInfo.InvariantCulture) + " of "
-            + facts.Available.ToString("N0", CultureInfo.InvariantCulture);
+        ServerConnectionLimits limits = facts.Limits;
 
-        if (share <= ConnectionThresholds.ServerUsedWarning)
+        double share = (double) limits.ClientBackends / limits.Available;
+        string used = limits.ClientBackends.ToString("N0", CultureInfo.InvariantCulture) + " of "
+            + limits.Available.ToString("N0", CultureInfo.InvariantCulture);
+
+        // The nearest limit: the largest share, and of two alike the one with fewer connections left.
+        List<(string? Variant, double Share, long Left)> candidates = [(null, share, limits.Available - limits.ClientBackends)];
+
+        if (limits.RoleLimited)
         {
-            return HealthVerdict.Quiet(used + " connections an ordinary role may open are in use on this server.");
+            candidates.Add((RoleVariant, Share(limits.RoleSessions, limits.RoleLimit), limits.RoleLimit - limits.RoleSessions));
         }
 
-        bool critical = share >= ConnectionThresholds.ServerUsedCritical;
+        if (limits.DatabaseLimited)
+        {
+            candidates.Add((DatabaseVariant, Share(limits.ThisDatabase, limits.DatabaseLimit), limits.DatabaseLimit - limits.ThisDatabase));
+        }
 
-        return HealthVerdict.Of(new HealthFinding
+        (string? nearest, double nearestShare, _) = candidates.OrderByDescending(static x => x.Share).ThenBy(static x => x.Left).First();
+
+        if (nearestShare <= ConnectionThresholds.ServerUsedWarning)
+        {
+            return HealthVerdict.Quiet(used + " connections an ordinary role may open are in use on this server." + LimitsNote(facts));
+        }
+
+        bool critical = nearestShare >= ConnectionThresholds.ServerUsedCritical;
+
+        return HealthVerdict.Of(nearest switch
+        {
+            RoleVariant => RoleFinding(facts, critical, used),
+            DatabaseVariant => DatabaseFinding(facts, critical, used),
+            _ => ServerFinding(facts, critical, used, share),
+        });
+    }
+
+    /// <summary>The server's own finding - its text as it always was, but where the platform or a capacity reading adds to it.</summary>
+    private static HealthFinding ServerFinding(ServerConnectionHeadroomFacts facts, bool critical, string used, double share)
+    {
+        ServerConnectionLimits limits = facts.Limits;
+
+        List<HealthEvidence> evidence =
+        [
+            new("In use", used + " (" + SessionText.Percent(share) + ")"),
+            new("To this database", limits.ThisDatabase.ToString("N0", CultureInfo.InvariantCulture)),
+            new("Available to ordinary roles", limits.AvailableText),
+        ];
+
+        evidence.AddRange(LimitEvidence(facts));
+
+        return new HealthFinding
         {
             Code = "C03",
             Severity = critical ? HealthSeverity.Critical : HealthSeverity.Warning,
@@ -64,25 +154,221 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
                 + "already\" - a pool that wants to grow, a deployment's new instance, the async daemon's next connection, a person "
                 + "with psql. Only superusers keep the reserved slots. Connections to every database on the server count, this "
                 + "store's and everybody else's.",
-            Evidence =
-            [
-                new("In use", used + " (" + SessionText.Percent(share) + ")"),
-                new("To this database", facts.ThisDatabase.ToString("N0", CultureInfo.InvariantCulture)),
-                new("Available to ordinary roles", facts.AvailableText),
-            ],
+            Evidence = evidence,
             Caveat =
                 "Counts every client backend on the server, every database included. A session the studio's role may not read into "
                 + "is counted too, because Postgres withholds its backend type rather than its row - so a hidden background worker that "
                 + "runs for a role can be counted with them. Background workers it can see, autovacuum and replication have slots of "
                 + "their own and are not counted. A moment's reading: a burst can come and go between two checks.",
-            Remedy = new HealthRemedy(
-                """
-                // Fewer connections per process - every data source Marten builds from a connection string:
-                opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);
-                """,
-                "Lower pool ceilings across the applications that share the server, or a pooler such as PgBouncer in front of it. "
-                + "max_connections itself is the server's setting, which the studio never changes; raising it costs memory per "
-                + "connection on the server."),
-        });
+            Remedy = facts.Platform.Kind == PostgresPlatformKind.AmazonAurora
+                ? AuroraRemedy(facts.Capacity)
+                : new HealthRemedy(
+                    """
+                    // Fewer connections per process - every data source Marten builds from a connection string:
+                    opts.ConfigureNpgsqlDataSourceBuilder(b => b.ConnectionStringBuilder.MaxPoolSize = 50);
+                    """,
+                    "Lower pool ceilings across the applications that share the server, or a pooler such as PgBouncer in front of it. "
+                    + "max_connections itself is the server's setting, which the studio never changes; raising it costs memory per "
+                    + "connection on the server."),
+        };
     }
+
+    /// <summary>
+    /// What raises Aurora's connections (A6): the cluster's maximum capacity with an <c>ACU</c> reading, and both cases
+    /// without one - never <c>max_connections</c> in a file nobody on Aurora has.
+    /// </summary>
+    internal static HealthRemedy AuroraRemedy(CapacityReading? capacity)
+    {
+        const string Derived =
+            "Aurora derives max_connections from the instance's memory - \"derived from a formula based on the memory size of the DB "
+            + "instance\" - and on Serverless v2 from the memory of the cluster's maximum capacity, which it holds while the instance "
+            + "scales: \"it uses the memory size based on the maximum Aurora capacity units (ACUs) for the DB instance, not the "
+            + "current ACU value\" (Performance and scaling for Aurora serverless, Aurora User Guide). A new maximum takes effect "
+            + "when the instances reboot, and with a minimum capacity of 0 or 0.5 ACU max_connections is capped at 2,000. Or lower "
+            + "the pool ceilings of the applications that share the cluster.";
+
+        if (capacity is { IsAcu: true, Capacity: { } acu })
+        {
+            return HealthRemedy.ForManagedPlatform(
+                "Raise the cluster's maximum capacity (now " + CapacityReading.Amount(acu.Maximum) + " ACU)",
+                "On Aurora Serverless v2 max_connections follows the maximum capacity. " + Derived);
+        }
+
+        return HealthRemedy.ForManagedPlatform(
+            "On Aurora Serverless v2: raise the cluster's maximum capacity (ACU)\n"
+            + "On a provisioned instance: a larger instance class, or max_connections in the DB cluster parameter group",
+            Derived + " The studio cannot tell which this cluster is, nor its capacity: register an IPostgresCapacitySource "
+            + "(docs/aurora.md) and this remedy names its maximum.");
+    }
+
+    private static HealthFinding RoleFinding(ServerConnectionHeadroomFacts facts, bool critical, string used)
+    {
+        ServerConnectionLimits limits = facts.Limits;
+        string role = limits.LoginRole ?? "(the login role)";
+        double share = Share(limits.RoleSessions, limits.RoleLimit);
+
+        List<HealthEvidence> evidence =
+        [
+            new("In use", Count(limits.RoleSessions) + " of " + Count(limits.RoleLimit) + " (" + SessionText.Percent(share) + ")"),
+            new("Role", role + ", CONNECTION LIMIT " + Count(limits.RoleLimit) + ", counted in every database on the server"),
+        ];
+
+        if (PoolSentence(facts) is { } pool)
+        {
+            evidence.Add(new HealthEvidence("This process's pool", pool));
+        }
+
+        evidence.Add(new HealthEvidence("Server", used + " connections an ordinary role may open"));
+
+        if (facts.Capacity?.Text is { } capacity)
+        {
+            evidence.Add(new HealthEvidence("Compute capacity", capacity));
+        }
+
+        return new HealthFinding
+        {
+            Code = "C03",
+            Variant = RoleVariant,
+            Severity = critical ? HealthSeverity.Critical : HealthSeverity.Warning,
+            Title = critical
+                ? "The login role has almost no connections left under its connection limit"
+                : "The login role's sessions are more than " + SessionText.Percent(ConnectionThresholds.ServerUsedWarning) + " of its connection limit",
+            WhyItMatters =
+                "Once the role the data source logs in as has as many sessions as its CONNECTION LIMIT, the next connection is refused "
+                + "with \"too many connections for role\" - whatever max_connections has left: a pool that wants to grow, a "
+                + "deployment's new instance, the async daemon's next connection. Every session of the role counts, in every database "
+                + "on the server. The limit is not enforced against a superuser.",
+            Evidence = evidence,
+            Caveat =
+                "Counts the role's client sessions on the whole server in pg_stat_activity, which every role may read - as Postgres "
+                + "counts them against its limit. A moment's reading: a burst can come and go between two checks.",
+            Remedy = PoolRemedy(limits.RoleLimit, facts.PoolCeiling,
+                "So that the processes that log in as " + role + " stay under its limit together - every one of them shares it. "
+                + "Raising the limit itself (ALTER ROLE ... CONNECTION LIMIT) is for whoever administers the role."),
+        };
+    }
+
+    private static HealthFinding DatabaseFinding(ServerConnectionHeadroomFacts facts, bool critical, string used)
+    {
+        ServerConnectionLimits limits = facts.Limits;
+        double share = Share(limits.ThisDatabase, limits.DatabaseLimit);
+
+        List<HealthEvidence> evidence =
+        [
+            new("In use", Count(limits.ThisDatabase) + " of " + Count(limits.DatabaseLimit) + " (" + SessionText.Percent(share) + ")"),
+            new("Database", "CONNECTION LIMIT " + Count(limits.DatabaseLimit) + ", every role's sessions counted"),
+            new("Server", used + " connections an ordinary role may open"),
+        ];
+
+        if (facts.Capacity?.Text is { } capacity)
+        {
+            evidence.Add(new HealthEvidence("Compute capacity", capacity));
+        }
+
+        return new HealthFinding
+        {
+            Code = "C03",
+            Variant = DatabaseVariant,
+            Severity = critical ? HealthSeverity.Critical : HealthSeverity.Warning,
+            Title = critical
+                ? "This database has almost no connections left under its connection limit"
+                : "This database's sessions are more than " + SessionText.Percent(ConnectionThresholds.ServerUsedWarning) + " of its connection limit",
+            WhyItMatters =
+                "Once this database has as many sessions as its CONNECTION LIMIT, the next connection to it is refused with \"too many "
+                + "connections for database\" - whatever max_connections has left. Every role's sessions in it count, the studio's "
+                + "included. The limit is not enforced against a superuser.",
+            Evidence = evidence,
+            Caveat =
+                "Counts this database's client sessions in pg_stat_activity, as Postgres counts them against its limit. A moment's "
+                + "reading: a burst can come and go between two checks.",
+            Remedy = PoolRemedy(limits.DatabaseLimit, facts.PoolCeiling,
+                "So that the processes that connect to this database stay under its limit together - every one of them shares it. "
+                + "Raising the limit itself (ALTER DATABASE ... CONNECTION LIMIT) is for whoever owns the database."),
+        };
+    }
+
+    /// <summary>
+    /// The pool ceiling that keeps this one process under the warning line of <paramref name="limit" />, as the connection
+    /// string's keyword - a line for the host's own configuration, never a statement: the limit itself is the DBA's.
+    /// </summary>
+    private static HealthRemedy PoolRemedy(int limit, int? ceiling, string explanation)
+    {
+        int suggested = Math.Max(1, (int) Math.Floor(limit * ConnectionThresholds.ServerUsedWarning));
+
+        return new HealthRemedy(
+            "Maximum Pool Size=" + suggested.ToString(CultureInfo.InvariantCulture),
+            (ceiling is { } now ? "This process's pool ceiling is " + Count(now) + " now. " : string.Empty) + explanation);
+    }
+
+    /// <summary>The role's and the database's limits, as evidence of the server's finding - only those that apply.</summary>
+    private static IEnumerable<HealthEvidence> LimitEvidence(ServerConnectionHeadroomFacts facts)
+    {
+        ServerConnectionLimits limits = facts.Limits;
+
+        if (limits.RoleLimited)
+        {
+            yield return new HealthEvidence("Role connection limit", Count(limits.RoleSessions) + " of " + Count(limits.RoleLimit)
+                + " for role " + (limits.LoginRole ?? "(the login role)"));
+        }
+
+        if (limits.DatabaseLimited)
+        {
+            yield return new HealthEvidence("Database connection limit", Count(limits.ThisDatabase) + " of " + Count(limits.DatabaseLimit));
+        }
+
+        if (PoolSentence(facts) is { } pool)
+        {
+            yield return new HealthEvidence("This process's pool", pool);
+        }
+
+        if (facts.Capacity?.Text is { } capacity)
+        {
+            yield return new HealthEvidence("Compute capacity", capacity);
+        }
+    }
+
+    /// <summary>What the quiet row adds for a limit that applies, a pool that can pass the role's, and a capacity reading.</summary>
+    private static string LimitsNote(ServerConnectionHeadroomFacts facts)
+    {
+        ServerConnectionLimits limits = facts.Limits;
+        List<string> notes = [];
+
+        if (limits.RoleLimited)
+        {
+            notes.Add("Role " + (limits.LoginRole ?? "(the login role)") + " has " + Count(limits.RoleSessions) + " of its "
+                + Count(limits.RoleLimit) + " connections.");
+        }
+
+        if (limits.DatabaseLimited)
+        {
+            notes.Add("This database has " + Count(limits.ThisDatabase) + " of its " + Count(limits.DatabaseLimit) + " connections.");
+        }
+
+        if (PoolSentence(facts) is { } pool)
+        {
+            notes.Add(char.ToUpperInvariant(pool[0]) + pool[1..] + ".");
+        }
+
+        if (facts.Capacity?.Text is { } capacity)
+        {
+            notes.Add("Compute capacity " + capacity + ".");
+        }
+
+        return notes.Count == 0 ? string.Empty : " " + string.Join(" ", notes);
+    }
+
+    /// <summary>"this process alone may open 100 connections as role app, which may open 50" - when the pool can pass the role's limit.</summary>
+    private static string? PoolSentence(ServerConnectionHeadroomFacts facts)
+    {
+        ServerConnectionLimits limits = facts.Limits;
+
+        return limits.RoleLimited && facts.PoolCeiling is { } ceiling && ceiling > limits.RoleLimit
+            ? "this process alone may open " + Count(ceiling) + " connections as role " + (limits.LoginRole ?? "(the login role)")
+              + ", which may open " + Count(limits.RoleLimit)
+            : null;
+    }
+
+    private static double Share(long used, int limit) => (double) used / Math.Max(1, limit);
+
+    private static string Count(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
 }

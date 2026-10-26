@@ -44,10 +44,10 @@ public class StandbyLagCheckTests
     }
 
     [Fact]
-    public void R03_lists_its_three_variants_at_the_database_gate()
+    public void R03_lists_its_four_variants_at_the_database_gate()
     {
         Info.Gate.Should().Be(HealthGate.Database);
-        Info.Variants.Should().Equal("primary-view", "standby-view", "paused");
+        Info.Variants.Should().Equal("primary-view", "standby-view", "paused", "aurora-reader");
     }
 
     [Theory]

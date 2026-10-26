@@ -85,7 +85,10 @@ internal static class ReplicationPlatform
     /// <summary>Why R02 does not apply: Aurora, or a provider that archives WAL itself.</summary>
     public static string? ArchiverNotApplicable(PostgresPlatform platform) => NotApplicable(platform, ReplicationSection.Archiver);
 
-    /// <summary>Why R03 does not apply: Aurora's readers do not stream (AUR reads their lag from <c>aurora_replica_status()</c>).</summary>
+    /// <summary>
+    /// Why <c>pg_stat_replication</c>'s standbys do not apply: Aurora's readers do not stream. R03 asks Aurora's own
+    /// <c>aurora_replica_status()</c> there instead (<c>aurora-reader</c>, W5-AUR), and the page shows "Aurora replicas".
+    /// </summary>
     public static string? StandbyLagNotApplicable(PostgresPlatform platform) => NotApplicable(platform, ReplicationSection.Standbys);
 
     /// <summary>Why R04 does not apply: Aurora's storage layer checkpoints.</summary>

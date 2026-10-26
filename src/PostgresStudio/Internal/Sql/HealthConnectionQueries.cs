@@ -177,7 +177,20 @@ internal static class HealthConnectionQueries
     /// Every backend has a row in <c>pg_stat_activity</c> for every role, whatever it may read of it - but a role
     /// without <c>pg_read_all_stats</c> reads another role's row with its <c>backend_type</c> null, so the counts
     /// take <see cref="ClientSession" />, which counts such a row rather than dropping it. A hidden background
+    /// <para>
+    /// Every backend has a row in <c>pg_stat_activity</c> for every role, whatever it may read of it - but a role
+    /// without <c>pg_read_all_stats</c> reads another role's row with its <c>backend_type</c> null, so the counts
+    /// take <see cref="ClientSession" />, which counts such a row rather than dropping it. A hidden background
     /// worker that runs for a role in a database is counted with them: over by that much, never under.
+    /// </para>
+    /// <para>
+    /// <b>And the two limits Postgres enforces before <c>max_connections</c></b> (W5-AUR, the 2026-10-26 health-gap analysis):
+    /// the login role's <c>CONNECTION LIMIT</c> (<c>pg_roles.rolconnlimit</c>, against that role's sessions on the whole server -
+    /// <c>pg_stat_activity.usename</c>, which every role may read, B0 G9) and this database's (<c>pg_database.datconnlimit</c>,
+    /// against its client sessions). The login role is <c>session_user</c>, which a <c>SET ROLE</c> to <c>SqlConsoleRole</c> does
+    /// not change, because that is the role a new connection is counted against. <c>-1</c> is "no limit", and neither limit is
+    /// enforced against a superuser - which is why whether the login role is one is read too.
+    /// </para>
     /// </remarks>
     public static HealthQuery ServerConnections() => new(
         "select (select count(*) from pg_stat_activity a where " + ClientSession + ") as client_backends,\n" +
@@ -185,7 +198,12 @@ internal static class HealthConnectionQueries
         "       current_setting('max_connections')::int4 as max_connections,\n" +
         "       current_setting('superuser_reserved_connections')::int4 as superuser_reserved,\n" +
         "       coalesce(nullif(current_setting('reserved_connections', true), ''), '0')::int4 as reserved,\n" +
-        "       current_setting('server_version_num')::int4 as server_version");
+        "       current_setting('server_version_num')::int4 as server_version,\n" +
+        "       session_user::text as login_role,\n" +
+        "       (select r.rolconnlimit from pg_catalog.pg_roles r where r.rolname = session_user) as role_limit,\n" +
+        "       coalesce((select r.rolsuper from pg_catalog.pg_roles r where r.rolname = session_user), false) as role_superuser,\n" +
+        "       (select count(*) from pg_stat_activity a where " + ClientSession + " and a.usename = session_user) as role_sessions,\n" +
+        "       (select d.datconnlimit from pg_catalog.pg_database d where d.datname = current_database()) as database_limit");
 
     /// <summary>
     /// The sessions of this database that are idle inside a transaction, oldest first, with what they hold -

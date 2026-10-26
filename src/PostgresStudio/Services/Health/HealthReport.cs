@@ -106,9 +106,56 @@ internal sealed record HealthCheckStatus(
     IReadOnlyList<HealthStatement> Statements,
     bool FindingsWithheld = false);
 
+/// <summary>
+/// Which server answered the regular sweep, and the compute capacity the host's source reported for it (issue #8 A1, A8) - one
+/// line on the Health page, both Overviews and the Server page, for a visitor through the database-wide gate.
+/// </summary>
+/// <param name="AnsweredBy">
+/// "instance studio-test-instance-2 (a reader), Aurora 16.4.1" (<see cref="PostgresServerFacts.AnsweredBy" />), or
+/// <see langword="null" /> on a platform that names no instance.
+/// </param>
+/// <param name="StartedAt">When that server started, or <see langword="null" /> when it was not read.</param>
+/// <param name="Capacity">"4.5 ACU (min 0.5, max 16), measured 12:01 UTC", or <see langword="null" /> without a reading.</param>
+/// <param name="CapacityUnknown">Why a registered source gave none this interval, or <see langword="null" />.</param>
+internal sealed record HealthServerLine(string? AnsweredBy, DateTimeOffset? StartedAt, string? Capacity, string? CapacityUnknown)
+{
+    /// <summary>
+    /// What the regular sweep read of the server and its capacity (its shared reads), or <see langword="null" /> when it read
+    /// nothing worth a line: no instance to name, and no capacity source registered.
+    /// </summary>
+    public static HealthServerLine? Of(HealthSweep sweep)
+    {
+        ArgumentNullException.ThrowIfNull(sweep);
+
+        sweep.TryShared(HealthServerQueries.PlatformKey, out PostgresServerFacts? server);
+        sweep.TryShared(Aurora.CapacityReading.Key, out Aurora.CapacityReading? capacity);
+
+        string? answeredBy = server?.AnsweredBy;
+        string? reading = capacity?.Text;
+        string? unknown = capacity is { SourceRegistered: true, Capacity: null } ? "capacity unknown this interval: " + capacity.Unknown : null;
+
+        return answeredBy is null && reading is null && unknown is null
+            ? null
+            : new HealthServerLine(answeredBy, answeredBy is null ? null : server?.StartedAt, reading, unknown);
+    }
+}
+
 /// <summary>Everything the Health page draws for one visitor and one database.</summary>
 internal sealed record HealthReport
 {
+    /// <summary>
+    /// Which server answered and its capacity, for a visitor through the database-wide gate - an instance id is the cluster's
+    /// own name for one of its instances, database-wide information (D29) - or <see langword="null" />.
+    /// </summary>
+    public HealthServerLine? Server { get; init; }
+
+    /// <summary>
+    /// "The statistics look reset since the last check: another instance answered; its counters started at ...": said once,
+    /// in the sweep that first sees a reset, so a failover reads as such and not as a quiet database - for a visitor through
+    /// the database-wide gate, the window's own. <see langword="null" /> otherwise.
+    /// </summary>
+    public string? StatisticsReset { get; init; }
+
     /// <summary>Why there is no report, or <see cref="HealthRefusal.None" />.</summary>
     public HealthRefusal Refusal { get; init; }
 

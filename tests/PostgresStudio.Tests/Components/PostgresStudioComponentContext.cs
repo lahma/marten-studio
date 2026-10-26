@@ -78,6 +78,8 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<PostgresStudio.Services.Storage.IStorageService>(Storage);
         Services.AddSingleton<ISqlConsoleService>(SqlConsole);
         Services.AddSingleton<IPostgresServerReader>(new FakeServerReader());
+        Aurora = new FakeAurora();
+        Services.AddSingleton<PostgresStudio.Services.Aurora.IAuroraService>(Aurora);
         Services.AddSingleton<INavIndicatorService>(new FakeNavIndicators());
         Services.AddSingleton(new DatabaseBrowserState());
         Services.AddSingleton(new SessionPoolObserver("PostgresStudio.Tests." + Guid.NewGuid().ToString("N")));
@@ -131,6 +133,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     public FakeStorage Storage { get; }
 
     public FakeSqlConsole SqlConsole { get; }
+
+    /// <summary>The Server page's Aurora section (W5-AUR).</summary>
+    internal FakeAurora Aurora { get; }
 
     public TestSourceAuthorizationService AuthorizationService { get; }
 

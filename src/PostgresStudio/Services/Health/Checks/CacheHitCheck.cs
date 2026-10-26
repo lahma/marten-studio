@@ -7,7 +7,14 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <summary>What C11 reads: the window's signals, whose <c>blks_hit</c> and <c>blks_read</c> are this database's since they began.</summary>
 /// <param name="Reading">The sweep's one read of the statistics window (<see cref="StatisticsWindow.ReadingAsync" />).</param>
 /// <param name="Platform">Who runs the server, for the one sentence that differs by platform (W5-AUR's A5 hook).</param>
-internal sealed record CacheHitFacts(StatisticsReading Reading, PostgresPlatform Platform);
+internal sealed record CacheHitFacts(StatisticsReading Reading, PostgresPlatform Platform)
+{
+    /// <summary>
+    /// What the host's capacity source said this interval, on Aurora - whose <see cref="PostgresComputeCapacity.IoOptimized" />
+    /// says which storage configuration bills the misses (A5) - or <see langword="null" />.
+    /// </summary>
+    public Aurora.CapacityReading? Capacity { get; init; }
+}
 
 /// <summary>
 /// C11: this database finds too few of the blocks it reads in shared buffers, with enough of them read a day for it to matter
@@ -47,7 +54,10 @@ internal sealed class CacheHitCheck : HealthCheck<CacheHitFacts>
         StatisticsReading reading = await StatisticsWindow.ReadingAsync(context).ConfigureAwait(false);
         PostgresServerFacts server = await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false);
 
-        return new CacheHitFacts(reading, server.Platform);
+        return new CacheHitFacts(reading, server.Platform)
+        {
+            Capacity = server.Platform.Kind == PostgresPlatformKind.AmazonAurora ? await Aurora.CapacityReading.SharedAsync(context).ConfigureAwait(false) : null,
+        };
     }
 
     /// <inheritdoc />
@@ -114,13 +124,37 @@ internal sealed class CacheHitCheck : HealthCheck<CacheHitFacts>
     }
 
     /// <summary>
-    /// What a miss costs on the server's platform, as one more sentence of the "why" - the hook issue #8 A5 (W5-AUR) words
-    /// "on Aurora Standard this is billed I/O" through. Nothing anywhere else, and nothing until then.
+    /// What a miss costs on the server's platform, as one more sentence of the "why" (issue #8 A5, W5-AUR): on Aurora, whether
+    /// the cluster's storage configuration bills it, from the host's capacity source's
+    /// <see cref="PostgresComputeCapacity.IoOptimized" /> - and both cases when it does not say, because SQL cannot see which.
+    /// Nothing on any other platform.
     /// </summary>
+    /// <remarks>
+    /// Aurora Standard: "In addition to the usage and storage of your DB clusters, you also pay a standard rate per 1 million
+    /// requests for I/O operations"; Aurora I/O-Optimized: "You pay only for the usage and storage of your DB clusters, with no
+    /// additional charges for read and write I/O operations" (<i>Amazon Aurora storage</i>, Aurora User Guide, read 2026-10-26).
+    /// </remarks>
     internal static string PlatformCost(CacheHitFacts facts)
     {
         ArgumentNullException.ThrowIfNull(facts);
-        return string.Empty;
+
+        if (facts.Platform.Kind != PostgresPlatformKind.AmazonAurora)
+        {
+            return string.Empty;
+        }
+
+        return facts.Capacity?.Capacity?.IoOptimized switch
+        {
+            true => " This cluster uses Aurora I/O-Optimized storage (its capacity source says so), which charges nothing for read "
+                + "and write I/O: a miss costs time here, not money.",
+            false => " This cluster uses Aurora Standard storage (its capacity source says so), where a read that misses the cache "
+                + "and goes to the cluster volume is billed I/O - Aurora Standard charges \"a standard rate per 1 million requests "
+                + "for I/O operations\" - so a low hit ratio is a cost as well as a wait.",
+            _ => " On Aurora a read that misses the cache goes to the cluster volume, and whether that is billed depends on the "
+                + "cluster's storage configuration, which SQL cannot see: on Aurora Standard reads that miss the cache are billed I/O "
+                + "requests, on Aurora I/O-Optimized they are not (Amazon Aurora storage, Aurora User Guide). A capacity source that "
+                + "sets IoOptimized says which.",
+        };
     }
 
     /// <summary>A ratio, to a tenth of a percent - 94.9 % is not 95 %.</summary>

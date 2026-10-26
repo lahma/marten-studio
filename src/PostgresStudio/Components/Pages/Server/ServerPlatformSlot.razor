@@ -1,5 +1,85 @@
+@using PostgresStudio.Services.Aurora
+@implements IDisposable
+@inject IAuroraService Aurora
+
 @*
-    The Server page's platform slot (W5-S2): where W5-AUR draws the Aurora section - which instance answered, reader lag, the
-    wait profile, the capacity the host supplies. It renders nothing until a packet gives it something to render, so the page's
-    sections around it never move when it does.
+    The Server page's platform slot (W5-S2), which W5-AUR fills: the Aurora section - which instance answered, the cluster's
+    instances, the wait profile, the commit latency and the capacity the host supplies (issue #8 A1, A3, A4, A8) - read through
+    IAuroraService whenever the page hands it a new scope or a new read. On a server that is not Aurora it draws a capacity
+    reading if a source gave one, and nothing otherwise, so the page's sections around it never move.
+
+    The page renders it only once interactive, so a prerender reads nothing. A failure is drawn here, never only logged.
 *@
+
+@if (error is { Length: > 0 })
+{
+    <section class="ms-section ms-aur" aria-label="Aurora">
+        <h2 class="ms-section-title">Aurora</h2>
+        <p class="ms-aur-note ms-aur-unavailable">@error</p>
+    </section>
+}
+else
+{
+    <AuroraSection Model="view" />
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private AuroraView? view;
+    private string? error;
+    private (StudioScope? Scope, DateTimeOffset? Revision) loaded;
+    private bool disposed;
+
+    /// <summary>The scope the page shows, as a <c>StudioScope</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    private StudioScope? Scope => Model as StudioScope;
+
+    /// <summary>When the page last read its own facts: a new value reads the section again.</summary>
+    [Parameter]
+    public DateTimeOffset? Revision { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (disposed || loaded == (Scope, Revision))
+        {
+            return;
+        }
+
+        loaded = (Scope, Revision);
+
+        if (Scope is not { } scope)
+        {
+            view = null;
+            return;
+        }
+
+        try
+        {
+            view = await Aurora.GetAsync(scope, lifetime.Token);
+            error = null;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a section that silently shows nothing.
+            error = "The Aurora section could not be read: " + exception.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

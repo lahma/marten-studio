@@ -174,7 +174,7 @@ written the moment the archiver first succeeds, or as a backlog that shrank to n
 
 ## R03 Standby lag
 
-Runs in both studios, Marten Studio and Postgres Studio. Variants: `primary-view`, `standby-view`, `paused`.
+Runs in both studios, Marten Studio and Postgres Studio. Variants: `primary-view`, `standby-view`, `paused`, `aurora-reader`.
 
 A standby that is behind is behind for whatever reads it, and if it is the failover target, everything it has not
 replayed is what a failover loses or waits for. The thresholds are issue #8 G8's: **Warning** at 5 minutes or 1 GiB
@@ -236,7 +236,15 @@ data source reached; the page lists the downstream standbys and says they are no
 One finding per variant, about every standby it judges, with the worst lag as its numbers; a standby's application
 name, client address and role are evidence shown only with `ViewDatabaseActivity` and the write policy.
 
-**Not applicable** on Amazon Aurora: its readers share the cluster volume and do not stream WAL.
+- **`aurora-reader`** (issue #8 A3): on Amazon Aurora the readers share the cluster volume and do not stream WAL, so
+  neither view above applies. Each reader's `replica_lag_in_msec` from Aurora's own `aurora_replica_status()` - "Time that
+  reader instance lags behind writer instance, in milliseconds", the number CloudWatch keeps as `AuroraReplicaLag` - is
+  judged on the same time thresholds: **Warning** at 5 minutes, **Critical** at an hour. There is no byte figure. The
+  writer (`session_id = 'MASTER_SESSION_ID'`) has no lag of its own and is never judged; a reader that reports none is
+  counted and not judged. The function's columns vary by Aurora release, so every column is read by name. An instance's
+  identifier is the cluster's own name for one of its instances - not a session's, a role's or a client's - so the
+  readers are named to anybody the database-wide gate admits, without `ViewDatabaseActivity`. The Replication page shows
+  them as "Aurora replicas". See [Aurora](../aurora.md).
 
 **A known limit on the standby side.** A standby whose WAL receiver has disconnected receives nothing new, replays what
 it has, and so is not seen to fall behind from the standby itself. R01 sees its slot go inactive and hold WAL on the
