@@ -493,7 +493,7 @@ overload starts the tenant's agents wherever it is asked. There the store-global
 (SEC1-fix4). A tenant's database is found without asking a dynamic tenancy for a tenant it lacks
 (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's databases (`AllDatabases()`,
 `Tenancy.DescribeDatabasesAsync()`, 9.50.1's `IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten
-through 9.54.1, and the studio, enumerating on the first navigation, can be the first caller: a known limit, not a
+through 9.54.2, and the studio, enumerating on the first navigation, can be the first caller: a known limit, not a
 per-poll cost. Measurements, history and details: decision-notes.md, D27.
 **D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),
 `BrowsableSchemas` playing "the store's own schemas": the schemas it names exactly are the source's own, their structure
@@ -694,7 +694,7 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | all four test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
 | all four test projects | `GitHubActionsTestLogger` | `2.4.1` | Held — see below. |
 | all four test projects | `AwesomeAssertions` | `9.6.0` | The MIT fork of FluentAssertions. One assertion library, and **no mocking library**: the data seam is our own set of interfaces, and hand-written fakes are smaller and more auditable than a mocking framework's call-matching DSL. Its namespace is `AwesomeAssertions`, not `FluentAssertions` (verified 2026-09-14); every test project declares it as a global using. |
-| both fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`) | `bunit` | `2.11.3` | Component tests. |
+| both fast suites (`tests/MartenStudio.Tests`, `tests/PostgresStudio.Tests`) | `bunit` | `2.13.3` | Component tests. |
 | both fast suites | `Verify.XunitV3` | `32.0.0` | Held — see below. Also the source of each fast suite's `global using Xunit;`, which is why neither csproj declares one. |
 | both fast suites | `PublicApiGenerator` | `11.5.4` | The public API snapshots (D20), one per package. |
 | both fast suites | `Microsoft.AspNetCore.TestHost` | `10.0.12` | `UseTestServer()` for the endpoint-metadata and startup-guard tests. TestHost rather than Mvc.Testing: those tests never need a `WebApplicationFactory`. |
@@ -762,7 +762,8 @@ no longer exists. The roots in brief:
 - `samples/` holds both demo hosts and their demo data (D17, D18).
 - `tests/` holds the four test projects (*Testing*).
 - `build/` is the Fallout orchestrator.
-- `docs/` holds the user documentation. `docs/maintainers/` holds the layout tree and the budget's dated entries.
+- `docs/` holds the user documentation. `docs/maintainers/` holds the layout tree, the budget's dated entries and the
+  decision notes.
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
 `.config/dotnet-tools.json` pins the Fallout CLI, `.fallout/` holds the parameter file and the generated
@@ -801,15 +802,15 @@ build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plai
 tests, an exact version) are defined there once; `Marten`'s `PackageVersion` reads
 `$(MartenStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
 `--marten-version` (env `MARTEN_VERSION`) — `floor`, the default; `latest`; or an exact version such as
-`9.54.1`, never a range — in `OnBuildInitialized`, and passes the result as
+`9.54.2`, never a range — in `OnBuildInitialized`, and passes the result as
 `-p:MartenStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
 variable of that name cannot change what a run tests. Without Fallout, `dotnet test …
--p:MartenStudioMartenVersion=9.54.1` does the same. **`Pack` packs at the floor and refuses anything
+-p:MartenStudioMartenVersion=9.54.2` does the same. **`Pack` packs at the floor and refuses anything
 else**, twice: the Fallout target asserts it, and `MartenStudio.csproj` fails a bare `dotnet pack` before
 the nuspec is written unless both `MartenStudioMartenVersion` is the floor *and* `project.assets.json`
 holds the `"Marten/<floor>"` library — because NuGet writes the dependency range from the assets file,
-so `dotnet test … -p:MartenStudioMartenVersion=9.54.1` followed by `dotnet pack --no-restore` would
-otherwise pass a property check and still ship `Marten >= 9.54.1`. A missing assets file is a refusal,
+so `dotnet test … -p:MartenStudioMartenVersion=9.54.2` followed by `dotnet pack --no-restore` would
+otherwise pass a property check and still ship `Marten >= 9.54.2`. A missing assets file is a refusal,
 not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
 latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
 and fix or record every difference in the same pull request. Raising the floor is a *Package budget
@@ -860,7 +861,7 @@ fails with `Could not find commit information` on an empty repository.
 dotnet test tests\MartenStudio.Tests                       # the fast suite alone
 $env:MARTENSTUDIO_PG_REUSE='false'                         # a container of this run's own; see PostgresFixture
 dotnet test tests\MartenStudio.Integration.Tests           # needs Docker - run `docker info` first
-dotnet test tests\MartenStudio.Tests -p:MartenStudioMartenVersion=9.54.1   # one suite at another Marten
+dotnet test tests\MartenStudio.Tests -p:MartenStudioMartenVersion=9.54.2   # one suite at another Marten
 dotnet test tests\MartenStudio.Tests --filter "FullyQualifiedName~ApiSurface"
 dotnet test tests\PostgresStudio.Tests                     # Postgres Studio's fast suite
 dotnet test tests\PostgresStudio.Integration.Tests         # its live suite - needs Docker

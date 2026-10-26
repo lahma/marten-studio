@@ -448,3 +448,52 @@ takes 21.6 s against 28.8 s, so the latest leg costs CI little.
 **Exit condition:** raise the floor when a member the studio needs is absent below the new value, or when a published
 advisory makes restore at the floor fail (`NU1901`-`NU1904`), and say here which. Bump `PostgresStudioNpgsqlLatest` in a
 pull request of its own, with both PostgresStudio suites green at it.
+
+**2026-10-26 — the latest-tested Marten moves from `9.54.1` to `9.54.2`; the floor stays at `9.39.0`.** Marten 9.54.2
+was released 2026-10-26, tagged `v9.54.2` (lower-case). Nothing in the studio needs it.
+
+The gates, run by V0:
+- `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.54.2`: zero NU messages.
+- `dotnet build marten-studio.slnx` at the floor and at 9.54.2: 0 warnings.
+- The fast suites at 9.54.2: `MartenStudio.Tests` 6 860 passed with 1 skip; `PostgresStudio.Tests` 1 502 passed.
+  `MartenRuntimeProbeTests` now pins 9.54.2.
+- The live classes under `Events`, `Projections`, `Schema`, `Health` and `Query`, and every `*NoDdl*` class, at
+  9.54.2 with `MARTENSTUDIO_PG_REUSE=false`: 575 passed, 2 skipped, none failed.
+
+The transitive graph at 9.54.2, compared with 9.54.1's: Marten itself, and **Weasel.Core / Weasel.Postgresql /
+Weasel.Storage 9.47.0** (from 9.46.0). Nothing else moved; JasperFx / JasperFx.Events stay **2.95.1**. **No package is
+new.**
+
+What changed between `V9.54.1` and `v9.54.2`, read from the source, and what the studio does with each:
+- **`src/Marten` changes in three files only.** None of them is a tenancy, schema, daemon, compaction or progression
+  file, so every "through 9.54.1" statement about those (D27's enumeration limit, the compaction notes) holds through
+  9.54.2.
+- **#5758: `EqualsIgnoreCase` escapes LIKE wildcards; #5760: `IsNullOrWhiteSpace` matches tabs and line breaks.** Both
+  are LINQ translation fixes. LINQ mode passes predicates to Marten's provider, so at 9.54.2 a `%` or `_` in an
+  `EqualsIgnoreCase` literal matches itself, where below it was a wildcard. No studio change.
+- **#5755 and weasel#747: a per-event Quick append reads back the `seq_id` it drew.** A failed batch then tombstones it,
+  so fewer permanent gaps arise in `mt_events`. The studio's gap readings are unchanged; there are simply fewer gaps to
+  read.
+- **The 2026-10-26 entry's known limit ends on the latest leg.** Weasel 9.47.0 carries 9.46.1's weasel#730 (a
+  foreign key corrected for its linked key once, however many migrations run it) and #732 (child index names past
+  63 bytes). The floor still resolves Weasel 9.33.0, so at the floor two circuits previewing or applying two databases
+  of one store at once can still render a widened key. The studio pins no Weasel.
+- **#5769 (Bobcat) and #5770 (a test)** don't affect the studio.
+
+**Exit condition:** unchanged.
+
+**2026-10-26 — `bunit` moves from `2.11.3` to `2.13.3`, test projects only.** FLK2 (0.4) had found that bUnit 2.11.3's
+`DisposeComponentsAsync`, when called from outside the renderer's dispatcher, disposed nothing (bUnit-dev/bUnit#1939).
+2.12.5 fixes that and a second disposal-task race, so the workaround in `StudioComponentContext` and
+`PostgresStudioComponentContext`, which ran the disposal on the dispatcher, is deleted.
+- **Restore** at the floor reported no NU message, so no alignment rows were needed. The 2026-09-14 entry's expectation
+  of NU1608 rows did not come true.
+- **The shipped graphs** (`src/MartenStudio`, `src/PostgresStudio`) are unchanged.
+- **The test graphs** moved as follows: AngleSharp 1.8.1 → 1.8.6, AngleSharp.Css 1.1.2 → 1.2.0, and
+  `Microsoft.AspNetCore.Components.WebAssembly`, `.WebAssembly.Authentication` and `Microsoft.JSInterop.WebAssembly`
+  10.0.10 → 10.0.13. These are transitive, and test-only.
+- **The fast suites** passed three runs in a row at the floor and one at 9.54.2, with no failure.
+- `Microsoft.AspNetCore.TestHost`, `Microsoft.AspNetCore.Mvc.Testing` and the shipped
+  `Microsoft.AspNetCore.App.Internal.Assets` floor stay at 10.0.12.
+
+**Exit condition:** bump when a fix matters here, with both fast suites green three times at the floor.

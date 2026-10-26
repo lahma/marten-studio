@@ -9,7 +9,7 @@ This page is the longer version of what the confirmation dialog says. Everything
 Marten's `EventStore.StreamCompacting.cs`, which is the same file at 9.39.0 (the studio's floor) and 9.50.2,
 and at 9.51.0, which adds two things and changes nothing else: an empty stream id is refused (#5695), and the
 folded events' DCB tag rows are deleted with them (#5694). Both are below, each marked with the version that
-has it. The file is unchanged again at 9.54.1, the latest Marten the studio is tested at.
+has it. The file is unchanged again at 9.54.1 and 9.54.2, the latest Marten the studio is tested at.
 
 ## What it does
 

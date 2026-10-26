@@ -84,7 +84,7 @@ two critical LINQ injection advisories) and `PostgresStudio` at exactly its own 
 MSBuild target, no runtime assembly), and it takes everything else — Blazor, SignalR, authorization, endpoint
 routing — from the shared framework, so it pins no ASP.NET Core patch onto your application. Target framework:
 `net10.0`. Your application's Npgsql stays the one Marten brings, which is never below Postgres Studio's floor;
-Marten Studio is tested at the Marten floor and at Marten 9.54.1, and not on Npgsql 10, which no tested Marten brings.
+Marten Studio is tested at the Marten floor and at Marten 9.54.2, and not on Npgsql 10, which no tested Marten brings.
 
 **PostgreSQL 14 to 18** are supported, and every release is tested on each. 14 reaches the community's end of life on
 2026-11-12, and 19 is supported from its general availability. Below 14 the studio still reads the server, with no
@@ -933,7 +933,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   Advance high water mark dialog says that the advance first ensures the event store's storage - with no tenant
   selected in every database of the store, each under its own `AutoCreate` - and, on a store that numbers events per
   tenant, which tenants' marks it moves.
-- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.54.1.
+- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.54.2.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,
   and a single-server tenancy creates every configured database that does not exist yet. The lookup table's
