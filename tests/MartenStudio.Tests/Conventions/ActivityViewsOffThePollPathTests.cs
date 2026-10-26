@@ -85,6 +85,14 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string AuroraBuilder = "src/PostgresStudio/Internal/Sql/AuroraQueries.cs";
 
+    /// <summary>
+    /// The connections-by-application builder (W5-API, issue #8 G9): one aggregate of this database's sessions by
+    /// <c>application_name</c>, with the server's budget. It is called only by the Sessions reader (the net below), as the
+    /// snapshot's fourth statement, so it is read exactly when Database › Sessions' snapshot is - at <c>HealthInterval</c>
+    /// or on Refresh, behind the snapshot's ten-second floor - and by the diagnostics API through that same snapshot.
+    /// </summary>
+    private const string ApplicationsBuilder = "src/PostgresStudio/Internal/Sql/ConnectionsByApplicationQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -100,7 +108,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -119,6 +127,23 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the replication builder joins pg_stat_activity for the senders' databases, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(AuroraBuilder.Split('/'))))
             .Should().BeTrue("the Aurora builder lists this database's sessions for their waits, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ApplicationsBuilder.Split('/'))))
+            .Should().BeTrue("the applications builder counts this database's sessions, so its exemption is not an exemption for nothing");
+    }
+
+    [Fact]
+    public void The_applications_builder_is_called_only_by_the_sessions_reader()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != ApplicationsBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("ConnectionsByApplicationQueries.", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().Equal(["src/PostgresStudio/Services/Database/SessionActivityReader.cs"],
+            "connections by application are the sessions snapshot's fourth statement, behind its ten-second floor, and nothing else's");
     }
 
     [Fact]
@@ -266,8 +291,9 @@ public class ActivityViewsOffThePollPathTests
         callers.Should().OnlyContain(
             static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks")
                 || x == "src/PostgresStudio/Services/Database/SessionActivityReader.cs"
-                || x == HorizonBuilder,
-            "every other caller would be a new path to the process array and the lock table; the horizon builder takes only H3's session predicate");
+                || x == HorizonBuilder
+                || x == ApplicationsBuilder,
+            "every other caller would be a new path to the process array and the lock table; the horizon and applications builders take only H3's session predicate");
     }
 
     [Fact]

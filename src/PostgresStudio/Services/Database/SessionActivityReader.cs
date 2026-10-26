@@ -65,6 +65,11 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             .QueryAsync(HealthConnectionQueries.PreparedTransactions(), SessionReads.Prepared, cancellationToken)
             .ConfigureAwait(false);
 
+        // Issue #8 G9: by application, over every session the role may see rather than the capped list above.
+        IReadOnlyList<ApplicationRow> applications = await sql
+            .QueryAsync(ConnectionsByApplicationQueries.Read(), MapApplication, cancellationToken)
+            .ConfigureAwait(false);
+
         return new SessionSnapshot(
             readAt,
             sessions.Count > 0 ? sessions[0].Visibility : SessionVisibility.Everything,
@@ -74,7 +79,64 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             [.. locks.Select(static x => x.Row)],
             prepared.Count > 0 ? prepared[0].MaxPrepared : 0,
             [.. prepared.Where(static x => x.Row is not null).Select(static x => x.Row!)],
-            sql.Statements);
+            sql.Statements)
+        {
+            Connections = Connections(applications),
+        };
+    }
+
+    /// <summary>One row of <see cref="ConnectionsByApplicationQueries.Read" />: the budget, and a total or an application.</summary>
+    internal sealed record ApplicationRow(
+        bool CanReadAllStats,
+        int MaxConnections,
+        int Reserved,
+        long ServerConnections,
+        bool IsTotal,
+        SessionApplicationCounts? Counts,
+        long ApplicationCount);
+
+    /// <summary>One row of <see cref="ConnectionsByApplicationQueries.Read" />.</summary>
+    internal static ApplicationRow MapApplication(NpgsqlDataReader reader) => new(
+        reader.GetBoolean(0),
+        reader.GetInt32(1),
+        reader.GetInt32(2),
+        reader.GetInt64(3),
+        !reader.IsDBNull(4) && reader.GetBoolean(4),
+        reader.IsDBNull(6)
+            ? null
+            : new SessionApplicationCounts(
+                reader.IsDBNull(4) || reader.GetBoolean(4) ? null : SessionReads.Text(reader, 5) ?? string.Empty,
+                reader.GetInt64(6),
+                reader.GetInt64(7),
+                reader.GetInt64(8),
+                reader.GetInt64(9),
+                reader.GetInt64(10),
+                reader.GetInt64(11),
+                SessionReads.Seconds(reader, 12)),
+        reader.IsDBNull(13) ? 0 : reader.GetInt64(13));
+
+    /// <summary>The rows as one reading, or <see langword="null" /> when the statement answered nothing at all.</summary>
+    internal static SessionConnections? Connections(IReadOnlyList<ApplicationRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        ApplicationRow first = rows[0];
+        SessionApplicationCounts total = rows.FirstOrDefault(static x => x.IsTotal)?.Counts
+            ?? new SessionApplicationCounts(null, 0, 0, 0, 0, 0, 0, null);
+
+        return new SessionConnections(
+            first.CanReadAllStats,
+            first.MaxConnections,
+            first.Reserved,
+            first.ServerConnections,
+            total,
+            [.. rows.Where(static x => !x.IsTotal && x.Counts is not null).Select(static x => x.Counts!)],
+            first.ApplicationCount);
     }
 
     /// <summary>The most bytes one character takes in any server encoding Postgres supports (UTF-8's four).</summary>

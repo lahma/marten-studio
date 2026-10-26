@@ -55,6 +55,30 @@ public class SessionActivityServiceTests
         harness.Ring.Should().BeEmpty("the summary is a plain read, and the page's question about the gate is never audited");
     }
 
+    /// <summary>
+    /// Issue #8 G9: the database's sessions by state and the server's budget are database-wide, so the summary carries them;
+    /// the applications are named only in the details, behind ViewDatabaseActivity - the summary says how many, and no name.
+    /// </summary>
+    [Fact]
+    public async Task Connections_by_application_are_totals_in_the_summary_and_names_only_in_the_details()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+
+        SessionActivitySummary summary = await harness.Service.GetSummaryAsync(Scope, Token);
+
+        summary.Connections.Should().Be(new SessionApplicationCounts(null, 3, 1, 1, 1, 1, 0, TimeSpan.FromMinutes(12)));
+        summary.Budget.Should().Be(new SessionConnectionBudget(100, 3, 9, true));
+        summary.ApplicationCount.Should().Be(2, "a count, which names no application");
+        System.Text.Json.JsonSerializer.Serialize(summary)
+            .Should().NotContain("billing-api", "an application's name is a detail").And.NotContain("psql");
+
+        SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
+
+        details.Applications.Select(static x => (x.Application, x.Total)).Should().Equal(("billing-api", 2L), ("psql", 1L));
+        details.ApplicationCount.Should().Be(2);
+        harness.Reader.Reads.Should().Be(1, "one snapshot serves both halves");
+    }
+
     [Fact]
     public async Task The_summary_needs_the_store_policy_for_the_database_as_a_whole()
     {
@@ -473,7 +497,21 @@ internal sealed class FakeSessionActivityReader : ISessionActivityReader
         ],
         10,
         [new PreparedRow("gid-orphan", "tx_owner", ReadAt.AddMinutes(-30), TimeSpan.FromMinutes(30), "901")],
-        [new HealthStatement("select 1", [])]);
+        [new HealthStatement("select 1", [])])
+    {
+        // Issue #8 G9: the same three sessions, by application.
+        Connections = new SessionConnections(
+            true,
+            100,
+            3,
+            9,
+            new SessionApplicationCounts(null, 3, 1, 1, 1, 1, 0, TimeSpan.FromMinutes(12)),
+            [
+                new SessionApplicationCounts("billing-api", 2, 1, 0, 1, 1, 0, TimeSpan.FromMinutes(12)),
+                new SessionApplicationCounts("psql", 1, 0, 1, 0, 0, 0, null),
+            ],
+            2),
+    };
 
     /// <inheritdoc />
     public Task<SessionSnapshot> ReadAsync(ResolvedSource resolved, CancellationToken cancellationToken)
