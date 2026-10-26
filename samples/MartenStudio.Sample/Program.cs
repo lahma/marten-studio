@@ -46,6 +46,11 @@ if (await SampleDatabaseCheck.PrepareAsync(
     return 1;
 }
 
+// The role the studio's SQL console, database browser and health checks read as, narrower than the store's login (which on
+// the throwaway container is the server's superuser): created here, before anything reads, and granted the demo's schemas in
+// the seeding once they exist (SampleConsoleRole). A login that may not create it leaves the studio reading as the login.
+bool consoleRole = await SampleConsoleRole.EnsureAsync(connectionString, Console.Out);
+
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -110,6 +115,13 @@ builder.Services.AddMartenStudio(options =>
     }
 });
 #endregion
+
+if (consoleRole)
+{
+    // Outside the README's snippet on purpose: what a host's SqlConsoleRole is depends on its own database's roles.
+    // K05 - "SQL console without a narrowed role" - is then the remedy applied, not a Warning.
+    builder.Services.Configure<MartenStudioOptions>(static options => options.SqlConsoleRole = SampleConsoleRole.Name);
+}
 
 #region readme_health
 // Optional, and AddMartenStudio() does not do it for you: the health advisor's configuration and catalog

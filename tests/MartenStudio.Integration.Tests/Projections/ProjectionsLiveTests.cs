@@ -402,6 +402,38 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     }
 
     /// <summary>
+    /// Wave 6: ShipmentTracker's rebuild meets the poisoned event, and the sample's
+    /// <c>Projections.RebuildErrors.SkipApplyErrors</c> skips it into a dead letter - so the rebuild finishes rather than
+    /// ending Failed at that event, which it did at every Marten CI runs while the sample left rebuild errors at their
+    /// default.
+    /// </summary>
+    [PostgresFact]
+    public async Task Rebuilding_the_projection_that_throws_skips_the_event_into_a_dead_letter_and_finishes()
+    {
+        await WaitUntilCaughtUpAsync(ShipmentTrackerName);
+
+        OperationStart handle = await Fixture.UseAsync(service => service.RebuildAsync(Fixture.Scope, ShipmentTrackerName, Token));
+
+        handle.Started.Should().BeTrue();
+
+        await ProjectionsFixture.WaitForAsync(
+            () => Task.FromResult(Fixture.Operations.Find(handle.Id)?.IsRunning == false),
+            $"the rebuild of {ShipmentTrackerName} to finish",
+            TimeSpan.FromMinutes(2),
+            Token);
+
+        StudioOperation operation = Fixture.Operations.Find(handle.Id)!;
+        operation.State.Should().Be(StudioOperationState.Succeeded, operation.Message);
+
+        await WaitUntilCaughtUpAsync(ShipmentTrackerName);
+
+        await using IQuerySession session = Fixture.Store.QuerySession();
+        IReadOnlyList<DeadLetterEvent> dead = await session.Query<DeadLetterEvent>().ToListAsync(Token);
+
+        dead.Should().Contain(x => x.ProjectionName == ShipmentTrackerName, "the rebuild skipped the poisoned event into a dead letter");
+    }
+
+    /// <summary>
     /// B3: two rebuilds of one projection would replay the same events into the same tables at once. The
     /// second request is answered with the first, and only one operation exists.
     /// </summary>
@@ -424,9 +456,9 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     /// than on the document table, whose truncation depends on what the projection declares.
     /// </para>
     /// <para>
-    /// DailySales, because its rebuild succeeds. ShipmentTracker's fails on the poison SKU at both Marten
-    /// versions CI runs: the sample skips apply errors only for continuous agents (<c>Projections.Errors</c>),
-    /// and a rebuild runs under <c>Projections.RebuildErrors</c>, which skips nothing by default.
+    /// DailySales, because its rebuild is a plain one. ShipmentTracker's meets the poison SKU: a rebuild runs under
+    /// <c>Projections.RebuildErrors</c>, which skips nothing by default, and since wave 6 the sample sets it to skip
+    /// apply errors as <c>Projections.Errors</c> does, so that rebuild skips the event into a dead letter.
     /// </para>
     /// <para>
     /// The test waits until that delete really is waiting on the lock before it asks again, and asserts that

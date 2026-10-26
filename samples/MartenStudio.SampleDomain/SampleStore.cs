@@ -120,6 +120,11 @@ public static class SampleStore
         // up with a stopped shard instead of the dead letter it is meant to demonstrate.
         opts.Projections.Errors.SkipApplyErrors = true;
 
+        // And the same during a rebuild, which runs under RebuildErrors - skipping nothing by default - rather than
+        // Errors: without this every rebuild of ShipmentTracker ends Failed at the poisoned event. With it, the rebuild
+        // skips that event into a dead letter and finishes, which is the demo of a rebuild meeting one.
+        opts.Projections.RebuildErrors.SkipApplyErrors = true;
+
         // Three registrations, three lifecycles, so the projections screen has each of them to draw.
         opts.Projections.Add(new OrderSummaryProjection(), ProjectionLifecycle.Inline);
         opts.Projections.Add(new DailySalesProjection(), ProjectionLifecycle.Async);

@@ -28,7 +28,9 @@ public sealed class Shipment
 /// hand would be a row with no history behind it; this one was produced by the daemon the way every dead
 /// letter in a real system is - a projection threw, the shard retried, and the event was skipped and
 /// recorded. <c>SampleStore.Configure</c> sets <c>Projections.Errors.SkipApplyErrors</c> so that the
-/// shard carries on afterwards instead of pausing, which is what makes the demo repeatable.
+/// shard carries on afterwards instead of pausing, which is what makes the demo repeatable - and
+/// <c>Projections.RebuildErrors.SkipApplyErrors</c> too, so that a rebuild skips the event into a dead letter
+/// and finishes rather than ending Failed.
 /// </para>
 /// <para>
 /// It is an <c>EventProjection</c> rather than an aggregation so that the projections screen has all

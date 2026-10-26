@@ -19,6 +19,26 @@ Sign in at `/login` as `admin`, `ops` or `viewer` — the password is the user n
 | `--path /ops/marten` | Mounts the studio somewhere other than `/marten`, which exercises the sub-path re-rooting. |
 | `--allow-data-generation` | Maps the demo-data panel and the "make it unhealthy" switches outside `Development`. See below. It also lets startup run `drop schema … cascade` on `studio_sample` and `studio_sample_events` when another build seeded them or their rows carry no seed marker, and the cascade drops whatever in other schemas depends on them too. |
 
+## The studio's own role
+
+The store logs in to the throwaway container as its superuser, so the sample narrows what the studio reads:
+on every start it creates the role `studio_sample_reader` (`NOLOGIN`) if it is missing, makes the store's login
+a member, and the seeding grants it `SELECT` on the demo's four schemas - `studio_sample`, `studio_sample_events`,
+`quartz` and `legacy` - and on the tables created there later. `MartenStudioOptions.SqlConsoleRole` is set to it,
+so the SQL console, the database browser and the health checks read as that role, and the Health page's K05
+("SQL console without a narrowed role") shows the remedy applied rather than a Warning. The role is also a member
+of `pg_monitor`, which lets the health checks and Database › Sessions see every session and statistic as before
+and reads no row of any table. A database whose login may not create roles - one `--allow-data-generation`
+points the sample at - says so on the console at start-up, and the studio reads as the login, as it did.
+
+## Rebuilding ShipmentTracker
+
+`ShipmentTracker` throws on one SKU on purpose, and the sample sets `Projections.Errors.SkipApplyErrors` so the
+running shard dead-letters that event and carries on. A rebuild runs under `Projections.RebuildErrors` instead,
+which skips nothing by default, so every rebuild of it used to end Failed at the poisoned event. The sample sets
+`Projections.RebuildErrors.SkipApplyErrors` too: a rebuild now skips that event into a dead letter and finishes,
+which is the demo of a rebuild meeting a bad event.
+
 ## Demo data
 
 The landing page has a **Demo data** panel in `Development` (or with `--allow-data-generation`), for the
