@@ -28,6 +28,40 @@
   transient/permanent classification of a shard failure is known to arrive with Marten 9.50.3.
 - LINQ mode: from JasperFx 2.91 (Marten 9.51) a date with no offset is read as UTC by JasperFx itself, and the
   studio's own correction stays idle, as measured.
+- **Postgres Studio**, a second package (`PostgresStudio`): the studio for an application that uses plain Npgsql and
+  no Marten. `services.AddPostgresStudio()` and `app.MapPostgresStudio()` serve it at `/postgres`, with the same
+  authorization layers (`AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy`) and startup
+  guard as Marten Studio. It lists the application's unkeyed singleton `NpgsqlDataSource` by itself, as the source
+  `default`; a keyed one only through `AddDataSource(name, resolve)`; and a host's own set of databases, one per
+  tenant say, through `AddDatabaseSource(name, resolve)` and an `IPostgresDatabaseSource`. It shows the Overview, the
+  database browser (tables, views, functions, triggers, sequences and types, and their rows), Sessions,
+  Relationships, Health, the SQL console and Activity. `BrowseDatabase`, `ViewDatabaseActivity` and `RunSql` are off
+  by default. `BrowsableSchemas` defaults to `public`, whose structure anyone the studio admits may see; rows and
+  definitions need `BrowseDatabase` and the write policy. It never reads a Marten table's rows (`mt_`) and references
+  no Marten package. `samples/PostgresStudio.Sample` runs it over an admin database and three tenant databases.
+- MartenStudio depends on exactly its own PostgresStudio, `PostgresStudio [0.5.0]` in the nuspec rather than
+  `>= 0.5.0`: the two assemblies are one program, and PostgresStudio grants MartenStudio its internals.
+  `AddMartenStudio()` and `AddHealthChecks().AddMartenStudio()` throw an `InvalidOperationException` when the
+  application loads no PostgresStudio or another build of it, and say which version to pin. The usual cause is a
+  central `PackageVersion` for PostgresStudio at another version under `CentralPackageTransitivePinningEnabled`,
+  which makes NuGet drop it from the graph without a warning.
+- One studio per application. `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and the
+  reverse. `MapMartenStudio()` throws in an application that registered Postgres Studio, and `MapPostgresStudio()` in
+  one that registered Marten Studio, each naming the map call to make instead.
+- A link to another store's database opens that database: `?store=B&db=X` opens B's database `X` when B lists it,
+  where it opened B's first database before. On Documents, a document, and the database browser's object list,
+  object and row pages, `?store=B` with no `db=` now opens B's database of the same name as the one open, if B lists
+  one, and B's first database otherwise.
+- The Marten sample checks its database before Marten touches it. When another build of the sample seeded it, or its
+  demo document tables hold rows with no seed marker, startup drops `studio_sample` and `studio_sample_events`
+  (`drop schema … cascade`, which also drops whatever in other schemas depends on them) and seeds them again: on the
+  throwaway container, and on any database when the host is started with `--allow-data-generation`. Any other
+  database is left alone, and the host stops with one line that says what to do.
+- `SqlConsoleRole` with a trailing line break is refused at startup like any other value that is not a plain
+  identifier (.NET's `$` matched before a final line feed). Relationships logs a scope that is refused or names
+  nothing at Debug, not Warning. A scope change that names a tenant the new store or database does not list keeps
+  the previous tenant only when the new store lists it too, and otherwise opens all tenants; before, it carried the
+  previous store's tenant over unchecked.
 
 # 0.4.0
 
