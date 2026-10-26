@@ -5,8 +5,8 @@ using MartenStudio.Tests.Conventions;
 namespace PostgresStudio.Tests.Aurora;
 
 /// <summary>
-/// W5-AUR's stylesheet section: every rule its own (<c>ms-aur-</c>), tokens only, and one column on a phone - read through
-/// one path the orchestrator points at <c>studio.css</c> when it folds the part in (W5-index §4, D26).
+/// W5-AUR's stylesheet section: every rule its own (<c>ms-aur-</c>), tokens only - read out of <c>studio.css</c> by its
+/// header, where it was folded in D26 order (W5-index §4).
 /// </summary>
 public partial class AuroraStylesheetTests
 {
@@ -38,7 +38,7 @@ public partial class AuroraStylesheetTests
 
         selectors.Should().NotBeEmpty().And.OnlyContain(
             static x => x.StartsWith(".ms-aur-", StringComparison.Ordinal),
-            "W5-R2 re-declares nothing an earlier section owns");
+            "W5-AUR re-declares nothing an earlier section owns");
     }
 
     [Fact]

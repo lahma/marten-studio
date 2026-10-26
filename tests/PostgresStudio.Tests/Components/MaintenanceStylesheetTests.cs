@@ -5,8 +5,8 @@ using MartenStudio.Tests.Conventions;
 namespace PostgresStudio.Tests.Components;
 
 /// <summary>
-/// W5-V1's stylesheet section: every rule its own (<c>ms-maint-</c>), tokens only, and one column on a phone - read through
-/// one path the orchestrator points at <c>studio.css</c> when it folds the part in (W5-index §4, D26).
+/// W5-V1's stylesheet section: every rule its own (<c>ms-maint-</c>), tokens only - read out of <c>studio.css</c> by its
+/// header, where it was folded in D26 order (W5-index §4).
 /// </summary>
 public partial class MaintenanceStylesheetTests
 {
@@ -38,7 +38,7 @@ public partial class MaintenanceStylesheetTests
 
         selectors.Should().NotBeEmpty().And.OnlyContain(
             static x => x.StartsWith(".ms-maint-", StringComparison.Ordinal),
-            "W5-R2 re-declares nothing an earlier section owns");
+            "W5-V1 re-declares nothing an earlier section owns");
     }
 
     [Fact]
