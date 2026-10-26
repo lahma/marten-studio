@@ -17,7 +17,7 @@ namespace MartenStudio.Tests.Conventions;
 /// baseline that is present on one CI leg and absent on the other. The
 /// <c>MartenStudioWithoutTheJasperFxSourceGenerator</c> target in <c>src/MartenStudio/MartenStudio.csproj</c>
 /// takes the generator out of that one compilation - <c>ExcludeAssets="analyzers"</c> was measured not to
-/// (AGENTS.md, <em>Package budget changes</em>, 2026-10-15).
+/// (docs/maintainers/package-budget-changes.md, 2026-10-15).
 /// </para>
 /// <para>
 /// The second fact is the anti-vacuity half. The test projects need the generator (the 9.22.4 - 9.23.0

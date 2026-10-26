@@ -40,7 +40,8 @@ anything; read *this* file before writing anything.
 ## Hard rules
 
 1. **No new NuGet package without a decision recorded in this file.** The package budget below is
-   complete. If a package looks necessary, add a dated row to *Package budget changes* saying what it is,
+   complete. If a package looks necessary, add a dated entry to *Package budget changes*
+   (`docs/maintainers/package-budget-changes.md`) saying what it is,
    what it replaces, and why nothing already present can do the job — before referencing it.
 2. **Never hand-edit `.github/workflows/*.yml`.** All four — `build.yml`, `marten-latest.yml`,
    `publish.yml`, `release.yml` — are generated from the `[GitHubActions]` attributes in
@@ -115,32 +116,24 @@ anything; read *this* file before writing anything.
    `.editorconfig` turns CS1591 off again for `build/`, `tests/`, `samples/` and `*.razor`, where a missing
    doc comment is noise. `BL0005` (setting a `[Parameter]` from outside its component) is an error.
 10. **In MartenStudio, Marten 9 is async-only, and its optional parts are genuinely optional.** There are no synchronous
-    LINQ terminals — they throw. Serialize and deserialize through `store.Options.Serializer()`, never
-    your own `JsonSerializer`, or a document round-trips through different settings than Marten wrote it
-    with. Never touch `StoreOptions.Storage.AllDocumentMappings` (internal). Every metadata column is
-    optional — but `Metadata.X.Enabled` alone does not say whether a column exists (verified against
-    Marten 9.35's `DocumentTable`, 2026-09-14): `tenant_id` exists iff the type is conjoined, `mt_doc_type`
-    iff it is a hierarchy, `mt_deleted`/`mt_deleted_at` iff its `DeleteStyle` is soft (read by casting the
-    `IDocumentType` to `Marten.Schema.DocumentMapping`), and only the rest honour `Enabled`; a store with
-    `DisableInformationalFields()` has no `mt_last_modified` at all. Build the column set with
-    `DocumentTableInfo.FromDocumentType(...).WithPhysicalColumns(...)`, which settles it against
-    `information_schema`, and never `select *`.
-    **And `IDocumentType.DuplicatedFields` is not a list of columns.** Marten registers a *search-only*
-    duplicated field for every metadata column a Marten attribute named a member for — `[Version]`,
-    `[CreatedAt]`, `[LastModified]`, `[TenantId]`, `[CorrelationId]`, `[CausationId]`, `[LastModifiedBy]`
-    — so that a LINQ comparison against the member reads the column instead of the JSON. Each one carries
-    the *metadata* column's name (`mt_version`, not a column of its own) and is marked `OnlyForSearching`;
-    Marten's own `DocumentTable` builds its columns from `DuplicatedFields.Where(x => !x.OnlyForSearching)`
-    and creates nothing for one. Enumerate them through `MartenDuplicatedFields.Physical` — anything that
-    describes the table's columns takes that, and `MetadataAliases` (via
-    `DocumentTableInfo.FindDuplicated`) is the *only* place the other half may be seen, because that is
-    the search path, where reading the column is the point. Getting this wrong named `mt_version` twice in
-    a select list and rendered two `<tr>` under one Blazor `@key`, which ends the circuit rather than the
-    render: issue #1, a 500 on the detail view of every document whose type has a `[Version]` property.
-    They also appear *late* — `DocumentMapping` holds the `DocumentSchema` that registers them behind a
-    `Lazy<T>`, so a mapping from a store that has never built its schema reports none of them, which is
-    every unit test here, and a store that has served one query reports them all, which is every
-    application. Test the shape with `SqlTestStore.WithLinqSearchAliasFor`, and prove Marten's half live.
+    LINQ terminals — they throw. Serialize and deserialize through `store.Options.Serializer()`, never your own
+    `JsonSerializer`, or a document round-trips through settings Marten did not write it with. Never touch
+    `StoreOptions.Storage.AllDocumentMappings` (internal). Every metadata column is optional, and `Metadata.X.Enabled`
+    alone does not say one exists: `tenant_id` exists iff the type is conjoined, `mt_doc_type` iff it is a hierarchy,
+    `mt_deleted`/`mt_deleted_at` iff its `DeleteStyle` is soft (cast the `IDocumentType` to
+    `Marten.Schema.DocumentMapping` to read it), only the rest honour `Enabled`, and `DisableInformationalFields()`
+    removes `mt_last_modified`. Build the column set with
+    `DocumentTableInfo.FromDocumentType(...).WithPhysicalColumns(...)`, which settles it against `information_schema`,
+    and never `select *`.
+    **And `IDocumentType.DuplicatedFields` is not a list of columns.** Each metadata column a Marten attribute names a
+    member for (`[Version]`, `[CreatedAt]`, `[LastModified]`, `[TenantId]`, `[CorrelationId]`, `[CausationId]`,
+    `[LastModifiedBy]`) also gets a *search-only* duplicated field, `OnlyForSearching`, named for the *metadata* column
+    (`mt_version`) and creating no column. Whatever describes the table's columns enumerates
+    `MartenDuplicatedFields.Physical`; only `MetadataAliases` (via `DocumentTableInfo.FindDuplicated`), the search path,
+    may see the other half: a column named twice ends the circuit, not the render (issue #1). The fields appear *late*:
+    none before a store builds its schema (every unit test here), all once it has served a query (every application).
+    Test the shape with `SqlTestStore.WithLinqSearchAliasFor` and prove Marten's half live (history:
+    `docs/maintainers/decision-notes.md`, hard rule 10).
 11. **In MartenStudio, never call `store.BuildProjectionDaemonAsync()`.** It starts a *second* daemon alongside the host's
     own, and the two fight over the same advisory locks until one hangs. The only supported way to reach a
     running daemon is the DI-registered coordinator, and its absence is a value —
@@ -153,86 +146,60 @@ anything; read *this* file before writing anything.
     this class from this table, run this command and paste the output. If a step needs a decision the
     packet does not make, the correct behaviour is to stop and report the question, never to guess.
 14. **In MartenStudio, a read or navigation path never calls `AllSchemaNames()`, `AllObjects()`, `ToDatabaseScript()` or
-    `CreateMigrationAsync()` — and nothing may describe `CreateOrUpdate` as additive.** PostgresStudio's read paths
-    write nothing at all - it has no Marten to ask - and `PostgresStudio.Integration.Tests` proves that a first
-    navigation over every core page, and every read each offers a click away, changes nothing
-    (`FirstNavigationLiveTests`). The first two
-    *apply migrations*: `IMartenDatabase.AllSchemaNames()` is
-    `AllObjects().Select(x => x.Identifier.Schema).Distinct()`, `AllObjects()` is
-    `BuildFeatureSchemas().SelectMany(x => x.Objects)`, and Marten's `BuildFeatureSchemas()` is
-    `StorageFeatures.AllActiveFeatures(this)` — which below Marten 9.50.3 reaches `database.Sequences`
-    whenever any document type has a numeric or HiLo id. That property is a `Lazy<SequenceFactory>` whose factory calls
-    `generateOrUpdateFeature(...)` and blocks on it, so it runs `Migrator.ApplyAllAsync` under the
-    database's own `AutoCreate`, the default being `CreateOrUpdate`. **Below 9.50.3 a single
-    `AllSchemaNames()` call on an empty schema creates `mt_hilo` and `mt_get_next_hi`** — proven live by
-    the P7 review, 2026-09-14, which is a studio that wrote DDL because somebody opened a tab. From
-    9.50.3 (#5665) `AllActiveFeatures` yields `database.SequenceFeature`, which is described and never
-    applied, so the enumeration is offline; the rule stands at every version because the floor has the
-    hazard, and `SchemaNoDdlLiveTests` pins it at the floor and its absence from 9.50.3
-    (`RuntimeFeature.OfflineSchemaEnumeration`). The last two are merely slow and connection-hungry, and
-    still connect. **Nor does a read path run a Marten LINQ terminal** (`ToListAsync`, `CountAsync`,
-    `FirstOrDefaultAsync` and the rest), `ToCommand`, `ExplainAsync` or `ToPreviewCommand` - nor `LoadAsync`,
-    `LoadManyAsync` or a `session.Events` read such as `FetchStreamAsync` or `AggregateStreamAsync` - because each
-    calls `EnsureStorageExistsAsync` for its type (read at 9.39.0, 9.50.2, 9.51.0 and 9.54.1), which under the database's
-    own `AutoCreate` creates or migrates that storage, and below 9.50.3 through `AllObjects()` `mt_hilo`, the first time the
-    process asks; reads use the studio's own SQL, and `StorageEnsuringCallTests` allows the remaining calls only
-    to the capability-gated writes and to F7's LINQ composition, which `MartenLinqCommand` builds into SQL
-    without it. From 9.52 the projection-floor seam (`FetchProjectionFloorAsync` and its two setters) and the
-    high-water advance ensure the event storage too: the rebuild dialog reads `mt_event_projection_floors` with the
-    studio's own SQL, and the advance is a capability-gated write. Schema names, declared indexes, managed tables and
-    installed functions all come
-    from `SchemaDeclarationReader`, which reads `IReadOnlyStoreOptions`, `IDocumentType` and the event
-    store's own feature schema and touches no connection; `CheckAsync`, `PreviewAsync` and `DdlAsync` are
-    behind buttons and say on the button what they may create on the Marten the host runs. Everything schema-related is **per
-    database, never per store**: the same four members exist on `IMartenDatabase` (through
-    `Weasel.Core.Migrations.IDatabase`) and answer only for the database the visitor resolved, whereas
-    `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows about (and below 9.51
-    dropped its `AutoCreate` override, #5693).
-    Enumerating a dynamic tenancy's databases is not read-only either — D27's known limit, whose call sites
-    `TenancyEnumerationCallTests` fences.
-    And the wording half of the rule, because it was got wrong once: **`AutoCreate.CreateOrUpdate` is not
-    additive.** Weasel's `TableDelta.WriteUpdate` — which is what an `Update` delta writes, and `Update` is
-    exactly what `CreateOrUpdate` allows — "emits `drop index` for every physical index the configuration
-    does not declare, `drop column` for every extra column, `alter column … type` for a changed one,
-    `alter table … drop constraint … CASCADE` for a changed primary key, and for a changed partition
-    scheme a `create table … as select` / `drop table … cascade` pair that copies the whole table out and
-    back. Only `Invalid` is refused, and `Invalid` is a much narrower thing than 'this will lose
-    something'." No screen, comment or doc may tell a person that an apply leaves their hand-made index
-    alone. Apply runs under `CreateOrUpdate` and never `AutoCreate.All`, the preview is rendered under the
-    same mode so what is read is what is run, `MigrationRisk` lists the destructive statements in the
-    dialog before the typed confirmation - and, apart from them, notes that remove nothing: an index built
-    without `CONCURRENTLY` on an existing table, and Weasel 9.46's partition-index resume, whose
-    `DROP INDEX CONCURRENTLY IF EXISTS` of an unattached child, rebuilt and attached at once, is not
-    counted as a drop - and the typed string travels to the service rather than being
-    re-supplied by the page. `Check`, `Preview` and `DDL` print the whole database — every tenant's
-    partition by name, every document type's table — so they answer only a visitor the store policy
-    allows for the database with `TenantId = null`, and, while any document type is hidden, one past the
-    database browser's gate too; an apply is authorized as `(db, null, ApplySchemaChanges)` whatever tenant
-    is selected, because `CreateOrUpdate` reaches every tenant.
-    **The database browser reads the catalog, never Weasel.** Every list and description of a non-Marten
-    object comes from `pg_catalog` (never `information_schema`, which hides what the role cannot touch),
-    filtered by `nspname = any(@schemas)`, and runs inside `ReadOnlySqlSession` — so `lock_timeout` keeps
-    it off a migration's lock queue and `has_*_privilege` answers for `SqlConsoleRole`. What Marten owns is
-    read from `SchemaDeclarationReader`'s kind map, which touches no connection either (D27).
+    `CreateMigrationAsync()` — and nothing may describe `CreateOrUpdate` as additive.** (PostgresStudio's read paths
+    write nothing, as `FirstNavigationLiveTests` in `PostgresStudio.Integration.Tests` proves for every core page.)
+    Below Marten 9.50.3 the first two *apply migrations*, under the database's own `AutoCreate`, when a document type
+    has a numeric or HiLo id: **a single `AllSchemaNames()` call on an empty schema creates `mt_hilo` and
+    `mt_get_next_hi`**. From 9.50.3 (#5665) the enumeration is offline (`RuntimeFeature.OfflineSchemaEnumeration`); the
+    rule stands at every version because the floor has the hazard, and `SchemaNoDdlLiveTests` pins both ends. The last
+    two are slow, connection-hungry and still connect. **Nor does a read path run a Marten LINQ terminal**
+    (`ToListAsync`, `CountAsync`, `FirstOrDefaultAsync` and the rest), `ToCommand`, `ExplainAsync`, `ToPreviewCommand`,
+    `LoadAsync`, `LoadManyAsync` or a `session.Events` read such as `FetchStreamAsync` or `AggregateStreamAsync`: each
+    calls `EnsureStorageExistsAsync`, which creates or migrates its type's storage (below 9.50.3, `mt_hilo` too) when
+    the process first asks. Reads use the studio's own SQL; `StorageEnsuringCallTests` allows those calls only in the
+    capability-gated writes and F7's LINQ composition, which `MartenLinqCommand` builds into SQL without it. From 9.52
+    the projection-floor seam (`FetchProjectionFloorAsync` and its two setters) and the high-water advance ensure the
+    event storage too: the rebuild dialog reads `mt_event_projection_floors` with the studio's own SQL, and the advance
+    is a gated write. Schema names, declared indexes, managed tables, installed functions and what Marten owns (its kind
+    map, D27) come from `SchemaDeclarationReader`, which reads `IReadOnlyStoreOptions`, `IDocumentType` and the event
+    store's feature schema without a connection; `CheckAsync`, `PreviewAsync` and `DdlAsync` are behind buttons that say
+    what they may create on the host's Marten. Everything schema-related is **per database, never per store**: the same
+    four members on `IMartenDatabase` (via `Weasel.Core.Migrations.IDatabase`) answer for the resolved database only,
+    while `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows. Enumerating a dynamic
+    tenancy's databases is not read-only either (D27's known limit; `TenancyEnumerationCallTests` fences its call
+    sites).
+    **`AutoCreate.CreateOrUpdate` is not additive**: its `Update` delta (Weasel's `TableDelta.WriteUpdate`) drops
+    undeclared indexes and extra columns, retypes changed columns, drops a changed primary key `CASCADE` and rebuilds a
+    re-partitioned table; only `Invalid` is refused. No screen, comment or doc may say an apply leaves a hand-made index
+    alone. Apply and its preview run under `CreateOrUpdate`, never `AutoCreate.All`, so what is read is what is run.
+    `MigrationRisk` lists the destructive statements before the typed confirmation, and notes two that remove nothing:
+    an index built without `CONCURRENTLY` on an existing table, and Weasel 9.46's partition-index resume, whose
+    `DROP INDEX CONCURRENTLY IF EXISTS` of an unattached child, rebuilt and attached at once, is not a drop. The typed
+    string travels to the service, never re-supplied by the page. `Check`, `Preview` and `DDL` print the whole database
+    (every tenant's partition, every document type's table), so they answer only a visitor the store policy allows for
+    the database with `TenantId = null` and, while any document type is hidden, past the database browser's gate; an
+    apply is authorized as `(db, null, ApplySchemaChanges)` whatever tenant is selected, as `CreateOrUpdate` reaches
+    every tenant. History: decision-notes.md, hard rule 14.
+    **The database browser reads the catalog, never Weasel.** Every list and description of a non-Marten object comes
+    from `pg_catalog` (never `information_schema`, which hides what the role cannot touch), filtered by
+    `nspname = any(@schemas)`, inside `ReadOnlySqlSession`, so `lock_timeout` keeps it off a migration's lock queue and
+    `has_*_privilege` answers for `SqlConsoleRole`.
 15. **In MartenStudio, open Marten sessions only with `SessionOptions.ForDatabase(resolved.TenantId, resolved.Database)`**
-    (or `ForDatabase(resolved.Database)` where the scope has no tenant), never
-    `Store.QuerySession(tenantId)` / `LightweightSession(tenantId)` — those ignore the selected database
-    and throw `DefaultTenantUsageDisabledException` on a `MultiTenantedDatabases` store. An unpinned
-    session on a multi-database store reads the store's default rather than the database the scope
-    selector named and the audit entry recorded, which is the same class of bug as reading another
-    tenant's rows. **Never run a user-supplied clause through `Query<T>(string)` /
-    `QueryAsync(Type, string)`**: Marten's `UserSuppliedQueryHandler` adds no tenant and no soft-delete
-    predicate, so a where clause typed into the studio reads every tenant's rows and every deleted one —
-    live-proven by the P6 review. A document type that Marten registers `SingleTenanted()` regardless of
-    the store (`DeadLetterEvent` is one) has no `tenant_id` column at all and gets no predicate from
-    Marten either: filter on the document's own `TenantId` property, and prove a sequence is in scope
-    before handing it to an API that has no tenant predicate of its own. **In both studios, catch interop loss with
-    `catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))`** (a core helper) and never with a ladder of
-    `catch` clauses: `JSDisconnectedException` derives from `Exception` and *not* from `JSException`, so
-    `catch (JSException) { } catch (InvalidOperationException) { }` misses exactly the case that happens
-    on every closed browser tab — and an exception escaping a component's `DisposeAsync` takes the rest of
-    that disposal with it, leaving the `DotNetObjectReference` that pins the component undisposed and the
-    page's `CancellationTokenSource` uncancelled. A filter still rethrows anything that is a real bug.
+    (or `ForDatabase(resolved.Database)` where the scope has no tenant), never `Store.QuerySession(tenantId)` /
+    `LightweightSession(tenantId)`: those ignore the selected database and throw `DefaultTenantUsageDisabledException`
+    on a `MultiTenantedDatabases` store, and an unpinned session on a multi-database store reads the store's default,
+    not the database the scope named and the audit recorded. **Never run a user-supplied clause through
+    `Query<T>(string)` / `QueryAsync(Type, string)`**: Marten's `UserSuppliedQueryHandler` adds no tenant or
+    soft-delete predicate, so a typed where clause reads every tenant's rows and every deleted one. A document type
+    Marten registers `SingleTenanted()` whatever the store (`DeadLetterEvent` is one) has no `tenant_id` column and no
+    Marten predicate: filter on its own `TenantId` property, and prove a sequence is in scope before handing it to an
+    API with no tenant predicate. **In both studios, catch interop loss with
+    `catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))`** (a core helper), never a ladder of
+    `catch` clauses: `JSDisconnectedException` derives from `Exception`, *not* `JSException`, so
+    `catch (JSException) { } catch (InvalidOperationException) { }` misses what every closed tab raises, and an
+    exception escaping a component's `DisposeAsync` abandons the rest of that disposal, leaving the
+    `DotNetObjectReference` that pins the component undisposed and the page's `CancellationTokenSource` uncancelled. A
+    filter still rethrows anything that is a real bug (history: decision-notes.md, hard rule 15).
 16. **The core is Marten-free, and the fence is the assembly.** `src/PostgresStudio` references no Marten, JasperFx or
     Weasel assembly or package, directly, through a project or transitively: `PostgresStudioFenceTests` holds that line
     at the project files, the restore graphs (`obj/project.assets.json`), the built assembly's references and the
@@ -262,23 +229,14 @@ cut has no way to see either.
 **D3 — Two dependencies a package, and no upper bound on either: MartenStudio (`Marten`, floor `9.39.0`, and
 PostgresStudio at exactly its own version), PostgresStudio (`Npgsql`, floor `8.0.3`, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`) - each plus `FrameworkReference
-Microsoft.AspNetCore.App`.** Everything else either RCL needs — Blazor, SignalR,
-authorization, endpoint routing — is in the shared framework, so the package pins no ASP.NET Core patch
-onto its host; the assets pack is three `.js` files and an MSBuild target, with no `lib/`, no `ref/` and
-no runtime assembly, so it does not either (D22). No `Marten.AspNetCore`: its value is ETag'd HTTP JSON
-writers generic over `T`, and the studio only ever has a runtime `Type`. No direct `Npgsql` either; it
-arrives through `Weasel.Postgresql`, and adding it would let the two drift. The Marten floor is a
-*security* floor (the two 9.39.0 advisories, *Package budget changes* 2026-10-15), and both suites run at
-it and at a pinned latest-tested 9.x (`MartenStudioMartenFloor` / `MartenStudioMartenLatest` in
-`Directory.Packages.props`, the `marten-latest` workflow); the package is only ever packed at the floor.
-The studio's own compilation runs without the JasperFx source generator Marten bundles, so the shipped
-assembly carries no JasperFx generator attribute and has the same public API whichever Marten built it.
-Since 0.5 the assets pack is PostgresStudio's, which MartenStudio references, and PostgresStudio - having no
-Marten to bring it - references `Npgsql` directly; "no direct `Npgsql`" is MartenStudio's rule alone
-(*Package budget changes* 2026-10-20 and 2026-10-26, D30). PostgresStudio's Npgsql floor is pinned only in the
-projects that set `PostgresStudioPinsNpgsql`, by a conditional central row, and is never above the Npgsql Marten's
-floor resolves (`NpgsqlVersionTests`); MartenStudio's nuspec still lists the assets pack, written there by
-`CentralPackageTransitivePinningEnabled` rather than by a reference of its own.
+Microsoft.AspNetCore.App`.** Everything else either RCL needs (Blazor, SignalR, authorization, endpoint routing) is in
+the shared framework, so neither pins an ASP.NET Core patch onto its host; nor does the assets pack, three `.js` files
+and an MSBuild target with no `lib/`, no `ref/` and no runtime assembly (D22). No `Marten.AspNetCore`: its value is
+ETag'd HTTP JSON writers generic over `T`, and the studio only ever has a runtime `Type`. MartenStudio has no direct
+`Npgsql`, which arrives through `Weasel.Postgresql` and must not drift from it; PostgresStudio, with no Marten to bring
+it, references `Npgsql` directly (*Build*). The Marten floor is a *security* floor (*Package budget changes*), tested
+and packed as *Build* says. The studio compiles without the JasperFx source generator Marten bundles, so its public API
+is the same whichever Marten built it.
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a
 read-only browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and
@@ -398,28 +356,16 @@ Marten API verification, Blazor circuit subtleties or test-case design goes to O
 Sonnet result is still reviewed by the orchestrator, and by `studio-reviewer` when it touches `src/`.
 
 **D22 — `blazor.web.js` reaches the host through a `PackageReference`, not through a copy in this
-package.** As of .NET 10 that file is neither in the shared framework nor embedded in any ASP.NET Core
-assembly: it is a static web asset in `Microsoft.AspNetCore.App.Internal.Assets`, which the SDK resolves
-only for a project whose `RequiresAspNetWebAssets` is true — and the Web SDK defaults that to true only
-for a project that has `.razor` Content items *of its own*. A host that adds Marten Studio and writes no
-Blazor components has none, so `GET /_framework/blazor.web.js` answered 404, the studio prerendered,
-never became interactive, and nothing in the build said a word. **The package cannot set the property on
-the consumer's behalf** — that is a restore-time decision, and NuGet deliberately excludes
-package-provided `.props`/`.targets` from restore evaluation (`ExcludeRestorePackageImports`), measured
-rather than assumed. A plain `PackageReference` is what does reach the consumer: the pack's
-`buildTransitive` targets run in any Web SDK executable that references the studio, directly or
-transitively, and define `_framework/blazor.web.js` as **that project's own** static web asset. So the
-host serves the script from its own `MapStaticAssets()`, the studio's mapped
-`{Path}/_framework/blazor.web.js` endpoint forwards to it, and nothing here ships a frozen copy of a
-Microsoft script that would go stale one patch after the package was built. The three-tier resolution in
-`MapStudioFrameworkScript` stays — host web root, host endpoint, then a packaged copy that is now
-normally absent (`_content/PostgresStudio/_framework/blazor.web.js`) — because the host's copy must always win where
-there is one. Since 0.5 the pack is referenced by PostgresStudio, so a MartenStudio host reaches it two hops away
-(host, MartenStudio, PostgresStudio, the pack), measured by PS-0 with an API-only host (*Package budget changes*
-2026-10-20). *The alternative that was
-tried and dropped:* vendoring the file, by setting `RequiresAspNetWebAssets` for the RCL itself and
-republishing the resolved file as `_content/MartenStudio/_framework/blazor.web.js`. It worked, and it
-coupled the shipped script to whatever ASP.NET Core patch built the package.
+package.** On .NET 10 the file is only a static web asset of `Microsoft.AspNetCore.App.Internal.Assets`, resolved only
+for a project whose `RequiresAspNetWebAssets` is true (by default, one with `.razor` Content items *of its own*), and
+**the package cannot set the property on the consumer's behalf**: NuGet excludes package-provided `.props`/`.targets`
+from restore evaluation (`ExcludeRestorePackageImports`). A plain `PackageReference` does reach the consumer: the
+pack's `buildTransitive` targets run in any Web SDK executable that references the studio, directly or transitively,
+and make `_framework/blazor.web.js` **that project's own** static web asset, served by its `MapStaticAssets()` and
+forwarded to by the studio's `{Path}/_framework/blazor.web.js` endpoint. `MapStudioFrameworkScript` tries the host
+web root, then the host endpoint, then a normally absent packaged copy
+(`_content/PostgresStudio/_framework/blazor.web.js`), as the host's copy must always win. Measurements, and the
+vendored copy that was tried and dropped: decision-notes.md, D22.
 
 **D23 — The studio has no forms, so it disables antiforgery on its own endpoints.** Every mutation is a
 Blazor event over the circuit; there is no `<form>` and no `<EditForm>` anywhere in `Components/`, and
@@ -434,31 +380,17 @@ unaffected — it simply has nothing to validate here. If a screen ever grows a 
 token back with it, scoped to that endpoint rather than to the whole studio.
 `StudioEndpointsTest.A_host_that_never_calls_UseAntiforgery_still_serves_the_studio` is the regression.
 
-**D24 — The packages ship no Blazor JS initializer; the shell loads `js/studio.js` itself.** A
-file named `*.lib.module.js` in an RCL's `wwwroot` *is* a JS initializer — nothing declares it, the
-filename alone is the declaration — and Blazor loads the initializers of every referenced RCL into
-**every** Blazor app in the process. A host that runs its own Blazor Server app therefore fetched the
-studio's initializer from the **site root** on every page it served, including pages that never mention
-the studio; with `AuthorizationPolicy` set, that path is authorized too, so the fetch was redirected to
-the login page, came back as `text/html`, and the browser logged a MIME-type error on every page load —
-the host's own unauthenticated login page included. That is the host's behaviour changed by the act of
-referencing this package, which is the thing this project exists to refuse, and it made
-`AuthorizationPolicy` unusable for exactly the hosts most likely to set it (issue #2). The file is an
-ordinary classic script, PostgresStudio's `wwwroot/js/studio.js` since 0.5 (`marten-studio.js` before), loaded by the
-shared shell document `StudioDocument.razor` with a
-**relative** `src` so it resolves against the studio-rooted `<base href>` and lands on the
-`_content/PostgresStudio` mirror under the mount path; its global keeps the name `window.martenStudio`. It sits at
-the end of `<body>`, before
-`blazor.web.js`: the prerendered markup is parsed by then, so the remembered theme is still applied to
-it — sooner than `afterWebStarted` ever ran — and every global is defined before the circuit that calls
-them starts. Measured, not assumed: the built asset manifest has no `js-initializer` dependency group at
-all. *The alternative that was rejected:* keeping the initializer and making it no-op outside the
-studio's circuit. It fixes nothing — the fetch, the redirect and the console error all happen before any
-of its code runs. `NoJsInitializerTests` is the regression, on both halves: no `*.lib.module.js` under
-`wwwroot`, and a shell that still asks for the script it replaced it with. Measured in 0.3.0: a studio
-navigation resets the `<html>` element's attributes even though the window survives, so state the script
-keeps there (the keyboard-or-pointer input modality behind the heading's focus ring) lives in JS and is
-re-applied by an observer.
+**D24 — The packages ship no Blazor JS initializer; the shell loads `js/studio.js` itself.** A file named
+`*.lib.module.js` in an RCL's `wwwroot` *is* a JS initializer, and Blazor loads every referenced RCL's into **every**
+Blazor app in the process, so a host's own app fetched the studio's from the **site root** on every page and, behind
+`AuthorizationPolicy`, logged a MIME-type error on each (issue #2). The script is a classic one, PostgresStudio's
+`wwwroot/js/studio.js`, loaded by the shared shell document `StudioDocument.razor` at the end of `<body>`, before
+`blazor.web.js`, with a **relative** `src` that resolves against the studio-rooted `<base href>` to the
+`_content/PostgresStudio` mirror under the mount path; its global keeps the name `window.martenStudio`. So the
+remembered theme applies to the prerendered markup, and every global exists before the circuit starts.
+`NoJsInitializerTests` holds both halves: no `*.lib.module.js` under `wwwroot`, and a shell that still asks for the
+script. A studio navigation resets the `<html>` element's attributes, so state the script keeps there lives in JS and an
+observer re-applies it. History: decision-notes.md, D24.
 
 **D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.**
 `.ms-main` hides horizontal overflow on purpose, so the studio never grows a page-level scrollbar inside
@@ -496,125 +428,83 @@ W5-AUR, W5-B1 and W5-API in that order under the same rule; each section's own s
 `studio.css` by its header.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
-0.3.0 lets the studio show what else lives in the store's Postgres database — a Quartz.NET job store, a
-legacy schema, another library's tables — as tables, views, functions, triggers, sequences and types.
-Reading them is gated like `RunSql`, because it is the same power: `Capabilities.BrowseDatabase` (off by
-default, off under `ReadOnly`) and `BrowsableSchemas` (exact names, or `"*"` for every schema the role has
-`USAGE` on except Postgres' own and extensions'). Structure — names, columns, keys, indexes, trigger
-names, estimates — is visible without either for the store's *own* schemas, because the Schema screen
-already showed it; everything else, every non-Marten definition and every row needs both, plus the write
-policy asked **with `TenantId = null`**, since nothing filters a non-Marten table by tenant. Marten's own
-document and event tables and every `mt_`-prefixed object are never read raw — the browser links to
-Documents and Events, where tenancy, soft delete and the serializer apply — while flat-table projections
-and `ExtendedSchemaObjects` are Marten-managed *relational* data and their rows are browsable. A hidden
-document type (`IsDocumentTypeVisible`) is absent from every list together with its indexes, keys,
-triggers and partitions, and a view over its table is refused; per-tenant partitions and sequences roll
-up, because their names are the tenant list. Classification fails closed: if a registered store's
-declarations cannot be read, nothing is called "Other". Known limit: features added with
-`Storage.Add(IFeatureSchema)` are reachable only through Marten's internal `AllActiveFeatures`, which hard
-rule 14 forbids, so they are classified by the `mt_` prefix alone. `BrowsableSchemas` limits what the
-screens show, not what `RunSql` can read: `SqlConsoleRole` is the real boundary, and `"*"` without it is
-event 9230 at startup.
-Free text is masked and structure is blanked: every catalog read pins `search_path` to `pg_catalog`, so
-every name Postgres deparses is printed with its schema, and `WithheldNames` masks a withheld schema's
-qualifier — in types, defaults, CHECK and index definitions, view, routine and trigger definitions,
-`SET search_path` and comments — as `‹withheld›`. A view that reads from or refers to anything in a
-withheld schema is refused its rows and its query; so is a trigger whose function is withheld, and, while
-any document type may be hidden, a view that calls user code or reads a document table no store declares.
-**A list locks nothing it lists** — no `pg_partition_*`, no `pg_sequence_last_value`, no size function —
-because a tenant-partitioned store has thousands of partitions and the lock table is shared; a sequence's
-value is read on demand, one at a time.
-On PostgreSQL 18 the `pg_sequences` view no longer checks the privilege itself: it calls `pg_sequence_last_value` for
-every row and every reader, and that function takes a `RowExclusiveLock` on each sequence even when it then returns
-null - so does any read of the view, whatever columns it selects. Lists read `pg_catalog.pg_sequence`; the one value
-read goes through `has_sequence_privilege` first, which on 18 is what keeps the lock away (measured, B0, 2026-10-20).
-Nor does a list call a deparse function that opens what it describes: `pg_get_indexdef` in every form,
-`pg_get_expr` with a relation (a default's `adbin`, a partition's `relpartbound`), `pg_get_viewdef` and
-`pg_get_constraintdef` of a table's CHECK each take a transient `AccessShareLock` and queue behind a migration's
-`ACCESS EXCLUSIVE` on 14 to 18 (measured 2026-10-26); a key's or foreign key's `pg_get_constraintdef` and a
-trigger without WHEN do not. `pg_get_partkeydef` and `pg_get_expr(relpartbound, <relid>)` open the relation and
-queue too, while `pg_get_expr(relpartbound, 0)` - no relation - does not, and is how a list reads partition bounds
-(14.24 and 18.6, measured 2026-10-26; `LintMatrixLiveTests`). A list that must deparse reads `pg_locks` once and
-leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its one
-relation, under `lock_timeout`.
-Another store's key and alias are shown only to a visitor that
-store's store policy passes, and its Marten-managed rows need its store and write policies. Known limits: a
-routine's body is shown as its author wrote it (a name it resolves through its own `SET search_path` or
-dynamic SQL is not masked); a hidden type nothing in the process has touched, and that is not registered
-with `Schema.For`, is unknown to `AllKnownDocumentTypes()` and is listed by its `mt_` name as infrastructure
-until Marten learns it (its rows are never read, views over it are refused); a domain CHECK that calls a
-function is not followed; a schema created after the 60-second schema-list cache is masked only once the
-list is read again.
-Rows are never read from a foreign table — nor from a partitioned table with a foreign partition, a table
-with a foreign inheritance child, or a view reading any of them (a materialized view's rows are local and
-are read). A view over Marten's own tables, or over another store's whose policies refuse the visitor, is
-refused its rows, and so is a table or view whose partitions or children sit in a withheld schema. A view
-is judged on what it reaches through other views and through functions with SQL-standard bodies (Postgres
-records their dependencies), and on the schemas it names as values, its collations and its text search
-objects. A function whose body is source text cannot be followed: a view calling one is refused its rows
-while any schema the reading role may read is withheld (for `SECURITY DEFINER`, while any schema is
-withheld) — which is why the sample writes `legacy.format_employee_name` with a `RETURN` body. Residual:
-under `"*"` with `SqlConsoleRole` narrowed, such a view is read, and what its function reads is bounded by
-that role alone; a definition naming a hidden type's table only through dynamic SQL is not detected; a
-foreign partition attached less than a minute ago may not yet be seen. A schema an extension owns is
-never admitted by `"*"` — only an exact `BrowsableSchemas` entry admits one — and one not admitted is
-masked like any withheld schema but does not count as withheld for dependency purposes. Every first read
-of a relation's rows is audited by signature (filter, sort, paging mode — never the cursor), per store,
-database and relation, and never from a static render: the browser's pages read only once interactive and
-once the scope their address names has been applied (an in-circuit Back or Forward to another database
-reads nothing against the previous one), so an explicit request the gate refuses is one 9202/9203 per
-page view and using a page whose gate is closed refuses nothing. On Activity and the Overview an entry
-under `BrowseDatabase` or `RunSql` is shown only while the capability is on and the write policy passes
-the reader for its scope; a browser read the store policy refused is recorded under `BrowseDatabase` too,
-and each policy is asked once per scope per sweep. Postgres' own error text about a browser read is
-masked like everything else (qualifiers, and every whole token that spells a withheld schema — whatever
-word precedes it, in any server language, a name with a space or a hyphen matched whole), except a value
-the read bound, which is echoed as typed; the Schema screen withholds a failure's text outright when the
-schema list it would be checked against cannot be read, and a failed apply's Activity entry carries its
-SQLSTATE, not Postgres' words, which stay in event 9206; row reads do not pin `search_path`, because a
-bare `=` must find `citext`'s own operator, and a name printed unqualified names no schema. The "could
-not be built" notice names another store only to a visitor that store's policy passes, and other stores'
-databases are enumerated only when a store policy — or a write policy, while `BrowseDatabase` is on —
-will be asked, and never for a `DynamicMultiple` store.
-**Reach, not scope.** An operation Marten runs over a whole database — a progression correction, a
-rebuild, a high-water restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind
-subscription", a schema apply — is authorized as `(store, database, null)` unless the database is
-exclusively the selected tenant's (never on a sharded tenancy, which pools tenants by design); the SQL
-console, the Mode A subquery lift and `EXPLAIN` are always asked with `TenantId = null`, because nothing
-narrows a typed statement to a tenant. The one exception is the dead-letter rewind on a store with
-`UseTenantPartitionedEvents`, from Marten 9.51 with JasperFx 2.91 (`RuntimeFeature.TenantSubscriptionRewind`):
-the daemon's per-tenant overload stops, rewinds and restarts only that tenant's agents, and Marten deletes
-only that tenant's dead letters of the shard (#5700, jasperfx#1025), so it is authorized as
-`(store, database, tenant)` - and made only for an agent the daemon in this process runs, with that agent's
-own names, because the overload starts the tenant's agents wherever it is asked. On such a store the
-store-global rewind is never made, and Skip event is the tenant overload of `MarkEventsAsSkipped` (#5698),
-asked about the tenant as before. Below either, both stay refused (SEC1-fix4). A tenant's database is found without asking a dynamic tenancy for a
-tenant it does not have (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's
-databases is not read-only, at any Marten through 9.54.1: `AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`
-and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run `Tenancy.BuildDatabases()`. Once per store
-instance, that applies a master-table or sharded tenancy's lookup table - gated, and from 9.51 (#5692) run,
-under the tenancy's own `AutoCreate` when it sets one and the store's `AutoCreateSchemaObjects` otherwise;
-below 9.51 always run under the store's (`maybeApplyChanges` at `V9.50.2`, `v9.51.0` and `V9.54.1`). So a tenancy that
-sets none applies under the store's mode at every version, `All` included, which drops and recreates a table
-it cannot alter; and below 9.51 a store's `None` is promoted to `CreateOrUpdate` when the tenancy's own
-`AutoCreate` is set to anything but `None`, where from 9.51 the tenancy's own mode runs instead. 9.51's
-`ShardedTenancy.FindOrCreateDatabase` also builds a pooled database id on a cache miss (#5702). It also
-upserts the tenancy's seed rows. On a single-server tenancy it creates every configured database that does
-not exist yet, under no `AutoCreate` at all. The studio enumerates on the first navigation, so in a process that runs no daemon of its own it can be
-that first caller; a host whose daemon runs in-process, or that applies on startup, has always enumerated
-before it. A known limit, not a per-poll cost.
-**D27 in PostgresStudio.** The gate is reused unchanged, with `PostgresStudioResource` and the source policy in place
-of the store's, and `BrowsableSchemas` playing "the store's own schemas": the schemas it names exactly are the data
-source's own, and their structure is shown to anyone the source policy admits, while their rows and definitions need
-`BrowseDatabase` and the write policy (asked with no tenant: a Postgres Studio scope has none). A schema only `"*"`
-admits needs both for its structure too, because `"*"` is a statement about the database rather than the
-configuration; a system schema is never browsable, and only an exact entry admits an extension's. With nothing named,
-the list is `public`, applied after every configuration, so a list that names schemas replaces it. There are no
-declarations, so the classifier holds no store: the `mt_` prefix rule is the only thing that names an object Marten's,
-and it fails closed - such an object's rows are never read, nor a view over one, its definition is shown only with
-`BrowseDatabase`, and the database page says once that the database holds a Marten store and points to Marten
-Studio. PostgresStudio cannot honour another application's `IsDocumentTypeVisible`, so a Marten database a host would
-hide types in belongs in Marten Studio, where that delegate applies.
+It lists the database's other objects by kind, gated like `RunSql`, whose power it is: `Capabilities.BrowseDatabase`
+(off by default and under `ReadOnly`) and `BrowsableSchemas` (exact names, or `"*"` for every schema the role has
+`USAGE` on but Postgres' own and extensions'). The store's *own* schemas' structure (names, columns, keys, indexes,
+trigger names, estimates) needs neither, as the Schema screen shows it; everything else, every non-Marten definition and
+every row needs both, plus the write policy asked **with `TenantId = null`**, as nothing filters a non-Marten table by
+tenant. Marten's document and event tables and `mt_` objects are never read raw (the browser links to Documents and
+Events, where tenancy, soft delete and the serializer apply), but the rows of flat-table projections and
+`ExtendedSchemaObjects`, Marten-managed *relational* data, are browsable. A hidden document type
+(`IsDocumentTypeVisible`) is absent from every list with its indexes, keys, triggers and partitions, and a view over its
+table is refused; per-tenant partitions and sequences roll up, their names being the tenant list. Classification fails
+closed: if a registered store's declarations cannot be read, nothing is "Other"; a `Storage.Add(IFeatureSchema)`
+feature, which only Marten's internal `AllActiveFeatures` reaches, is classified by its `mt_` prefix. `BrowsableSchemas`
+limits the screens, not `RunSql`: `SqlConsoleRole` is the real boundary, and `"*"` without it is event 9230 at startup.
+Free text is masked and structure blanked: every catalog read pins `search_path` to `pg_catalog`, so deparsed names
+carry their schema, and `WithheldNames` masks a withheld schema's qualifier as `‹withheld›` in types, defaults, CHECK,
+index, view, routine and trigger definitions, `SET search_path` and comments. A view reading from or referring to a
+withheld schema is refused its rows and query, as is a trigger with a withheld function and, while any document type may
+be hidden, a view calling user code or reading a document table no store declares.
+**A list locks nothing it lists** (no `pg_partition_*`, `pg_sequence_last_value` or size function): a tenant-partitioned
+store has thousands of partitions, and the lock table is shared. Lists read `pg_catalog.pg_sequence`, never the
+`pg_sequences` view, which on PostgreSQL 18 locks every sequence for every reader; a sequence's value is read on demand,
+one at a time, behind `has_sequence_privilege`, which on 18 keeps the `RowExclusiveLock` away. Nor does a list call a
+deparse function that opens what it describes, as its `AccessShareLock` queues behind a migration's `ACCESS EXCLUSIVE`
+on 14 to 18: `pg_get_indexdef` in any form, `pg_get_expr` with a relation (a default's `adbin`, a partition's
+`relpartbound`: `pg_get_expr(relpartbound, <relid>)`), `pg_get_viewdef`, a table CHECK's `pg_get_constraintdef`,
+`pg_get_partkeydef`. Lists read partition bounds with `pg_get_expr(relpartbound, 0)`, which opens nothing
+(`LintMatrixLiveTests`). A list that must deparse reads `pg_locks` once and leaves a locked table's text out
+(`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its one relation, under `lock_timeout`.
+Another store's key, alias and name in the "could not be built" notice show only to a visitor its store policy passes,
+its Marten-managed rows need its store and write policies, and other stores' databases are enumerated only when a store
+policy (or, while `BrowseDatabase` is on, a write policy) will be asked, never for a `DynamicMultiple` store. No rows
+are read from a foreign table, a partitioned table with a foreign partition, a table with a foreign inheritance child or
+a view reading one (a materialized view's rows are local, and read); from a view over Marten's tables or another store's
+whose policies refuse the visitor; or from a table or view with partitions or children in a withheld schema. A view is
+judged on what it reaches through views and SQL-standard-bodied functions (Postgres records their dependencies), the
+schemas it names as values, its collations and its text search objects. A source-text function cannot be followed, so a
+view calling one is refused its rows while any schema the reading role may read is withheld (for `SECURITY DEFINER`, any
+schema): hence the sample's `legacy.format_employee_name` has a `RETURN` body. A schema an extension owns needs an exact
+`BrowsableSchemas` entry, and one not admitted is masked like a withheld schema without counting as withheld for
+dependencies. Known limits (in the notes): routine bodies' own name resolution, hidden types Marten has not learned
+(`Schema.For`, `AllKnownDocumentTypes()`), domain CHECK functions, schemas newer than the 60-second cache, source-text
+functions under `"*"` with a narrowed `SqlConsoleRole`, dynamic-SQL table names, foreign partitions under a minute old.
+The first read of a relation's rows per signature (filter, sort, paging mode, never the cursor) is audited per store,
+database and relation, never from a static render: browser pages read only once interactive and once their address's
+scope applies, so a refused explicit request is one 9202/9203 per page view and a page whose gate is closed refuses
+nothing. Activity and the Overview show an entry under `BrowseDatabase` or `RunSql` only while the capability is on and
+the write policy passes the reader for its scope; a browser read the store policy refused is recorded under
+`BrowseDatabase` too, each policy asked once per scope per sweep. Postgres' error text about a browser read is masked
+like everything else except a value the read bound, echoed as typed; the Schema screen withholds a failure's text
+outright when it cannot read the schema list to check it, and a failed apply's Activity entry carries its SQLSTATE, the
+words staying in event 9206. Row reads do not pin `search_path`: a bare `=` must find `citext`'s own operator, and an
+unqualified name names no schema.
+**Reach, not scope.** An operation Marten runs over a whole database (a progression correction, a rebuild, a high-water
+restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind subscription", a schema apply) is
+authorized as `(store, database, null)` unless the database is exclusively the selected tenant's, never on a sharded
+tenancy, which pools tenants; the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with
+`TenantId = null`, as nothing narrows a typed statement to a tenant. The one exception is the dead-letter rewind under
+`UseTenantPartitionedEvents` from Marten 9.51 with JasperFx 2.91 (`RuntimeFeature.TenantSubscriptionRewind`), whose
+per-tenant overload touches only that tenant's agents and dead letters (#5700, jasperfx#1025): it is authorized as
+`(store, database, tenant)` and made only for an agent this process's daemon runs, with that agent's own names, as the
+overload starts the tenant's agents wherever it is asked. There the store-global rewind is never made, and Skip event is
+`MarkEventsAsSkipped`'s tenant overload (#5698), asked about the tenant; below either version both stay refused
+(SEC1-fix4). A tenant's database is found without asking a dynamic tenancy for a tenant it lacks
+(`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's databases (`AllDatabases()`,
+`Tenancy.DescribeDatabasesAsync()`, 9.50.1's `IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten
+through 9.54.1, and the studio, enumerating on the first navigation, can be the first caller: a known limit, not a
+per-poll cost. Measurements, history and details: decision-notes.md, D27.
+**D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),
+`BrowsableSchemas` playing "the store's own schemas": the schemas it names exactly are the source's own, their structure
+shown to anyone the source policy admits, their rows and definitions needing `BrowseDatabase` and the write policy
+(asked with no tenant, as a Postgres Studio scope has none). A schema only `"*"` admits needs both for its structure
+too, `"*"` being a statement about the database, not the configuration; a system schema is never browsable. Naming
+nothing means `public`, applied after every configuration, so naming schemas replaces it. With no declarations only the
+`mt_` prefix names an object Marten's, failing closed: its rows are never read, nor a view over it, its definition shows
+only with `BrowseDatabase`, and the database page says once that it holds a Marten store and points to Marten Studio. A
+Marten database whose host would hide types belongs in Marten Studio: PostgresStudio cannot honour another application's
+`IsDocumentTypeVisible`.
 
 **D28 — LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and
 lit up at run time from Marten 9.48.** The Query page's third mode hands the predicate a host's code would
@@ -635,213 +525,158 @@ dragged forward for one mode, so the adapter is reached by reflection behind the
 pinned at both ends by `MartenRuntimeProbeTests` and `MartenLinqCommandTests`, and its absence is a line
 naming the Marten it needs. `docs/linq-mode.md` is the threat model.
 
-**D29 — The health advisor: one shared sweep, three gates, and two deliberate exceptions.** A sweep
-is the database's - once per interval, under no visitor's identity - and what each visitor is shown of it is
-decided finding by finding and piece of evidence by piece of evidence (`HealthService`). `None` is for what the
-Configuration page already says (K01–K04, S01): anyone the scope admits. `Database`, every other check's default,
-is for numbers about the database as a whole: the store policy asked with `TenantId = null`, about the store's
-registered key and the resolved database's own `Id.Identity` - never the visitor's spelling, a key in another case
-or an empty database id - so the gates, the audit, the mute keys and the high-water Explain name one resource.
-`Activity` is for other people's sessions and statements - process ids, roles, client addresses, statement text:
-`ViewDatabaseActivity` (off by default, off under `ReadOnly`), then that store policy, then the write policy with
-the capability named, as Database › Sessions asks. The name of the role the studio reads as (`SqlConsoleRole`, or
-the store's own login where none is set) is Database-gate information, and so is the login the source's data source
-connects as, which S04, S05, S08 and S10 name. A "not checked" row names it, and the grant it lacks, to a visitor the
-check's own gate admits. C02 and C03 name the login role too (`session_user`, in the role-limit evidence and the
-quiet row), at the check's own Database gate. An Aurora instance's identifier (`aurora_db_instance_identifier()`,
-`aurora_replica_status().server_id`) is the cluster's own name for one of its instances, not a session's, a role's
-or a client's, so it is Database-gate information too: R03's `aurora-reader` evidence, the Replication page's Aurora
-replicas, the "Answered by" line, the Server page's Aurora section (the cluster's instances, the instance's waits, this
-database's commit latency and DML) and the capacity line need no `ViewDatabaseActivity`. A session's Aurora waits
-(`aurora_stat_backend_waits`) are `Activity`: they are read only for a visitor through that gate, and shown as counts
-and shares, never as a time. A finding about one tenant names it, so it needs `Activity`
-and that tenant's store policy too. A withheld finding is counted and never described, and a row below its check's
-gate reads "findings not shown to you" whether or not there are any; the badge and the banners read only a scope
-the report would be shown to. A finding that names a table in a schema outside the store's own - an
-`ExtendedSchemaObjects` table in a schema of its own, `HealthFinding.GatedSchemas` - also needs the database
-browser's gate for that schema, which D27 withholds and masks otherwise; the badge, the banners and the Critical
-toast resolve no scope and cannot ask that gate, so they withhold such a finding from everybody, and T12 and T13,
-being the database's, name such a table generically rather than vanish. The first exception is to D13 and D27,
-which call `SqlConsoleRole` the real boundary: T02, T22 and T23 read `pg_stat_statements`' counters and texts as
-the store's own role, because the extension shows any other role `<insufficient privilege>` for Marten's
-statements and a narrowed console role - the careful host's configuration - would see nothing of the store. The
-reads are fenced to `userid = current_user` and this database (`StatementChecksFenceTests`), so they show what
-that role could read anyway; a text still carrying a literal as written, or that is not a plain query or write, is
-withheld; plans run as `SqlConsoleRole`. The Statements page (W5-Q1) is the same read: it shows the statement checks'
-own `pg_stat_statements` read, widened to the hundred statements with the most execution time (and on Aurora the most
-storage reads). The fence is unchanged, T02's withholding and comment masking are applied at read, and every text is
-behind the Activity gate and the visitor's own mask. Every other health read, and every console statement, stays
-under it. The
-second is the opt-in ASP.NET Core health check, which runs with no visitor at all - every store, up to 25
-databases, no policy - and is acceptable only because it reports codes, outcomes, severities and counts, never a
-name, a tenant, a statement or anything Postgres said: the host's own endpoint is its only gate (`docs/health.md`,
-`docs/security.md`). A mute is kept in the browser as an HMAC-SHA256 under a random key of that browser's own. The
-browser holds that key only as the host's Data Protection protected it (purpose `PostgresStudio.Health.MuteKeys.v1`,
-`HealthMuteKeys`), never as a plain hash a guess could confirm. An instance whose key ring cannot open the key reads
-nothing as muted, and leaves the list for the instance that made it until the browser next mutes there. The studio
-registers no Data Protection: `AddRazorComponents()` and `AddInteractiveServerComponents()` already do, and a
-container without it keys in memory.
-**Whole-database table scope.** MartenStudio's table checks judge every table of the store's own schemas and - while
-`BrowseDatabase` is on - of the schemas `BrowsableSchemas` admits, the store's declarations laid over one catalog list
-(`MartenHealthTableSource`, issue #8 G1). A declared table keeps its kind, origins and `StoreOptions` remedies, Marten's
-event and bookkeeping tables staying the store's own; an undeclared one is the host's (migration SQL), a recognised
-library's (exempt from the index-design rules only) or somebody else's, and one outside the store's schemas carries
-`GatedSchemas`. Another registered store's tables are left out, because a visitor-less sweep cannot ask its policy; so,
-while any type may be hidden, is every table named like a document table. The coverage sentence says what was left
-out, in counts.
-**Two studios, one engine.** A check in MartenStudio's assembly runs only on a Marten source (the registry's source
-kinds), and the shared checks run on both. Postgres Studio's `Database` gate asks the source policy about the
-source's key and the database's own identity, as Marten Studio asks the store policy about the store's. A relational
-table's remedy may be migration SQL, shown "for your own migrations - the studio never runs this" and built only in
-`MigrationSqlText`, which quotes every name and gives no statement for a name it cannot; a Marten table's remedy is
-never DDL - a `StoreOptions` line in Marten Studio, nothing in Postgres Studio.
-**The statistics window** (`StatisticsWindow`) is the one answer to "since when have these counters counted". It is the
-later of `pg_stat_database.stats_reset` and the earlier of the two shared views' `stats_reset` (`pg_stat_bgwriter` up
-to 16 or `pg_stat_checkpointer` from 17, and `pg_stat_archiver`): `max(database, min(shared, archiver))`. So a
-`pg_stat_reset_shared()` of one view never shortens it. A clean restart is not a reset, and neither is the watched
-standby's promotion, nor the standby following one upstream; a failover starts the window at the promoted server's
-reset times. A verdict that needs a long window gives none until the window covers it, and none while it looks
-reset: T01's, T05's and T06's seven days and C08's and C11's day are measured against it.
-**The Maintenance page reads nothing of its own**: its facts are the regular sweep's shared reads
-(`HealthSweep.Shared`: the table read with each table's autovacuum triggers, T16's workers and progress reads, T12 and
-T13's wraparound read and T14's result). Its one read of its own is the on-demand bloat measure, which runs as
-`SqlConsoleRole` in a read-only transaction under `lock_timeout` and `QueryTimeout`, one per database at a time, is
-never part of a sweep or a list, and is audited as "Measure bloat" with the table only. The triggers T07, T08 and the
-page judge by are computed in SQL (`HealthTableQueries.TablesSql`), and `Autovacuum.Triggers` is its C# mirror, held
-equal by `TriggerParityLiveTests`: a rule of thumb that ignores a table's storage parameters is a rule this project
-does not use.
+**D29 — The health advisor: one shared sweep, three gates, and two deliberate exceptions.** A sweep is the database's,
+once per interval under no visitor's identity; what a visitor sees of it is decided per finding and per piece of
+evidence (`HealthService`). `None` is for what the Configuration page already says (K01–K04, S01): anyone the scope
+admits. `Database`, every other check's default, is for whole-database numbers: the store policy asked with
+`TenantId = null` about the store's registered key and the resolved database's own `Id.Identity` (never the visitor's
+spelling, another case or an empty id), so gates, audit, mute keys and the high-water Explain name one resource.
+`Activity` is for other people's sessions and statements (process ids, roles, client addresses, statement text):
+`ViewDatabaseActivity` (off by default and under `ReadOnly`), then that store policy, then the write policy with the
+capability named, as Database › Sessions asks. `Database` covers the role the studio reads as (`SqlConsoleRole`, else
+the store's login), which a "not checked" row names with its missing grant to a visitor the check's own gate admits; the
+login the data source connects as (named by S04, S05, S08 and S10, and by C02 and C03 as `session_user` in the
+role-limit evidence and the quiet row); and an Aurora instance's identifier (`aurora_db_instance_identifier()`,
+`aurora_replica_status().server_id`), the cluster's name for an instance, not a session's, role's or client's. So R03's
+`aurora-reader` evidence, the Replication page's Aurora replicas, the "Answered by" line, the Server page's Aurora
+section (instance waits included) and the capacity line need no `ViewDatabaseActivity`; a session's Aurora waits
+(`aurora_stat_backend_waits`) are `Activity`, read only through that gate and shown as counts and shares, never as a
+time. A finding about one tenant names it, so it also needs `Activity` and that tenant's store policy. A withheld
+finding is counted, never described; a row below its check's gate reads "findings not shown to you" whether or not there
+are any; the badge and banners read only a scope the report would be shown to. A finding naming a table outside the
+store's schemas (`HealthFinding.GatedSchemas`, as for an `ExtendedSchemaObjects` table) also needs D27's gate for that
+schema; the badge, banners and Critical toast, which resolve no scope, withhold such a finding from everybody, and T12
+and T13, being the database's, name such a table generically.
+The first exception is to D13 and D27, which call `SqlConsoleRole` the real boundary: T02, T22 and T23 read
+`pg_stat_statements`' counters and texts as the store's own role, as the extension shows a narrowed console role
+`<insufficient privilege>` for Marten's statements. The reads are fenced to `userid = current_user` and this database
+(`StatementChecksFenceTests`), so they show what that role could read anyway; a text still carrying a literal as
+written, or not a plain query or write, is withheld; plans run as `SqlConsoleRole`. The Statements page (W5-Q1) widens
+the same read to the hundred statements with the most execution time (on Aurora, storage reads), under the same fence,
+withholding and comment masking at read, every text behind the Activity gate and the visitor's own mask. Every other
+health read and console statement stays under `SqlConsoleRole`. The second exception, the opt-in ASP.NET Core health
+check, runs with no visitor (every store, up to 25 databases, no policy), acceptable only because it reports codes,
+outcomes, severities and counts, never a name, a tenant, a statement or anything Postgres said; the host's own endpoint
+is its only gate (`docs/health.md`, `docs/security.md`). A mute lives in the browser as an HMAC-SHA256 under the
+browser's own random key, held only as the host's Data Protection protected it (purpose
+`PostgresStudio.Health.MuteKeys.v1`, `HealthMuteKeys`), never as a plain hash a guess could confirm; an instance whose
+key ring cannot open it reads nothing as muted and leaves the list to the instance that made it until the browser next
+mutes there. The studio registers no Data Protection: `AddRazorComponents()` and `AddInteractiveServerComponents()` do,
+and a container without it keys in memory.
+**Whole-database table scope.** MartenStudio's table checks judge every table of the store's own schemas and, while
+`BrowseDatabase` is on, of those `BrowsableSchemas` admits: the store's declarations over one catalog list
+(`MartenHealthTableSource`, issue #8 G1). A declared table keeps its kind, origins and `StoreOptions` remedies (Marten's
+event and bookkeeping tables are the store's own); an undeclared one is the host's (migration SQL), a recognised
+library's (exempt only from the index-design rules) or somebody else's; one outside the store's schemas carries
+`GatedSchemas`. Left out, and counted in the coverage sentence: other registered stores' tables, as a visitor-less sweep
+cannot ask their policies, and, while any type may be hidden, tables named like a document table.
+**Two studios, one engine.** MartenStudio's checks run only on Marten sources (the registry's source kinds), the shared
+checks on both. A relational table's remedy may be migration SQL, shown "for your own migrations - the studio never runs
+this" and built only in `MigrationSqlText`, which quotes every name and gives no statement for a name it cannot; a
+Marten table's remedy is never DDL: a `StoreOptions` line in Marten Studio, nothing in Postgres Studio.
+**The statistics window** (`StatisticsWindow`), the one answer to "since when have these counters counted", is
+`max(database, min(shared, archiver))` over each view's `stats_reset` (`pg_stat_database.stats_reset`; the shared view,
+`pg_stat_bgwriter` up to 16 or `pg_stat_checkpointer` from 17; `pg_stat_archiver`), so one view's
+`pg_stat_reset_shared()` never shortens it. Restarts and failovers: decision-notes.md, D29. A verdict needing a long
+window (T01's, T05's and T06's seven days, C08's and C11's day) gives none until the window covers it, nor while it
+looks reset.
+**The Maintenance page reads nothing of its own** but the on-demand bloat measure; its facts are the sweep's shared
+reads (`HealthSweep.Shared`: the table read with each table's autovacuum triggers, T16's workers and progress reads, T12
+and T13's wraparound read, T14's result). The bloat measure runs as `SqlConsoleRole` in a read-only transaction under
+`lock_timeout` and `QueryTimeout`, one per database at a time, never in a sweep or a list, and is audited as "Measure
+bloat" with the table only. The triggers T07, T08 and the page judge by are computed in SQL
+(`HealthTableQueries.TablesSql`), mirrored in C# by `Autovacuum.Triggers` and held equal by `TriggerParityLiveTests`: no
+rule of thumb that ignores a table's storage parameters is used.
 **A check whose platform does what it judges** throws `HealthCheckNotApplicableException` with `ReplicationPlatform`'s
-sentence: listed as not applicable, never run, nothing logged (issue #8, A2) - an expected state, like a missing
-extension or privilege, and never a Warning. The platform is recognised only from markers a role short of a superuser
-cannot plant.
+sentence: listed as not applicable, never run, nothing logged (issue #8, A2), an expected state like a missing extension
+or privilege, never a Warning. The platform is recognised only from markers a role short of a superuser cannot plant.
 
-**D30 — PostgresStudio: the core is a package of its own, and Marten Studio is built on it.** 0.5 splits the studio
-into two Razor Class Libraries. **PostgresStudio** is everything that is about a PostgreSQL database rather than a
-Marten store: the shell, router and re-rooting (D11); the scope picker and the three authorization layers (D5); the
-capability guard and the audit; the database browser (D27), Sessions, the SQL console (D13) and Relationships' foreign
-keys; the health engine with 44 of its 73 checks in 0.5.0 (D29), and the Statements, Maintenance, Storage, Replication
-and Server pages; the diagnostics API (D31); the JSON toolkit, the stylesheet and the script. It references `Npgsql`,
-the assets pack and the shared framework, and nothing from Marten, JasperFx or Weasel (hard rule 16). **Marten
-Studio** references PostgresStudio and Marten, and adds the Marten screens, the Marten checks and the Marten halves of
-every seam.
-
-*Why one core package rather than shared source.* A host that has Marten takes one package and gets one copy of the
-core. A host that has only Npgsql takes the core alone, and the user asked for exactly that. Linked source would put
-the same types in two assemblies.
+**D30 — PostgresStudio: the core is a package of its own, and Marten Studio is built on it.** 0.5 splits the studio into
+two Razor Class Libraries, so a host with Marten gets one copy of the core and a host with only Npgsql takes the core
+alone, as the user asked. **PostgresStudio** is everything about a PostgreSQL database rather than a Marten store: the
+introduction's list, plus the router and re-rooting (D11), the capability guard, the Statements, Maintenance, Storage,
+Replication and Server pages, the diagnostics API (D31), the JSON toolkit, the stylesheet, the script and the shared
+checks (D29). Its references are D3's, and hard rule 16 fences them.
 
 *Why `InternalsVisibleTo` and an exact pin, not a public extension API.* Marten Studio extends nearly every core
-service. Publishing those seams would multiply the public surface (hard rule 7) for a plug-in model nobody asked for.
-With IVT the two packages are one program in two files, and the nuspec says so with `[x.y.z]`, which
-`MartenStudioPinsPostgresStudioExactly` in `MartenStudio.csproj` writes (it brackets NuGet-private item metadata) and
-`Pack` asserts in the nuspec text, so a NuGet that renamed those items fails the build rather than shipping `>=`. A
-host that upgrades one package without the other gets NU1608 at restore for a direct reference to another version (a
-warning, an error under `TreatWarningsAsErrors`), NU1107 for a cousin that needs another version, and NU1605 for a
-stale direct one. Under `CentralPackageTransitivePinningEnabled` with a central `PackageVersion` for PostgresStudio at
-another version it gets nothing: SDK 10.0.402's resolver drops PostgresStudio from the graph silently, a green build
-and a `FileNotFoundException` at startup (PS-0; the closest upstream issue is NuGet/Home#14698). So `AddMartenStudio()`
-first runs `PostgresStudioVersionGuard`, which names no PostgresStudio type, loads the assembly by name, compares
-informational versions up to the `+`, and throws an `InvalidOperationException` that names the central pin. The public
-`AddMartenStudio`'s own body stays free of PostgresStudio types - everything else is in a `NoInlining` method - and
-`PostgresStudioVersionGuardTests` scans its IL to keep it so.
+service, and publishing those seams would multiply the public surface (hard rule 7) for a plug-in model nobody asked
+for; with IVT the two packages are one program in two files, as the nuspec's `[x.y.z]` says (*Build*).
+`AddMartenStudio()` first runs `PostgresStudioVersionGuard` (*Build*; evidence: decision-notes.md, D30), which names no
+PostgresStudio type and loads the assembly by name; the public `AddMartenStudio`'s own body stays free of PostgresStudio
+types (the rest is in a `NoInlining` method), and `PostgresStudioVersionGuardTests` scans its IL to keep it so.
 
-*What PostgresStudio browses.* The application's own singleton `NpgsqlDataSource` registrations: the unkeyed one by
-default (`IncludeDefaultDataSource`, the source `default`), a keyed or otherwise-held one named with `AddDataSource`, and
-a host's own set of databases - one per tenant, say - named with `AddDatabaseSource` and an `IPostgresDatabaseSource`,
-which lists names and hands back each one's data source on demand. Never a connection string, for the reason Marten
-Studio is keyed on `IDocumentStore`: it renders what the application configured, with the application's role, pool and
-TLS. A factory is called once, with the root provider, and its result kept for the process and never disposed; a
-scoped or transient registration is refused, because it would build a pool per visitor. A database's identity is the
-source's own: a Marten store's database is its `Id.Identity`, unchanged; a DI-registered data source's is its
-registration name; a host-listed database's is the name the host lists. It is what `?db=`, policies, caches, history,
-mutes and the audit key on, so it must be stable across processes and restarts.
+*What PostgresStudio browses.* The application's own singleton `NpgsqlDataSource` registrations, never a connection
+string (see the introduction): the unkeyed one by default (`IncludeDefaultDataSource`, the source `default`), a keyed or
+otherwise-held one named with `AddDataSource`, and a host's own databases named with `AddDatabaseSource` and an
+`IPostgresDatabaseSource` that lists names and hands back each one's data source on demand. A factory is called once,
+with the root provider, and its result kept for the process and never disposed; a scoped or transient registration is
+refused, as it would build a pool per visitor. A database's identity is its source's own (a Marten store database's
+`Id.Identity`, unchanged; a DI-registered data source's registration name; the name a host lists); `?db=`, policies,
+caches, history, mutes and the audit key on it, so it must be stable across processes and restarts.
 
 *Authorization.* Postgres Studio is asked against its own `PostgresStudioResource(SourceName, DatabaseIdentifier,
 Capability)`, which has no tenant and is deliberately unrelated to `MartenStoreResource`: a handler written for one must
-never be handed the other. `SourceAuthorizationPolicy` is its store policy.
+never be handed the other. `SourceAuthorizationPolicy` is its store policy; D27 applies as *D27 in PostgresStudio* says.
 
-*D27 in PostgresStudio* is D27's gate unchanged, with `BrowsableSchemas` playing the store's own schemas and the `mt_`
-prefix rule the only thing that names an object Marten's (D27).
-
-*Routes and assets.* Every page route belongs to exactly one assembly of a studio. Compile-time roots are per assembly
-(`/postgres`, `/marten`), and re-rooting is from each assembly's root, so the shared pages sit at `/marten/…` in Marten
-Studio. Static assets live only in `_content/PostgresStudio/`.
+*Routes and assets* follow hard rule 16 and D11 (the shared pages sit at `/marten/…` in Marten Studio); static assets
+live only in `_content/PostgresStudio/`.
 
 *Words.* Shared sentences come from `IStudioSettings.Text` (`StudioText`): MartenStudio's instance is 0.4's literals,
-pinned by `StudioTextPinTests`, so no host of Marten Studio sees a word change; Postgres Studio's speaks of data sources,
-and `PostgresStudioWordsTests` evaluates every shared check in its words and fails on a store word outside a reasoned
-allow-list. Shared log events keep MartenStudio's templates in `StudioLog`, and Postgres Studio declares the same ids,
-levels and properties in its own words in `PostgresStudioLog`.
+pinned by `StudioTextPinTests`, so no Marten Studio host sees a word change. Shared log events keep MartenStudio's
+templates in `StudioLog`; `PostgresStudioLog` declares the same ids, levels and properties in Postgres Studio's words.
 
 *One studio per process in 0.5.* `AddPostgresStudio` and `AddMartenStudio` refuse each other, and each `Map*Studio`
-refuses the other's registration. The seams are DI-resolved settings, a descriptor, a source provider and source kinds
-in the health registry, so that Marten Studio can later list plain data sources beside its stores in one packet.
-
-*Npgsql.* PostgresStudio's Npgsql floor is pinned only in the projects that set `PostgresStudioPinsNpgsql`, by a
-conditional central row, and it is never above the Npgsql Marten's floor resolves (`NpgsqlVersionTests`). The latest
-leg runs PostgresStudio at the newest Npgsql major (a pass of its own over `postgres-studio.slnf`) as well as Marten
-Studio at the newest Marten 9.x; Marten Studio on Npgsql 10 is not a tested combination (*Build*).
+refuses the other's registration (what the seams leave room for: decision-notes.md, D30).
 
 **D31 — The diagnostics API: what the studio found, for the host's own code, by stable code, and never served by the
-studio.** 0.5 gives host code a read of what the studio already reads. Issue #8's two production hosts delete their own
-PostgreSQL diagnostics services, and keep at most a page of their own over this.
+studio.** History: decision-notes.md, D31. `IPostgresDiagnostics`, registered by `AddPostgresStudio()` and by
+`AddMartenStudio()` (one per process, like the studio), lists the databases the studio would list (`ListDatabasesAsync`)
+and returns each one's `PostgresDiagnosticsSnapshot` (`GetSnapshotAsync`): findings by stable code and variant, and
+typed sections for storage, statements, settings and extensions, and connections. `IPostgresDatabaseSource` (D30) and
+`IPostgresCapacitySource`, found in DI to report compute capacity SQL cannot see (Aurora Serverless v2's ACU), point the
+other way. MartenStudio's hosts reach it through the PostgresStudio assembly their exact pin names (hard rule 7).
 
-`IPostgresDiagnostics` is registered by `AddPostgresStudio()` and by `AddMartenStudio()`, one per process like the
-studio. It lists the databases the studio would list (`ListDatabasesAsync`). For each database it returns a
-`PostgresDiagnosticsSnapshot` (`GetSnapshotAsync`): the findings, by stable code and variant, and typed sections for
-storage, statements, settings and extensions, and connections. Two interfaces point the other way:
-`IPostgresDatabaseSource`, named with `AddDatabaseSource`, lists a host's own databases and hands the studio each one's
-`NpgsqlDataSource` on demand; `IPostgresCapacitySource`, found in DI, reports compute capacity that SQL cannot see, such
-as Aurora Serverless v2's ACU. PostgresStudio's public surface is D30's six registration types, the six inbound types
-and this read model's nineteen; its Verify baseline is the list (hard rule 7). MartenStudio's surface does not change:
-its hosts reach the read model through the PostgresStudio assembly its exact pin names.
-
-*Why public, when D12 keeps the data seam internal.* The read model is results, not seams. There is no
-`IStudioDatabase`, no sweep and no check base class in it, so a host cannot add a check or change a threshold; that is
-a non-goal of #8. The studio stays English. A host words findings in its own language, keyed on codes.
+*Why public, when D12 keeps the data seam internal.* It is results, not seams: with no `IStudioDatabase`, sweep or check
+base class, a host cannot add a check or change a threshold (a non-goal of #8). The studio stays English; a host words
+findings in its own language, keyed on codes.
 
 *No visitor, so no visitor's gates, and no new reach.* The API answers host code, which already holds the data source or
-the store, so it may read nothing that code could not. It runs the same statements as the pages, as the same roles -
-`SqlConsoleRole` for every read but D29's first exception, whose `userid = current_user` fence is unchanged - through
-the same single-flight caches. It leaves out the per-visitor decisions: the store, source, write and authorization
-policies, the capabilities and `ReadOnly`, and D27's masking of withheld schemas. `ReadOnly` is a statement about the
-people who open the studio, not about the host's own code. It keeps the rules that are about the content rather than
-the reader: a hidden document type is never named; a statement text that still carries a literal, or is not a plain
-query or write, is withheld; comments are masked; texts are capped; Postgres' own error words are not carried, only the
-studio's sentence and the SQLSTATE.
+the store, so it reads nothing that code could not: the pages' statements, as the same roles (`SqlConsoleRole` for all
+but D29's first exception, whose `userid = current_user` fence holds), through the same single-flight caches. It skips
+the per-visitor decisions (the store, source, write and authorization policies, the capabilities, `ReadOnly`, which is
+about the people who open the studio, and D27's masking of withheld schemas) and keeps the content rules: no hidden
+document type is named; a statement text still carrying a literal, or not a plain query or write, is withheld; comments
+are masked; texts are capped; Postgres' error words are not carried, only the studio's sentence and the SQLSTATE.
 
-*Activity-grade data is opt-in per call.* Everything D29 puts behind `Activity` is returned only when the call sets
-`IncludeActivity = true`: the statements section, application names, other sessions' evidence, the findings of an
-Activity check, and findings about one tenant. Otherwise each is counted as withheld, as a visitor short of that gate is
-told: a section by name in `Withheld`, a finding in `FindingsWithheld`, a piece of evidence by its label. The default is
-the safe one, for D4's reason: the call somebody writes without reading the docs must not be the one that puts
-statements in an e-mail.
+*Activity-grade data is opt-in per call.* What D29 puts behind `Activity` (the statements section, application names,
+other sessions' evidence, Activity checks' findings, findings about one tenant) is returned only when the call sets
+`IncludeActivity = true`, else counted as withheld, as a visitor short of that gate is told: a section by name in
+`Withheld`, a finding in `FindingsWithheld`, evidence by its label. The default is the safe one, for D4's reason: a call
+written without reading the docs must not put statements in an e-mail.
 
 *The studio never serves it.* Nothing in either package puts an API result into an HTTP response, a log line above
-Debug, a metric, the Activity ring or the health check's data, and no endpoint maps one. Where a result goes is the
-host's decision, made in the host's code. So the opt-in health check stays codes and counts (D29's second exception);
-the Health page's Snapshot download is built from the visitor's own gated view, section by section, never from this API
-(`VisitorSnapshotBuilder`, fenced by `DiagnosticsApiIsNotServedTests`); and an API call is not audited, because the ring
-records what visitors did through the studio and the host's code is not a visitor - a call is event 9250, at Debug,
-codes and counts only.
+Debug, a metric, the Activity ring or the health check's data, and no endpoint maps one: where a result goes is the
+host's decision. So the opt-in health check stays codes and counts (D29's second exception); the Health page's Snapshot
+download is built from the visitor's own gated view, section by section, never from this API (`VisitorSnapshotBuilder`,
+fenced by `DiagnosticsApiIsNotServedTests`); and an API call is not audited, as host code is not a visitor: a call is
+event 9250, at Debug, codes and counts only.
 
-*Stable codes.* A code is a letter and two digits. It is a string, never an enum. It is never reused, never renamed and
-never changes area; a retired check is marked so in `docs/health/codes.md`, and its code is never reassigned (hard rule
-7). A finding's variant (`deadlocks`, `temp-files`) is frozen the same way within its code, and a check that has
-variants names one on every finding. A newer studio may return a code a host has no wording for; the host then falls
-back to the title, which is the studio's own wording. Severity, category, outcome, action kind, platform and table
-ownership are enums with explicit values, and may gain members.
+*Stable codes.* A code is a letter and two digits, a string, never an enum, never reused, renamed or moved to another
+area (hard rule 7). A finding's variant (`deadlocks`, `temp-files`) is frozen the same way within its code, and a check
+with variants names one on every finding. Severity, category, outcome, action kind, platform and table ownership are
+enums with explicit values, and may gain members.
 
-*Extend-only.* Result types are sealed, non-positional records with `init` properties and no `required` member, so a
-host can build one in its own tests and a new property breaks nothing. A new section is a new nullable property and a
-new request flag. The three interfaces gain members only as default interface members. `PublicApiShapeTests` holds the
-package to this. The JSON snapshot carries `schemaVersion`, which only a removal, a rename or a change of meaning bumps.
+*Extend-only* (hard rule 7). Result types are sealed, non-positional records with `init` properties and no `required`
+member, so a host can build one in its tests and a new property breaks nothing. A new section is a new nullable property
+and request flag; the three interfaces gain members only as default interface members. The JSON snapshot's
+`schemaVersion` changes only for a removal, a rename or a change of meaning.
 
-*Cost and DDL.* An API nobody calls reads nothing. A call shares the pages' sweep and section caches, so a host polling
-every few seconds costs one sweep per interval per database. Fresh reads that calls start run at most two at a time per
-process; a cache hit waits behind nothing. Listing never enumerates a tenancy that builds: Marten's databases are the
-held ones (D27, hard rule 14). A host's database source must list without creating anything, and its names are
-identities: they key policies, history and mutes, and survive a database moving server. The studio keeps per-database
-state for at most 64 databases, the least recently used forgotten first (`HealthDatabaseBound`).
+*Cost and DDL.* An API nobody calls reads nothing. Calls share the pages' sweep and section caches, so polling every few
+seconds costs one sweep per interval per database; fresh reads that calls start run at most two at a time per process,
+and a cache hit waits behind nothing. Listing never enumerates a tenancy that builds: Marten's databases are the held
+ones (D27, hard rule 14). A host's database source must list without creating anything, and its names (D30's identities)
+survive a database moving server. Per-database state is kept for at most 64 databases, least recently used forgotten
+first (`HealthDatabaseBound`).
 
 ## Package budget
 
@@ -872,451 +707,23 @@ SourceLink needs no package reference: it is in-SDK on .NET 8 and later.
 
 ### Package budget changes
 
-**2026-09-14 — initial budget.** Everything in the table above, taken at once as the bootstrap commit.
-Three things were verified rather than assumed:
+The dated entries are in `docs/maintainers/package-budget-changes.md`, oldest first. Each says what a package or a
+floor move was, what it replaced, what was measured and its exit condition. A reference to "*Package budget changes*
+<date>" names an entry there. Hard rule 1's decision is a new entry in that file, and so is every floor or
+latest-tested move; read a package's entries before changing its row. What they settled:
 
-- `dotnet restore marten-studio.slnx` produces **zero NU warnings**. The anticipated `NU1608` from bUnit
-  2.11.3 asking for `Microsoft.AspNetCore.*` 10.0.10 under central package management did **not** occur —
-  the explicit `10.0.12` rows for `Microsoft.AspNetCore.TestHost` and `Microsoft.AspNetCore.Mvc.Testing`
-  are enough on their own, and no `NoWarn` was added. If a future bump reintroduces it, the fix is more
-  explicit `PackageVersion` rows in a labelled "framework floor alignment" group — never `NoWarn`.
-- The `11.0.0-rc` releases of the `Microsoft.AspNetCore.*` test packages are deliberately not taken.
-- `Marten` is a floor rather than an exact pin. The repository's own contract with Marten's API is pinned
-  instead, by `tests/MartenStudio.Tests/Marten/MartenApiSurfaceTest.cs` — see *Testing*.
-
-**2026-09-14 — `Microsoft.AspNetCore.App.Internal.Assets` 10.0.12 added to `src/MartenStudio`, and a
-vendored copy of `blazor.web.js` removed.** It is the only place that file exists on .NET 10, and nothing
-already in the budget can produce it: the shared framework does not carry it and no ASP.NET Core assembly
-embeds it (checked — `Microsoft.AspNetCore.Components.Server`/`Web`/`Endpoints` have no manifest
-resources). It replaces the build-time vendoring P1.2-fix shipped, which resolved the same pack *for the
-RCL* and republished the file as `_content/MartenStudio/_framework/blazor.web.js` — working, but frozen at
-whatever ASP.NET Core patch built the package. The reference puts the script in the **consumer's** static
-web assets instead, through the pack's `buildTransitive` targets. See D22.
-
-Measured before it was taken, with a nupkg in a local feed and a scratch **API-only** host that has no
-`.razor` file, does not set `RequiresAspNetWebAssets`, calls `MapStaticAssets()` and never calls
-`UseAntiforgery()` (2026-09-14): `_framework/blazor.web.js` appears in the host's own
-`*.staticwebassets.endpoints.json`, `GET /_framework/blazor.web.js` and
-`GET /marten/_framework/blazor.web.js` both answer 200 with the real 200 645-byte script,
-`GET /marten` is 200, the JS-initializer URL the page advertises is 200 under the studio path, and
-`POST /marten/_blazor/negotiate?negotiateVersion=1` answers 200 with a connection token. A second scratch
-host with **central package management, transitive pinning and a `.razor` file of its own** also builds
-clean — worth checking, because the SDK adds an *implicit* `PackageReference` to this pack for such a
-project and a `PackageVersion` row beside an implicit reference is `NU1009`. That is exactly why
-`samples/MartenStudio.Sample` no longer sets `RequiresAspNetWebAssets`: with the row in
-`Directory.Packages.props`, saying it there was NU1009 — and the sample is a better demonstration
-without it, because it is now the shape a real host has.
-
-**2026-09-14 — `GitHubActionsTestLogger` held at 2.4.1, not 3.0.5.** 3.x is a Microsoft.Testing.Platform
-logger: it is compiled against `Microsoft.Testing.Platform` 2.0.0, while `xunit.v3` 3.2.2 resolves 1.9.1,
-and the two are not assembly-version compatible — **both** test projects failed to compile with `CS1705`
-("…uses Microsoft.Testing.Platform … which has a higher version than referenced assembly"). 2.4.1 is the
-last VSTest-only release and depends on nothing but `Microsoft.TestPlatform.ObjectModel`, which is exactly
-the bridge Fallout 10.4.0's `ITest` drives. Pinning `Microsoft.Testing.Platform` forward instead would
-fight xunit.v3's own resolution and was not done. Verified the same day that `dotnet fallout Test` with
-`GITHUB_ACTIONS=true` loads the logger and emits its GitHub Actions annotations, and that the TRX still
-lands in `artifacts/test-results`. **Exit condition:** revisit when xunit.v3 and Fallout's `ITest` both
-speak Microsoft.Testing.Platform v2.
-
-**2026-09-19 — the `Marten` floor moved *down*, from `9.35.0` to `9.31.0`.** A floor should be the oldest
-version that works, not the newest one that happened to be current when the row was written: a host on
-Marten 9.31 must not be forced to upgrade to take this package, and NuGet takes the higher of the two
-anyway, so nothing on a newer Marten is affected. Bisected over every stable 9.x on nuget.org, all four
-gates run at each candidate (`dotnet restore marten-studio.slnx` with `TreatWarningsAsErrors`,
-`dotnet build marten-studio.slnx`, `dotnet test tests/MartenStudio.Tests`, and
-`MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests` against a real
-`postgres:17-alpine`). 9.31.0 is clean on all four; **9.30.0 is not** — three
-`ExtendedProgressionLiveTests` fail in their fixture with
-`Npgsql.PostgresException : 42703: column "heartbeat" of relation "mt_event_progression" does not exist`,
-because Marten only stopped gating `EventProgressionTable`'s extended columns on
-`Events.EnableExtendedProgressionTracking` in 9.31.0 (#5309, commit `d26169ff`, whose lowest containing
-tag is `V9.31.0`), and every pre-9.31 store with the flag off therefore migrates a table those three
-tests cannot write their row into — probed live at 9.24.0 and 9.30.0, which fail identically, and the
-commit is what says the whole 9.24–9.30 span does. Four other walls were found on the way down, and each
-one is a reason no lower floor is reachable:
-
-- **Everything up to and including 9.12.0 carries a critical advisory** and never reaches the compiler:
-  restore fails with `NU1904` for GHSA-rfx3-98h7-v3xp, "Marten's LINQ provider has SQL injection via
-  unescaped string literals", whose range is `>= 7.0.0, <= 9.12.0` and whose first patched version is
-  9.13.0. Probed at 9.0.0.
-- **Below 9.20.0 there is no `JasperFx.Events.Daemon.ShardFailure`**, which `ProjectionDataService`
-  builds out of `mt_event_progression`'s four nullable failure columns: `CS0246`, twice, in `src/`.
-  Probed at 9.13.0 and 9.19.0; present from 9.20.0.
-- **9.20.0 through 9.22.3 have no `ShardName.HighWaterMarkFor`**, which `MartenApiSurfaceTest` uses to
-  tell a bookkeeping progression row from a real shard: `CS0117`, three times. Probed at 9.20.0, 9.21.0,
-  9.22.0, 9.22.2 and 9.22.3; it appears in 9.22.4.
-- **9.22.4 through 9.23.0 compile clean but fail three `AggregateStreamInvokerTests`** with
-  `InvalidProjectionException: No source-generated dispatcher found for …TimeTravelSummaryProjection`,
-  because the `JasperFx.Events.SourceGenerator` shipped in those packages emits no dispatcher for a
-  non-`partial` `SingleStreamProjection<T, TId>` subclass and the runtime fallback is gone. Probed at
-  9.22.4, 9.22.6 and 9.23.0; fixed by 9.24.0.
-
-None of those tests were touched to make an older version pass; a behavioural difference in an older
-Marten is what a floor is *for*. At the floor the transitive graph is JasperFx / JasperFx.Events
-**2.60.0**, Weasel.Core / Weasel.Postgresql / Weasel.Storage **9.29.0** and Npgsql /
-Npgsql.NetTopologySuite **9.0.4** — behind what 9.35.0 brought on the first two (2.69.3 and 9.32.0) and
-the same Npgsql, and restore is still free of NU warnings. The "verified against Marten 9.35" notes
-elsewhere in this file and throughout `src/` are deliberately left alone: they record what was read on
-2026-09-14 and are still true of 9.35, and a floor is a minimum rather than a statement about what a
-host resolves. **Exit condition:** raise the floor only when a member the studio needs is genuinely
-absent below the new value, and say here which one.
-
-**2026-10-15 — the `Marten` floor moved *up*, from `9.31.0` to `9.39.0`, for two advisories and not for
-an API; and both suites now also run at a pinned latest-tested `9.50.2`.** Marten 9.39.0 fixes
-**GHSA-q4xm-rhx9-xjm4** (SQL injection through a `GroupBy(…).Where(…)` HAVING operand, critical, affects
-9.13.0–9.38.0) and **GHSA-frqq-p5g3-8jq5** (SQL injection through `regConfig` on the full-text ranking
-path, critical, affects 9.31.0–9.38.0) — both disclosed in its release notes on 2026-09-22, and neither in
-the GitHub advisory database on 2026-10-15 (`GET /advisories/{id}` answers 404 for both, and
-`JasperFx/marten`'s published advisories are still only GHSA-rfx3-98h7-v3xp and GHSA-vmw2-qwm8-x84c). The
-day they are published, restore at any floor below 9.39.0 fails with `NU1904` under
-`TreatWarningsAsErrors` — the same wall as GHSA-rfx3 at ≤ 9.12.0, arriving on a CI run nobody changed.
-Moving first means the break never happens, and a package that sets a floor should not set it on an
-injectable Marten anyway. The studio itself reaches neither sink: its reads are raw parameterised SQL and
-its writes go through `StoreObjects` (D6). Nothing in the code needed the move — the 2026-09-19 entry
-above still records what it needs (9.31.0) — so this is the first floor raised for a reason other than a
-missing member, and the exit condition widens to say so.
-
-All four gates were run at 9.39.0 exactly as on 2026-09-19 — `dotnet restore marten-studio.slnx` with
-`TreatWarningsAsErrors` (zero NU warnings), `dotnet build marten-studio.slnx` (0 warnings), the fast
-suite (3 417 passed) and `MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests`
-against `postgres:17-alpine` (729 passed, 9 opt-in skips) — and then again at 9.50.2 through
-`-p:MartenStudioMartenVersion=9.50.2` and through `dotnet fallout Test --marten-version latest`: zero NU
-warnings, 0 build warnings, 3 417 fast and 729 live passed with the same 9 opt-in skips (the 1.2M-row
-passes and the screenshot retakes). No test was touched to make either end pass, and `PublicApiTest`
-passes at both against an untouched baseline. The transitive graph:
-
-- **At the floor, 9.39.0:** JasperFx / JasperFx.Events **2.74.0**, Weasel.Core / Weasel.Postgresql /
-  Weasel.Storage **9.33.0**, Npgsql / Npgsql.NetTopologySuite **9.0.4**, DistributedLock.Core 1.0.8 /
-  DistributedLock.Postgres 1.3.0, Polly.Core 8.6.5.
-- **At the latest tested, 9.50.2:** JasperFx / JasperFx.Events **2.87.1**, Weasel.* **9.45.0**, Npgsql
-  **9.0.4** (unchanged), and three packages the floor does not have, all **transitive-only** — the studio
-  references none of them directly and must not start to, because none is in this budget:
-  **System.Linq.Dynamic.Core 1.7.4** (JasperFx has depended on it since 2.84, for Dynamic LINQ document
-  queries; two advisories in its history, both behind 1.7.4: CVE-2023-32571 / GHSA-w65q-jcmv-28gj,
-  critical, `< 1.3.0`, and CVE-2024-51417 / GHSA-4cv2-4hjh-77rx, high, `< 1.6.0`), and
-  **Patched.DistributedLock.Core 1.0.11 / Patched.DistributedLock.Postgres 1.3.3**, which replace
-  DistributedLock.Core / DistributedLock.Postgres from Weasel.Postgresql 9.34 on - Marten 9.39.1, not 9.45 as this
-  entry first said (corrected by W5-S2-fix, 2026-10-26: `git show 9.34.0:src/Weasel.Postgresql/Weasel.Postgresql.csproj`
-  references `Patched.DistributedLock.Postgres`, 9.33.0 the upstream package) - (JasperFx/weasel#614,
-  "Use patched advisory lock", merged 2026-09-24). They are a JasperFx-maintained fork, owned on
-  nuget.org by **Hawxy**, a JasperFx contributor — not packages from DistributedLock's own author, even
-  though their nuspec still carries the upstream authors and repository URL.
-
-Three things changed in how the repository consumes Marten, all measured rather than assumed:
-
-- **The version is a property, defined once.** `MartenStudioMartenFloor` and `MartenStudioMartenLatest`
-  in `Directory.Packages.props`; `Marten`'s `PackageVersion` reads `$(MartenStudioMartenVersion)`, which
-  defaults to the floor; `build/Build.Marten.cs` resolves `--marten-version floor|latest|<exact>` and
-  passes it to Restore, Compile and Test; `marten-latest.yml` runs both suites with `MARTEN_VERSION:
-  latest` on every push and pull request to `main`. The latest-tested version is exact and bumped by a
-  pull request of its own, never floating. Pack refuses anything but the floor, in the build and in
-  `MartenStudio.csproj` — which checks both the property and what the last restore resolved
-  (`"Marten/<floor>"` in `project.assets.json`, which is where NuGet takes the nuspec's range from), and
-  refuses when there is no assets file.
-- **The shipped assembly is compiled without the JasperFx source generator.** Marten bundles
-  `JasperFx.Events.SourceGenerator` in its own `analyzers/`, and from JasperFx 2.75 (Marten 9.40) it emits
-  `[assembly: JasperFxSourceGeneratorApplied]` into every assembly it processes — so `MartenStudio.dll`
-  built at 9.50.2 carried it and `PublicApiTest`'s received file gained the line. The obvious fix,
-  `ExcludeAssets="analyzers"` on the reference, **does nothing**: NuGet records the
-  exclusion (the include flags in `project.assets.json` drop `Analyzers`), but SDK 10.0.402's
-  `ResolvePackageAssets` adds the analyzers of every package in the lock file without consulting them,
-  and the generator still ran — in this project and in a minimal one without central package management
-  (decompiled `ResolvePackageAssets.CacheWriter.WriteAnalyzers`; built with `EmitCompilerGeneratedFiles`).
-  The removal is therefore a target in `MartenStudio.csproj`, `BeforeTargets="CoreCompile"`, that drops
-  the one `Analyzer` item, the same item-level surgery JasperFx.Events' own dedupe target does. Measured:
-  the nuspec is **byte-identical** with `ExcludeAssets` and without (`<dependency id="Marten"
-  version="9.39.0" exclude="Build,Analyzers" />` either way — analyzers are in the default
-  `PrivateAssets` already), and the target touches nothing NuGet sees; at 9.39.0 the generator emitted no
-  file for the studio at all, and at 9.50.2 the marker was the only one, so nothing in `src/` relied on
-  generated code. The sample and both test projects keep the generator, which still flows to them through
-  the same unfiltered resolution; `JasperFxSourceGeneratorTests` pins both halves. That flow is not a
-  promise: dotnet/sdk `main` has an opt-in `RestoreEnableAnalyzerAssets` path that does honour the include
-  flags, and if it becomes the default, `MartenStudio.Tests` — which reaches Marten only through its
-  `ProjectReference` to `src/` — would lose the generator (so would the integration suite, whose
-  references to Marten are project references too), and `JasperFxSourceGeneratorTests` on the latest leg
-  is what would say so. The fix then is a direct `Marten` reference in the test projects, not a looser
-  test.
-- **Behavioural differences between 9.39.0 and 9.50.2, read from the release notes and the source at
-  `V9.50.2` / JasperFx `V2.87.1`, none of which fails a test at either end:**
-  `DefaultTenantUsageDisabledException` now derives from `JasperFx.Events.DefaultTenantUsageDisabledException`
-  rather than `MartenException` (9.41, #5514) — nothing in `src/` catches through `MartenException`. The
-  read resilience pipeline no longer retries a timeout or `57014` (9.46, #5566) and a commit has its own,
-  narrower pipeline — `55P03` is still retried on reads, so the reason `DocumentWriteService` runs its
-  lock statements on `IQuerySession.Connection` still holds. Marten's progression statement gained
-  `last_updated` (9.43, #5541) — the studio's own read does not select it yet, and the two bookkeeping row
-  names it excludes are unchanged. During a rebuild, `StartAgentAsync(string)` on that projection's shard
-  now returns without starting anything (logged at Information, jasperfx#1009, JasperFx 2.86) where the
-  floor's JasperFx 2.74 has no such guard and can start a continuous agent beside the replay, whose agent
-  it cannot see; and a second rebuild of the same projection throws
-  `ProjectionAlreadyRebuildingException`, an `InvalidOperationException` that the operation tracker
-  reports — both safer than the floor, and both left to the rebuild-awareness work, since the studio's
-  Start button does not yet know a rebuild is running. Drains are bounded by `StopAndDrainTimeout`
-  (9.47); the HotCold leadership lock is session-scoped again (9.41) — the studio reads no daemon lock
-  today. #5665 (`AllObjects()` offline) is on Marten `master` but in no tag up to `V9.50.2`; hard rule 14
-  is unchanged.
-
-**Exit condition:** raise the floor when a member the studio needs is genuinely absent below the new
-value, *or* when a published advisory makes restore at the floor fail (`NU1901`–`NU1904` under
-`TreatWarningsAsErrors`) — and say here which. Bump `MartenStudioMartenLatest` when a newer stable 9.x
-ships, in its own pull request, with both suites green at it and every difference recorded.
-
-**2026-10-20 — the latest-tested Marten moves from `9.50.2` to `9.51.0`; the floor stays at `9.39.0`.** Marten 9.51.0
-was released 2026-10-19. Its tag is `v9.51.0`, with a lower-case `v` (every earlier tag is upper-case), and it contains
-all of 9.50.3 (2026-10-15). Nothing in the studio needs it, so the floor and its reasons are unchanged. It does bring
-what the studio refused without, and those light up at run time behind probes in `RuntimeFeature` (D28's pattern), each
-pinned at both ends by `MartenRuntimeProbeTests`: Skip event and Rewind subscription for one tenant under
-`UseTenantPartitionedEvents`, compaction of a stream whose events carry DCB tags, and the Schema screen's wording of
-what its buttons may create.
-
-The gates were run at both ends:
-
-- `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.51.0` with `TreatWarningsAsErrors`: zero NU
-  warnings, so no `NU1901`–`NU1904` for anything in the graph.
-- `dotnet build marten-studio.slnx` at 9.39.0 and at 9.51.0: 0 warnings at both.
-- The fast suite at both: 5 987 tests; 5 873 passed with 114 version-gated skips at the floor (every one a LINQ-mode
-  test, which needs Marten 9.48), 5 986 passed with 1 skip at 9.51.0 (its mirror, the LINQ-mode test of a Marten older
-  than 9.48).
-- Every live class under `Events`, `Schema` and `Query`, with `DaemonHealthLiveTests`, `EventHealthSweepLiveTests` and
-  `EnumerationAppliesLiveTests`, at both, with `MARTENSTUDIO_PG_REUSE=false`.
-- `PublicApiTest` passes at both against an untouched baseline, and so does `JasperFxSourceGeneratorTests`. At 9.51.0
-  (JasperFx 2.91.0) the generator, when allowed to run, still writes only its marker for `MartenStudio.dll` (measured
-  with the removal target redefined empty and `EmitCompilerGeneratedFiles` on).
-
-The transitive graph at 9.51.0, compared with 9.50.2's in `project.assets.json`:
-
-- JasperFx / JasperFx.Events **2.91.0** (from 2.87.1); Weasel.Core / Weasel.Postgresql / Weasel.Storage **9.46.0**
-  (from 9.45.0).
-- Unchanged: Npgsql / Npgsql.NetTopologySuite 9.0.4, Patched.DistributedLock.Core 1.0.11 /
-  Patched.DistributedLock.Postgres 1.3.3, System.Linq.Dynamic.Core 1.7.4, Polly.Core 8.6.5, FastExpressionCompiler
-  5.4.1, ImTools 4.0.0, Spectre.Console / Spectre.Console.Ansi 0.55.0, Microsoft.Bcl.TimeProvider 10.0.0,
-  Microsoft.IO.RecyclableMemoryStream 3.0.1.
-- **No package is new**: the two resolved lists differ in those five version moves and nothing else.
-
-Behavioural differences between 9.50.2 and 9.51.0, read from the source at `V9.50.2`, `V9.50.3` and `v9.51.0`, JasperFx
-`V2.87.1` to `v2.91.0` and Weasel `9.46.0`, and what the studio does with each:
-
-- **`IMartenDatabase.MarkEventsAsSkipped(tenantId, sequences)`** (#5698) adds `and tenant_id = :tenant_id` on a
-  conjoined event store, and the tenant-less overload now refuses under `UseTenantPartitionedEvents`. The studio calls
-  the tenant overload there, by reflection because the floor has no such member, for the scope's tenant and after the
-  same tenant proof as before. `TenantEventSkipping` asks for Marten's implementation, not the throwing interface
-  default.
-- **Rewind per tenant** (#5700, jasperfx#1025). The daemon's per-tenant `RewindSubscriptionAsync` stops, rewinds and
-  restarts one tenant's agents; Marten rewrites only that tenant's shard rows, through `findTenantShard`, which 9.50
-  lacked, and deletes only that tenant's dead letters of the shard.
-  - The studio makes the call only for an agent the daemon in this process runs, because the overload starts the
-    tenant's agents wherever it is asked, so a cold node or a distributed host would run a second one.
-  - It passes that agent's own names, because JasperFx stops agents by an ordinal comparison.
-  - It authorizes the call as `(store, database, tenant)`, D27's one exception.
-  - The store-global rewind is never made on such a store; from 2.91 it rewinds each tenant this daemon runs and
-    refuses a floor above zero there.
-- **Compaction deletes the folded events' DCB tag rows** (#5694), and every tag table declares
-  `idx_mt_event_tag_<suffix>_seq_id`. A tagged stream now compacts (`TaggedStreamCompaction`, which probes #5694's
-  `TenantDataCleaner.deleteTagRowsAsync`). A store whose tag tables were built below 9.51 shows the index as drift: one
-  plain `CREATE INDEX` per tag table in Preview, which holds a SHARE lock while it builds so tagged appends wait, now a
-  `MigrationRisk` note.
-- **Empty stream ids** (#5695): the fetch reads only that stream and `CompactStreamAsync` refuses an empty id. The
-  studio's refusal stays at every version, and its reason names both ends.
-- **#5665 has been in a release since 9.50.3**, so the 2026-10-15 entry's "in no tag up to `V9.50.2`" is superseded.
-  `AllActiveFeatures` yields `SequenceFeature`, described and never applied, so `AllObjects()`, `AllSchemaNames()`,
-  `ToDatabaseScript()` and the ensure path's post-processing no longer create `mt_hilo`. Hard rule 14 stays, because
-  the floor has the hazard, and `OfflineSchemaEnumeration` words the Schema buttons. `SchemaNoDdlLiveTests`' and
-  `ReadPathNoDdlLiveTests`' anti-vacuity theories went red at 9.51.0, as they exist to, and now assert each end.
-- **The tenancy's own `AutoCreate` picks the apply mode** (#5692), and `ApplyAllConfiguredChangesToDatabaseAsync(@override)`
-  passes its override on (#5693); D27 is reworded, and enumeration is still not read-only.
-  `ShardedTenancy.FindOrCreateDatabase` resolves a pooled database id (#5702). `FindRebuildTenantsAsync` answers `[]`
-  before the first tenant (#5701), so Rebuild and Start stop failing on a partitioned store with no tenant yet.
-- **JasperFx:**
-  - jasperfx#1024 (2.91.0) reads offset-less date literals as UTC for `DateTime` members, so LINQ mode's correction
-    goes idle by itself, measured and pinned by `DynamicLinqAdapterTests`.
-  - #1019 (2.90.1) retries transient projection failures.
-  - #1016's `TransientFailures.IsTransient` (2.89.0) first ships in 9.50.3, which is why `RuntimeFeature.Requirement`
-    now prints a non-zero patch ("Marten 9.50.3+").
-  - #1027/#1028 (2.91.0) add `HighWaterProgressStallThreshold`, shown on the Configuration page.
-  - #1022 and #1026 are inert here.
-- **Weasel 9.46:** #718 resumes a stopped partitioned concurrent index build with `DROP INDEX CONCURRENTLY IF EXISTS
-  <child>` before each partition's build, no longer counted as "drops an index" when that exact build and attach
-  follow it. #719/#725 scope the advisory-lock holder read to the database, as the studio's own reads already were.
-- **Also in range, with no studio change:**
-  - #5675: archiving a tagged stream under archived partitioning moves its tag rows.
-  - #5672: long FK and index names are hashed, and a custom FK name survives the conjoined reorder, so such a store
-    shows drop/add drift, already a destructive `MigrationRisk` line.
-  - #5688: rollbacks run with `CancellationToken.None`, and a failed save's tombstones are written off its path.
-  - #5712: inline array literals in LINQ are compiled; LINQ mode keeps building its own array.
-  - #5681 and #5717.
-
-**Exit condition:** unchanged.
-
-**2026-10-20 — `src/PostgresStudio` takes a direct `Npgsql` `PackageReference`, and
-`Microsoft.AspNetCore.App.Internal.Assets` moves to it from `src/MartenStudio`.** The 0.5 move (PS-2) split the
-shared studio out of MartenStudio into `src/PostgresStudio`, a Razor Class Library MartenStudio references through a
-`ProjectReference` and which references neither Marten nor MartenStudio. `PostgresStudioFenceTests` holds that line at
-the project file, at the restore graph (`obj/project.assets.json`) and at the built assembly's references, and
-`CoreFenceTests` at the text the compiler does not bind.
-
-- **`Npgsql`, direct, for PostgresStudio only.** The shared studio talks to Postgres through Npgsql and has no Marten to
-  bring it, so it references the package itself. The version is one central row in `Directory.Packages.props`,
-  `<PackageVersion Include="Npgsql" Version="9.0.4" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />`, which only
-  a project that sets `PostgresStudioPinsNpgsql` sees - `PostgresStudio.csproj` alone today - so no other project gains
-  a direct reference or a row. 9.0.4 is what Marten's floor already resolves through Weasel.Postgresql 9.33.0, so the
-  move changes no resolved version anywhere; it is a placeholder, and PS-7 measures the lowest Npgsql the shared studio
-  passes at. D3's "no direct `Npgsql`" stands, for MartenStudio: its reason is that a second, direct reference would
-  let Npgsql and Weasel.Postgresql drift apart, and that is true only of a project that has Weasel. PostgresStudio has
-  none, so for it there is nothing to drift from. MartenStudio still declares no `Npgsql` of its own; it reaches Npgsql
-  through Marten and through PostgresStudio, and NuGet takes the higher of the two.
-- **The assets pack, moved with the shell.** The component that writes the `blazor.web.js` script tag
-  (`Components/StudioDocument.razor`) and the static web assets (`_content/PostgresStudio/css/studio.css`,
-  `_content/PostgresStudio/js/studio.js`) are PostgresStudio's now, so the `Microsoft.AspNetCore.App.Internal.Assets`
-  10.0.12 `PackageReference` moved with them; MartenStudio no longer references it. D22's mechanism is unchanged - the
-  pack's `buildTransitive` targets define `_framework/blazor.web.js` as the consuming executable's own static web asset -
-  but a MartenStudio host now reaches it through two hops (host, MartenStudio, PostgresStudio, the pack). PS-0 measured
-  that on 2026-10-20 with an API-only scratch host referencing only a MartenStudio nupkg (design Appendix E, E3):
-  `GET /_framework/blazor.web.js` and `GET {Path}/_framework/blazor.web.js` answer 200 with the real script, and
-  negotiate answers 200. PS-2f re-checked the sample host after the move.
-- **Restore** is still free of NU warnings at both Marten ends (`TreatWarningsAsErrors`), and the shared studio's
-  restore graph is exactly `Npgsql` 9.0.4 and `Microsoft.AspNetCore.App.Internal.Assets` 10.0.12.
-- The budget table above is rewritten with D30 (PS-8): the assets pack's row moves to `src/PostgresStudio`, and a
-  `src/PostgresStudio` | `Npgsql` row joins it.
-
-**Exit condition:** move the `Npgsql` row only on PS-7's measurement, in an entry of its own.
-
-**2026-10-26 — the latest-tested Marten moves from `9.51.0` to `9.54.1`; the floor stays at `9.39.0`.** Marten 9.54.1
-was released 2026-10-25. It is the fourth release since 9.51.0, after 9.52.0 and 9.53.0 (both 2026-10-23) and 9.54.0
-(2026-10-24); the first two are tagged with a lower-case `v` (`v9.52.0`, `v9.53.0`), 9.54.x with an upper-case `V`.
-Nothing in the studio needs any of them, so the floor and its reasons are unchanged. One light-up had to be re-anchored
-and three are new, each behind a probe in `RuntimeFeature` pinned at both ends by `MartenRuntimeProbeTests`.
-
-The gates were run at both ends:
-
-- `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.54.1` with `TreatWarningsAsErrors`: zero NU
-  warnings.
-- `dotnet build marten-studio.slnx` at 9.39.0 and at 9.54.1: 0 warnings at both.
-- The fast suite at both: 6 237 tests; 6 123 passed with 114 version-gated skips at the floor (every one a LINQ-mode
-  test, which needs Marten 9.48), 6 236 passed with 1 skip at 9.54.1 (its mirror).
-- Every live class under `Events`, `Projections`, `Schema`, `Health` and `Query`, and every `*NoDdl*` class, at both,
-  with `MARTENSTUDIO_PG_REUSE=false`: 547 tests; 531 passed with 16 LINQ-mode skips at the floor, 546 passed with 1 skip
-  at 9.54.1.
-- `MartenRuntimeProbeTests` at 9.50.3 and 9.51.0 as well, either side of the re-anchored probe.
-- `PublicApiTest` passes at both against an untouched baseline, and so does `JasperFxSourceGeneratorTests`. At 9.54.1
-  (JasperFx 2.95.1) the generator, when allowed to run, still writes only its marker for `MartenStudio.dll` (measured
-  with the removal target redefined empty and `EmitCompilerGeneratedFiles` on).
-
-The transitive graph at 9.54.1, compared with 9.51.0's in `project.assets.json`:
-
-- JasperFx / JasperFx.Events **2.95.1** (from 2.91.0).
-- Unchanged: Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.46.0, Npgsql / Npgsql.NetTopologySuite 9.0.4,
-  Patched.DistributedLock.Core 1.0.11 / Patched.DistributedLock.Postgres 1.3.3, System.Linq.Dynamic.Core 1.7.4, Polly.Core
-  8.6.5, FastExpressionCompiler 5.4.1, ImTools 4.0.0, Spectre.Console / Spectre.Console.Ansi 0.55.0,
-  Microsoft.Bcl.TimeProvider 10.0.0, Microsoft.IO.RecyclableMemoryStream 3.0.1.
-- **No package is new.** On 2026-10-26 Marten's advisories are still GHSA-rfx3-98h7-v3xp and GHSA-vmw2-qwm8-x84c alone,
-  and none covers JasperFx, JasperFx.Events or Weasel.
-
-Behavioural differences between 9.51.0 and 9.54.1, read from the source at `v9.51.0`, `v9.52.0` and `V9.54.1`, JasperFx
-`v2.91.0` to `V2.95.1` and Weasel `9.46.0`, and what the studio does with each:
-
-- **`TaggedStreamCompaction` lost its anchor** (marten#5720, 9.52.0): `TenantDataCleaner.deleteTagRowsAsync` moved to
-  `PerTenantPartitionedCleanup.DeleteSideTableRowsAsync`, and the probe answered "absent" at every Marten from 9.52
-  while compaction - `EventStore.StreamCompacting.cs` is identical at `v9.51.0` and `V9.54.1` - went on deleting the
-  tag rows. It now probes what #5694 declares, `idx_mt_event_tag_<suffix>_seq_id` on a tag table of a throwaway
-  `StoreOptions`, through the event store's feature schema and with no connection. The 2026-10-20 entry's "which probes
-  #5694's `TenantDataCleaner.deleteTagRowsAsync`" is superseded.
-- **Projection start floors** (jasperfx#809/#1068 in JasperFx.Events 2.93.0, #5740 in 9.52.0; `ProjectionStartFloors`,
-  both halves). A rebuild replays from `AsyncOptions.DetermineRebuildFloorAsync` - a stored floor, then a configured
-  `SubscribeFromSequence` / `SubscribeFromTime` floor, else 0 - while its teardown still empties the projection for the
-  whole database.
-  - The rebuild dialog reads `mt_event_projection_floors` with the studio's own SQL, never `FetchProjectionFloorAsync`,
-    which opens with `EnsureStorageExistsAsync(typeof(IEvent))`.
-  - It takes the stored floor off the events to replay, says that a document only the events at or below it built is
-    deleted and not rebuilt, and where none is stored, that a floor in code may still apply.
-  - Per-tenant floors are counted, never named.
-  - The table is not gated on any option, so a store migrated below 9.52 previews one non-destructive `CREATE TABLE`
-    with no note (`ProjectionFloorsDriftLiveTests`), and `SchemaDeclarationReader` classifies it as an `EventTable`.
-- **Systemic database failures** (jasperfx#1029/#1064, JasperFx.Events 2.93.0; #5741, 9.52.0; `SystemicDatabaseFailure`).
-  A non-transient `DbException` in projection code is attributed to its event as `ApplyEvent` and never dead-lettered,
-  `SkipApplyErrors` or not. D05 drops that remedy where the daemon here says the failure is one, keeps it where it says
-  it is not, and names the exception where nothing can tell - every row read back from `mt_event_progression`.
-- **The high-water advance** (#5738, jasperfx#1031, 9.52.0; `PerDatabaseHighWaterAdvance`) opens with
-  `EnsureStorageExistsAsync(typeof(IEvent))`, locks the mark `FOR UPDATE`, and under `UseTenantPartitionedEvents` moves
-  `HighWaterMark:{tenant}` - the tenant's, or every managed tenant's - where below 9.52 it wrote only the store-global
-  row, which the daemon never reads there.
-  - The studio's call is unchanged: `CorrectProgression`, the reach authorization and the audit.
-  - The dialog and the button say what it may create, and which marks it moves.
-  - The dialog's old sentence, that projections treat the events they have not processed as already gone, was wrong at
-    every version (the advance targets the highest committed `seq_id`, #4953; what is lost is the gap's sequence numbers)
-    and is replaced.
-  - The per-database compare-and-set overload on `IEventStore`, and its preview, are 0.6's. `MartenApiSurfaceTest`'s
-    no-per-database-form test now says where that form lives.
-- **What ensures storage from 9.52.**
-  - `StorageEnsuringCallTests` knows `AdvanceHighWaterMarkToLatestAsync` (both `AdvancedOperations` overloads and
-    `IEventStore`'s), `PreviewHighWaterAdvanceAsync`, the floor seam, `QueryEventData` and
-    `QueryStreamStatesForAllTenants`. The studio's one call, `ProjectionDataService.AdvanceHighWaterMarkAsync`, is an
-    allowed gated write.
-  - The daemon reads a stored floor through `FetchProjectionFloorAsync` on every continuous start and every rebuild, so
-    Start and Rebuild - both gated and audited - ensure the event storage inside the daemon. Every `*NoDdl*` live class
-    stays green at both ends.
-- **Composite members**, pre-existing at every version: each member writes a progression row its composite's
-  `ShardNames()` does not list, so the projections screen drew them as "Unregistered shards". They are now drawn under
-  the composite, floor-safe, through `CompositeProjection<,>.AllProjections()` and `ShardName.Compose` (public at
-  `V2.74.0`). JasperFx 2.95.0 put members into `IEventStore.RegisteredShardNames()` and 2.95.1 moved them behind
-  `RegisteredShardNames(true)` (jasperfx#1080); the studio calls neither.
-- **D27 still holds at 9.54.1.** The only tenancy change in range is `ShardedTenancy.dropPartitionsForTenant`'s side-table
-  clean-up, and Weasel is unchanged, so enumerating a dynamic tenancy's databases is still not read-only.
-- **Also in range, with no studio change:**
-  - #5682: `Advanced.ExceptionTransforms` - a studio write's failure may surface as a type the host chose;
-    `ConcurrencyException` still comes from the operations first.
-  - #5743: `StatementOperation` is a `NoDataReturnedCall`; the studio queues `UndoDeleteWhere` alone.
-  - #5723: a projection's revision is no longer cut to `int`.
-  - #5720/#5742: tenant removal deletes the tenant's side-table rows; the studio removes no tenant.
-  - jasperfx#1079 (every tenant's stream states) and jasperfx#1073 (`QueryEventData`): LINQ, so they ensure storage, and
-    the latter's tenant form opens `QuerySession(tenantId)` (hard rules 14 and 15).
-  - CritterWatch's diagnostics members (2.93-2.95, marten#5768), which reach `FetchStreamAsync` or LINQ.
-- **Known limit: Weasel 9.46.1 is not consumed.** weasel#730, released in Weasel 9.46.1 on 2026-10-23, rebuilds
-  `ForeignKey.TryToCorrectForLink` so that two migrations running `PostProcess` over the same `Table` cannot widen a
-  conjoined key twice. No Marten through 9.54.1 depends on 9.46.1 - Marten's `Directory.Packages.props` at `V9.54.1`
-  pins 9.46.0 - so two circuits previewing or applying two databases of one store at the same moment can render a key
-  linked to a wider primary key as `FOREIGN KEY(seq_id, tenant_id, tenant_id)`, as with a DCB tag table under per-tenant
-  partitioning. It is not pinned here: a transitive `Weasel.Postgresql` row would be a budget decision, would raise the
-  Weasel every host resolves - floor hosts on Marten 9.39.0, which ships Weasel 9.33.0, included - and would test the
-  studio against a Weasel no Marten ships. It arrives with the first latest-tested Marten that depends on it. A per-store
-  lock around the studio's own Check, Preview and Apply would remove the circuit-against-circuit race without a package;
-  it would not remove one against the host's own migrations.
-
-**Exit condition:** unchanged.
-
-**2026-10-26 — PostgresStudio's `Npgsql` floor moves *down*, from the `9.0.4` placeholder to `8.0.3`.** PS-7 measured it
-as the 2026-09-19 entry measured Marten's. At each candidate it ran four gates over `postgres-studio.slnf`, with
-`-p:PostgresStudioNpgsqlVersion=<v>` on every command:
-
-- `dotnet restore` with `TreatWarningsAsErrors`, confirming `"Npgsql/<v>"` in `src/PostgresStudio/obj/project.assets.json`;
-- `dotnet build`;
-- `tests/PostgresStudio.Tests`;
-- `tests/PostgresStudio.Integration.Tests`, with `MARTENSTUDIO_PG_REUSE=false`.
-
-The base was `a46e257c`.
-
-| Npgsql | restore | build | fast | live | pool instruments |
-|---|---|---|---|---|---|
-| **8.0.3** | 0 NU warnings | 0 warnings | 332 of 332 | 72 of 72, no skips | read (`NpgsqlPoolLiveTests`) |
-| 7.0.7 | 0 NU warnings | 0 warnings | 3 failed | 1 failed | absent |
-| 10.0.3 (latest tested) | 0 NU warnings | 0 warnings | 332 of 332 | 72 of 72, no skips | read |
-
-There are two walls, and each is a reason no lower floor is reachable:
-
-- **7.x has no `db.client.connections.usage`/`.max` instruments.** Npgsql reported its pool through EventCounters
-  before 8.0, so at 7.0.7 the pool observer finds no pool. Three `NpgsqlPoolInstrumentsTests` fail, and so does
-  `NpgsqlPoolLiveTests.The_Sessions_pool_panel_and_C01_read_a_real_pool`: C01 reports "This database's Npgsql pool is
-  not among the pools Npgsql reports in this process", and Sessions' pool panel is empty. Everything else passes at
-  7.0.7, so the pool reading is the one member the studio needs from 8.0.
-- **8.0.0 through 8.0.2 carry CVE-2024-32655** (GHSA-x9vc-6hfv-hg8c, fixed in 8.0.3), so they were not taken as
-  candidates. A package should not set its floor on a vulnerable driver.
-
-Nothing changes for a MartenStudio host. Marten's floor resolves Npgsql 9.0.4 through Weasel.Postgresql, and NuGet takes
-the higher of that and PostgresStudio's `>= 8.0.3`; `NpgsqlVersionTests` keeps the floor at or below what the Marten
-floor resolves. A host without Marten may now stay on Npgsql 8.0.3 or later. Of 8.0.3 against 10.0.3, the live suite
-takes 21.6 s against 28.8 s, so the latest leg costs CI little.
-
-**Exit condition:** raise the floor when a member the studio needs is absent below the new value, or when a published
-advisory makes restore at the floor fail (`NU1901`-`NU1904`), and say here which. Bump `PostgresStudioNpgsqlLatest` in a
-pull request of its own, with both PostgresStudio suites green at it.
+- **Marten's floor, 9.39.0, is a security floor** (GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, 2026-10-15). The code
+  needs nothing above 9.31.0 (2026-09-19), and the walls below that are recorded there: GHSA-rfx3-98h7-v3xp up to
+  9.12.0, `ShardFailure` from 9.20.0, `ShardName.HighWaterMarkFor` from 9.22.4, the generator's dispatcher from 9.24.0
+  and the extended progression columns from 9.31.0. Each latest-tested bump's entry records every behavioural
+  difference and every light-up.
+- **PostgresStudio's Npgsql floor is 8.0.3** (2026-10-26, PS-7). 7.x has no pool instruments, and 8.0.0–8.0.2 carry
+  CVE-2024-32655.
+- **The JasperFx source generator is removed from MartenStudio's compilation by a target**, because `ExcludeAssets`
+  does nothing for analyzers in SDK 10.0.402 (2026-10-15).
+- **The exit condition is the same for every floor.** Raise a floor when a member the studio needs is absent below the
+  new value, or when a published advisory makes restore at the floor fail (`NU1901`-`NU1904`), and say which in a new
+  entry. Bump a latest-tested version in a pull request of its own, with the suites it covers green at it.
 
 **Held deliberately, and not stale.**
 
@@ -1346,244 +753,16 @@ which arrives with `Fallout.Common` 10.4.0 — no new `PackageReference` anywher
 
 ## Layout
 
-`AgentsLayoutTests` parses the block below and fails if it names a directory that does not exist, or
-misses one that does. Keep it in step with the tree.
-
-```text
-.claude/                                 Agent definitions and local Claude Code configuration
-.claude/agents/                          studio-implementer, studio-reviewer, studio-ui-verifier,
-                                         studio-grunt (hard rule 12 - the only way work is delegated)
-build/                                   The Fallout orchestrator. `build/` is a resolver convention and
-                                         .gitignore must never untrack it (hard rule 8)
-  Build.cs                               CHANGELOG-driven version, Clean, test projects, release notes
-  Build.CI.GitHubActions.cs              The four [GitHubActions] attributes every workflow comes from
-  Build.Browsers.cs                      The Playwright install target, and Test's dependency on it (D19)
-  Build.Publish.cs                       Pack (both packages) + the in-build nuget.org OIDC token exchange (D15)
-  Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
-  Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, PostgresStudio's latest-Npgsql pass (D30)
-build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
-src/                                     The shipped libraries, and nothing else: the shared studio and MartenStudio
-src/PostgresStudio/                      The shared studio's Razor Class Library (0.5, PS-2): shell, routes, scope,
-                                         authorization, audit, the database browser, Sessions, Health, the SQL
-                                         console, Relationships, the JSON toolkit and wwwroot/. References no Marten
-                                         and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
-src/PostgresStudio/Components/           the shared document every root renders, route table, links, scope query
-src/PostgresStudio/Components/Shared/    small building-block components: TableScroll (D25), CopyButton,
-                                         dialogs, chips, the empty and error states
-src/PostgresStudio/Internal/             startup authorization guard, endpoint marker, mapped-endpoint
-                                         tracking and the endpoint mapper (D11)
-src/PostgresStudio/Services/             scope, state, authorization, the capability guard, the action log,
-                                         toasts and the shared log events
-src/PostgresStudio/wwwroot/              static web assets, packed under `_content/PostgresStudio/`
-src/PostgresStudio/wwwroot/css/          the one stylesheet, studio.css
-src/PostgresStudio/wwwroot/js/           the studio's browser helpers, studio.js, loaded by the shell (never a
-                                         Blazor JS initializer - see StudioDocument.razor)
-src/MartenStudio/                        The Marten Razor Class Library: public API, the store-facing services,
-                                         pages and checks, and Internal/; references PostgresStudio
-src/MartenStudio/Components/             MartenStudioApp (the root component) and the component bridges
-src/MartenStudio/Internal/               the duplicated-field enumeration, and the Marten SQL builders below
-src/MartenStudio/Services/               store registry, scope resolver, tenant discovery, the source provider,
-                                         descriptor, settings and links, and the bridges onto the shared seams
-samples/                                 Demo hosts and their demo data; never packed
-samples/MartenStudio.Sample/             The sample ASP.NET Core host (D18) - README snippet regions
-samples/MartenStudio.SampleDomain/       The demo domain, shared with the integration tests; deliberately
-                                         does NOT reference MartenStudio (D17)
-samples/PostgresStudio.SampleData/       The demo data with no Marten in it, shared by both samples and the integration
-                                         tests: Quartz.NET's job store (vendored, Apache-2.0), the "legacy" catalog
-                                         edge-case schema, studio_sample.app_settings, and the tenant databases with
-                                         their directory - all idempotent. References no studio (D17)
-samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), no Marten: an admin database and three
-                                         tenant databases through its own IPostgresDatabaseSource - README snippet regions
-samples/PostgresStudio.Sample/Auth/      Cookie auth, the three demo users, the studio policy and the per-capability one
-samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5211
-tests/                                   All four test projects match *.Tests, so one Test run covers them all
-tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
-                                         conventions. No Docker
-tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
-tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
-tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
-src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the source provider over the application's NpgsqlDataSources
-                                         and host database sources, settings, descriptor, the Overview's server read, and
-                                         the seams' plain-Postgres implementations (declarations, tables, remedies, locks, links)
-tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
-tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests
-tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
-tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
-tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
-tests/PostgresStudio.Tests/Support/      PostgresStudio's own test doubles (the shared ones are linked from MartenStudio.Tests)
-tests/PostgresStudio.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
-tests/PostgresStudio.Integration.Tests/  PostgresStudio's live suite: Testcontainers Postgres under a reuse label of its own
-                                         (never the Marten suite's container) + Playwright. Needs Docker; no Marten
-tests/PostgresStudio.Integration.Tests/Browser/  Playwright over samples/PostgresStudio.Sample on real Kestrel: six
-                                         scenarios, the D19 gate, and the zero-config start
-tests/PostgresStudio.Integration.Tests/Database/  Live Postgres: first navigation writes nothing, the D27 gate and its
-                                         audit, Sessions, the pool panel at both Npgsql majors, the sample's tenant databases
-tests/PostgresStudio.Integration.Tests/Health/  Live Postgres: the table checks fire and stay quiet over the
-                                         whole-database table source, and the export over a host source past its budget
-tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console example runs
-tests/PostgresStudio.Integration.Tests/Sources/  Live Postgres: discovery, and isolation between a host source's
-                                         databases through every cache
-src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
-                                         Postgres identifier becomes SQL text (hard rule 4)
-src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
-                                         other (hard rule 4)
-src/PostgresStudio/Components/Layout/    Shell chrome: layout, nav, scope selector, capability chip, the
-                                         preferences popover (theme and time zone, behind the gear)
-src/PostgresStudio/Components/Pages/     The shared routed pages; each @page must be rooted at /postgres
-src/MartenStudio/Components/Pages/       The Marten routed pages; each @page must be rooted at /marten
-samples/MartenStudio.SampleDomain/Documents/  The demo document types
-samples/MartenStudio.Sample/Auth/        Cookie auth, the three demo users, the two policies
-samples/MartenStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5210
-tests/MartenStudio.Tests/Endpoints/      Authorization matrix, sub-path re-rooting, the startup guard
-tests/MartenStudio.Tests/Services/       Registry, scope resolver, audit log, tenant discovery
-tests/MartenStudio.Tests/Components/     bUnit: StudioComponentContext, StudioMarkup and the page tests
-tests/MartenStudio.Tests/Support/        Test doubles shared by the tiers - never a mocking library
-tests/MartenStudio.Tests/Verify/         The approved API baseline; never hand-edited (hard rule 7)
-src/PostgresStudio/Components/Json/      The JSON toolkit: viewer, raw view, editor, copy menu, diffs
-src/PostgresStudio/Services/Json/        Flat model, path expressions, pretty printer, canonicalizer,
-                                         round-trip differ, C# record generator
-src/MartenStudio/Services/Query/         Search grammar, index advisor, the document list request, LINQ mode
-src/PostgresStudio/Services/Query/       The SQL console service, export, saved queries, error text, index
-                                         verdicts and search chips
-tests/MartenStudio.Tests/Json/           Unit and bUnit tests for the JSON toolkit
-tests/MartenStudio.Tests/Sql/            SQL builders, guard theory, grammar, advisor - no database
-tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, builders, catalog, estimator
-src/MartenStudio/Services/Documents/      Document read and write services and their DTOs
-tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
-tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
-src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker
-src/PostgresStudio/Services/Live/         Snapshot cache, the per-page polling helper (D10), the nav indicators
-src/MartenStudio/Services/Live/           The tracker observer: the in-process daemon's latest shard state (D10)
-src/PostgresStudio/Services/Settings/     The shared studio's settings seam, descriptor, links, mount path, registration
-                                         marker and core registrations (PS-1a; moved whole in PS-2)
-src/PostgresStudio/Services/Sources/      The source seam - databases, the source provider, the shared resolver - and the
-                                         seams MartenStudio implements (PS-1a-1d; moved whole in PS-2)
-src/MartenStudio/Components/Pages/Projections/  The projections screen and its parts
-samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
-tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
-tests/MartenStudio.Integration.Tests/Projections/  Live Postgres + a real Solo daemon
-tests/MartenStudio.Integration.Tests/Logging/  Live hosts with no daemon and an externally managed one: no Warning from polling
-src/MartenStudio/Services/Events/         Event data service, aggregate invoker, event DTOs and links
-src/MartenStudio/Components/Pages/Events/ Streams, stream detail, feed, event types, dead letters
-tests/MartenStudio.Tests/Events/          Event builder cases, links, and the five page tests - no database
-tests/MartenStudio.Integration.Tests/Events/  Live Postgres: the event reads and the dead-letter writes
-src/MartenStudio/Services/Schema/         Schema data service, index advice, migration risk and their DTOs
-src/PostgresStudio/Services/Schema/       The DDL tokenizer, schema declarations, storage parameters, index redundancy
-src/MartenStudio/Services/Configuration/  The read-only StoreOptions describer and its DTOs
-src/MartenStudio/Components/Pages/Schema/ The schema screen's five tabs and their parts
-src/MartenStudio/Components/Pages/Configuration/  The configuration dump screen
-tests/MartenStudio.Tests/Schema/          Index advice, the tokenizer, the schema page - no database
-tests/MartenStudio.Tests/Configuration/   The describer and the configuration page - no database
-tests/MartenStudio.Integration.Tests/Schema/  Live Postgres: drift, migration preview, catalog reads
-src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
-src/MartenStudio/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
-src/PostgresStudio/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
-                                         examples and the SQL console panel
-tests/MartenStudio.Tests/Query/            Composer, guard, export, saved queries, the page - no database
-tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
-samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
-                                         truncation, the word lists and the run marker
-samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag; and the
-                                         "make it unhealthy" switches, their board, endpoints and panel
-tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k rows, and at 1.2M opt-in; the
-                                         unhealthy switches' gates, markup, checks and clean-up
-docs/                                    Long-form documentation linked from README.md; never packed
-docs/screenshots/                        The fourteen README screenshots (ScreenshotCaptureTests retakes them)
-src/PostgresStudio/Services/Relationships/    The relationship graph service, its DTOs and the SVG layout
-src/MartenStudio/Services/Relationships/      The Marten half of the graph: what StoreOptions says of the document types
-src/PostgresStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
-tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
-tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
-tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: thirteen scenarios, the D19 gate, the large-data passes
-src/PostgresStudio/Services/Database/     The database browser: the per-visitor gate, the schema matcher, the
-                                         ownership classifier, the catalog cache and the object service
-src/PostgresStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
-                                         object detail and its tabs, the Rows and Relationships slots
-tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
-tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
-                                         and the relational demo schemas' idempotency and demo-data flows
-src/PostgresStudio/Services/Health/       The health advisor: check model and registry, sweeper, sweep cache,
-                                         history, per-visitor report and gates, mutes and toasts
-src/PostgresStudio/Services/Health/Checks/  One file per shared health check (attribute, gatherer, pure evaluator); a
-                                         check is added by adding its file here, nothing else
-src/MartenStudio/Services/Health/         What MartenStudio's checks read of the store (MartenHealthContext)
-src/MartenStudio/Services/Health/Checks/  One file per Marten-only health check - the store, the event store, the
-                                         daemon - run against Marten stores only; added the same way
-src/PostgresStudio/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every
-                                         store and database, summarised as codes and counts, never names
-src/PostgresStudio/Components/Pages/Health/ The Health page and its presentation helpers
-tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, gates, page, badge, toast, the
-                                         check and docs conventions - no database
-tests/MartenStudio.Integration.Tests/Health/  Live Postgres: each check fires and stays quiet, the no-DDL /
-                                         no-lock sweep helper, and the fires/quiet attribute convention
-docs/health/                             One file per health area, one "## <code> <title>" anchor per check
-tests/MartenStudio.Integration.Tests/Tenancy/  Live Postgres: first navigation per tenancy shape changes nothing,
-                                         and the enumerations that still apply a lookup table
-src/PostgresStudio/Services/Server/       The server facts every W5 packet uses: the PostgreSQL version gates
-                                         (PostgresFeatures), the reading role's grants and the "not checked"
-                                         sentences (PostgresGrants), and server-setting remedies
-tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per platform and grant, the remedy kinds
-tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
-                                         the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
-                                         server per major, started on first use (an assembly fixture)
-src/PostgresStudio/Services/Maintenance/  The Maintenance page's facts (the regular sweep's own reads), its
-                                         per-visitor view, and the on-demand bloat measure
-src/PostgresStudio/Components/Pages/Maintenance/  The Maintenance page: autovacuum's triggers per table, running
-                                         maintenance, the workers, the freeze forecast and the vacuum horizon
-tests/PostgresStudio.Integration.Tests/Maintenance/  Live Postgres on autovacuum servers of their own: T07 against
-                                         each table's triggers, T08, T16, T24, S02, the bloat measure, C06's VACUUM
-                                         at the head and T14's standby through a slot
-src/PostgresStudio/Services/Storage/      The Storage page's facts (sizes from relpages, growth over the statistics
-                                         window, the largest tables) and its per-visitor view (W5-CAP)
-src/PostgresStudio/Components/Pages/Storage/  The Storage page: the tiles and the largest tables
-tests/PostgresStudio.Tests/Storage/       The statistics window over hand-built histories, the growth arithmetic, the
-                                         Storage builder's D27 fence - no database
-tests/MartenStudio.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
-tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 14-18: the Storage facts, behind a held lock, no DDL,
-                                         and the statistics window across a real crash
-src/PostgresStudio/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
-                                         WAL, checkpoints, pg_stat_io, tablespaces), A2's not-applicable rules, the
-                                         advisor's counter windows, and the per-visitor service
-src/PostgresStudio/Components/Pages/Replication/  Operations › Replication: slots, standbys, the archiver, WAL,
-                                         checkpoints, I/O by backend type and tablespaces
-tests/PostgresStudio.Tests/Replication/   R02-R04's evaluators at every edge, WAL file names, the facts' version shapes,
-                                         the per-visitor view and the page
-tests/PostgresStudio.Integration.Tests/Replication/  Live primary and standby pairs (17 and 18): R02-R04 fire and stay
-                                         quiet, the page's facts, and Aurora's not-applicable sections
-src/PostgresStudio/Components/Pages/Server/  System › Server: the server's facts, what the studio can see, the curated
-                                         settings, the extension chips, the security posture and the platform slot
-tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
-                                         14-18 as app and probe, and their no-lock, no-DDL reads
-src/PostgresStudio/Services/Aurora/       Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
-                                         profile and its samples, the parameter reference, the host's capacity reader, and
-                                         the Server page section's facts and per-visitor view
-tests/PostgresStudio.Tests/Aurora/        By-name mapping of Aurora's functions, the wait windows, commit latency, the capacity
-                                         reader, the parameter wording and R03's aurora-reader view - no database
-tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the instance, R03 aurora-reader, the wait section, a
-                                         failover, the not-applicable checks, C03's remedy and the spoof-proof markers
-src/PostgresStudio/Services/Statements/   The Statements page (W5-Q1): its facts (the statement sweep's own read and
-                                         history), the per-visitor view behind the activity gate, the plain classifier
-src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group
-tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the view's ranking and groups, the gate, the
-                                         classifier, the cost meter's connection tracker, and the page - no database
-tests/MartenStudio.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
-tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
-                                         matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
-tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
-                                         sequence headroom and the lint statements' D27 shape - no database
-src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
-                                         findings, checks and sections - namespace PostgresStudio, like the registration types
-src/PostgresStudio/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builders, read limiter and JSON
-                                         writer, and the Health page's visitor download builder (W5-API)
-tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the host gate's sentinels, the JSON baselines, the
-                                         limiter, the sections from hand-built facts, the visitor download and the Snapshot
-                                         menu - no database
-tests/PostgresStudio.Integration.Tests/Diagnostics/  Live: G9 by application as app and probe, a full snapshot that
-                                         creates nothing, three databases behind a database source, an API-only host, and
-                                         the statements section on a pg_stat_statements server
-tests/MartenStudio.Integration.Tests/Diagnostics/  Live: the API over a conjoined store (a tenant's finding needs
-                                         IncludeActivity) and a master-table tenancy that lists nothing
-```
+The directory tree is in `docs/maintainers/layout.md`: every directory under `src/`, `samples/`, `tests/`, `build/`,
+`.claude/` and `docs/`, and what belongs in each. Read it before adding a file. Add a directory to it in the same pull
+request that creates the directory, because `AgentsLayoutTests` fails on a directory the tree misses and on one that
+no longer exists. The roots in brief:
+- `src/PostgresStudio/` is the shared studio, with no Marten; `src/MartenStudio/` holds the Marten screens and checks.
+  Each has `Components/`, `Services/` and `Internal/Sql/` (hard rule 4).
+- `samples/` holds both demo hosts and their demo data (D17, D18).
+- `tests/` holds the four test projects (*Testing*).
+- `build/` is the Fallout orchestrator.
+- `docs/` holds the user documentation. `docs/maintainers/` holds the layout tree and the budget's dated entries.
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),
 `.config/dotnet-tools.json` pins the Fallout CLI, `.fallout/` holds the parameter file and the generated
@@ -1721,9 +900,9 @@ graph:
 4. **Public API snapshot** (`PublicApiTest.cs`) — Verify + PublicApiGenerator, `ComponentBase` types
    excluded (D20). Hard rule 7 governs the baseline.
 5. **Conventions** (`tests/MartenStudio.Tests/Conventions/`) — rules too easy to break silently to leave to
-   review: the workflows are the generated ones and still carry the permissions they need; the AGENTS.md
-   layout tree matches disk; no `async void` in `src/`; README snippets equal the `#region` bodies in the
-   sample's `Program.cs`; every `.ms-table` in `src/` is inside a scroll region (D25); the stylesheet
+   review: the workflows are the generated ones and still carry the permissions they need; the layout tree
+   (`docs/maintainers/layout.md`) matches disk; no `async void` in `src/`; README snippets equal the `#region`
+   bodies in the sample's `Program.cs`; every `.ms-table` in `src/` is inside a scroll region (D25); the stylesheet
    still carries the shell rules the 0.2.0 UX pass measured (`StylesheetTests` and its `.Shell` part);
    `MartenStudio.dll` carries no `JasperFxSourceGeneratorApplied` marker while the test assembly does
    wherever JasperFx stamps one (`JasperFxSourceGeneratorTests`, D3).
@@ -1752,31 +931,26 @@ graph:
    `upstream` tags, check out the tag matching `Directory.Packages.props`) — with JasperFx at
    `D:\Work\jasperfx` and Wolverine, a current consumer, at `D:\Work\wolverine`; read them before
    decompiling. All three are read-only: never modify them.
-7. **Integration and browser** (`tests/MartenStudio.Integration.Tests/`) — one `postgres:17-alpine` via an
-   assembly fixture (reuse enabled locally unless `MARTENSTUDIO_PG_REUSE=false`; `PostgresFixtureTests`
-   pins the variable's name), one Marten schema per collection, everything driven *through* the studio's
-   own services so the gating is exercised rather than bypassed. A class that needs a server setting of
-   its own (`pg_stat_statements` preloaded, a lowered `autovacuum_freeze_max_age`, `max_connections`,
-   `wal_level=logical`, data checksums) starts a `postgres:17-alpine` of its own, never reused.
-   `PgVectorLiveTests` starts `pgvector/pgvector:0.8.1-pg17` (`PgVectorServerFixture.Image`), pinned by
-   tag to the pgvector release whose defaults the studio quotes; an image that cannot be pulled skips that
-   class locally, with the `docker pull` command in the reason, and fails the run on CI (D19's rule).
-   `PostgresVersionMatrix` (`tests/PostgresStudio.Integration.Tests/Versions/`, an assembly fixture) starts one
-   never-reused server per major on first use - `postgres:14.24-alpine` to `18.6-alpine`, and `19rc1-alpine` as a
-   preview leg that reports and never fails a run - with `pg_stat_statements` preloaded and B0's
-   `app`/`probe`/`stats`/`mon` roles; `VersionMatrixLiveTests` runs the shared studio's regular and statement checks,
-   every `MatrixReads` read, the held-lock read and the gate table on each (MartenStudio's checks are not in the
-   matrix). Six containers, about 30 s for the folder with the images local, plus a ~110 MB pull per image on a cold
-   CI runner. A W5 packet appends its facts reads to `MatrixReads`. A test that creates, grants or alters a role on the
-   matrix takes `PostgresVersionMatrix.IsolatedServerAsync`, never `ServerAsync`: roles are the cluster's, and the
-   matrix's no-DDL fingerprint lists them. VERS's Aurora shim (`Versions/AuroraShim.cs`) puts Aurora's functions,
-   written from AWS's signatures, in `pg_catalog` of a database of its own on the matrix's PostgreSQL 17. It is never
-   applied to a database a self-hosted test reads, because the detector would then call that database Aurora.
-   `Aurora/AuroraShimLiveTests` proves A1-A8 on it, and that no role short of a superuser can plant an Aurora marker.
-   `tests/PostgresStudio.Integration.Tests/` is this suite's Postgres Studio twin: the same rules (D19's gate, wait on
-   the condition, `MARTENSTUDIO_PG_REUSE`), a container labelled `marten-studio.tests=PostgresStudio.Integration.Tests`
-   so it never attaches to this suite's, and no Marten anywhere in its graph; it is in `postgres-studio.slnf`, so the
-   Npgsql pass runs it too.
+7. **Integration and browser** (`tests/MartenStudio.Integration.Tests/`) — one `postgres:17-alpine` via an assembly
+   fixture (reuse enabled locally unless `MARTENSTUDIO_PG_REUSE=false`; `PostgresFixtureTests` pins the variable's
+   name), one Marten schema per collection, everything driven *through* the studio's own services so the gating is
+   exercised, not bypassed. A class that needs a server setting of its own (`pg_stat_statements` preloaded, a lowered
+   `autovacuum_freeze_max_age`, `max_connections`, `wal_level=logical`, data checksums) starts a `postgres:17-alpine` of
+   its own, never reused. `PgVectorLiveTests` starts `pgvector/pgvector:0.8.1-pg17` (`PgVectorServerFixture.Image`), the
+   release whose defaults the studio quotes; an image that cannot be pulled skips the class locally, naming the
+   `docker pull` command, and fails on CI (D19's rule). `PostgresVersionMatrix`
+   (`tests/PostgresStudio.Integration.Tests/Versions/`, an assembly fixture) starts one never-reused server per major on
+   first use, `postgres:14.24-alpine` to `18.6-alpine` (and `19rc1-alpine`, a preview leg that never fails a run), with
+   `pg_stat_statements` and B0's `app`/`probe`/`stats`/`mon` roles; `VersionMatrixLiveTests` runs the shared studio's
+   checks, every `MatrixReads` read, the held-lock read and the gate table on each (cost: decision-notes.md, *Testing*).
+   A W5 packet appends its facts reads to `MatrixReads`. A test that creates, grants or alters a role on the matrix
+   takes `PostgresVersionMatrix.IsolatedServerAsync`, never `ServerAsync`: roles are the cluster's, and the matrix's
+   no-DDL fingerprint lists them. VERS's Aurora shim (`Versions/AuroraShim.cs`, Aurora's functions from AWS's signatures
+   in `pg_catalog`) goes only into a database of its own on the matrix's PostgreSQL 17, never one a self-hosted test
+   reads, which the detector would call Aurora; `Aurora/AuroraShimLiveTests` proves A1-A8 on it, and the marker rule D29
+   states. `tests/PostgresStudio.Integration.Tests/` is this suite's Postgres Studio twin: the same rules (D19's gate,
+   wait on the condition, `MARTENSTUDIO_PG_REUSE`), a container labelled
+   `marten-studio.tests=PostgresStudio.Integration.Tests` so it never attaches to this suite's.
    Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19).

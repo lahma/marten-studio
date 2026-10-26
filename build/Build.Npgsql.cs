@@ -120,8 +120,8 @@ partial class Build
             $"Refusing to pack with --npgsql-version {ResolvedNpgsqlVersion}: PostgresStudio is packed only at the Npgsql " +
             $"floor ({NpgsqlFloor}, PostgresStudioNpgsqlFloor in Directory.Packages.props). The nuspec would say " +
             $"'Npgsql >= {ResolvedNpgsqlVersion}' and raise every host's Npgsql. Run Pack without --npgsql-version (and " +
-            "without NPGSQL_VERSION in the environment), or raise the floor deliberately and record why in AGENTS.md, " +
-            "Package budget changes.");
+            "without NPGSQL_VERSION in the environment), or raise the floor deliberately and record why in " +
+            "docs/maintainers/package-budget-changes.md.");
     }
 
     Target NpgsqlPass => _ => _
