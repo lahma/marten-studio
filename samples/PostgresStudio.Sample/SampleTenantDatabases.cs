@@ -46,9 +46,20 @@ internal sealed class SampleTenantDatabases(NpgsqlDataSource admin, string serve
     private readonly ConcurrentDictionary<string, Lazy<NpgsqlDataSource>> dataSources = new(StringComparer.Ordinal);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A configured admin database the sample was not allowed to write to (<see cref="SampleArguments" />) has no directory
+    /// unless an earlier start made one: that is no tenants, an expected state, and answered as an empty list rather than
+    /// as a failure the studio would log on every refresh.
+    /// </remarks>
     public async IAsyncEnumerable<string> ListAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         await using NpgsqlConnection connection = await admin.OpenConnectionAsync(cancellationToken);
+
+        if (!await HasDirectoryAsync(connection, cancellationToken))
+        {
+            yield break;
+        }
+
         await using var command = new NpgsqlCommand("select name from " + Directory + " order by name", connection);
         await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -87,10 +98,25 @@ internal sealed class SampleTenantDatabases(NpgsqlDataSource admin, string serve
     private async Task<string?> DatabaseOfAsync(string name, CancellationToken cancellationToken)
     {
         await using NpgsqlConnection connection = await admin.OpenConnectionAsync(cancellationToken);
+
+        if (!await HasDirectoryAsync(connection, cancellationToken))
+        {
+            return null;
+        }
+
         await using var command = new NpgsqlCommand("select database_name from " + Directory + " where name = @name", connection);
         command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Text) { Value = name });
 
         return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
+    /// <summary>Whether the admin database has the tenant directory: the demo's seeding made it here, now or on an earlier start.</summary>
+    private static async Task<bool> HasDirectoryAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("select pg_catalog.to_regclass(@directory) is not null", connection);
+        command.Parameters.Add(new NpgsqlParameter("directory", NpgsqlDbType.Text) { Value = Directory });
+
+        return await command.ExecuteScalarAsync(cancellationToken) is true;
     }
 
     private NpgsqlDataSource Build(string database) =>

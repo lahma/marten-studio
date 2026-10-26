@@ -93,10 +93,17 @@ internal sealed class SampleHost : IAsyncDisposable
     /// The admin database, or <see langword="null" /> for none - the zero-config <c>dotnet run</c>, in which the sample
     /// starts a fresh throwaway Postgres of its own (D18).
     /// </param>
+    /// <param name="allowDataGeneration">
+    /// Pass <c>--allow-data-generation</c>, without which the sample writes its demo data only to the throwaway Postgres it
+    /// started itself, never to a configured one.
+    /// </param>
     /// <param name="cancellationToken">Cancels the wait.</param>
-    public static async Task<SampleHost> StartAsync(string? connectionString, CancellationToken cancellationToken = default)
+    public static async Task<SampleHost> StartAsync(
+        string? connectionString,
+        bool allowDataGeneration = false,
+        CancellationToken cancellationToken = default)
     {
-        Process process = Process.Start(CreateStartInfo(connectionString))
+        Process process = Process.Start(CreateStartInfo(connectionString, allowDataGeneration))
             ?? throw new InvalidOperationException("`dotnet` did not start the sample host.");
 
         var host = new SampleHost(process);
@@ -197,7 +204,7 @@ internal sealed class SampleHost : IAsyncDisposable
         }
     }
 
-    private static ProcessStartInfo CreateStartInfo(string? connectionString)
+    private static ProcessStartInfo CreateStartInfo(string? connectionString, bool allowDataGeneration)
     {
         string assembly = SampleAssemblyPath();
 
@@ -211,6 +218,13 @@ internal sealed class SampleHost : IAsyncDisposable
         };
 
         startInfo.ArgumentList.Add(assembly);
+
+        // Before --urls, bare, on purpose: the sample's own reading is what keeps the switch from swallowing the next token.
+        if (allowDataGeneration)
+        {
+            startInfo.ArgumentList.Add("--allow-data-generation");
+        }
+
         startInfo.ArgumentList.Add("--urls");
         startInfo.ArgumentList.Add("http://127.0.0.1:0");
 

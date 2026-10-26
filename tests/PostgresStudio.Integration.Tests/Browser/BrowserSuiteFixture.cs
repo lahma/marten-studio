@@ -30,7 +30,8 @@ public sealed class BrowserSuite : ICollectionFixture<BrowserSuiteFixture>
 /// <para>
 /// <b>Pointed at the suite's container</b> rather than started zero-config (<see cref="PostgresStudioSampleHostTests" />
 /// proves that start): so the scenarios can read what the sample's databases hold. The admin database is
-/// <see cref="AdminDatabase" />, and the sample creates its three tenant databases beside it, as it would on any server.
+/// <see cref="AdminDatabase" />, and the sample - started with <c>--allow-data-generation</c>, without which it writes nothing
+/// to a database it did not start - creates its three tenant databases beside it, as it would on any server.
 /// </para>
 /// <para>
 /// <b>A snapshot before anybody looks.</b> The sample seeds before it listens, so once it answers, its databases hold
@@ -89,7 +90,8 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
         await TenantDatabases.DropAsync(postgres, CancellationToken.None);
         string admin = await postgres.CreateDatabaseAsync(AdminDatabase);
 
-        host = await SampleHost.StartAsync(admin);
+        // A database of the suite's, not the sample's own container: the sample writes its demo data only when told to.
+        host = await SampleHost.StartAsync(admin, allowDataGeneration: true);
 
         databases =
         [

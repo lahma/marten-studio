@@ -276,8 +276,9 @@ internal sealed class MartenStudioSource : IStudioSource
 
             if (!TenantList.IsAcceptable(listed, scope.TenantId))
             {
+                // The visitor's values escaped and bounded (StudioLogValue.Cap): the message is logged and audited whole.
                 throw new KeyNotFoundException(
-                    $"'{scope.TenantId}' is not a tenant of database '{scope.DatabaseId}' in Marten store '{Marten.Key}'.");
+                    $"'{StudioLogValue.Cap(scope.TenantId)}' is not a tenant of database '{StudioLogValue.Cap(scope.DatabaseId)}' in Marten store '{Marten.Key}'.");
             }
 
             // 6. And the instance that tenant was built from, when the database has twins.

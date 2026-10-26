@@ -11,7 +11,10 @@ using PostgresStudio.Sample;
 using PostgresStudio.Sample.Auth;
 using PostgresStudio.SampleData;
 
-WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+// Not `args`: a bare `--allow-data-generation` would let the command-line configuration provider swallow the token after
+// it. SampleArguments hands the builder the same command line with the switch spelled `--allow-data-generation=true`.
+SampleArguments sample = SampleArguments.Parse(args);
+WebApplicationBuilder builder = WebApplication.CreateBuilder([.. sample.HostArguments]);
 
 // No silent localhost fallback: either something configured a database, or a throwaway container is started, or the
 // host refuses (D18). The configured database is the admin database; the tenant databases are created beside it.
@@ -19,6 +22,16 @@ string? connectionString = builder.Configuration.GetConnectionString("Postgres")
 if (string.IsNullOrWhiteSpace(connectionString))
 {
     connectionString = await EphemeralPostgres.StartAsync();
+}
+
+// The demo's databases and schemas are written only where they are the demo's: the throwaway container started above, or
+// a server --allow-data-generation names as the demo's, as in the Marten sample. A configured database may be shared, and
+// creating three databases on its server, or schemas in it, is not a demo's to do unasked - so anywhere else the sample
+// writes nothing, says so in one line, and the studio reads whatever is there.
+bool writeDemoData = EphemeralPostgres.IsThrowaway(connectionString) || sample.AllowDataGeneration;
+if (!writeDemoData)
+{
+    Console.WriteLine(SampleArguments.ReadOnlyNotice);
 }
 
 builder.Services
@@ -78,13 +91,14 @@ builder.Services.AddHealthChecks().AddPostgresStudio(tags: ["postgres"]);
 
 WebApplication app = builder.Build();
 
-// The demo data, before the first request: the tenant databases and the admin database's directory of them, then
-// Quartz.NET's job store and the legacy schema beside it. Both are idempotent, so starting again writes nothing, and
-// neither writes into a database or schema it did not create.
-ILogger seeding = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("PostgresStudio.Sample.Seeding");
-await TenantDemo.ApplyAsync(connectionString, seeding);
-await using (NpgsqlConnection adminConnection = await app.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync())
+// The demo data, before the first request and only where it is the demo's (above): the tenant databases and the admin
+// database's directory of them, then Quartz.NET's job store and the legacy schema beside it. Both are idempotent, so
+// starting again writes nothing, and neither writes into a database or schema it did not create.
+if (writeDemoData)
 {
+    ILogger seeding = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("PostgresStudio.Sample.Seeding");
+    await TenantDemo.ApplyAsync(connectionString, seeding);
+    await using NpgsqlConnection adminConnection = await app.Services.GetRequiredService<NpgsqlDataSource>().OpenConnectionAsync();
     await RelationalDemoSchema.ApplyAsync(adminConnection, seeding);
 }
 
@@ -114,6 +128,10 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
         : "Not signed in.";
 
     AntiforgeryTokenSet tokens = antiforgery.GetAndStoreTokens(context);
+    string readOnly = writeDemoData
+        ? string.Empty
+        : "<p>Read-only: this sample did not start the configured database, so it wrote nothing to it. The tenants are "
+          + "listed only if an earlier start with <code>--allow-data-generation</code> created them.</p>";
 
     context.Response.ContentType = "text/html; charset=utf-8";
     return context.Response.WriteAsync($$"""
@@ -132,6 +150,7 @@ app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
         <body>
           <h1>Postgres Studio sample</h1>
           <p>{{who}}</p>
+          {{readOnly}}
           <ul>
             <li><a href="/postgres">Open Postgres Studio</a> &mdash; mounted at <code>/postgres</code>, with the admin
               database as the source <code>default</code> and <code>tenant_a</code>, <code>tenant_b</code> and

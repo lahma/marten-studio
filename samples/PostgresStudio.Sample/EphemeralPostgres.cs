@@ -52,10 +52,12 @@ internal static class EphemeralPostgres
                 connection string is configured, and Docker did not answer. Either:
 
                   - start Docker (or Podman with the Docker-compatible socket) and run again, or
-                  - point the sample at a database you already have, on a server where its role may
-                    create the three tenant databases (tenant_a, tenant_b and tenant_c) beside it:
+                  - point the sample at a database you already have. It writes nothing there unless told to:
+                    --allow-data-generation creates the three tenant databases (tenant_a, tenant_b and
+                    tenant_c) beside it, which needs a role that may create databases, and the demo's
+                    schemas in it:
 
-                        dotnet run --project samples/PostgresStudio.Sample \
+                        dotnet run --project samples/PostgresStudio.Sample -- --allow-data-generation \
                           --ConnectionStrings:Postgres "Host=localhost;Database=admin;Username=postgres;Password=postgres"
 
                 The sample will not quietly fall back to localhost: connecting to a database nobody asked
@@ -65,6 +67,7 @@ internal static class EphemeralPostgres
         }
 
         string connectionString = container.GetConnectionString();
+        Started = connectionString;
 
         Console.WriteLine();
         Console.WriteLine("  ┌───────────────────────────────────────────────────────────────────────────┐");
@@ -96,6 +99,18 @@ internal static class EphemeralPostgres
             // well; without it this is simply a new container each run.
             .WithReuse(reuse)
             .Build();
+
+    /// <summary>The connection string of the container this process started, or <see langword="null" /> when it started none.</summary>
+    private static string? Started { get; set; }
+
+    /// <summary>
+    /// Whether <paramref name="connectionString" /> is the throwaway container this process started - as opposed to a
+    /// database somebody configured, which may be shared and may matter. The demo's databases and schemas are written only
+    /// on this one, unless the host was started with <c>--allow-data-generation</c> (<see cref="SampleArguments" />).
+    /// </summary>
+    /// <param name="connectionString">The admin database's connection string.</param>
+    public static bool IsThrowaway(string? connectionString) =>
+        Started is { } started && string.Equals(started, connectionString, StringComparison.Ordinal);
 
     /// <summary>The environment variable that asks for a reused container.</summary>
     /// <remarks>

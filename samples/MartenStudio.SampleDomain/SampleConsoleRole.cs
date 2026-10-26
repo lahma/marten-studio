@@ -29,8 +29,13 @@ namespace MartenStudio.SampleDomain;
 /// runs on every start, before the store is touched, and only on the throwaway container or a database
 /// <c>--allow-data-generation</c> names as the demo's, because a role is the server's and not the database's; it says whether
 /// the role is usable. <see cref="GrantAsync" /> runs in the seeding, once the schemas exist, and grants only a role this login
-/// is a member of - so on any other database it grants nothing. A login that may not create roles leaves the role unset and the
-/// sample reads as its login, as before. The studio itself never creates a role or grants anything: this is the host's.
+/// is a member of. That check alone does not keep the grants to the demo's database: role membership is cluster-wide, so a
+/// login that an earlier start with <c>--allow-data-generation</c> made a member is still one on every other database of that
+/// server, and the role would be granted the demo's schemas there too. So the seeding calls
+/// it only when the host said the database is the demo's (<see cref="SampleSeeding.GrantConsoleRole" />), the same condition
+/// <see cref="EnsureAsync(string, TextWriter?, CancellationToken)" /> runs under. A login that may not create roles leaves the
+/// role unset and the sample reads as its login, as before. The studio itself never creates a role or grants anything: this is
+/// the host's.
 /// </para>
 /// <para>
 /// <b>Safe when two hosts start at once.</b> Concurrent <c>CREATE ROLE</c>s of one name fail with <c>duplicate_object</c> or,
@@ -126,7 +131,8 @@ public static partial class SampleConsoleRole
     /// Grants the role <c>USAGE</c> on each of <paramref name="schemas" /> that exists, <c>SELECT</c> on its tables and
     /// sequences, and <c>SELECT</c> on the tables the login creates there later - nothing on a schema that is not there yet, and
     /// nothing at all unless the login is a member of the role, which <see cref="EnsureAsync(string, TextWriter?, CancellationToken)" />
-    /// makes it on a database that is the demo's.
+    /// makes it on a database that is the demo's. Membership is the server's, though, so it says nothing about which database
+    /// this is: call it only for a database that is the demo's (<see cref="SampleSeeding.GrantConsoleRole" />).
     /// </summary>
     /// <param name="connection">An open connection, as the store's login, in no transaction.</param>
     /// <param name="logger">Where a refusal is said, or <see langword="null" />.</param>
@@ -146,8 +152,9 @@ public static partial class SampleConsoleRole
 
         if (!await IsMemberAsync(connection, role, cancellationToken).ConfigureAwait(false))
         {
-            // Not a role this login reads as: the host did not make it here (another database than the demo's), so the
-            // sample grants it nothing.
+            // Not a role this login reads as - the host made no role on this server - so there is nothing to grant to. A
+            // member, though, may be one from another database of the server: the caller decides whether this one is the
+            // demo's.
             return;
         }
 

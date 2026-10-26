@@ -180,7 +180,13 @@ public class DocumentWriteServiceTests
 
         preview.Status.Should().Be(WritePreviewStatus.Refused);
         preview.Reason.Should().Contain("no-such-collection").And.Contain("read-only");
-        harness.Authorization.Calls.Should().HaveCount(2, "both gates ran before the lookup did");
+
+        // Both gates ran before the lookup did: for the link's spelling (no ?db=), and again for the database it named
+        // (SEC-fix F1), each the store policy and then the write policy.
+        harness.Authorization.Calls.Should().HaveCount(4, "both gates ran before the lookup did, for each spelling");
+        harness.Authorization.Calls.Select(static x => x.Resource.Capability).Should().Equal(
+            null, nameof(StudioCapability.EditDocuments), null, nameof(StudioCapability.EditDocuments));
+        harness.Authorization.Calls[2].Resource.DatabaseIdentifier.Should().NotBeEmpty("the second pair names the database the empty id matched");
     }
 
     // ---------------------------------------------------------------------------------------------
