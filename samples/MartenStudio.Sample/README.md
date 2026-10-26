@@ -26,10 +26,18 @@ on every start it creates the role `studio_sample_reader` (`NOLOGIN`) if it is m
 a member, and the seeding grants it `SELECT` on the demo's four schemas - `studio_sample`, `studio_sample_events`,
 `quartz` and `legacy` - and on the tables created there later. `MartenStudioOptions.SqlConsoleRole` is set to it,
 so the SQL console, the database browser and the health checks read as that role, and the Health page's K05
-("SQL console without a narrowed role") shows the remedy applied rather than a Warning. The role is also a member
-of `pg_monitor`, which lets the health checks and Database › Sessions see every session and statistic as before
-and reads no row of any table. A database whose login may not create roles - one `--allow-data-generation`
-points the sample at - says so on the console at start-up, and the studio reads as the login, as it did.
+("SQL console without a narrowed role") shows the remedy applied rather than a Warning.
+
+A role belongs to the whole server, not to one database, so the sample makes it only on the throwaway container or
+on a database `--allow-data-generation` names as the demo's. On any other configured database it creates no role and
+grants nothing, and the studio reads as the store's login, as it always did; so it does where the login may not
+create roles, which the console says at start-up.
+
+The role is also a member of `pg_monitor`, which lets the health checks and Database › Sessions see every session
+and statistic as before. That is wider than the four schemas: `pg_monitor` reads no table's rows, but it does read
+every session's current statement text across the whole server, and `pg_stat_statements`' statement texts, so the
+SQL console - which runs as this role - can read them too. On the demo's own throwaway server that is what it is for;
+it is why the sample does not make the role anywhere else.
 
 ## Rebuilding ShipmentTracker
 

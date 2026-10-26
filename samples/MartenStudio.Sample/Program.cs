@@ -48,8 +48,11 @@ if (await SampleDatabaseCheck.PrepareAsync(
 
 // The role the studio's SQL console, database browser and health checks read as, narrower than the store's login (which on
 // the throwaway container is the server's superuser): created here, before anything reads, and granted the demo's schemas in
-// the seeding once they exist (SampleConsoleRole). A login that may not create it leaves the studio reading as the login.
-bool consoleRole = await SampleConsoleRole.EnsureAsync(connectionString, Console.Out);
+// the seeding once they exist (SampleConsoleRole). A role is the server's, not the database's, so only on a database that is
+// the demo's - the throwaway container, or one --allow-data-generation names - and anywhere else the studio reads as the
+// login, as does one whose login may not create it.
+bool consoleRole = (EphemeralPostgres.IsThrowaway(connectionString) || sample.AllowDataGeneration)
+    && await SampleConsoleRole.EnsureAsync(connectionString, Console.Out);
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
