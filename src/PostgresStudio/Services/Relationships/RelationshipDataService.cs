@@ -127,12 +127,12 @@ internal sealed class RelationshipDataService : IRelationshipDataService
             if (reads.Product == StudioProduct.PostgresStudio)
             {
                 logger.LogWarning(
-                    exception, "Postgres Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+                    exception, "Postgres Studio could not read the relationships of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
             }
             else
             {
                 logger.LogWarning(
-                    exception, "Marten Studio could not read the relationships of {StoreKey}", scope.StoreKey);
+                    exception, "Marten Studio could not read the relationships of {StoreKey}", StudioLogValue.Cap(scope.StoreKey));
             }
 
             return RelationshipGraph.Failed(RelationshipReads.Describe(exception, gate), readAt);

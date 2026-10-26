@@ -61,6 +61,9 @@ internal static partial class StudioLog
     /// <summary>9452, in the studio's words.</summary>
     public static void StatementsRead(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, int statements)
     {
+        // Wave 6: the reader's name is the host's identity's, which a visitor can shape, and is escaped and bounded as 9245's is.
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+
         if (product == StudioProduct.PostgresStudio)
         {
             logger.PostgresStudioStatementsRead(user, storeKey, databaseId, statements);

@@ -9,11 +9,13 @@ namespace PostgresStudio.Services;
 // two). An event whose level is a parameter has no dispatcher: its site calls both forms itself, because LogLevelsTests
 // follows the level from the call. None of these is a [LoggerMessage], so this class still declares each id once.
 //
-// Wave 6: the audit and refusal dispatchers (9200-9205, 9235, 9236, 9245) are the one way a site writes those events, and
-// each takes every value a visitor could have shaped - the user's name, the scope the address asked for, a target, a reason,
-// a statement - through StudioLogValue: escaped and bounded, so a refused ?store= cannot write a log line of any length or a
-// second, forged one. Constants (an action's name, a capability, an option, a policy's name) go as they are.
-// RefusalLogValuesTests holds every site to the dispatchers and every dispatcher to the caps.
+// Wave 6: the audit and refusal dispatchers (9200-9205, 9235, 9236, 9245, and 9452's in StudioLog.StatementsPage.cs) are
+// the one way a site writes those events, and each takes every value a visitor could have shaped - the user's name, the
+// scope the address asked for, a target, a reason, a statement - through StudioLogValue: escaped and bounded, so a refused
+// ?store= cannot write a log line of any length or a second, forged one. 9204's statement, the one that ran, is kept whole
+// up to the circuit's receive bound instead (StudioLogValue.CapStatement). Constants (an action's name, a capability, an
+// option, a policy's name) go as they are. RefusalLogValuesTests holds every site to the dispatchers and every dispatcher
+// to the caps.
 internal static partial class StudioLog
 {
     /// <summary>9200 in the studio's own words.</summary>
@@ -79,11 +81,14 @@ internal static partial class StudioLog
         }
     }
 
-    /// <summary>9204 in the studio's own words.</summary>
+    /// <summary>
+    /// 9204 in the studio's own words: the statement that ran is escaped and kept whole up to the circuit's receive bound
+    /// (<see cref="StudioLogValue.CapStatement" />), never cut at its front, so no padding keeps it out of the record.
+    /// </summary>
     public static void SqlExecuted(this ILogger logger, StudioProduct product, string user, string storeKey, string databaseId, long elapsedMilliseconds, int rowCount, string sql)
     {
         (user, storeKey, databaseId, sql) =
-            (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.CapText(sql));
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId), StudioLogValue.CapStatement(sql));
 
         if (product == StudioProduct.PostgresStudio)
         {

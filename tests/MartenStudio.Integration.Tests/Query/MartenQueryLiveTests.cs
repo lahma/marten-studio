@@ -125,9 +125,9 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
     /// lookalike.
     /// </summary>
     /// <remarks>
-    /// Since wave 6 the log carries the statement through <see cref="StudioLogValue.CapText" /> - its line breaks
+    /// Since wave 6 the log carries the statement through <see cref="StudioLogValue.CapStatement" /> - its line breaks
     /// escaped, so a statement cannot write a second, forged log line - and the comparison applies the same escaping to
-    /// what the page shows. The statement is far below the cap, so nothing of it is cut.
+    /// what the page shows. The statement is far below the bound, so nothing of it is cut.
     /// </remarks>
     [PostgresFact]
     public async Task The_sql_the_page_shows_is_the_statement_that_was_sent()
@@ -138,10 +138,10 @@ public class MartenQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
             harness.Scope, new MartenQueryRequest(alias, "where data ->> 'Name' = 'Alice'"), Token);
 
         result.Succeeded.Should().BeTrue();
-        result.GeneratedSql.Length.Should().BeLessThan(StudioLogValue.MaxTextLength, "a statement below the cap is logged whole");
+        result.GeneratedSql.Length.Should().BeLessThan(StudioLogValue.MaxStatementLength, "a statement below the bound is logged whole");
 
         harness.Logs.Should().Contain(
-            x => x.EventId == 9204 && x.Message.Contains(StudioLogValue.CapText(result.GeneratedSql)!, StringComparison.Ordinal),
+            x => x.EventId == 9204 && x.Message.Contains(StudioLogValue.CapStatement(result.GeneratedSql)!, StringComparison.Ordinal),
             "9204 carries the statement the studio actually executed, escaped as every logged value is");
 
         result.Plan!.HasPlan.Should().BeTrue(

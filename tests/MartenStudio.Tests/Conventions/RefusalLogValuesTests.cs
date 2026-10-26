@@ -48,6 +48,8 @@ public partial class RefusalLogValuesTests
     [InlineData("line\u2028separator\u2029", "line\\u2028separator\\u2029")]
     [InlineData("zero\u200bwidth", "zero\\u200Bwidth")]
     [InlineData("é and 日本 and 🐘", "é and 日本 and 🐘")]
+    [InlineData("a typed \\n is not a line break", "a typed \\\\n is not a line break")]
+    [InlineData("C:\\temp\\x", "C:\\\\temp\\\\x")]
     public void A_value_is_escaped_and_an_ordinary_one_goes_as_it_is(string value, string logged)
     {
         StudioLogValue.Cap(value).Should().Be(logged);
@@ -109,19 +111,25 @@ public partial class RefusalLogValuesTests
         logger.TableRowsRead(product, HostileStoreKey, "Read rows", HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement, HostileStatement);
         logger.TableRowOpened(product, HostileStoreKey, "Open row", HostileStoreKey, HostileStoreKey, HostileDatabaseId, HostileStatement);
         logger.SessionDetailsRead(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, 1, 2, 3);
+        logger.StatementsRead(product, HostileStoreKey, HostileStoreKey, HostileDatabaseId, 4);
 
-        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9200, 9201, 9202, 9203, 9204, 9205, 9235, 9236, 9245);
+        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9200, 9201, 9202, 9203, 9204, 9205, 9235, 9236, 9245, 9452);
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {
             HasRawControl(entry.Message).Should().BeFalse("event {0} writes every value a visitor shaped escaped", entry.EventId.Id);
             entry.Message.Should().NotContain(HostileStoreKey).And.NotContain(HostileDatabaseId).And.NotContain(HostileStatement);
             entry.Message.Should().Contain(StudioLogValue.Cap(HostileStoreKey), "event {0} keeps the bounded value", entry.EventId.Id);
-            entry.Message.Length.Should().BeLessThan(3 * StudioLogValue.MaxTextLength, "event {0} is bounded whatever was sent", entry.EventId.Id);
+            entry.Message.Length.Should().BeLessThan(
+                (entry.EventId.Id == 9204 ? StudioLogValue.MaxStatementLength : 0) + (3 * StudioLogValue.MaxTextLength),
+                "event {0} is bounded whatever was sent", entry.EventId.Id);
         }
 
         captured.Entries.Single(static x => x.EventId.Id == 9205).Message.Should().Contain(StudioLogValue.CapText(HostileStatement),
-            "a statement keeps its longer bound");
+            "a refused statement, which never ran, keeps a text's bound");
+        captured.Entries.Single(static x => x.EventId.Id == 9204).Message.Should().Contain(StudioLogValue.CapStatement(HostileStatement),
+            "the statement that ran is kept whole, escaped, up to the circuit's receive bound")
+            .And.Contain(new string('z', 9_000), "its end is in the record");
     }
 
     /// <summary>The audit itself: a refused scope from the address goes into 9203 and its 9201 escaped and bounded.</summary>
@@ -169,7 +177,10 @@ public partial class RefusalLogValuesTests
 
     /// <summary>The audit and refusal events whose values a visitor shapes, by the name a site calls them by.</summary>
     private static readonly string[] Dispatched =
-        ["ActionPerformed", "ActionFailed", "CapabilityDenied", "ScopeAuthorizationDenied", "SqlExecuted", "SqlRejected", "TableRowsRead", "TableRowOpened", "SessionDetailsRead"];
+        ["ActionPerformed", "ActionFailed", "CapabilityDenied", "ScopeAuthorizationDenied", "SqlExecuted", "SqlRejected", "TableRowsRead", "TableRowOpened", "SessionDetailsRead", "StatementsRead"];
+
+    /// <summary>The files that hold the per-product dispatchers, which alone call the generated templates.</summary>
+    private static readonly string[] DispatcherFiles = ["StudioLog.PostgresStudio.cs", "StudioLog.StatementsPage.cs"];
 
     /// <summary>
     /// Every site that writes 9200-9205, 9235, 9236 or 9245 does it through the per-product dispatcher - whose first argument
@@ -183,7 +194,7 @@ public partial class RefusalLogValuesTests
 
         List<string> direct = [];
 
-        foreach (string file in files.Where(static x => !x.EndsWith("StudioLog.PostgresStudio.cs", StringComparison.Ordinal)))
+        foreach (string file in files.Where(static x => !DispatcherFiles.Contains(Path.GetFileName(x), StringComparer.Ordinal)))
         {
             string code = SourceScanner.StripCommentsAndStrings(File.ReadAllText(file));
 
@@ -199,7 +210,8 @@ public partial class RefusalLogValuesTests
 
         direct.Should().BeEmpty("a site that calls an event's generated template writes the visitor's values uncapped");
 
-        string dispatchers = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", "StudioLog.PostgresStudio.cs"));
+        string dispatchers = string.Concat(DispatcherFiles.Select(static x =>
+            SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", x)))));
         foreach (string name in Dispatched)
         {
             Regex.IsMatch(dispatchers, @"public static void " + name + @"\(this ILogger logger, StudioProduct product[^{]*\{\s*\([^;]*StudioLogValue\.Cap|public static void " + name + @"\(this ILogger logger, StudioProduct product[^{]*\{\s*user = StudioLogValue\.Cap")
