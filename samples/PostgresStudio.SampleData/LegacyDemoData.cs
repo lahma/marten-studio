@@ -6,7 +6,7 @@ using Npgsql;
 
 using NpgsqlTypes;
 
-namespace MartenStudio.SampleDomain.Relational;
+namespace PostgresStudio.SampleData;
 
 /// <summary>
 /// The rows of the <c>legacy</c> schema, of <c>legacy.customer_credit</c>'s link to the Marten customers,
@@ -274,7 +274,7 @@ internal static class LegacyDemoData
         NpgsqlTransaction transaction,
         CancellationToken cancellationToken)
     {
-        if (!await DemoTable.ExistsAsync(connection, transaction, RelationalDemoSchema.MartenDocumentSchemaName, "mt_doc_customer", cancellationToken)
+        if (!await DemoTable.ExistsAsync(connection, transaction, RelationalDemoSchema.SampleSchemaName, "mt_doc_customer", cancellationToken)
                 .ConfigureAwait(false)
             || await DemoTable.HasRowsAsync(connection, transaction, RelationalDemoSchema.LegacySchemaName, RelationalDemoSchema.CustomerCreditTable, cancellationToken)
                 .ConfigureAwait(false))
@@ -288,14 +288,14 @@ internal static class LegacyDemoData
         List<string> bands = [];
         List<DateTime> reviewed = [];
 
-        for (int i = 1; i <= SampleDataSeeder.CustomerCount; i++)
+        for (int i = 1; i <= SampleCustomers.Count; i++)
         {
             if (i % 4 == 0)
             {
                 continue;
             }
 
-            ids.Add(SampleDataSeeder.CustomerId(i));
+            ids.Add(SampleCustomers.Id(i));
             limits.Add(1_000m * (2 + (i * 7 % 23)));
             currencies.Add(i % 6 == 0 ? "SEK" : "EUR");
             bands.Add(RiskBands[i % RiskBands.Length]);
@@ -327,9 +327,9 @@ internal static class LegacyDemoData
         NpgsqlTransaction transaction,
         CancellationToken cancellationToken)
     {
-        if (!await DemoTable.ExistsAsync(connection, transaction, RelationalDemoSchema.MartenDocumentSchemaName, RelationalDemoSchema.AppSettingsTable, cancellationToken)
+        if (!await DemoTable.ExistsAsync(connection, transaction, RelationalDemoSchema.SampleSchemaName, RelationalDemoSchema.AppSettingsTable, cancellationToken)
                 .ConfigureAwait(false)
-            || await DemoTable.HasRowsAsync(connection, transaction, RelationalDemoSchema.MartenDocumentSchemaName, RelationalDemoSchema.AppSettingsTable, cancellationToken)
+            || await DemoTable.HasRowsAsync(connection, transaction, RelationalDemoSchema.SampleSchemaName, RelationalDemoSchema.AppSettingsTable, cancellationToken)
                 .ConfigureAwait(false))
         {
             return 0;

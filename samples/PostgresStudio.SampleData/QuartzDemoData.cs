@@ -6,7 +6,7 @@ using Npgsql;
 
 using NpgsqlTypes;
 
-namespace MartenStudio.SampleDomain.Relational;
+namespace PostgresStudio.SampleData;
 
 /// <summary>
 /// Two Quartz.NET schedulers' worth of jobs, triggers and bookkeeping, written the way Quartz's own

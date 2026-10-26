@@ -8,7 +8,7 @@ using Npgsql;
 
 using NpgsqlTypes;
 
-namespace MartenStudio.SampleDomain.Relational;
+namespace PostgresStudio.SampleData;
 
 /// <summary>What one <see cref="RelationalDemoSchema.ApplyAsync(NpgsqlConnection, ILogger, CancellationToken)" /> did and found.</summary>
 /// <param name="RowsWritten">
@@ -60,9 +60,10 @@ public readonly record struct RelationalDemoResult(
 /// table, a disabled trigger and a foreign key into a Marten document table (legacy).
 /// </para>
 /// <para>
-/// <b>No package.</b> Everything here is plain SQL over Npgsql, which arrives with Marten; the Quartz
-/// schema is vendored rather than referenced (AGENTS.md hard rule 1), and this project still does not
-/// reference MartenStudio (D17).
+/// <b>No package.</b> Everything here is plain SQL over Npgsql, the one package this project references;
+/// the Quartz schema is vendored rather than referenced (AGENTS.md hard rule 1). This project references
+/// no Marten and no studio (D17): the Marten sample's domain references it, and so does the Postgres
+/// Studio sample, which applies it to a database that has no Marten store at all.
 /// </para>
 /// <para>
 /// <b>Idempotent, and in one transaction.</b>
@@ -76,9 +77,10 @@ public readonly record struct RelationalDemoResult(
 /// <para>
 /// <b>Run it after Marten has seeded.</b> <c>legacy.customer_credit</c>'s foreign key and rows need
 /// <c>studio_sample.mt_doc_customer</c> and the seeded customers in it, and <c>app_settings</c> needs the
-/// <c>studio_sample</c> schema; <see cref="SampleDataSeeder" /> calls this last for exactly that reason.
-/// Against a database with no Marten store the Marten-anchored half is skipped rather than failed, and
-/// <see cref="RelationalDemoResult" /> says which parts are present.
+/// <c>studio_sample</c> schema; the Marten sample's <c>SampleDataSeeder</c> calls this last for exactly that
+/// reason. Against a database with no Marten store the Marten-anchored half is skipped rather than failed,
+/// and <see cref="RelationalDemoResult" /> says which parts are present: the foreign key needs Marten's
+/// table, while <c>app_settings</c> needs only the schema, which the Postgres Studio sample creates itself.
 /// </para>
 /// <para>
 /// <b>Never into a schema it did not create.</b> <c>quartz</c> and <c>legacy</c> are ordinary names, and a
@@ -124,8 +126,14 @@ public static class RelationalDemoSchema
     /// <summary>The hand-made schema of catalog edge cases.</summary>
     public const string LegacySchemaName = "legacy";
 
-    /// <summary>The Marten document schema <see cref="AppSettingsTable" /> is created in.</summary>
-    public const string MartenDocumentSchemaName = SampleStore.DocumentSchema;
+    /// <summary>
+    /// The sample application's own schema, which <see cref="AppSettingsTable" /> is created in whenever it exists,
+    /// and whose <c>mt_doc_customer</c> <see cref="CustomerCreditTable" />'s foreign key points at when Marten made
+    /// one. In the Marten sample it is the store's document schema - <c>SampleStore.DocumentSchema</c> is this
+    /// constant - and in the Postgres Studio sample a plain schema of the admin database. The scripts spell it out,
+    /// so it is a constant here rather than a setting.
+    /// </summary>
+    public const string SampleSchemaName = "studio_sample";
 
     /// <summary>How many tables Quartz.NET's schema has.</summary>
     public const int QuartzTableCount = 14;
@@ -192,8 +200,9 @@ public static class RelationalDemoSchema
     /// nowhere.
     /// </summary>
     /// <param name="connection">
-    /// A connection to the database the Marten store uses. Opened if it is not open yet; never closed or
-    /// disposed here, because the caller owns it.
+    /// A connection to the database to apply the demo to: the one the Marten sample's store uses, or the Postgres
+    /// Studio sample's admin database. Opened if it is not open yet; never closed or disposed here, because the
+    /// caller owns it.
     /// </param>
     /// <param name="cancellationToken">Cancels the apply, which then rolls back as a whole.</param>
     /// <returns>What was written, and which of the optional parts are present.</returns>
@@ -207,8 +216,9 @@ public static class RelationalDemoSchema
     /// half whose schema exists and was not created by the demo.
     /// </summary>
     /// <param name="connection">
-    /// A connection to the database the Marten store uses. Opened if it is not open yet; never closed or
-    /// disposed here, because the caller owns it.
+    /// A connection to the database to apply the demo to: the one the Marten sample's store uses, or the Postgres
+    /// Studio sample's admin database. Opened if it is not open yet; never closed or disposed here, because the
+    /// caller owns it.
     /// </param>
     /// <param name="logger">Where a skipped half is reported, at Information.</param>
     /// <param name="cancellationToken">Cancels the apply, which then rolls back as a whole.</param>
@@ -423,7 +433,7 @@ public static class RelationalDemoSchema
         using Stream stream = typeof(RelationalDemoSchema).Assembly.GetManifestResourceStream(resource)
             ?? throw new InvalidOperationException(
                 "The embedded script " + resource + " is missing. It is an EmbeddedResource in "
-                + "MartenStudio.SampleDomain.csproj; a rename there has to be made here too.");
+                + "PostgresStudio.SampleData.csproj; a rename there has to be made here too.");
 
         using var reader = new StreamReader(stream, Encoding.UTF8);
 

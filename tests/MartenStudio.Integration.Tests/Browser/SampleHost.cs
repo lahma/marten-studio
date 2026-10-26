@@ -130,7 +130,7 @@ internal sealed class SampleHost : IAsyncDisposable
     /// build output has no static web assets (see below), so only HTTP endpoints can be tested there, not the studio.
     /// </param>
     /// <param name="cancellationToken">Cancels the wait.</param>
-    public static async Task<SampleHost> StartAsync(
+    public static Task<SampleHost> StartAsync(
         string connectionString,
         string? studioPath = null,
         bool allowDataGeneration = false,
@@ -140,60 +140,43 @@ internal sealed class SampleHost : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
 
-        string assembly = SampleAssemblyPath();
+        return StartAsync(
+            SampleApp.Marten,
+            connectionString,
+            MartenArguments(studioPath, allowDataGeneration, noDaemon),
+            studioPath,
+            environment,
+            cancellationToken);
+    }
 
-        var startInfo = new ProcessStartInfo("dotnet")
-        {
-            WorkingDirectory = Path.GetDirectoryName(assembly)!,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        };
+    /// <summary>
+    /// Starts <paramref name="app" /> and waits until it answers.
+    /// </summary>
+    /// <param name="app">Which sample.</param>
+    /// <param name="connectionString">
+    /// The database it is pointed at, or <see langword="null" /> for none - the zero-config <c>dotnet run</c>, in which
+    /// the sample starts a throwaway Postgres of its own (D18) and no reuse is asked for.
+    /// </param>
+    /// <param name="arguments">The sample's own switches.</param>
+    /// <param name="studioPath">Where the studio is mounted, or <see langword="null" /> for the sample's default.</param>
+    /// <param name="environment">The host's environment; see the Marten overload for why it is Development.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    public static async Task<SampleHost> StartAsync(
+        SampleApp app,
+        string? connectionString,
+        IReadOnlyList<string>? arguments = null,
+        string? studioPath = null,
+        string environment = "Development",
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(app);
 
-        startInfo.ArgumentList.Add(assembly);
-        startInfo.ArgumentList.Add("--urls");
-        startInfo.ArgumentList.Add("http://127.0.0.1:0");
-
-        if (studioPath is { Length: > 0 })
-        {
-            // --path is the one switch that really is a --key value pair; the boolean ones below are
-            // bare switches and consume nothing (see SampleOptions).
-            startInfo.ArgumentList.Add("--path");
-            startInfo.ArgumentList.Add(studioPath);
-        }
-
-        if (allowDataGeneration)
-        {
-            startInfo.ArgumentList.Add("--allow-data-generation");
-        }
-
-        if (noDaemon)
-        {
-            startInfo.ArgumentList.Add("--no-daemon");
-        }
-
-        // Explicit rather than inherited: a suite whose behaviour depends on what was exported in the
-        // shell that started it is not a suite.
-        //
-        // Development, and it has to be. This host is started from `bin/`, not from a publish, and
-        // ASP.NET Core only calls StaticWebAssetsLoader.UseStaticWebAssets when the environment is
-        // Development - outside it, a non-published application has no static web assets at all. Measured
-        // here before it was changed: with ASPNETCORE_ENVIRONMENT=Production the host logged "The
-        // application is not running against the published output and Static Web Assets are not enabled",
-        // `GET {path}/_content/PostgresStudio/css/studio.css` answered 404 and
-        // `GET {path}/_framework/blazor.web.js` answered 200 with an empty body. That is a fact about
-        // running a build output rather than a publish, not about the studio, and pretending otherwise
-        // would make this suite assert the wrong thing.
-        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = environment;
-        startInfo.Environment["DOTNET_ENVIRONMENT"] = environment;
-        startInfo.Environment["ConnectionStrings__Marten"] = connectionString;
-        startInfo.Environment["Logging__LogLevel__Default"] = "Information";
+        ProcessStartInfo startInfo = CreateStartInfo(app, connectionString, arguments ?? [], environment);
 
         Process process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("`dotnet` did not start the sample host.");
 
-        var host = new SampleHost(process, Normalize(studioPath));
+        var host = new SampleHost(process, Normalize(studioPath, app.DefaultStudioPath));
 
         // Synchronous handlers on purpose. An `async` lambda converted to a DataReceivedEventHandler is
         // an `async void` with different spelling, and AGENTS.md hard rule 6 forbids it in every shape.
@@ -363,8 +346,150 @@ internal sealed class SampleHost : IAsyncDisposable
         }
     }
 
-    private static string Normalize(string? studioPath) =>
-        studioPath is { Length: > 0 } path ? "/" + path.Trim('/') : "/marten";
+    /// <summary>
+    /// Runs <paramref name="app" /> until it exits by itself, for a start the sample is expected to refuse.
+    /// </summary>
+    /// <param name="app">Which sample.</param>
+    /// <param name="connectionString">The database it is pointed at.</param>
+    /// <param name="arguments">The sample's own switches.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>The exit code, and everything it wrote to stdout and stderr.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// It was still running after <see cref="StartTimeout" />, or it bound a socket - which is a host that started.
+    /// </exception>
+    public static async Task<(int ExitCode, string Output)> RunToExitAsync(
+        SampleApp app,
+        string connectionString,
+        IReadOnlyList<string>? arguments = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+
+        Process process = Process.Start(CreateStartInfo(app, connectionString, arguments ?? [], "Development"))
+            ?? throw new InvalidOperationException("`dotnet` did not start the sample host.");
+
+        await using var host = new SampleHost(process, Normalize(null, app.DefaultStudioPath));
+
+        process.OutputDataReceived += (_, e) => host.OnLine(e.Data);
+        process.ErrorDataReceived += (_, e) => host.OnLine(e.Data);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(StartTimeout);
+
+        Task exited = process.WaitForExitAsync(timeout.Token);
+        Task started = host.listening.Task;
+
+        try
+        {
+            if (await Task.WhenAny(exited, started).ConfigureAwait(false) == started)
+            {
+                throw new InvalidOperationException(
+                    "The sample host started listening; it was expected to stop. Its output was:" + Environment.NewLine + host.Log);
+            }
+
+            // With redirected output this also waits for both readers to reach the end, so the log is complete.
+            await exited.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "The sample host did not exit within " + StartTimeout + ". Its output was:" + Environment.NewLine + host.Log,
+                exception);
+        }
+
+        return (process.ExitCode, host.Log);
+    }
+
+    /// <summary>The Marten sample's own switches, as the overload that predates the PostgresStudio sample names them.</summary>
+    private static string[] MartenArguments(string? studioPath, bool allowDataGeneration, bool noDaemon)
+    {
+        List<string> arguments = [];
+
+        if (studioPath is { Length: > 0 })
+        {
+            // --path is the one switch that really is a --key value pair; the boolean ones below are
+            // bare switches and consume nothing (see SampleOptions).
+            arguments.Add("--path");
+            arguments.Add(studioPath);
+        }
+
+        if (allowDataGeneration)
+        {
+            arguments.Add("--allow-data-generation");
+        }
+
+        if (noDaemon)
+        {
+            arguments.Add("--no-daemon");
+        }
+
+        return [.. arguments];
+    }
+
+    private static ProcessStartInfo CreateStartInfo(
+        SampleApp app,
+        string? connectionString,
+        IReadOnlyList<string> arguments,
+        string environment)
+    {
+        string assembly = SampleAssemblyPath(app);
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            WorkingDirectory = Path.GetDirectoryName(assembly)!,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+
+        startInfo.ArgumentList.Add(assembly);
+        startInfo.ArgumentList.Add("--urls");
+        startInfo.ArgumentList.Add("http://127.0.0.1:0");
+
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        // Explicit rather than inherited: a suite whose behaviour depends on what was exported in the
+        // shell that started it is not a suite.
+        //
+        // Development, and it has to be. This host is started from `bin/`, not from a publish, and
+        // ASP.NET Core only calls StaticWebAssetsLoader.UseStaticWebAssets when the environment is
+        // Development - outside it, a non-published application has no static web assets at all. Measured
+        // here before it was changed: with ASPNETCORE_ENVIRONMENT=Production the host logged "The
+        // application is not running against the published output and Static Web Assets are not enabled",
+        // `GET {path}/_content/PostgresStudio/css/studio.css` answered 404 and
+        // `GET {path}/_framework/blazor.web.js` answered 200 with an empty body. That is a fact about
+        // running a build output rather than a publish, not about the studio, and pretending otherwise
+        // would make this suite assert the wrong thing.
+        startInfo.Environment["ASPNETCORE_ENVIRONMENT"] = environment;
+        startInfo.Environment["DOTNET_ENVIRONMENT"] = environment;
+        startInfo.Environment["Logging__LogLevel__Default"] = "Information";
+
+        string variable = "ConnectionStrings__" + app.ConnectionStringName;
+
+        if (connectionString is { Length: > 0 })
+        {
+            startInfo.Environment[variable] = connectionString;
+        }
+        else
+        {
+            // The zero-config start: nothing configured, so the sample starts a throwaway Postgres of its own, and a
+            // fresh one - never one this suite's container could be mistaken for.
+            startInfo.Environment.Remove(variable);
+            startInfo.Environment[PostgresFixture.ReuseEnvironmentVariable] = "false";
+        }
+
+        return startInfo;
+    }
+
+    private static string Normalize(string? studioPath, string defaultPath) =>
+        studioPath is { Length: > 0 } path ? "/" + path.Trim('/') : defaultPath;
 
     /// <summary>
     /// The sample's own build output.
@@ -377,7 +502,7 @@ internal sealed class SampleHost : IAsyncDisposable
     /// Both candidates are probed and the failure names them, because a path guessed wrong three layers
     /// down produces "the host did not start" and nothing else.
     /// </remarks>
-    private static string SampleAssemblyPath()
+    private static string SampleAssemblyPath(SampleApp app)
     {
         var output = new DirectoryInfo(
             AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -385,11 +510,12 @@ internal sealed class SampleHost : IAsyncDisposable
         string targetFramework = output.Name;
         string configuration = output.Parent?.Name ?? "Debug";
         string root = RepositoryRoot();
+        string file = app.Project + ".dll";
 
         string[] candidates =
         [
-            Path.Combine(root, "samples", "MartenStudio.Sample", "bin", configuration, targetFramework, "MartenStudio.Sample.dll"),
-            Path.Combine(root, "artifacts", "bin", "MartenStudio.Sample", configuration.ToLowerInvariant(), "MartenStudio.Sample.dll"),
+            Path.Combine(root, "samples", app.Project, "bin", configuration, targetFramework, file),
+            Path.Combine(root, "artifacts", "bin", app.Project, configuration.ToLowerInvariant(), file),
         ];
 
         foreach (string candidate in candidates)
@@ -424,4 +550,20 @@ internal sealed class SampleHost : IAsyncDisposable
             "marten-studio.slnx was not found above " + AppContext.BaseDirectory + ", so the repository "
             + "root could not be located.");
     }
+}
+
+/// <summary>One of the repository's two sample hosts, as <see cref="SampleHost" /> starts it.</summary>
+/// <param name="Project">The project's folder and assembly name under <c>samples/</c>.</param>
+/// <param name="ConnectionStringName">The <c>ConnectionStrings:</c> key it reads its database from.</param>
+/// <param name="DefaultStudioPath">Where it mounts its studio when no path is given.</param>
+internal sealed record SampleApp(string Project, string ConnectionStringName, string DefaultStudioPath)
+{
+    /// <summary>The Marten sample: <c>samples/MartenStudio.Sample</c>.</summary>
+    public static SampleApp Marten { get; } = new("MartenStudio.Sample", "Marten", "/marten");
+
+    /// <summary>
+    /// The Postgres Studio sample: <c>samples/PostgresStudio.Sample</c>, built through a project reference that
+    /// references no assembly of it.
+    /// </summary>
+    public static SampleApp Postgres { get; } = new("PostgresStudio.Sample", "Postgres", "/postgres");
 }

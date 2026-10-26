@@ -6,6 +6,8 @@ using Marten;
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Events;
 
+using PostgresStudio.SampleData;
+
 namespace MartenStudio.SampleDomain;
 
 /// <summary>
@@ -18,8 +20,11 @@ namespace MartenStudio.SampleDomain;
 /// </remarks>
 public static class SampleStore
 {
-    /// <summary>The schema the demo documents live in.</summary>
-    public const string DocumentSchema = "studio_sample";
+    /// <summary>
+    /// The schema the demo documents live in: the relational demo's own sample schema, which its scripts name and
+    /// which it reaches into (<c>app_settings</c>, and <c>legacy.customer_credit</c>'s foreign key).
+    /// </summary>
+    public const string DocumentSchema = RelationalDemoSchema.SampleSchemaName;
 
     /// <summary>The schema the demo event store lives in.</summary>
     public const string EventSchema = "studio_sample_events";

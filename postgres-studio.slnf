@@ -3,6 +3,8 @@
     "path": "marten-studio.slnx",
     "projects": [
       "src\\PostgresStudio\\PostgresStudio.csproj",
+      "samples\\PostgresStudio.SampleData\\PostgresStudio.SampleData.csproj",
+      "samples\\PostgresStudio.Sample\\PostgresStudio.Sample.csproj",
       "tests\\PostgresStudio.Tests\\PostgresStudio.Tests.csproj"
     ]
   }

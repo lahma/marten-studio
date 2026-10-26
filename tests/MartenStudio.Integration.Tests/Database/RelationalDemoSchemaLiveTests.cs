@@ -8,12 +8,12 @@ using MartenStudio.Integration.Tests.Browser;
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Generation;
-using MartenStudio.SampleDomain.Relational;
 
 using Microsoft.Extensions.Logging;
 
 using Npgsql;
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.SampleData;
 
 namespace MartenStudio.Integration.Tests.Database;
 

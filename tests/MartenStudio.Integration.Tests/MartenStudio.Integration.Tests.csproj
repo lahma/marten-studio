@@ -33,6 +33,10 @@
     <ProjectReference Include="../../src/MartenStudio/MartenStudio.csproj" />
     <ProjectReference Include="../../samples/MartenStudio.SampleDomain/MartenStudio.SampleDomain.csproj" />
     <ProjectReference Include="../../samples/MartenStudio.Sample/MartenStudio.Sample.csproj" />
+    <!-- Built, so the smoke test can start it from its own bin as SampleHost starts the Marten sample, and never
+         referenced as an assembly: both samples have a top-level Program, and the suite needs none of this one's
+         types. PostgresStudio.Integration.Tests (PS-5) is its natural home once it exists. -->
+    <ProjectReference Include="../../samples/PostgresStudio.Sample/PostgresStudio.Sample.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

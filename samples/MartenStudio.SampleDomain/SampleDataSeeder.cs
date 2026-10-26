@@ -5,12 +5,13 @@ using Marten.Schema;
 
 using MartenStudio.SampleDomain.Documents;
 using MartenStudio.SampleDomain.Events;
-using MartenStudio.SampleDomain.Relational;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using Npgsql;
+
+using PostgresStudio.SampleData;
 
 namespace MartenStudio.SampleDomain;
 
@@ -48,8 +49,18 @@ public sealed class SeedMarker
 /// </remarks>
 public sealed class SampleDataSeeder : IInitialData
 {
-    /// <summary>Bumped when the data below changes, so an existing database is re-seeded.</summary>
-    private const int SeedVersion = 3;
+    /// <summary>
+    /// Bumped when the data below changes, so an existing database is re-seeded - and when
+    /// <see cref="SampleStore" />'s configuration changes in a way Marten cannot migrate over the rows an older build
+    /// wrote, such as a new foreign key.
+    /// </summary>
+    /// <remarks>
+    /// The sample host compares it with the database's <see cref="SeedMarker" /> before Marten touches anything
+    /// (<see cref="SampleDatabase" />), and a database another version seeded has the demo's schemas dropped and seeded
+    /// again, or the host stops and says how to do that. The re-seed below - clear, then write again - is for a store
+    /// whose tables already have the current shape, which is what a test that rewinds the marker builds.
+    /// </remarks>
+    public const int SeedVersion = 3;
 
     private readonly ILogger logger;
 
@@ -69,7 +80,8 @@ public sealed class SampleDataSeeder : IInitialData
     private const int MediaAssetBytes = 1_500_000;
 
     /// <summary>How many customers the seeder writes, numbered from one.</summary>
-    public const int CustomerCount = 25;
+    /// <remarks>The relational demo's credit lines name the same customers, so the number is defined there.</remarks>
+    public const int CustomerCount = SampleCustomers.Count;
 
     public async Task Populate(IDocumentStore store, CancellationToken cancellation)
     {
@@ -402,9 +414,10 @@ public sealed class SampleDataSeeder : IInitialData
     /// <summary>
     /// The id of seeded customer <paramref name="index" />, one to <see cref="CustomerCount" />, stable
     /// across runs - which is what lets <c>legacy.customer_credit</c> point at the same customers every
-    /// time it is filled.
+    /// time it is filled. Defined by the relational demo (<see cref="SampleCustomers.Id" />), which names
+    /// them without referencing Marten, and the same as <c>DeterministicGuid("customer", index)</c>.
     /// </summary>
-    public static Guid CustomerId(int index) => DeterministicGuid("customer", index);
+    public static Guid CustomerId(int index) => SampleCustomers.Id(index);
 
     /// <summary>
     /// Empties the demo's own collections, and only those: a sample store may be sharing a database with

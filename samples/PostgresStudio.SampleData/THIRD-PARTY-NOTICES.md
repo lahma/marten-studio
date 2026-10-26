@@ -1,7 +1,7 @@
 # Third-party notices
 
-This folder belongs to the Marten Studio sample, which is never packed or shipped. One file in it is
-not the sample's own work.
+This folder belongs to the samples' shared demo data, which both sample hosts apply and which is never
+packed or shipped. One file in it is not the samples' own work.
 
 ## Quartz.NET
 

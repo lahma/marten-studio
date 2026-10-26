@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The Postgres Studio sample: a web host with no Marten, shaped like issue #8's host B - an admin database (the
+    application's unkeyed NpgsqlDataSource) and one database per tenant, listed by the host itself through an
+    IPostgresDatabaseSource. With no ConnectionStrings:Postgres it starts a throwaway Postgres (D18).
+
+    Deliberately NO `RequiresAspNetWebAssets`, for the reason samples/MartenStudio.Sample gives: the studio's own
+    reference to Microsoft.AspNetCore.App.Internal.Assets brings blazor.web.js here, which is the shape a real host
+    has.
+
+    It sets PostgresStudioPinsNpgsql, as every PostgresStudio-only project does, so it restores the Npgsql the
+    PostgresStudio package is pinned to and joins the latest-Npgsql pass over postgres-studio.slnf (AGENTS.md D30).
+    Nothing here may reach Marten: PostgresStudioSolutionFilterTests holds the filter closed.
+  -->
+  <PropertyGroup>
+    <UserSecretsId>postgres-studio-sample</UserSecretsId>
+    <PostgresStudioPinsNpgsql>true</PostgresStudioPinsNpgsql>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <!-- The throwaway-Postgres switch and the sign-in form are internal to the demo; PS-5's suite tests them. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="PostgresStudio.Integration.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PostgresStudio/PostgresStudio.csproj" />
+    <ProjectReference Include="../PostgresStudio.SampleData/PostgresStudio.SampleData.csproj" />
+  </ItemGroup>
+
+</Project>

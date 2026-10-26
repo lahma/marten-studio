@@ -1,8 +1,6 @@
-using MartenStudio.SampleDomain.Generation;
-
 using Npgsql;
 
-namespace MartenStudio.SampleDomain.Relational;
+namespace PostgresStudio.SampleData;
 
 /// <summary>The two catalog questions the relational seeding asks before it writes.</summary>
 internal static class DemoTable
