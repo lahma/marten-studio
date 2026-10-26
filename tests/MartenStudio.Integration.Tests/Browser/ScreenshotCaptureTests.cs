@@ -272,7 +272,7 @@ public class ScreenshotCaptureTests(BrowserSuiteFixture fixture)
                 new PageWaitForFunctionOptions { Timeout = 30_000 });
 
             // And the sidebar's badge caught up with it: it reads the same sweep on its own poll, a few seconds behind.
-            (await HealthBrowser.BadgeAgreesWithThePageAsync(page)).Should().BePositive("T07 and C04 are Warnings");
+            (await HealthBrowser.BadgeAgreesWithThePageAsync(page)).Should().BePositive("T07 is Critical and C04 a Warning, both counted by the badge");
 
             // From the top of the page to the bottom of the last findings area, in document coordinates, measured from the
             // element itself once everything above has settled.

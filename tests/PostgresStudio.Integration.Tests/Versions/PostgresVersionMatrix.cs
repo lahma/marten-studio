@@ -99,6 +99,11 @@ public sealed record MatrixVersion(int Major, string Image)
 /// this machine, and two containers cannot share a name.
 /// </para>
 /// <para>
+/// <b>Shared, so nothing of the cluster's changes on it.</b> Every class of the run reads the same server, and
+/// <c>VersionMatrixLiveTests</c>' no-DDL fingerprint lists every role. A test that makes a role, grants one or alters
+/// one takes a server of its own (<see cref="IsolatedServerAsync" />, named <c>ms-matrix-&lt;major&gt;-&lt;purpose&gt;-&lt;run&gt;</c>).
+/// </para>
+/// <para>
 /// <b>D19's rule.</b> An image that cannot be pulled or started skips its leg locally, with the <c>docker pull</c> line in
 /// the reason (<see cref="MatrixServer.Unavailable" />), and fails the run on CI - except a <see cref="MatrixVersion.Preview" />
 /// leg, which skips on CI too until its tag is a released one. No Docker at all is <c>[PostgresTheory]</c>'s skip.
@@ -185,16 +190,55 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
         """;
 
     private readonly ConcurrentDictionary<int, Lazy<Task<MatrixServer>>> servers = new();
+    private readonly ConcurrentDictionary<(int Major, string Purpose), Lazy<Task<MatrixServer>>> isolated = new();
 
     /// <summary>The server of <paramref name="major" />, started and seeded the first time any class asks for it.</summary>
+    /// <remarks>
+    /// Shared by every class of the run, so nothing of the cluster's - a role, a role's membership or its settings - is
+    /// ever changed on it: that is <see cref="IsolatedServerAsync" />'s.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">The matrix has no such major.</exception>
     public Task<MatrixServer> ServerAsync(int major)
     {
-        MatrixVersion version = Versions.FirstOrDefault(x => x.Major == major)
-            ?? throw new ArgumentOutOfRangeException(nameof(major), major, "The version matrix runs 14 to 19.");
+        MatrixVersion version = VersionOf(major);
 
         return servers.GetOrAdd(major, _ => new Lazy<Task<MatrixServer>>(() => MatrixServer.StartAsync(version), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
     }
+
+    /// <summary>
+    /// A server of <paramref name="major" /> that only the callers naming the same <paramref name="purpose" /> share - the same
+    /// image, settings and seed as <see cref="ServerAsync" />'s, started the first time one asks and disposed with the matrix -
+    /// for a test that changes something of the whole cluster's.
+    /// </summary>
+    /// <remarks>
+    /// A role is the cluster's, not a database's, so <see cref="MatrixServer.CreateDatabaseAsync" /> does not keep it away
+    /// from the seeded database, and <see cref="MatrixServer.SnapshotAsync" /> lists every role. A role another class makes
+    /// before <c>VersionMatrixLiveTests</c>' sweep and drops during it reads as an object the sweep dropped - W5's CI,
+    /// 2026-10-26: 95 objects before a sweep on 17 and 94 after, where a fresh 17 has 94, while <c>ServerPostureLiveTests</c>
+    /// made and dropped its logins on the shared 17. So <c>CREATE ROLE</c>, <c>GRANT</c> of a role and <c>ALTER ROLE</c> run
+    /// here, never on <see cref="ServerAsync" />'s.
+    /// </remarks>
+    /// <param name="major">The major.</param>
+    /// <param name="purpose">What the callers share the server for, in lower-case letters, digits and hyphens: part of its container's name.</param>
+    /// <exception cref="ArgumentOutOfRangeException">The matrix has no such major.</exception>
+    /// <exception cref="ArgumentException"><paramref name="purpose" /> is not a container-name segment.</exception>
+    public Task<MatrixServer> IsolatedServerAsync(int major, string purpose)
+    {
+        MatrixVersion version = VersionOf(major);
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(purpose, "^[a-z0-9-]+$", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)))
+        {
+            throw new ArgumentException("A purpose is lower-case letters, digits and hyphens: it names a container.", nameof(purpose));
+        }
+
+        return isolated.GetOrAdd(
+            (major, purpose),
+            _ => new Lazy<Task<MatrixServer>>(() => MatrixServer.StartAsync(version, purpose), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+    }
+
+    private static MatrixVersion VersionOf(int major) =>
+        Versions.FirstOrDefault(x => x.Major == major)
+            ?? throw new ArgumentOutOfRangeException(nameof(major), major, "The version matrix runs 14 to 19.");
 
     /// <inheritdoc />
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -202,7 +246,7 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
-        foreach (Lazy<Task<MatrixServer>> server in servers.Values.Where(static x => x.IsValueCreated))
+        foreach (Lazy<Task<MatrixServer>> server in servers.Values.Concat(isolated.Values).Where(static x => x.IsValueCreated))
         {
             try
             {
@@ -355,6 +399,34 @@ public sealed class MatrixServer : IAsyncDisposable
         return objects;
     }
 
+    /// <summary>
+    /// The no-DDL assertion over two <see cref="SnapshotAsync" /> fingerprints: set equality, asserted as the list of what was
+    /// created and what was dropped, so a failure names the objects - a message that prints both whole fingerprints, some
+    /// ninety objects each, is cut short long before the one that differs.
+    /// </summary>
+    /// <remarks>
+    /// The fingerprint lists roles, which are the cluster's, so a role another class made on a server of
+    /// <see cref="PostgresVersionMatrix.ServerAsync" /> while the read under test ran would show here as created or dropped
+    /// by it - which is why such a class takes <see cref="PostgresVersionMatrix.IsolatedServerAsync" />.
+    /// </remarks>
+    /// <param name="before">The fingerprint before the read.</param>
+    /// <param name="after">The fingerprint after it.</param>
+    /// <param name="because">What the read promises.</param>
+    public static void AssertUnchanged(IReadOnlySet<string> before, IReadOnlySet<string> after, string because)
+    {
+        ArgumentNullException.ThrowIfNull(before);
+        ArgumentNullException.ThrowIfNull(after);
+
+        string[] changed =
+        [
+            .. after.Except(before).Order(StringComparer.Ordinal).Select(static x => "created " + x),
+            .. before.Except(after).Order(StringComparer.Ordinal).Select(static x => "dropped " + x),
+        ];
+
+        // As one string: a collection's BeEmpty names only the first item it found.
+        string.Join("; ", changed).Should().BeEmpty(because);
+    }
+
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
@@ -369,8 +441,11 @@ public sealed class MatrixServer : IAsyncDisposable
         }
     }
 
-    /// <summary>Starts and seeds one leg's server, or says why it cannot.</summary>
-    internal static async Task<MatrixServer> StartAsync(MatrixVersion version)
+    /// <summary>
+    /// Starts and seeds one leg's server - the shared one, or with <paramref name="purpose" /> one of its own
+    /// (<see cref="PostgresVersionMatrix.IsolatedServerAsync" />) - or says why it cannot.
+    /// </summary>
+    internal static async Task<MatrixServer> StartAsync(MatrixVersion version, string? purpose = null)
     {
         DockerAvailability.ThrowIfMissingOnContinuousIntegration();
 
@@ -382,8 +457,9 @@ public sealed class MatrixServer : IAsyncDisposable
         string major = version.Major.ToString(CultureInfo.InvariantCulture);
         PostgreSqlContainer container = new PostgreSqlBuilder(version.Image)
             .WithReuse(false)
-            .WithName("ms-matrix-" + major + "-" + PostgresVersionMatrix.RunId)
+            .WithName("ms-matrix-" + major + (purpose is null ? string.Empty : "-" + purpose) + "-" + PostgresVersionMatrix.RunId)
             .WithLabel("ms-matrix", major)
+            .WithLabel("ms-matrix-purpose", purpose ?? "shared")
             .WithLabel("ms-matrix-run", PostgresVersionMatrix.RunId)
             .WithCommand("-c", "shared_preload_libraries=pg_stat_statements")
             .WithCommand("-c", "track_io_timing=on")
