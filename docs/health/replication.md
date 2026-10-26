@@ -194,9 +194,16 @@ behind, **Critical** at an hour.
   bound, exact to within one sample. It is never the age of the last replayed commit, which grows with no lag at all
   on an idle primary, behind a long writer that has not committed (a freeze `VACUUM` writes WAL for hours and
   commits nothing), and on a delayed standby after a quiet night; that age is shown in the evidence and never judged.
-  Before there is an earlier sample, or while replay has reached nothing the samples saw received and the bound is
-  still under 5 minutes, the status row says the time is "not judged yet". A standby stuck since before the advisor
-  started watching fires on the bound once it reaches 5 minutes, and says "at least".
+  The start of a stall - that oldest unreplayed sample - is carried from sweep to sweep in series of its own, so a
+  stall longer than the 60 samples the advisor keeps still grows, and a sample above what the standby has received
+  now (from before a `pg_rewind` onto an earlier fork, or a restore to an earlier point) is never a start.
+
+  So a standby that is hours behind when the advisor starts watching, but holds under 1 GiB unreplayed, is:
+  - **"not judged yet"** for its first 5 minutes of samples - nothing yet says how long it has been stuck;
+  - then a **Warning** at the lower bound, worded "at least", because the stall may be older than the samples;
+  - and **Critical** once the stall's recorded start is an hour old, however many samples the ring has dropped since.
+
+  A gibibyte or more unreplayed is a Warning at once, on the bytes alone.
 - **`paused`**, Warning: replay is paused (`pg_wal_replay_pause()`, `pg_get_wal_replay_pause_state()` from 14). The
   standby keeps receiving WAL and applies none of it until somebody runs `pg_wal_replay_resume()`.
 
@@ -211,9 +218,10 @@ itself, for every visitor.
 **A delayed standby** (`recovery_min_apply_delay`) replays late on purpose. On the standby the setting is read, and the
 time judged is the time beyond the delay: a healthy one replays what it received a delay ago, so it fires only when WAL
 received more than the delay and 5 minutes ago is still unreplayed - replay stuck behind the delay, not waiting on it.
-That needs samples that reach back past the delay: the advisor keeps 60 samples per database, an hour at the default
-`HealthInterval` of one minute, so a standby delayed by more than about 55 minutes is judged only with a longer
-`HealthInterval`, and until then its status row says "not judged yet" and why. An hour's delay after a night with no commits is not 8.5 hours of lag: the
+Until replay is first seen to pass a position the advisor sampled - about one delay after it began watching - the
+status row says "not judged yet" and why, unless the time is already more than 5 minutes beyond the delay, which fires.
+From then on the stall's carried start judges it, so the samples need not reach back past the delay: a delay longer
+than the 60 samples the advisor keeps is judged too. An hour's delay after a night with no commits is not 8.5 hours of lag: the
 last replayed commit is that old, but replay has reached everything received more than an hour ago. The WAL it holds
 for the delay is shown and not judged.
 
@@ -230,8 +238,13 @@ name, client address and role are evidence shown only with `ViewDatabaseActivity
 
 **Not applicable** on Amazon Aurora: its readers share the cluster volume and do not stream WAL.
 
-**History.** On a standby, R03 adds `replication.standby-received`, the position it has received, to the samples: the
-earlier samples are what the time behind is read from.
+**A known limit on the standby side.** A standby whose WAL receiver has disconnected receives nothing new, replays what
+it has, and so is not seen to fall behind from the standby itself. R01 sees its slot go inactive and hold WAL on the
+primary, and from the primary's view it is missing from `pg_stat_replication`.
+
+**History.** On a standby, R03 adds `replication.standby-received`, the position it has received, to the samples, and,
+while a stall lasts, `replication.standby-stall-since`, `replication.standby-stall-position` and (while it may be older
+than the samples) `replication.standby-stall-open`, which carry its start from one sweep to the next.
 
 ## R04 Requested checkpoints
 
