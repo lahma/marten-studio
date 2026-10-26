@@ -120,7 +120,8 @@ health checks, Amazon Aurora awareness, PostgreSQL 14 to 18 as a tested range, a
   databases it checks. It reports each database's latest result for one full rotation and one run more, counted in runs
   rather than time, so findings do not flap however long a run takes; a database a page swept within the interval is
   not swept again. `databasesSkipped` changes meaning: it now counts only the databases never yet checked in this
-  process, not every database past the first 25. A platform that lacks or refuses `pg_control_checkpoint()` or
+  process, not every database past the first 25, and the description says they are "not yet reached by the rotation"
+  where it said "past the most one run checks". A platform that lacks or refuses `pg_control_checkpoint()` or
   `pg_control_system()` does not make it `Degraded`.
 - The health advisor keeps per-database state for at most 64 databases - history, T14's first-seen marks, cached sweeps
   and statement texts - and forgets the least recently used database's state all together. A database that is read
@@ -223,9 +224,10 @@ health checks, Amazon Aurora awareness, PostgreSQL 14 to 18 as a tested range, a
   `pg_read_all_stats`, and without it the check says "not checked" and names the grant; a standby that delays replay
   on purpose shows its delay as lag there. From a standby the data source reaches no grant is needed, and the time is
   how long WAL the standby received has gone unreplayed, read from the advisor's samples, never the age of its last
-  commit; on a delayed standby only the time beyond `recovery_min_apply_delay` counts. A paused replay is its own
-  Warning. Known limit: the history holds 60 samples, about an hour at the default `HealthInterval`, so a standby
-  delayed by more than about 55 minutes is "not judged yet" on time.
+  commit; on a delayed standby only the time beyond `recovery_min_apply_delay` counts. The start of a stall is carried
+  from sweep to sweep, so a delay longer than the hour of samples the advisor keeps is judged too; until replay is
+  first seen to pass a position the advisor sampled, the status row says "not judged yet" and why. A paused replay is
+  its own Warning.
 - New check R04 Requested checkpoints: requested checkpoints are 20% or more of at least 10 checkpoints in the
   advisor's window, counted each release's own way (up to 17 the timed count includes checkpoints an idle server
   skipped; from 18 it is `num_done`), or there are more requested checkpoints than `checkpoint_timeout` allows. The

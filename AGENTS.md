@@ -995,7 +995,9 @@ passes at both against an untouched baseline. The transitive graph:
   queries; two advisories in its history, both behind 1.7.4: CVE-2023-32571 / GHSA-w65q-jcmv-28gj,
   critical, `< 1.3.0`, and CVE-2024-51417 / GHSA-4cv2-4hjh-77rx, high, `< 1.6.0`), and
   **Patched.DistributedLock.Core 1.0.11 / Patched.DistributedLock.Postgres 1.3.3**, which replace
-  DistributedLock.Core / DistributedLock.Postgres from Weasel.Postgresql 9.45 on (JasperFx/weasel#614,
+  DistributedLock.Core / DistributedLock.Postgres from Weasel.Postgresql 9.34 on - Marten 9.39.1, not 9.45 as this
+  entry first said (corrected by W5-S2-fix, 2026-10-26: `git show 9.34.0:src/Weasel.Postgresql/Weasel.Postgresql.csproj`
+  references `Patched.DistributedLock.Postgres`, 9.33.0 the upstream package) - (JasperFx/weasel#614,
   "Use patched advisory lock", merged 2026-09-24). They are a JasperFx-maintained fork, owned on
   nuget.org by **Hawxy**, a JasperFx contributor — not packages from DistributedLock's own author, even
   though their nuspec still carries the upstream authors and repository URL.
