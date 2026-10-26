@@ -412,6 +412,17 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     {
         await WaitUntilCaughtUpAsync(ShipmentTrackerName);
 
+        // What the continuous agent wrote. Not a count to see grow: Marten's rebuild teardown deletes the projection's
+        // dead letters before it replays (DocumentStore.EventStore teardownProjectionStorage, read at V9.39.0), so the
+        // rebuild's own dead letter replaces one rather than adding to it - and a new id is what only the rebuild writes.
+        HashSet<Guid> before;
+        await using (IQuerySession earlier = Fixture.Store.QuerySession())
+        {
+            before = [.. (await earlier.Query<DeadLetterEvent>().ToListAsync(Token))
+                .Where(static x => x.ProjectionName == ShipmentTrackerName)
+                .Select(static x => x.Id)];
+        }
+
         OperationStart handle = await Fixture.UseAsync(service => service.RebuildAsync(Fixture.Scope, ShipmentTrackerName, Token));
 
         handle.Started.Should().BeTrue();
@@ -430,7 +441,9 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
         await using IQuerySession session = Fixture.Store.QuerySession();
         IReadOnlyList<DeadLetterEvent> dead = await session.Query<DeadLetterEvent>().ToListAsync(Token);
 
-        dead.Should().Contain(x => x.ProjectionName == ShipmentTrackerName, "the rebuild skipped the poisoned event into a dead letter");
+        dead.Should().Contain(
+            x => x.ProjectionName == ShipmentTrackerName && !before.Contains(x.Id),
+            "the rebuild skipped the poisoned event into a dead letter of its own, one the continuous agent did not write");
     }
 
     /// <summary>
