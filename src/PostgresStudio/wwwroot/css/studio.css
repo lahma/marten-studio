@@ -11051,6 +11051,16 @@ a.ms-schema-health-mark:focus-visible {
     background: var(--ms-color-surface);
 }
 
+/*
+   Positioned so that each table is the containing block of the visually hidden text in it (the tablespaces' last
+   header, "Size", is .ms-sr-only, which is absolute). Without it that text is placed against the initial containing
+   block, escapes the scroll region the table sits in, and widened the whole document to 484 px at 390 px - measured
+   (UI-fix), on both samples. The database browser's grids carry the same rule for the same reason.
+*/
+.ms-repl-table {
+    position: relative;
+}
+
 @media (max-width: 640px) {
     .ms-repl-stats,
     .ms-repl-facts {
