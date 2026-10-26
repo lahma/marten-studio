@@ -167,6 +167,9 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
             IndexOrigin.Host =>
                 " It is the host's own index, which nothing the studio knows of reconciles: whoever owns the schema rebuilds it "
                 + "(REINDEX INDEX CONCURRENTLY) or drops it, in the host's own migrations.",
+            IndexOrigin.StoreManaged =>
+                " It is on a table a Marten store manages: that store's next apply decides it, so change it in that store's "
+                + "StoreOptions - re-applying its configuration drops an invalid index and builds it again.",
             IndexOrigin.Ignored =>
                 " The configuration tells Marten's migration to skip it (IgnoreIndex), so an apply neither rebuilds nor drops it - "
                 + "short of one that rebuilds the whole table, as a changed partition scheme does: it stays invalid until a DBA "
@@ -252,6 +255,7 @@ internal sealed class InvalidIndexCheck : HealthCheck<InvalidIndexFacts>
         IndexOrigin.Managed => "by the Marten-managed table's own definition",
         IndexOrigin.Ignored => "no - the configuration ignores it (IgnoreIndex)",
         IndexOrigin.Host => "by the host's own schema",
+        IndexOrigin.StoreManaged => "managed by a Marten store; change it in that store's StoreOptions",
         _ => "no - nothing in the configuration declares it",
     };
 }

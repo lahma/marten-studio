@@ -64,6 +64,11 @@ internal sealed class StudioText
     /// <summary>What the Activity ring says of a scope a policy refused.</summary>
     public required string ScopeDeniedEntry { get; init; }
 
+    /// <summary>
+    /// The source, possessive, before "own role", "own schemas" or "most expensive statements": <c>the store's</c>.
+    /// </summary>
+    public required string SourcePossessive { get; init; }
+
     // ---------------------------------------------------------------------------------------------------------------
     // The database browser.
 
@@ -190,6 +195,7 @@ internal sealed class StudioText
         RegistrationMethod = "AddMartenStudio",
         SourceNoun = "Marten store",
         ScopeDeniedEntry = "Not authorized for this store, database or tenant.",
+        SourcePossessive = "the store's",
 
         BrowseReadOnlyDenial = DatabaseGate.ReadOnlyDenial,
         BrowseCapabilityDenial = DatabaseGate.CapabilityDenial,

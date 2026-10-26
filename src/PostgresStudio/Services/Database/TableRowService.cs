@@ -569,7 +569,11 @@ internal sealed class TableRowService : ITableRowService
                                     .MayCountExactlyAsync(connection, relation.Schema, relation.Name, estimate, token)
                                     .ConfigureAwait(false))
                             {
-                                return shell with { Count = DocumentCount.RefusedExact(estimate, threshold) };
+                                return shell with
+                                {
+                                    Count = DocumentCount.RefusedExact(
+                                        estimate, threshold, DocumentCount.RefusedAboveNote(threshold, value.OptionName("ExactCountThreshold"))),
+                                };
                             }
                         }
 

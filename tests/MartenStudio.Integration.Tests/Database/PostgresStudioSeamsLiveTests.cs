@@ -61,7 +61,8 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
             && x.Library == "Quartz.NET" && x.ExemptFromIndexDesign);
         set.Find(App, "__EFMigrationsHistory")!.Library.Should().Be("Entity Framework Core");
         set.Find(App, "mt_hilo")!.Library.Should().Be("Marten");
-        set.Find(App, "mt_doc_order")!.Ownership.Should().Be(StudioTableOwnership.Owned);
+        set.Find(App, "mt_doc_order")!.Should().Match<StudioTable>(static x => x.Kind == StudioTableKind.DocumentTable
+            && x.Ownership == StudioTableOwnership.Library && x.Library == "Marten", "a Marten store manages it");
         set.Find(Legacy, "ledger")!.Should().Match<StudioTable>(static x => x.Ownership == StudioTableOwnership.Other
             && x.GatedSchemas.Single() == Legacy, "only \"*\" admits its schema");
         set.Tables.Should().NotContain(static x => x.Schema.StartsWith("pg_", StringComparison.Ordinal) || x.Schema == "information_schema");
@@ -82,7 +83,7 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
 
         await using ServiceProvider services = Host(postgres.ConnectionString, [App]);
         await using AsyncServiceScope circuit = services.CreateAsyncScope();
-        StudioScope scope = new("default", string.Empty, null);
+        StudioScope scope = new("default", "default", null);
 
         DatabaseObjectList tables = await circuit.ServiceProvider.GetRequiredService<IDatabaseObjectService>()
             .ListAsync(scope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables, App), Token);
@@ -137,7 +138,7 @@ public class PostgresStudioSeamsLiveTests(PostgresFixture postgres)
     {
         await using AsyncServiceScope scope = services.CreateAsyncScope();
         return await scope.ServiceProvider.GetRequiredService<StudioSourceResolver>()
-            .ResolveAsync(new StudioScope("default", string.Empty, null), null, Token);
+            .ResolveAsync(new StudioScope("default", "default", null), null, Token);
     }
 
     private async Task SeedAsync()

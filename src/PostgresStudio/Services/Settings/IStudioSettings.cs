@@ -37,8 +37,11 @@ internal interface IStudioSettings
 
     /// <summary>
     /// Every sentence the shared studio says in this studio's own words (<see cref="StudioText" />): MartenStudio's is
-    /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. No default: a studio that forgot to say would
-    /// otherwise speak another's words.
+    /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. This member has no default implementation, so
+    /// a studio's settings must say. A few shared services take the settings optionally, only so that a test can build
+    /// them by hand, and fall back to MartenStudio's words when given none (<see cref="StudioText.Of" />); every studio's
+    /// registration supplies its settings, which <c>PostgresStudioWiringTests</c> holds a real <c>AddPostgresStudio()</c>
+    /// host to.
     /// </summary>
     StudioText Text { get; }
 

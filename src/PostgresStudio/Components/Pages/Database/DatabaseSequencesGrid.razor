@@ -152,7 +152,8 @@
             return false;
         }
 
-        return (sequence.Ownership.IsMarten && access.StoreSchemas.Contains(sequence.Schema))
+        // Marten's own sequences are structure only where a store declares them (MartenStudio's Schema screen).
+        return (Settings.Text.Product == StudioProduct.MartenStudio && sequence.Ownership.IsMarten && access.StoreSchemas.Contains(sequence.Schema))
             || (access.IsOpen && access.BrowsableSchemas.Contains(sequence.Schema));
     }
 

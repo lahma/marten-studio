@@ -8,6 +8,27 @@ namespace PostgresStudio.Tests.Sources;
 /// </summary>
 public class MigrationSqlTextTests
 {
+    /// <summary>
+    /// Names carrying a character that changes what the text on the screen says - a right-to-left override, a zero-width
+    /// space, a Unicode line or paragraph separator - built at run time, so that this source file holds none of them.
+    /// </summary>
+    public static TheoryData<string, string> InvisibleCharacterNames() =>
+    [
+        ("public", "rlo" + char.ConvertFromUtf32(0x202E) + "txt.exe"),
+        ("public", "zero" + char.ConvertFromUtf32(0x200B) + "width"),
+        ("public", "line" + char.ConvertFromUtf32(0x2028) + "separator"),
+        ("public", "paragraph" + char.ConvertFromUtf32(0x2029) + "separator"),
+    ];
+
+    /// <summary>A covering index name that would plant a statement under the remedy's comment, by each line break.</summary>
+    public static TheoryData<string> CommentBreakingNames() =>
+    [
+        "x\nALTER ROLE app SUPERUSER;\n--",
+        "x\rALTER ROLE app SUPERUSER;\r--",
+        "x" + char.ConvertFromUtf32(0x2028) + "ALTER ROLE app SUPERUSER;" + char.ConvertFromUtf32(0x2028) + "--",
+        "x" + char.ConvertFromUtf32(0x2029) + "ALTER ROLE app SUPERUSER;" + char.ConvertFromUtf32(0x2029) + "--",
+        "cover\"; ALTER ROLE app SUPERUSER; --",
+    ];
     [Theory]
     [InlineData("public", "orders", "\"public\".\"orders\"")]
     [InlineData("public", "order", "\"public\".\"order\"")]
@@ -34,8 +55,8 @@ public class MigrationSqlTextTests
     [InlineData("public", "nul\0name")]
     [InlineData("public", "tab\tname")]
     [InlineData("public", "line\nbreak")]
-    [InlineData("public", "rlo‮txt.exe")]
-    [InlineData("public", "zero​width")]
+    [MemberData(nameof(InvisibleCharacterNames))]
+    [InlineData("public", "carriage\rreturn")]
     [InlineData("public", "")]
     [InlineData("public", "   ")]
     public void A_name_that_cannot_be_quoted_honestly_gets_no_statement(string schema, string name)
@@ -45,6 +66,10 @@ public class MigrationSqlTextTests
         MigrationSqlText.CreateIndexConcurrently(schema, name).Should().BeNull();
         MigrationSqlText.DropIndexConcurrently(schema, name).Should().BeNull();
         MigrationSqlText.ReindexIndexConcurrently(schema, name).Should().BeNull();
+        MigrationSqlText.DropRedundantIndexConcurrently(schema, name, "cover").Should().BeNull();
+        string hostile = schema == "public" ? name : schema;
+        MigrationSqlText.DropRedundantIndexConcurrently("public", "index", hostile).Should().BeNull("the covering name is printed too");
+        MigrationSqlText.IsPrintableName(hostile).Should().BeFalse();
     }
 
     [Theory]

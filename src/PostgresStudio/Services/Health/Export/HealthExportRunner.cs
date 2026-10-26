@@ -355,7 +355,14 @@ internal sealed class HealthExportRunner
                 case StudioSweepTargetOutcome.SourceNotEnumerated:
                     // An expected state, and the host's own: its tenancy holds no database in this process yet, or is one
                     // the studio cannot ask without making it build.
-                    if (logger.IsEnabled(LogLevel.Debug))
+                    if (logger.IsEnabled(LogLevel.Debug) && Text.Product == StudioProduct.PostgresStudio)
+                    {
+                        logger.LogDebug(
+                            "Postgres Studio's health export left data source {StoreKey} out: it holds no database it can name ({Shape})",
+                            target.Source.Key,
+                            target.Detail);
+                    }
+                    else if (logger.IsEnabled(LogLevel.Debug))
                     {
                         logger.LogDebug(
                             "Marten Studio's health export left store {StoreKey} out: its tenancy holds no database it can name without building one ({Shape})",

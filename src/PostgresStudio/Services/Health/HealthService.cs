@@ -689,6 +689,15 @@ internal sealed class HealthService : IHealthService
     internal const string UncheckedSchemaReason =
         "names a table in a schema outside the store's own, which could not be checked against the database browser's gate for you";
 
+    /// <summary><see cref="UncheckedSchemaReason" /> in the studio's own words: MartenStudio's is that constant.</summary>
+    /// <param name="text">The studio's words.</param>
+    internal static string UncheckedSchemaReasonFor(StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return "names a table in a schema outside " + text.SourcePossessive
+            + " own, which could not be checked against the database browser's gate for you";
+    }
+
     /// <summary>
     /// Why a finding naming tables in <paramref name="schemas" /> - each outside the store's own - is withheld from this
     /// visitor, or <see langword="null" /> when the database browser shows them every one (AGENTS.md D27).
@@ -706,7 +715,7 @@ internal sealed class HealthService : IHealthService
 
         if (read is null || !read.Succeeded)
         {
-            return UncheckedSchemaReason;
+            return UncheckedSchemaReasonFor(settings.Text);
         }
 
         DatabaseGate gate = read.Gate;

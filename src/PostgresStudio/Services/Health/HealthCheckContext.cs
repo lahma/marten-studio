@@ -204,6 +204,32 @@ internal sealed class HealthSweepMemo
     /// <summary>How many shared reads ran, for a test and for nothing else.</summary>
     internal int Reads { get; private set; }
 
+    /// <summary>
+    /// The answer of a shared read that has already finished, for the sweep itself after its gatherers ran - never a
+    /// read started here, and nothing for one that failed, is still running, or was asked for as another type.
+    /// </summary>
+    /// <typeparam name="T">What the read answers.</typeparam>
+    /// <param name="key">The read's key.</param>
+    /// <param name="value">Its answer.</param>
+    internal bool TryGetCompleted<T>(string key, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out T value)
+    {
+        lock (gate)
+        {
+            if (entries.TryGetValue(key, out Entry? entry)
+                && entry.Type == typeof(T)
+                && entry.Work is { IsValueCreated: true } work
+                && work.Value.IsCompletedSuccessfully
+                && work.Value.Result is T answer)
+            {
+                value = answer;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
     /// <summary>The shared read for <paramref name="key" />: started by the first caller, awaited by every one.</summary>
     public async Task<T> GetAsync<T>(string key, HealthSqlRunner caller, Func<CancellationToken, Task<T>> read, CancellationToken sweepToken)
     {

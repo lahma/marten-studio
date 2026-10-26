@@ -136,6 +136,14 @@ public sealed class PostgresStudioOptions
     /// extension owns. A system schema is never browsable, even by exact name.
     /// </para>
     /// <para>
+    /// <b>Only an exact name makes a schema's structure free.</b> The schemas listed by name are the data source's own: their
+    /// structure is shown to anyone the source policy admits. A schema <c>"*"</c> alone admits is shown - structure, rows
+    /// and definitions - only with <see cref="PostgresStudioCapabilities.BrowseDatabase" /> and the write policy, because
+    /// <c>"*"</c> is a statement about the database rather than this configuration, and what it admits changes as the
+    /// database does. An exact entry naming a schema an extension owns (<c>cron</c>, TimescaleDB's) is honoured like any
+    /// other, which is how a host that wants such a schema browses it: <c>"*"</c> never admits one.
+    /// </para>
+    /// <para>
     /// <b>This limits what the screens show, not what can be read.</b> The SQL console reads whatever the connection's
     /// role can read; <see cref="SqlConsoleRole" /> is the boundary for both. A <c>"*"</c> with no
     /// <see cref="SqlConsoleRole" /> is logged as a warning at startup.

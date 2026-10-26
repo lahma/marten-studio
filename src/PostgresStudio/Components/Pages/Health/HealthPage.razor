@@ -128,7 +128,7 @@
             {
                 <p class="ms-health-summary-line ms-health-statements-note">
                     "Run statement checks" is off for you: it reads pg_stat_statements - statements' text, and the plans of
-                    the store's own - so it @report.StatementChecksRefused. Its findings are not shown to you either.
+                    @Settings.Text.SourcePossessive own - so it @report.StatementChecksRefused. Its findings are not shown to you either.
                 </p>
             }
             else if (report.StatementsMeasuredAt is { } statementsAt)
@@ -138,7 +138,7 @@
             else if (report.StatementChecksExist)
             {
                 <p class="ms-health-summary-line ms-health-statements-note">
-                    "Run statement checks" reads pg_stat_statements as the store's own role and plans the store's most
+                    "Run statement checks" reads pg_stat_statements as @Settings.Text.SourcePossessive own role and plans @Settings.Text.SourcePossessive most
                     expensive statements, on demand and cached for five minutes. It has not run here recently.
                 </p>
             }
@@ -262,7 +262,7 @@
     private string StatementsTitle => report switch
     {
         { StatementChecksAllowed: false } => "Reads pg_stat_statements: it " + report.StatementChecksRefused,
-        _ => "Reads pg_stat_statements and plans the store's most expensive statements; cached for five minutes",
+        _ => "Reads pg_stat_statements and plans " + Settings.Text.SourcePossessive + " most expensive statements; cached for five minutes",
     };
 
     protected override void OnInitialized()

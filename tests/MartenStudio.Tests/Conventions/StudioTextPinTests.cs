@@ -4,8 +4,10 @@ using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Export;
+using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
+using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Tests.Conventions;
 
@@ -169,6 +171,75 @@ public class StudioTextPinTests
                 100_000,
                 Marten)
             .Should().Contain("(more than MartenStudioOptions.ExactCountThreshold, 100,000)");
+    }
+
+    [Fact]
+    public void Martens_own_definitions_are_structure_only_where_a_store_declares_them()
+    {
+        string schema = MartenStudio.Tests.Database.DatabaseTestStores.DocumentSchema;
+        DatabaseObjectOwnership marten = new(DatabaseObjectOwner.MartenInfrastructure, "default");
+        IReadOnlyList<CatalogSchema> live = [new(schema, true, false)];
+
+        // MartenStudio, unchanged: a store declares the schema, so its Marten objects' definitions are the Schema screen's.
+        DatabaseGate store = new([schema], live, ["quartz"], capabilityEnabled: false, readOnly: false, authorized: null,
+            MartenStudio.Tests.Database.DatabaseTestStores.Classifier());
+        store.DefinitionAccess(schema, marten).Allowed.Should().BeTrue();
+
+        // A studio over plain data sources: nothing declares it, so an object only named like Marten's is gated like any.
+        DatabaseGate plain = new([schema], live, [schema], capabilityEnabled: false, readOnly: false, authorized: null,
+            new DatabaseObjectClassifier([]), text: PostgresStudio.Services.Postgres.PostgresStudioText.Instance);
+        plain.ExemptsMartensOwnDefinitions.Should().BeFalse();
+        plain.DefinitionAccess(schema, marten).Should().Match<DatabaseRowAccess>(static x => !x.Allowed && x.Refusal == DatabaseRefusal.CapabilityOff);
+    }
+
+    [Theory]
+    [InlineData(nameof(StudioTableKind.DocumentTable))]
+    [InlineData(nameof(StudioTableKind.EventTable))]
+    [InlineData(nameof(StudioTableKind.Projection))]
+    [InlineData(nameof(StudioTableKind.Bookkeeping))]
+    public void No_remedy_for_a_table_that_is_not_relational_is_migration_SQL(string kindName)
+    {
+        StudioTableKind kind = Enum.Parse<StudioTableKind>(kindName);
+        StudioTable table = new("public", "orders", kind, StudioTableOwnership.Owned) { TypeName = "Order", Alias = "order" };
+        HealthIndexRow index = new() { Schema = "public", Table = "orders", Name = "orders_by_customer" };
+        HealthIndexRow cover = new() { Schema = "public", Table = "orders", Name = "orders_by_customer_and_date" };
+
+        foreach (IHealthTableRemedies remedies in new IHealthTableRemedies[] { MartenHealthRemedyProvider.Instance, PostgresStudio.Services.Postgres.PostgresHealthTableRemedies.Instance })
+        {
+            HealthRemedy?[] all =
+            [
+                remedies.IndexTheFilteredMember(table),
+                remedies.IndexTheUnnamedMember(table),
+                remedies.RebuildInvalidIndex(table, index, IndexOrigin.Declared),
+                remedies.RebuildInvalidIndex(table, index, IndexOrigin.Host),
+                remedies.RemoveRedundantIndex(table, index, IndexOrigin.Declared, cover),
+                remedies.RemoveRedundantIndex(table, index, IndexOrigin.Host, cover),
+                remedies.RemoveUnusedIndex(table, index, IndexOrigin.Declared),
+                remedies.RemoveUnusedIndex(table, index, IndexOrigin.Host),
+                remedies.LeaveRoomForHotUpdates(table, 80),
+                remedies.IndexAColumnInPlaceOfAnExpression(table),
+                remedies.ReenableAutovacuum(table),
+                remedies.AutovacuumSetting(table, "autovacuum_vacuum_scale_factor", "0.02", "Vacuums sooner."),
+            ];
+
+            all.Where(static x => x is not null).Should().OnlyContain(static x => !x!.IsMigration,
+                "design §3.6: migration SQL is a relational table's remedy only - " + remedies.GetType().Name + ", " + kind);
+        }
+    }
+
+    [Fact]
+    public void A_catalog_name_that_could_end_a_line_gets_no_configuration_line_either()
+    {
+        StudioTable table = new("public", "mt_doc_order", StudioTableKind.DocumentTable, StudioTableOwnership.Owned) { TypeName = "Order" };
+        HealthIndexRow hostile = new() { Schema = "public", Table = "mt_doc_order", Name = "x\nopts.Schema.For<Secret>();\n//" };
+        HealthIndexRow plain = new() { Schema = "public", Table = "mt_doc_order", Name = "mt_doc_order_idx_number" };
+
+        MartenHealthRemedyProvider.Instance.RemoveUnusedIndex(table, hostile, IndexOrigin.Declared).Should().BeNull();
+        MartenHealthRemedyProvider.Instance.RemoveRedundantIndex(table, plain, IndexOrigin.Declared, hostile).Should().BeNull();
+        MartenHealthRemedyProvider.Instance.RemoveUnusedIndex(table, plain, IndexOrigin.Declared)!.Code.Should().Be(
+            "// opts.Schema.For<Order>() declares mt_doc_order_idx_number, and nothing has scanned it:\n"
+            + "// remove the .Index(...), .Duplicate(...) or GIN/full-text index that declares it from the registration.",
+            "an ordinary name renders as it always did");
     }
 
     [Fact]

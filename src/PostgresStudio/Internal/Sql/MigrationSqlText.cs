@@ -50,6 +50,28 @@ internal static partial class MigrationSqlText
     public static string? DropIndexConcurrently(string schema, string index) =>
         Qualified(schema, index) is { } qualified ? "DROP INDEX CONCURRENTLY " + qualified + ";" : null;
 
+    /// <summary>
+    /// <c>-- "covering" already does this index's whole job:</c> and <c>DROP INDEX CONCURRENTLY schema.index;</c> - or
+    /// <see langword="null" /> when any of the three names cannot be printed honestly. The covering index is named in a
+    /// comment, quoted like every other name: a name that could end the comment line (a line feed, a carriage return, a
+    /// Unicode line or paragraph separator) would otherwise plant a statement of its own under it.
+    /// </summary>
+    /// <param name="schema">The indexes' schema, which is their table's.</param>
+    /// <param name="index">The redundant index.</param>
+    /// <param name="coveredBy">The index that already does its job.</param>
+    public static string? DropRedundantIndexConcurrently(string schema, string index, string coveredBy) =>
+        IsQuotable(coveredBy) && DropIndexConcurrently(schema, index) is { } drop
+            ? "-- " + SqlIdentifier.Quote(coveredBy) + " already does this index's whole job:\n" + drop
+            : null;
+
+    /// <summary>
+    /// Whether <paramref name="name" /> may be printed inside text a person copies - a remedy's comment or line - as it
+    /// is: the names this builder quotes (<see cref="IsQuotable" />), the same rule a studio's configuration-line remedies
+    /// hold a catalog name to before naming it.
+    /// </summary>
+    /// <param name="name">A schema, table or index name, as the catalog has it.</param>
+    public static bool IsPrintableName(string? name) => IsQuotable(name);
+
     /// <summary><c>REINDEX INDEX CONCURRENTLY schema.index;</c> (PostgreSQL 12+), or <see langword="null" />.</summary>
     /// <param name="schema">The index's schema, which is its table's.</param>
     /// <param name="index">The index.</param>
@@ -101,10 +123,11 @@ internal static partial class MigrationSqlText
     }
 
     /// <summary>
-    /// The names <see cref="SqlIdentifier.Quote" /> accepts, asked without letting it throw - less any with a control or
-    /// a format character in it. Those quote safely, but a person reads this text before running it, and a
-    /// right-to-left override or a zero-width character in a name makes the line on the screen say something other than
-    /// the statement it is (Trojan Source, CVE-2021-42574): such a name gets no statement either.
+    /// The names <see cref="SqlIdentifier.Quote" /> accepts, asked without letting it throw - less any with a control, a
+    /// format, a line-separator or a paragraph-separator character in it. Those quote safely, but a person reads this
+    /// text before running it, and a right-to-left override, a zero-width character or a line break (U+2028 and U+2029
+    /// included) in a name makes the text on the screen say something other than the statement it is (Trojan Source,
+    /// CVE-2021-42574) - or, in a comment, ends the comment: such a name gets no statement either.
     /// </summary>
     private static bool IsQuotable(string? identifier)
     {
@@ -117,7 +140,8 @@ internal static partial class MigrationSqlText
 
         foreach (char c in identifier)
         {
-            if (char.GetUnicodeCategory(c) is UnicodeCategory.Control or UnicodeCategory.Format)
+            if (char.GetUnicodeCategory(c) is UnicodeCategory.Control or UnicodeCategory.Format
+                or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
             {
                 return false;
             }

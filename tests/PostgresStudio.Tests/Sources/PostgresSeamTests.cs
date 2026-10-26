@@ -129,13 +129,15 @@ public sealed class PostgresSeamTests : IDisposable
             ["public"],
             PostgresHealthTableSource.TableCap);
 
-        set.Tables.Should().OnlyContain(static x => x.Kind == StudioTableKind.Relational);
+        set.Tables.Where(static x => !x.Table.StartsWith("mt_", StringComparison.Ordinal)).Should().OnlyContain(static x => x.Kind == StudioTableKind.Relational);
 
         set.Find("public", "orders")!.Ownership.Should().Be(StudioTableOwnership.Owned);
         set.Find("public", "qrtz_triggers")!.Should().Match<StudioTable>(static x => x.Ownership == StudioTableOwnership.Library && x.Library == "Quartz.NET" && x.ExemptFromIndexDesign);
         set.Find("public", "__EFMigrationsHistory")!.Library.Should().Be("Entity Framework Core");
-        set.Find("public", "mt_events")!.Library.Should().Be("Marten", "Marten's own tables are a library's");
-        set.Find("public", "mt_doc_order")!.Ownership.Should().Be(StudioTableOwnership.Owned, "a document table is the application's documents (G1)");
+        set.Find("public", "mt_events")!.Should().Match<StudioTable>(static x => x.Library == "Marten" && x.Kind == StudioTableKind.EventTable);
+        set.Find("public", "mt_doc_order")!.Should().Match<StudioTable>(static x => x.Ownership == StudioTableOwnership.Library
+            && x.Library == "Marten" && x.Kind == StudioTableKind.DocumentTable && x.ExemptFromIndexDesign,
+            "a Marten store manages its document tables: its apply drops an index nobody declared, so none is the host's design");
         set.Find("legacy", "ledger")!.Ownership.Should().Be(StudioTableOwnership.Other, "only \"*\" admits its schema");
         set.Find("legacy", "ledger")!.GatedSchemas.Should().Equal("legacy");
         set.Find("public", "orders")!.GatedSchemas.Should().BeEmpty("an own schema's table needs no gate beyond the check's");
@@ -160,6 +162,46 @@ public sealed class PostgresSeamTests : IDisposable
             .Should().Be(IndexOrigin.PrimaryKey);
         set.OriginOf(new HealthIndexRow { Schema = "public", Table = "orders", Name = "orders_by_customer" }, orders)
             .Should().Be(IndexOrigin.Host, "nothing reconciles a relational table's indexes, so no apply drops one");
+    }
+
+    [Fact]
+    public void A_Marten_tables_indexes_are_its_stores_never_the_hosts()
+    {
+        IStudioTableSet set = PostgresHealthTableSource.Build([Row("public", "mt_doc_order")], ["public"], PostgresHealthTableSource.TableCap);
+
+        set.OriginOf(new HealthIndexRow { Schema = "public", Table = "mt_doc_order", Name = "mt_doc_order_idx_number" }, set.Find("public", "mt_doc_order")!)
+            .Should().Be(IndexOrigin.StoreManaged, "that store's apply decides it, so no claim that no apply drops it");
+    }
+
+    [Fact]
+    public void A_capped_sets_coverage_is_said_in_every_table_checks_verdict()
+    {
+        IStudioTableSet set = PostgresHealthTableSource.Build([Row("public", "a", total: 3412), Row("public", "b", total: 3412)], ["public"], 2);
+        HealthFinding finding = new() { Code = "T07", Severity = HealthSeverity.Warning, Title = "t", WhyItMatters = "w", Caveat = "Read in pg_stat_user_tables." };
+
+        HealthVerdict quiet = HealthTables.WithCoverage(HealthVerdict.Quiet(), set.Coverage);
+        HealthVerdict found = HealthTables.WithCoverage(HealthVerdict.Of(finding), set.Coverage);
+
+        quiet.Note.Should().Be("Judged: the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2).");
+        found.Findings.Single().Caveat.Should().Be(
+            "Read in pg_stat_user_tables. Judged: the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2).");
+        HealthTables.WithCoverage(HealthVerdict.Of(finding), null).Findings.Single().Should().BeSameAs(finding, "an uncapped set adds nothing");
+    }
+
+    [Fact]
+    public void T07s_verdict_over_a_capped_set_says_what_was_left_out()
+    {
+        StudioTable table = new("public", "orders", StudioTableKind.Relational, StudioTableOwnership.Owned);
+        TableFacts facts = new(table, new HealthTableRow
+        {
+            Schema = "public", Table = "orders", EstimatedRows = 1_000_000, LiveRows = 500_000, DeadRows = 400_000,
+            AutovacuumEnabled = true,
+        });
+
+        HealthVerdict verdict = new VacuumBehindCheck().Evaluate(new VacuumFacts(DateTimeOffset.UnixEpoch, [facts]), HealthEvaluation.At(DateTimeOffset.UnixEpoch));
+        HealthVerdict said = HealthTables.WithCoverage(verdict, "the 2,000 largest of 3,412 tables by estimated size (a sweep judges at most 2,000)");
+
+        (said.Note + string.Concat(said.Findings.Select(static x => x.Caveat))).Should().Contain("Judged: the 2,000 largest of 3,412 tables");
     }
 
     [Fact]
@@ -260,8 +302,24 @@ public sealed class PostgresSeamTests : IDisposable
     }
 
     [Theory]
-    [InlineData("we\"ird")]
-    [InlineData("rlo‮txt")]
+    [MemberData(nameof(MigrationSqlTextTests.CommentBreakingNames), MemberType = typeof(MigrationSqlTextTests))]
+    public void A_covering_index_name_that_could_end_the_comment_gets_no_remedy(string coveredBy)
+    {
+        PostgresHealthTableRemedies.Instance
+            .RemoveRedundantIndex(Relational("orders"), Index("orders_by_customer"), IndexOrigin.Host, Index(coveredBy))
+            .Should().BeNull("the covering name would plant a statement under the comment that names it");
+    }
+
+    [Fact]
+    public void A_covering_index_is_named_quoted_in_its_comment()
+    {
+        PostgresHealthTableRemedies.Instance
+            .RemoveRedundantIndex(Relational("orders"), Index("orders_by_customer"), IndexOrigin.Host, Index("orders by customer, date"))!
+            .Code.Should().Be("-- \"orders by customer, date\" already does this index's whole job:\nDROP INDEX CONCURRENTLY \"public\".\"orders_by_customer\";");
+    }
+
+    [Theory]
+    [MemberData(nameof(UnquotableTableNames))]
     public void A_name_that_cannot_be_quoted_gets_no_remedy_rather_than_a_misleading_one(string table)
     {
         StudioTable hostile = Relational(table);
@@ -270,6 +328,15 @@ public sealed class PostgresSeamTests : IDisposable
         PostgresHealthTableRemedies.Instance.ReenableAutovacuum(hostile).Should().BeNull();
         PostgresHealthTableRemedies.Instance.RemoveUnusedIndex(Relational("orders"), Index(table), IndexOrigin.Host).Should().BeNull();
     }
+
+    /// <summary>A quote, and the characters that change what a line says on screen - built at run time, never in this file.</summary>
+    public static TheoryData<string> UnquotableTableNames() =>
+    [
+        "we\"ird",
+        "rlo" + char.ConvertFromUtf32(0x202E) + "txt",
+        "line" + char.ConvertFromUtf32(0x2028) + "separator",
+        "paragraph" + char.ConvertFromUtf32(0x2029) + "separator",
+    ];
 
     // ---- Locks and links ----------------------------------------------------------------------------------------
 

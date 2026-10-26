@@ -90,13 +90,19 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
         foreach (HealthRelationalTableRow row in rows)
         {
             bool isOwn = own.Contains(row.Schema);
-            string? library = StudioTableLibraries.LibraryOf(row.Table);
+
+            // A Marten store's table is that store's to manage, whatever it holds: its next apply drops an index nobody
+            // declared and keeps the storage parameters it declares, so nothing here is the host's design. Every mt_
+            // table - the documents' too - is the Marten library's, exempt from the index-design rules, worded as a
+            // Marten table and given no migration SQL (PostgresHealthTableRemedies).
+            bool marten = DatabaseObjectClassifier.IsMartenName(row.Table);
+            string? library = marten ? "Marten" : StudioTableLibraries.LibraryOf(row.Table);
 
             StudioTableOwnership ownership = library is not null
                 ? StudioTableOwnership.Library
                 : isOwn ? StudioTableOwnership.Owned : StudioTableOwnership.Other;
 
-            tables.Add(new StudioTable(row.Schema, row.Table, StudioTableKind.Relational, ownership)
+            tables.Add(new StudioTable(row.Schema, row.Table, marten ? MartenKindOf(row.Table) : StudioTableKind.Relational, ownership)
             {
                 Library = library,
                 GatedSchemas = isOwn ? [] : [row.Schema],
@@ -116,7 +122,19 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
             coverage);
     }
 
-    /// <summary>A plain data source's judged tables: every index the host's, but the primary key.</summary>
+    /// <summary>What a Marten table is, by its name alone - no store is registered to say more.</summary>
+    /// <param name="table">An <c>mt_</c> table's name.</param>
+    internal static StudioTableKind MartenKindOf(string table) =>
+        table.StartsWith(DatabaseObjectClassifier.DocumentTablePrefix, StringComparison.OrdinalIgnoreCase)
+            ? StudioTableKind.DocumentTable
+            : table.StartsWith("mt_event", StringComparison.OrdinalIgnoreCase) || string.Equals(table, "mt_streams", StringComparison.OrdinalIgnoreCase)
+                ? StudioTableKind.EventTable
+                : StudioTableKind.Bookkeeping;
+
+    /// <summary>
+    /// A plain data source's judged tables: every index the host's, but the primary key - and but a Marten table's, which
+    /// its store manages (<see cref="IndexOrigin.StoreManaged" />).
+    /// </summary>
     private sealed class RelationalTableSet : IStudioTableSet
     {
         private readonly Dictionary<string, StudioTable> byKey;
@@ -143,7 +161,11 @@ internal sealed class PostgresHealthTableSource : IHealthTableSource
         public IndexOrigin OriginOf(HealthIndexRow index, StudioTable table)
         {
             ArgumentNullException.ThrowIfNull(index);
-            return index.IsPrimaryKey ? IndexOrigin.PrimaryKey : IndexOrigin.Host;
+            ArgumentNullException.ThrowIfNull(table);
+
+            return index.IsPrimaryKey
+                ? IndexOrigin.PrimaryKey
+                : table.Kind == StudioTableKind.Relational ? IndexOrigin.Host : IndexOrigin.StoreManaged;
         }
     }
 }

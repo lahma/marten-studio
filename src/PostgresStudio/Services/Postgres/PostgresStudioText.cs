@@ -35,6 +35,7 @@ internal static class PostgresStudioText
         RegistrationMethod = "AddPostgresStudio",
         SourceNoun = "data source",
         ScopeDeniedEntry = "Not authorized for this data source or database.",
+        SourcePossessive = "the data source's",
 
         BrowseReadOnlyDenial =
             "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.BrowseDatabase off with every "

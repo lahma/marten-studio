@@ -88,9 +88,9 @@ internal sealed class PostgresHealthTableRemedies : IHealthTableRemedies
         ArgumentNullException.ThrowIfNull(index);
         ArgumentNullException.ThrowIfNull(coveredBy);
 
-        return Droppable(table, index, origin) && MigrationSqlText.DropIndexConcurrently(index.Schema, index.Name) is { } sql
+        return Droppable(table, index, origin) && MigrationSqlText.DropRedundantIndexConcurrently(index.Schema, index.Name, coveredBy.Name) is { } sql
             ? HealthRemedy.ForMigration(
-                "-- " + coveredBy.Name + " already does this index's whole job:\n" + sql,
+                sql,
                 "Every write maintains every index, so one another index covers is cost without benefit. Check first that nothing "
                 + "names it - a query hint, a CLUSTER, a migration that alters it. DROP INDEX CONCURRENTLY cannot run inside a "
                 + "transaction block.")

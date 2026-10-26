@@ -270,7 +270,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                         // A hidden type's table, or a trigger on one: not there, as far as this visitor is
                         // concerned - said from the name alone, before anything is asked.
                         null => RouteKind.NotThere,
-                        { IsMarten: true } when IsStoreSchema(declared, schema) => RouteKind.Structure,
+                        { IsMarten: true } when IsStoreSchema(declared, schema) && DeclaresAStore(declared) => RouteKind.Structure,
                         _ => RouteKind.Browse,
                     };
                 },
@@ -367,7 +367,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                     return byName switch
                     {
                         null => RouteKind.NotThere,
-                        { IsMarten: true } when IsStoreSchema(declared, schema) => RouteKind.Structure,
+                        { IsMarten: true } when IsStoreSchema(declared, schema) && DeclaresAStore(declared) => RouteKind.Structure,
                         _ => RouteKind.Browse,
                     };
                 },
@@ -768,6 +768,13 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
     private static bool IsStoreSchema(DatabaseDeclarations declared, string schema) =>
         declared.StoreSchemas.Contains(schema, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether a registered store declares the objects classified here - what makes Marten's own definitions and
+    /// sequence values in the store's schemas the Schema screen's structure. A studio over plain data sources has none,
+    /// so an object only named like Marten's is a <c>BrowseDatabase</c> read there, like every other definition.
+    /// </summary>
+    private static bool DeclaresAStore(DatabaseDeclarations declared) => declared.Classifier is { Stores.Count: > 0 };
 
     private static CatalogParts PartsFor(DatabaseObjectCategory category) => category switch
     {

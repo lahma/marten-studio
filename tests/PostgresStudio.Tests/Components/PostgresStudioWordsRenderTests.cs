@@ -65,6 +65,58 @@ public class PostgresStudioWordsRenderTests
         page.Markup.Should().NotContain("MartenStudioOptions").And.NotContain("Declared by this Marten store");
     }
 
+    /// <summary>What a rendered PostgresStudio page must never say - MartenStudio's options, configuration and nouns.</summary>
+    private static readonly string[] MartenStudioWords =
+        ["MartenStudioOptions", "StoreOptions", "Marten Studio", "the store's", "this store", "LightweightSession", "AddMartenStudio"];
+
+    public static TheoryData<string> Pages() => ["overview", "query", "database", "sessions", "health", "activity"];
+
+    [Theory]
+    [MemberData(nameof(Pages))]
+    public async Task No_core_page_renders_MartenStudios_words(string page)
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+
+        string markup = page switch
+        {
+            "overview" => Rendered(context.Render<StudioHome>(), ".ms-page-title"),
+            "query" => Rendered(context.Render<QueryPage>(), ".ms-page-title"),
+            "database" => RenderDatabase(context),
+            "sessions" => Rendered(context.Render<Sessions>(), ".ms-sessions-stats"),
+            "health" => Rendered(context.Render<HealthPage>(), ".ms-health-lead"),
+            _ => Rendered(context.Render<Activity>(), ".ms-page-title"),
+        };
+
+        // The sentences that name Marten Studio on purpose: where a Marten store's objects are browsed.
+        foreach (string onPurpose in new[]
+                 {
+                     PostgresStudioText.Instance.MartenStoreNotice!, PostgresStudioText.Instance.MartenInternalTitle,
+                     PostgresStudioText.Instance.OwnerFilterMartenTitle, PostgresStudioText.Instance.MartenDependencyDenial,
+                 })
+        {
+            markup = markup.Replace(onPurpose, string.Empty, StringComparison.Ordinal)
+                .Replace(System.Net.WebUtility.HtmlEncode(onPurpose), string.Empty, StringComparison.Ordinal);
+        }
+
+        foreach (string word in MartenStudioWords)
+        {
+            markup.Should().NotContain(word, "the " + page + " page is Postgres Studio's");
+        }
+    }
+
+    private static string RenderDatabase(PostgresStudioComponentContext context)
+    {
+        context.Navigate("postgres/database");
+        return Rendered(context.Render<DatabaseObjects>(), ".ms-db-kind-tabs");
+    }
+
+    private static string Rendered<T>(IRenderedComponent<T> component, string ready)
+        where T : Microsoft.AspNetCore.Components.IComponent
+    {
+        component.WaitForAssertion(() => component.FindAll(ready).Should().NotBeEmpty());
+        return component.Markup;
+    }
+
     [Fact]
     public async Task Relationships_say_what_Postgres_has_and_nothing_of_StoreOptions()
     {

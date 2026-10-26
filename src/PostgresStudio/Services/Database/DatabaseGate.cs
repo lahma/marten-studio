@@ -469,14 +469,22 @@ internal sealed class DatabaseGate
     /// <summary>Whether this visitor may read the definition of an object in <paramref name="schema" />.</summary>
     /// <remarks>
     /// Marten's own objects in the store's own schemas are what the Schema screen already shows; anything
-    /// else is the host's code, and reading it is a <c>BrowseDatabase</c> read.
+    /// else is the host's code, and reading it is a <c>BrowseDatabase</c> read. The exemption needs a registered
+    /// store (<see cref="ExemptsMartensOwnDefinitions" />): a studio over plain data sources has no Schema screen, and an
+    /// object only named like Marten's is gated like every other definition there.
     /// </remarks>
     public DatabaseRowAccess DefinitionAccess(string schema, DatabaseObjectOwnership ownership)
     {
         ArgumentNullException.ThrowIfNull(ownership);
 
-        return IsStoreSchema(schema) && ownership.IsMarten ? DatabaseRowAccess.Granted : DataAccess(schema);
+        return ExemptsMartensOwnDefinitions && IsStoreSchema(schema) && ownership.IsMarten ? DatabaseRowAccess.Granted : DataAccess(schema);
     }
+
+    /// <summary>
+    /// Whether Marten's own definitions in the source's own schemas are structure, free without the capability: only
+    /// where a registered store declares them, whose Schema screen shows them anyway.
+    /// </summary>
+    public bool ExemptsMartensOwnDefinitions => Classifier.Stores.Count > 0;
 
     /// <summary>Whether this visitor may read <paramref name="relation" />'s rows, and the sentence when not.</summary>
     /// <param name="relation">The relation, as the catalog has it.</param>

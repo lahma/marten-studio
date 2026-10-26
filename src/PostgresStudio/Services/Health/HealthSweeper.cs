@@ -352,8 +352,11 @@ internal sealed class HealthSweeper
             return evaluation;
         }
 
+        // What a capped table set left out, said by every Tables-area check (HealthTables.WithCoverage, design R5).
+        string? tableCoverage = memo.TryGetCompleted<IStudioTableSet>(HealthTables.SetKey, out var judged) ? judged.Coverage : null;
+
         List<HealthCheckResult> results =
-            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId))];
+            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage))];
 
         return new HealthSweep(storeKey, databaseId, kind, now, Stopwatch.GetElapsedTime(started), results);
 
@@ -419,7 +422,7 @@ internal sealed class HealthSweeper
     }
 
     /// <summary>Judges one check's facts, and stamps what it found.</summary>
-    private HealthCheckResult Evaluate(Gathered gathered, HealthEvaluation evaluation, string storeKey, string databaseId)
+    private HealthCheckResult Evaluate(Gathered gathered, HealthEvaluation evaluation, string storeKey, string databaseId, string? tableCoverage)
     {
         HealthCheckInfo info = gathered.Descriptor.Info;
 
@@ -431,6 +434,11 @@ internal sealed class HealthSweeper
         try
         {
             HealthVerdict verdict = gathered.Descriptor.Check.Evaluate(gathered.Facts, evaluation);
+
+            if (info.Area == HealthArea.Tables)
+            {
+                verdict = HealthTables.WithCoverage(verdict, tableCoverage);
+            }
 
             // A key holds the finding's Subject, and a label can hold a name: both sit at the finding's gate, which can
             // be stricter than the check's that the status row is shown at. So the page's sentence names the code and
