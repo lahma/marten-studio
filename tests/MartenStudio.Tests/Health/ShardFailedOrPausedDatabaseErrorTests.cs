@@ -155,6 +155,58 @@ public class ShardFailedOrPausedDatabaseErrorTests
     }
 
     /// <summary>
+    /// The classified half, from a real <c>ShardFailure.For</c>: the reflected <c>IsTransient</c> read and the root type
+    /// as JasperFx writes it (<c>FullNameInCode</c>), resolved among the loaded assemblies. From JasperFx.Events 2.93 a
+    /// permanent failure whose root is a <c>PostgresException</c> is a database error, a transient one is not, and one whose
+    /// root is a nested type - which <c>FullNameInCode</c> spells with a dot that type lookup does not read - cannot be told
+    /// and falls back to the caveat. Below 2.93 nothing is classified.
+    /// </summary>
+    [Fact]
+    public void A_classified_failure_says_database_error_from_its_transience_and_its_root_type()
+    {
+        DateTimeOffset now = Now;
+
+        JasperFx.Events.Daemon.ShardFailure permanent = JasperFx.Events.Daemon.ShardFailure.For(
+            new InvalidOperationException("the projection failed",
+                new PostgresException("column \"weight\" does not exist", "ERROR", "ERROR", PostgresErrorCodes.UndefinedColumn)),
+            now);
+        JasperFx.Events.Daemon.ShardFailure transient = JasperFx.Events.Daemon.ShardFailure.For(
+            new InvalidOperationException("the projection failed",
+                new PostgresException("deadlock detected", "ERROR", "ERROR", PostgresErrorCodes.DeadlockDetected)),
+            now);
+        JasperFx.Events.Daemon.ShardFailure nested = JasperFx.Events.Daemon.ShardFailure.For(
+            new InvalidOperationException("the projection failed", new Outer.NestedDatabaseException()),
+            now);
+        JasperFx.Events.Daemon.ShardFailure notDatabase = JasperFx.Events.Daemon.ShardFailure.For(
+            new InvalidOperationException("SKU 'POISON' cannot ship"),
+            now);
+
+        permanent.RootExceptionType.Should().Be("Npgsql.PostgresException", "the root is the innermost exception, at every JasperFx");
+
+        if (!RuntimeFeature.SystemicDatabaseFailure.IsAvailable(MartenRuntime.Current))
+        {
+            DaemonLightUp.IsSystemicDatabaseFailure(permanent).Should().BeNull("below JasperFx.Events 2.93 nothing is classified");
+            return;
+        }
+
+        DaemonLightUp.IsSystemicDatabaseFailure(permanent).Should().BeTrue("42703 is permanent, and its root is a DbException");
+        DaemonLightUp.IsSystemicDatabaseFailure(transient).Should().BeFalse("a deadlock is transient, and a transient failure is not systemic");
+        DaemonLightUp.IsSystemicDatabaseFailure(notDatabase).Should().BeNull(
+            "permanent with no database root: a DbException could still sit further up the graph, so nothing is claimed");
+
+        nested.RootExceptionType.Should().Contain("Outer.NestedDatabaseException").And.NotContain("+");
+        DaemonLightUp.IsSystemicDatabaseFailure(nested).Should().BeNull(
+            "a nested type's FullNameInCode does not resolve by name, so the finding keeps the caveat");
+    }
+
+    /// <summary>A database exception nested in a type, as a host's own data layer might declare one.</summary>
+    internal static class Outer
+    {
+        /// <summary>A permanent database error of a nested type.</summary>
+        internal sealed class NestedDatabaseException() : System.Data.Common.DbException("a nested database error");
+    }
+
+    /// <summary>
     /// The live half is JasperFx's own <c>IsSystemicDatabaseFailure</c>, reached by reflection: it answers where this run's
     /// JasperFx.Events has it (2.93+) and is <see langword="null" /> below - so at the floor nothing is classified.
     /// </summary>

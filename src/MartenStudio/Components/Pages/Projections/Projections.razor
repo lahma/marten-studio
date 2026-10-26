@@ -949,7 +949,7 @@
     /// </summary>
     private string AdvanceTitle => CorrectTitle is { Length: > 0 } refused
         ? refused
-        : HighWaterAdvanceWording.ButtonNote(MartenRuntime.Current, view?.DatabaseAutoCreate);
+        : HighWaterAdvanceWording.ButtonNote(MartenRuntime.Current, view?.DatabaseAutoCreate, State.ActiveScope?.TenantId);
 
     /// <summary>
     /// Whether this projection may be rebuilt right now.

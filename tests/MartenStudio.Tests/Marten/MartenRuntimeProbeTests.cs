@@ -257,6 +257,13 @@ public class MartenRuntimeProbeTests
         Version marten = MartenRuntime.Current.VersionOf(RuntimePackage.Marten)!;
         bool expected = marten >= new Version(9, 51, 0);
 
+        // Anti-vacuity: the probe's tag table is declared at every Marten from the floor on, so "false" can only mean the
+        // index is missing - never a tag type that failed to register, a feature schema that moved, or a misspelt table.
+        Weasel.Postgresql.Tables.Table? table = RuntimeFeature.ProbeTagTable();
+        table.Should().NotBeNull("Marten {0} declares mt_event_tag_{1} for a registered tag type", marten, RuntimeFeature.TagProbeSuffix);
+        table!.Identifier.Name.Should().Be("mt_event_tag_studio_probe");
+        table.Columns.Select(static x => x.Name).Should().Contain("seq_id", "the column the index is on is the table's at every version");
+
         RuntimeFeature.DeclaresTagSequenceIndex().Should().Be(expected,
             "Marten {0}: #5694 declares idx_mt_event_tag_<suffix>_seq_id from 9.51.0, and the anchor must read it without throwing",
             marten);

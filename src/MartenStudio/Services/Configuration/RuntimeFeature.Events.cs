@@ -74,20 +74,26 @@ internal sealed partial class RuntimeFeature
     /// </summary>
     internal static bool DeclaresTagSequenceIndex()
     {
+        string index = "idx_mt_event_tag_" + TagProbeSuffix + "_seq_id";
+
+        return ProbeTagTable()?.Indexes.Any(x => string.Equals(x.Name, index, StringComparison.Ordinal)) == true;
+    }
+
+    /// <summary>
+    /// The tag table <c>mt_event_tag_&lt;suffix&gt;</c> a throwaway store's options declare for the probe's one tag type, or
+    /// <see langword="null" /> - which no Marten from the floor on answers, so the probe's "absent" is about the index and
+    /// never about a table it failed to find (<c>MartenRuntimeProbeTests</c>).
+    /// </summary>
+    internal static Table? ProbeTagTable()
+    {
         var options = new StoreOptions();
         options.Events.RegisterTagType<TagProbe>(TagProbeSuffix);
 
-        if (options.Events is not IFeatureSchema feature)
-        {
-            return false;
-        }
-
         string table = "mt_event_tag_" + TagProbeSuffix;
-        string index = "idx_mt_event_tag_" + TagProbeSuffix + "_seq_id";
 
-        return feature.Objects.OfType<Table>().Any(x =>
-            string.Equals(x.Identifier.Name, table, StringComparison.Ordinal)
-            && x.Indexes.Any(i => string.Equals(i.Name, index, StringComparison.Ordinal)));
+        return options.Events is IFeatureSchema feature
+            ? feature.Objects.OfType<Table>().FirstOrDefault(x => string.Equals(x.Identifier.Name, table, StringComparison.Ordinal))
+            : null;
     }
 
     /// <summary>The strong-typed id the probe registers: one wrapped string, the shape a DCB tag type has.</summary>

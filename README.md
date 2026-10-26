@@ -819,8 +819,9 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   rebuild dialog names the floor stored for it in `mt_event_projection_floors` (read with the studio's own SQL)
   and says that a floor set in code may apply; D05 stops offering `SkipApplyErrors` for a database error in
   projection code, which from 9.52 pauses the shard at any setting and is never dead-lettered; and the
-  Advance high water mark dialog says that the advance first ensures the event store's storage under the
-  database's `AutoCreate`, and, on a store that numbers events per tenant, which tenants' marks it moves.
+  Advance high water mark dialog says that the advance first ensures the event store's storage - with no tenant
+  selected in every database of the store, each under its own `AutoCreate` - and, on a store that numbers events per
+  tenant, which tenants' marks it moves.
 - **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.54.1.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,

@@ -784,14 +784,45 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         };
     }
 
-    private List<ShardProgress> MergeProgress(ResolvedScope resolved, StoredProjections stored)
+    private List<ShardProgress> MergeProgress(ResolvedScope resolved, StoredProjections stored) =>
+        MergeProgress(
+            stored.Projections,
+            stored.Progress,
+            liveState.Latest(resolved.Registration.Key, resolved.Database.Id.Identity),
+            stored.HighWaterMark,
+            stored.Rows);
+
+    /// <summary>
+    /// The shard rows the page draws, from three sources - each projection's own shards, a composite's members, and the
+    /// rows nothing registered claims - with every shard name exactly once.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Once, because the names are <c>@key</c>s.</b> The projections table and the Overview's health table key each
+    /// row by its shard name (<c>Projections.razor</c>, <c>Overview.razor</c>), and two siblings with one key end the
+    /// circuit rather than the render - issue #1's failure. So the sources are taken in order of authority and a name
+    /// already drawn is never drawn again.
+    /// </para>
+    /// <para>
+    /// <b>Every projection's own shards first, then the members.</b> Neither JasperFx nor Marten refuses a composite
+    /// member whose name is also a top-level projection's, and both then write the same <c>X:All</c> row. The top-level
+    /// projection is the agent that row belongs to, so its claim is settled before any composite is looked at - which a
+    /// single pass in name order would get wrong whenever the composite sorts first.
+    /// </para>
+    /// </remarks>
+    internal static List<ShardProgress> MergeProgress(
+        IReadOnlyList<ProjectionInfo> projections,
+        IReadOnlyList<ShardState> stored,
+        IReadOnlyDictionary<string, ShardState> live,
+        long highWaterMark,
+        IReadOnlyDictionary<string, ProgressionRow>? rows)
     {
-        IReadOnlyDictionary<string, ShardState> live = liveState.Latest(
-            resolved.Registration.Key,
-            resolved.Database.Id.Identity);
+        ArgumentNullException.ThrowIfNull(projections);
+        ArgumentNullException.ThrowIfNull(stored);
+        ArgumentNullException.ThrowIfNull(live);
 
         Dictionary<string, ShardState> byShard = new(StringComparer.OrdinalIgnoreCase);
-        foreach (ShardState row in stored.Progress)
+        foreach (ShardState row in stored)
         {
             if (row.ShardName is { Length: > 0 } name && !IsBookkeepingRow(name))
             {
@@ -802,33 +833,37 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         List<ShardProgress> progress = [];
         HashSet<string> rendered = new(StringComparer.OrdinalIgnoreCase);
 
-        foreach (ProjectionInfo projection in stored.Projections)
-        {
-            // Inline and live projections have no daemon shard: the async daemon never runs them, so a
-            // progress row for one would be a number about something that does not happen.
-            if (!projection.IsAsync)
-            {
-                continue;
-            }
+        // Inline and live projections have no daemon shard: the async daemon never runs them, so a progress row for one
+        // would be a number about something that does not happen.
+        ProjectionInfo[] daemonRun = [.. projections.Where(static x => x.IsAsync)];
 
+        // Pass one: every projection's own shards.
+        foreach (ProjectionInfo projection in daemonRun)
+        {
             foreach (string shardName in projection.ShardNames)
             {
-                rendered.Add(shardName);
-                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark, isRegistered: true, stored.Rows?.GetValueOrDefault(shardName)));
-            }
-
-            // A composite's members record rows of their own, which its agent advances in its own batch: they are the
-            // composite's, drawn under it, and not agents - only once they have a row, because a member that never ran
-            // is the composite never having run, which its own shard already says.
-            foreach (string memberName in projection.MemberShardNames)
-            {
-                if (rendered.Contains(memberName) || byShard.GetValueOrDefault(memberName) is not { } memberRow)
+                if (!rendered.Add(shardName))
                 {
                     continue;
                 }
 
-                rendered.Add(memberName);
-                progress.Add(Build(memberName, projection.Name, memberRow, live.GetValueOrDefault(memberName), stored.HighWaterMark, isRegistered: true, stored.Rows?.GetValueOrDefault(memberName))
+                progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(shardName)));
+            }
+        }
+
+        // Pass two: a composite's members, which record rows of their own that its agent advances in its own batch. They
+        // are the composite's, drawn under it, and not agents - only once they have a row, because a member that never
+        // ran is the composite never having run, which its own shard already says.
+        foreach (ProjectionInfo projection in daemonRun)
+        {
+            foreach (string memberName in projection.MemberShardNames)
+            {
+                if (byShard.GetValueOrDefault(memberName) is not { } memberRow || !rendered.Add(memberName))
+                {
+                    continue;
+                }
+
+                progress.Add(Build(memberName, projection.Name, memberRow, live.GetValueOrDefault(memberName), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(memberName))
                     with { IsCompositeMember = true });
             }
         }
@@ -839,9 +874,9 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         // instead of inventing a projection row for a projection this store no longer has.
         foreach (KeyValuePair<string, ShardState> orphan in byShard)
         {
-            if (!rendered.Contains(orphan.Key))
+            if (rendered.Add(orphan.Key))
             {
-                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), stored.HighWaterMark, isRegistered: false, stored.Rows?.GetValueOrDefault(orphan.Key)));
+                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), highWaterMark, isRegistered: false, rows?.GetValueOrDefault(orphan.Key)));
             }
         }
 

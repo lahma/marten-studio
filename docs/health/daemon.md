@@ -69,8 +69,8 @@ outright when those cannot be read.
 What to do: end the transaction that holds it - Explain names it - or use **Advance high water mark** on the
 projections screen (`CorrectProgression`), which moves the mark to the latest committed event; anything that later
 commits inside the gap is then never projected. From Marten 9.52 (#5738) the advance first ensures the event store's
-storage, so under the database's `AutoCreate` the first press in a process may create or migrate the event store's
-tables; and on a store that numbers events per tenant it moves the selected tenant's own mark, or every tenant's,
+storage, so under each database's `AutoCreate` - every database of the store when no tenant is selected - the first
+press in a process may create or migrate the event store's tables; and on a store that numbers events per tenant it moves the selected tenant's own mark, or every tenant's,
 where below 9.52 it wrote only a store-global mark the daemon does not read there. The dialog says which. To bound
 future stalls, at the same cost:
 

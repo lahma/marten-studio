@@ -221,6 +221,48 @@ public class Marten952WordingTests
         page.FindAll("[data-unregistered-shard]").Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Every shard name once, because the names are <c>@key</c>s and two siblings with one key end the circuit (issue #1).
+    /// Neither JasperFx nor Marten refuses a composite member named like a top-level projection, and here the composite
+    /// sorts first: the top-level projection's own shard wins, the member is not drawn a second time, and a member two
+    /// composites share is drawn once.
+    /// </summary>
+    [Fact]
+    public void A_composite_member_named_like_a_projection_that_sorts_after_it_is_drawn_once_as_that_projections_own()
+    {
+        ProjectionInfo alpha = new("Alpha", JasperFx.Events.Projections.ProjectionLifecycle.Async, "CompositeProjection", 1, "CompositeProjection", ["Alpha:All"])
+        {
+            MemberShardNames = ["Zed:All", "Shared:All"],
+        };
+        ProjectionInfo beta = new("Beta", JasperFx.Events.Projections.ProjectionLifecycle.Async, "CompositeProjection", 1, "CompositeProjection", ["Beta:All"])
+        {
+            MemberShardNames = ["shared:all"],
+        };
+        ProjectionInfo zed = new("Zed", JasperFx.Events.Projections.ProjectionLifecycle.Async, "Projection", 1, "ZedProjection", ["Zed:All"]);
+
+        JasperFx.Events.Projections.ShardState[] stored =
+        [
+            new("Alpha:All", 10), new("Beta:All", 10), new("Zed:All", 20), new("Shared:All", 30), new("Orphan:All", 5),
+        ];
+
+        List<ShardProgress> rows = ProjectionDataService.MergeProgress(
+            [alpha, beta, zed], stored, new Dictionary<string, JasperFx.Events.Projections.ShardState>(), 100, null);
+
+        rows.Select(static x => x.ShardName.ToUpperInvariant()).Should().OnlyHaveUniqueItems("a key is compared as the page compares names");
+        rows.Should().HaveCount(5);
+
+        ShardProgress own = rows.Single(static x => x.ShardName == "Zed:All");
+        own.ProjectionName.Should().Be("Zed", "the top-level projection is the agent that row belongs to");
+        own.IsCompositeMember.Should().BeFalse();
+        own.IsRegistered.Should().BeTrue();
+
+        ShardProgress shared = rows.Single(static x => string.Equals(x.ShardName, "Shared:All", StringComparison.OrdinalIgnoreCase));
+        shared.IsCompositeMember.Should().BeTrue();
+        shared.ProjectionName.Should().Be("Alpha", "the first composite to claim it");
+
+        rows.Single(static x => x.ShardName == "Orphan:All").IsRegistered.Should().BeFalse();
+    }
+
     /// <summary>The member identities follow the composite's own rule, at the floor's JasperFx and the latest's alike.</summary>
     [Fact]
     public void A_composites_member_identities_are_its_stages_projections_by_name_and_version()
@@ -271,18 +313,42 @@ public class Marten952WordingTests
         HighWaterAdvanceWording.ButtonNote(Below, "CreateOrUpdate").Should().BeEmpty();
     }
 
+    /// <summary>
+    /// With a tenant selected the advance runs in that tenant's database alone, so this database's mode is the one that
+    /// applies, and under None it creates nothing.
+    /// </summary>
     [Fact]
-    public void From_9_52_the_advance_says_it_may_create_or_migrate_the_event_store_under_the_databases_AutoCreate()
+    public void From_9_52_a_tenants_advance_says_it_may_create_or_migrate_under_this_databases_AutoCreate()
     {
-        string message = HighWaterAdvanceWording.Message(From, false, null, "CreateOrUpdate");
+        string message = HighWaterAdvanceWording.Message(From, false, "acme", "CreateOrUpdate");
 
         message.Should().Contain("Marten first ensures the event store's storage under this database's AutoCreate (CreateOrUpdate)");
         message.Should().Contain("may create the event store's tables, or migrate them");
         message.Should().NotContainEquivalentOf("additive", "hard rule 14: nothing may call CreateOrUpdate additive");
 
-        HighWaterAdvanceWording.ButtonNote(From, "All").Should().StartWith("Marten first ensures").And.Contain("(All)");
-        HighWaterAdvanceWording.ButtonNote(From, "None").Should().Contain("creates nothing");
-        HighWaterAdvanceWording.Message(From, false, null, "None").Should().Contain("(None) creates nothing");
+        HighWaterAdvanceWording.ButtonNote(From, "All", "acme").Should().StartWith("Marten first ensures").And.Contain("(All)");
+        HighWaterAdvanceWording.ButtonNote(From, "None", "acme").Should().Contain("creates nothing");
+        HighWaterAdvanceWording.Message(From, false, "acme", "None").Should().Contain("(None) creates nothing");
+    }
+
+    /// <summary>
+    /// Without a tenant the advance runs its ensure in every database of the store, each under its own AutoCreate: the
+    /// selected database's mode is quoted as this one's, and "creates nothing" is never said for all of them.
+    /// </summary>
+    [Fact]
+    public void From_9_52_a_tenantless_advance_says_each_database_ensures_under_its_own_AutoCreate()
+    {
+        foreach (string mode in new[] { "CreateOrUpdate", "None" })
+        {
+            string message = HighWaterAdvanceWording.Message(From, false, null, mode);
+
+            message.Should().Contain("in each database it reaches, under each database's own AutoCreate (this one's is " + mode + ")");
+            message.Should().Contain("wherever that is not None, it may create the event store's tables, or migrate them");
+            message.Should().NotContain("creates nothing", "another database of the store may not be None");
+            message.Should().NotContainEquivalentOf("additive");
+
+            HighWaterAdvanceWording.ButtonNote(From, mode).Should().StartWith("Marten first ensures the event store's storage in each database");
+        }
     }
 
     [Fact]

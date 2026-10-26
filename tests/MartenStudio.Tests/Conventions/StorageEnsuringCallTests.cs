@@ -202,6 +202,15 @@ public class StorageEnsuringCallTests
     /// </summary>
     private static readonly (string Call, string Needs)[] AllowedEventStoreCalls = [];
 
+    /// <summary>
+    /// The calls the studio makes on JasperFx's document-store diagnostics - <c>IDocumentStoreDiagnostics</c> (JasperFx
+    /// 2.74 and later) and <c>IDocumentStoreDiagnosticsWriter</c> (later) - as <c>"Type: Member"</c> with what each needs.
+    /// None: Marten implements them for CritterWatch, and its implementations reach LINQ, <c>LoadAsync</c> or
+    /// <c>FetchStreamAsync</c> (<c>DocumentStore.DocumentDiagnostics*.cs</c> at <c>V9.54.1</c>), each of which ensures
+    /// storage, where the studio has its own reads of the same things.
+    /// </summary>
+    private static readonly (string Call, string Needs)[] AllowedDocumentDiagnosticsCalls = [];
+
     [Fact]
     public void Every_storage_ensuring_call_in_src_is_one_of_todays_sites()
     {
@@ -319,6 +328,54 @@ public class StorageEnsuringCallTests
             "JasperFx's IEventStore explorer reads (GetRecentStreamsAsync, ReadStreamAsync, GetStreamMetadataAsync, ...) each "
             + "ensure the event store first; read what they report with the studio's own SQL, or allow the call with what it needs");
         allowed.Except(calls, StringComparer.Ordinal).Should().BeEmpty("an allowed call that is no longer made is a stale entry - prune it");
+    }
+
+    /// <summary>
+    /// JasperFx's document-store diagnostics, fenced as whole interfaces like <c>IEventStore</c>: Marten 9.52-9.54 grew them
+    /// (explain, aggregate a document from its stream, undelete, preview a write), every implementation reaches a
+    /// storage-ensuring read, and Marten implements them explicitly, so a call is a call on the interface.
+    /// </summary>
+    [Fact]
+    public void The_studio_calls_nothing_on_JasperFxs_document_store_diagnostics_unless_it_is_allowed()
+    {
+        IlScan.DocumentDiagnosticsInterfaces.Should().NotBeEmpty(
+            "IDocumentStoreDiagnostics is in JasperFx from 2.74.0, the floor's, so the fence has something to fence");
+
+        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, IlScan.IsOnTheDocumentDiagnostics);
+
+        scan.Unresolved.Should().BeEmpty();
+
+        string[] calls = [.. scan.Calls.Keys.Select(static x => x.Type + ": " + x.Member).Distinct().Order(StringComparer.Ordinal)];
+        string[] allowed = [.. AllowedDocumentDiagnosticsCalls.Select(static x => x.Call)];
+
+        calls.Except(allowed, StringComparer.Ordinal).Should().BeEmpty(
+            "JasperFx's IDocumentStoreDiagnostics and IDocumentStoreDiagnosticsWriter, as Marten implements them, reach LINQ, "
+            + "LoadAsync or FetchStreamAsync, each of which ensures storage; read what they report with the studio's own SQL, "
+            + "or allow the call with what it needs");
+        allowed.Except(calls, StringComparer.Ordinal).Should().BeEmpty("an allowed call that is no longer made is a stale entry - prune it");
+    }
+
+    /// <summary>
+    /// The diagnostics fence's anti-vacuity: a call on the interface, and a method group of one, are seen; and the
+    /// writer's members are fenced too wherever this run's JasperFx has the writer.
+    /// </summary>
+    [Fact]
+    public void A_call_on_JasperFxs_document_store_diagnostics_is_seen_by_the_whole_interface_fence()
+    {
+        IlScan.Result scan = IlScan.Scan(typeof(StorageEnsuringCallTests).Assembly, IlScan.IsOnTheDocumentDiagnostics);
+
+        scan.Unresolved.Should().BeEmpty();
+        Mine(scan).Should().ContainKey("DocumentTypesAsync")
+            .WhoseValue.Should().Equal([nameof(Offenders.Diagnostics), nameof(Offenders.DiagnosticsMethodGroup)]);
+
+        Type? writer = typeof(JasperFx.Documents.IDocumentStoreDiagnostics).Assembly
+            .GetType("JasperFx.Documents.IDocumentStoreDiagnosticsWriter", throwOnError: false);
+
+        if (writer is not null)
+        {
+            IlScan.DocumentDiagnosticsInterfaces.Should().Contain(writer);
+            writer.GetMethods().Should().NotBeEmpty().And.OnlyContain(x => IlScan.IsOnTheDocumentDiagnostics(x));
+        }
     }
 
     /// <summary>The source layer's anti-vacuity: it finds a real call however it is spelled, and ignores prose and namesakes.</summary>
@@ -580,6 +637,12 @@ public class StorageEnsuringCallTests
             (await store.GetRecentStreamsAsync(10, token)).Count;
 
         public static Task<int> NotAnOffender(Namesake namesake) => namesake.QueryAsync<Probe>("select 1");
+
+        public static async Task<int> Diagnostics(JasperFx.Documents.IDocumentStoreDiagnostics diagnostics, CancellationToken token) =>
+            (await diagnostics.DocumentTypesAsync(token)).Count;
+
+        public static Func<CancellationToken, Task<IReadOnlyList<JasperFx.Documents.DocumentTypeRef>>> DiagnosticsMethodGroup(
+            JasperFx.Documents.IDocumentStoreDiagnostics diagnostics) => diagnostics.DocumentTypesAsync;
     }
 
     /// <summary>A document type for the offenders to name.</summary>
@@ -615,6 +678,61 @@ public class StorageEnsuringCallTests
         public static bool EnsuresStorage(MethodBase target) =>
             Names.Contains(target.Name)
             && MartenAssemblies.Contains(target.DeclaringType?.Assembly.GetName().Name ?? string.Empty);
+
+        /// <summary>
+        /// JasperFx's document-store diagnostics interfaces this run's JasperFx has: <c>IDocumentStoreDiagnostics</c> from
+        /// 2.74.0, <c>IDocumentStoreDiagnosticsWriter</c> from later - looked up by name, so the fence compiles at both ends.
+        /// </summary>
+        public static readonly IReadOnlyList<Type> DocumentDiagnosticsInterfaces =
+        [
+            .. new[] { "JasperFx.Documents.IDocumentStoreDiagnostics", "JasperFx.Documents.IDocumentStoreDiagnosticsWriter" }
+                .Select(static name => typeof(JasperFx.AutoCreate).Assembly.GetType(name, throwOnError: false))
+                .OfType<Type>(),
+        ];
+
+        /// <summary>
+        /// Every method that implements one of <see cref="DocumentDiagnosticsInterfaces" /> in Marten, JasperFx or Weasel, by
+        /// module and metadata token - so an implicit implementation called on the concrete type is fenced as well as the
+        /// interface member.
+        /// </summary>
+        private static readonly Lazy<HashSet<(Module Module, int Token)>> DocumentDiagnosticsImplementations = new(static () =>
+        {
+            HashSet<(Module, int)> methods = [];
+
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies().Where(static x => MartenAssemblies.Contains(x.GetName().Name ?? string.Empty)))
+            {
+                Type[] types;
+                try
+                {
+                    types = assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException exception)
+                {
+                    types = [.. exception.Types.OfType<Type>()];
+                }
+
+                foreach (Type type in types.Where(static x => x is { IsClass: true, IsGenericTypeDefinition: false }))
+                {
+                    foreach (Type @interface in DocumentDiagnosticsInterfaces.Where(x => x.IsAssignableFrom(type)))
+                    {
+                        foreach (MethodInfo target in type.GetInterfaceMap(@interface).TargetMethods)
+                        {
+                            methods.Add((target.Module, target.MetadataToken));
+                        }
+                    }
+                }
+            }
+
+            return methods;
+        });
+
+        /// <summary>
+        /// A target declared on JasperFx's document-store diagnostics interfaces, or a method that implements one of their
+        /// members - any member at all.
+        /// </summary>
+        public static bool IsOnTheDocumentDiagnostics(MethodBase target) =>
+            (target.DeclaringType is { } owner && DocumentDiagnosticsInterfaces.Contains(owner))
+            || DocumentDiagnosticsImplementations.Value.Contains((target.Module, target.MetadataToken));
 
         /// <summary>A target declared on JasperFx's <c>IEventStore</c>, or its generic form - any member at all.</summary>
         public static bool IsOnTheEventStore(MethodBase target) =>

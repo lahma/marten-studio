@@ -59,7 +59,7 @@ internal static class HighWaterAdvanceWording
                     : " This store numbers its events per tenant (UseTenantPartitionedEvents): Marten moves every tenant's own "
                       + "mark, in every database it reaches.";
 
-        return what + marks + (from952 ? StorageSentence(autoCreate) : string.Empty);
+        return what + marks + (from952 ? StorageSentence(autoCreate, tenantId) : string.Empty);
     }
 
     /// <summary>
@@ -68,12 +68,13 @@ internal static class HighWaterAdvanceWording
     /// </summary>
     /// <param name="runtime">The Marten this host runs.</param>
     /// <param name="autoCreate">The resolved database's <c>AutoCreate</c>, by name.</param>
-    public static string ButtonNote(MartenRuntime runtime, string? autoCreate)
+    /// <param name="tenantId">The tenant the scope selector is on, or <see langword="null" />: without one the advance reaches every database.</param>
+    public static string ButtonNote(MartenRuntime runtime, string? autoCreate, string? tenantId = null)
     {
         ArgumentNullException.ThrowIfNull(runtime);
 
         return RuntimeFeature.PerDatabaseHighWaterAdvance.IsAvailable(runtime)
-            ? StorageSentence(autoCreate).TrimStart()
+            ? StorageSentence(autoCreate, tenantId).TrimStart()
             : string.Empty;
     }
 
@@ -100,13 +101,30 @@ internal static class HighWaterAdvanceWording
             : null;
     }
 
-    private static string StorageSentence(string? autoCreate) =>
-        string.Equals(autoCreate, nameof(JasperFx.AutoCreate.None), StringComparison.Ordinal)
-            ? " Marten first ensures the event store's storage, which under this database's AutoCreate (None) creates nothing."
-            : " Marten first ensures the event store's storage under this database's AutoCreate ("
-              + (autoCreate is { Length: > 0 } mode ? mode : "not reported")
-              + "): the first time this process asks, that may create the event store's tables, or migrate them to what the "
-              + "store declares, before the mark is written.";
+    /// <summary>
+    /// What the advance's storage check may do. With a tenant selected it runs in that tenant's database alone, under
+    /// that database's <c>AutoCreate</c>. Without one it runs in every database of the store
+    /// (<c>Tenancy.BuildDatabases()</c>), each under its own <c>AutoCreate</c>, and the selected database's mode says
+    /// nothing about the others - so it is quoted as this database's, and "creates nothing" is never said for all of them.
+    /// </summary>
+    private static string StorageSentence(string? autoCreate, string? tenantId)
+    {
+        string mode = autoCreate is { Length: > 0 } named ? named : "not reported";
+        bool none = string.Equals(autoCreate, nameof(JasperFx.AutoCreate.None), StringComparison.Ordinal);
+
+        if (tenantId is { Length: > 0 })
+        {
+            return none
+                ? " Marten first ensures the event store's storage, which under this database's AutoCreate (None) creates nothing."
+                : " Marten first ensures the event store's storage under this database's AutoCreate (" + mode + "): the first "
+                  + "time this process asks, that may create the event store's tables, or migrate them to what the store "
+                  + "declares, before the mark is written.";
+        }
+
+        return " Marten first ensures the event store's storage in each database it reaches, under each database's own "
+            + "AutoCreate (this one's is " + mode + "): the first time this process asks, wherever that is not None, it may "
+            + "create the event store's tables, or migrate them to what the store declares, before the mark is written.";
+    }
 }
 
 /// <summary>
