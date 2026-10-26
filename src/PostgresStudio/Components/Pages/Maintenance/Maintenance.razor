@@ -1,0 +1,618 @@
+@page "/postgres/maintenance"
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Health.Checks
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Maintenance
+@using PostgresStudio.Services.Server
+@using PostgresStudio.Services.Settings
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Components.Pages.Health
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject IMaintenanceService MaintenanceData
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+
+@*
+    Maintenance (W5-V1, issue #8 G2): what autovacuum makes of each table - its three decisions against the table's own
+    triggers - what maintenance is running now, the workers, the freeze forecast, who holds the vacuum horizon, and a bloat
+    measure on demand.
+
+    Everything but the measure is the regular health sweep's own reads (MaintenanceFacts), so the page costs the database
+    nothing the Health page does not: read once interactive, every HealthInterval while it stays open, and on Refresh. The
+    gate is the database-wide one; a table outside the source's own schemas is named only past the database browser's gate;
+    the horizon holder's names only behind the activity gate, through the Health page's own reads.
+*@
+
+<PageTitle>Maintenance</PageTitle>
+
+<div class="ms-page ms-maint">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Maintenance</h1>
+        <div class="ms-maint-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-maint-lead">
+        What autovacuum makes of each table: its dead rows, inserts and changes against the triggers autovacuum itself computes -
+        the table's own storage parameters over the server's settings - with what is running now, the freeze forecast and who
+        holds the vacuum horizon. It changes nothing; the one thing it runs on its own is a bloat measure, when you press it.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        @* A static render reads nothing: the sweep starts once the page is interactive. *@
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a database in the header to see its maintenance.</p>
+        </div>
+    }
+    else if (view.Refusal != MaintenanceRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-maint-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (view.MeasuredAt is { } measured)
+        {
+            <p class="ms-maint-measured">
+                Read by the health sweep @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />). Counters read just
+                after a manual VACUUM can be inflated: a backend's pending counts reach the statistics after the VACUUM reset them.
+            </p>
+        }
+
+        <section class="ms-section ms-maint-triggers" aria-labelledby="ms-maint-triggers-title">
+            <h2 class="ms-section-title" id="ms-maint-triggers-title">Triggers</h2>
+
+            @if (!view.TablesRead)
+            {
+                <p class="ms-muted">The table read did not finish in this sweep; the Health page's T07 row says why.</p>
+            }
+            else if (view.Tables.Count == 0)
+            {
+                <p class="ms-muted">
+                    @(view.TablesWithheld > 0
+                        ? "Every judged table is in a schema the database browser does not show you."
+                        : "No table is judged in this database.")
+                </p>
+            }
+            else
+            {
+                <p class="ms-maint-legend">
+                    Each bar is a counter against twice its trigger: the mark in the middle is the trigger autovacuum acts past, and a
+                    full bar is past twice it. A partitioned table shows its partition furthest behind.
+                </p>
+
+                <TableScroll Label="Autovacuum's triggers for each table">
+                    <table class="ms-table ms-maint-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Table</th>
+                                <th scope="col">Dead rows</th>
+                                <th scope="col">Inserts since vacuum</th>
+                                <th scope="col">Changed since analyze</th>
+                                <th scope="col">Last vacuum</th>
+                                <th scope="col">Last analyze</th>
+                                <th scope="col">Overrides</th>
+                                @if (PostgresFeatures.Has(PostgresFeature.TotalVacuumTime, view.ServerVersion))
+                                {
+                                    <th scope="col">Time vacuuming / analysing</th>
+                                }
+                                <th scope="col">Bloat</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (MaintenanceTableView table in view.Tables)
+                            {
+                                <tr class="ms-table-row" @key="table.Key">
+                                    <td class="ms-table-cell ms-maint-name">
+                                        <span class="ms-mono">@table.Key</span>
+                                        @if (table.Partitions > 0)
+                                        {
+                                            <span class="ms-maint-partitions">@SessionText.Count(table.Partitions, "partition")</span>
+                                        }
+                                        <span class="ms-maint-badges">
+                                            @if (table.Behind)
+                                            {
+                                                <span class="ms-maint-badge ms-maint-badge-behind">behind</span>
+                                            }
+                                            else if (table.Due)
+                                            {
+                                                <span class="ms-maint-badge ms-maint-badge-due">due</span>
+                                            }
+                                            @if (table.Off is { } off)
+                                            {
+                                                <span class="ms-maint-badge ms-maint-badge-off" title="@off">autovacuum off</span>
+                                            }
+                                        </span>
+                                    </td>
+                                    <td class="ms-table-cell">@Bar("Dead rows", table.Vacuum)</td>
+                                    <td class="ms-table-cell">@Bar("Inserts since the last vacuum", table.Insert)</td>
+                                    <td class="ms-table-cell">@Bar("Changed since the last analyze", table.Analyze)</td>
+                                    <td class="ms-table-cell ms-maint-when">
+                                        <span>auto @MaintenancePresentation.When(table.LastAutovacuum, view.MeasuredAt ?? DateTimeOffset.UtcNow)</span>
+                                        <span>manual @MaintenancePresentation.When(table.LastVacuum, view.MeasuredAt ?? DateTimeOffset.UtcNow)</span>
+                                    </td>
+                                    <td class="ms-table-cell ms-maint-when">
+                                        <span>auto @MaintenancePresentation.When(table.LastAutoanalyze, view.MeasuredAt ?? DateTimeOffset.UtcNow)</span>
+                                        <span>manual @MaintenancePresentation.When(table.LastAnalyze, view.MeasuredAt ?? DateTimeOffset.UtcNow)</span>
+                                    </td>
+                                    <td class="ms-table-cell ms-mono ms-maint-overrides">@(table.Overrides.Count == 0 ? "-" : string.Join(", ", table.Overrides))</td>
+                                    @if (PostgresFeatures.Has(PostgresFeature.TotalVacuumTime, view.ServerVersion))
+                                    {
+                                        <td class="ms-table-cell ms-num">
+                                            @MaintenancePresentation.Milliseconds(table.TotalVacuumMilliseconds) / @MaintenancePresentation.Milliseconds(table.TotalAnalyzeMilliseconds)
+                                        </td>
+                                    }
+                                    <td class="ms-table-cell">
+                                        @if (table.Measurable)
+                                        {
+                                            <button type="button"
+                                                    class="ms-button ms-btn-sm ms-maint-measure"
+                                                    disabled="@(!interactive || measuring is not null)"
+                                                    title="Reads the table with pgstattuple_approx and each index with pgstatindex - one table, on demand"
+                                                    @onclick="() => MeasureAsync(table)">
+                                                @(measuring == table.Key ? "Measuring…" : "Measure")
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="ms-muted">per partition</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+
+                @if (view.TablesCut > 0)
+                {
+                    <p class="ms-muted">And @SessionText.Count(view.TablesCut, "more table"), less pressed than these.</p>
+                }
+            }
+
+            @if (view.TablesWithheld > 0 && view.Tables.Count > 0)
+            {
+                <p class="ms-muted ms-maint-withheld">
+                    @SessionText.Count(view.TablesWithheld, "table") in schemas the database browser does not show you are not listed.
+                </p>
+            }
+
+            @if (view.Coverage is { Length: > 0 } coverage)
+            {
+                <p class="ms-muted">Judged: @coverage.</p>
+            }
+
+            @if (bloat is { } result)
+            {
+                <div class="ms-maint-bloat" role="status" aria-live="polite">
+                    <h3 class="ms-maint-subtitle">Bloat of <span class="ms-mono">@result.TableKey</span></h3>
+                    @if (result.Measure is { } measure)
+                    {
+                        <dl class="ms-maint-facts">
+                            <div><dt>Size</dt><dd>@MaintenancePresentation.Bytes(measure.TableBytes)</dd></div>
+                            <div><dt>Dead tuples</dt><dd>@MaintenancePresentation.Count(measure.DeadTuples) (@MaintenancePresentation.Percent(measure.DeadPercent))</dd></div>
+                            <div><dt>Free space</dt><dd>@MaintenancePresentation.Bytes(measure.FreeBytes) (@MaintenancePresentation.Percent(measure.FreePercent))</dd></div>
+                            <div><dt>Live tuples</dt><dd>~@MaintenancePresentation.Count(measure.LiveTuples)</dd></div>
+                            <div><dt>Read rather than estimated</dt><dd>@MaintenancePresentation.Percent(measure.ScannedPercent) of the table</dd></div>
+                        </dl>
+
+                        @if (measure.Indexes.Count > 0)
+                        {
+                            <TableScroll Label="Bloat of the table's indexes">
+                                <table class="ms-table ms-maint-index-table">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Index</th>
+                                            <th scope="col">Method</th>
+                                            <th scope="col">Size</th>
+                                            <th scope="col">Leaf density</th>
+                                            <th scope="col">Fragmentation</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (BloatIndexRow index in measure.Indexes)
+                                        {
+                                            <tr class="ms-table-row" @key="index.Name">
+                                                <td class="ms-table-cell ms-mono">@index.Name</td>
+                                                <td class="ms-table-cell">@index.AccessMethod</td>
+                                                <td class="ms-table-cell ms-num">@MaintenancePresentation.Bytes(index.Bytes)</td>
+                                                <td class="ms-table-cell ms-num">@(index.LeafDensity is { } density ? MaintenancePresentation.Percent(density) : index.PendingPages is { } pending ? MaintenancePresentation.Count(pending) + " pending pages" : index.HashFreePercent is { } free ? MaintenancePresentation.Percent(free) + " free" : "not measured")</td>
+                                                <td class="ms-table-cell ms-num">@(index.LeafFragmentation is { } fragmentation ? MaintenancePresentation.Percent(fragmentation) : "-")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </TableScroll>
+                        }
+
+                        <p class="ms-muted">
+                            Measured @State.FormatInSelectedTimeZone(result.At) with pgstattuple_approx and pgstatindex: an estimate of the
+                            heap from the visibility map and an exact read of every b-tree page. A leaf density far below the index's
+                            fillfactor (90% by default) is space a REINDEX CONCURRENTLY would give back.
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="ms-maint-bloat-refusal">@result.Refusal</p>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="ms-section ms-maint-running" aria-labelledby="ms-maint-running-title">
+            <h2 class="ms-section-title" id="ms-maint-running-title">Running now</h2>
+
+            @if (!view.Running.Read)
+            {
+                <p class="ms-muted">The progress views were not read in this sweep; the Health page's T16 row says why.</p>
+            }
+            else if (view.Running.Rows.Count == 0 && view.Running.Unseen == 0)
+            {
+                <p class="ms-muted">No VACUUM, ANALYZE, index build or CLUSTER was running in this database when the sweep read it.</p>
+            }
+            else
+            {
+                @if (view.Running.Rows.Count > 0)
+                {
+                    <TableScroll Label="Maintenance running in this database">
+                        <table class="ms-table ms-maint-running-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">What</th>
+                                    <th scope="col">On</th>
+                                    <th scope="col">By</th>
+                                    <th scope="col">Phase</th>
+                                    <th scope="col">Progress</th>
+                                    @if (PostgresFeatures.Has(PostgresFeature.ProgressIndexesTotal, view.ServerVersion))
+                                    {
+                                        <th scope="col">Indexes</th>
+                                    }
+                                    <th scope="col">Running for</th>
+                                    <th scope="col">Phase done in</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < view.Running.Rows.Count; i++)
+                                {
+                                    MaintenanceRunningRow row = view.Running.Rows[i];
+                                    <tr class="ms-table-row" @key="i">
+                                        <td class="ms-table-cell">@row.Kind</td>
+                                        <td class="ms-table-cell ms-mono">@row.Table</td>
+                                        <td class="ms-table-cell">@(row.Who ?? "not known")</td>
+                                        <td class="ms-table-cell">@(row.Phase ?? "-")</td>
+                                        <td class="ms-table-cell">@MaintenancePresentation.Blocks(row.BlocksDone, row.BlocksTotal)</td>
+                                        @if (PostgresFeatures.Has(PostgresFeature.ProgressIndexesTotal, view.ServerVersion))
+                                        {
+                                            <td class="ms-table-cell">@(row.IndexesTotal is { } total ? (row.IndexesProcessed ?? 0) + " of " + total : "-")</td>
+                                        }
+                                        <td class="ms-table-cell">@(row.Running is { } running ? SessionText.Duration(running) : "-")</td>
+                                        <td class="ms-table-cell">@(row.Eta is { } eta ? "about " + SessionText.Duration(eta) : "-")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+
+                @if (view.Running.Unseen > 0)
+                {
+                    <p class="ms-maint-unseen">
+                        @SessionText.Number(view.Running.Unseen) maintenance process@(view.Running.Unseen == 1 ? string.Empty : "es") in this database this role cannot see the table of -
+                        autovacuum's own work included. @view.Running.NotChecked
+                    </p>
+                }
+            }
+        </section>
+
+        <section class="ms-section ms-maint-workers" aria-labelledby="ms-maint-workers-title">
+            <h2 class="ms-section-title" id="ms-maint-workers-title">Workers</h2>
+
+            @if (view.Workers is { } workers)
+            {
+                <dl class="ms-maint-facts">
+                    <div><dt>autovacuum</dt><dd>@(workers.Autovacuum ? "on" : "off - nothing is vacuumed but to prevent wraparound (S02)")</dd></div>
+                    <div><dt>autovacuum_max_workers</dt><dd>@workers.MaxWorkers</dd></div>
+                    @if (workers.WorkerSlots is { } slots)
+                    {
+                        <div><dt>autovacuum_worker_slots</dt><dd>@slots</dd></div>
+                    }
+                    <div><dt>Busy</dt><dd class="@(workers.Saturated ? "ms-maint-alert" : null)">@workers.Busy</dd></div>
+                    <div><dt>autovacuum_naptime</dt><dd>@workers.NaptimeSeconds s</dd></div>
+                </dl>
+            }
+            else
+            {
+                <p class="ms-muted">The workers were not read in this sweep.</p>
+            }
+        </section>
+
+        <section class="ms-section ms-maint-freeze" aria-labelledby="ms-maint-freeze-title">
+            <h2 class="ms-section-title" id="ms-maint-freeze-title">Freeze forecast</h2>
+
+            @if (view.Freeze is { } freeze)
+            {
+                <TableScroll Label="Transaction-id and multixact ages against their lines">
+                    <table class="ms-table ms-maint-freeze-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Counter</th>
+                                <th scope="col">Oldest age</th>
+                                <th scope="col">Forced freeze at</th>
+                                <th scope="col">Reached in</th>
+                                <th scope="col">Writes refused at</th>
+                                <th scope="col">Reached in</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (MaintenanceForecast forecast in (MaintenanceForecast[]) [freeze.TransactionIds, freeze.Multixacts])
+                            {
+                                <tr class="ms-table-row" @key="forecast.Noun">
+                                    <td class="ms-table-cell">@forecast.Noun</td>
+                                    <td class="ms-table-cell ms-num">@Wraparound.Count(forecast.Age)</td>
+                                    <td class="ms-table-cell ms-num">@Wraparound.Count(forecast.ForcedLine)</td>
+                                    <td class="ms-table-cell">@MaintenancePresentation.Until(forecast.ToForced, forecast.Rate)</td>
+                                    <td class="ms-table-cell ms-num">@Wraparound.Count(forecast.RefusalLine)</td>
+                                    <td class="ms-table-cell">@MaintenancePresentation.Until(forecast.ToRefusal, forecast.Rate)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+
+                <p class="ms-muted">
+                    @(freeze.TransactionIds.Rate is { } rate ? "Transaction ids are spent at " + rate + "." : "A rate needs two samples of the counter.")
+                    The forecast is linear and assumes no freeze completes in between - which autovacuum is about to do at the forced line,
+                    so before it the time is a note, never a warning (T12, T13).
+                </p>
+
+                @if (freeze.OldestTables.Count > 0)
+                {
+                    <p class="ms-maint-oldest">
+                        Furthest into the range:
+                        @string.Join("; ", freeze.OldestTables.Select(static x => x.Table + " " + Wraparound.Count(x.XidAge)))
+                    </p>
+                }
+            }
+            else
+            {
+                <p class="ms-muted">The wraparound read did not finish in this sweep; the Health page's T12 row says why.</p>
+            }
+        </section>
+
+        <section class="ms-section ms-maint-horizon" aria-labelledby="ms-maint-horizon-title">
+            <h2 class="ms-section-title" id="ms-maint-horizon-title">Vacuum horizon</h2>
+
+            @if (view.Horizon.Finding is { } holder)
+            {
+                <p class="ms-maint-horizon-title">
+                    <span class="@HealthPresentation.ChipClass(holder.Severity)">@HealthPresentation.Label(holder.Severity)</span>
+                    @holder.Finding.Title
+                </p>
+                <dl class="ms-maint-facts">
+                    @foreach (HealthEvidence item in holder.Evidence)
+                    {
+                        <div><dt>@item.Label</dt><dd class="ms-mono">@item.Value</dd></div>
+                    }
+                </dl>
+                <p class="ms-muted">The Health page's T14 finding says what to do about it.</p>
+            }
+            else
+            {
+                <p class="ms-muted">@(view.Horizon.Note ?? "Nothing holds the vacuum horizon back.")</p>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    /// <summary>The page's own polling loop, at <c>HealthInterval</c>; built rather than injected.</summary>
+    private StudioLiveUpdates? live;
+
+    private MaintenanceView? view;
+    private BloatMeasureResult? bloat;
+    private string? error;
+    private string? measuring;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+        CancellationToken token = lifetime.Token;
+
+        await State.EnsureInitializedAsync(token);
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        bloat = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync(CancellationToken poll = default)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            MaintenanceView? read = scope is null ? null : await MaintenanceData.GetAsync(scope, token);
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                view = read;
+                error = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing.
+            error = exception.Message;
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task MeasureAsync(MaintenanceTableView table)
+    {
+        if (disposed || measuring is not null || State.ActiveScope is not { } scope)
+        {
+            return;
+        }
+
+        measuring = table.Key;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            BloatMeasureResult result = await MaintenanceData.MeasureBloatAsync(scope, table.Schema, table.Table, lifetime.Token);
+
+            if (State.ActiveScope == scope)
+            {
+                bloat = result;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            bloat = new BloatMeasureResult(table.Key, null, "The measure failed: " + exception.Message, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            measuring = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>One decision as a bar: the counter against twice its trigger, the trigger marked at the middle.</summary>
+    private static RenderFragment Bar(string what, AutovacuumUnit? unit) => __builder =>
+    {
+        if (unit is null)
+        {
+            <span class="ms-muted">-</span>
+            return;
+        }
+
+        string fill = MaintenancePresentation.Fill(unit).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+        <span class="ms-maint-decision" title="@("Trigger: " + MaintenancePresentation.TriggerParts(unit))">
+            <span class="@MaintenancePresentation.BarClass(unit)" role="img" aria-label="@MaintenancePresentation.BarLabel(what, unit)">
+                <span class="ms-maint-bar-fill" style="@("width: " + fill + "%")"></span>
+                <span class="ms-maint-bar-trigger"></span>
+            </span>
+            <span class="ms-maint-against">@MaintenancePresentation.Against(unit)</span>
+        </span>
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

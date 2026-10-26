@@ -93,6 +93,28 @@ internal static class TableCheckBuilders
     public static TableFacts Table(MartenTable table, Func<HealthTableRow, HealthTableRow>? shape = null) =>
         new(table, shape is null ? Row(table) : shape(Row(table)));
 
+    /// <summary>
+    /// One of autovacuum's decisions about a table (W5-V1): a counter against a trigger, last acted on
+    /// <paramref name="last" /> - with PostgreSQL's default threshold and scale factor unless the case says otherwise.
+    /// </summary>
+    public static AutovacuumUnit Unit(
+        long counter,
+        double trigger,
+        DateTimeOffset? last = null,
+        bool running = false,
+        double threshold = 50,
+        double scale = 0.2,
+        double tuples = 10_000) => new()
+        {
+            Counter = counter,
+            Trigger = trigger,
+            Last = last,
+            Running = running,
+            Threshold = threshold,
+            ScaleFactor = scale,
+            Tuples = tuples,
+        };
+
     /// <summary>A valid b-tree index on <paramref name="table" /> over <paramref name="columns" />.</summary>
     public static HealthIndexRow IndexRow(MartenTable table, string name, params string[] columns) => new()
     {

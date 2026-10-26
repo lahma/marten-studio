@@ -81,6 +81,7 @@ internal static class PostgresStudioDescriptor
         new("Operations",
         [
             new("Health", "health", "pulse", StudioNavBadgeKeys.Health),
+            new("Maintenance", "maintenance", "maintenance", Title: "Autovacuum's triggers, running maintenance, the freeze forecast and the horizon"),
         ]),
         new("System",
         [

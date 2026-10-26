@@ -331,6 +331,7 @@ public class StudioLayoutTests
                 "Event types",
                 "Dead letters",
                 "Health",
+                "Maintenance",
                 "Projections",
                 "Schema",
                 "Configuration",
@@ -361,6 +362,7 @@ public class StudioLayoutTests
             "events/types",
             "events/dead-letters",
             "health",
+            "maintenance",
             "projections",
             "schema",
             "config",
@@ -389,6 +391,7 @@ public class StudioLayoutTests
             "events/types",
             "events/dead-letters",
             "health",
+            "maintenance",
             "projections",
             "schema",
             "config",
@@ -550,7 +553,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(14, "every entry, Health (0.4) included");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(15, "every entry, Health (0.4) and Maintenance (0.5) included");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

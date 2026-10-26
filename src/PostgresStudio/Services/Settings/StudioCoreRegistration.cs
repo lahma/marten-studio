@@ -4,6 +4,7 @@ using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
+using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
 using PostgresStudio.Services.Sources;
@@ -144,6 +145,12 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<HealthMutes>();
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();
+
+        // W5-V1: the Maintenance page. Its facts are the regular sweep's own reads, the database's and every circuit's, and so
+        // is the one bloat measure per database at once; what a visitor is shown of them is the circuit's.
+        services.TryAddSingleton<IMaintenanceFacts, MaintenanceFactsReader>();
+        services.TryAddSingleton<BloatMeasureFlights>();
+        services.TryAddScoped<IMaintenanceService, MaintenanceService>();
 
         // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
         // MeterListener is process-wide, and it listens only while a sweep or an open Sessions page holds a

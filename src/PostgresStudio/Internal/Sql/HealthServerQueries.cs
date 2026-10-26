@@ -100,7 +100,9 @@ internal static class HealthServerQueries
     /// <summary>
     /// Every replication slot on the server, most WAL retained first, with the server's settings that bound what a
     /// slot may hold - one row with nulls for the slot columns when there is none, so the settings are read either
-    /// way. R01, and T14's horizon (<c>xmin</c> and <c>catalog_xmin</c> ages).
+    /// way. R01, and T14's horizon (<c>xmin</c> and <c>catalog_xmin</c> ages) - and, W5-V1, the two as raw transaction ids
+    /// (<c>xmin::text</c>), so that T14 can see a slot pinned at exactly a writer's own transaction id as behind that writer,
+    /// which two <c>age()</c>s from two statements cannot say.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -137,7 +139,9 @@ internal static class HealthServerQueries
         "         x.j ->> 'invalidation_reason' as invalidation_reason,\n" +
         "         (x.j ->> 'conflicting')::bool as conflicting,\n" +
         "         pg_catalog.count(*) over () as total,\n" +
-        "         (s.database is null or s.database = pg_catalog.current_database()) as this_database\n" +
+        "         (s.database is null or s.database = pg_catalog.current_database()) as this_database,\n" +
+        "         s.xmin::text as xmin,\n" +
+        "         s.catalog_xmin::text as catalog_xmin\n" +
         "    from pg_catalog.pg_replication_slots s\n" +
         "   cross join server v\n" +
         "   cross join lateral (select pg_catalog.to_jsonb(s) as j) x\n" +
@@ -147,7 +151,7 @@ internal static class HealthServerQueries
         "select v.server_version, v.in_recovery, v.max_slot_wal_keep_bytes, v.wal_keep_bytes,\n" +
         "       r.slot_name, r.slot_type, r.plugin, r.database, r.temporary, r.active, r.retained_bytes,\n" +
         "       r.wal_status, r.safe_wal_size, r.xmin_age, r.catalog_xmin_age, r.inactive_seconds,\n" +
-        "       r.invalidation_reason, r.conflicting, r.total, r.this_database\n" +
+        "       r.invalidation_reason, r.conflicting, r.total, r.this_database, r.xmin, r.catalog_xmin\n" +
         "  from server v left join slots r on true",
         [Integer("limit", MaxSlots)]);
 

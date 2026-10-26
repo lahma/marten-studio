@@ -122,8 +122,14 @@ public class HealthSeamTests
         new SequentialScansCheck().Sample(new SequentialScanFacts(Now, [scanned], DatabaseStatistics.Of([scanned])))
             .Should().BeEmpty("T01 does not watch a table whose missing index is not the host's to add");
 
-        TableFacts bloated = Table(jobs, row => row with { LiveRows = 50_000, DeadRows = 50_000, LastAutovacuum = Now.AddDays(-3) });
-        VacuumBehindCheck.IsBehind(bloated, Now).Should().BeTrue("vacuum rules still apply to a library's table");
+        TableFacts bloated = Table(jobs, row => row with
+        {
+            LiveRows = 50_000,
+            DeadRows = 50_000,
+            LastAutovacuum = Now.AddDays(-3),
+            Vacuum = Unit(50_000, 10_050, Now.AddDays(-3), tuples: 50_000),
+        });
+        VacuumBehindCheck.IsBehind(bloated, VacuumBehindKind.DeadRows, Now).Should().BeTrue("vacuum rules still apply to a library's table");
     }
 
     // -----------------------------------------------------------------------------------------------
@@ -147,6 +153,7 @@ public class HealthSeamTests
             DeadRows = 50_000,
             LastAutovacuum = Now.AddDays(-3),
             StorageOptions = ["autovacuum_enabled=false"],
+            Vacuum = Unit(50_000, 10_050, Now.AddDays(-3), tuples: 50_000),
         });
 
         HealthFinding finding = new VacuumBehindCheck().Evaluate(new VacuumFacts(Now, [off]), Evaluation())
@@ -227,7 +234,7 @@ public class HealthSeamTests
 
         registry.All.Select(static x => x.Info.CheckType).Should().BeEquivalentTo(
             MartenStudioDescriptor.Instance.HealthCheckAssemblies.Select(static x => x.Assembly).Distinct().SelectMany(HealthCheckRegistry.Discover));
-        registry.All.Should().HaveCount(50, "the studio ships 50 checks: 0.4's 49 and W5's D09");
+        registry.All.Should().HaveCount(52, "the studio ships 52 checks: 0.4's 49, W5's D09, and W5-V1's T16 and T24");
 
         HealthCheckRegistry.Describe(typeof(ScriptedLightUpCheck), MartenStudioRuntime.Current).Requires
             .Should().BeSameAs(RuntimeFeature.TransientFailureClassifier);

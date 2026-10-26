@@ -208,14 +208,19 @@ public partial class HealthHorizonQueriesTests
     {
         string sql = HealthHorizonQueries.HoldersSql;
 
-        Regex.Count(sql, @"pg_catalog\.age\(a\.backend_xid\)::bigint as own_xid_age|pg_catalog\.age\(a\.backend_xid\)::bigint\n", RegexOptions.CultureInvariant)
+        Regex.Count(sql, @"pg_catalog\.age\(a\.backend_xid\)::bigint as own_xid_age,\n|pg_catalog\.age\(a\.backend_xid\)::bigint,\n", RegexOptions.CultureInvariant)
             .Should().Be(2, "this database's sessions and another database's");
-        Regex.Count(sql, @"pg_catalog\.count\(\*\) over \(\),\n\s*pg_catalog\.age\(p\.transaction\)::bigint\n", RegexOptions.CultureInvariant)
+        Regex.Count(sql, @"pg_catalog\.count\(\*\) over \(\),\n\s*pg_catalog\.age\(p\.transaction\)::bigint,\n", RegexOptions.CultureInvariant)
             .Should().Be(1, "this database's prepared transactions");
-        Regex.Count(sql, @"1::bigint,\n\s*pg_catalog\.age\(p\.transaction\)::bigint\n", RegexOptions.CultureInvariant)
+        Regex.Count(sql, @"1::bigint,\n\s*pg_catalog\.age\(p\.transaction\)::bigint,\n", RegexOptions.CultureInvariant)
             .Should().Be(1, "another database's prepared transaction");
-        sql.Should().Contain("pg_catalog.count(*) over (),\n            null::bigint\n", "a standby's feedback is the oldest id running when it took its snapshot");
-        sql.Should().Contain("h.holds_daemon_lock, h.total,\n       h.own_xid_age\n");
+        sql.Should().Contain("pg_catalog.count(*) over (),\n            null::bigint,\n", "a standby's feedback is the oldest id running when it took its snapshot");
+        sql.Should().Contain("h.holds_daemon_lock, h.total,\n       h.own_xid_age, h.own_xid, h.xmin_raw\n");
+
+        // W5-V1: the same ids raw, so a slot pinned at a writer's own transaction id matches it (and a hold has an identity).
+        Regex.Count(sql, @"a\.backend_xid::text", RegexOptions.CultureInvariant).Should().Be(2, "both session branches");
+        Regex.Count(sql, @"p\.transaction::text", RegexOptions.CultureInvariant).Should().Be(2, "both prepared branches");
+        sql.Should().Contain("null::text, r.backend_xmin::text", "a standby's raw xmin is its identity's");
     }
 
     /// <summary>
@@ -232,10 +237,11 @@ public partial class HealthHorizonQueriesTests
 
         // The 17th column of the session branch is the owned id's age.
         string branch = sql[sql.IndexOf("(select 0 as kind", StringComparison.Ordinal)..sql.IndexOf(" from pg_catalog.pg_stat_activity a\n     where a.datname = pg_catalog.current_database()", StringComparison.Ordinal)];
-        branch.TrimEnd().Should().EndWith("pg_catalog.age(a.backend_xid)::bigint as own_xid_age");
+        branch.Should().Contain("pg_catalog.age(a.backend_xid)::bigint as own_xid_age,\n");
+        branch.TrimEnd().Should().EndWith("a.backend_xid::text as own_xid, a.backend_xmin::text as xmin_raw", "W5-V1's raw ids come after the 17th");
         Regex.Count(branch, @" as (kind|xid_age|at_least|transaction_open|bound|usename|application_name|client_addr|state|gid|has_xid|hidden|holds_daemon_lock|total|own_xid_age)\b",
                 RegexOptions.CultureInvariant)
-            .Should().Be(15, "15 aliased columns, and a.pid and a.backend_start unaliased: 17 in all");
+            .Should().Be(15, "15 aliased columns, and a.pid and a.backend_start unaliased: 17 in all up to own_xid_age");
     }
 
     /// <summary>Follow-up 4: another database's holders are an age and nothing else - not even a count.</summary>

@@ -83,7 +83,13 @@ Configuration page show the version already. The platform's name is evidence at 
 - **Critical anywhere**: `track_counts = off`. Autovacuum chooses what to vacuum and analyse from those counters.
   With it off, nothing is vacuumed except to stop wraparound: every document Marten upserts leaves a dead row
   version that is never cleared, the tables bloat, the planner's statistics go stale, and the studio's own table
-  checks have nothing to read.
+  checks have nothing to read. Also `autovacuum = off` (0.5): nothing vacuums or analyses a table by itself any more,
+  whatever its own storage parameters say, and the only vacuum still coming is the forced anti-wraparound one, which
+  scans a whole table at once. Its remedy is `autovacuum = on` (a reload, no restart) where the platform changes
+  server settings; a table switched off by its own storage parameter is T24's.
+- **Warning**: `track_activities = off` (0.5). `pg_stat_activity` then records no state, no statement and no times for
+  a session, so the session checks C04, C05 and T14 cannot see sessions' state or age, and Database › Sessions shows
+  sessions without what they are doing.
 - **Critical in Production**: `fsync = off` and `full_page_writes = off`, which give up crash safety (a power cut
   can corrupt the cluster, not merely lose a transaction). Also `zero_damaged_pages = on`, which silently turns a
   damaged page into an empty one, and `ignore_checksum_failure = on`, which goes on using it. The environment is
@@ -96,7 +102,9 @@ Configuration page show the version already. The platform's name is evidence at 
   configuration the server does not run yet.
 
 **Never** a sizing setting - `shared_buffers`, `work_mem`, `random_page_cost` and the rest. Advice computed from
-the server's memory cries wolf (R1 §D). The six settings above are the whole list.
+the server's memory cries wolf (R1 §D). The eight settings above - `track_counts`, `autovacuum`, `track_activities`,
+`fsync`, `full_page_writes`, `zero_damaged_pages`, `ignore_checksum_failure` and `synchronous_commit` - and the
+settings waiting for a restart are the whole of what S02 judges.
 
 The values are read on a connection from the store's own data source, so a value set for its role, its database,
 or in its connection string's startup options (`Options=-c …`) is the value the store's sessions run with.

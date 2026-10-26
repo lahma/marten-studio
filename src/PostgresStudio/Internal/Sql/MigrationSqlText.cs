@@ -106,6 +106,18 @@ internal static partial class MigrationSqlText
             ? "ALTER TABLE " + qualified + " RESET (" + parameter + ");"
             : null;
 
+    /// <summary>
+    /// <c>ALTER TABLE schema.table RESET (toast.parameter);</c> - the table's TOAST table's storage parameter back to the
+    /// server's setting (W5-V1, T24) - or <see langword="null" />.
+    /// </summary>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="parameter">A storage parameter, without its <c>toast.</c> prefix.</param>
+    public static string? ResetToastStorageParameter(string schema, string table, string parameter) =>
+        Qualified(schema, table) is { } qualified && IsParameterName(parameter)
+            ? "ALTER TABLE " + qualified + " RESET (toast." + parameter + ");"
+            : null;
+
     /// <summary>Whether <paramref name="parameter" /> has a storage parameter's shape: lower-case letters and underscores.</summary>
     public static bool IsParameterName(string? parameter) => parameter is { Length: > 0 } && ParameterName().IsMatch(parameter);
 

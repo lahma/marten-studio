@@ -163,6 +163,7 @@ public class ServerChecksTests
     [
         On("track_counts", "default"), On("fsync", "default"), On("full_page_writes", "default"),
         Off("zero_damaged_pages", "default"), Off("ignore_checksum_failure", "default"), On("synchronous_commit", "default"),
+        On("autovacuum", "default"), On("track_activities", "default"),
     ];
 
     private static ServerSetting[] With(params ServerSetting[] changed) =>
@@ -174,8 +175,40 @@ public class ServerChecksTests
         HealthVerdict verdict = Settings("Production", null, Defaults);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Be("track_counts, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
-            + "synchronous_commit is on, and nothing waits for a restart.");
+        verdict.Note.Should().Be("track_counts, autovacuum, track_activities, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are "
+            + "at their safe values, synchronous_commit is on, and nothing waits for a restart.");
+    }
+
+    /// <summary>W5-V1 (issue #8 G2): autovacuum switched off for the whole server is Critical anywhere, as track_counts is.</summary>
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    [InlineData(null)]
+    public void Autovacuum_off_is_Critical_in_every_environment_with_the_server_setting_to_turn_it_on(string? environment)
+    {
+        HealthFinding finding = Settings(environment, null, With(new ServerSetting("autovacuum", "off", "configuration file", false) { Context = "sighup" }))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Code.Should().Be("S02");
+        finding.Subject.Should().Be("autovacuum");
+        finding.Severity.Should().Be(HealthSeverity.Critical);
+        finding.Title.Should().Be("Autovacuum is switched off for the whole server (autovacuum = off)");
+        finding.Remedy!.Kind.Should().Be(HealthRemedyKind.ServerSetting);
+        finding.Remedy.Code.Should().EndWith("autovacuum = on");
+        finding.Remedy.Explanation.Should().Contain("postgresql.conf").And.NotContain("restarts", "autovacuum is a sighup setting");
+    }
+
+    /// <summary>W5-V1 (2026-10-26 health-gap analysis): without track_activities the session checks are blind.</summary>
+    [Fact]
+    public void Track_activities_off_is_a_warning_that_names_the_checks_it_blinds()
+    {
+        HealthFinding finding = Settings("Production", null, With(Off("track_activities")))
+            .Findings.Should().ContainSingle().Subject;
+
+        finding.Subject.Should().Be("track_activities");
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.WhyItMatters.Should().Contain("C04, C05 and T14 cannot see sessions' state or age");
+        finding.Remedy!.Code.Should().EndWith("track_activities = on");
     }
 
     /// <summary>A watched setting with no row is not judged, and the status row says so, rather than calling it safe.</summary>

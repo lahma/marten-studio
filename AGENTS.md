@@ -1270,6 +1270,12 @@ tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per
 tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
                                          the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
                                          server per major, started on first use (an assembly fixture)
+src/PostgresStudio/Services/Maintenance/  The Maintenance page's facts (the regular sweep's own reads), its
+                                         per-visitor view, and the on-demand bloat measure
+src/PostgresStudio/Components/Pages/Maintenance/  The Maintenance page: autovacuum's triggers per table, running
+                                         maintenance, the workers, the freeze forecast and the vacuum horizon
+src/PostgresStudio/wwwroot/css/parts/    W5 CSS parts, one per packet: folded into studio.css in D26 order, then
+                                         deleted, by the orchestrator - parts/ never reaches main
 ```
 
 Outside those roots: `.github/workflows/` holds the four **generated** workflow files (hard rule 2),

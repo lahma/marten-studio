@@ -60,6 +60,14 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string TableBuilder = "src/PostgresStudio/Internal/Sql/HealthTableQueries.cs";
 
+    /// <summary>
+    /// The maintenance builder (W5-V1): T16 counts the autovacuum workers in <c>pg_stat_activity</c> and reads what an
+    /// autovacuum in the progress views is from it. It runs only in the regular sweep, at <c>HealthInterval</c>, through the
+    /// sweep's two shared maintenance reads - which only T16 calls (the net below) - and the Maintenance page reads the sweep's
+    /// memo of them, never the builder.
+    /// </summary>
+    private const string MaintenanceBuilder = "src/PostgresStudio/Internal/Sql/MaintenanceQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -75,7 +83,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -90,6 +98,37 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the horizon builder reads pg_stat_activity and pg_prepared_xacts for T14, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(TableBuilder.Split('/'))))
             .Should().BeTrue("the table builder reads pg_locks for its index read, so its exemption is not an exemption for nothing");
+    }
+
+    /// <summary>
+    /// The maintenance builder's two shared reads - the workers and what is running - are called by the health checks alone
+    /// (T16), so the process array is read once per regular sweep; the bloat measure, the one thing the Maintenance service
+    /// runs itself, reads no activity view.
+    /// </summary>
+    [Fact]
+    public void The_maintenance_builders_activity_reads_are_called_only_by_the_health_checks()
+    {
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(MaintenanceBuilder.Split('/'))))
+            .Should().BeTrue("the maintenance builder reads pg_stat_activity for T16, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(PostgresStudio.Internal.Sql.MaintenanceQueries.BloatSql("ext") + PostgresStudio.Internal.Sql.MaintenanceQueries.BloatPreconditionsSql)
+            .Should().BeFalse("the on-demand measure reads no activity view");
+
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != MaintenanceBuilder)
+                .Where(static file =>
+                {
+                    string text = SourceScanner.StripCommentsAndStrings(File.ReadAllText(file));
+                    return text.Contains("MaintenanceQueries.Workers(", StringComparison.Ordinal) || text.Contains("MaintenanceQueries.Progress(", StringComparison.Ordinal);
+                })
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().NotBeEmpty("a scan that found no caller would pass for the wrong reason");
+        callers.Should().OnlyContain(
+            static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks"),
+            "every other caller would be a new path to the process array");
     }
 
     [Fact]

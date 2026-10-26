@@ -57,7 +57,10 @@ internal sealed record DangerousSettingsFacts(
 /// <list type="bullet">
 /// <item><b>Critical anywhere</b>: <c>track_counts = off</c>. Autovacuum decides which tables to vacuum and analyse from
 /// those counters, so with it off nothing is vacuumed but to prevent wraparound - Marten's upserted documents bloat and
-/// its statistics go stale - and every statistics-based check here goes blind with it.</item>
+/// its statistics go stale - and every statistics-based check here goes blind with it. And <c>autovacuum = off</c> (W5-V1, issue
+/// #8 G2), which leaves every table to the forced anti-wraparound vacuum alone, whatever its own storage parameters say.</item>
+/// <item><b>Warning</b>: <c>track_activities = off</c> (W5-V1), which blinds the session checks C04, C05 and T14 to every
+/// session's state and age.</item>
 /// <item><b>Critical in Production</b>: <c>fsync = off</c> and <c>full_page_writes = off</c>, which give up crash safety
 /// (a power cut can corrupt the cluster, not merely lose a transaction), and <c>zero_damaged_pages = on</c> and
 /// <c>ignore_checksum_failure = on</c>, which hide corruption by destroying or using the damaged page. A development
@@ -97,6 +100,7 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
     public static readonly IReadOnlyList<string> Watched =
     [
         "track_counts", "fsync", "full_page_writes", "zero_damaged_pages", "ignore_checksum_failure", "synchronous_commit",
+        "autovacuum", "track_activities",
     ];
 
     /// <summary>How many settings waiting for a restart a finding lists.</summary>
@@ -151,6 +155,37 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
                 + "vacuumed except to stop transaction-id wraparound: every document Marten upserts leaves a dead row version that is "
                 + "never cleared, its tables bloat, the planner's statistics go stale, and the studio's own table checks - and its "
                 + "~ estimated counts - have nothing to read.",
+                "on",
+                evaluation.Text));
+        }
+
+        // W5-V1 (issue #8 G2): autovacuum switched off for the whole server is Critical anywhere, as track_counts is.
+        if (Is(facts.Find("autovacuum"), "off") is { } autovacuum)
+        {
+            findings.Add(Setting(
+                facts,
+                autovacuum,
+                HealthSeverity.Critical,
+                "Autovacuum is switched off for the whole server (autovacuum = off)",
+                "Nothing vacuums or analyses a table by itself any more: dead rows pile up in every table, statistics go stale, the "
+                + "visibility map index-only scans read is never set, and the only vacuum that still comes is the forced one at "
+                + "autovacuum_freeze_max_age, which scans a whole table at once. No table's own storage parameter can switch it back "
+                + "on; the studio's table checks (T07, T08) read every table as switched off.",
+                "on",
+                evaluation.Text));
+        }
+
+        // W5-V1 (2026-10-26 health-gap analysis): without track_activities a session's state and statement are not recorded.
+        if (Is(facts.Find("track_activities"), "off") is { } activities)
+        {
+            findings.Add(Setting(
+                facts,
+                activities,
+                HealthSeverity.Warning,
+                "Postgres is not recording what sessions are doing (track_activities = off)",
+                "pg_stat_activity then shows no state, no statement and no times for a session, so the session checks C04, C05 and "
+                + "T14 cannot see sessions' state or age: a transaction left idle, a statement running for an hour or a snapshot "
+                + "holding vacuum back goes unseen, and Database › Sessions shows sessions without what they are doing.",
                 "on",
                 evaluation.Text));
         }
@@ -259,8 +294,8 @@ internal sealed class DangerousSettingsCheck : HealthCheck<DangerousSettingsFact
 
         return HealthVerdict.Quiet(notes.Count > 0
             ? string.Join(" ", notes) + " Everything else S02 judges is at its safe value, and nothing waits for a restart."
-            : "track_counts, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are at their safe values, "
-              + "synchronous_commit is on, and nothing waits for a restart.");
+            : "track_counts, autovacuum, track_activities, fsync, full_page_writes, zero_damaged_pages and ignore_checksum_failure are "
+              + "at their safe values, synchronous_commit is on, and nothing waits for a restart.");
     }
 
     /// <summary>

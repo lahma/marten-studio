@@ -252,6 +252,16 @@ state, role, application and client are not read. The head of each chain - a blo
 wait itself - is described by its state and how long its transaction has been open. Waits are measured from
 `pg_locks.waitstart` (PostgreSQL 14+), else from the session's last state change, an upper bound.
 
+**A `VACUUM` at the head** (0.5) is named for what it is. Every role sees a `VACUUM`'s process id in
+`pg_stat_progress_vacuum`, so a head running one is "a VACUUM"; a role with `pg_read_all_stats` also sees its
+`backend_type` and its statement, so it is "an autovacuum", or "an autovacuum to prevent wraparound" when its
+statement says `autovacuum: VACUUM … (to prevent wraparound)` - a test made in SQL, so the statement, which names the
+table, never leaves the database. The finding then says what to do: a manual `VACUUM` and an anti-wraparound
+autovacuum do not give way to a lock request (an ordinary autovacuum is cancelled by one after `deadlock_timeout`), so
+a migration queued behind it - in Marten Studio `ApplyAllDatabaseChangesOnStartup` or `db-apply`, in Postgres Studio
+whatever runs the host's migrations - holds every reader of the table behind itself. Let the vacuum finish and retry
+the migration, and never cancel the vacuum while T12 is near its line.
+
 ## C07 Orphaned prepared transaction
 
 **Critical** when a prepared transaction has waited five minutes for its `COMMIT PREPARED` or `ROLLBACK PREPARED`.

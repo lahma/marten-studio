@@ -324,9 +324,17 @@ internal static class HealthConnectionQueries
     /// is what finds the head of a chain. C06.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A blocker can be in another database - a lock on a shared catalog is the server's - and nothing about such a
     /// session is this database's to say: its state, role, application and client are null, and the finding says
     /// "a session in another database".
+    /// </para>
+    /// <para>
+    /// <b>A <c>VACUUM</c> at the head</b> (W5-V1): whether the blocker has a row in <c>pg_stat_progress_vacuum</c> - whose
+    /// process id every role may read (B0 §7c) - its <c>backend_type</c>, and whether it is autovacuum running to prevent
+    /// wraparound, which only a role that may read the worker's <c>query</c> (<c>pg_read_all_stats</c>) is told. The query is
+    /// read for that test alone and never returned: it names the table.
+    /// </para>
     /// </remarks>
     /// <param name="processIds">The blockers' process ids, from <c>pg_blocking_pids</c>.</param>
     public static HealthQuery Blockers(IReadOnlyCollection<int> processIds)
@@ -342,8 +350,12 @@ internal static class HealthConnectionQueries
             "       extract(epoch from (now() - a.xact_start))::float8 as transaction_seconds,\n" +
             "       extract(epoch from (now() - a.state_change))::float8 as state_seconds,\n" +
             "       a.backend_xid is not null as has_xid,\n" +
-            "       a.wait_event_type = 'Lock' as waiting\n" +
+            "       a.wait_event_type = 'Lock' as waiting,\n" +
+            "       v.pid is not null as vacuum,\n" +
+            "       a.backend_type::text as backend_type,\n" +
+            "       case when a.backend_type = 'autovacuum worker' then a.query like 'autovacuum:%(to prevent wraparound)%' end as prevents_wraparound\n" +
             "  from pg_stat_activity a\n" +
+            "  left join pg_catalog.pg_stat_progress_vacuum v on v.pid = a.pid\n" +
             " where a.pid = any(@pids)\n" +
             "   and a.pid <> pg_backend_pid()\n" +
             " order by a.pid\n" +
