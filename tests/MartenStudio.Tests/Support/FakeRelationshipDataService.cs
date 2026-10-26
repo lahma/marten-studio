@@ -158,6 +158,24 @@ internal sealed class FakeRelationshipDataService : IRelationshipDataService
     };
 
     /// <summary>
+    /// <see cref="WithTables" /> as a studio over plain data sources reads it: no document type at all - Postgres Studio has
+    /// no node source - so only the keys between two tables, and <c>legacy.customer_credit</c>, whose one key pointed into a
+    /// document table, has none.
+    /// </summary>
+    public static GraphModel PlainTables()
+    {
+        GraphModel graph = WithTables();
+
+        return graph with
+        {
+            Nodes = [],
+            Edges = [.. graph.Edges.Where(static x => x.FromIsTable && x.ToIsTable)],
+            Withheld = [],
+            VisibleSchemas = ["legacy", "quartz"],
+        };
+    }
+
+    /// <summary>
     /// <see cref="WithTables" /> with two document types no key reaches at all - the column of unconnected
     /// boxes the Both view used to draw down the left of the diagram.
     /// </summary>

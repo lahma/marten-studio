@@ -60,6 +60,27 @@ public partial class ReplicationStylesheetTests
         section[phone..].Should().Contain(".ms-repl-stats,").And.Contain(".ms-repl-facts {").And.Contain("grid-template-columns: minmax(0, 1fr);");
     }
 
+    /// <summary>
+    /// UI-fix: the tablespaces' "Size" header is <c>.ms-sr-only</c>, which is absolute, so each of the page's tables must be
+    /// positioned - or that text is placed against the initial containing block, escapes the table's scroll region, and
+    /// widened the whole document to 484 px at 390 px (D25), on both samples.
+    /// </summary>
+    [Fact]
+    public void Every_table_is_the_containing_block_of_its_visually_hidden_text()
+    {
+        Match rule = Regex.Match(Section(), @"(?m)^\.ms-repl-table \{(?<body>[^}]*)\}");
+
+        rule.Success.Should().BeTrue("the section positions .ms-repl-table itself, not one of its descendants");
+        rule.Groups["body"].Value.Should().Contain("position: relative;");
+
+        string page = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Components", "Pages", "Replication", "Replication.razor"));
+
+        foreach (Match table in Regex.Matches(page, "<table class=\"(?<classes>[^\"]*)\""))
+        {
+            table.Groups["classes"].Value.Split(' ').Should().Contain("ms-repl-table", "every table on the page takes the positioned rule: " + table.Value);
+        }
+    }
+
     [GeneratedRegex("#[0-9a-fA-F]{3,8}\\b")]
     private static partial Regex HexColour();
 }

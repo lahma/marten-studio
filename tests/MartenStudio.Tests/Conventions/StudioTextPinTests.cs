@@ -100,6 +100,17 @@ public class StudioTextPinTests
         Marten.ExamplesEmpty.Should().Be("This store has no document type to build an example from.");
         Marten.RelationshipTableKey.Should().Be("A key on a table Marten does not map - enforced by Postgres.");
 
+        // UI-fix: moved from the Relationships components' markup, each the sentence it rendered.
+        Marten.RelationshipTableCaption.Should().Be(
+            "Every foreign key between the document types and tables on the diagram, with the end that points, the end pointed at, "
+            + "the columns, whether the database has the constraint, and what a delete does.");
+        Marten.RelationshipIsolatedLabel.Should().Be("Document types and tables with no foreign key");
+        Marten.RelationshipUnmatchedNote.Should().Be(
+            "These foreign keys have an end that is not a document type of this store, so there is nothing to draw them between.");
+        Marten.RelationshipNeighbourhoodUnmatched.Should().Be(
+            "an end that is not a document type of this store or a table the studio can place, so there is nothing to draw them between.");
+        Marten.RelationshipTablesUnavailable.Should().Be("Only document types are drawn:");
+
         QuerySqlErrors.Describe(new SqlError("57014", "canceled", 0, null, null), TimeSpan.FromSeconds(12), Marten).Should().Be(
             "Statement timed out after 12 s. MartenStudioOptions.QueryTimeout is what sets that.");
         QuerySqlErrors.Describe(new SqlError("42501", "denied", 0, null, null), TimeSpan.FromSeconds(12), Marten).Should().Be(

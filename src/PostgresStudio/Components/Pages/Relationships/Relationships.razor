@@ -26,7 +26,12 @@
     chip and no cap: the screen is exactly the document-type diagram it always was. Once there are, the
     view (?view=documents|tables|both) and the schema chip (?schema=) live in the URL, so a pasted link
     reopens the same picture (D9) - and every view is a pure function of one read, so switching costs
-    nothing and the picture and the table can never disagree.
+    nothing and the picture and the table can never disagree. The view switch also needs a document type
+    on the graph: without one - always, in a studio over plain data sources - Documents draws nothing and
+    Tables is Both, so there is no switch and the picture is Both whatever the URL says.
+
+    Every sentence about document types is the studio's own (StudioText, or Product for the prose drawn
+    as markup), so a studio over plain data sources speaks of tables alone.
 *@
 
 <PageTitle>Relationships</PageTitle>
@@ -64,13 +69,16 @@
     @if (Drawing && graph.HasTableEdges)
     {
         <div class="ms-graph-toolbar">
-            <div class="ms-segmented ms-graph-views" role="group" aria-label="Which relationships to draw">
-                @ViewButton(RelationshipViewMode.Documents, "Documents", projection.DocumentEdges)
-                @ViewButton(RelationshipViewMode.Tables, "Tables", projection.TableEdges)
-                @ViewButton(RelationshipViewMode.Both, "Both", projection.AllEdges)
-            </div>
+            @if (HasViews)
+            {
+                <div class="ms-segmented ms-graph-views" role="group" aria-label="Which relationships to draw">
+                    @ViewButton(RelationshipViewMode.Documents, "Documents", projection.DocumentEdges)
+                    @ViewButton(RelationshipViewMode.Tables, "Tables", projection.TableEdges)
+                    @ViewButton(RelationshipViewMode.Both, "Both", projection.AllEdges)
+                </div>
+            }
 
-            @if (view != RelationshipViewMode.Documents && projection.Schemas.Count > 0)
+            @if (Shown != RelationshipViewMode.Documents && projection.Schemas.Count > 0)
             {
                 <div class="ms-graph-schemas" role="group" aria-label="Schemas">
                     <button type="button"
@@ -132,7 +140,18 @@
     }
     else if (graph.IsEmpty)
     {
-        @if (graph.Tables.Count > 0)
+        @if (Settings.Text.Product != StudioProduct.MartenStudio)
+        {
+            @* No configuration declares a key here: the only keys there are, are the ones in the tables' DDL. *@
+            <div class="ms-empty">
+                <p class="ms-empty-title">No foreign keys connect the tables you can see</p>
+                <p class="ms-empty-description">
+                    A table's keys are its own: <code>REFERENCES</code> in its DDL, which this screen draws as soon
+                    as Postgres has one.
+                </p>
+            </div>
+        }
+        else if (graph.Tables.Count > 0)
         {
             <div class="ms-empty">
                 <p class="ms-empty-title">No foreign keys connect the document types and tables you can see</p>
@@ -163,7 +182,7 @@
         @if (projection.OverCap)
         {
             <div class="ms-graph-toomany" role="status">
-                <p class="ms-graph-toomany-title">@projection.DrawnNodes objects are too many to draw — pick a schema or a view.</p>
+                <p class="ms-graph-toomany-title">@projection.DrawnNodes objects are too many to draw — @(HasViews ? "pick a schema or a view" : "pick a schema").</p>
                 <p class="ms-graph-toomany-description">
                     Every foreign key of this view is still in the table below.
                 </p>
@@ -177,11 +196,11 @@
         @* What has no key at all, as chips right under the picture: drawn, a dozen unconnected boxes filled
            the diagram's first column. Only where tables take part in keys, and never in the Documents view,
            which draws every document type as the screen always has. *@
-        @if (view != RelationshipViewMode.Documents && graph.HasTableEdges && projection.IsolatedDocuments.Count + projection.Isolated.Count > 0)
+        @if (Shown != RelationshipViewMode.Documents && graph.HasTableEdges && projection.IsolatedDocuments.Count + projection.Isolated.Count > 0)
         {
             <div class="ms-graph-isolated">
                 <h2 class="ms-section-title">No foreign keys</h2>
-                <ul class="ms-graph-isolated-list" aria-label="Document types and tables with no foreign key">
+                <ul class="ms-graph-isolated-list" aria-label="@Settings.Text.RelationshipIsolatedLabel">
                     @foreach (RelationshipNode document in projection.IsolatedDocuments)
                     {
                         <li @key="@("d:" + document.Alias)">
@@ -221,10 +240,7 @@
         {
             <div class="ms-graph-unmatched">
                 <h2 class="ms-section-title">Not on the diagram</h2>
-                <p class="ms-schema-note">
-                    These foreign keys have an end that is not a document type of this store, so there is
-                    nothing to draw them between.
-                </p>
+                <p class="ms-schema-note">@Settings.Text.RelationshipUnmatchedNote</p>
                 <TableScroll Label="Foreign keys not on the diagram table">
                     <table class="ms-table">
                         <thead>
@@ -285,6 +301,15 @@
     /// <summary>Whether the picture and its table are on screen - the branch the view switch and the legend belong to.</summary>
     private bool Drawing =>
         !loading && graph.Error is not { Length: > 0 } && State.ActiveScope is not null && !graph.IsEmpty;
+
+    /// <summary>
+    /// Whether the Documents · Tables · Both switch is drawn: a table takes part in a key, and the graph has a document
+    /// type at all. Without one the switch would offer two names for one picture and a third for an empty one.
+    /// </summary>
+    private bool HasViews => graph.HasTableEdges && graph.HasDocuments;
+
+    /// <summary>The view drawn: the URL's, or Both on a graph with no document type, which has no switch to leave another by.</summary>
+    private RelationshipViewMode Shown => graph.HasDocuments ? view : RelationshipViewMode.Both;
 
     protected override async Task OnInitializedAsync()
     {
@@ -349,7 +374,7 @@
 
     private void Recompute()
     {
-        projection = RelationshipViews.Project(graph, view, schema);
+        projection = RelationshipViews.Project(graph, Shown, schema);
         styles = RelationshipViews.Styles(projection.Drawn.Edges);
     }
 
@@ -364,7 +389,7 @@
     {
         schema = chip;
         Recompute();
-        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Settings, Descriptor, State.ActiveScope, view, schema));
+        Navigation.NavigateTo(DatabaseLinks.ToRelationships(Settings, Descriptor, State.ActiveScope, Shown, schema));
     }
 
     private RenderFragment ViewButton(RelationshipViewMode mode, string label, int count) => __builder =>
@@ -394,7 +419,7 @@
 
         if (graph.TablesUnavailable is { Length: > 0 } unavailable)
         {
-            <p class="ms-graph-withheld" role="note">Only document types are drawn: @unavailable</p>
+            <p class="ms-graph-withheld" role="note">@Settings.Text.RelationshipTablesUnavailable @unavailable</p>
         }
 
         if (graph.Truncated)

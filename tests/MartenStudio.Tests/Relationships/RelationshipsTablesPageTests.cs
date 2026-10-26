@@ -120,13 +120,35 @@ public class RelationshipsTablesPageTests
     public void Past_the_node_cap_the_diagram_is_replaced_and_the_table_still_lists_every_key()
     {
         using var context = NewContext(out FakeRelationshipDataService relationships);
-        relationships.Graph = Chain(RelationshipViews.NodeCap + 10);
+
+        // One document type beside the chain, no key reaching it: what draws the view switch, so "or a view" names one.
+        relationships.Graph = Chain(RelationshipViews.NodeCap + 10) with { Nodes = FakeRelationshipDataService.WithoutKeys().Nodes };
 
         var page = context.Render<RelationshipsPage>();
 
         page.FindAll("svg.ms-graph-svg").Should().BeEmpty();
         page.Find(".ms-graph-toomany").TextContent.Should().Contain(
             $"{RelationshipViews.NodeCap + 10} objects are too many to draw — pick a schema or a view");
+        page.FindAll(".ms-graph-views").Should().ContainSingle();
+        page.FindAll(".ms-graph-row").Should().HaveCount(RelationshipViews.NodeCap + 9);
+    }
+
+    /// <summary>
+    /// UI-fix: with no document type there is no view switch - Documents would draw nothing, and Tables is Both - so past the
+    /// cap the screen asks for a schema alone.
+    /// </summary>
+    [Fact]
+    public void Past_the_node_cap_with_no_document_type_it_asks_for_a_schema_and_draws_no_view_switch()
+    {
+        using var context = NewContext(out FakeRelationshipDataService relationships);
+        relationships.Graph = Chain(RelationshipViews.NodeCap + 10);
+
+        var page = context.Render<RelationshipsPage>();
+
+        page.Find(".ms-graph-toomany-title").TextContent.Should().Be(
+            $"{RelationshipViews.NodeCap + 10} objects are too many to draw — pick a schema.");
+        page.FindAll(".ms-graph-views").Should().BeEmpty();
+        page.FindAll(".ms-graph-schema-chip").Should().NotBeEmpty();
         page.FindAll(".ms-graph-row").Should().HaveCount(RelationshipViews.NodeCap + 9);
     }
 
