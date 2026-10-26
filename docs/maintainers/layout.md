@@ -146,8 +146,9 @@ tests/MartenStudio.Integration.Tests/Generation/  Responsiveness budgets at 100k
                                          unhealthy switches' gates, markup, checks and clean-up
 docs/                                    Long-form documentation linked from README.md; never packed
 docs/screenshots/                        The fourteen README screenshots (ScreenshotCaptureTests retakes them)
-docs/maintainers/                        Maintainer reference moved out of AGENTS.md: this tree, and the dated
-                                         package budget entries (package-budget-changes.md); never packed
+docs/maintainers/                        Maintainer reference moved out of AGENTS.md: this tree, the dated package
+                                         budget entries (package-budget-changes.md) and the evidence and history
+                                         behind the rules (decision-notes.md); never packed
 src/PostgresStudio/Services/Relationships/    The relationship graph service, its DTOs and the SVG layout
 src/MartenStudio/Services/Relationships/      The Marten half of the graph: what StoreOptions says of the document types
 src/PostgresStudio/Components/Pages/Relationships/  The relationships screen: the diagram, the table, the legend
