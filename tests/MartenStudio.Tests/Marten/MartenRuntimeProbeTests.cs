@@ -13,8 +13,8 @@ namespace MartenStudio.Tests.Marten;
 /// <b>The same test is right at the floor and at the latest.</b> At the floor - Marten 9.39.0, which brings
 /// JasperFx and JasperFx.Events 2.74.0 (Marten's own <c>Directory.Packages.props</c> at <c>V9.39.0</c>) - every
 /// probe in the table must find nothing: the earliest of them is Marten 9.41.0's tenant compaction and
-/// JasperFx.Events 2.76.0's shard start reason. At the latest tested, 9.51.0 (JasperFx 2.91.0), every one must
-/// find its member - the 2.89 classifier and the 9.50.3 offline enumeration included. A probe that silently finds
+/// JasperFx.Events 2.76.0's shard start reason. At the latest tested, 9.54.1 (JasperFx 2.95.1), every one must
+/// find its member - the 2.89 classifier, the 9.50.3 offline enumeration and the 9.52 floors included. A probe that silently finds
 /// nothing at the latest - a renamed
 /// member, a type that moved assembly, a namespace typo - is precisely the failure that light-up would
 /// otherwise hide forever, because "absent" is what the studio does without. So the general assertion is
@@ -24,8 +24,10 @@ namespace MartenStudio.Tests.Marten;
 /// entry whose introducing version is itself wrong cannot pass by being consistently wrong.
 /// </para>
 /// <para>
-/// Run it at the latest with <c>-p:MartenStudioMartenVersion=9.51.0</c>, or Fallout's
-/// <c>--marten-version latest</c>.
+/// Run it at the latest with <c>-p:MartenStudioMartenVersion=9.54.1</c>, or Fallout's
+/// <c>--marten-version latest</c>. A probe re-anchored between two releases (<c>TaggedStreamCompaction</c>, 2026-10-26)
+/// is also run at the releases either side of its version - 9.50.3 and 9.51.0 for that one - where the general test is
+/// what applies.
 /// </para>
 /// <para>
 /// This is deliberately not <c>MartenApiSurfaceTest</c>, which pins the floor contract. That one fails if a
@@ -131,14 +133,14 @@ public class MartenRuntimeProbeTests
         }
         else if (running == latest)
         {
-            latest.Should().Be(new Version(9, 51, 0), "the latest tested moved: re-read what the table says there, and pin it here");
+            latest.Should().Be(new Version(9, 54, 1), "the latest tested moved: re-read what the table says there, and pin it here");
 
-            // Marten 9.51.0 brings JasperFx and JasperFx.Events 2.91.0 (its Directory.Packages.props at v9.51.0).
-            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx).Should().Be(new Version(2, 91, 0));
-            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents).Should().Be(new Version(2, 91, 0));
+            // Marten 9.54.1 brings JasperFx and JasperFx.Events 2.95.1 (its Directory.Packages.props at V9.54.1).
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx).Should().Be(new Version(2, 95, 1));
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents).Should().Be(new Version(2, 95, 1));
             available.Should().Equal(
                 [.. RuntimeFeature.All.Select(static x => x.Name).Order(StringComparer.Ordinal)],
-                "Marten 9.51.0 with JasperFx 2.91.0 has everything in the table");
+                "Marten 9.54.1 with JasperFx 2.95.1 has everything in the table");
 
             // Named, so that a feature added to the table later cannot make this pass by being the one that moved.
             available.Should().Contain(
@@ -149,6 +151,9 @@ public class MartenRuntimeProbeTests
                 nameof(RuntimeFeature.TenantSubscriptionRewind),
                 nameof(RuntimeFeature.TaggedStreamCompaction),
                 nameof(RuntimeFeature.HighWaterProgressStall),
+                nameof(RuntimeFeature.ProjectionStartFloors),
+                nameof(RuntimeFeature.SystemicDatabaseFailure),
+                nameof(RuntimeFeature.PerDatabaseHighWaterAdvance),
             ]);
         }
         else
@@ -201,6 +206,9 @@ public class MartenRuntimeProbeTests
 
         RuntimeFeature.DynamicLinqQuery.Requirement.Should().Be("Marten 9.48+", "a .0 release is still printed in two parts");
         RuntimeFeature.TenantEventSkipping.Requirement.Should().Be("Marten 9.51+");
+        RuntimeFeature.ProjectionStartFloors.Requirement.Should().Be("Marten 9.52+");
+        RuntimeFeature.SystemicDatabaseFailure.Requirement.Should().Be("Marten 9.52+", "JasperFx.Events 2.93 is first in Marten 9.52.0");
+        RuntimeFeature.PerDatabaseHighWaterAdvance.Requirement.Should().Be("Marten 9.52+");
 
         RuntimeFeature.Short(new Version(2, 89, 0)).Should().Be("2.89");
         RuntimeFeature.Short(new Version(9, 50, 3)).Should().Be("9.50.3");
@@ -231,6 +239,28 @@ public class MartenRuntimeProbeTests
         RuntimeFeature.TransientFailureClassifier.IsAvailable(below).Should().BeFalse();
         RuntimeFeature.TransientFailureClassifier.IsAvailable(at).Should().BeTrue();
         RuntimeFeature.TenantEventSkipping.IsAvailable(at).Should().BeFalse("9.50.3 has no tenant overload of MarkEventsAsSkipped");
+    }
+
+    /// <summary>
+    /// The tagged-compaction probe's anchor, called directly rather than through the probe's catch: what #5694 declares -
+    /// the tag table's <c>_seq_id</c> index - is read without throwing at every Marten, and is there exactly from 9.51.0.
+    /// Its first anchor, a private method of <c>TenantDataCleaner</c>, went with marten#5720 in 9.52.0, and the probe
+    /// then answered "absent" at every Marten after it while compaction went on deleting the tag rows.
+    /// </summary>
+    /// <remarks>
+    /// Run at 9.50.3 and 9.51.0 as well as the floor and the latest: the release below the feature has no index and
+    /// the release that brought it has one, and neither knows about the cleanup that moved.
+    /// </remarks>
+    [Fact]
+    public void The_tagged_compaction_probe_reads_the_declared_tag_index_and_not_a_private_member()
+    {
+        Version marten = MartenRuntime.Current.VersionOf(RuntimePackage.Marten)!;
+        bool expected = marten >= new Version(9, 51, 0);
+
+        RuntimeFeature.DeclaresTagSequenceIndex().Should().Be(expected,
+            "Marten {0}: #5694 declares idx_mt_event_tag_<suffix>_seq_id from 9.51.0, and the anchor must read it without throwing",
+            marten);
+        RuntimeFeature.TaggedStreamCompaction.Probe().Should().Be(expected);
     }
 
     private static string PackagesProperty(string name) =>

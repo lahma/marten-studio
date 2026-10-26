@@ -175,7 +175,7 @@ A visitor the policies refuse the plan still gets the rows. The panel says why t
    - that reads static fields and properties by reflection;
    - otherwise it compiles the subtree with FastExpressionCompiler and invokes it.
 
-   This was read at Marten `V9.39.0`, `V9.50.2` and `v9.51.0`, and a test runs it (see the tests below). From
+   This was read at Marten `V9.39.0`, `V9.50.2`, `v9.51.0` and `V9.54.1`, and a test runs it (see the tests below). From
    9.51.0 (#5712) a parameter-free array initialiser is sent the same way. If a parsed predicate
    could contain `Status == System.IO.File.ReadAllText("c:/x")`, your server would run it. That is the shape of
    CVE-2023-32571 in System.Linq.Dynamic.Core: code execution through reflection, fixed in 1.3.0. CVE-2024-51417
@@ -283,7 +283,7 @@ wall in front of the parse itself: every rule after it walks a tree Dynamic LINQ
   - collection `Any` / `All` / `Contains` / `Count`, each of which must touch the document;
   - no static members, no conditionals, and no construction beyond dates, times and Guids.
 
-  It is identical at JasperFx 2.84.0, 2.87.1, 2.89.0 and 2.91.0 (2.91.0 changed only how dates are read).
+  It is identical at JasperFx 2.84.0, 2.87.1, 2.89.0, 2.91.0 and 2.95.1 (2.91.0 changed only how dates are read).
 - The parser itself runs with no custom types, no `new`, no type lookup by simple name and no casting to a type
   named in a string. `object` was removed from its predefined types for CVE-2024-51417, so `GetType()` cannot be
   called.

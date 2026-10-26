@@ -409,7 +409,7 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
 
 /// <summary>
 /// F3 against a real Postgres, at whichever Marten the run resolves: the floor (9.39.0) and, with
-/// <c>-p:MartenStudioMartenVersion=9.51.0</c>, the latest - the same assertions at both, because the
+/// <c>-p:MartenStudioMartenVersion=9.54.1</c>, the latest - the same assertions at both, because the
 /// session-level compaction is the same code at both, but for a tagged stream: 9.51 deletes the folded events'
 /// tag rows with them (#5694), and that one test asserts each end's behaviour.
 /// </summary>
@@ -434,6 +434,8 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         // This store keeps one tag type in a tag table: below Marten 9.51 a tagged stream's delete may be refused, from
         // 9.51 the folded events' tag rows go with them (L3) - one or the other, as this run's Marten does it.
         bool martenDeletesTagRows = RuntimeFeature.TaggedStreamCompaction.Probe() == true;
+        martenDeletesTagRows.Should().Be(MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 51, 0),
+            "plan and expectation both read the probe, so the probe is held to the version here as well");
         plan.TagTablesMayRefuse.Should().Be(!martenDeletesTagRows);
         plan.TagRowsFoldWithEvents.Should().Be(martenDeletesTagRows);
 
@@ -840,7 +842,12 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         Func<Task> compact = () => events.CompactStreamAsync(Everyone, id.ToString(), id.ToString(), plan.Version, Token);
         StudioActionLogEntry entry;
 
-        if (RuntimeFeature.TaggedStreamCompaction.Probe() != true)
+        // Which half runs is the version's, and the probe has to agree with it: with the probe's first anchor gone (marten#5720,
+        // 9.52) this test expected a refusal from a Marten that compacts.
+        bool martenDeletesTagRows = MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 51, 0);
+        RuntimeFeature.TaggedStreamCompaction.Probe().Should().Be(martenDeletesTagRows);
+
+        if (!martenDeletesTagRows)
         {
             plan.TagTablesMayRefuse.Should().BeTrue();
             plan.TagRowsFoldWithEvents.Should().BeFalse();

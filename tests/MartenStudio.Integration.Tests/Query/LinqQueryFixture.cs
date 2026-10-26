@@ -98,7 +98,7 @@ public static class LinqLiveAvailability
 {
     public const string SkipReason =
         "Needs Docker and a Marten with JasperFx's DynamicQuery (9.48+). At the floor run the suite with " +
-        "-p:MartenStudioMartenVersion=9.51.0; without Docker, start it and run `docker info`.";
+        "-p:MartenStudioMartenVersion=9.54.1; without Docker, start it and run `docker info`.";
 
     public static bool CanRun => DockerAvailability.IsAvailable && DynamicLinqAdapter.Current is not null && MartenLinqCommand.IsAvailable;
 }

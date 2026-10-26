@@ -60,6 +60,14 @@ namespace MartenStudio.Tests.Conventions;
 /// fenced as a whole as well: the studio calls none of its members unless <see cref="AllowedEventStoreCalls" /> says so.
 /// <see cref="NoSchemaBuildingCallTests" /> predates this test and still pins its twelve event-store members on its own.
 /// </para>
+/// <para>
+/// <b>Marten 9.52 widened what ensures</b> (read at <c>V9.54.1</c>): the high-water advance - which the studio calls, from
+/// its capability-gated, audited correction - its per-database form and preview on <c>IEventStore</c>, the projection-floor
+/// seam, and two new LINQ reads. And it moved two ensures the studio does not call itself: the daemon reads a projection's
+/// stored floor through <c>FetchProjectionFloorAsync</c> on every continuous start and every rebuild, so Start and Rebuild -
+/// both behind capabilities and audited - now ensure the event storage inside the daemon. No read path reaches a daemon
+/// start; the live <c>NoDdl</c> suites are what would see one that did.
+/// </para>
 /// </remarks>
 public class StorageEnsuringCallTests
 {
@@ -102,6 +110,13 @@ public class StorageEnsuringCallTests
         "DeleteAllDocumentsAsync", "DeleteDocumentsByTypeAsync", "DeleteDocumentsExceptAsync", "CompletelyRemoveAsync",
         "CompletelyRemoveAllAsync", "DeleteAllEventDataAsync", "DeleteSingleEventStreamAsync",
         "BulkInsertAsync", "BulkInsertDocumentsAsync", "BulkInsertEnlistTransactionAsync",
+
+        // Marten 9.52-9.54, read at V9.54.1: the high-water advance - AdvancedOperations' two overloads and IEventStore's
+        // per-database one go through DocumentStore.highWaterDetectorFor, which ensures IEvent - and its preview; the
+        // projection-floor seam on MartenDatabase; and the LINQ reads over event data and every tenant's stream states.
+        "AdvanceHighWaterMarkToLatestAsync", "PreviewHighWaterAdvanceAsync",
+        "FetchProjectionFloorAsync", "TrySetProjectionFloorAsync", "SetProjectionFloorAsync",
+        "QueryEventData", "QueryStreamStatesForAllTenants",
     ];
 
     /// <summary>
@@ -171,6 +186,10 @@ public class StorageEnsuringCallTests
         new("src/MartenStudio/Services/Events/StreamCompactionInvoker.cs", "SaveChangesAsync",
             ["CompactAndSaveAsync"],
             "the compaction's own save"),
+        new("src/MartenStudio/Services/Projections/ProjectionDataService.cs", "AdvanceHighWaterMarkToLatestAsync",
+            ["AdvanceHighWaterMarkAsync", "AdvanceHighWaterMarkAsync"],
+            "AdvanceHighWaterMarkAsync (CorrectProgression), through AdvancedAsync's capability check, reach authorization and "
+            + "audit: from Marten 9.52 the advance ensures the event store's storage first, which the dialog and the button say"),
         new("src/MartenStudio/Services/Query/LinqQueryComposer.cs", "Query",
             ["ComposeCore"],
             "F7: the LINQ source the visitor's predicate is composed onto - built by MartenLinqCommand without "

@@ -7,6 +7,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Configuration;
 using PostgresStudio.Services.Database;
 using MartenStudio.Services.Live;
 
@@ -159,6 +160,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         {
             Trends = trends,
             HealthHistory = history,
+            TenantPartitionedEvents = resolved.Store.Options.Events.UseTenantPartitionedEvents,
+            DatabaseAutoCreate = Read<string?>(() => resolved.Database.AutoCreate.ToString(), null),
         };
     }
 
@@ -258,13 +261,27 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         long highWaterMark = await ReadHighWaterMarkAsync(resolved, connection, cancellationToken)
             .ConfigureAwait(false) ?? 0;
 
+        // From Marten 9.52 a rebuild replays from the projection's start floor, not from the first event. The stored
+        // floors are read with the studio's own SQL, never through IEventDatabase.FetchProjectionFloorAsync, which
+        // ensures the event storage first (hard rule 14); below 9.52 nothing reads them, and nothing here does either.
+        RebuildFloor? floor = RuntimeFeature.ProjectionStartFloors.IsAvailable(MartenRuntime.Current)
+            ? RebuildFloor.From(
+                await ProjectionProgressQueries
+                    .ReadProjectionFloorsAsync(connection, catalog, EventSchemaOf(resolved), source.Name, CommandTimeout, cancellationToken)
+                    .ConfigureAwait(false),
+                resolved.Store.Options.Events.UseTenantPartitionedEvents)
+            : null;
+
         return new RebuildScope(
             source.Name,
-            highWaterMark,
+            floor?.EventsToReplay(highWaterMark) ?? highWaterMark,
             [.. ShardIdentities(source)],
             TablesFor(resolved.Store, source),
             source.Lifecycle,
-            options.Value.RebuildShardTimeout);
+            options.Value.RebuildShardTimeout)
+        {
+            Floor = floor,
+        };
     }
 
     /// <inheritdoc />
@@ -570,7 +587,10 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                 source.Type.ToString(),
                 source.Version,
                 source.ImplementationType?.Name ?? "(unknown)",
-                [.. ShardIdentities(source)]));
+                [.. ShardIdentities(source)])
+            {
+                MemberShardNames = CompositeMemberIdentities(source),
+            });
         }
 
         projections.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
@@ -795,6 +815,21 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             {
                 rendered.Add(shardName);
                 progress.Add(Build(shardName, projection.Name, byShard.GetValueOrDefault(shardName), live.GetValueOrDefault(shardName), stored.HighWaterMark, isRegistered: true, stored.Rows?.GetValueOrDefault(shardName)));
+            }
+
+            // A composite's members record rows of their own, which its agent advances in its own batch: they are the
+            // composite's, drawn under it, and not agents - only once they have a row, because a member that never ran
+            // is the composite never having run, which its own shard already says.
+            foreach (string memberName in projection.MemberShardNames)
+            {
+                if (rendered.Contains(memberName) || byShard.GetValueOrDefault(memberName) is not { } memberRow)
+                {
+                    continue;
+                }
+
+                rendered.Add(memberName);
+                progress.Add(Build(memberName, projection.Name, memberRow, live.GetValueOrDefault(memberName), stored.HighWaterMark, isRegistered: true, stored.Rows?.GetValueOrDefault(memberName))
+                    with { IsCompositeMember = true });
             }
         }
 
@@ -1539,6 +1574,44 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         }
 
         return shards.Length == 0 ? [source.Name + ":All"] : shards.Select(static x => x.Identity);
+    }
+
+    /// <summary>
+    /// A composite projection's members, by the shard identity each records its progress under, or none for any other
+    /// projection.
+    /// </summary>
+    /// <remarks>
+    /// Floor-safe, and the composite's own rule: <c>ProjectionStage.BuildExecution</c> names each member's shard
+    /// <c>ShardName.Compose(member.Name, tenantId: parent.TenantId, version: member.Version)</c> (JasperFx 2.74.0 and
+    /// 2.95.1), and the store-global form of that is what is listed here, as <see cref="ShardIdentities" /> lists a
+    /// projection's. <c>CompositeProjection.AllProjections()</c> is public at both ends. JasperFx 2.95.1's
+    /// <c>IEventStore.RegisteredShardNames(includeCompositeMembers: true)</c> would say the same, but it is a call on the
+    /// event store, which the studio makes none of (<c>StorageEnsuringCallTests</c>).
+    /// </remarks>
+    internal static IReadOnlyList<string> CompositeMemberIdentities(ISubscriptionSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source is not JasperFx.Events.Projections.Composite.CompositeProjection<IDocumentOperations, IQuerySession> composite)
+        {
+            return [];
+        }
+
+        try
+        {
+            return
+            [
+                .. composite.AllProjections()
+                    .Select(static member => ShardName.Compose(member.Name, version: member.Version).Identity)
+                    .Distinct(StringComparer.OrdinalIgnoreCase),
+            ];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // A composite that will not enumerate its members still runs; its members' rows then read as unregistered, as
+            // they always did, rather than the page failing.
+            return [];
+        }
     }
 
     private static ISubscriptionSource? FindSource(IDocumentStore store, string projectionName)

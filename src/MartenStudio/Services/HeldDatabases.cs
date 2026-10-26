@@ -52,7 +52,8 @@ internal sealed record HeldDatabaseList(TenancyShape Shape, IReadOnlyList<IMarte
 /// <remarks>
 /// <para>
 /// <b>Why not simply <c>Storage.AllDatabases()</c>.</b> That is <c>Tenancy.BuildDatabases()</c>, which for the
-/// dynamic tenancies is not a read (read at Marten <c>V9.39.0</c>, <c>V9.50.2</c> and <c>v9.51.0</c>):
+/// dynamic tenancies is not a read (read at Marten <c>V9.39.0</c>, <c>V9.50.2</c> and <c>v9.51.0</c>, and unchanged at
+/// <c>V9.54.1</c>, where the tenancies' only change is the side-table clean-up in <c>ShardedTenancy.dropPartitionsForTenant</c>):
 /// </para>
 /// <list type="bullet">
 /// <item><description>

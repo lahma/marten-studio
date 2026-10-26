@@ -68,7 +68,11 @@ outright when those cannot be read.
 
 What to do: end the transaction that holds it - Explain names it - or use **Advance high water mark** on the
 projections screen (`CorrectProgression`), which moves the mark to the latest committed event; anything that later
-commits inside the gap is then never projected. To bound future stalls, at the same cost:
+commits inside the gap is then never projected. From Marten 9.52 (#5738) the advance first ensures the event store's
+storage, so under the database's `AutoCreate` the first press in a process may create or migrate the event store's
+tables; and on a store that numbers events per tenant it moves the selected tenant's own mark, or every tenant's,
+where below 9.52 it wrote only a store-global mark the daemon does not read there. The dialog says which. To bound
+future stalls, at the same cost:
 
 ```csharp
 opts.Projections.SkipStaleGapsDespiteLiveTransactionsAfter = TimeSpan.FromMinutes(30);
@@ -218,6 +222,16 @@ opts.Projections.Errors.SkipUnknownEvents = true;        // UnknownEventType - o
 ```
 
 Each trades a stopped shard for a skipped event: the projection never reflects it until it is rebuilt.
+
+**Except a database error, from Marten 9.52.** JasperFx.Events 2.93 (jasperfx#1029/#1064, with Marten's #5741)
+attributes a non-transient database exception in projection code - a missing column or table, a permission - to its
+event as `ApplyEvent`, and never dead-letters it, `SkipApplyErrors` or not: every event would fail the same way, so
+the shard pauses instead. Fix the schema or the grant it ran into, then start the shard again. So where the daemon in
+this process says the failure is one - its live exception, through JasperFx's own classifier, or its classified failure
+(permanent, with a database exception at its root) - D05 offers no `SkipApplyErrors` line and says what to fix; where it
+says it is not, the line stands as it is; and where nothing can say - every failure read back from
+`mt_event_progression`, which keeps only the category and the text - the line carries that exception. Below 9.52 such
+an error escaped unwrapped, the shard paused as `Other`, and none of this applies.
 
 **Starting a shard during a rebuild.** From Marten 9.50 (JasperFx 2.86) the daemon refuses a continuous start while
 the shard's projection is being rebuilt, and Marten Studio says it was refused and records why. Below 9.50 a rebuild

@@ -28,6 +28,42 @@ public class MigrationRiskTests
         MigrationRisk.Find(sql).Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Marten 9.52's <c>mt_event_projection_floors</c> (#5740), written by Weasel from the declaration itself: what a store
+    /// migrated below 9.52 previews as its one drift is a plain create, which removes nothing and earns no note. Below
+    /// 9.52 nothing declares the table.
+    /// </summary>
+    [Fact]
+    public void The_projection_floors_table_marten_9_52_adds_is_a_create_that_removes_nothing()
+    {
+        var options = new global::Marten.StoreOptions();
+        options.Events.DatabaseSchemaName = "studio_events";
+
+        Weasel.Postgresql.Tables.Table? floors = ((Weasel.Core.Migrations.IFeatureSchema) options.Events).Objects
+            .OfType<Weasel.Postgresql.Tables.Table>()
+            .FirstOrDefault(static x => x.Identifier.Name == "mt_event_projection_floors");
+
+        bool declared = MartenStudio.Services.Configuration.MartenRuntime.Current
+            .VersionOf(MartenStudio.Services.Configuration.RuntimePackage.Marten) >= new Version(9, 52, 0);
+
+        if (!declared)
+        {
+            floors.Should().BeNull("Marten below 9.52 has no projection floors");
+            return;
+        }
+
+        floors.Should().NotBeNull();
+
+        using var writer = new StringWriter();
+        floors!.WriteCreateStatement(new Weasel.Postgresql.PostgresqlMigrator(), writer);
+        string sql = writer.ToString();
+
+        sql.Should().ContainEquivalentOf("create table").And.Contain("mt_event_projection_floors");
+        MigrationRisk.IsDestructive(sql).Should().BeFalse();
+        MigrationRisk.Find(sql).Should().BeEmpty();
+        MigrationRisk.Notes(sql).Should().BeEmpty("a new table blocks no writer: there is nothing on it yet to wait for");
+    }
+
     [Fact]
     public void A_dropped_index_is_found_and_named()
     {

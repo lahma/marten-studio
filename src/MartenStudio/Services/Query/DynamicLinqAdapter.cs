@@ -31,7 +31,7 @@ internal sealed record DynamicLinqApplied<T>(IQueryable<T>? Query, LinqRefusal? 
 /// a call that fails half-way. Read at JasperFx <c>V2.84.0</c> and <c>V2.87.1</c> (identical in
 /// <c>src/JasperFx/Linq</c>, and still so at <c>V2.89.0</c>), and again at <c>v2.91.0</c>, where only
 /// <c>DynamicQuery.cs</c>'s date handling moved (jasperfx#1024, <see cref="ReadsDatesInServerTime" />) and every
-/// member below is unchanged:
+/// member below is unchanged - and the folder is identical again at <c>V2.95.1</c> (Marten 9.54.1):
 /// </para>
 /// <list type="bullet">
 /// <item><description><c>static IQueryable&lt;T&gt; DynamicQuery.Apply&lt;T&gt;(IQueryable&lt;T&gt;, DynamicQueryText, DynamicQueryPolicy?)</c></description></item>

@@ -1,6 +1,7 @@
 @page "/marten/projections"
 @using System.Globalization
 @using MartenStudio.Services
+@using MartenStudio.Services.Configuration
 @using MartenStudio.Services.Health
 @using MartenStudio.Services.Health.Checks
 @using MartenStudio.Services.Live
@@ -294,7 +295,7 @@
                     <button type="button"
                             class="ms-button ms-daemon-advance-high-water"
                             disabled="@(!CorrectEnabled)"
-                            title="@CorrectTitle"
+                            title="@AdvanceTitle"
                             @onclick="() => AskAsync(PendingAction.AdvanceHighWaterMark)">
                         Advance high water mark
                     </button>
@@ -441,6 +442,11 @@
                                         {
                                             <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
                                         }
+                                        @if (shard.IsCompositeMember)
+                                        {
+                                            <span class="ms-badge ms-shard-composite-member"
+                                                  title="@($"A member of the composite projection {shard.ProjectionName}: its agent advances this row in its own batch")">member</span>
+                                        }
                                     </td>
                                     <td class="ms-table-cell" colspan="3">
                                         @if (!shard.HasProgressRow)
@@ -494,7 +500,8 @@
                                         }
                                     </td>
                                     <td class="ms-table-cell ms-table-cell-actions">
-                                        @if (!Capabilities.ReadOnly && !ExternallyManaged)
+                                        @* A composite's member has no agent of its own: the composite's shard, above it, is what starts and stops. *@
+                                        @if (!Capabilities.ReadOnly && !ExternallyManaged && !shard.IsCompositeMember)
                                         {
                                             @* Disabled, never hidden, while the coordinator is running: the
                                                option has to stay discoverable, and the hover text - like the
@@ -590,6 +597,9 @@
     <RebuildDialog IsOpen="rebuild is not null"
                    ProjectionName="@(rebuild?.ProjectionName ?? string.Empty)"
                    EventsToReplay="rebuild?.EventsToReplay ?? 0"
+                   ReplayPhrase="@RebuildWording.ReplayPhrase(rebuild?.Floor)"
+                   ReplaysFrom="@RebuildWording.ReplaysFrom(rebuild?.Floor)"
+                   FloorNote="@RebuildWording.FloorNote(rebuild?.Floor)"
                    Shards="rebuild?.ShardNames ?? []"
                    Tables="rebuild?.TablesAffected ?? []"
                    Lifecycle="@(rebuild?.Lifecycle.ToString() ?? string.Empty)"
@@ -932,6 +942,14 @@
     }
 
     private string CorrectTitle => Title(StudioCapability.CorrectProgression, needsDaemon: false);
+
+    /// <summary>
+    /// The advance button's hover text: why it is disabled, or - from Marten 9.52, where the advance ensures the event
+    /// store's storage first - what pressing it may create (<see cref="HighWaterAdvanceWording.ButtonNote" />).
+    /// </summary>
+    private string AdvanceTitle => CorrectTitle is { Length: > 0 } refused
+        ? refused
+        : HighWaterAdvanceWording.ButtonNote(MartenRuntime.Current, view?.DatabaseAutoCreate);
 
     /// <summary>
     /// Whether this projection may be rebuilt right now.
@@ -1504,10 +1522,10 @@
             + $"store has here back up: {AffectedDatabases}. Any agent you started or stopped by hand "
             + "while it was paused goes back to whatever the coordinator decides.",
         PendingAction.AdvanceHighWaterMark =>
-            "This moves the high water mark to the latest event sequence. Every async projection then treats "
-            + "the events it has not processed as already gone: they will never be projected. This exists for "
-            + "retrofitting projections onto a very large event store, and it is not reversible."
-            + CorrectionReach,
+            HighWaterAdvanceWording.Message(
+                MartenRuntime.Current, view?.TenantPartitionedEvents == true, State.ActiveScope?.TenantId, view?.DatabaseAutoCreate)
+            + (HighWaterAdvanceWording.TenantReach(MartenRuntime.Current, view?.TenantPartitionedEvents == true, State.ActiveScope?.TenantId)
+                ?? CorrectionReach),
         PendingAction.CorrectProgression =>
             "This pulls the high water mark and every shard's progression back to the highest real event "
             + "sequence. It only does anything if progression somehow ran ahead of the events themselves."
