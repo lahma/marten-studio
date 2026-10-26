@@ -40,9 +40,12 @@ the browser's own, which the browser keeps only as the host's ASP.NET Core Data 
 who can read `localStorage` can confirm a guess at a key either. Every studio host has Data Protection already:
 the studio's own `AddRazorComponents()` and `AddInteractiveServerComponents()` register it, as they do for any
 Blazor Server app, and the studio adds nothing to it. Mutes therefore survive a restart, and reach every instance
-of a deployment, exactly as long as the host's Data Protection keys do - a host that persists its key ring keeps
-them, one whose keys live only in memory (a container with no volume for them) starts every mute again when it
-restarts. A container built by hand with no Data Protection at all keys mutes in memory, for the life of the
+of a deployment that shares the key ring, exactly as long as the host's Data Protection keys do - a host that
+persists its key ring keeps them, one whose keys live only in memory (a container with no volume for them) starts
+every mute again when it restarts. An instance whose key ring cannot open the browser's key - instances that do not
+share one, or keys since lost - shows nothing muted and leaves the list alone, so going back to the instance that
+made it finds every mute still there; the list is replaced only when you mute something on an instance that cannot
+read it. A container built by hand with no Data Protection at all keys mutes in memory, for the life of the
 process. Upgrading to 0.5 resets every mute once: a list kept by an earlier release is dropped, not migrated.
 
 A Critical finding that appears while a tab is open raises a toast in that tab, once. One that was already Critical

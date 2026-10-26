@@ -133,29 +133,85 @@ public class HealthMutesTests
     }
 
     /// <summary>
-    /// Another provider - another key ring, a host that lost its keys - cannot open what this one protected: the browser
-    /// gets a new key and hashes nothing the old one made, so its mutes are gone rather than wrong.
+    /// Another provider - another instance's key ring, or a host that lost its keys - cannot open what this one protected: it
+    /// reads nothing as muted, and leaves the list as it is until the browser mutes something there, which replaces it with a
+    /// key of its own whose HMAC of the same mute key is another one.
     /// </summary>
     [Fact]
-    public async Task A_different_provider_gives_a_different_HMAC_and_the_mutes_reset()
+    public async Task A_different_provider_gives_a_different_HMAC_and_replaces_the_list_only_on_a_mute()
     {
         const string Key = "default|db|K02";
         HealthMuteKeys ours = new(new EphemeralDataProtectionProvider());
         HealthMuteKeys theirs = new(new EphemeralDataProtectionProvider());
 
         string written = await MutedAsync(ours, Key);
+        string ourHash = JsonDocument.Parse(written).RootElement.GetProperty("muted")[0].GetString()!;
 
         (HealthMutes elsewhere, BunitContext browser) = await ReadBackAsync(theirs, written);
         using (browser)
         {
             elsewhere.IsMuted(Key).Should().BeFalse("another key ring cannot open this browser's key");
-            elsewhere.Hash(Key).Should().NotBe(JsonDocument.Parse(written).RootElement.GetProperty("muted")[0].GetString(),
-                "the key it starts again with hashes the same mute key differently");
+            elsewhere.IsUnreadableHere.Should().BeTrue();
+            WroteBack(browser).Should().BeFalse("a list another key ring made is left for it, not written over on a read");
+
+            await elsewhere.SetAsync(browser.JSInterop.JSRuntime, Key, muted: true, Token);
 
             using JsonDocument rewritten = JsonDocument.Parse(LastWritten(browser));
-            rewritten.RootElement.GetProperty("muted").GetArrayLength().Should().Be(0, "the old hashes are written over at once");
-            theirs.Open(rewritten.RootElement.GetProperty("key").GetString()).Should().NotBeNull("with a key this host can open");
+            string theirHash = rewritten.RootElement.GetProperty("muted").EnumerateArray().Single().GetString()!;
+            theirHash.Should().NotBe(ourHash, "the key it starts with hashes the same mute key differently");
+            theirs.Open(rewritten.RootElement.GetProperty("key").GetString()).Should().NotBeNull("with a key this instance can open");
             ours.Open(rewritten.RootElement.GetProperty("key").GetString()).Should().BeNull();
+            elsewhere.IsUnreadableHere.Should().BeFalse();
+            elsewhere.IsMuted(Key).Should().BeTrue();
+        }
+    }
+
+    /// <summary>
+    /// W6-fix: on a host whose instances do not share a key ring, a visit to another instance used to write over the
+    /// browser's list at once and lose every mute. Now the list survives the visit: the instance that made it still reads it.
+    /// An unmute there changes nothing either, because nothing reads as muted there to unmute.
+    /// </summary>
+    [Fact]
+    public async Task A_visit_to_an_instance_with_another_key_ring_keeps_every_mute_for_the_instance_that_made_them()
+    {
+        const string Key = "default|db|K02";
+        HealthMuteKeys first = new(new EphemeralDataProtectionProvider());
+        HealthMuteKeys second = new(new EphemeralDataProtectionProvider());
+
+        string written = await MutedAsync(first, Key, "default|db|K03");
+
+        (HealthMutes onSecond, BunitContext browser) = await ReadBackAsync(second, written);
+        using (browser)
+        {
+            onSecond.IsMuted(Key).Should().BeFalse();
+            await onSecond.SetAsync(browser.JSInterop.JSRuntime, Key, muted: false, Token);
+            WroteBack(browser).Should().BeFalse("neither the read nor an unmute replaces a list this instance cannot read");
+        }
+
+        (HealthMutes backOnFirst, BunitContext again) = await ReadBackAsync(first, written);
+        using (again)
+        {
+            backOnFirst.IsMuted(Key).Should().BeTrue("the list the browser still holds is the first instance's, as it made it");
+            backOnFirst.IsMuted("default|db|K03").Should().BeTrue();
+        }
+    }
+
+    /// <summary>A stored key that is not one at all - not base64, or too short to carry a key - is replaced at once.</summary>
+    [Theory]
+    [InlineData("not base64 at all!")]
+    [InlineData("AAAA")]
+    public async Task A_key_that_no_key_ring_could_have_made_is_replaced_at_once(string notAKey)
+    {
+        HealthMuteKeys keys = new(new EphemeralDataProtectionProvider());
+        string stored = JsonSerializer.Serialize(new HealthMutes.StoredMutes(notAKey, [new string('a', 64)]));
+
+        (HealthMutes mutes, BunitContext browser) = await ReadBackAsync(keys, stored);
+        using (browser)
+        {
+            mutes.IsUnreadableHere.Should().BeFalse();
+            using JsonDocument rewritten = JsonDocument.Parse(LastWritten(browser));
+            rewritten.RootElement.GetProperty("muted").GetArrayLength().Should().Be(0);
+            keys.Open(rewritten.RootElement.GetProperty("key").GetString()).Should().NotBeNull();
         }
     }
 

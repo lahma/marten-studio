@@ -129,8 +129,9 @@ internal sealed class HealthMuteKeys
 /// <para>
 /// <b>Correct without it.</b> A private window, blocked storage, a prerender or a closed tab all answer as an
 /// empty list, and every access is behind <see cref="StudioLiveUpdates.IsInteropUnavailable" /> on this side
-/// and a <c>try</c> on the browser's: what that costs is that nothing is muted, never a broken page. A key the host can no
-/// longer open - its key ring lost, or never persisted - is the same: a new key, and nothing muted.
+/// and a <c>try</c> on the browser's: what that costs is that nothing is muted, never a broken page. A key this instance
+/// cannot open - another instance's key ring, or this host's own since lost - is the same here: nothing muted, and the list
+/// left for the key ring that made it until the browser next mutes something.
 /// </para>
 /// <para>
 /// Scoped: one circuit is one browser tab. Bounded at <see cref="MaxKeys" />, newest kept, so the list in
@@ -151,6 +152,7 @@ internal sealed class HealthMutes
     private byte[]? key;
     private string? protectedKey;
     private bool loaded;
+    private bool unreadable;
 
     /// <summary>A circuit's mutes, keyed through the host's Data Protection.</summary>
     /// <param name="keys">
@@ -164,6 +166,21 @@ internal sealed class HealthMutes
 
     /// <summary>Whether the browser's list has been read yet.</summary>
     public bool IsLoaded => loaded;
+
+    /// <summary>
+    /// Whether the browser keeps a list under a key this instance's key ring cannot open, and has muted nothing since - so
+    /// nothing reads as muted here, and the list is left for the key ring that made it.
+    /// </summary>
+    internal bool IsUnreadableHere
+    {
+        get
+        {
+            lock (gate)
+            {
+                return unreadable;
+            }
+        }
+    }
 
     /// <summary>Every muted key's hash (<see cref="Hash" />), oldest first - what the browser keeps.</summary>
     public IReadOnlyList<string> Keys
@@ -204,10 +221,18 @@ internal sealed class HealthMutes
 
     /// <summary>Reads the browser's list, once per circuit. A browser that cannot answer has muted nothing.</summary>
     /// <remarks>
-    /// Anything stored that this host cannot use - a list from before wave 6 (plain SHA-256 hashes, or the raw keys a
-    /// pre-release 0.4 build stored), a key another key ring protected, a value that is not the studio's - is written back
-    /// at once as a new key and an empty list, so nothing stale waits in <c>localStorage</c> for the next mute to overwrite
-    /// it. Those mutes are dropped, not carried over: nothing is migrated.
+    /// <para>
+    /// Anything stored that no key ring made - a list from before wave 6 (plain SHA-256 hashes, or the raw keys a
+    /// pre-release 0.4 build stored), a value that is not the studio's - is written back at once as a new key and an empty
+    /// list, so nothing stale waits in <c>localStorage</c> for the next mute to overwrite it. Those mutes are dropped, not
+    /// carried over: nothing is migrated.
+    /// </para>
+    /// <para>
+    /// A well-formed key this instance cannot open is not (W6-fix): on a host whose instances do not share a key ring, the
+    /// next request may reach the instance that made it, and writing over it here would lose every mute on every change of
+    /// instance. Its list reads as nothing muted here (<see cref="IsUnreadableHere" />) and stays as it is until this browser
+    /// mutes something, which replaces it with a key of this instance's.
+    /// </para>
     /// </remarks>
     public async Task LoadAsync(IJSRuntime jsRuntime, CancellationToken cancellationToken = default)
     {
@@ -241,12 +266,24 @@ internal sealed class HealthMutes
             {
                 key = opened;
                 protectedKey = parsed.Key;
+                unreadable = false;
                 hashes.AddRange(parsed.Muted?.OfType<string>() ?? []);
+            }
+            else if (IsWellFormedKey(parsed.Key))
+            {
+                // A key this instance cannot open, but one a key ring could have made: another instance's, on a host whose
+                // instances do not share a key ring, or this host's before it lost its keys. Its list is unreadable here and
+                // is left as it is - the instance that made it may answer the next request, and would read it. Nothing is
+                // muted here until this browser mutes something, which starts a key of this instance's (SetAsync).
+                (key, protectedKey) = (null, null);
+                unreadable = true;
+                dropped = false;
             }
             else
             {
-                // No key, or one this host cannot open: whatever hashes came with it were made under another key.
+                // No key, or not one at all: whatever hashes came with it are nothing a key ring made.
                 (key, protectedKey) = keys.Create();
+                unreadable = false;
                 dropped |= stored is { Length: > 0 };
             }
 
@@ -280,7 +317,22 @@ internal sealed class HealthMutes
 
         lock (gate)
         {
-            string hash = HealthMuteKeys.Hash(key!, muteKey);
+            if (key is null)
+            {
+                if (!muted)
+                {
+                    // An unreadable list has nothing muted here to unmute, and is still not this instance's to replace.
+                    return;
+                }
+
+                // The browser's first mute since its list became unreadable here: the list is replaced now, and only now,
+                // with a key this instance can open - the mutes another key ring keyed are lost at this point, not before.
+                (key, protectedKey) = keys.Create();
+                hashes.Clear();
+                unreadable = false;
+            }
+
+            string hash = HealthMuteKeys.Hash(key, muteKey);
             hashes.RemoveAll(x => string.Equals(x, hash, StringComparison.Ordinal));
 
             if (muted)
@@ -355,6 +407,21 @@ internal sealed class HealthMutes
         List<string> kept = [.. muted.OfType<string>().Where(IsHash).Distinct(StringComparer.Ordinal).TakeLast(MaxKeys)];
         dropped = kept.Count != muted.Length || parsed.Muted is null;
         return new StoredMutes(parsed.Key, [.. kept]);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="protectedKey" /> could be a key some key ring protected - base64 of a payload at least as long as
+    /// the key it carries - rather than nothing, or a value that is not one at all.
+    /// </summary>
+    private static bool IsWellFormedKey(string? protectedKey)
+    {
+        if (string.IsNullOrWhiteSpace(protectedKey))
+        {
+            return false;
+        }
+
+        byte[] buffer = new byte[(protectedKey.Length * 3 / 4) + 3];
+        return Convert.TryFromBase64String(protectedKey, buffer, out int written) && written > HealthMuteKeys.KeyLength;
     }
 
     /// <summary>Whether <paramref name="entry" /> has the shape <see cref="HealthMuteKeys.Hash" /> gives: 64 lowercase hex digits.</summary>
