@@ -90,6 +90,28 @@ public class SqlLiteralTextTests
     }
 
     [Theory]
+    [MemberData(nameof(UnprintableNames))]
+    public void Printable_text_is_the_names_rule_less_what_only_an_identifier_needs(string name)
+    {
+        bool identifierOnly = name.Contains('"', StringComparison.Ordinal) || string.IsNullOrWhiteSpace(name);
+
+        SqlLiteralText.IsPrintableText(name).Should().Be(identifierOnly,
+            "a quote and a blank are refused only as a name; everything else here would not read as itself anywhere");
+    }
+
+    [Theory]
+    [InlineData("it's")]
+    [InlineData("a\"b")]
+    [InlineData("back\\slash")]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("commandes_été")]
+    public void Printable_text_admits_what_reads_as_itself(string text)
+    {
+        SqlLiteralText.IsPrintableText(text).Should().BeTrue();
+    }
+
+    [Theory]
     [InlineData("Mixed Case")]
     [InlineData("it's")]
     [InlineData("back\\slash")]

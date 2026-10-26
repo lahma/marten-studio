@@ -54,6 +54,33 @@ internal static class SqlLiteralText
     }
 
     /// <summary>
+    /// Whether <paramref name="text" /> reads on screen as what it is when printed into text a person copies: no control
+    /// character (a NUL, a tab or a line break among them), no format character (a right-to-left override, a zero-width
+    /// space) and no Unicode line or paragraph separator, any of which makes the text say something other than the
+    /// statement it is (Trojan Source, CVE-2021-42574). The rule <see cref="MigrationSqlText.IsPrintableName" /> holds a
+    /// name to, less what only an identifier needs; the JSON viewer holds a member name to it before printing one.
+    /// </summary>
+    /// <param name="text">A name or value about to be printed; <see langword="null" /> is not printable.</param>
+    public static bool IsPrintableText(string? text)
+    {
+        if (text is null)
+        {
+            return false;
+        }
+
+        foreach (char c in text)
+        {
+            if (char.GetUnicodeCategory(c) is UnicodeCategory.Control or UnicodeCategory.Format
+                or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// A value as a SQL string literal that means the same under either <c>standard_conforming_strings</c> - or
     /// <c>null</c> for a NULL, and <see langword="null" /> for a value no literal can carry.
     /// </summary>

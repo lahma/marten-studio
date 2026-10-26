@@ -130,26 +130,10 @@ internal static partial class MigrationSqlText
     /// included) in a name makes the text on the screen say something other than the statement it is (Trojan Source,
     /// CVE-2021-42574) - or, in a comment, ends the comment: such a name gets no statement either.
     /// </summary>
-    private static bool IsQuotable(string? identifier)
-    {
-        if (string.IsNullOrWhiteSpace(identifier)
-            || identifier.Contains('"', StringComparison.Ordinal)
-            || identifier.Contains('\0', StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        foreach (char c in identifier)
-        {
-            if (char.GetUnicodeCategory(c) is UnicodeCategory.Control or UnicodeCategory.Format
-                or UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    private static bool IsQuotable(string? identifier) =>
+        !string.IsNullOrWhiteSpace(identifier)
+        && !identifier.Contains('"', StringComparison.Ordinal)
+        && SqlLiteralText.IsPrintableText(identifier);
 
     // ASCII only, and \z rather than $: a .NET \d is any Unicode digit, and $ matches before a trailing newline.
     [GeneratedRegex(@"\A[a-z][a-z_]{0,62}\z", RegexOptions.CultureInvariant)]
