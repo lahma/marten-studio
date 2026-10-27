@@ -54,8 +54,8 @@ public partial class MediumDataSetLiveTests
 {
     /// <summary>
     /// The health statements one regular sweep of this set runs, measured again on 2026-10-27 with 0.6's first wave merged
-    /// (INT-W1): 50 from 54 of the 68 checks, at the Marten floor (9.39.0) and at the latest tested (9.54.2) alike - so one
-    /// budget serves both. The test's output lists every check's count and every distinct statement with the checks that
+    /// (INT-W1, M4+M7 included): 51 from 55 of the 69 checks, at the Marten floor (9.39.0) and at the latest tested (9.54.2)
+    /// alike - so one budget serves both. The test's output lists every check's count and every distinct statement with the checks that
     /// share it. See <see cref="SweepStatementBudget" /> for the margin.
     /// </summary>
     /// <remarks>
@@ -88,7 +88,10 @@ public partial class MediumDataSetLiveTests
     /// the table checks share, takes the place of C06's own and of the lock half of C04's, whose sessions read stays its own;
     /// C12 shares it. X4 adds 1: T18's tenant-skew read (<c>ColumnSkewQueries</c>), one statement over every conjoined table
     /// the store declares - the sample's conjoined type among them - summed in the statement, never per table or per tenant.
-    /// M2's D05 keeps its positions in process, and the other wave-1 packets read nothing in a sweep.
+    /// M4's D10 adds 1: the progression rows nothing the store registers advances
+    /// (<c>HealthDaemonQueries.OrphanCandidates</c>), one statement over <c>mt_event_progression</c>, beside the catalog read
+    /// the daemon checks share. M2's D05 keeps its positions in process, and the other wave-1 packets read nothing in a
+    /// sweep.
     /// </para>
     /// <para>
     /// T24, C11 and D09 add none of their own - each shares reads counted above - and K05-K08 read configuration in process.
@@ -96,7 +99,7 @@ public partial class MediumDataSetLiveTests
     /// and <c>pg_monitor</c>), S07's update paths (an extension behind its default).
     /// </para>
     /// </remarks>
-    private const int MeasuredSweepStatements = 50;
+    private const int MeasuredSweepStatements = 51;
 
     /// <summary>
     /// The statement budget: the measured count plus two. A check that adds a statement on a path this data set takes is
@@ -332,7 +335,8 @@ public partial class MediumDataSetLiveTests
 /// </para>
 /// <para>
 /// <b>The readers</b>, measured over the hundred-thousand-row set on 2026-10-19: the progression table D01, D02, D03, D05
-/// and D08; the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02, D03 and D09 share
+/// and D08, and from 0.6 D10, whose subject it is (M4's orphaned rows, <c>HealthDaemonQueries.OrphanCandidates</c>, with the
+/// table's primary key); the boundary of <c>mt_events</c> above the mark and its sequence the high-water read D01, D02, D03 and D09 share
 /// (with D09's <c>max(seq_id)</c>, W5-G1M);
 /// the high-water skips D07; the dead letters D06 - each with the table's indexes, which the planner opens with it - and
 /// <c>mt_hilo</c> T11. The event checks of a regular sweep (E05, E07) read only the catalog and the statistics views, so a
@@ -345,7 +349,7 @@ internal sealed class SweepLockAllowList
     public static readonly string[] EventBookkeeping = ["mt_event_progression", "mt_events", "mt_high_water_skips", "mt_doc_deadletterevent"];
 
     /// <summary>The checks whose statements may read <see cref="EventBookkeeping" />: the daemon checks, and no other.</summary>
-    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09"];
+    public static readonly string[] EventBookkeepingReaders = ["D01", "D02", "D03", "D04", "D05", "D06", "D07", "D08", "D09", "D10"];
 
     /// <summary>The checks whose statements may read <c>mt_hilo</c>.</summary>
     public static readonly string[] HiloReaders = ["T11"];
