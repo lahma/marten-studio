@@ -147,7 +147,7 @@ internal static class ColumnSkewQueries
         valued as (
             select sa.root, v.value, pg_catalog.sum(sa.tuples * v.freq)::float8 as tuples
             from sampled sa
-            cross join lateral pg_catalog.unnest(sa.vals, sa.freqs) as v(value, freq)
+            cross join lateral rows from (pg_catalog.unnest(sa.vals), pg_catalog.unnest(sa.freqs)) as v(value, freq)
             group by sa.root, v.value
         )
         select l.nspname::text,

@@ -63,9 +63,10 @@ public class TableHealthQuietLiveTests(PostgresFixture postgres)
         // read pg_control_checkpoint() and pg_control_system() apart from the window: a has_function_privilege probe, then a
         // call of only the functions it allowed - two more statements behind the same shared window read. Fifteen before
         // W5-B1's five: T15's foreign keys, the usage guard's counters-age read T01, T05 and T06 share, T26's integer keys,
-        // the partition read T19 and T20 share, and T17's document-named tables.
+        // the partition read T19 and T20 share, and T17's document-named tables. Twenty before X4's T18, whose one tenant-skew
+        // read the sample's conjoined type asks for.
         first.Checks.Where(static x => x.Code.StartsWith('T')).SelectMany(static x => x.Statements).Select(static x => x.Sql)
-            .Distinct(StringComparer.Ordinal).Should().HaveCount(20, "the regular table checks' whole catalog cost on the sample store");
+            .Distinct(StringComparer.Ordinal).Should().HaveCount(21, "the regular table checks' whole catalog cost on the sample store");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(
             static x => x.Sql.Contains("pg_catalog.pg_stat_archiver", StringComparison.Ordinal), "T08 reads the statistics window for since-restart");
         first.Checks.Single(static x => x.Code == "T08").Statements.Should().Contain(
