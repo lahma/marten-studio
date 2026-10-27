@@ -465,6 +465,9 @@ internal sealed record DeadLetterQuery
     /// <summary>Only those whose exception type contains this.</summary>
     public string? ExceptionType { get; init; }
 
+    /// <summary>Only those about the event of this sequence - the stepper's link to a step's dead letters (M1).</summary>
+    public long? EventSequence { get; init; }
+
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
 
@@ -482,7 +485,14 @@ internal sealed record DeadLetterQuery
 /// Where it came from: a registered single-stream projection, or the manual picker over every document
 /// type the store knows.
 /// </param>
-internal sealed record AggregateTypeCandidate(Type Type, string Name, string FullName, AggregateCandidateSource Source);
+internal sealed record AggregateTypeCandidate(Type Type, string Name, string FullName, AggregateCandidateSource Source)
+{
+    /// <summary>
+    /// The name of the registered projection that folds it, for a <see cref="AggregateCandidateSource.SingleStreamProjection" />:
+    /// what a dead letter names, so its link can open the stepper on this aggregate (M1).
+    /// </summary>
+    public string? ProjectionName { get; init; }
+}
 
 /// <summary>Where an aggregate-type candidate came from.</summary>
 internal enum AggregateCandidateSource

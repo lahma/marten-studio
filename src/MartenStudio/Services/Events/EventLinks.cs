@@ -33,6 +33,9 @@ internal static class EventLinks
     /// <summary>One stream's detail page.</summary>
     public const string StreamDetailRoute = "events/streams/s";
 
+    /// <summary>The projection stepper over one stream (M1).</summary>
+    public const string StreamStepperRoute = "events/streams/step";
+
     /// <summary>The global feed.</summary>
     public const string FeedRoute = "events/feed";
 
@@ -88,6 +91,41 @@ internal static class EventLinks
     /// <summary>A link to one stream's detail page.</summary>
     public static string ToStream(MartenStudioOptions options, StudioScope? scope, string streamId) =>
         To(options, StreamDetailRoute, scope, [new("id", streamId)]);
+
+    /// <summary>
+    /// A link to the stepper: the stream, the aggregate type, the step and the watched path all in the query string, so a
+    /// pasted link reopens the same step (D9).
+    /// </summary>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="streamId">The stream.</param>
+    /// <param name="aggregate">The aggregate type's full name, or <see langword="null" /> to let the visitor pick.</param>
+    /// <param name="version">The step, or <see langword="null" /> for the first.</param>
+    /// <param name="projection">
+    /// A projection's name for the page to pick the aggregate by, when there is no <paramref name="aggregate" />: what a
+    /// dead letter names.
+    /// </param>
+    /// <param name="path">The value of the aggregate the next-change search watches, or <see langword="null" />.</param>
+    public static string ToStep(
+        MartenStudioOptions options,
+        StudioScope? scope,
+        string streamId,
+        string? aggregate = null,
+        long? version = null,
+        string? projection = null,
+        string? path = null) =>
+        To(options, StreamStepperRoute, scope,
+        [
+            new("id", streamId),
+            new("agg", aggregate),
+            new("v", Number(version)),
+            new("projection", projection),
+            new("path", path),
+        ]);
+
+    /// <summary>A link to the dead letters that name one event.</summary>
+    public static string ToDeadLettersForEvent(MartenStudioOptions options, StudioScope? scope, long sequence) =>
+        To(options, DeadLettersRoute, scope, [new("seq", Number(sequence))]);
 
     /// <summary>A link to the feed, filtered to one stream.</summary>
     public static string ToFeedForStream(MartenStudioOptions options, StudioScope? scope, string streamId) =>

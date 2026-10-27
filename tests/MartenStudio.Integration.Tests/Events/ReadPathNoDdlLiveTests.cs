@@ -204,6 +204,39 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         before.ShouldBeUnchangedIn(await host.SnapshotAsync());
     }
 
+    /// <summary>
+    /// M1: the stepper folds a stream this process's store never read - one window, the search for the next change, and
+    /// the dead letters that name its events - with the studio's own SQL and Marten's own selector and aggregator, and
+    /// writes nothing. This store has an int-id type, so below Marten 9.50.3 one ensure would have created <c>mt_hilo</c>.
+    /// </summary>
+    [PostgresFact]
+    public async Task Stepping_a_stream_a_store_never_ensured_folds_it_and_creates_nothing()
+    {
+        await using Host host = await Host.StartAsync(fixture);
+        Guid stream = await host.SeedAsync(withDeadLetters: true);
+
+        ServerSnapshot before = await host.SnapshotAsync();
+        string type = typeof(LedgerSummary).FullName!;
+
+        StreamStepWindow window = await host.EventsAsync(x => x.StepAsync(Scope, stream.ToString(), type, 1, Token));
+        StepSearch search = await host.EventsAsync(x => x.FindNextChangeAsync(Scope, stream.ToString(), type, 1, "Balance", Token));
+        StreamStepWindow missing = await host.EventsAsync(x => x.StepAsync(Scope, Guid.NewGuid().ToString(), type, 1, Token));
+
+        window.Error.Should().BeNull();
+        window.Steps.Select(static x => x.Version).Should().Equal([1L, 2L, 3L]);
+        window.Steps[1].StateJson.Should().Contain("\"Balance\":10").And.Contain("\"Owner\":\"acme\"");
+        window.Steps[2].StateJson.Should().Contain("\"Balance\":25").And.Contain("\"Credits\":2");
+        window.Steps.Select(static x => x.DeadLetters.Count).Should().Equal(
+            [1, 1, 1], "the seeded dead letters name the stream's three events, one each, by sequence");
+        window.Steps[0].DeadLetters[0].ExceptionMessage.Should().Be("first");
+
+        search.FoundVersion.Should().Be(2);
+        missing.Missing.Should().Be(AggregateMissingReason.StreamMissing);
+
+        (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse("to_regclass: no HiLo bookkeeping was created");
+        before.ShouldBeUnchangedIn(await host.SnapshotAsync());
+    }
+
     /// <summary>The document page's "view stream" check: right answer, no DDL.</summary>
     [PostgresFact]
     public async Task Asking_whether_a_stream_exists_answers_and_creates_nothing()

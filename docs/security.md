@@ -291,6 +291,23 @@ Every refusal, and the first run of each query in a circuit, is audited (events 
 predicate is in your logs from then on. **Grant `RunLinqQueries` to people you would trust with the store's
 data.**
 
+### Time travel and the stepper run your projection's code
+
+A stream's *time travel* (the aggregate at a version) and its *stepper* (the aggregate after each event, and
+what each event changed) fold the stream with Marten's own aggregator. That aggregator calls your
+projection's own `Create`, `Apply`, `ShouldDelete` and `Evolve` methods, in this process, on a session pinned
+to the scope's database and tenant. **Neither has a gate beyond reading the stream**: the store policy for the
+scope, as every read asks it. There is no capability for either, and nothing is audited, because neither
+writes anything, starts nothing and asks no daemon. A visitor who can open a stream can therefore make your
+`Apply` methods run against its events, as often as they click. What those methods do is yours: one that
+loads other documents through the session it is handed reads them as your code wrote it (and a Marten
+`LoadAsync` there may ensure that document type's storage, which the studio's own reads never do). The fold
+runs under `QueryTimeout`. An exception a method throws is shown on the page, its type and message: the
+stepper stops on that event and logs nothing, since a projection that fails on an event is what it is there to
+find; time travel reports it as a failed read (event 9217, throttled). The aggregate types offered are the
+store's own single-stream projections and the document types `IsDocumentTypeVisible` shows, and a type name is
+never looked up from what the browser sent.
+
 ### The opt-in health check
 
 `services.AddHealthChecks().AddMartenStudio()` (or `.AddPostgresStudio()`) runs the advisor's configuration and

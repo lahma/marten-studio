@@ -1225,6 +1225,7 @@ internal sealed partial class EventDataService : IEventDataService
                 ProjectionName = string.IsNullOrWhiteSpace(query.ProjectionName) ? null : query.ProjectionName,
                 ShardName = string.IsNullOrWhiteSpace(query.ShardName) ? null : query.ShardName,
                 ExceptionType = string.IsNullOrWhiteSpace(query.ExceptionType) ? null : query.ExceptionType,
+                EventSequences = query.EventSequence is { } sequence ? [sequence] : null,
                 Offset = Math.Max(0, query.Offset),
 
                 // One more than asked for, so "is there another page" is answered without a count.

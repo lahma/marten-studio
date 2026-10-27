@@ -20,6 +20,8 @@ public class DeadLetterQueriesTests
 {
     private static readonly DeadLetterJsonKeys Keys = DeadLetterJsonKeys.For(null);
 
+    private static readonly string[] SequencesAsText = ["7", "1234567890123"];
+
     private static DocumentTableInfo Table => new()
     {
         Schema = "studio_events",
@@ -129,11 +131,33 @@ public class DeadLetterQueriesTests
     [Fact]
     public void The_json_keys_follow_the_serializers_casing()
     {
-        DeadLetterJsonKeys.For(null).Should().Be(new DeadLetterJsonKeys("TenantId", "ProjectionName", "ShardName", "ExceptionType", "Timestamp"));
+        DeadLetterJsonKeys.For(null).Should().Be(
+            new DeadLetterJsonKeys("TenantId", "ProjectionName", "ShardName", "ExceptionType", "Timestamp", "EventSequence"));
         DeadLetterJsonKeys.For(JsonNamingPolicy.CamelCase).Should().Be(
-            new DeadLetterJsonKeys("tenantId", "projectionName", "shardName", "exceptionType", "timestamp"));
+            new DeadLetterJsonKeys("tenantId", "projectionName", "shardName", "exceptionType", "timestamp", "eventSequence"));
         DeadLetterJsonKeys.For(JsonNamingPolicy.SnakeCaseLower).Should().Be(
-            new DeadLetterJsonKeys("tenant_id", "projection_name", "shard_name", "exception_type", "timestamp"));
+            new DeadLetterJsonKeys("tenant_id", "projection_name", "shard_name", "exception_type", "timestamp", "event_sequence"));
+    }
+
+    /// <summary>
+    /// M1: the stepper asks for the dead letters of its window's events, and the screen's link from a step for one. The
+    /// sequence is compared as the body holds it - text, so a body somebody wrote by hand cannot fail the whole list on a
+    /// cast - and every number is a parameter.
+    /// </summary>
+    [Fact]
+    public void The_event_filter_is_one_text_array_parameter_and_absent_reads_every_event()
+    {
+        using NpgsqlCommand some = DeadLetterQueries.BuildPage(Table, Keys, new DeadLetterPageQuery { EventSequences = [7, 1_234_567_890_123] });
+        using NpgsqlCommand every = DeadLetterQueries.BuildPage(Table, Keys, new DeadLetterPageQuery());
+
+        some.CommandText.Should().Contain("(@sequences is null or d.\"data\" ->> @sequence_key = any(@sequences))");
+        some.Parameters["sequences"].Value.Should().BeEquivalentTo(SequencesAsText);
+        some.Parameters["sequences"].NpgsqlDbType.Should().Be(NpgsqlTypes.NpgsqlDbType.Array | NpgsqlTypes.NpgsqlDbType.Text);
+        some.Parameters["sequence_key"].Value.Should().Be("EventSequence");
+        some.CommandText.Should().NotContain("1234567890123");
+
+        every.Parameters["sequences"].Value.Should().Be(DBNull.Value);
+        every.CommandText.Should().Be(some.CommandText, "one statement serves every filter combination");
     }
 
     /// <summary>A soft-deleted mapping - which only a host's own <c>Schema.For&lt;DeadLetterEvent&gt;()</c> makes - keeps Marten's default filter.</summary>

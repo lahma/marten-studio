@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 
 using JasperFx.Events;
 using JasperFx.Events.Aggregation;
@@ -53,10 +52,16 @@ namespace MartenStudio.Services.Events;
 /// </para>
 /// <para>
 /// <b>The call.</b> Marten's aggregator is generic in the aggregate, and the studio only ever holds a
-/// <see cref="Type" />, so <see cref="MethodInfo.MakeGenericMethod" /> is the only route - which AGENTS.md
-/// allows here, and this is the one place it happens. It is paid once per aggregate type: the closed method
-/// becomes a strongly typed delegate that is cached process-wide, so the reflection cost is not on the
-/// version stepper's per-click path.
+/// <see cref="Type" />, so closing a generic over it at run time is the only route - which AGENTS.md allows here, and
+/// this is the one place it happens. It is paid once per aggregate type: the closed <see cref="IAggregateFolder" /> is
+/// cached process-wide, so the reflection cost is not on the stepper's per-click path.
+/// </para>
+/// <para>
+/// <b>One fold.</b> Time travel and the stepper (M1) both fold through <see cref="IAggregateFolder.FoldAsync" /> - Marten's
+/// <c>AggregatorFor&lt;T&gt;().BuildAsync(events, session, state, token)</c> and nothing else. Time travel hands it every
+/// event up to a version and no state; the stepper hands it one event and the state before it, or - for the projections
+/// whose fold is not one event at a time (<see cref="AggregateStepShape" />) - every event from the first, again. Neither
+/// re-implements a dispatch, and neither calls <c>DetermineActionAsync</c> or a projection's <c>Evolve</c> itself.
 /// </para>
 /// <para>
 /// <b>Not <c>AggregateStreamAsync&lt;T&gt;</c> any more, and why.</b> That call reads the stream through
@@ -72,15 +77,8 @@ namespace MartenStudio.Services.Events;
 /// </remarks>
 internal static class AggregateStreamInvoker
 {
-    private const BindingFlags PrivateStatic = BindingFlags.NonPublic | BindingFlags.Static;
-
-    /// <summary>One cached delegate per aggregate type, closed over the generic method.</summary>
-    private static readonly ConcurrentDictionary<Type, Func<IQuerySession, object, IReadOnlyList<IEvent>, long, CancellationToken, Task<object?>>>
-        Invokers = new();
-
-    private static readonly MethodInfo Definition =
-        typeof(AggregateStreamInvoker).GetMethod(nameof(AggregateAsync), PrivateStatic)
-        ?? throw new InvalidOperationException($"{nameof(AggregateStreamInvoker)}.{nameof(AggregateAsync)} is missing.");
+    /// <summary>One folder per aggregate type, closed over it once.</summary>
+    private static readonly ConcurrentDictionary<Type, IAggregateFolder> Folders = new();
 
     /// <summary>
     /// The aggregate types this store's streams can be replayed into: every registered single-stream
@@ -122,7 +120,9 @@ internal static class AggregateStreamInvoker
             Type? aggregate = SingleStreamAggregateType(source, identity);
             if (aggregate is not null && IsUsable(aggregate) && IsShown(aggregate, isVisible) && seen.Add(aggregate))
             {
-                candidates.Add(Describe(aggregate, AggregateCandidateSource.SingleStreamProjection));
+                // The registration's own name, so a dead letter - which names its projection - can open the stepper on
+                // the aggregate that projection folds (M1).
+                candidates.Add(Describe(aggregate, AggregateCandidateSource.SingleStreamProjection) with { ProjectionName = source.Name });
             }
         }
 
@@ -165,6 +165,18 @@ internal static class AggregateStreamInvoker
         ArgumentNullException.ThrowIfNull(streamId);
         ArgumentNullException.ThrowIfNull(events);
 
+        IAggregateFolder folder = FolderFor(aggregateType);
+
+        return AggregateAsync(folder, session, streamId, events, version, cancellationToken);
+    }
+
+    /// <summary>The folder for one aggregate type: Marten's aggregator for it, closed over it once and cached.</summary>
+    /// <param name="aggregateType">The aggregate type, which must be a reference type.</param>
+    /// <exception cref="ArgumentException">The type cannot be an aggregate at all.</exception>
+    public static IAggregateFolder FolderFor(Type aggregateType)
+    {
+        ArgumentNullException.ThrowIfNull(aggregateType);
+
         if (!IsUsable(aggregateType))
         {
             throw new ArgumentException(
@@ -172,22 +184,19 @@ internal static class AggregateStreamInvoker
                 nameof(aggregateType));
         }
 
-        Func<IQuerySession, object, IReadOnlyList<IEvent>, long, CancellationToken, Task<object?>> invoker = Invokers.GetOrAdd(
+        return Folders.GetOrAdd(
             aggregateType,
-            static type => Definition
-                .MakeGenericMethod(type)
-                .CreateDelegate<Func<IQuerySession, object, IReadOnlyList<IEvent>, long, CancellationToken, Task<object?>>>());
-
-        return invoker(session, streamId, events, version, cancellationToken);
+            static type => (IAggregateFolder) Activator.CreateInstance(typeof(Folder<>).MakeGenericType(type))!);
     }
 
-    /// <summary>The one generic body every closed delegate points at.</summary>
+    /// <summary>Time travel's replay: the whole fold to a version, then the stream's id on the aggregate.</summary>
     /// <remarks>
     /// <para>
     /// <c>QueryEventStore.AggregateStreamAsync&lt;T&gt;</c> after its <c>FetchStreamAsync</c>, line for line, at
     /// <c>V9.39.0</c> and <c>V9.50.2</c> (the file is identical): no events is no aggregate; a version past the
     /// stream's last event is no aggregate, which the caller turns into "this stream never reached that version";
-    /// otherwise <c>Options.Projections.AggregatorFor&lt;T&gt;().BuildAsync(events, session, null, token)</c>.
+    /// otherwise <c>Options.Projections.AggregatorFor&lt;T&gt;().BuildAsync(events, session, null, token)</c> - which is
+    /// <see cref="IAggregateFolder.FoldAsync" /> with no state.
     /// </para>
     /// <para>
     /// The identity is set as Marten's <c>TryGetStorageForLiveAggregation</c> sets it - the type's document storage
@@ -196,12 +205,13 @@ internal static class AggregateStreamInvoker
     /// the studio asks again instead, and changes nothing about the host's store.
     /// </para>
     /// </remarks>
-    private static async Task<object?> AggregateAsync<T>(
+    private static async Task<object?> AggregateAsync(
+        IAggregateFolder folder,
         IQuerySession session,
         object streamId,
         IReadOnlyList<IEvent> events,
         long version,
-        CancellationToken cancellationToken) where T : class
+        CancellationToken cancellationToken)
     {
         if (events.Count == 0)
         {
@@ -213,22 +223,105 @@ internal static class AggregateStreamInvoker
             return null;
         }
 
-        IMartenSession marten = (IMartenSession) session;
+        object? aggregate = await folder.FoldAsync(session, null, events, cancellationToken).ConfigureAwait(false);
 
-        T? aggregate = await marten.Options.Projections
-            .AggregatorFor<T>()
-            .BuildAsync(events, session, null, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (aggregate is null)
+        if (aggregate is not null)
         {
-            return null;
+            folder.SetIdentity(session, aggregate, streamId);
         }
 
-        if (IdentityStorage<T>(marten) is { } storage)
+        return aggregate;
+    }
+
+    /// <summary>
+    /// Marten's aggregator for one aggregate type, closed over it: the fold both time travel and the stepper use, the
+    /// stream's identity on the result, and how the stepper may step it.
+    /// </summary>
+    /// <typeparam name="T">The aggregate type.</typeparam>
+    private sealed class Folder<T> : IAggregateFolder where T : class
+    {
+        /// <inheritdoc />
+        public Type AggregateType => typeof(T);
+
+        /// <inheritdoc />
+        public async Task<object?> FoldAsync(
+            IQuerySession session,
+            object? state,
+            IReadOnlyList<IEvent> events,
+            CancellationToken cancellationToken)
         {
-            // Both overloads named, as Marten's two AggregateStreamAsync overloads do: the id was parsed against
-            // the store's stream identity, so exactly one of them is right.
+            ArgumentNullException.ThrowIfNull(session);
+            ArgumentNullException.ThrowIfNull(events);
+
+            return await ((IMartenSession) session).Options.Projections
+                .AggregatorFor<T>()
+                .BuildAsync(events, session, (T?) state, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
+        public void SetIdentity(IQuerySession session, object aggregate, object streamId)
+        {
+            if (IdentityStorage((IMartenSession) session) is { } storage)
+            {
+                Set(storage, (T) aggregate, streamId);
+            }
+        }
+
+        /// <inheritdoc />
+        public string ToJson(IQuerySession session, ISerializer serializer, object aggregate, object streamId)
+        {
+            ArgumentNullException.ThrowIfNull(serializer);
+
+            T typed = (T) aggregate;
+
+            if (IdentityStorage((IMartenSession) session) is not { } storage)
+            {
+                return serializer.ToJson(typed);
+            }
+
+            // What the aggregate held before: the state folds on from this very object, and Marten's own single fold
+            // sets the identity only after its last event - so an Apply that reads the id must not see one the studio
+            // put there to draw a step. A Guid or a string is put back; any other identity stays the stream's, which a
+            // single-stream projection never has (its identity type is the stream's, checked in Candidates).
+            object? previous = storage.IdentityFor(typed);
+
+            Set(storage, typed, streamId);
+
+            try
+            {
+                return serializer.ToJson(typed);
+            }
+            finally
+            {
+                switch (previous)
+                {
+                    case Guid guid:
+                        storage.SetIdentityFromGuid(typed, guid);
+                        break;
+                    case string text:
+                        storage.SetIdentityFromString(typed, text);
+                        break;
+                }
+            }
+        }
+
+        /// <inheritdoc />
+        public AggregateStepShape ShapeOf(IQuerySession session)
+        {
+            ArgumentNullException.ThrowIfNull(session);
+
+            IAggregator<T, IQuerySession> aggregator = ((IMartenSession) session).Options.Projections.AggregatorFor<T>();
+
+            return AggregateStepShapes.Of(aggregator, typeof(T));
+        }
+
+        /// <summary>
+        /// Both overloads named, as Marten's two <c>AggregateStreamAsync</c> overloads do: the id was parsed against the
+        /// store's stream identity, so exactly one of them is right.
+        /// </summary>
+        private static void Set(Weasel.Storage.IDocumentStorage<T> storage, T aggregate, object streamId)
+        {
             if (streamId is Guid guid)
             {
                 storage.SetIdentityFromGuid(aggregate, guid);
@@ -239,19 +332,17 @@ internal static class AggregateStreamInvoker
             }
         }
 
-        return aggregate;
-    }
-
-    /// <summary>The aggregate type's document storage, or <see langword="null" /> when it has no identity to set.</summary>
-    private static Weasel.Storage.IDocumentStorage<T>? IdentityStorage<T>(IMartenSession session) where T : class
-    {
-        try
+        /// <summary>The aggregate type's document storage, or <see langword="null" /> when it has no identity to set.</summary>
+        private static Weasel.Storage.IDocumentStorage<T>? IdentityStorage(IMartenSession session)
         {
-            return session.StorageFor<T>();
-        }
-        catch (InvalidDocumentException)
-        {
-            return null;
+            try
+            {
+                return session.StorageFor<T>();
+            }
+            catch (InvalidDocumentException)
+            {
+                return null;
+            }
         }
     }
 

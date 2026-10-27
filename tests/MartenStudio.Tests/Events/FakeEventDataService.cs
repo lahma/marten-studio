@@ -277,6 +277,50 @@ internal sealed partial class FakeEventDataService : IEventDataService
         return answer;
     }
 
+    /// <summary>What the stepper is handed, by the version asked for; <see cref="Step" /> answers any other.</summary>
+    public Dictionary<long, StreamStepWindow> StepWindows { get; } = [];
+
+    /// <summary>What the stepper is handed when <see cref="StepWindows" /> has nothing for the version.</summary>
+    public StreamStepWindow? Step { get; set; }
+
+    /// <summary>The steps asked for, as "aggregate@version", newest last.</summary>
+    public List<string> StepRequests { get; } = [];
+
+    /// <summary>What the next-change search answers.</summary>
+    public StepSearch? Search { get; set; }
+
+    /// <summary>The searches asked for, as "aggregate@after:path", newest last.</summary>
+    public List<string> SearchRequests { get; } = [];
+
+    public Task<StreamStepWindow> StepAsync(
+        StudioScope scope,
+        string streamId,
+        string aggregateTypeFullName,
+        long version,
+        CancellationToken cancellationToken = default)
+    {
+        StepRequests.Add(aggregateTypeFullName + "@" + version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        return Task.FromResult(
+            StepWindows.TryGetValue(version, out StreamStepWindow? window)
+                ? window
+                : Step ?? StreamStepWindow.NotFound(aggregateTypeFullName, version, AggregateMissingReason.StreamMissing));
+    }
+
+    public Task<StepSearch> FindNextChangeAsync(
+        StudioScope scope,
+        string streamId,
+        string aggregateTypeFullName,
+        long afterVersion,
+        string path,
+        CancellationToken cancellationToken = default)
+    {
+        SearchRequests.Add(
+            aggregateTypeFullName + "@" + afterVersion.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + path);
+
+        return Task.FromResult(Search ?? new StepSearch { Path = path, AfterVersion = afterVersion });
+    }
+
     public Task<DeadLetterPage> ListDeadLettersAsync(
         StudioScope scope,
         DeadLetterQuery query,

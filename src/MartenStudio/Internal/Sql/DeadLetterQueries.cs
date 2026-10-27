@@ -23,6 +23,10 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="ShardName">The key of <c>DeadLetterEvent.ShardName</c>.</param>
 /// <param name="ExceptionType">The key of <c>DeadLetterEvent.ExceptionType</c>.</param>
 /// <param name="Timestamp">The key of <c>DeadLetterEvent.Timestamp</c>, which the list is ordered by.</param>
+/// <param name="EventSequence">
+/// The key of <c>DeadLetterEvent.EventSequence</c>, the failing event's sequence: what the stepper and the dead-letter
+/// screen's link from it filter on (M1).
+/// </param>
 /// <remarks>
 /// <c>Casing.Default</c> writes <c>ProjectionName</c>, <c>CamelCase</c> <c>projectionName</c> and
 /// <c>SnakeCase</c> <c>projection_name</c>; Marten's own LINQ reads the member through the same spelling, which is
@@ -35,7 +39,8 @@ internal sealed record DeadLetterJsonKeys(
     string ProjectionName,
     string ShardName,
     string ExceptionType,
-    string Timestamp)
+    string Timestamp,
+    string EventSequence)
 {
     /// <summary>The keys under the store's naming policy, or the CLR names when it has none.</summary>
     public static DeadLetterJsonKeys For(JsonNamingPolicy? policy) => new(
@@ -43,7 +48,8 @@ internal sealed record DeadLetterJsonKeys(
         Key(nameof(DeadLetterEvent.ProjectionName), policy),
         Key(nameof(DeadLetterEvent.ShardName), policy),
         Key(nameof(DeadLetterEvent.ExceptionType), policy),
-        Key(nameof(DeadLetterEvent.Timestamp), policy));
+        Key(nameof(DeadLetterEvent.Timestamp), policy),
+        Key(nameof(DeadLetterEvent.EventSequence), policy));
 
     private static string Key(string member, JsonNamingPolicy? policy) => policy?.ConvertName(member) ?? member;
 }
@@ -62,6 +68,12 @@ internal sealed record DeadLetterPageQuery
 
     /// <summary>Only those whose exception type contains this, case-sensitively; <see langword="null" /> for any.</summary>
     public string? ExceptionType { get; init; }
+
+    /// <summary>
+    /// Only those about one of these events, by sequence; <see langword="null" /> for any event. The stepper asks for its
+    /// window's events, and the dead-letter screen's link from a step for one (M1).
+    /// </summary>
+    public IReadOnlyList<long>? EventSequences { get; init; }
 
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
@@ -236,6 +248,12 @@ internal static class DeadLetterQueries
                 .Append("pg_catalog.strpos(").Append(data).Append(" ->> ")
                 .Append(Key(command, "exception_key", keys.ExceptionType)).Append(", @exception) > 0)\n");
 
+            // The sequence as the body holds it, compared as text: the daemon writes a JSON number, which ->> prints the way
+            // a long is printed - and a cast would fail the whole list on one body somebody wrote by hand.
+            sql.Append("  and (").Append(Sequences(command, query.EventSequences)).Append(" is null or ")
+                .Append(data).Append(" ->> ").Append(Key(command, "sequence_key", keys.EventSequence))
+                .Append(" = any(@sequences))\n");
+
             if (LiveRows(table, Alias) is { } live)
             {
                 sql.Append("  and ").Append(live).Append('\n');
@@ -279,5 +297,16 @@ internal static class DeadLetterQueries
     {
         command.Parameters.Add(new NpgsqlParameter(name, NpgsqlDbType.Varchar) { Value = (object?) value ?? DBNull.Value });
         return "@" + name;
+    }
+
+    /// <summary>The event sequences as a typed <c>text[]</c> parameter, null for none.</summary>
+    private static string Sequences(NpgsqlCommand command, IReadOnlyList<long>? sequences)
+    {
+        object value = sequences is null
+            ? DBNull.Value
+            : sequences.Select(static x => x.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+
+        command.Parameters.Add(new NpgsqlParameter("sequences", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = value });
+        return "@sequences";
     }
 }
