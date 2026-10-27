@@ -53,10 +53,10 @@ namespace MartenStudio.Integration.Tests.Generation;
 public partial class MediumDataSetLiveTests
 {
     /// <summary>
-    /// The health statements one regular sweep of this set runs, measured on 2026-10-26: 44 from 46 of the 60 checks, at the
-    /// Marten floor (9.39.0) and at the latest tested (9.54.1) alike - so one budget serves both. The test's output lists
-    /// every check's count and every distinct statement with the checks that share it. See <see cref="SweepStatementBudget" />
-    /// for the margin.
+    /// The health statements one regular sweep of this set runs, measured again on 2026-10-27 with 0.6's first wave merged
+    /// (INT-W1): 50 from 54 of the 68 checks, at the Marten floor (9.39.0) and at the latest tested (9.54.2) alike - so one
+    /// budget serves both. The test's output lists every check's count and every distinct statement with the checks that
+    /// share it. See <see cref="SweepStatementBudget" /> for the margin.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -84,8 +84,11 @@ public partial class MediumDataSetLiveTests
     /// W5-Q1 adds only to statement sweeps, and W5-AUR's Aurora reads run only on Aurora, so neither moves this count.
     /// </para>
     /// <para>
-    /// 0.6's X4 adds 1: T18's tenant-skew read (<c>ColumnSkewQueries</c>), one statement over every conjoined table the store
-    /// declares - the sample's conjoined type among them - summed in the statement, never per table or per tenant.
+    /// 0.6's X3 adds none: its one read of the lock table (<c>HealthConnectionQueries.LockTable</c>), which C04, C06, C12 and
+    /// the table checks share, takes the place of C06's own and of the lock half of C04's, whose sessions read stays its own;
+    /// C12 shares it. X4 adds 1: T18's tenant-skew read (<c>ColumnSkewQueries</c>), one statement over every conjoined table
+    /// the store declares - the sample's conjoined type among them - summed in the statement, never per table or per tenant.
+    /// M2's D05 keeps its positions in process, and the other wave-1 packets read nothing in a sweep.
     /// </para>
     /// <para>
     /// T24, C11 and D09 add none of their own - each shares reads counted above - and K05-K08 read configuration in process.
