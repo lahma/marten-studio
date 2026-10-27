@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using PostgresStudio.Components.Pages.Database;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Database;
@@ -208,9 +209,10 @@ public class DatabaseAccessTests
         harness.Policies.Calls.Should().OnlyContain(static x => x.Resource.Capability == null,
             "only the store policy for the visitor's own scope is asked before the capability refuses");
 
-        // The store's own structure needs no capability, so there the tenant is resolved - and refused.
+        // The store's own structure needs no capability, so there the tenant is resolved - and refused, as a tenant the
+        // store does not have: labelled as such (H1), not as a fault.
         DatabaseObjectDetail own = await objects.GetObjectAsync(TenantScope, "public", "orders", Token);
-        own.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        own.Refusal.Should().Be(DatabaseRefusal.NotFound);
         own.Reason.Should().Contain("'acme' is not a tenant");
     }
 
@@ -386,6 +388,11 @@ public class DatabaseAccessTests
             x.Resource.StoreName == nameof(IBrokenStore) && x.Resource.TenantId == null && x.Resource.Capability == null,
             "the broken store's own store policy is what was asked");
 
+        // H1, D29: asked about this database by its own identity on every page, the object page included - which finds the
+        // store before it resolves a database, and asked with the visitor's spelling of it (here, none at all).
+        harness.Policies.Calls.Where(static x => x.Resource.StoreName == nameof(IBrokenStore)).Should()
+            .OnlyContain(x => x.Resource.DatabaseIdentifier == resolved.Database.Id.Identity, "never the visitor's empty ?db=");
+
         // Its store policy passes: named, with its reason.
         harness.Policies.Allow(static _ => true);
 
@@ -553,19 +560,20 @@ public class DatabaseAccessTests
 
         IDatabaseObjectService objects = harness.Resolve<IDatabaseObjectService>();
 
+        // H1: labelled as what it is - the store policy refusing this scope - where it read as a fault ("unavailable").
         DatabaseBrowserOverview overview = await objects.GetOverviewAsync(TenantScope, Token);
-        overview.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        overview.Refusal.Should().Be(DatabaseRefusal.ScopeRefused);
         overview.Reason.Should().Be("Not authorized for the requested store, database or tenant.");
 
         DatabaseObjectList list = await objects.ListAsync(TenantScope, new DatabaseObjectQuery(DatabaseObjectCategory.Tables), Token);
-        list.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        list.Refusal.Should().Be(DatabaseRefusal.ScopeRefused);
 
         DatabaseObjectDetail detail = await objects.GetObjectAsync(TenantScope, "public", "orders", Token);
-        detail.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        detail.Refusal.Should().Be(DatabaseRefusal.ScopeRefused);
 
         DatabaseObjectDefinition definition = await objects.GetDefinitionAsync(
             TenantScope, new DatabaseObjectRef(DatabaseObjectKind.View, "public", "v"), Token);
-        definition.Refusal.Should().Be(DatabaseRefusal.Unavailable);
+        definition.Refusal.Should().Be(DatabaseRefusal.ScopeRefused);
 
         IReadOnlyList<StudioActionLogEntry> audited = harness.Ring.GetLatest();
         audited.Select(static x => x.Action).Should().BeEquivalentTo(
@@ -575,6 +583,73 @@ public class DatabaseAccessTests
             !x.Succeeded
             && x.Capability == nameof(StudioCapability.BrowseDatabase)
             && x.Message == "Not authorized for this store, database or tenant.");
+    }
+
+    /// <summary>
+    /// H1, item 7: a refusal is labelled as what it is, and the labels enumerate nothing. The store policy is asked before
+    /// anything is looked up, so a store it refuses reads the same - <see cref="DatabaseRefusal.ScopeRefused" />, the same
+    /// sentence - whether it is registered or not; only a key the policy passes and that names nothing is
+    /// <see cref="DatabaseRefusal.NotFound" />, which its own sentence already says.
+    /// </summary>
+    [Fact]
+    public async Task A_refused_scope_reads_the_same_whether_or_not_the_store_exists_and_a_missing_one_says_so()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities.BrowseDatabase = true);
+        harness.Policies.Allow(static resource => resource.StoreName is not ("default" or "ghost"));
+
+        IDatabaseObjectService objects = harness.Resolve<IDatabaseObjectService>();
+
+        DatabaseObjectDetail registered = await objects.GetObjectAsync(new StudioScope("default", string.Empty, null), "public", "orders", Token);
+        DatabaseObjectDetail unregistered = await objects.GetObjectAsync(new StudioScope("ghost", string.Empty, null), "public", "orders", Token);
+
+        (registered.Refusal, registered.Reason).Should().Be((unregistered.Refusal, unregistered.Reason),
+            "a store the policy refuses reads the same whether it exists or not");
+        registered.Refusal.Should().Be(DatabaseRefusal.ScopeRefused);
+
+        (await objects.GetOverviewAsync(new StudioScope("ghost", string.Empty, null), Token)).Refusal.Should().Be(DatabaseRefusal.ScopeRefused);
+
+        const string Hostile = "nowhere\r\nforged\u001b";
+        DatabaseObjectDetail missing = await objects.GetObjectAsync(new StudioScope(Hostile, string.Empty, null), "public", "orders", Token);
+
+        missing.Refusal.Should().Be(DatabaseRefusal.NotFound, "the policy passed it, and nothing is registered under it");
+        missing.Reason.Should().Be("No Marten store is registered under '" + StudioLogValue.Cap(Hostile) + "'.",
+            "the visitor's key is escaped and bounded in the sentence (H1, item 1)");
+
+        (await objects.GetOverviewAsync(new StudioScope(Hostile, string.Empty, null), Token)).Refusal.Should().Be(DatabaseRefusal.NotFound);
+
+        DatabasePresentation.StructureStillShown(DatabaseRefusal.ScopeRefused).Should().BeNull(
+            "nothing of a refused scope is shown, so the page does not say its structure is");
+    }
+
+    /// <summary>
+    /// H1, item 2 (D29): the gate asks both policies about the store and database the scope resolved to - the registered
+    /// key and the database's own identity - never the visitor's spelling of either, so a handler that keys on the names it
+    /// was promised cannot be passed by a key in another case or an empty <c>?db=</c>, and open structure the enforcement
+    /// would refuse.
+    /// </summary>
+    [Fact]
+    public async Task The_gate_asks_the_policies_by_the_registered_key_and_the_databases_identity()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities.BrowseDatabase = true);
+
+        StudioScope spelled = new("DEFAULT", string.Empty, "acme");
+        ResolvedScope resolved = await harness.Resolve<StudioScopeResolver>().ResolveAsync(spelled with { TenantId = null }, null, Token);
+        harness.Policies.Calls.Clear();
+
+        try
+        {
+            await harness.Access.GateAsync(spelled, resolved, Token);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // The schema list is read after the policies, from a database this test does not have.
+        }
+
+        harness.Policies.Calls.Should().NotBeEmpty("the premise: the gate asked the policies");
+        harness.Policies.Calls.Where(static x => x.Resource.StoreName is "DEFAULT" or "default").Should().OnlyContain(
+            x => x.Resource.StoreName == "default" && x.Resource.DatabaseIdentifier == resolved.Database.Id.Identity && x.Resource.TenantId == null,
+            "the gate's questions name what was resolved");
+        harness.Policies.Calls.Should().Contain(static x => x.Resource.Capability == nameof(StudioCapability.BrowseDatabase));
     }
 
     /// <summary>

@@ -1747,7 +1747,7 @@ internal sealed partial class EventDataService : IEventDataService
     }
 
     /// <summary>
-    /// The one Marten call both skips end in, past every check, on a token of the operation's own (<see cref="CommitAsync" />):
+    /// The one Marten call both skips end in, past every check, on a token of the operation's own (<see cref="CommitAsync(Func{CancellationToken, Task})" />):
     /// <c>MarkEventsAsSkipped(sequences)</c>, or under <c>UseTenantPartitionedEvents</c> its tenant overload for the scope's
     /// tenant (<see cref="MarkTenantEventsAsSkippedAsync" />). A page that goes away now has not decided to abandon it, and
     /// the audit entry has to say how it ended.
@@ -2311,9 +2311,9 @@ internal sealed partial class EventDataService : IEventDataService
     /// travel into the audit ring and onto the page, so a wrong name typed at the studio would have
     /// listed the store's whole projection set to whoever typed it.
     /// </remarks>
-    /// <param name="projectionName">The name that was asked for.</param>
+    /// <param name="projectionName">The name that was asked for: the visitor's text, so escaped and bounded (H1).</param>
     internal static KeyNotFoundException UnknownAsyncProjection(string projectionName) =>
-        new($"This store has no async projection named '{projectionName}'.");
+        new($"This store has no async projection named '{StudioLogValue.Cap(projectionName)}'.");
 
     /// <summary>
     /// The one call that rewinds a subscription, and the only place the argument order is chosen.
@@ -2377,7 +2377,16 @@ internal sealed partial class EventDataService : IEventDataService
     /// like any other.
     /// </para>
     /// </remarks>
-    private async Task CommitAsync(Func<CancellationToken, Task> commit)
+    private Task CommitAsync(Func<CancellationToken, Task> commit) =>
+        CommitAsync(commit, "It was cancelled from inside Marten or the async daemon after it had started, so it may be partly done: ");
+
+    /// <summary><see cref="CommitAsync(Func{CancellationToken, Task})" />, with what a cancellation from inside says first.</summary>
+    /// <param name="commit">The operation's commit.</param>
+    /// <param name="cancelledInside">
+    /// The sentence a cancellation from inside is reported with, before the cancellation's own words - what it may have left
+    /// done, which depends on the operation.
+    /// </param>
+    private async Task CommitAsync(Func<CancellationToken, Task> commit, string cancelledInside)
     {
         if (CommitStarting is { } starting)
         {
@@ -2392,16 +2401,14 @@ internal sealed partial class EventDataService : IEventDataService
         }
         catch (OperationCanceledException cancelled)
         {
-            throw new InvalidOperationException(
-                "It was cancelled from inside Marten or the async daemon after it had started, so it may be partly done: "
-                + cancelled.Message,
-                cancelled);
+            throw new InvalidOperationException(cancelledInside + cancelled.Message, cancelled);
         }
     }
 
     /// <summary>
     /// A test's hook, run once every check of a skip or a rewind has passed and just before its commit - the point from
-    /// which the page's token no longer counts (<see cref="CommitAsync" />). Always <see langword="null" /> outside a test.
+    /// which the page's token no longer counts (<see cref="CommitAsync(Func{CancellationToken, Task}, string)" />). Always
+    /// <see langword="null" /> outside a test.
     /// </summary>
     internal Func<Task>? CommitStarting { get; set; }
 

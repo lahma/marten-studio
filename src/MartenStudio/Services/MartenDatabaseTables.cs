@@ -35,7 +35,14 @@ namespace MartenStudio.Services;
 /// <param name="Cap">How many other tables the read may list: <see cref="MartenHealthTableSource.TableCap" /> less <paramref name="DeclaredCount" />.</param>
 /// <param name="OtherStoresDeclareHere">
 /// Whether another registered store declares a table in a schema this read admits - which the coverage sentence says,
-/// never which store or which table.
+/// never which store or which table. Only a table that is that store's alone counts: one the swept store declares too (two
+/// stores sharing a schema share their event tables) is judged here as the swept store's, Marten's bookkeeping
+/// (<c>mt_hilo</c>) is no store's data, and a hidden type's table is absent from every list (D27), so none of them makes the
+/// sentence say something is left out (G1M F6, H1).
+/// </param>
+/// <param name="OtherStoresDeclareInOwnSchemas">
+/// <paramref name="OtherStoresDeclareHere" /> for the store's own schemas alone: what the sentence says to a visitor the
+/// database browser keeps out of every other schema (G1M F6, H1).
 /// </param>
 internal sealed record MartenTableScope(
     IReadOnlyList<string> StoreSchemas,
@@ -45,10 +52,17 @@ internal sealed record MartenTableScope(
     bool SkipDocumentTables,
     int DeclaredCount,
     int Cap,
-    bool OtherStoresDeclareHere)
+    bool OtherStoresDeclareHere,
+    bool OtherStoresDeclareInOwnSchemas = false)
 {
     /// <summary>Whether the catalog is read at all: the declared tables may fill the cap by themselves.</summary>
     public bool ReadsCatalog => Cap > 0;
+
+    /// <summary>
+    /// Whether the read admits any schema beyond the store's own - a <c>BrowsableSchemas</c> entry, or <c>"*"</c> - so a
+    /// visitor the database browser keeps out of those is told less than one it lets in (G1M F6, H1).
+    /// </summary>
+    public bool ReadsBeyondOwnSchemas => Everything || Names.Any(x => !StoreSchemas.Contains(x, StringComparer.Ordinal));
 
     /// <summary>
     /// The scope of one sweep: the store's declarations, every registered store's (for what to leave out), and the studio's
@@ -106,7 +120,12 @@ internal sealed record MartenTableScope(
             Exclude(table.Schema, table.Table);
         }
 
+        // The swept store's own tables, as its sets find them (ignoring case): one another store declares as well is this
+        // store's too, and judged here.
+        HashSet<string> ownTables = new(declared.Tables.Select(static x => SchemaKey.For(x.Schema, x.Table)), StringComparer.OrdinalIgnoreCase);
+
         bool othersHere = false;
+        bool othersInOwnSchemas = false;
 
         foreach (StoreDeclarations store in classifier.Stores)
         {
@@ -122,14 +141,28 @@ internal sealed record MartenTableScope(
                     continue;
                 }
 
+                // A hidden type's table is never bound - SkipDocumentTables leaves every document table out of the read - and
+                // never said to be there either: it is absent from every list, and from this sentence's count (D27, H1).
+                if (other is { Kind: MartenObjectKind.DocumentTable, Visible: false })
+                {
+                    continue;
+                }
+
+                Exclude(other.Schema, other.Name);
+
+                // A table the swept store declares too - an event table, or a document type, in a schema two stores share - is
+                // this store's, and judged here as such: it is not "another store's table", whatever else declares it. And
+                // Marten's bookkeeping (mt_hilo, which every store declares beside its documents whatever it uses) is no
+                // store's data: left out of the read, but never the reason the sentence says another store's tables are (H1).
+                if (ownTables.Contains(other.Key) || other.Kind == MartenObjectKind.Infrastructure)
+                {
+                    continue;
+                }
+
                 othersHere |= names.Contains(other.Schema, StringComparer.Ordinal)
                     || (everything && BrowsableSchemaMatcher.MightMatch(entries, other.Schema));
 
-                // A hidden type's table is never bound: SkipDocumentTables leaves every document table out of the read.
-                if (other is not { Kind: MartenObjectKind.DocumentTable, Visible: false })
-                {
-                    Exclude(other.Schema, other.Name);
-                }
+                othersInOwnSchemas |= storeSchemas.Contains(other.Schema, StringComparer.Ordinal);
             }
         }
 
@@ -141,7 +174,8 @@ internal sealed record MartenTableScope(
             classifier.MayHideDocumentTypes,
             declared.Tables.Count,
             tableCap - declared.Tables.Count,
-            othersHere);
+            othersHere,
+            othersInOwnSchemas);
     }
 
     /// <summary>Whether a declared object is a table: a document, event, projection or extended table, or bookkeeping.</summary>
@@ -285,7 +319,26 @@ internal static class MartenDatabaseTables
         }
 
         int total = rows.Count == 0 ? 0 : rows[0].Total;
-        return new MartenDatabaseTableSet(declared, undeclared, CoverageOf(scope, undeclared.Count, rows.Count, total, tableCap));
+        string? coverage = CoverageOf(scope, undeclared.Count, rows.Count, total, tableCap);
+
+        if (!scope.ReadsBeyondOwnSchemas)
+        {
+            return new MartenDatabaseTableSet(declared, undeclared, coverage);
+        }
+
+        // The same sentence over the store's own schemas alone, for a visitor the database browser keeps out of the rest:
+        // the global top-N cut, restricted to them, is their own top-N, so it is honest about them and tells nothing of
+        // what the other schemas hold (G1M F6, H1). A row built by hand says nothing of the own schemas: when every row it
+        // listed is in one, so is every table it counted.
+        int listedOwn = rows.Count(x => storeSchemas.Contains(x.Schema));
+        int judgedOwn = undeclared.Count(x => storeSchemas.Contains(x.Schema));
+        int ownTotal = rows.Count == 0 ? 0 : rows[0].OwnTotal ?? (listedOwn == rows.Count ? total : listedOwn);
+
+        return new MartenDatabaseTableSet(
+            declared,
+            undeclared,
+            coverage,
+            CoverageOf(scope, judgedOwn, listedOwn, ownTotal, tableCap, ownSchemasOnly: true));
     }
 
     /// <summary>The declared tables alone - when the other stores' declarations could not be read - and why.</summary>
@@ -300,7 +353,11 @@ internal static class MartenDatabaseTables
     /// <param name="listed">How many the statement listed: fewer than <paramref name="total" /> only when its cap cut the list.</param>
     /// <param name="total">How many the admitted schemas hold that could have been, past the cap included.</param>
     /// <param name="tableCap">The most tables a sweep judges.</param>
-    internal static string? CoverageOf(MartenTableScope scope, int judged, int listed, int total, int tableCap)
+    /// <param name="ownSchemasOnly">
+    /// Whether the numbers are the store's own schemas' alone - the sentence a visitor the database browser keeps out of
+    /// every other schema reads (G1M F6, H1).
+    /// </param>
+    internal static string? CoverageOf(MartenTableScope scope, int judged, int listed, int total, int tableCap, bool ownSchemasOnly = false)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -314,13 +371,16 @@ internal static class MartenDatabaseTables
         }
         else if (total > listed)
         {
+            // The own reading leaves the cap out (H1b): the declared tables and a capped list fill exactly the cap, so the
+            // cap less the declared and the own schemas' judged counts is how many tables the sweep judged in schemas this
+            // reader is not shown - arithmetic that would give back the count the own reading exists to withhold.
             parts.Add("the store's " + scope.DeclaredCount.ToString("N0", CultureInfo.InvariantCulture) + " declared tables and the "
                 + judged.ToString("N0", CultureInfo.InvariantCulture) + " largest of "
-                + total.ToString("N0", CultureInfo.InvariantCulture) + " other tables by estimated size (a sweep judges at most "
-                + cap + ")");
+                + total.ToString("N0", CultureInfo.InvariantCulture) + " other tables"
+                + (ownSchemasOnly ? " in its own schemas by estimated size" : " by estimated size (a sweep judges at most " + cap + ")"));
         }
 
-        if (scope.OtherStoresDeclareHere)
+        if (ownSchemasOnly ? scope.OtherStoresDeclareInOwnSchemas : scope.OtherStoresDeclareHere)
         {
             parts.Add("another registered Marten store's tables are not judged here");
         }
@@ -349,13 +409,18 @@ internal sealed class MartenDatabaseTableSet : IStudioTableSet
     /// <param name="declared">The store's declared tables.</param>
     /// <param name="undeclared">The other tables, as <see cref="MartenDatabaseTables.Classify" /> described them.</param>
     /// <param name="coverage">What the set leaves out.</param>
-    public MartenDatabaseTableSet(MartenTableSet declared, IReadOnlyList<StudioTable> undeclared, string? coverage)
+    /// <param name="ownSchemasCoverage">
+    /// What it leaves out, counted over the store's own schemas alone (<see cref="IStudioTableSet.OwnSchemasCoverage" />);
+    /// <paramref name="coverage" /> when the read admitted no other schema.
+    /// </param>
+    public MartenDatabaseTableSet(MartenTableSet declared, IReadOnlyList<StudioTable> undeclared, string? coverage, string? ownSchemasCoverage)
     {
         ArgumentNullException.ThrowIfNull(declared);
         ArgumentNullException.ThrowIfNull(undeclared);
 
         Declared = declared;
         Coverage = coverage;
+        OwnSchemasCoverage = ownSchemasCoverage;
 
         List<StudioTable> tables = [];
 
@@ -393,6 +458,18 @@ internal sealed class MartenDatabaseTableSet : IStudioTableSet
 
     /// <inheritdoc />
     public string? Coverage { get; }
+
+    /// <inheritdoc />
+    public string? OwnSchemasCoverage { get; }
+
+    /// <summary>The set over <paramref name="declared" /> and <paramref name="undeclared" />, read from no schema beyond the store's own.</summary>
+    /// <param name="declared">The store's declared tables.</param>
+    /// <param name="undeclared">The other tables, as <see cref="MartenDatabaseTables.Classify" /> described them.</param>
+    /// <param name="coverage">What the set leaves out - the same to every visitor.</param>
+    public MartenDatabaseTableSet(MartenTableSet declared, IReadOnlyList<StudioTable> undeclared, string? coverage)
+        : this(declared, undeclared, coverage, coverage)
+    {
+    }
 
     /// <inheritdoc />
     public StudioTable? Find(string schema, string table)

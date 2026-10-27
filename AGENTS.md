@@ -80,7 +80,8 @@ anything; read *this* file before writing anything.
    A value a visitor could shape reaches the log only through `StudioLogValue`: escaped, a backslash doubled, a
    name bounded at 256 characters and other text at 4,000. That holds in these events: 9200–9205, 9235, 9236, 9245
    and 9452 (the per-product dispatchers); 9206, 9207 and 9209 (MartenLog's wrappers); 9260–9263 (LINQ mode's
-   `Logged*` values); and every Warning that carries a typed route value. The one exception is 9204's executed
+   `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also holds every
+   `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
    statement, which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
 6. **No `async void`.** Component events are `Func<Task>`, handlers are `private async Task` with a
    `try`/`catch` that puts the failure on screen. An `async void` handler's exception escapes the
@@ -255,6 +256,8 @@ call, against the same resource with the capability name attached. `ReadOnly` an
 of all three. A startup guard refuses a mapping that answered none of it, because "I forgot to add
 `RequireAuthorization`" must not be a silent state. Postgres Studio has the same three layers and the same guard, with
 `SourceAuthorizationPolicy` asked about a `PostgresStudioResource` in place of the store policy (D30).
+Known limit: under a policy refusing by registered name, a case variant tells a refused source or database from a missing
+one, as matching ignores case.
 
 **D6 — Reads are raw parameterised SQL, writes go through a Marten session.** The studio only knows
 document types as runtime `Type`s, so a generic `session.Query<T>()` is not available to it; reads are

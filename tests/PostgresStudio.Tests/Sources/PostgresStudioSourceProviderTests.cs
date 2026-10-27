@@ -314,6 +314,48 @@ public class PostgresStudioSourceProviderTests
     }
 
     /// <summary>
+    /// H1, item 1: a refusal is logged and audited whole, so the values in it that are not the studio's own text - the
+    /// visitor's tenant, a name the host listed, the words of the host's own exception - go in escaped and bounded
+    /// (<see cref="StudioLogValue" />), never raw: a line break in any of them would forge a second log line.
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_names_the_tenant_the_host_listed_name_and_the_hosts_words_escaped_and_bounded()
+    {
+        // A host's names are refused at listing unless they are valid database names, so the host's exception's words and
+        // the visitor's tenant are what carry a line break here; a listed name goes in through the same cap.
+        const string HostileTenant = "t1\r\n2026-10-27 forged: admin was granted everything\u001b[2J";
+        const string HostileName = "broken";
+
+        ServiceCollection services = new();
+        FakeDatabaseSource tenants = new("acme", HostileName)
+        {
+            OpenFailures = { [HostileName] = new InvalidOperationException("down\r\nforged line\u0007") },
+        };
+
+        await using Harness harness = new(services, new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants));
+
+        IStudioSource source = harness.Resolve("tenants");
+        IReadOnlyList<IStudioDatabase> listed = await source.DatabasesAsync(Token);
+
+        Func<Task> tenant = async () => await source.CompleteAsync(new StudioScope("tenants", "acme", HostileTenant), listed[0], listed, Token);
+        string refused = (await tenant.Should().ThrowAsync<KeyNotFoundException>()).Which.Message;
+        refused.Should().Contain("'" + StudioLogValue.Cap(HostileTenant) + "'");
+        refused.Any(StudioLogValue.IsEscaped).Should().BeFalse("the visitor's tenant goes in escaped");
+
+        Func<Task> broken = async () => await source.CompleteAsync(new StudioScope("tenants", HostileName, null), listed[1], listed, Token);
+        string unavailable = (await broken.Should().ThrowAsync<StudioStoreUnavailableException>()).Which.Message;
+        unavailable.Should().Contain(StudioLogValue.Cap(HostileName)).And.Contain(StudioLogValue.CapText("down\r\nforged line\u0007"));
+        unavailable.Any(StudioLogValue.IsEscaped).Should().BeFalse("the host's name and its exception's words go in escaped");
+
+        tenants.Names.Add("gone");
+        harness.Provider.Invalidate();
+        IReadOnlyList<IStudioDatabase> again = await source.DatabasesAsync(Token);
+        Func<Task> gone = async () => await source.CompleteAsync(new StudioScope("tenants", "gone", null), again[^1], again, Token);
+        string missing = (await gone.Should().ThrowAsync<KeyNotFoundException>()).Which.Message;
+        missing.Should().Be("data source 'tenants' no longer has a database named 'gone'.", "an ordinary name goes in as it is");
+    }
+
+    /// <summary>
     /// The review's live finding, as a unit: a policy that allows the empty database id - which the studio asks only to
     /// list a source that would not build - and refuses <c>globex</c> by name must never be answered with globex. The
     /// shared resolver matches an empty id to the first listed database, asks the policy about it by name (SEC-fix F1),

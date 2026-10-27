@@ -289,6 +289,39 @@ public class LinqQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         acmeOnly.Logs.Entries.Should().Contain(static x => x.EventId == 9203);
     }
 
+    /// <summary>
+    /// H1's plan question, live (H1b): a conjoined store, the address spelling the store <c>DEFAULT</c> with no <c>?db=</c>, a
+    /// tenant selected, and a policy that refuses LINQ mode for the store as a whole by its registered key alone - a deny-list
+    /// that passes the spelling. The tenant's rows are the visitor's; the plan, which describes the whole table, is refused,
+    /// because it is asked about <c>default</c> and the database's own identity; and so is every other question with no
+    /// tenant - the page's hints included (<c>DescribeAsync</c>).
+    /// </summary>
+    [LinqLiveFact]
+    public async Task The_plan_is_asked_by_the_registered_key_and_the_databases_identity_whatever_the_address_spelt()
+    {
+        await using LinqQueryHarness canonical = await LinqQueryHarness.CreateAsync(fixture, "linqquerylivecanon", static options =>
+        {
+            options.StoreAuthorizationPolicy = LinqQueryHarness.CanonicalPlanPolicy;
+            options.WriteAuthorizationPolicy = LinqQueryHarness.CanonicalPlanPolicy;
+        });
+
+        string identity = canonical.Store.Storage.Database.Id.Identity;
+        StudioScope spelt = new("DEFAULT", string.Empty, LinqQueryHarness.Acme);
+        string alias = await canonical.AliasOfAsync<LinqLiveOrder>(spelt);
+
+        LinqQueryResult result = await canonical.Linq.RunAsync(spelt, new LinqQueryRequest(alias, "Name == \"Ada\"", IncludePlan: true), Token);
+
+        result.Error.Should().BeNull();
+        Ids(result).Should().Equal(LinqQueryHarness.AcmeAda);
+        result.Plan!.UnavailableReason.Should().Be(LinqQueryService.PlanRefusedMessage);
+
+        canonical.Asked.Where(static x => x.TenantId == null && x.Capability == nameof(StudioCapability.RunLinqQueries)).Should().NotBeEmpty()
+            .And.OnlyContain(x => x.StoreName == "default" && x.DatabaseIdentifier == identity,
+                "a tenant-less question is about the database as a whole, named as the policy is promised - never DEFAULT or an empty ?db=");
+        canonical.Ring.GetLatest().Should().Contain(x =>
+            x.Action == LinqQueryService.LinqExplainAction && !x.Succeeded && x.TenantId == null && x.StoreKey == "default" && x.DatabaseId == identity);
+    }
+
     [LinqLiveFact]
     public async Task A_collection_not_divided_by_tenant_is_asked_of_the_whole_database_from_a_tenant_scope()
     {

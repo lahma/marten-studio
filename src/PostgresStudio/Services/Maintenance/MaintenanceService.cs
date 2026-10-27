@@ -107,7 +107,9 @@ internal sealed class BloatMeasureFlights
 /// and counted as not shown otherwise - also when the gate cannot be read. A running command on a table this page does not
 /// judge is "a table this page does not name", a system catalog by its own name. Who holds the horizon is T14's finding,
 /// read through the Health page's own gates (<see cref="IHealthService.CachedFindingsAsync" />): its names only behind the
-/// activity gate, and audited as the Health page audits them.
+/// activity gate, and audited as the Health page audits them. The judged set's coverage - the page's "Judged: …" and the
+/// sentence T14's note ends with - counts tables in schemas only <c>BrowsableSchemas</c> admits only for a visitor past the
+/// browser's gate, and the source's own schemas' alone for anyone else (<see cref="ReadsWholeCoverageAsync" />, H1b).
 /// </para>
 /// <para>
 /// <b>The bloat measure</b> is the database gate's too, for a table this visitor is shown, and is audited - success, failure
@@ -192,7 +194,11 @@ internal sealed class MaintenanceService : IMaintenanceService
             return MaintenanceView.Refused(MaintenanceRefusal.Unavailable, "The database's maintenance facts could not be read: " + exception.GetType().Name + ".");
         }
 
-        Func<IReadOnlyList<string>, Task<bool>> shown = await NamesAsync(whole, read, cancellationToken).ConfigureAwait(false);
+        Func<Task<DatabaseGateRead?>> gate = GateOnce(whole, cancellationToken);
+        Func<IReadOnlyList<string>, Task<bool>> shown = NamesOf(read, gate);
+
+        // The judged set's coverage, and T14's note that ends with it, as this visitor may read them (G1M F6, H1b).
+        bool wholeCount = await ReadsWholeCoverageAsync(read, gate).ConfigureAwait(false);
 
         List<MaintenanceTableView> tables = [];
         int withheld = 0;
@@ -225,11 +231,11 @@ internal sealed class MaintenanceService : IMaintenanceService
             Tables = [.. ordered.Take(MaxTables)],
             TablesCut = Math.Max(0, ordered.Count - MaxTables),
             TablesWithheld = withheld,
-            Coverage = read.Coverage,
+            Coverage = wholeCount ? read.Coverage : read.OwnSchemasCoverage,
             Running = await RunningAsync(read, shown).ConfigureAwait(false),
             Workers = WorkersOf(read),
             Freeze = await FreezeAsync(read, shown).ConfigureAwait(false),
-            Horizon = await HorizonAsync(scope, read, cancellationToken).ConfigureAwait(false),
+            Horizon = await HorizonAsync(scope, read, wholeCount, cancellationToken).ConfigureAwait(false),
             ServerVersion = read.Tables is { Count: > 0 } any ? any[0].Row.ServerVersion : read.Wraparound?.Database.ServerVersion ?? 0,
         };
     }
@@ -259,7 +265,7 @@ internal sealed class MaintenanceService : IMaintenanceService
         TableFacts? found = read.Tables?.FirstOrDefault(x =>
             string.Equals(x.Table.Schema, schema, StringComparison.Ordinal) && string.Equals(x.Table.Table, table, StringComparison.Ordinal));
 
-        Func<IReadOnlyList<string>, Task<bool>> shown = await NamesAsync(whole, read, cancellationToken).ConfigureAwait(false);
+        Func<IReadOnlyList<string>, Task<bool>> shown = NamesOf(read, GateOnce(whole, cancellationToken));
 
         if (found is null || !await shown(found.Table.GatedSchemas).ConfigureAwait(false))
         {
@@ -324,14 +330,45 @@ internal sealed class MaintenanceService : IMaintenanceService
     }
 
     /// <summary>
+    /// This visitor's database-browser gate for the database, read on first use and at most once per view - or
+    /// <see langword="null" /> when the studio has none, or it cannot be read (which every caller treats as shut).
+    /// </summary>
+    private Func<Task<DatabaseGateRead?>> GateOnce(ResolvedSource whole, CancellationToken cancellationToken)
+    {
+        Task<DatabaseGateRead?>? read = null;
+
+        return () => read ??= ReadAsync();
+
+        async Task<DatabaseGateRead?> ReadAsync()
+        {
+            if (access is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return await access.GateAsync(whole.Scope, whole, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "{Product} could not read the database browser's gate for the Maintenance page", settings.Text.ProductName);
+                }
+
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether this visitor is shown a table in <c>schemas</c> - the schemas outside the source's own it is in: none is every
     /// visitor's; any other needs the database browser's gate, read at most once per view, and is withheld when it cannot be.
     /// </summary>
-    private async Task<Func<IReadOnlyList<string>, Task<bool>>> NamesAsync(ResolvedSource whole, MaintenanceFacts read, CancellationToken cancellationToken)
+    private static Func<IReadOnlyList<string>, Task<bool>> NamesOf(MaintenanceFacts read, Func<Task<DatabaseGateRead?>> gate)
     {
         bool anyGated = (read.Tables ?? []).Any(static x => x.Table.GatedSchemas.Count > 0);
-        DatabaseGateRead? gate = null;
-        bool gateRead = false;
 
         return async schemas =>
         {
@@ -340,32 +377,31 @@ internal sealed class MaintenanceService : IMaintenanceService
                 return true;
             }
 
-            if (!anyGated || access is null)
+            if (!anyGated)
             {
                 return false;
             }
 
-            if (!gateRead)
-            {
-                gateRead = true;
-
-                try
-                {
-                    gate = await access.GateAsync(whole.Scope, whole, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    if (logger.IsEnabled(LogLevel.Debug))
-                    {
-                        logger.LogDebug(exception, "{Product} could not read the database browser's gate for the Maintenance page", settings.Text.ProductName);
-                    }
-
-                    gate = null;
-                }
-            }
-
-            return gate is { Succeeded: true } passed && !schemas.Any(passed.Gate!.IsWithheld);
+            return await gate().ConfigureAwait(false) is { Succeeded: true } passed && !schemas.Any(passed.Gate!.IsWithheld);
         };
+    }
+
+    /// <summary>
+    /// Whether this visitor reads the judged set's coverage - the page's own "Judged: …" line and the one T14's note ends with
+    /// - counted over every schema the sweep admitted, rather than over the source's own alone (G1M F6, H1b): only past the
+    /// database browser's gate (<see cref="DatabaseGate.IsOpen" />, the rule the Health page's coverage follows), because how
+    /// many tables a schema only <c>BrowsableSchemas</c> admits holds is the browser's to show. A gate that is shut or cannot be
+    /// read is the own reading (fail closed). The gate is read only when the two readings differ.
+    /// </summary>
+    internal static async Task<bool> ReadsWholeCoverageAsync(MaintenanceFacts read, Func<Task<DatabaseGateRead?>> gate)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        ArgumentNullException.ThrowIfNull(gate);
+
+        bool twoReadings = !string.Equals(read.Coverage, read.OwnSchemasCoverage, StringComparison.Ordinal)
+            || read.Horizon?.WithinOwnSchemas is not null;
+
+        return !twoReadings || await gate().ConfigureAwait(false) is { Succeeded: true, Gate.IsOpen: true };
     }
 
     /// <summary>One table as the page draws it. Pure.</summary>
@@ -565,13 +601,18 @@ internal sealed class MaintenanceService : IMaintenanceService
             new(noun, age, forced, refused, rate?.Until(age, forced), rate?.Until(age, refused), rate?.RateText("ids"));
     }
 
-    /// <summary>T14's finding through the Health page's own gates, or its note.</summary>
-    private async Task<MaintenanceHorizonView> HorizonAsync(StudioScope scope, MaintenanceFacts read, CancellationToken cancellationToken)
+    /// <summary>
+    /// T14's finding through the Health page's own gates, or its note - which ends with the judged set's coverage, read as
+    /// <paramref name="wholeCount" /> says this visitor may (<see cref="ReadsWholeCoverageAsync" />).
+    /// </summary>
+    private async Task<MaintenanceHorizonView> HorizonAsync(StudioScope scope, MaintenanceFacts read, bool wholeCount, CancellationToken cancellationToken)
     {
-        if (read.Horizon is not { } result)
+        if (read.Horizon is not { } horizon)
         {
             return new MaintenanceHorizonView(null, "T14 has not run in this sweep, so who holds the horizon is not known.");
         }
+
+        HealthCheckResult result = wholeCount ? horizon : horizon.WithinOwnSchemas ?? horizon;
 
         if (result.Outcome != HealthCheckOutcome.Checked)
         {

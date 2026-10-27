@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 
@@ -128,6 +129,13 @@ internal sealed class LinqQueryHarness : IAsyncDisposable
     /// <summary>Allows <see cref="Acme" /> and nothing wider - not the database as a whole, not another tenant.</summary>
     public const string AcmeOnlyPolicy = "linq-acme-only";
 
+    /// <summary>
+    /// Refuses LINQ mode for the default store as a whole - <c>RunLinqQueries</c> with no tenant - by the registered key alone,
+    /// as a host's deny-list keyed on the names a policy is promised would (D29), and allows everything else; every question
+    /// it is asked is in <see cref="Asked" />.
+    /// </summary>
+    public const string CanonicalPlanPolicy = "linq-canonical-plan";
+
     public static readonly Guid AcmeAda = Guid.Parse("a0000000-0000-0000-0000-000000000001");
     public static readonly Guid AcmeBob = Guid.Parse("a0000000-0000-0000-0000-000000000002");
     public static readonly Guid AcmeDeleted = Guid.Parse("a0000000-0000-0000-0000-000000000003");
@@ -139,17 +147,21 @@ internal sealed class LinqQueryHarness : IAsyncDisposable
     private readonly ServiceProvider provider;
     private readonly IServiceScope scope;
 
-    private LinqQueryHarness(ServiceProvider provider, IServiceScope scope, string schema, HarnessLogCollector logs)
+    private LinqQueryHarness(ServiceProvider provider, IServiceScope scope, string schema, HarnessLogCollector logs, ConcurrentQueue<MartenStoreResource> asked)
     {
         this.provider = provider;
         this.scope = scope;
         Schema = schema;
         Logs = logs;
+        Asked = asked;
     }
 
     public string Schema { get; }
 
     public HarnessLogCollector Logs { get; }
+
+    /// <summary>Every resource <see cref="CanonicalPlanPolicy" /> was asked about, in order.</summary>
+    public IReadOnlyCollection<MartenStoreResource> Asked { get; }
 
     public ILinqQueryService Linq => scope.ServiceProvider.GetRequiredService<ILinqQueryService>();
 
@@ -167,10 +179,27 @@ internal sealed class LinqQueryHarness : IAsyncDisposable
 
         var services = new ServiceCollection();
         var logs = new HarnessLogCollector();
+        var asked = new ConcurrentQueue<MartenStoreResource>();
 
         services.AddLogging(builder => builder.AddProvider(logs));
-        services.AddAuthorization(options => options.AddPolicy(AcmeOnlyPolicy, policy => policy.RequireAssertion(
-            static context => context.Resource is MartenStoreResource { TenantId: Acme })));
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy(AcmeOnlyPolicy, policy => policy.RequireAssertion(
+                static context => context.Resource is MartenStoreResource { TenantId: Acme }));
+
+            options.AddPolicy(CanonicalPlanPolicy, policy => policy.RequireAssertion(context =>
+            {
+                if (context.Resource is not MartenStoreResource resource)
+                {
+                    return false;
+                }
+
+                asked.Enqueue(resource);
+
+                return !(resource is { TenantId: null, StoreName: MartenStoreRegistry.DefaultStoreKey }
+                         && resource.Capability == nameof(StudioCapability.RunLinqQueries));
+            }));
+        });
         services.AddSingleton<AuthenticationStateProvider, SignedIn>();
 
         services.AddMarten(options =>
@@ -196,7 +225,7 @@ internal sealed class LinqQueryHarness : IAsyncDisposable
         });
 
         ServiceProvider provider = services.BuildServiceProvider();
-        var harness = new LinqQueryHarness(provider, provider.CreateScope(), schema, logs);
+        var harness = new LinqQueryHarness(provider, provider.CreateScope(), schema, logs, asked);
 
         await harness.SeedAsync();
 

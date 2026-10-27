@@ -27,6 +27,7 @@ using Weasel.Core;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Services.Query;
 
@@ -222,9 +223,14 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         types.Sort(static (left, right) => QueryService.CompareAliases(left.Alias, right.Alias));
 
-        bool mayRun = await authorization.IsAuthorizedAsync(scope, StudioCapability.RunLinqQueries, cancellationToken).ConfigureAwait(false);
+        // The page's hints ask what the run and the plan will be asked: by the registered key and the database's own
+        // identity, never the visitor's spelling of either (D29, H1b) - or a policy keyed on those names would offer a Run
+        // button, or a plan, that the run then refuses.
+        StudioScope named = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target);
 
-        return new LinqModeStatus(LinqAvailability.Available, null, types, mayRun, mayRun && await MayExplainAsync(scope, cancellationToken).ConfigureAwait(false));
+        bool mayRun = await authorization.IsAuthorizedAsync(named, StudioCapability.RunLinqQueries, cancellationToken).ConfigureAwait(false);
+
+        return new LinqModeStatus(LinqAvailability.Available, null, types, mayRun, mayRun && await MayExplainAsync(named, cancellationToken).ConfigureAwait(false));
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -364,12 +370,12 @@ internal sealed class LinqQueryService : ILinqQueryService
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
             logger.LinqQueryUnexpected(exception, run.LoggedAlias, run.LoggedStoreKey);
-            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(scope, run)));
+            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(run)));
         }
 
         if (found is not { } target)
         {
-            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(scope, run)));
+            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(run)));
         }
 
         DocumentTableInfo table = DocumentTableInfo.FromDocumentType(target.Root);
@@ -869,9 +875,12 @@ internal sealed class LinqQueryService : ILinqQueryService
             return ExplainResult.Unavailable("No plan was asked for.");
         }
 
-        StudioScope explainScope = QueryService.SqlScope(run.Scope);
+        // The plan is authorized for the store and database the scope resolved to, by the registered key and the database's
+        // own identity - never the visitor's spelling of either (D29, H1) - and audited against that same resource.
+        StudioScope named = StudioSourceResolver.Named(run.Scope, resolved.Source, resolved.Target);
+        StudioScope explainScope = QueryService.SqlScope(named);
 
-        if (!await MayExplainAsync(run.Scope, cancellationToken).ConfigureAwait(false))
+        if (!await MayExplainAsync(named, cancellationToken).ConfigureAwait(false))
         {
             // An explicit request the gate refused: one 9203, the same entry any other refused read writes.
             audit.RecordScopeDenied(explainScope, WritePolicyName(options.Value), LinqExplainAction, run.Target, StudioCapability.RunLinqQueries);
@@ -1149,10 +1158,11 @@ internal sealed class LinqQueryService : ILinqQueryService
 
     /// <summary>
     /// The refusal for an alias that names no visible type - and for one the host's visibility delegate threw for, which
-    /// must not read differently. The alias is capped as the log caps it: it is the visitor's text too.
+    /// must not read differently. The alias and the store key are capped as the log caps them: both are the visitor's text
+    /// (H1).
     /// </summary>
-    private static string NoVisibleType(StudioScope scope, Run run) =>
-        $"Marten store '{scope.StoreKey}' has no visible document type with alias '{run.LoggedAlias}'.";
+    private static string NoVisibleType(Run run) =>
+        $"Marten store '{run.LoggedStoreKey}' has no visible document type with alias '{run.LoggedAlias}'.";
 
     /// <summary>
     /// One ring entry, and event 9260, for the first success of this signature in this circuit - whichever page it
@@ -1160,7 +1170,9 @@ internal sealed class LinqQueryService : ILinqQueryService
     /// </summary>
     private void AuditSuccess(Run run, ResolvedScope resolved, int rows, TimeSpan duration, ExplainResult? plan)
     {
-        string key = run.Scope.StoreKey + Separator + resolved.Database.Id.Identity + Separator + (run.Scope.TenantId ?? string.Empty) +
+        // By the registered key and the database's identity, as the run resolved them: two spellings of one store are one
+        // first read, and one audit entry (D29, H1).
+        string key = resolved.Registration.Key + Separator + resolved.Database.Id.Identity + Separator + (run.Scope.TenantId ?? string.Empty) +
                      Separator + run.Request.Alias.ToLowerInvariant();
         string signature = run.Where + Separator + run.OrderBy + Separator + run.Request.Deleted;
 

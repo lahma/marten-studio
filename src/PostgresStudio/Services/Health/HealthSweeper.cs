@@ -144,7 +144,18 @@ internal sealed record HealthCheckResult(
     string? Note,
     HealthCheckProblem? Problem,
     IReadOnlyList<HealthStatement> Statements,
-    TimeSpan Duration);
+    TimeSpan Duration)
+{
+    /// <summary>
+    /// This result as a visitor the database browser keeps out of every schema beyond the source's own reads it: the same
+    /// findings and note, with the judged set's coverage counted over the source's own schemas alone
+    /// (<see cref="IStudioTableSet.OwnSchemasCoverage" />) - or <see langword="null" /> when that reads the same. A
+    /// Tables-area check's coverage says how many tables the sweep left out, and the count of tables in a schema only
+    /// <c>BrowsableSchemas</c> admits is the browser's to show (G1M F6, H1). The report picks one per visitor; the host's
+    /// diagnostics API, which applies no visitor's gates (D31), reads this result itself.
+    /// </summary>
+    public HealthCheckResult? WithinOwnSchemas { get; init; }
+}
 
 /// <summary>One sweep of one database: every check of its kind, each with its own outcome.</summary>
 /// <param name="StoreKey">The store.</param>
@@ -453,11 +464,15 @@ internal sealed class HealthSweeper
             return evaluation;
         }
 
-        // What a capped table set left out, said by every Tables-area check (HealthTables.WithCoverage, design R5).
-        string? tableCoverage = memo.TryGetCompleted<IStudioTableSet>(HealthTables.SetKey, out var judged) ? judged.Coverage : null;
+        // What a capped table set left out, said by every Tables-area check (HealthTables.WithCoverage, design R5) - and
+        // the same counted over the source's own schemas alone, for a visitor the database browser keeps out of the rest
+        // (G1M F6, H1).
+        (string? tableCoverage, string? ownCoverage) = memo.TryGetCompleted<IStudioTableSet>(HealthTables.SetKey, out var judged)
+            ? (judged.Coverage, judged.OwnSchemasCoverage)
+            : (null, null);
 
         List<HealthCheckResult> results =
-            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage))];
+            [.. gathered.Select(x => Evaluate(x, EvaluationAt(x.Descriptor.Info.Gate), storeKey, databaseId, tableCoverage, ownCoverage))];
 
         // A regular sweep keeps its shared reads for the pages that reuse them (W5-V1), and a statement sweep keeps its own for
         // the Statements page (W5-Q1), whose service shows them only through the activity gate - the gate the sweep itself
@@ -549,7 +564,13 @@ internal sealed class HealthSweeper
     }
 
     /// <summary>Judges one check's facts, and stamps what it found.</summary>
-    private HealthCheckResult Evaluate(Gathered gathered, HealthEvaluation evaluation, string storeKey, string databaseId, string? tableCoverage)
+    private HealthCheckResult Evaluate(
+        Gathered gathered,
+        HealthEvaluation evaluation,
+        string storeKey,
+        string databaseId,
+        string? tableCoverage,
+        string? ownCoverage)
     {
         HealthCheckInfo info = gathered.Descriptor.Info;
 
@@ -560,13 +581,35 @@ internal sealed class HealthSweeper
 
         try
         {
-            HealthVerdict verdict = gathered.Descriptor.Check.Evaluate(gathered.Facts, evaluation);
+            HealthVerdict judged = gathered.Descriptor.Check.Evaluate(gathered.Facts, evaluation);
 
-            if (info.Area == HealthArea.Tables)
+            if (info.Area != HealthArea.Tables || string.Equals(tableCoverage, ownCoverage, StringComparison.Ordinal))
             {
-                verdict = HealthTables.WithCoverage(verdict, tableCoverage);
+                return Stamped(info.Area == HealthArea.Tables ? HealthTables.WithCoverage(judged, tableCoverage) : judged);
             }
 
+            // Two readings of one verdict, which differ only in what the coverage counts: every schema the sweep admitted,
+            // and the source's own alone (G1M F6, H1). The report picks one per visitor.
+            return Stamped(HealthTables.WithCoverage(judged, tableCoverage)) with
+            {
+                WithinOwnSchemas = Stamped(HealthTables.WithCoverage(judged, ownCoverage)),
+            };
+        }
+        catch (Exception exception)
+        {
+            // An evaluator is pure, so a throw is a bug in the studio - and still only this check's row.
+            Report(info, HealthCheckOutcome.Failed, exception, storeKey, databaseId);
+
+            HealthCheckProblem problem = exception is HealthSweepRuleException rule
+                ? new HealthCheckProblem("The check's verdict was refused: " + rule.Shown, null, null)
+                : new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null);
+
+            return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
+        }
+
+        // A verdict held to the sweep's rules and stamped with the check's own facts. Throws HealthSweepRuleException.
+        HealthCheckResult Stamped(HealthVerdict verdict)
+        {
             // A key holds the finding's Subject, and a label can hold a name: both sit at the finding's gate, which can
             // be stricter than the check's that the status row is shown at. So the page's sentence names the code and
             // a count, and only the log's names what was duplicated.
@@ -617,17 +660,6 @@ internal sealed class HealthSweeper
             }
 
             return new HealthCheckResult(info, HealthCheckOutcome.Checked, findings, verdict.Note, null, gathered.Statements, gathered.Elapsed);
-        }
-        catch (Exception exception)
-        {
-            // An evaluator is pure, so a throw is a bug in the studio - and still only this check's row.
-            Report(info, HealthCheckOutcome.Failed, exception, storeKey, databaseId);
-
-            HealthCheckProblem problem = exception is HealthSweepRuleException rule
-                ? new HealthCheckProblem("The check's verdict was refused: " + rule.Shown, null, null)
-                : new HealthCheckProblem("The check's judgement failed: " + exception.GetType().Name + ". " + MessageIsLogged, null, null);
-
-            return new HealthCheckResult(info, HealthCheckOutcome.Failed, [], null, problem, gathered.Statements, gathered.Elapsed);
         }
     }
 

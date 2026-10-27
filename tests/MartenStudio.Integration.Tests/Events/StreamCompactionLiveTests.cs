@@ -29,6 +29,27 @@ public sealed record CompactionCustomer(string Value);
 public sealed record CompactionTagged(string Customer);
 
 /// <summary>
+/// A session listener that throws <see cref="OperationCanceledException" /> from the next <c>SaveChangesAsync</c> once
+/// armed - Marten calls it after the unit of work is built and before any statement runs - and is idle otherwise.
+/// </summary>
+public sealed class CancellingListener : DocumentSessionListenerBase
+{
+    private int armed;
+
+    /// <summary>Cancels the next save, and only that one.</summary>
+    public void Arm() => Interlocked.Exchange(ref armed, 1);
+
+    /// <summary>Stands down, whether or not a save came.</summary>
+    public void Disarm() => Interlocked.Exchange(ref armed, 0);
+
+    /// <inheritdoc />
+    public override Task BeforeSaveChangesAsync(IDocumentSession session, CancellationToken token) =>
+        Interlocked.Exchange(ref armed, 0) == 1
+            ? throw new OperationCanceledException("The save was cancelled from inside (a test's listener).")
+            : Task.CompletedTask;
+}
+
+/// <summary>
 /// Two stores for F3: a single-tenanted one with one DCB tag type, and a conjoined one - each with the studio
 /// on top twice, once with every capability and once with none.
 /// </summary>
@@ -44,6 +65,12 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
 
     /// <summary>The single-tenanted store.</summary>
     public DocumentStore Plain { get; private set; } = null!;
+
+    /// <summary>
+    /// A listener on <see cref="Plain" /> that, once armed, cancels the next save from inside Marten - before it writes
+    /// anything - as a host shutting down or a cancelled pipeline would: what a compaction's commit must audit (H1).
+    /// </summary>
+    public CancellingListener SaveCanceller { get; } = new();
 
     /// <summary>The conjoined store.</summary>
     public DocumentStore Conjoined { get; private set; } = null!;
@@ -110,6 +137,9 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
             // One tag type and one rule, on one event type only: every other stream here is untagged.
             options.Events.RegisterTagType<CompactionCustomer>("compaction_customer");
             options.Events.TagWith<CompactionTagged>(static e => new CompactionCustomer(e.Customer));
+
+            // Idle until a test arms it (H1, item 3).
+            options.Listeners.Add(SaveCanceller);
         });
 
         Conjoined = DocumentStore.For(options =>
@@ -758,6 +788,52 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
     {
         StreamState stream = await events.GetStreamAsync(scope, id, token);
         return await events.DescribeCompactionAsync(scope, stream, token);
+    }
+
+    /// <summary>
+    /// H1, item 3: a compaction cancelled from inside Marten once its save has begun - not by the visitor, whose page's token
+    /// no longer counts there - is audited as the failure it is, saying it was cancelled and how to find out what it left.
+    /// As an <see cref="OperationCanceledException" /> it escaped the audit, and nothing recorded how a compaction somebody
+    /// confirmed had ended (hard rule 5: on failure as well as on success).
+    /// </summary>
+    [PostgresFact]
+    public async Task A_compaction_cancelled_from_inside_its_save_is_audited_as_cancelled_and_compacts_nothing()
+    {
+        IServiceProvider studio = fixture.Studio(fixture.Plain, capabilities: true);
+        IEventDataService events = studio.GetRequiredService<IEventDataService>();
+
+        Guid id = await StreamCompactionFixture.StartAsync(fixture.Plain, tenantId: null);
+        IReadOnlyList<(long Sequence, long Version, string Type)> before = await fixture.EventsAsync(fixture.PlainSchema, id);
+
+        CompactionPlan plan = await PlanAsync(events, Everyone, id.ToString(), Token);
+        plan.IsOffered.Should().BeTrue(plan.Explanation);
+
+        fixture.SaveCanceller.Arm();
+
+        try
+        {
+            Func<Task> compacting = () => events.CompactStreamAsync(Everyone, id.ToString(), plan.StreamId, plan.Version, Token);
+
+            string message = (await compacting.Should().ThrowAsync<InvalidOperationException>(
+                    "a cancellation from inside is a failure the audit records, never an OperationCanceledException that skips it"))
+                .Which.Message;
+
+            message.Should().StartWith(EventDataService.CompactionCancelledInside)
+                .And.Contain("cancelled from inside (a test's listener)");
+
+            StudioActionLogEntry entry = Latest(studio);
+            entry.Action.Should().Be(EventDataService.CompactStreamAction);
+            entry.Target.Should().Be(id.ToString());
+            entry.Succeeded.Should().BeFalse();
+            entry.Message.Should().Be(message);
+            entry.Capability.Should().Be(nameof(StudioCapability.CompactStreams));
+        }
+        finally
+        {
+            fixture.SaveCanceller.Disarm();
+        }
+
+        (await fixture.EventsAsync(fixture.PlainSchema, id)).Should().Equal(before, "the save was cancelled before it wrote: one transaction, nothing committed");
     }
 
     [PostgresFact]

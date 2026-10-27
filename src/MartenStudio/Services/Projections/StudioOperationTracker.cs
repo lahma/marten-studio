@@ -439,8 +439,17 @@ internal sealed class StudioOperationTracker : IDisposable
             _ => nameof(StudioOperationState.Running)
         };
 
-        logger.ProjectionRebuildFinished(
-            completed.Target, completed.StoreKey, completed.DatabaseId, elapsedMilliseconds, outcome);
+        // The operation's store and database are the resolved ones, and its target a registered projection's name; escaped
+        // and bounded all the same, as every other template's names are (H1).
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            logger.ProjectionRebuildFinished(
+                StudioLogValue.Cap(completed.Target),
+                StudioLogValue.Cap(completed.StoreKey),
+                StudioLogValue.Cap(completed.DatabaseId),
+                elapsedMilliseconds,
+                outcome);
+        }
 
         actionLog.Record(new StudioActionLogEntry(
             finishedAt,

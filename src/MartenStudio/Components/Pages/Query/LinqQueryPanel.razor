@@ -456,7 +456,8 @@
     {
         if (Logger.IsEnabled(LogLevel.Information))
         {
-            Logger.LinqQueryUnexpected(exception, alias ?? string.Empty, scope.StoreKey);
+            // The alias and the store key are the address's: escaped and bounded, as the service's own 9263 writes them (H1).
+            Logger.LinqQueryUnexpected(exception, StudioLogValue.Cap(alias ?? string.Empty), StudioLogValue.Cap(scope.StoreKey));
         }
 
         return "LINQ mode failed (" + exception.GetType().Name + "). The application log has the details.";

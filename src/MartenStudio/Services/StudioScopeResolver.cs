@@ -63,8 +63,9 @@ internal sealed class StudioScopeResolver
     {
         ResolvedSource resolved = await resolver.ResolveAsync(scope, capability, cancellationToken).ConfigureAwait(false);
 
+        // The visitor's spelling, escaped and bounded: the message is logged and audited whole (H1).
         return resolved as ResolvedScope
-            ?? throw new KeyNotFoundException($"'{scope.StoreKey}' is not a Marten store.");
+            ?? throw new KeyNotFoundException($"'{StudioLogValue.Cap(scope.StoreKey)}' is not a Marten store.");
     }
 
     /// <summary>

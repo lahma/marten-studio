@@ -344,11 +344,113 @@ public class StoragePageTests
         storage.Requests.Should().ContainSingle().Which.Should().Be(context.State.ActiveScope);
     }
 
-    private sealed class Set(IReadOnlyList<StudioTable> tables) : IStudioTableSet
+    // -----------------------------------------------------------------------------------------------
+    // H1b (G1M F6, Option A): the Tables tile counts the other schemas only past the browser's gate.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>What the set leaves out, over every admitted schema.</summary>
+    private const string WholeCoverage = "the store's 3 declared tables and the 1 largest of 3,412 other tables by estimated size (a sweep judges at most 4)";
+
+    /// <summary>The same, over the store's own schemas alone.</summary>
+    private const string OwnCoverage = "the store's 3 declared tables and the 0 largest of 7 other tables in its own schemas by estimated size";
+
+    /// <summary>The usual facts, read from a set that also judged schemas only <c>BrowsableSchemas</c> admits, and says so.</summary>
+    private static StorageFacts Covered() => StorageFacts.Build(
+        "default",
+        "localhost.marten",
+        Window(TimeSpan.FromDays(3)),
+        new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: 170_011),
+        new Set([Orders, Salaries, Triggers, Hidden], WholeCoverage, OwnCoverage),
+        [
+            Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000),
+            Row("hr", "salaries", heap: 60L << 20, index: 6L << 20, toast: 0, rows: 50_000),
+            Row("quartz", "qrtz_triggers", heap: 10L << 20, index: 2L << 20, toast: 0, rows: 4_000),
+        ]);
+
+    /// <summary>A visitor's gate the write policy shuts: the store's own schema is still theirs, nothing else is.</summary>
+    private static DatabaseGate ShutGate() => new(
+        ["public"],
+        [new CatalogSchema("public", true, false), new CatalogSchema("quartz", true, false), new CatalogSchema("hr", true, false)],
+        ["quartz"],
+        capabilityEnabled: true,
+        readOnly: false,
+        authorized: false,
+        new DatabaseObjectClassifier([]));
+
+    [Fact]
+    public void The_facts_keep_both_readings_of_the_tables_tile()
+    {
+        StorageFacts facts = Covered();
+
+        facts.TableCount.Should().Be(4, "every table the set judges, for the host's own code (D31)");
+        facts.Coverage.Should().Be(WholeCoverage);
+        facts.OwnSchemasTableCount.Should().Be(2, "orders and the hidden type's table sit in public; salaries and qrtz_triggers do not");
+        facts.OwnSchemasCoverage.Should().Be(OwnCoverage);
+        facts.HasOwnSchemasReading.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Past the browser's gate the tile counts every judged table and says what the whole set left out; short of it - a gate
+    /// the write policy shuts, or one that cannot be read - it counts the store's own schemas' tables and says only what they
+    /// hold, as the Health page's coverage does (G1M F6). Before H1b everyone past the database gate read the whole count.
+    /// </summary>
+    [Theory]
+    [InlineData("open", true)]
+    [InlineData("shut", false)]
+    [InlineData("unreadable", false)]
+    public async Task The_tables_tile_counts_the_other_schemas_only_past_the_browsers_gate(string gate, bool whole)
+    {
+        int gateReads = 0;
+
+        StorageView view = await Service(Hiding()).ShowAsync(Covered(), new StudioScope("default", "localhost.marten", null), () =>
+        {
+            gateReads++;
+            return Task.FromResult<DatabaseGate?>(gate switch
+            {
+                "open" => Gate(),
+                "shut" => ShutGate(),
+                _ => null,
+            });
+        });
+
+        view.TableCount.Should().Be(whole ? 4 : 2);
+        view.Coverage.Should().Be(whole ? WholeCoverage : OwnCoverage);
+        gateReads.Should().Be(1, "one gate read per view serves the names and the tile alike");
+    }
+
+    /// <summary>The page over each view: the tile's number and its note are the visitor's reading, and nothing else counts the rest.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task The_page_draws_the_tables_tile_this_visitor_may_read(bool open)
+    {
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(Covered(), new StudioScope("default", "localhost.marten", null),
+                () => Task.FromResult<DatabaseGate?>(open ? Gate() : ShutGate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<PostgresStudio.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        page.TextOfAll(".ms-storage-tile-value")[^1].Should().Be(open ? "4" : "2");
+        page.TextOfAll(".ms-storage-tile-note")[^1].Should().Be("Judged: " + (open ? WholeCoverage : OwnCoverage) + ".");
+
+        if (!open)
+        {
+            page.Markup.Should().NotContain("3,412").And.NotContain("a sweep judges at most",
+                "nothing on the page counts what the schemas only BrowsableSchemas admits hold");
+        }
+    }
+
+    private sealed class Set(IReadOnlyList<StudioTable> tables, string? coverage = null, string? ownSchemasCoverage = null) : IStudioTableSet
     {
         public IReadOnlyList<StudioTable> Tables { get; } = tables;
 
-        public string? Coverage => null;
+        public string? Coverage => coverage;
+
+        public string? OwnSchemasCoverage => ownSchemasCoverage ?? coverage;
 
         public StudioTable? Find(string schema, string table) => Tables.FirstOrDefault(x => x.Schema == schema && x.Table == table);
 

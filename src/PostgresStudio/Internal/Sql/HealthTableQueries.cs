@@ -17,7 +17,15 @@ internal sealed record HealthTableTarget(string Schema, string Table);
 /// <param name="Kind"><c>relkind</c>: <c>r</c>, or <c>p</c> for a partitioned table.</param>
 /// <param name="EstimatedPages"><c>relpages</c>, summed over the partitions of a partitioned table - an estimate.</param>
 /// <param name="Total">How many tables the admitted schemas hold in all, the ones past the cap included.</param>
-internal sealed record HealthRelationalTableRow(string Schema, string Table, string Kind, long EstimatedPages, int Total);
+internal sealed record HealthRelationalTableRow(string Schema, string Table, string Kind, long EstimatedPages, int Total)
+{
+    /// <summary>
+    /// How many of <see cref="HealthRelationalTableRow.Total" /> are in the source's own schemas (<c>@own</c>), past the cap
+    /// included - what the coverage sentence counts for a visitor the database browser keeps out of every other schema
+    /// (G1M F6, H1). <see langword="null" /> for a row built by hand, which counts the listed rows instead.
+    /// </summary>
+    public int? OwnTotal { get; init; }
+}
 
 /// <summary>
 /// One Marten table as the catalog and the statistics collector see it, its partitions rolled in - what
@@ -1196,7 +1204,8 @@ internal static class HealthTableQueries
     /// The size is <c>relpages</c> - summed over the partition tree, walked through <c>pg_inherits</c>, for a partitioned
     /// table - never <c>pg_relation_size</c>. A database of ten thousand tables is capped at the largest
     /// <c>@cap</c>, and the total (<c>count(*) over ()</c>, computed before the limit) is what the coverage sentence
-    /// says was left out.
+    /// says was left out. So is the total in the source's own schemas alone (<c>@own</c>): a visitor the database browser
+    /// keeps out of the rest is told only how many of <em>those</em> there are (G1M F6, H1).
     /// </para>
     /// </remarks>
     internal const string RelationalTablesSql =
@@ -1248,7 +1257,8 @@ internal static class HealthTableQueries
                t.relname::text,
                t.relkind::text,
                case when t.relkind = 'p' then coalesce(p.pages, 0)::bigint else t.relpages::bigint end,
-               (pg_catalog.count(*) over ())::int
+               (pg_catalog.count(*) over ())::int,
+               (pg_catalog.count(*) filter (where t.nspname = any(@own)) over ())::int
         from candidates t
         left join partitioned p on p.root = t.oid
         order by 4 desc, 1, 2
@@ -1333,7 +1343,8 @@ internal static class HealthTableQueries
                t.relname::text,
                t.relkind::text,
                case when t.relkind = 'p' then coalesce(p.pages, 0)::bigint else t.relpages::bigint end,
-               (pg_catalog.count(*) over ())::int
+               (pg_catalog.count(*) over ())::int,
+               (pg_catalog.count(*) filter (where t.nspname = any(@own)) over ())::int
         from candidates t
         left join partitioned p on p.root = t.oid
         order by 4 desc, 1, 2
@@ -1363,13 +1374,17 @@ internal static class HealthTableQueries
         ArgumentNullException.ThrowIfNull(names);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cap);
 
+        string[] named = names as string[] ?? [.. names];
+
+        // The schemas named exactly are the source's own (D27 in Postgres Studio): the second total counts them.
         return new HealthQuery(
             RelationalTablesSql,
             [
-                new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = names as string[] ?? [.. names] },
+                new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = named },
                 new NpgsqlParameter("everything", NpgsqlDbType.Boolean) { Value = everything },
                 new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = cap },
                 new NpgsqlParameter("system", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = SystemSchemasBeyondPrefix },
+                new NpgsqlParameter("own", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = named },
             ]);
     }
 
@@ -1386,23 +1401,29 @@ internal static class HealthTableQueries
     /// </param>
     /// <param name="skipDocumentTables">Whether to leave out every table named like a document table.</param>
     /// <param name="cap">How many tables at most.</param>
+    /// <param name="own">
+    /// The source's own schemas - the ones every visitor its gate admits may see - which the second total counts (G1M F6,
+    /// H1); <see langword="null" /> for <paramref name="names" />.
+    /// </param>
     public static HealthQuery UndeclaredTables(
         IReadOnlyList<string> names,
         bool everything,
         IReadOnlyList<HealthTableTarget> declared,
         bool skipDocumentTables,
-        int cap)
+        int cap,
+        IReadOnlyList<string>? own = null)
     {
         ArgumentNullException.ThrowIfNull(names);
         ArgumentNullException.ThrowIfNull(declared);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(cap);
 
         NpgsqlParameter[] targets = TargetParameters(declared);
+        string[] named = names as string[] ?? [.. names];
 
         return new HealthQuery(
             UndeclaredTablesSql,
             [
-                new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = names as string[] ?? [.. names] },
+                new NpgsqlParameter("names", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = named },
                 new NpgsqlParameter("everything", NpgsqlDbType.Boolean) { Value = everything },
                 new NpgsqlParameter("cap", NpgsqlDbType.Integer) { Value = cap },
                 new NpgsqlParameter("system", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = SystemSchemasBeyondPrefix },
@@ -1410,6 +1431,7 @@ internal static class HealthTableQueries
                 new NpgsqlParameter("document_prefix", NpgsqlDbType.Text) { Value = DocumentTablePrefix },
                 new NpgsqlParameter("declared_schemas", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = targets[0].Value },
                 new NpgsqlParameter("declared_tables", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = targets[1].Value },
+                new NpgsqlParameter("own", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = own is null ? named : own as string[] ?? [.. own] },
             ]);
     }
 
@@ -1424,7 +1446,10 @@ internal static class HealthTableQueries
     {
         ArgumentNullException.ThrowIfNull(reader);
 
-        return new HealthRelationalTableRow(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt32(4));
+        return new HealthRelationalTableRow(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt32(4))
+        {
+            OwnTotal = reader.GetInt32(5),
+        };
     }
 
     /// <summary>The listed tables, rolled up (<see cref="TablesSql" />).</summary>

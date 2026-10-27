@@ -43,6 +43,13 @@ internal sealed record MaintenanceFacts
     /// <summary>What a capped table set left out, in words (<see cref="IStudioTableSet.Coverage" />), or <see langword="null" />.</summary>
     public string? Coverage { get; init; }
 
+    /// <summary>
+    /// <see cref="Coverage" /> counted over the source's own schemas alone (<see cref="IStudioTableSet.OwnSchemasCoverage" />):
+    /// what a visitor the database browser keeps out of every other schema reads (G1M F6, H1b). The same as
+    /// <see cref="Coverage" /> for a set that reads no other schema.
+    /// </summary>
+    public string? OwnSchemasCoverage { get; init; }
+
     /// <summary>The server's autovacuum workers (T16's read), or <see langword="null" />.</summary>
     public MaintenanceWorkersRow? Workers { get; init; }
 
@@ -98,13 +105,16 @@ internal sealed class MaintenanceFactsReader(HealthSweepCache cache, HealthHisto
         ArgumentNullException.ThrowIfNull(sweep);
         ArgumentNullException.ThrowIfNull(history);
 
+        IStudioTableSet? set = sweep.TryShared<IStudioTableSet>(HealthTables.SetKey, out var judged) ? judged : null;
+
         return new MaintenanceFacts
         {
             MeasuredAt = sweep.MeasuredAt,
             StoreKey = sweep.StoreKey,
             DatabaseId = sweep.DatabaseId,
             Tables = sweep.TryShared<IReadOnlyList<TableFacts>>(HealthTables.TablesKey, out var tables) ? tables : null,
-            Coverage = sweep.TryShared<IStudioTableSet>(HealthTables.SetKey, out var set) ? set.Coverage : null,
+            Coverage = set?.Coverage,
+            OwnSchemasCoverage = set?.OwnSchemasCoverage,
             Workers = sweep.TryShared<MaintenanceWorkersRow>(MaintenanceQueries.WorkersKey, out var workers) ? workers : null,
             Running = sweep.TryShared<IReadOnlyList<MaintenanceProgressRow>>(MaintenanceQueries.ProgressKey, out var running) ? running : null,
             Wraparound = sweep.TryShared<WraparoundFacts>(Wraparound.Key, out var wraparound) ? wraparound : null,

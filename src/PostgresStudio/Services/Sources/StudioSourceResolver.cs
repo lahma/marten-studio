@@ -28,6 +28,14 @@ namespace PostgresStudio.Services.Sources;
 /// is "the name a host's <c>IPostgresDatabaseSource</c> lists the database under"); this is where that promise is kept,
 /// whichever caller built the scope. A scope already spelled that way is asked once.
 /// </para>
+/// <para>
+/// <b>Known limit (AGENTS.md D5).</b> That second question comes after the lookup, so a policy that refuses by the
+/// registered names alone - a deny-list on <c>admin</c> - lets a case variant tell a refused source or database from a
+/// missing one: <c>?store=ADMIN</c> passes the first question and is refused by the second, where a key nothing is
+/// registered under is not found. Asking by the registered names first would need the lookup first, which is the
+/// enumeration step 1 exists to keep behind the policy; answering "not found" for the refusal would leave a refused write
+/// unaudited as one. A policy that compares names ignoring case, as the resolver matches them, does not have it (H1b).
+/// </para>
 /// </remarks>
 internal sealed class StudioSourceResolver
 {

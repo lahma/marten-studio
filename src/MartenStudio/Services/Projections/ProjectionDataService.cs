@@ -144,23 +144,22 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
-        return await ViewAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+        return await ViewAsync(resolved, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The projections view of a scope that has resolved.</summary>
-    /// <param name="scope">The scope as asked for.</param>
-    /// <param name="resolved">The scope as it resolved.</param>
+    /// <param name="resolved">The scope as it resolved: its registered store key and database identity key the cache (H1).</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <param name="withLagHistories">
     /// Whether to judge every shard's own samples for the chart - which the projections screen draws and the Overview's
     /// summary does not. The samples are recorded either way, by the snapshot read.
     /// </param>
-    private async Task<ProjectionsView> ViewAsync(StudioScope scope, ResolvedScope resolved, CancellationToken cancellationToken, bool withLagHistories = true)
+    private async Task<ProjectionsView> ViewAsync(ResolvedScope resolved, CancellationToken cancellationToken, bool withLagHistories = true)
     {
         // The database read is shared; the daemon and the tracker are in-process and are read fresh, so a
         // start or a stop shows on the next render rather than a second later.
         StoredProjections stored = await cache
-            .GetAsync(CacheKey(scope, "projections"), token => ReadStoredAsync(resolved, token), cancellationToken)
+            .GetAsync(CacheKey(resolved, "projections"), token => ReadStoredAsync(resolved, token), cancellationToken)
             .ConfigureAwait(false);
 
         DaemonStatus daemon = await DescribeDaemonAsync(resolved, cancellationToken).ConfigureAwait(false);
@@ -270,7 +269,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             ArgumentNullException.ThrowIfNull(scope);
 
             resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-            ProjectionsView view = await ViewAsync(scope, resolved, cancellationToken, withLagHistories: false).ConfigureAwait(false);
+            ProjectionsView view = await ViewAsync(resolved, cancellationToken, withLagHistories: false).ConfigureAwait(false);
 
             ShardProgress? worst = view.Progress.Count > 0 ? view.Progress[0] : null;
 
@@ -357,7 +356,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
         ISubscriptionSource? source = FindSource(resolved.Store, projectionName)
-            ?? throw new KeyNotFoundException($"This store has no projection named '{projectionName}'.");
+            ?? throw UnknownProjection(projectionName);
 
         // The same read the page's own numbers come from, and for the same reason: describing a rebuild
         // must not be the thing that creates an event store (hard rule 14). A database that has none has
@@ -510,7 +509,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             }
 
             ISubscriptionSource source = FindSource(resolved.Store, projectionName)
-                ?? throw new KeyNotFoundException($"This store has no projection named '{projectionName}'.");
+                ?? throw UnknownProjection(projectionName);
 
             // "Already rebuilding" is a state: the daemon here is rebuilding it and the studio is not (JasperFx 2.86+).
             if (RebuildRefusal(daemon, resolved, source) is { } refusal)
@@ -532,7 +531,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                 async token =>
                 {
                     await RebuildWithTimeoutAsync(daemon, name, shardTimeout, token).ConfigureAwait(false);
-                    cache.InvalidatePrefix(CachePrefix(scope));
+                    cache.InvalidatePrefix(CachePrefix(resolved));
                 });
 
             audit.Record(
@@ -545,7 +544,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                 StudioCapability.RebuildProjections,
                 scope);
 
-            cache.InvalidatePrefix(CachePrefix(scope));
+            cache.InvalidatePrefix(CachePrefix(resolved));
 
             return start;
         }
@@ -1452,7 +1451,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             await operation(daemon, cancellationToken).ConfigureAwait(false);
 
             audit.Record(action, target, true, null, capability, scope);
-            cache.InvalidatePrefix(CachePrefix(scope));
+            cache.InvalidatePrefix(CachePrefix(resolved));
         }
         catch (StudioCapabilityDeniedException denial)
         {
@@ -1555,13 +1554,13 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             if (await operation(daemon, hosting, resolved, cancellationToken).ConfigureAwait(false) is { } refusal)
             {
                 audit.Record(action, target, false, refusal, capability, scope);
-                cache.InvalidatePrefix(CachePrefix(scope));
+                cache.InvalidatePrefix(CachePrefix(resolved));
 
                 return DaemonControlResult.Refused(refusal);
             }
 
             audit.Record(action, target, true, null, capability, scope);
-            cache.InvalidatePrefix(CachePrefix(scope));
+            cache.InvalidatePrefix(CachePrefix(resolved));
 
             return DaemonControlResult.Done;
         }
@@ -1654,7 +1653,9 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             await operation(coordinator, new DaemonControlContext(resolved, user, controlState)).ConfigureAwait(false);
 
             audit.Record(action, target, true, outcome, capability, scope);
-            cache.InvalidatePrefix(CachePrefix(scope));
+
+            // A coordinator control reaches every database of the store, so every one's cached reads go.
+            cache.InvalidatePrefix(StorePrefix(resolved));
         }
         catch (StudioCapabilityDeniedException denial)
         {
@@ -1815,7 +1816,10 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             await operation(resolved.Store.Advanced, resolved.TenantId, cancellationToken).ConfigureAwait(false);
 
             audit.Record(action, target, true, null, capability, scope);
-            cache.InvalidatePrefix(CachePrefix(scope));
+
+            // Without a tenant a correction reaches every database of the store, and with one the tenant's database,
+            // which need not be the one in the scope: every database's cached reads go.
+            cache.InvalidatePrefix(StorePrefix(resolved));
         }
         catch (StudioCapabilityDeniedException denial)
         {
@@ -1843,9 +1847,17 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// failed action with this message rather than as a 9203 scope denial.
     /// </remarks>
     internal static KeyNotFoundException UnprovisionedTenant(string storeKey, string tenantId) =>
-        new($"No database of Marten store '{storeKey}' holds tenant '{tenantId}' yet. Marten Studio does not " +
+        new($"No database of Marten store '{storeKey}' holds tenant '{StudioLogValue.Cap(tenantId)}' yet. Marten Studio does not " +
             "ask the tenancy to find it, because on a sharded or single-server tenancy finding a tenant " +
             "provisions one.");
+
+    /// <summary>
+    /// The refusal for a projection name this store has none of: the name as it was asked for - a visitor's text, from the
+    /// page or a circuit - escaped and bounded, because the message is audited and rendered whole (H1).
+    /// </summary>
+    /// <param name="projectionName">The name that was asked for.</param>
+    internal static KeyNotFoundException UnknownProjection(string projectionName) =>
+        new($"This store has no projection named '{StudioLogValue.Cap(projectionName)}'.");
 
     // ------------------------------------------------------------------------------------------------
     // Helpers
@@ -1858,10 +1870,24 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     private static string StoreTarget(StudioScope scope) =>
         scope.StoreKey is { Length: > 0 } key ? key : "(default store)";
 
-    private static string CachePrefix(StudioScope scope) =>
-        scope.StoreKey + "|" + scope.DatabaseId + "|" + (scope.TenantId ?? string.Empty) + "|";
+    /// <summary>
+    /// Every cached read of one database, every tenant's: the store's registered key and the database's own identity, as
+    /// the scope resolved to them (H1). A write invalidates this prefix, so it reaches every tenant's entry and every
+    /// spelling's - there is only one spelling.
+    /// </summary>
+    private static string CachePrefix(ResolvedScope resolved) =>
+        StorePrefix(resolved) + resolved.Database.Id.Identity + "|";
 
-    private static string CacheKey(StudioScope scope, string query) => CachePrefix(scope) + query;
+    /// <summary>Every cached read of every database of the store: what an operation that reaches them all invalidates.</summary>
+    private static string StorePrefix(ResolvedScope resolved) => resolved.Registration.Key + "|";
+
+    /// <summary>
+    /// One cached read: the database by its registered key and identity, never the visitor's spelling of either (D29, H1) -
+    /// a link with no <c>?db=</c>, or a key in another case, is the same database and the same entry, as every other cache
+    /// keys it - and the tenant, which the read is narrowed by and which is matched ordinally, so already spelled as listed.
+    /// </summary>
+    private static string CacheKey(ResolvedScope resolved, string query) =>
+        CachePrefix(resolved) + (resolved.TenantId ?? string.Empty) + "|" + query;
 
     /// <summary>
     /// Whether a row of <c>mt_event_progression</c> is Marten's own bookkeeping rather than a shard.

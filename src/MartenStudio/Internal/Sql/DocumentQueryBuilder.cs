@@ -8,6 +8,7 @@ using Npgsql;
 
 using NpgsqlTypes;
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Internal.Sql;
@@ -654,17 +655,17 @@ internal static class DocumentQueryBuilder
             case DocumentIdColumnType.Uuid:
                 return Guid.TryParse(trimmed, CultureInfo.InvariantCulture, out var guid)
                     ? IdParseResult.Ok(guid)
-                    : IdParseResult.Failed($"'{trimmed}' is not a GUID, and this collection's id column is uuid.");
+                    : IdParseResult.Failed($"'{StudioLogValue.Cap(trimmed)}' is not a GUID, and this collection's id column is uuid.");
 
             case DocumentIdColumnType.Int4:
                 return int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i)
                     ? IdParseResult.Ok(i)
-                    : IdParseResult.Failed($"'{trimmed}' is not a 32-bit integer, and this collection's id column is int4.");
+                    : IdParseResult.Failed($"'{StudioLogValue.Cap(trimmed)}' is not a 32-bit integer, and this collection's id column is int4.");
 
             case DocumentIdColumnType.Int8:
                 return long.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)
                     ? IdParseResult.Ok(l)
-                    : IdParseResult.Failed($"'{trimmed}' is not a 64-bit integer, and this collection's id column is int8.");
+                    : IdParseResult.Failed($"'{StudioLogValue.Cap(trimmed)}' is not a 64-bit integer, and this collection's id column is int8.");
 
             default:
                 // text, varchar and anything the studio could not identify: the id is whatever was typed,
@@ -1038,8 +1039,9 @@ internal static class DocumentQueryBuilder
             return converted!;
         }
 
+        // The cursor is the address's (?cursor=), so its value goes in escaped and bounded (H1).
         throw new DocumentQueryRefusedException(
-            $"The page cursor's sort value '{value}' does not fit the column it orders by.", isFilter: false);
+            $"The page cursor's sort value '{StudioLogValue.Cap(value)}' does not fit the column it orders by.", isFilter: false);
     }
 
     private static string MetadataColumnName(DocumentTableInfo table, DocumentMetadataColumn column) =>
@@ -1060,7 +1062,7 @@ internal static class DocumentQueryBuilder
             }
         }
 
-        throw new DocumentQueryRefusedException($"'{table.Alias}' has no duplicated column named '{columnName}'.");
+        throw new DocumentQueryRefusedException($"'{table.Alias}' has no duplicated column named '{StudioLogValue.Cap(columnName)}'.");
     }
 
     /// <summary>The Npgsql type of the <c>any(…)</c> array parameter for a given id column.</summary>
