@@ -147,4 +147,21 @@ internal interface IDocumentDataService
         StudioScope scope,
         int limit,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: the list's own statement planned now and under the index Marten would create for one of the advice's lines - behind
+    /// the plan gate of the Query page's advisor (<c>RunLinqQueries</c>, for the database as a whole), composed again from the
+    /// request, planned twice and never run, audited. Every refusal is a value; nothing is thrown but for cancellation.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="alias">The collection.</param>
+    /// <param name="request">The list the advice was about.</param>
+    /// <param name="index">The index to imagine: one <see cref="DocumentPage.WhatIf" /> offered.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    Task<WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        string alias,
+        DocumentListRequest request,
+        HypotheticalIndex index,
+        CancellationToken cancellationToken = default);
 }

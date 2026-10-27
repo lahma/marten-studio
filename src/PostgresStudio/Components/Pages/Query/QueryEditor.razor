@@ -33,6 +33,26 @@
                     @onclick="RunClickAsync">
                 Run
             </button>
+            @if (OnExplain.HasDelegate)
+            {
+                <button type="button"
+                        class="ms-btn ms-btn-sm ms-query-explain"
+                        disabled="@Disabled"
+                        title="Plans the statement with EXPLAIN (FORMAT JSON) and draws the plan. Nothing runs."
+                        @onclick="ExplainClickAsync">
+                    Explain
+                </button>
+            }
+            @if (OnExplainAnalyze.HasDelegate)
+            {
+                <button type="button"
+                        class="ms-btn ms-btn-sm ms-query-explain-analyze"
+                        disabled="@Disabled"
+                        title="Runs the statement under EXPLAIN (ANALYZE, BUFFERS), inside the console's read-only transaction and statement timeout, and draws what it did."
+                        @onclick="ExplainAnalyzeClickAsync">
+                    Explain analyze
+                </button>
+            }
             <button type="button" class="ms-btn ms-btn-sm" disabled="@Disabled" @onclick="SaveClickAsync">Save…</button>
         }
 
@@ -102,6 +122,20 @@
     /// <summary>Raised with the live text when Save or Ctrl+S happens.</summary>
     [Parameter]
     public EventCallback<string> OnSave { get; set; }
+
+    /// <summary>
+    /// Raised with the text when Explain is clicked - the SQL console's plan of a statement (X1). The button is drawn only
+    /// when somebody listens.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnExplain { get; set; }
+
+    /// <summary>
+    /// Raised with the text when Explain analyze is clicked - the SQL console's measured plan, which runs the statement (K1).
+    /// The button is drawn only when somebody listens.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> OnExplainAnalyze { get; set; }
 
     /// <summary>Whether a query is in flight, which swaps Run for Cancel.</summary>
     [Parameter]
@@ -255,6 +289,10 @@
     }
 
     private async Task SaveClickAsync() => await OnSave.InvokeAsync(Value ?? string.Empty);
+
+    private async Task ExplainClickAsync() => await OnExplain.InvokeAsync(Value ?? string.Empty);
+
+    private async Task ExplainAnalyzeClickAsync() => await OnExplainAnalyze.InvokeAsync(Value ?? string.Empty);
 
     private async Task CommitAsync(string? value)
     {

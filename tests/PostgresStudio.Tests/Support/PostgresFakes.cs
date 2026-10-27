@@ -125,10 +125,26 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
 {
     public List<(StudioScope Scope, SqlConsoleRequest Request)> Runs { get; } = [];
 
+    /// <summary>What the next run returns, or <see langword="null" /> for an empty result.</summary>
+    public SqlConsoleResult? Next { get; set; }
+
     public Task<SqlConsoleResult> RunSqlAsync(StudioScope scope, SqlConsoleRequest request, CancellationToken cancellationToken = default)
     {
         Runs.Add((scope, request));
-        return Task.FromResult(new SqlConsoleResult([], [], false, 500, TimeSpan.Zero, [], null, null));
+        return Task.FromResult(Next ?? new SqlConsoleResult([], [], false, 500, TimeSpan.Zero, [], null, null));
+    }
+
+    /// <summary>Every what-if asked (X2), with the statement it was for.</summary>
+    public List<(string Statement, HypotheticalIndex Index)> WhatIfs { get; } = [];
+
+    /// <summary>What a what-if answers; hypopg not installed when a test says nothing.</summary>
+    public Func<HypotheticalIndex, WhatIfResult>? WhatIf { get; set; }
+
+    public Task<WhatIfResult> WhatIfAsync(StudioScope scope, string statement, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        WhatIfs.Add((statement, index));
+        return Task.FromResult(WhatIf?.Invoke(index)
+            ?? WhatIfResult.NotCompared(index, HypotheticalIndexAvailability.NotInstalledSentence, HypotheticalIndexState.NotInstalled));
     }
 }
 

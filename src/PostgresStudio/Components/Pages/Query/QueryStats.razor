@@ -64,7 +64,8 @@
         {
             @if (!string.IsNullOrWhiteSpace(Plan))
             {
-                <JsonView Json="@Plan" Label="Query plan" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="plan.json" />
+                @* X1: the plan as a tree, with its insights, and the JSON Postgres printed under it. *@
+                <PlanView Json="@Plan" Caption="@PlanCaption" Label="Query plan" WhatIf="WhatIf" />
             }
             else
             {
@@ -146,9 +147,36 @@
     [Parameter]
     public string? PlanUnavailable { get; set; }
 
+    /// <summary>A line under the plan's summary, saying what kind of plan it is.</summary>
+    [Parameter]
+    public string? PlanCaption { get; set; }
+
+    /// <summary>
+    /// Whether a new plan opens the Plan tab - the console's Explain buttons, where the plan is the answer - rather than leaving
+    /// the tab where the visitor put it.
+    /// </summary>
+    [Parameter]
+    public bool PlanFirst { get; set; }
+
     /// <summary>Anything Postgres raised while the statement ran.</summary>
     [Parameter]
     public IReadOnlyList<string> Messages { get; set; } = [];
+
+    /// <summary>X2: the plan's "What if?", handed to the plan view (a <c>WhatIfSource</c>), or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public object? WhatIf { get; set; }
+
+    private string? shownPlan;
+
+    protected override void OnParametersSet()
+    {
+        if (PlanFirst && !string.IsNullOrWhiteSpace(Plan) && !string.Equals(Plan, shownPlan, StringComparison.Ordinal))
+        {
+            selected = PlanTab;
+        }
+
+        shownPlan = Plan;
+    }
 
     private void Select(string tab) => selected = tab;
 }

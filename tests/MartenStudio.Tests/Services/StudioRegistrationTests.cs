@@ -182,7 +182,11 @@ public class StudioRegistrationTests
 
         // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
         (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
+        // 0.6 (X1): the Statements drill-in's planner, stateless and the process's.
+        (typeof(PostgresStudio.Services.Statements.StatementPlanReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementPlanReader)),
         (typeof(PostgresStudio.Services.Statements.IStatementsService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Statements.StatementsService)),
+        // 0.6 (X2): the what-if engine - hypopg's availability cached per database, every hypothetical index reset - the process's.
+        (typeof(PostgresStudio.Services.Query.HypotheticalIndexReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Query.HypotheticalIndexReader)),
 
         // W5-API: the Health page's Snapshot menu, the circuit's - built from the page services as the visitor.
         (typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder)),

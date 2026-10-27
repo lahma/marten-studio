@@ -374,6 +374,15 @@ public sealed class MatrixServer : IAsyncDisposable
     /// </summary>
     public async Task<IReadOnlySet<string>> SnapshotAsync(string database = Database, CancellationToken cancellationToken = default)
     {
+        await using NpgsqlConnection connection = await OpenAsync(MatrixRole.Superuser, database, cancellationToken);
+        return await FingerprintAsync(connection, cancellationToken);
+    }
+
+    /// <summary>The same fingerprint, over a superuser's connection to a server of a test's own (X2's hypopg server).</summary>
+    public static async Task<IReadOnlySet<string>> FingerprintAsync(NpgsqlConnection connection, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+
         const string Sql =
             "with s as (select n.oid, n.nspname from pg_catalog.pg_namespace n where n.nspname not in ('pg_catalog', 'information_schema', 'pg_toast') and n.nspname not like 'pg\\_temp\\_%' and n.nspname not like 'pg\\_toast\\_temp\\_%') "
             + "select 'schema:' || s.nspname from s "
@@ -385,7 +394,6 @@ public sealed class MatrixServer : IAsyncDisposable
             + "union all select 'extension:' || e.extname || ':' || e.extversion from pg_catalog.pg_extension e "
             + "union all select 'role:' || r.rolname from pg_catalog.pg_roles r";
 
-        await using NpgsqlConnection connection = await OpenAsync(MatrixRole.Superuser, database, cancellationToken);
         await using NpgsqlCommand command = new(Sql, connection);
 
         HashSet<string> objects = new(StringComparer.Ordinal);

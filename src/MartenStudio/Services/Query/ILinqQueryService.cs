@@ -44,4 +44,20 @@ internal interface ILinqQueryService
         StudioScope scope,
         LinqQueryRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: Marten's statement for this query planned now and under the index Marten would create for the advisor's line, which
+    /// hypopg imagines - through the same gate as <see cref="RunAsync" /> and then the plan's own (<c>RunLinqQueries</c> for the
+    /// database as a whole), composed again from the request, never from what the page holds. Every refusal is a value,
+    /// audited; nothing is thrown but for cancellation.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="request">The query the advice is about.</param>
+    /// <param name="index">The index to imagine: one the advice offered, found again by its key and Marten's definition.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        LinqQueryRequest request,
+        PostgresStudio.Services.Query.HypotheticalIndex index,
+        CancellationToken cancellationToken = default);
 }

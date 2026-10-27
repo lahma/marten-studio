@@ -151,6 +151,12 @@ public class CapabilityGatingMatrixTests
         // H3: Database > Sessions' details - process ids, roles, client addresses, application names and
         // statements - refused as a value and audited; the summary beside it is a plain read.
         new(typeof(ISessionActivityService), nameof(ISessionActivityService.GetDetailsAsync), StudioCapability.ViewDatabaseActivity),
+        // X2: a what-if plans a statement under a hypothetical index, behind the gate of the plan it accompanies - the
+        // console's (RunSql), Mode A's (the console's again) and LINQ mode's (RunLinqQueries) - refused as a value, audited.
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.WhatIfAsync), StudioCapability.RunSql),
+        new(typeof(IQueryService), nameof(IQueryService.WhatIfAsync), StudioCapability.RunSql),
+        new(typeof(ILinqQueryService), nameof(ILinqQueryService.WhatIfAsync), StudioCapability.RunLinqQueries),
+        new(typeof(IDocumentDataService), nameof(IDocumentDataService.WhatIfAsync), StudioCapability.RunLinqQueries),
     ];
 
     /// <summary>
@@ -173,6 +179,8 @@ public class CapabilityGatingMatrixTests
         [
             "CountExactAsync", "GetCollectionsAsync", "GetDocumentAsync", "GetRelatedAsync",
             "ListAsync", "ListRecentAsync", "ProbeIdAsync", "StreamExistsAsync",
+            // X2: a gated read (GatedReads), behind the Query page's advisor's plan gate.
+            "WhatIfAsync",
         ],
         [typeof(IEventDataService)] =
         [
@@ -205,11 +213,11 @@ public class CapabilityGatingMatrixTests
             "CheckAsync", "DatabaseIdentityAsync", "DdlAsync", "FunctionsAsync", "IndexesAsync",
             "PreviewAsync", "TablesAsync",
         ],
-        [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync"],
+        [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync", "WhatIfAsync"],
 
-        // PS-1d: the console is the shared seam now, and its one member is gated (Mutating).
-        [typeof(ISqlConsoleService)] = [],
-        [typeof(ILinqQueryService)] = ["DescribeAsync"],
+        // PS-1d: the console is the shared seam now, and its run is gated (Mutating); X2's what-if is a gated read.
+        [typeof(ISqlConsoleService)] = ["WhatIfAsync"],
+        [typeof(ILinqQueryService)] = ["DescribeAsync", "WhatIfAsync"],
         [typeof(IDatabaseObjectService)] =
         [
             "GetDefinitionAsync", "GetObjectAsync", "GetOverviewAsync", "GetSequenceValueAsync", "ListAsync",
@@ -706,6 +714,23 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(IReadOnlyDictionary<string, string>))
         {
             return new Dictionary<string, string> { ["id"] = "8f1d5a6e-1a2b-4c3d-9e8f-000000000001" };
+        }
+
+        // X2: an index a plan would suggest, and the clause Mode A ran - so a gate that ran after either was looked at is caught.
+        if (type == typeof(HypotheticalIndex))
+        {
+            return HypotheticalIndexCandidates.FromPlan(QueryPlanReader.Read(
+                """[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Schema":"public","Alias":"o","Filter":"(o.customer_id = 42)","Total Cost":10}}]""").Plan!)[0];
+        }
+
+        if (type == typeof(MartenQueryRequest))
+        {
+            return new MartenQueryRequest("customer", "data ->> 'Name' = 'x'");
+        }
+
+        if (type == typeof(DocumentListRequest))
+        {
+            return new DocumentListRequest { Search = "Name:x", SortKey = "mt_last_modified" };
         }
 
         throw new NotSupportedException(

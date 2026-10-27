@@ -48,4 +48,22 @@ internal sealed class FakeLinqQueryService : ILinqQueryService
 
         return Task.FromResult(Result ?? new LinqQueryResult(request.Alias, [], false, request.Offset, request.PageSize ?? 50, string.Empty, [], TimeSpan.Zero));
     }
+
+    /// <summary>X2: what <see cref="WhatIfAsync" /> answers; hypopg not installed when a test says nothing.</summary>
+    public Func<PostgresStudio.Services.Query.HypotheticalIndex, PostgresStudio.Services.Query.WhatIfResult>? WhatIf { get; set; }
+
+    /// <summary>Every what-if the panel asked for, with the request it was for.</summary>
+    public List<(LinqQueryRequest Request, PostgresStudio.Services.Query.HypotheticalIndex Index)> WhatIfs { get; } = [];
+
+    public Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        LinqQueryRequest request,
+        PostgresStudio.Services.Query.HypotheticalIndex index,
+        CancellationToken cancellationToken = default)
+    {
+        WhatIfs.Add((request, index));
+
+        return Task.FromResult(WhatIf?.Invoke(index) ?? PostgresStudio.Services.Query.WhatIfResult.NotCompared(
+            index, PostgresStudio.Services.Query.HypotheticalIndexAvailability.NotInstalledSentence, PostgresStudio.Services.Query.HypotheticalIndexState.NotInstalled));
+    }
 }

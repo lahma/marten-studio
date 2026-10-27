@@ -36,6 +36,16 @@ internal sealed record SqlResultSet(
 {
     /// <summary>Whether the statement ran without a Postgres error.</summary>
     public bool Succeeded => Error is null;
+
+    /// <summary>
+    /// The plan, whole, when the result is exactly what <c>EXPLAIN (FORMAT JSON)</c> returns - one <c>json</c> column named
+    /// <c>QUERY PLAN</c> - and it is at most <see cref="ExplainStatements.MaxPlanCharacters" /> long: the grid's cell is capped
+    /// for a grid, and a plan view needs every character of it (X1).
+    /// </summary>
+    public string? Plan { get; init; }
+
+    /// <summary>How long a plan was that is longer than <see cref="ExplainStatements.MaxPlanCharacters" />, and so not kept.</summary>
+    public long? PlanCharacters { get; init; }
 }
 
 /// <summary>What the SQL console is allowed to do, all of it clamped on the server.</summary>
@@ -310,6 +320,8 @@ internal sealed class ReadOnlySqlSession
         List<IReadOnlyList<SqlCell>> rows = [];
         var truncated = false;
         var stopwatch = Stopwatch.StartNew();
+        string? plan = null;
+        long? planCharacters = null;
 
         await using var command = new NpgsqlCommand(sql, connection, transaction)
         {
@@ -329,6 +341,9 @@ internal sealed class ReadOnlySqlSession
                 columns.Add(new SqlResultColumn(reader.GetName(i), reader.GetDataTypeName(i)));
             }
 
+            // EXPLAIN (FORMAT JSON)'s one json column: kept whole for the plan view (X1), as well as capped for the grid.
+            bool planShaped = columns.Count == 1 && ExplainStatements.IsPlanColumn(columns[0].Name, columns[0].PostgresType);
+
             while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (rows.Count == options.MaxRows)
@@ -340,16 +355,34 @@ internal sealed class ReadOnlySqlSession
 
                 var row = new SqlCell[reader.FieldCount];
 
-                for (var i = 0; i < reader.FieldCount; i++)
+                if (planShaped && rows.Count == 0 && !await reader.IsDBNullAsync(0, cancellationToken).ConfigureAwait(false))
                 {
-                    row[i] = ReadCell(reader, i, columns[i].PostgresType);
+                    string text = reader.GetString(0);
+
+                    if (text.Length <= ExplainStatements.MaxPlanCharacters)
+                    {
+                        plan = text;
+                    }
+                    else
+                    {
+                        planCharacters = text.Length;
+                    }
+
+                    row[0] = formatter.Format(text, columns[0].PostgresType);
+                }
+                else
+                {
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        row[i] = ReadCell(reader, i, columns[i].PostgresType);
+                    }
                 }
 
                 rows.Add(row);
             }
 
             stopwatch.Stop();
-            return new SqlResultSet(columns, rows, truncated, stopwatch.Elapsed, null);
+            return new SqlResultSet(columns, rows, truncated, stopwatch.Elapsed, null) { Plan = plan, PlanCharacters = planCharacters };
         }
         catch (PostgresException exception)
         {

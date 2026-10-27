@@ -394,7 +394,11 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
         }
     }
 
-    private static string RefusalText(StatementPlanRefusal refusal) => refusal switch
+    /// <summary>
+    /// Why a recorded statement is not planned, in words: T02's Plan evidence, and the Statements page's drill-in (X1), which
+    /// refuses exactly what T02 refuses.
+    /// </summary>
+    internal static string RefusalText(StatementPlanRefusal refusal) => refusal switch
     {
         StatementPlanRefusal.Truncated =>
             "Not planned: its text is longer than the " + TableText.Count(HealthStatementQueries.MaxTextCharacters) + " characters the studio reads.",
@@ -494,12 +498,17 @@ internal sealed class ExpensiveStatementsCheck : HealthCheck<ExpensiveStatementF
             Caveat = StatementWindows.Caveat(read, window, evaluation.History, evaluation.Text)
                 + (reading is not null ? GenericPlanCaveat(evaluation.Text) : string.Empty),
             Remedy = Remedy(reading, document, evaluation.TableRemedies),
+            // A document table's statement goes to the Marten advisor; any other to the statement's own drill-in, whose plan reads
+            // the column the remedy leaves as a placeholder and whose What if? imagines the index where hypopg is installed (X2).
             Link = document is { Alias: { } alias }
                 ? new HealthLink(
                     "Open the index advisor in Query",
                     "query",
                     [new KeyValuePair<string, string?>("mode", "marten"), new KeyValuePair<string, string?>("type", alias)])
-                : null,
+                : new HealthLink(
+                    "Plan it in Statements, and ask what if",
+                    Statements.StatementLinks.Route,
+                    [new KeyValuePair<string, string?>(Statements.StatementLinks.QueryIdParameter, statement.QueryId.ToString(CultureInfo.InvariantCulture))]),
             DocumentTypes = statement.DocumentTypes,
             GatedSchemas = statement.GatedSchemas,
         };

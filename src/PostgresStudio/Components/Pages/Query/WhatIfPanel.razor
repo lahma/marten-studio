@@ -1,0 +1,173 @@
+@using PostgresStudio.Services.Query
+@implements IDisposable
+
+@*
+    X2: "What if?" - one more index, imagined by hypopg, and the plan drawn now and under it, side by side. Under every plan
+    that suggests an index (PlanView, for the console, Mode A and the Statements drill-in), and beside the Marten advisor's
+    advice. The panel offers only indexes a builder wrote - read off the plan (HypotheticalIndexCandidates) or Marten's own
+    DDL for the advisor's line - and asks the surface's own service, which passes the plan's own gate, runs both plans in the
+    read-only transaction, and resets hypopg before the connection goes back. Nothing here creates anything.
+
+    Every class is ms-whatif-, in studio.css's X2 section. The two plans sit in a grid that stacks on a narrow screen; each
+    PlanView draws its tree in its own labelled scroll region (D25).
+*@
+
+@if (candidates.Count > 0 || result is not null)
+{
+    <section class="ms-whatif" aria-label="What if">
+        <h3 class="ms-whatif-title">What if?</h3>
+        <p class="ms-whatif-lead">
+            hypopg can show how Postgres would plan this statement with one more index: an index the planner sees, in this one
+            session, and the table never gets. Nothing is created, and the session forgets it before it goes back to the pool.
+        </p>
+
+        @if (source?.Note is { } note)
+        {
+            <p class="ms-muted ms-whatif-note">@note</p>
+        }
+
+        @if (candidates.Count > 0)
+        {
+            <ul class="ms-whatif-candidates">
+                @for (int i = 0; i < candidates.Count; i++)
+                {
+                    HypotheticalIndex candidate = candidates[i];
+                    <li class="ms-whatif-candidate" @key="candidate.Key">
+                        <div class="ms-whatif-candidate-text">
+                            <span class="ms-whatif-caption">@candidate.Caption</span>
+                            <code class="ms-whatif-definition">@candidate.Definition</code>
+                            @if (candidate.Note is { } candidateNote)
+                            {
+                                <span class="ms-muted ms-whatif-candidate-note">@candidateNote</span>
+                            }
+                        </div>
+                        <button type="button"
+                                class="ms-btn ms-btn-sm ms-whatif-run"
+                                disabled="@running"
+                                aria-label="@("What if " + candidate.Caption)"
+                                @onclick="() => RunAsync(candidate)">
+                            @(running && ReferenceEquals(runningFor, candidate) ? "Planning…" : "What if?")
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (failure is { } failed)
+        {
+            <p class="ms-alert ms-alert-error ms-whatif-failure" role="alert">@failed</p>
+        }
+
+        @if (result is { } shown)
+        {
+            <div class="ms-whatif-result" role="status">
+                <p class="ms-whatif-imagined">Imagined: <code class="ms-whatif-definition">@shown.Index.Definition</code></p>
+
+                @if (shown.Reason is { } reason)
+                {
+                    <p class="ms-alert ms-alert-warning ms-whatif-reason">@reason</p>
+                }
+                else
+                {
+                    <p class="ms-whatif-verdict @(shown.Used ? "ms-whatif-used" : "ms-whatif-unused")">@shown.Verdict</p>
+
+                    @if (shown.IndexName is { } name)
+                    {
+                        <p class="ms-muted ms-whatif-name">The plan names the hypothetical index <code>@name</code>.</p>
+                    }
+
+                    <div class="ms-whatif-compare">
+                        <div class="ms-whatif-side ms-whatif-before">
+                            <h4 class="ms-whatif-side-title">Now</h4>
+                            <PlanView Plan="shown.Before" Label="The plan now" />
+                        </div>
+                        <div class="ms-whatif-side ms-whatif-after">
+                            <h4 class="ms-whatif-side-title">With the index</h4>
+                            <PlanView Plan="shown.After" Label="The plan with the hypothetical index" />
+                        </div>
+                    </div>
+
+                    <p class="ms-muted ms-whatif-caveat">@WhatIfResult.Caveat</p>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private IReadOnlyList<HypotheticalIndex> candidates = [];
+    private WhatIfSource? source;
+    private object? readFor;
+    private WhatIfResult? result;
+    private HypotheticalIndex? runningFor;
+    private bool running;
+    private string? failure;
+
+    /// <summary>
+    /// How to run a what-if, and - for advice not read off a plan - the indexes to offer: a <see cref="WhatIfSource" />.
+    /// <see cref="object" /> because the Razor SDK emits every component as public and a public parameter cannot have an internal
+    /// type.
+    /// </summary>
+    [Parameter]
+    public object? Source { get; set; }
+
+    /// <summary>The plan the panel is under, a <see cref="QueryPlan" />: the indexes it suggests are offered when the source names none.</summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        WhatIfSource? next = Source as WhatIfSource;
+        object? key = (object?) next?.Candidates ?? Plan;
+
+        if (!ReferenceEquals(next, source) || !ReferenceEquals(key, readFor))
+        {
+            // A new plan or a new source: what was compared before is about another statement.
+            source = next;
+            readFor = key;
+            result = null;
+            failure = null;
+            candidates = next is null ? []
+                : next.Candidates ?? (Plan is QueryPlan plan ? HypotheticalIndexCandidates.FromPlan(plan) : []);
+        }
+    }
+
+    private async Task RunAsync(HypotheticalIndex candidate)
+    {
+        if (source is null || running)
+        {
+            return;
+        }
+
+        running = true;
+        runningFor = candidate;
+        failure = null;
+
+        try
+        {
+            result = await source.RunAsync(candidate, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The page is going away.
+        }
+        catch (Exception exception)
+        {
+            // On the panel: a what-if that failed out of sight is a button that silently does nothing.
+            result = null;
+            failure = "The what-if could not run (" + exception.GetType().Name + ").";
+        }
+        finally
+        {
+            running = false;
+            runningFor = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

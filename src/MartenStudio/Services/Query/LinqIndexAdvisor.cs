@@ -37,6 +37,10 @@ internal static class LinqIndexAdvisor
     /// <param name="indexes">What <c>pg_indexes</c> says the table has.</param>
     /// <param name="jsonName">A member name as the serializer writes it into the JSON.</param>
     /// <param name="planJson">The plan, when one was fetched.</param>
+    /// <param name="mapping">
+    /// The document type, for X2's what-if: each verdict whose line declares an index on a member offers the one Marten would
+    /// create (<see cref="MartenIndexDdl" />). <see langword="null" /> offers none.
+    /// </param>
     public static LinqIndexAdvice Build(
         Expression composed,
         Expression source,
@@ -44,7 +48,8 @@ internal static class LinqIndexAdvisor
         DocumentTableInfo table,
         IReadOnlyList<PostgresIndex> indexes,
         Func<string, string> jsonName,
-        string? planJson)
+        string? planJson,
+        Marten.Schema.IDocumentType? mapping = null)
     {
         ArgumentNullException.ThrowIfNull(composed);
         ArgumentNullException.ThrowIfNull(source);
@@ -52,6 +57,81 @@ internal static class LinqIndexAdvisor
         ArgumentNullException.ThrowIfNull(indexes);
         ArgumentNullException.ThrowIfNull(jsonName);
 
+        Collector collector = Collect(composed, source, idMember, jsonName);
+
+        List<LinqIndexVerdict> verdicts = [];
+        List<HypotheticalIndex> whatIf = [];
+        var worst = IndexVerdictLevel.Green;
+
+        foreach ((string subject, DocumentPredicate predicate, List<MemberInfo>? chain) in collector.Predicates)
+        {
+            IndexVerdict verdict = IndexAdvisor.Evaluate(table, indexes, predicate);
+            verdicts.Add(new LinqIndexVerdict(subject, verdict));
+            worst = verdict.Level > worst ? verdict.Level : worst;
+            Offer(subject, verdict, chain);
+        }
+
+        foreach ((string subject, DocumentColumn sort, List<MemberInfo>? chain) in collector.Sorts)
+        {
+            IndexVerdict verdict = IndexAdvisor.EvaluateSort(table, indexes, sort);
+            verdicts.Add(new LinqIndexVerdict("order by " + subject, verdict));
+            worst = verdict.Level > worst ? verdict.Level : worst;
+            Offer("order by " + subject, verdict, chain);
+        }
+
+        IReadOnlyList<LinqPlanScan> scans = planJson is null ? [] : ReadScans(planJson);
+
+        return new LinqIndexAdvice(worst, verdicts, scans, Note(worst, verdicts.Count, scans, table.Table)) { WhatIf = whatIf };
+
+        void Offer(string subject, IndexVerdict verdict, List<MemberInfo>? chain)
+        {
+            if (mapping is null || chain is null || verdict.Level == IndexVerdictLevel.Green || verdict.Suggestion is not { } line
+                || !(line.Contains(".Duplicate(", StringComparison.Ordinal) || line.Contains(".Index(", StringComparison.Ordinal))
+                || MartenIndexDdl.Computed(mapping, chain) is not { } definition
+                || whatIf.Any(x => string.Equals(x.Definition, definition, StringComparison.Ordinal)))
+            {
+                return;
+            }
+
+            whatIf.Add(MartenIndexDdl.Index(subject, definition, line, table, line.Contains(".Duplicate(", StringComparison.Ordinal)));
+        }
+    }
+
+    /// <summary>
+    /// X2, on the server: the index Marten would create on every member <paramref name="composed" /> filters or orders on, by the
+    /// verdict's subject - what a what-if may imagine for this query, whatever the panel was sent. Pure; no connection.
+    /// </summary>
+    public static IReadOnlyList<HypotheticalIndex> Hypothetical(
+        Expression composed,
+        Expression source,
+        MemberInfo? idMember,
+        DocumentTableInfo table,
+        Marten.Schema.IDocumentType mapping,
+        Func<string, string> jsonName)
+    {
+        ArgumentNullException.ThrowIfNull(composed);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(mapping);
+        ArgumentNullException.ThrowIfNull(jsonName);
+
+        Collector collector = Collect(composed, source, idMember, jsonName);
+        List<HypotheticalIndex> offered = [];
+
+        foreach ((string subject, List<MemberInfo>? chain) in collector.Predicates.Select(static x => (x.Subject, x.Chain))
+                     .Concat(collector.Sorts.Select(static x => ("order by " + x.Subject, x.Chain))))
+        {
+            if (chain is not null && MartenIndexDdl.Computed(mapping, chain) is { } definition)
+            {
+                offered.Add(MartenIndexDdl.Index(subject, definition, subject, table, duplicate: false));
+            }
+        }
+
+        return offered;
+    }
+
+    private static Collector Collect(Expression composed, Expression source, MemberInfo? idMember, Func<string, string> jsonName)
+    {
         var collector = new Collector(idMember, jsonName);
         Expression node = composed;
 
@@ -72,26 +152,7 @@ internal static class LinqIndexAdvisor
             node = call.Arguments[0];
         }
 
-        List<LinqIndexVerdict> verdicts = [];
-        var worst = IndexVerdictLevel.Green;
-
-        foreach ((string subject, DocumentPredicate predicate) in collector.Predicates)
-        {
-            IndexVerdict verdict = IndexAdvisor.Evaluate(table, indexes, predicate);
-            verdicts.Add(new LinqIndexVerdict(subject, verdict));
-            worst = verdict.Level > worst ? verdict.Level : worst;
-        }
-
-        foreach ((string subject, DocumentColumn sort) in collector.Sorts)
-        {
-            IndexVerdict verdict = IndexAdvisor.EvaluateSort(table, indexes, sort);
-            verdicts.Add(new LinqIndexVerdict("order by " + subject, verdict));
-            worst = verdict.Level > worst ? verdict.Level : worst;
-        }
-
-        IReadOnlyList<LinqPlanScan> scans = planJson is null ? [] : ReadScans(planJson);
-
-        return new LinqIndexAdvice(worst, verdicts, scans, Note(worst, verdicts.Count, scans, table.Table));
+        return collector;
     }
 
     /// <summary>The scans in an <c>EXPLAIN (FORMAT JSON)</c> plan, outermost first - read by the shared <see cref="ExplainPlanScans" />.</summary>
@@ -130,9 +191,9 @@ internal static class LinqIndexAdvisor
     /// <summary>Reads the members a guarded predicate filters on and a guarded ordering orders by.</summary>
     private sealed class Collector(MemberInfo? idMember, Func<string, string> jsonName)
     {
-        public List<(string Subject, DocumentPredicate Predicate)> Predicates { get; } = [];
+        public List<(string Subject, DocumentPredicate Predicate, List<MemberInfo>? Chain)> Predicates { get; } = [];
 
-        public List<(string Subject, DocumentColumn Sort)> Sorts { get; } = [];
+        public List<(string Subject, DocumentColumn Sort, List<MemberInfo>? Chain)> Sorts { get; } = [];
 
         private readonly HashSet<string> seen = new(StringComparer.Ordinal);
 
@@ -147,11 +208,11 @@ internal static class LinqIndexAdvisor
 
             if (IsId(chain))
             {
-                Sorts.Add(("id", DocumentColumn.ById));
+                Sorts.Add(("id", DocumentColumn.ById, null));
                 return;
             }
 
-            Sorts.Add((Dotted(chain), new DocumentColumn.JsonPath([.. chain.Select(x => jsonName(x.Name))])));
+            Sorts.Add((Dotted(chain), new DocumentColumn.JsonPath([.. chain.Select(x => jsonName(x.Name))]), chain));
         }
 
         private void Visit(Expression expression, ParameterExpression document)
@@ -216,7 +277,7 @@ internal static class LinqIndexAdvisor
 
             if (seen.Add(subject + "\u001f" + predicate.GetType().Name))
             {
-                Predicates.Add((subject, predicate));
+                Predicates.Add((subject, predicate, predicate is DocumentPredicate.IdEquals ? null : chain));
             }
         }
 

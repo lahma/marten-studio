@@ -139,6 +139,12 @@ internal sealed record LinqIndexAdvice(
     IReadOnlyList<LinqPlanScan> Scans,
     string? Note = null)
 {
+    /// <summary>
+    /// X2: the index Marten would create for each verdict whose line declares one on a member - Marten's own DDL, for hypopg to
+    /// imagine - in the order of the verdicts. Empty when no verdict suggests one hypopg can imagine.
+    /// </summary>
+    public IReadOnlyList<HypotheticalIndex> WhatIf { get; init; } = [];
+
     /// <summary>No predicate, no ordering, no plan: nothing to advise.</summary>
     public static LinqIndexAdvice None { get; } = new(IndexVerdictLevel.Green, [], []);
 }
@@ -177,6 +183,9 @@ internal sealed record LinqQueryResult(
     MartenQueryScope? Scope = null,
     bool BudgetSpent = false)
 {
+    /// <summary>X2: what a what-if came to, for a run made to compare plans rather than to read rows.</summary>
+    public WhatIfResult? WhatIf { get; init; }
+
     /// <summary>Whether the query ran and Postgres was happy with it.</summary>
     public bool Succeeded => Refusal is null && Error is null;
 

@@ -279,6 +279,8 @@ public class LogLevelsTests
             "A page's scope-change handler threw: a studio bug, and a page that missed the switch can show another scope's data."),
         ["src/PostgresStudio/Services/StudioState.cs : A Postgres Studio page failed to handle a scope change"] = (Verdict.Fault,
             "The same line in Postgres Studio's words: a page's scope-change handler threw, and it can show another scope's data."),
+        ["src/PostgresStudio/Services/Query/HypotheticalIndexReader.cs : A what-if on database {Database} could neither reset hypopg nor end its own session; backend {ProcessId} may still hold a hypothetical index, which every later user of that pooled connection's planner sees until it is reset or the backend ends"] = (Verdict.Fault,
+            "X2: a what-if ended half-done - neither the reset nor ending its own session worked - so a pooled backend may plan with an index that does not exist."),
         ["src/MartenStudio/Services/Projections/StudioOperationTracker.cs : Marten Studio operation {Kind} on {Target} failed"] = (Verdict.Fault,
             "A rebuild the visitor started failed after tearing the projection's tables down; they stay empty until rebuilt."),
 

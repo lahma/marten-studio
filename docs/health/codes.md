@@ -64,6 +64,14 @@ baseline, so editing or deleting a row is a reviewed change.
 | [K06](configuration.md#k06-database-browser-open-to-every-schema-without-a-narrowed-role) | Database browser open to every schema without a narrowed role | Configuration | - | - | both | 0.5 | - |
 | [K07](configuration.md#k07-studio-open-to-anonymous-visitors-with-a-capability-on) | Studio open to anonymous visitors with a capability on | Configuration | - | - | both | 0.5 | - |
 | [K08](configuration.md#k08-server-timeouts-end-the-daemons-leadership) | Server timeouts end the daemon's leadership | Configuration | `idle-in-transaction`, `transaction-timeout`, `idle-session` | setting | Marten | 0.5 | - |
+| [P01](plans.md#p01-row-estimate-off-tenfold-or-more) | Row estimate off tenfold or more | Plans | - | plan node | both | 0.6 | - |
+| [P02](plans.md#p02-sort-or-hash-spilled-to-disk) | Sort or hash spilled to disk | Plans | - | plan node | both | 0.6 | - |
+| [P03](plans.md#p03-lossy-bitmap-heap-scan) | Lossy bitmap heap scan | Plans | - | plan node | both | 0.6 | - |
+| [P04](plans.md#p04-sequential-scan-with-a-selective-filter) | Sequential scan with a selective filter | Plans | - | plan node | both | 0.6 | - |
+| [P05](plans.md#p05-nested-loop-over-a-large-outer-side) | Nested loop over a large outer side | Plans | - | plan node | both | 0.6 | - |
+| [P06](plans.md#p06-large-offset) | Large OFFSET | Plans | - | plan node | both | 0.6 | - |
+| [P07](plans.md#p07-leading-wildcard-like) | Leading-wildcard LIKE | Plans | - | plan node | both | 0.6 | - |
+| [P08](plans.md#p08-parallel-workers-short-of-the-plan) | Parallel workers short of the plan | Plans | - | plan node | both | 0.6 | - |
 | [R01](replication.md#r01-replication-slot-retaining-wal) | Replication slot retaining WAL | Replication | `near-limit`, `inactive`, `lost` | - | both | 0.4 | - |
 | [R02](replication.md#r02-wal-archiving-failing) | WAL archiving failing | Replication | `failing`, `backlog` | - | both | 0.5 | - |
 | [R03](replication.md#r03-standby-lag) | Standby lag | Replication | `primary-view`, `standby-view`, `paused`, `aurora-reader` | - | both | 0.5 | - |

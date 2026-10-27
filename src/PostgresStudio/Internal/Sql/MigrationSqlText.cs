@@ -152,6 +152,29 @@ internal static partial class MigrationSqlText
             : null;
     }
 
+    /// <summary>
+    /// <c>CREATE INDEX ON schema.table (a, b);</c> - the index a what-if imagines (X2), handed to hypopg and never run - or
+    /// <see langword="null" /> when a name cannot be printed honestly. With no schema the table is named alone, and resolves
+    /// through the transaction's <c>search_path</c> exactly as the statement it accompanies resolved it: a plan Postgres printed
+    /// without <c>VERBOSE</c> names no schema. Postgres (and hypopg) names the index.
+    /// </summary>
+    /// <param name="schema">The table's schema, when the plan printed it.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="columns">The columns, in index order.</param>
+    public static string? CreateIndex(string? schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (columns.Count == 0 || !columns.All(IsQuotable) || !IsQuotable(table))
+        {
+            return null;
+        }
+
+        string? target = schema is null ? SqlIdentifier.Quote(table) : Qualified(schema, table);
+
+        return target is null ? null : "CREATE INDEX ON " + target + " (" + string.Join(", ", columns.Select(SqlIdentifier.Quote)) + ");";
+    }
+
     /// <summary><c>ALTER TABLE schema.table ALTER COLUMN column TYPE bigint;</c> (T26), or <see langword="null" />.</summary>
     /// <param name="schema">The table's schema.</param>
     /// <param name="table">The table.</param>

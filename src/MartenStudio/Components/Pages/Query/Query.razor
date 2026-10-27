@@ -174,7 +174,8 @@
                                     SqlNote="@MartenSqlNote(result)"
                                     Plan="@result.Plan?.PlanJson"
                                     PlanUnavailable="@PlanNote(result.Plan)"
-                                    Messages="@MartenMessages(result)" />
+                                    Messages="@MartenMessages(result)"
+                                    WhatIf="@martenWhatIf" />
 
                         @if (result.Succeeded)
                         {
@@ -295,6 +296,22 @@
     private IReadOnlyList<QueryDocumentTypeInfo> documentTypes = [];
     private QueryExamples examples = QueryExamples.None;
     private MartenQueryResult? martenResult;
+    private WhatIfSource? martenWhatIf;
+
+    /// <summary>
+    /// X2: Mode A's "What if?" - the indexes its plan suggests, each planned again from the clause through the console's gate, as
+    /// Mode A's plan is (<see cref="IQueryService.WhatIfAsync" />).
+    /// </summary>
+    private WhatIfSource MartenWhatIf(MartenQueryRequest request) => new()
+    {
+        RunAsync = async (index, token) =>
+        {
+            StudioScope? scope = State.ActiveScope;
+            return scope is null
+                ? WhatIfResult.NotCompared(index, "Not compared: no database is selected.")
+                : await Queries.WhatIfAsync(scope, request, index, token);
+        },
+    };
 
     /// <summary>What the SQL tab shows - kept here, so leaving the tab and coming back finds it as it was.</summary>
     private readonly SqlConsoleSession sqlSession = new();
@@ -687,10 +704,11 @@
 
         try
         {
-            MartenQueryResult result = await Queries.RunMartenQueryAsync(
-                scope, new MartenQueryRequest(alias, whereText, pageSize, deletedFilter), cts.Token);
+            MartenQueryRequest request = new(alias, whereText, pageSize, deletedFilter);
+            MartenQueryResult result = await Queries.RunMartenQueryAsync(scope, request, cts.Token);
 
             martenResult = result;
+            martenWhatIf = MartenWhatIf(request);
 
             if (result.Rejection is { } rejection)
             {
