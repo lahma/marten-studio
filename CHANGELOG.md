@@ -17,7 +17,9 @@ preview of a document save lights up where the host's Marten has it.
   4 KB, which broke the JSON of any real plan.
 - Operations › Statements has a drill-in: a statement's Plan link (`?queryid=`, so the link reopens it) shows its
   text, its counters and its generic plan, planned as `SqlConsoleRole` behind the page's own gate and audited by
-  `queryid`. A text withheld from you, a write, a locking read or a cut text gets no plan and says why; a plan that
+  `queryid`. A text withheld from you, one that names a
+  schema you may not see (a qualified view or SQL function would be expanded into the plan), a write, a locking read or
+  a cut text gets no plan and says why; a plan that
   reads a schema you may not see is not shown, and every other plan is masked as the text is.
 - Plan insights under every plan, with stable codes P01-P08 in `docs/health/codes.md` (a new area, Plans) and their
   docs in `docs/health/plans.md`: a row estimate off tenfold or more, a sort or hash spilled to disk, a lossy bitmap
@@ -96,7 +98,7 @@ preview of a document save lights up where the host's Marten has it.
   event type, exception type and message fingerprint - the message with its numbers, GUIDs, quoted strings,
   timestamps and hex runs set aside - each group with its letters and events, how many are skipped, first and last
   seen, its tenants (named only to a visitor whose store policy passes that tenant) and a sample message. Opening a
-  group lists its letters (`?group=`), with every per-letter action.
+  group lists its letters among the newest 20,000 in scope (`?group=`), with every per-letter action.
 - "Skip this group" marks a group's events skipped through Skip event's own path - `ManageDeadLetters`, the write
   policy, the tenant proof of every sequence and `MarkEventsAsSkipped`, under `UseTenantPartitionedEvents` its tenant
   overload from Marten 9.51 and refused below it as Skip event is - at most 1,000 events an action, lowest sequence

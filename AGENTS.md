@@ -290,7 +290,9 @@ adding a hub now would add a host-visible endpoint for a feature that polling co
 own lag samples (`ProjectionLagHistory`), written only by its single-flight snapshot read: 120 per shard, 200 shards per
 database, databases bounded by `HealthDatabaseBound` (M2). Dead letters are grouped in the web process from one read
 per interval of the newest 20,000 letters' columns (`DeadLetterGroupQueries.BuildGroupRows`), and a group's letters are
-found again in SQL by the same rule (`DeadLetterFingerprint`); `DeadLetterGroupsLiveTests` holds the two equal (M3;
+found again in SQL by the same rule (`DeadLetterFingerprint`) - the list's only among those same newest letters
+(`DeadLetterGroupCache.LettersGrouped`), the skip's count and the skip among all of a group's letters;
+`DeadLetterGroupsLiveTests` holds the two equal (M3;
 why: decision-notes.md, D10).
 
 **D11 — Sub-path mounting is ported from Quartz.Dashboard.** Compile-time routes are re-rooted at map time, from
@@ -701,7 +703,12 @@ Explain buttons (and a typed `EXPLAIN (FORMAT JSON)`), Mode A and the Statements
 `EXPLAIN ANALYZE` runs only under `RunSql`, for a statement the guard accepts, in the read-only transaction. The
 drill-in plans a `pg_stat_statements` text as its generic plan by `prepare` + `force_generic_plan`, never
 `GENERIC_PLAN`, which Npgsql's extended protocol breaks. It runs as `SqlConsoleRole`, `VERBOSE`, under the visitor's
-`search_path` less withheld schemas, and never plans a write or a withheld text. A plan reading a withheld schema is not
+`search_path` less withheld schemas, and never plans a write, a withheld text, or a text
+that names a withheld schema (`StatementsService.TextNamesWithheld`: one the visitor's mask changes, or a `U&"` name
+while anything is withheld; asked again by the reader before any `prepare`), because a qualified view or `LANGUAGE
+sql` function is expanded or inlined into visible tables and a `plpgsql` call prints its defaults. Known limit: a view
+or SQL function in a visible schema that reads a withheld one is expanded like any other. A plan reading a withheld
+schema is not
 shown; the rest is masked like the text, and each plan is audited by `queryid`. Console and Mode A plans are `RunSql`
 output, unmasked (D27). What if? (X2) imagines one index with hypopg behind the gate of the plan it accompanies, only
 one a builder writes (`MigrationSqlText`, or Marten's own `ToDDL`), re-derived on the server. Read-only; never
