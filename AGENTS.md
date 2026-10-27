@@ -98,7 +98,7 @@ anything; read *this* file before writing anything.
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt`, and it must not move because of
    PostgresStudio. PostgresStudio's is the same six (its own registration types), plus its six inbound types
    (`IPostgresDatabaseSource`, `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`,
-   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model's nineteen
+   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model's twenty-one
    types, which `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt` lists type by type.
    Anything else that appears in either baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
