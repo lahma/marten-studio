@@ -363,5 +363,9 @@ namespace PostgresStudio
         public string? Reason { get; init; }
         public long? Records { get; init; }
         public System.DateTimeOffset? StatsReset { get; init; }
+        public double? SyncTimeMs { get; init; }
+        public long? Syncs { get; init; }
+        public double? WriteTimeMs { get; init; }
+        public long? Writes { get; init; }
     }
 }

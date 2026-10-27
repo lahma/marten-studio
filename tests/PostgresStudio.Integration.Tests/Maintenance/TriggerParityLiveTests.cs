@@ -43,8 +43,12 @@ public class TriggerParityLiveTests
             ? await AutovacuumServer.StartAsync(major, "autovacuum_vacuum_max_threshold=" + ServerCap.ToString(CultureInfo.InvariantCulture))
             : await AutovacuumServer.StartAsync(major);
 
+        // The load commits synchronously (the statements share one connection): the Testcontainers server runs with
+        // synchronous_commit = off, and a committed row is hinted only once the WAL writer has flushed its commit record, which
+        // the VACUUM (FREEZE) below can precede - and a page with a row not hinted committed is not frozen (BaselineLiveTests).
         List<string> statements =
         [
+            "set synchronous_commit = on",
             "create schema ps_parity",
             "create table ps_parity.plain (id int, note text) with (autovacuum_enabled = false)",
             "create table ps_parity.partial (id int, note text) with (autovacuum_enabled = false)",

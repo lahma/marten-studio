@@ -241,7 +241,10 @@ internal static class StandbyLagLive
         facts.Io.Value!.BytesFromOpBytes.Should().Be(!eighteen);
         facts.Io.Value.Groups.Any(static x => x.IsWal).Should().Be(eighteen, "18 counts WAL I/O in pg_stat_io");
         facts.Io.Value.Groups.Should().Contain(static x => x.BackendType == "client backend" && x.ReadBytes != null);
-        facts.Wal.Value!.Writes.HasValue.Should().Be(!eighteen, "18 moved WAL writes to pg_stat_io");
+        // 0.9-C: the WAL writes and syncs mean the same on every release - pg_stat_wal's up to 17, and from 18, which moved them, the
+        // sum of pg_stat_io's WAL rows - so both are counts everywhere.
+        facts.Wal.Value!.Writes.Should().BeGreaterThanOrEqualTo(0, "18 moved WAL writes to pg_stat_io, and the read follows them");
+        facts.Wal.Value.Syncs.Should().BeGreaterThanOrEqualTo(0);
         facts.Tablespaces.Value!.Rows.Select(static x => x.Name).Should().Contain(["pg_default", "pg_global"]);
 
         await using StudioHost onStandby = ReplicationServer.HostOver(pair.StandbyConnectionString(MatrixRole.Probe), TimeProvider.System);

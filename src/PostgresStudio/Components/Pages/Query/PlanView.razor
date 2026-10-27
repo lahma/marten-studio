@@ -414,92 +414,92 @@
 
     private RenderFragment NodeBody(PlanNode node, bool selected, bool onPath, PlanHeatCell? cell) => __builder =>
     {
-                @if (Analyzer)
+        @if (Analyzer)
+        {
+            <button type="button"
+                    class="ms-plan-pick ms-plan-node-pick"
+                    aria-pressed="@(selected ? "true" : "false")"
+                    aria-label="@("Select " + node.Description)"
+                    @onclick="() => SelectAsync(node.Id)"
+                    @onclick:stopPropagation="true"></button>
+        }
+
+        <p class="ms-plan-node-head">
+            @if (node.SubplanName is { } subplan)
+            {
+                <span class="ms-plan-subplan">@subplan</span>
+            }
+            else if (node.ParentRelationship is "InitPlan" or "SubPlan")
+            {
+                <span class="ms-plan-subplan">@node.ParentRelationship</span>
+            }
+            <span class="ms-plan-node-type">@node.Label</span>
+            @if (node.Target is { } target)
+            {
+                <span class="ms-plan-node-target">@target</span>
+            }
+            @if (node.Disabled == true)
+            {
+                <span class="ms-chip ms-chip-warning ms-plan-chip" title="A planner setting (enable_*) disabled this kind of node, and the planner used it anyway.">disabled</span>
+            }
+            @if (node.NeverExecuted)
+            {
+                <span class="ms-chip ms-plan-chip">never executed</span>
+            }
+            @if (onPath)
+            {
+                <span class="ms-chip ms-plan-chip ms-plan-critical-flag" title="On the critical path: the chain of nodes that carries most of the plan's time">critical</span>
+            }
+            @if (flags.TryGetValue(node.Id, out List<string>? codes))
+            {
+                @foreach (string code in codes)
                 {
-                    <button type="button"
-                            class="ms-plan-pick ms-plan-node-pick"
-                            aria-pressed="@(selected ? "true" : "false")"
-                            aria-label="@("Select " + node.Description)"
-                            @onclick="() => SelectAsync(node.Id)"
-                            @onclick:stopPropagation="true"></button>
+                    string current = code;
+                    <span class="ms-chip ms-chip-warning ms-plan-chip ms-plan-node-flag" @key="current">@current</span>
                 }
+            }
+        </p>
 
-                <p class="ms-plan-node-head">
-                    @if (node.SubplanName is { } subplan)
-                    {
-                        <span class="ms-plan-subplan">@subplan</span>
-                    }
-                    else if (node.ParentRelationship is "InitPlan" or "SubPlan")
-                    {
-                        <span class="ms-plan-subplan">@node.ParentRelationship</span>
-                    }
-                    <span class="ms-plan-node-type">@node.Label</span>
-                    @if (node.Target is { } target)
-                    {
-                        <span class="ms-plan-node-target">@target</span>
-                    }
-                    @if (node.Disabled == true)
-                    {
-                        <span class="ms-chip ms-chip-warning ms-plan-chip" title="A planner setting (enable_*) disabled this kind of node, and the planner used it anyway.">disabled</span>
-                    }
-                    @if (node.NeverExecuted)
-                    {
-                        <span class="ms-chip ms-plan-chip">never executed</span>
-                    }
-                    @if (onPath)
-                    {
-                        <span class="ms-chip ms-plan-chip ms-plan-critical-flag" title="On the critical path: the chain of nodes that carries most of the plan's time">critical</span>
-                    }
-                    @if (flags.TryGetValue(node.Id, out List<string>? codes))
-                    {
-                        @foreach (string code in codes)
-                        {
-                            string current = code;
-                            <span class="ms-chip ms-chip-warning ms-plan-chip ms-plan-node-flag" @key="current">@current</span>
-                        }
-                    }
-                </p>
+        @if (Share(node) is { } share)
+        {
+            <p class="ms-plan-share">
+                <span class="ms-plan-bar @(cell is { Level: > 0 } ? "ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture) : null)" style="--ms-plan-share: @Width(share.Value)" aria-hidden="true"></span>
+                <span class="ms-plan-share-value">@TableText.Percent(share.Value) of @share.Of</span>
+            </p>
+        }
 
-                @if (Share(node) is { } share)
-                {
-                    <p class="ms-plan-share">
-                        <span class="ms-plan-bar @(cell is { Level: > 0 } ? "ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture) : null)" style="--ms-plan-share: @Width(share.Value)" aria-hidden="true"></span>
-                        <span class="ms-plan-share-value">@TableText.Percent(share.Value) of @share.Of</span>
-                    </p>
-                }
+        @if (cell is not null)
+        {
+            @* The heat as text beside the colour: colour is never the only signal. *@
+            <p class="ms-plan-heat-line">
+                <span class="ms-plan-heat-chip ms-plan-heat-@cell.Level.ToString(CultureInfo.InvariantCulture)">@PlanAnalysis.Label(heat, read?.Plan): @cell.Text</span>
+            </p>
+        }
 
-                @if (cell is not null)
-                {
-                    @* The heat as text beside the colour: colour is never the only signal. *@
-                    <p class="ms-plan-heat-line">
-                        <span class="ms-plan-heat-chip ms-plan-heat-@cell.Level.ToString(CultureInfo.InvariantCulture)">@PlanAnalysis.Label(heat, read?.Plan): @cell.Text</span>
-                    </p>
-                }
+        <p class="ms-plan-facts">
+            @{ IReadOnlyList<string> facts = Facts(node); }
+            @for (int i = 0; i < facts.Count; i++)
+            {
+                <span class="ms-plan-fact" @key="i">@facts[i]</span>
+            }
+        </p>
 
-                <p class="ms-plan-facts">
-                    @{ IReadOnlyList<string> facts = Facts(node); }
-                    @for (int i = 0; i < facts.Count; i++)
+        @if (Details(node) is { Count: > 0 } details)
+        {
+            <details class="ms-plan-details">
+                <summary>Details</summary>
+                <dl class="ms-plan-detail-list">
+                    @for (int i = 0; i < details.Count; i++)
                     {
-                        <span class="ms-plan-fact" @key="i">@facts[i]</span>
+                        (string Term, string Value) detail = details[i];
+                        <div class="ms-plan-detail" @key="i">
+                            <dt>@detail.Term</dt>
+                            <dd><code class="ms-plan-detail-value">@detail.Value</code></dd>
+                        </div>
                     }
-                </p>
-
-                @if (Details(node) is { Count: > 0 } details)
-                {
-                    <details class="ms-plan-details">
-                        <summary>Details</summary>
-                        <dl class="ms-plan-detail-list">
-                            @for (int i = 0; i < details.Count; i++)
-                            {
-                                (string Term, string Value) detail = details[i];
-                                <div class="ms-plan-detail" @key="i">
-                                    <dt>@detail.Term</dt>
-                                    <dd><code class="ms-plan-detail-value">@detail.Value</code></dd>
-                                </div>
-                            }
-                        </dl>
-                    </details>
-                }
+                </dl>
+            </details>
+        }
     };
 
     /// <summary>The node's share of the plan's time, when it was analyzed with timing, or else of its cost.</summary>

@@ -17,9 +17,10 @@ namespace PostgresStudio.Integration.Tests.Diagnostics;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why every release.</b> <c>pg_stat_wal</c> exists from 14 and lost its write and sync counters on 18 (the section carries
-/// none, so it reads alike), <c>data_checksums</c> is on by default only from 18, so the matrix holds both of its branches, and
-/// <c>checksum_failures</c> is null where checksums are off.
+/// <b>Why every release.</b> <c>pg_stat_wal</c> exists from 14 and gave its write and sync counters to <c>pg_stat_io</c>'s WAL
+/// rows on 18 (the section reads both homes as one meaning, and is held here to each one's own answer), <c>data_checksums</c>
+/// is on by default only from 18, so the matrix holds both of its branches, and <c>checksum_failures</c> is null where
+/// checksums are off.
 /// </para>
 /// <para>
 /// A database of the test's own, with autovacuum off for its tables, so the ratio the test compares with is the one its
@@ -61,13 +62,18 @@ public class BaselineLiveTests(PostgresVersionMatrix matrix)
         await server.ExecuteAsync("vacuum public.events", database, Token);
         await server.ExecuteAsync("vacuum public.parts", database, Token);
 
+        // The WAL counters only grow, so the catalog's own answer before the snapshot and after it brackets the snapshot's.
+        await using NpgsqlConnection catalog = await server.OpenAsync(MatrixRole.App, database, Token);
+        (long Writes, long Syncs) walBefore = await WalCountsAsync(catalog, major);
+
         await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
         PostgresDiagnosticsSnapshot snapshot = await host.Services.GetRequiredService<IPostgresDiagnostics>().GetSnapshotAsync(
             new PostgresDatabaseRef("default", ""),
             new PostgresDiagnosticsRequest { Findings = false, Storage = true, Settings = true, Wal = true },
             Token);
 
-        await using NpgsqlConnection catalog = await server.OpenAsync(MatrixRole.App, database, Token);
+        (long Writes, long Syncs) walAfter = await WalCountsAsync(catalog, major);
+        bool walTiming = (string) (await ScalarAsync(catalog, "show track_wal_io_timing"))! == "on";
         string checksums = (string) (await ScalarAsync(catalog, "show data_checksums"))!;
         double? events = await RatioAsync(catalog, "select case when relpages > 0 then relallvisible::float8 / relpages end from pg_catalog.pg_class where oid = 'public.events'::regclass");
         double? parts = await RatioAsync(
@@ -113,6 +119,31 @@ public class BaselineLiveTests(PostgresVersionMatrix matrix)
             if (wal.StatsReset is null)
             {
                 problems.Add("Wal.StatsReset is null: pg_stat_wal.stats_reset is set when the statistics begin.");
+            }
+
+            // 0.9-C: the writes and syncs are counts on every release - pg_stat_wal's up to 17, pg_stat_io's WAL rows from 18.
+            if (wal.Writes is not >= 0 || wal.Syncs is not >= 0)
+            {
+                problems.Add("Wal.Writes is " + Show(wal.Writes) + " and Wal.Syncs " + Show(wal.Syncs) + ": both are counts, on every release.");
+            }
+            else
+            {
+                if (wal.Writes < walBefore.Writes || wal.Writes > walAfter.Writes)
+                {
+                    problems.Add("Wal.Writes is " + wal.Writes + ", outside " + walBefore.Writes + " to " + walAfter.Writes + ", the catalog's own count before and after.");
+                }
+
+                if (wal.Syncs < walBefore.Syncs || wal.Syncs > walAfter.Syncs)
+                {
+                    problems.Add("Wal.Syncs is " + wal.Syncs + ", outside " + walBefore.Syncs + " to " + walAfter.Syncs + ", the catalog's own count before and after.");
+                }
+            }
+
+            // The times are the server's with track_wal_io_timing on, and nothing otherwise: a zero it keeps is no time.
+            if (walTiming ? wal.WriteTimeMs is not >= 0 || wal.SyncTimeMs is not >= 0 : wal.WriteTimeMs is not null || wal.SyncTimeMs is not null)
+            {
+                problems.Add("track_wal_io_timing is " + (walTiming ? "on" : "off") + " and Wal.WriteTimeMs is " + Show(wal.WriteTimeMs) + ", Wal.SyncTimeMs "
+                    + Show(wal.SyncTimeMs) + ": the times are non-negative milliseconds while it is on, null while it is off.");
             }
         }
 
@@ -187,6 +218,11 @@ public class BaselineLiveTests(PostgresVersionMatrix matrix)
         {
             problems.Add("The JSON lacks wal, or settings.dataChecksums is not a boolean.");
         }
+        else if (json.RootElement.GetProperty("wal").GetProperty("writes").ValueKind != JsonValueKind.Number
+            || json.RootElement.GetProperty("wal").GetProperty("syncs").ValueKind != JsonValueKind.Number)
+        {
+            problems.Add("The JSON's wal.writes and wal.syncs are not numbers.");
+        }
 
         Report(server, problems);
     }
@@ -204,6 +240,22 @@ public class BaselineLiveTests(PostgresVersionMatrix matrix)
         {
             problems.Add("public." + table + " has an all-visible ratio of " + Show(row.AllVisibleRatio) + "; the catalog's relallvisible / relpages is " + Show(catalog) + ".");
         }
+    }
+
+    /// <summary>
+    /// The catalog's own WAL writes and syncs: <c>pg_stat_wal</c>'s columns up to 17, and from 18, where they moved, <c>pg_stat_io</c>'s
+    /// WAL rows of the <c>normal</c> context - the one that has the meaning <c>pg_stat_wal</c>'s had.
+    /// </summary>
+    private static async Task<(long Writes, long Syncs)> WalCountsAsync(NpgsqlConnection connection, int major)
+    {
+        string sql = major >= 18
+            ? "select coalesce(sum(writes), 0)::int8, coalesce(sum(fsyncs), 0)::int8 from pg_catalog.pg_stat_io where object = 'wal' and context = 'normal'"
+            : "select wal_write, wal_sync from pg_catalog.pg_stat_wal";
+
+        await using NpgsqlCommand command = new(sql, connection);
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+
+        return await reader.ReadAsync(Token) ? (reader.GetInt64(0), reader.GetInt64(1)) : throw new InvalidOperationException("The WAL counters returned no row.");
     }
 
     private static async Task<object?> ScalarAsync(NpgsqlConnection connection, string sql)

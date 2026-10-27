@@ -300,8 +300,9 @@ The remedy doubles `max_wal_size`, worded for the platform that runs the server 
 
 Operations › Replication shows, for the database the scope names: the slots (R01's read, with each logical slot's
 decoding statistics from `pg_stat_replication_slots` and, from 17, `failover` and `synced`), the standbys streaming
-from the server (or, on a standby, its own replay), the archiver, WAL volume and the full-page-image share, the
-checkpoints, I/O by backend type (`pg_stat_io`, 16+; byte columns are 18's own, and operations times `op_bytes` on 16
+from the server (or, on a standby, its own replay), the archiver, WAL volume, the full-page-image share and the WAL
+writes and syncs since the statistics were reset (with the time they took, when `track_wal_io_timing` is on; on 18 the
+counters come from `pg_stat_io`'s WAL rows, and are the same ones as on 14 to 17), the checkpoints, I/O by backend type (`pg_stat_io`, 16+; byte columns are 18's own, and operations times `op_bytes` on 16
 and 17), and the tablespaces. Numbers are shown to anybody the store policy passes for the database as a whole;
 names follow R01's rule and `ViewDatabaseActivity`, and a logical slot of another database has its decoding statistics
 shown under no name, as R01 shows the slot. The standbys table marks each sender physical or logical, and counts

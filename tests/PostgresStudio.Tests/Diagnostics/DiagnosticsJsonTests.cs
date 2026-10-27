@@ -198,6 +198,10 @@ public class DiagnosticsJsonTests
             Records = 123_456_789,
             FullPageImages = 4_567_890,
             Bytes = 98_765_432_100,
+            Writes = 41_000_123,
+            Syncs = 38_500_456,
+            WriteTimeMs = 12_345.5,
+            SyncTimeMs = 987_654.25,
             StatsReset = At.AddDays(-30),
         },
         Withheld = new Dictionary<string, string> { ["connections.byApplication"] = HostGate.WithheldSection, ["statements"] = HostGate.WithheldSection },
@@ -270,6 +274,10 @@ public class DiagnosticsJsonTests
         wal.GetProperty("records").GetInt64().Should().Be(123_456_789);
         wal.GetProperty("fullPageImages").GetInt64().Should().Be(4_567_890);
         wal.GetProperty("bytes").GetInt64().Should().Be(98_765_432_100, "byte counts are numbers");
+        wal.GetProperty("writes").GetInt64().Should().Be(41_000_123);
+        wal.GetProperty("syncs").GetInt64().Should().Be(38_500_456);
+        wal.GetProperty("writeTimeMs").GetDouble().Should().Be(12_345.5, "milliseconds, as the statements' totals are");
+        wal.GetProperty("syncTimeMs").GetDouble().Should().Be(987_654.25);
         wal.GetProperty("statsReset").GetString().Should().Be("2026-10-03T06:00:01.0000000+00:00");
 
         JsonElement settings = root.GetProperty("settings");
@@ -297,7 +305,7 @@ public class DiagnosticsJsonTests
         wal.GetProperty("outcome").GetString().Should().Be("notApplicable");
         wal.GetProperty("reason").GetString().Should().StartWith("Not applicable on Aurora");
 
-        foreach (string key in (string[]) ["records", "fullPageImages", "bytes", "statsReset"])
+        foreach (string key in (string[]) ["records", "fullPageImages", "bytes", "writes", "syncs", "writeTimeMs", "syncTimeMs", "statsReset"])
         {
             wal.GetProperty(key).ValueKind.Should().Be(JsonValueKind.Null, key);
         }

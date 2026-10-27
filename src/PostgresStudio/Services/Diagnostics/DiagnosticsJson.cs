@@ -387,6 +387,10 @@ internal static class DiagnosticsJson
         Integer(json, "records", wal.Records);
         Integer(json, "fullPageImages", wal.FullPageImages);
         Integer(json, "bytes", wal.Bytes);
+        Integer(json, "writes", wal.Writes);
+        Integer(json, "syncs", wal.Syncs);
+        Number(json, "writeTimeMs", wal.WriteTimeMs);
+        Number(json, "syncTimeMs", wal.SyncTimeMs);
         Time(json, "statsReset", wal.StatsReset);
         json.WriteEndObject();
     }

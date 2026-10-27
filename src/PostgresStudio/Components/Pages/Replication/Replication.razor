@@ -350,10 +350,10 @@
                     <dd>@WalText.Bytes((long) wal.Totals.Bytes) in @SessionText.Count(wal.Totals.Records, "record"), @SessionText.Count(wal.Totals.FullPageImages, "full-page image")</dd>
                     <dt>WAL buffers full</dt>
                     <dd>@SessionText.Number(wal.Totals.BuffersFull)</dd>
-                    @if (wal.Totals.Writes is { } writes)
+                    @if (wal.Totals.Writes is not null)
                     {
                         <dt>Writes and syncs</dt>
-                        <dd>@SessionText.Number(writes) writes, @SessionText.Number(wal.Totals.Syncs ?? 0) syncs</dd>
+                        <dd>@WriteCounts(wal.Totals, wal.Totals.StatsReset is { } countsSince ? State.FormatInSelectedTimeZone(countsSince) : null)</dd>
                     }
                     <dt>Rate</dt>
                     <dd>@(wal.BytesPerSecond is { } rate ? WalText.Bytes((long) rate) + " a second over the last " + SessionText.Duration(wal.Window!.Span) : NoWindow)</dd>
@@ -800,6 +800,24 @@
     private static string Bytes(double? value) => value is { } bytes ? WalText.Bytes((long) bytes) : "–";
 
     private static string Count(double? value) => value is { } count ? SessionText.Number((long) count) : "–";
+
+    /// <summary>
+    /// "12,345 writes, 678 syncs since the reset", and the time they took - "; writing took 15 ms, syncing 4 s" - when the
+    /// server timed them (<c>track_wal_io_timing</c>): the counters are the same on every release, 18 moving them to
+    /// <c>pg_stat_io</c> (<c>ReplicationQueries.Wal</c>).
+    /// </summary>
+    internal static string WriteCounts(WalStatistics wal, string? since)
+    {
+        string text = SessionText.Count(wal.Writes ?? 0, "write") + ", " + SessionText.Count(wal.Syncs ?? 0, "sync")
+            + (since is null ? string.Empty : " since " + since);
+
+        return wal is { WriteTimeMs: null, SyncTimeMs: null }
+            ? text
+            : text + "; writing took " + Lag(Milliseconds(wal.WriteTimeMs)) + ", syncing " + Lag(Milliseconds(wal.SyncTimeMs));
+    }
+
+    private static TimeSpan? Milliseconds(double? value) =>
+        value is { } ms && double.IsFinite(ms) && ms >= 0 && ms < TimeSpan.MaxValue.TotalMilliseconds ? TimeSpan.FromMilliseconds(ms) : null;
 
     private static string Lag(TimeSpan? value) =>
         value is { } lag

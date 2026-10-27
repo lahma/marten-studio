@@ -291,6 +291,16 @@ internal static class MatrixReads
         {
             throw new InvalidOperationException("The WAL counters were not read: " + facts.Wal.Outcome + " " + facts.Wal.Note);
         }
+
+        // 0.9-C: the WAL writes and syncs mean the same on every release - pg_stat_wal's up to 17, pg_stat_io's WAL rows from 18 -
+        // so both are counts, never null, as every role. The times are null or non-negative milliseconds.
+        if (facts.Wal.Value is not { Writes: >= 0, Syncs: >= 0 } wal || wal.WriteTimeMs < 0 || wal.SyncTimeMs < 0)
+        {
+            throw new InvalidOperationException(
+                "The WAL writes and syncs were not read as counts on PostgreSQL " + facts.Server.VersionNumber + ": "
+                + facts.Wal.Value?.Writes + " writes, " + facts.Wal.Value?.Syncs + " syncs, " + facts.Wal.Value?.WriteTimeMs + " ms writing, "
+                + facts.Wal.Value?.SyncTimeMs + " ms syncing.");
+        }
     }
 
     /// <summary>Fails a Server page facts read any section of which failed: on every release each one reads.</summary>

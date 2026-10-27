@@ -240,21 +240,60 @@ internal static class ReplicationQueries
         "          from pg_catalog.pg_ls_waldir() d) w");
 
     /// <summary>
-    /// <c>pg_stat_wal</c> (PostgreSQL 14+), by name: records, full-page images, bytes and full WAL buffers on every
-    /// release, and the write and sync counters that 18 moved to <c>pg_stat_io</c>, null there.
+    /// The WAL counters (PostgreSQL 14+): <c>pg_stat_wal</c>'s records, full-page images, bytes and full WAL buffers on every
+    /// release, and the server's WAL writes and syncs with their times, which mean the same on every release but are kept
+    /// in two places - <c>pg_stat_wal</c> up to 17 (<c>wal_write</c>, <c>wal_sync</c>, <c>wal_write_time</c> and
+    /// <c>wal_sync_time</c>), <c>pg_stat_io</c>'s WAL rows from 18, which took them over.
     /// </summary>
-    public static HealthQuery Wal() => new(
+    /// <remarks>
+    /// <para>
+    /// <b>The same meaning on every release</b> (measured on 14.24, 17.11, 18.6 and 19rc1: 2,000 one-statement commits are
+    /// about 2,000 writes and 2,000 syncs, some 14 ms of writing and 4,050 ms of syncing, on each). 18's <c>pg_stat_io</c>
+    /// counts the creation of a WAL segment as WAL I/O too, in a context of its own (<c>init</c>: in a bulk insert, 12 writes
+    /// and 12 syncs beside the <c>normal</c> context's 51 syncs), which <c>pg_stat_wal</c> never counted; so only the
+    /// <c>normal</c> context's rows are summed, over every backend type that writes WAL. The times are in milliseconds, and
+    /// <c>track_wal_io_timing</c> alone governs them on every release, 18 and 19 included - <c>track_io_timing</c> times a
+    /// relation's I/O and no WAL row. Both views keep a zero while timing is off, which is no time, so a time is read as null
+    /// unless the setting is on.
+    /// </para>
+    /// <para>
+    /// <b>One reset time.</b> <c>pg_stat_io</c> is reset by its own <c>pg_stat_reset_shared('io')</c>, not with
+    /// <c>pg_stat_wal</c>, so from 18 <c>stats_reset</c> is the later of the two: the counters read began from nothing no
+    /// later than it.
+    /// </para>
+    /// </remarks>
+    /// <param name="ioWal">Whether the server keeps the WAL writes and syncs in <c>pg_stat_io</c> (PostgreSQL 18+).</param>
+    public static HealthQuery Wal(bool ioWal) => new(
         "select (x.j ->> 'wal_records')::int8 as wal_records,\n" +
         "       (x.j ->> 'wal_fpi')::int8 as wal_fpi,\n" +
         "       (x.j ->> 'wal_bytes')::numeric::float8 as wal_bytes,\n" +
         "       (x.j ->> 'wal_buffers_full')::int8 as wal_buffers_full,\n" +
-        "       (x.j ->> 'wal_write')::int8 as wal_write,\n" +
-        "       (x.j ->> 'wal_sync')::int8 as wal_sync,\n" +
-        "       (x.j ->> 'wal_write_time')::float8 as wal_write_time,\n" +
-        "       (x.j ->> 'wal_sync_time')::float8 as wal_sync_time,\n" +
-        "       (x.j ->> 'stats_reset')::timestamptz as stats_reset\n" +
-        "  from pg_catalog.pg_stat_wal w\n" +
-        " cross join lateral (select pg_catalog.to_jsonb(w) as j) x");
+        (ioWal
+            ? "       io.writes as wal_write,\n" +
+              "       io.syncs as wal_sync,\n" +
+              "       case when t.timed then io.write_time end as wal_write_time,\n" +
+              "       case when t.timed then io.sync_time end as wal_sync_time,\n" +
+              "       greatest((x.j ->> 'stats_reset')::timestamptz, io.stats_reset) as stats_reset\n" +
+              "  from pg_catalog.pg_stat_wal w\n" +
+              " cross join lateral (select pg_catalog.to_jsonb(w) as j) x\n" +
+              " cross join lateral (select coalesce(pg_catalog.current_setting('track_wal_io_timing', true) = 'on', false) as timed) t\n" +
+              " cross join lateral (\n" +
+              "   select pg_catalog.sum((s.j ->> 'writes')::numeric)::int8 as writes,\n" +
+              "          pg_catalog.sum((s.j ->> 'fsyncs')::numeric)::int8 as syncs,\n" +
+              "          pg_catalog.sum((s.j ->> 'write_time')::float8) as write_time,\n" +
+              "          pg_catalog.sum((s.j ->> 'fsync_time')::float8) as sync_time,\n" +
+              "          pg_catalog.max((s.j ->> 'stats_reset')::timestamptz) as stats_reset\n" +
+              "     from (select pg_catalog.to_jsonb(i) as j\n" +
+              "             from pg_catalog.pg_stat_io i\n" +
+              "            where i.object = 'wal' and i.context = 'normal') s) io"
+            : "       (x.j ->> 'wal_write')::int8 as wal_write,\n" +
+              "       (x.j ->> 'wal_sync')::int8 as wal_sync,\n" +
+              "       case when t.timed then (x.j ->> 'wal_write_time')::float8 end as wal_write_time,\n" +
+              "       case when t.timed then (x.j ->> 'wal_sync_time')::float8 end as wal_sync_time,\n" +
+              "       (x.j ->> 'stats_reset')::timestamptz as stats_reset\n" +
+              "  from pg_catalog.pg_stat_wal w\n" +
+              " cross join lateral (select pg_catalog.to_jsonb(w) as j) x\n" +
+              " cross join lateral (select coalesce(pg_catalog.current_setting('track_wal_io_timing', true) = 'on', false) as timed) t"));
 
     /// <summary>
     /// The checkpoint counters: from <c>pg_stat_bgwriter</c> up to 16, and from <c>pg_stat_checkpointer</c> from 17 -

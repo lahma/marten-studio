@@ -143,6 +143,25 @@ public class DiagnosticsSnapshotBuilderTests
         wal.Reason.Should().BeNull();
         wal.MeasuredAt.Should().Be(ReplicationTestFacts.Now, "the Replication page's read time");
         (wal.Records, wal.FullPageImages, wal.Bytes, wal.StatsReset).Should().Be((1000L, 250L, 64_000_000L, (DateTimeOffset?) At.AddDays(-9)));
+        (wal.Writes, wal.Syncs, wal.WriteTimeMs, wal.SyncTimeMs).Should().Be((10L, 5L, (double?) null, (double?) null), "untimed: the times are null, not zero");
+    }
+
+    [Fact]
+    public void The_wal_writes_syncs_and_their_times_are_the_facts_whichever_view_they_came_from()
+    {
+        // The facts carry them alike for 14-17 (pg_stat_wal) and 18+ (pg_stat_io's WAL rows): the section cannot tell which.
+        PostgresWalSection timed = DiagnosticsSnapshotBuilder.Wal(ReplicationViewTests.Facts() with
+        {
+            Wal = ReplicationRead<WalStatistics>.Of(new WalStatistics(1000, 250, 64e6, 3, 2_001, 2_000, 14.6, 4_049.8, At.AddDays(-9))),
+        });
+        PostgresWalSection broken = DiagnosticsSnapshotBuilder.Wal(ReplicationViewTests.Facts() with
+        {
+            Wal = ReplicationRead<WalStatistics>.Of(new WalStatistics(1000, 250, 64e6, 3, 0, 0, double.NaN, double.PositiveInfinity, null)),
+        });
+
+        (timed.Writes, timed.Syncs, timed.WriteTimeMs, timed.SyncTimeMs).Should().Be((2_001L, 2_000L, (double?) 14.6, (double?) 4_049.8));
+        (broken.Writes, broken.Syncs).Should().Be((0L, 0L), "nothing written is a count of nought, not nothing");
+        (broken.WriteTimeMs, broken.SyncTimeMs).Should().Be(((double?) null, (double?) null), "a time that is not a number is null");
     }
 
     [Fact]
@@ -170,6 +189,7 @@ public class DiagnosticsSnapshotBuilderTests
         wal.Outcome.Should().Be(PostgresReadOutcome.NotApplicable);
         wal.Reason.Should().Be(ReplicationPlatform.Aurora);
         (wal.Records, wal.FullPageImages, wal.Bytes, wal.StatsReset).Should().Be(((long?) null, (long?) null, (long?) null, (DateTimeOffset?) null));
+        (wal.Writes, wal.Syncs, wal.WriteTimeMs, wal.SyncTimeMs).Should().Be(((long?) null, (long?) null, (double?) null, (double?) null));
     }
 
     [Fact]

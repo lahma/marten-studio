@@ -61,6 +61,66 @@ public class ReplicationPageTests
         context.Health.CachedReads.Should().ContainSingle().Which.Should().BeEquivalentTo(["R01", "R02", "R03", "R04"]);
     }
 
+    /// <summary>The value beside a term of the WAL section's definition list.</summary>
+    private static string WalFact(IRenderedComponent<ReplicationPage> page, string term)
+    {
+        IElement section = page.Find("#ms-repl-wal").ParentElement!;
+        IElement dt = section.QuerySelectorAll("dt").Single(x => x.TextContent == term);
+
+        return dt.NextElementSibling!.TextContent.Trim();
+    }
+
+    [Fact]
+    public async Task The_wal_section_says_the_writes_and_syncs_since_the_reset_and_what_they_took_when_the_server_timed_them()
+    {
+        ReplicationFacts facts = ReplicationViewTests.Facts() with
+        {
+            Wal = ReplicationRead<WalStatistics>.Of(new WalStatistics(1000, 250, 64e6, 0, 12_345, 678, 14.6, 4_049.8, ReplicationTestFacts.Now.AddDays(-3))),
+        };
+
+        (PostgresStudioComponentContext context, _) = await ContextAsync(
+            ReplicationService.Build(facts, true, null, HealthHistoryView.Empty, PostgresStudioText.Instance));
+        await using PostgresStudioComponentContext owned = context;
+
+        var page = context.Render<ReplicationPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
+
+        string line = WalFact(page, "Writes and syncs");
+        line.Should().StartWith("12,345 writes, 678 syncs since ").And.EndWith("; writing took 15 ms, syncing 4 s");
+        WalFact(page, "Statistics since").Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task Untimed_writes_and_syncs_are_counted_and_no_time_is_made_up()
+    {
+        // ReplicationViewTests.Facts(): 10 writes, 5 syncs, no timing and no reset time.
+        (PostgresStudioComponentContext context, _) = await ContextAsync(View(names: true));
+        await using PostgresStudioComponentContext owned = context;
+
+        var page = context.Render<ReplicationPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
+
+        WalFact(page, "Writes and syncs").Should().Be("10 writes, 5 syncs");
+    }
+
+    [Fact]
+    public async Task A_server_with_no_wal_counter_rows_draws_no_writes_and_syncs_line()
+    {
+        ReplicationFacts facts = ReplicationViewTests.Facts() with
+        {
+            Wal = ReplicationRead<WalStatistics>.Of(new WalStatistics(1000, 250, 64e6, 0, null, null, null, null, null)),
+        };
+
+        (PostgresStudioComponentContext context, _) = await ContextAsync(
+            ReplicationService.Build(facts, true, null, HealthHistoryView.Empty, PostgresStudioText.Instance));
+        await using PostgresStudioComponentContext owned = context;
+
+        var page = context.Render<ReplicationPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-repl-section").Should().HaveCount(7));
+
+        page.Find("#ms-repl-wal").ParentElement!.QuerySelectorAll("dt").Select(static x => x.TextContent).Should().NotContain("Writes and syncs");
+    }
+
     [Fact]
     public async Task With_pg_read_all_stats_a_standbys_lag_is_drawn_and_its_name_through_the_activity_gate()
     {
