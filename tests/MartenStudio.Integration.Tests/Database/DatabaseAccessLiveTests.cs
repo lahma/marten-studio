@@ -88,6 +88,58 @@ public class DatabaseAccessLiveTests(DatabaseAccessLiveTests.Fixture fixture) : 
     }
 
     /// <summary>
+    /// H1's R4 (H1b): the value of Marten's own sequence is the Schema screen's structure, read with the visitor's own
+    /// scope, tenant and all. When <c>SqlConsoleRole</c> may not read it, the refusal named the role - and the name of the
+    /// role the studio reads as is Database-gate information (D29), which a visitor the store policy passes only for its
+    /// tenant does not pass. So that visitor is told the role cannot read it, not which role; one past the gate - the store
+    /// policy for the database as a whole - is told its name, as before.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_Marten_sequence_the_SqlConsoleRole_cannot_read_names_the_role_only_past_the_database_gate()
+    {
+        var acme = new StudioScope("default", string.Empty, "acme");
+        var tenantOnly = new ResourcePolicy(static resource => resource.TenantId == "acme");
+
+        await using (BrowserHost host = fixture.Host(
+                         options =>
+                         {
+                             options.StoreAuthorizationPolicy = StorePolicy;
+                             options.WriteAuthorizationPolicy = WritePolicy;
+                             options.KnownTenantIds.Add("acme");
+                             options.SqlConsoleRole = fixture.Role;
+                         },
+                         tenantOnly))
+        {
+            DatabaseSequenceValue refused = await host.ObjectsAsync(x => x.GetSequenceValueAsync(acme, fixture.EventSchema, "mt_events_sequence", Token));
+
+            refused.Refusal.Should().Be(DatabaseRefusal.NoPrivilege, refused.Reason);
+            refused.Reason.Should().Be(DatabaseObjectService.SequenceNoPrivilegeUnnamed).And.NotContain(fixture.Role);
+            tenantOnly.Calls.Should().Contain(static x => x.Policy == StorePolicy && x.Resource.TenantId == null,
+                "the Database gate was asked: the store policy, about the database as a whole");
+        }
+
+        var everyone = new ResourcePolicy(static _ => true);
+
+        await using (BrowserHost host = fixture.Host(
+                         options =>
+                         {
+                             options.StoreAuthorizationPolicy = StorePolicy;
+                             options.KnownTenantIds.Add("acme");
+                             options.SqlConsoleRole = fixture.Role;
+                         },
+                         everyone))
+        {
+            DatabaseSequenceValue named = await host.ObjectsAsync(x => x.GetSequenceValueAsync(acme, fixture.EventSchema, "mt_events_sequence", Token));
+
+            named.Refusal.Should().Be(DatabaseRefusal.NoPrivilege, named.Reason);
+            named.Reason.Should().Contain(fixture.Role).And.Contain("SqlConsoleRole", "past the gate, the role is named and so is the option");
+
+            DatabaseSequenceValue whole = await host.ObjectsAsync(x => x.GetSequenceValueAsync(BrowserHost.Scope, fixture.EventSchema, "mt_events_sequence", Token));
+            whole.Reason.Should().Be(named.Reason, "a scope with no tenant has passed the gate already, by resolving");
+        }
+    }
+
+    /// <summary>
     /// Acceptance 7, the last case: a handler that confines a visitor to their own tenant refuses
     /// <c>TenantId == null</c>, so it refuses the database browser's reads - and the refusal is in the
     /// audit ring, naming the policy that said no: the store policy, asked first (F10). The store's own

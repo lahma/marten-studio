@@ -150,6 +150,38 @@ public sealed class PostgresSeamTests : IDisposable
         IStudioTableSet set = PostgresHealthTableSource.Build([Row("public", "a", total: 3412), Row("public", "b", total: 3412)], ["public"], 2);
 
         set.Coverage.Should().Be("the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)");
+        set.OwnSchemasCoverage.Should().Be(set.Coverage, "every table counted is in the data source's own schemas");
+    }
+
+    /// <summary>
+    /// G1M F6, H1: with <c>"*"</c> the count takes in schemas only it admits, which the database browser shows only past its
+    /// gate. A visitor short of it reads the sentence counted over the data source's own schemas alone - the ones
+    /// <c>BrowsableSchemas</c> names exactly - which says nothing of what the others hold.
+    /// </summary>
+    [Fact]
+    public void A_capped_set_over_star_says_to_a_visitor_kept_out_only_what_the_own_schemas_hold()
+    {
+        IStudioTableSet set = PostgresHealthTableSource.Build(
+            [
+                Row("legacy", "ledger", total: 3412) with { OwnTotal = 10 },
+                Row("public", "orders", total: 3412) with { OwnTotal = 10 },
+            ],
+            ["public"],
+            2);
+
+        set.Coverage.Should().Be("the 2 largest of 3,412 tables by estimated size (a sweep judges at most 2)");
+        set.OwnSchemasCoverage.Should().Be(
+            "the 1 largest of 10 tables in the data source's own schemas by estimated size",
+            "the cap is left out (H1b): two judged in all, less the one of the own schemas, is the one judged in legacy");
+
+        IStudioTableSet whole = PostgresHealthTableSource.Build(
+            [Row("legacy", "ledger", total: 2) with { OwnTotal = 1 }, Row("public", "orders", total: 2) with { OwnTotal = 1 }], ["public"], 2);
+        whole.Coverage.Should().BeNull("every table was listed");
+        whole.OwnSchemasCoverage.Should().BeNull("and every one of the own schemas' too");
+
+        HealthTableQueries.RelationalTables(["public"], everything: true, 2)
+            .Parameters.Single(static x => x.ParameterName == "own").Value.Should().BeEquivalentTo((string[]) ["public"],
+                "the schemas named exactly are the data source's own");
     }
 
     [Fact]
@@ -210,7 +242,7 @@ public sealed class PostgresSeamTests : IDisposable
         HealthQuery query = HealthTableQueries.RelationalTables(["public", "quartz"], everything: true, 2000);
 
         query.Sql.Should().NotContain("public").And.NotContain("pg_relation_size").And.Contain("limit @cap");
-        query.Parameters.Select(static x => x.ParameterName).Should().BeEquivalentTo(["names", "everything", "cap", "system"]);
+        query.Parameters.Select(static x => x.ParameterName).Should().BeEquivalentTo(["names", "everything", "cap", "system", "own"]);
         HealthTableQueries.SystemSchemasBeyondPrefix.Should().OnlyContain(static x => BrowsableSchemaMatcher.IsSystemSchema(x));
     }
 

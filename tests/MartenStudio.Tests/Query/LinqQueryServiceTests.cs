@@ -194,6 +194,31 @@ public class LinqQueryServiceTests
         status.Types.Single(static x => x.Alias == "linqorder").Members.Should().Contain("Name");
     }
 
+    /// <summary>
+    /// H1b (D29): the page's hints - may this visitor run, may it see the plan - are asked what the run and the plan will be
+    /// asked, by the registered key and the database's own identity. A policy that refuses LINQ mode for the store
+    /// <c>default</c> by that name was asked about <c>DEFAULT</c> and an empty <c>?db=</c> instead, said yes, and the page
+    /// offered a Run button the run then refused.
+    /// </summary>
+    [DynamicLinqFact]
+    public async Task The_pages_hints_are_asked_by_the_registered_key_and_the_databases_identity()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        harness.Policies.Allow(static resource =>
+            !(resource.Capability == nameof(StudioCapability.RunLinqQueries) && resource.StoreName == "default"));
+
+        LinqModeStatus status = await harness.Linq.DescribeAsync(new StudioScope("DEFAULT", string.Empty, null), Token);
+
+        status.IsAvailable.Should().BeTrue("the store policy passes the scope, both ways it is spelt");
+        status.MayRun.Should().BeFalse("the run is asked about the store by its registered key, which the policy refuses");
+        status.MayExplain.Should().BeFalse();
+
+        string identity = harness.Identity;
+        harness.Policies.Calls.Where(static x => x.Resource.Capability == nameof(StudioCapability.RunLinqQueries)).Should().NotBeEmpty()
+            .And.OnlyContain(x => x.Resource.StoreName == "default" && x.Resource.DatabaseIdentifier == identity,
+                "never the address's DEFAULT or its empty ?db=");
+    }
+
     // ------------------------------------------------------------------------------------------------
     // The harness
     // ------------------------------------------------------------------------------------------------
@@ -215,6 +240,9 @@ public class LinqQueryServiceTests
         public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
 
         public ILinqQueryService Linq => scope.ServiceProvider.GetRequiredService<ILinqQueryService>();
+
+        /// <summary>The store's one database's own identity, which an empty <c>?db=</c> resolves to.</summary>
+        public string Identity => provider.GetRequiredService<IDocumentStore>().Storage.Database.Id.Identity;
 
         public static Harness Create(Action<MartenStudioOptions> configure)
         {

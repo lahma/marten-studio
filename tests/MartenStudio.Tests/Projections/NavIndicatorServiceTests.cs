@@ -286,6 +286,141 @@ public class NavIndicatorServiceTests
     }
 
     // -----------------------------------------------------------------------------------------------
+    // H1b (D29): the question and the entry are both the registered names', never the address's spelling.
+    // -----------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Two circuits on one database, one of them spelling it <c>DEFAULT</c> / <c>LOCALHOST.MARTEN</c>, share one entry - keyed
+    /// on the registered key and the database's identity, the shape a projection write invalidates (<c>Key|Identity|</c>), so
+    /// the invalidation reaches it whoever spelt it how. Keyed by the spelling, they were two entries and two pairs of reads,
+    /// and the write's invalidation never reached the second.
+    /// </summary>
+    [Fact]
+    public async Task Two_spellings_of_one_database_share_one_entry_which_a_write_by_the_identity_invalidates()
+    {
+        Shared shared = new();
+        Circuit canonical = await shared.CircuitAsync("default", "localhost.marten", static _ => true);
+        Circuit spelled = await shared.CircuitAsync("DEFAULT", "LOCALHOST.MARTEN", static _ => true);
+        spelled.State.ActiveScope.Should().Be(new StudioScope("DEFAULT", "LOCALHOST.MARTEN", null), "the premise: the address's own spelling");
+
+        DeadLetterBadge(await canonical.Service.ReadAsync(Token)).Should().Be("3");
+        DeadLetterBadge(await spelled.Service.ReadAsync(Token)).Should().Be("3");
+
+        shared.Events.DeadLetterCountReads.Should().Be(1, "one database, one entry");
+        shared.Cache.Count.Should().Be(1);
+        shared.Cache.Holds(NavIndicatorService.CacheKey(new StudioScope("default", "localhost.marten", null))).Should().BeTrue();
+
+        // What ProjectionDataService invalidates after a write: the registered key and the identity, every tenant's.
+        shared.Cache.InvalidatePrefix("default|localhost.marten|");
+        shared.Cache.Count.Should().Be(0, "the write's invalidation reaches the entry, however the visitor spelt the database");
+
+        await spelled.Service.ReadAsync(Token);
+        shared.Events.DeadLetterCountReads.Should().Be(2, "read again after the write");
+    }
+
+    /// <summary>
+    /// A deny-list policy keyed on the registered names (<c>StoreName == "default"</c>) passes the spelling <c>DEFAULT</c>. A
+    /// visitor it allows reads the badges into the cache; one it refuses by those names, spelling the database the same way,
+    /// must be handed nothing - not the first visitor's cached answer. Keyed and asked by the spelling, the second visitor's
+    /// question passed and the cache answered it.
+    /// </summary>
+    [Fact]
+    public async Task A_visitor_refused_by_the_registered_names_is_handed_no_cached_answer()
+    {
+        Shared shared = new();
+        Circuit allowed = await shared.CircuitAsync("DEFAULT", "LOCALHOST.MARTEN", static _ => true);
+        Circuit refused = await shared.CircuitAsync("DEFAULT", "LOCALHOST.MARTEN", static resource => resource.StoreName != "default");
+
+        DeadLetterBadge(await allowed.Service.ReadAsync(Token)).Should().Be("3");
+
+        NavIndicators indicators = await refused.Service.ReadAsync(Token);
+
+        indicators.Should().Be(NavIndicators.None, "the cached badges are the allowed visitor's, and this one may not see the database");
+        shared.Events.DeadLetterCountReads.Should().Be(1, "the refused visitor's read ran nothing either");
+        refused.Policies.Calls.Should().Contain(static x => x.Resource.StoreName == "default" && x.Resource.DatabaseIdentifier == "localhost.marten",
+            "asked again by the registered key and the identity");
+    }
+
+    /// <summary>
+    /// Which registered names a spelling stands for is found by resolving, which enumerates the source's databases - on a
+    /// master-table or sharded tenancy, a read of its lookup table. So it is remembered for a minute per circuit, and read again
+    /// once the minute is up or the scope selector's refresh moves the provider's generation; the policy is asked on every poll.
+    /// </summary>
+    [Fact]
+    public async Task The_names_are_resolved_once_a_minute_and_the_policy_asked_on_every_poll()
+    {
+        Harness harness = await Harness.ReadyAsync();
+        harness.WithPolicy();
+        harness.Authorization.AllowStores("default");
+
+        for (int poll = 0; poll < 3; poll++)
+        {
+            await harness.Service.ReadAsync(Token);
+        }
+
+        harness.Sources.DatabaseListings.Should().Be(1, "three polls, one enumeration");
+        harness.Authorization.Calls.Should().HaveCount(3, "the question is this visitor's, asked every poll");
+
+        harness.Time.Advance(NavIndicatorService.NamingTimeToLive);
+        await harness.Service.ReadAsync(Token);
+        harness.Sources.DatabaseListings.Should().Be(2, "a minute on, the names are read again");
+
+        harness.Sources.Invalidate();
+        await harness.Service.ReadAsync(Token);
+        harness.Sources.DatabaseListings.Should().Be(3, "and after the scope selector's refresh");
+
+        harness.Authorization.DenyEverything();
+        (await harness.Service.ReadAsync(Token)).Should().Be(NavIndicators.None, "a remembered name is no remembered answer");
+    }
+
+    /// <summary>The contributor's fakes and the process-wide cache two circuits share.</summary>
+    private sealed class Shared
+    {
+        public FakeEventDataService Events { get; } = new() { DeadLetterCount = 3 };
+
+        public FakeProjectionDataService Projections { get; } = new();
+
+        public StudioSnapshotCache Cache { get; } = new();
+
+        /// <summary>
+        /// A circuit whose scope selector lists the store and database as <paramref name="storeKey" /> and
+        /// <paramref name="databaseId" /> spell them, over sources registered as <c>default</c> / <c>localhost.marten</c>.
+        /// </summary>
+        public async Task<Circuit> CircuitAsync(string storeKey, string databaseId, Func<MartenStoreResource, bool> policy)
+        {
+            FakeStudioScopeCatalog catalog = new();
+            catalog.WithStore(storeKey, "Default", databaseIdentities: databaseId);
+
+            StudioState state = new(catalog, NullLogger<StudioState>.Instance, new HttpContextAccessor());
+            await state.EnsureInitializedAsync(TestContext.Current.CancellationToken);
+
+            TestAuthenticationStateProvider visitor = new();
+            visitor.SignIn("operator");
+
+            TestStoreAuthorizationService policies = new();
+            policies.Allow(policy);
+
+            IOptions<MartenStudioOptions> options = Options.Create(new MartenStudioOptions { StoreAuthorizationPolicy = Harness.PolicyName });
+            StudioAuthorization authorization = MartenSpine.Authorization(options, policies, visitor);
+            FakeStudioSourceProvider sources = new FakeStudioSourceProvider().WithSource("default", "localhost.marten");
+
+            NavIndicatorService service = new(
+                state,
+                authorization,
+                sources.Resolver(authorization),
+                sources,
+                [new MartenNavIndicatorContributor(Events, Projections)],
+                Cache,
+                NullLogger<NavIndicatorService>.Instance);
+
+            return new Circuit(state, policies, service);
+        }
+    }
+
+    /// <summary>One visitor's circuit: its scope, its policy engine, and its navigation service.</summary>
+    private sealed record Circuit(StudioState State, TestStoreAuthorizationService Policies, NavIndicatorService Service);
+
+    // -----------------------------------------------------------------------------------------------
     // PS-1d: the shared service draws what its contributors read, and nothing of its own beyond health.
     // -----------------------------------------------------------------------------------------------
 
@@ -388,13 +523,26 @@ public class NavIndicatorServiceTests
         }
 
         /// <summary>The same service - same circuit, policy and cache - over other contributors.</summary>
-        public NavIndicatorService With(params PostgresStudio.Services.Sources.INavIndicatorContributor[] contributors) =>
-            new(
+        public NavIndicatorService With(params PostgresStudio.Services.Sources.INavIndicatorContributor[] contributors)
+        {
+            StudioAuthorization authorization = MartenSpine.Authorization(Options.Create(options), Authorization, AuthenticationState);
+
+            return new(
                 State,
-                MartenSpine.Authorization(Options.Create(options), Authorization, AuthenticationState),
+                authorization,
+                Sources.Resolver(authorization),
+                Sources,
                 contributors,
                 Cache,
-                NullLogger<NavIndicatorService>.Instance);
+                NullLogger<NavIndicatorService>.Instance,
+                timeProvider: Time);
+        }
+
+        /// <summary>The sources the circuit resolves against: the store as it is registered.</summary>
+        public FakeStudioSourceProvider Sources { get; } = new FakeStudioSourceProvider().WithSource("default", "localhost.marten");
+
+        /// <summary>The circuit's clock.</summary>
+        public FakeTimeProvider Time { get; } = new(new DateTimeOffset(2026, 10, 27, 9, 0, 0, TimeSpan.Zero));
 
         public FakeStudioScopeCatalog Catalog { get; }
 

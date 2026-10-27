@@ -1,3 +1,36 @@
+# 0.5.1
+
+0.5.1 is a security and hardening patch: the leftovers of 0.5's two security reviews, and what a review of those fixes
+found. Nothing is added and no option changes; upgrade both packages together, as with 0.5.0.
+
+- A value a visitor typed - a tenant, an alias, a projection or shard name, a page cursor, a document or stream id - and
+  a host database source's name and error words now reach a refusal message escaped and bounded, as they reach the
+  log, on the database browser and on Relationships alike. The daemon-control (9209), rebuild (9207, 9208) and LINQ
+  (9263) events write their target, projection, store and alias escaped and bounded too.
+- Every policy question asked after a scope resolves now names the registered store key and the database's own
+  identity, never the address's spelling: the database browser's gate, the question that lifts Mode A's nested-read
+  rules, LINQ mode's plan and the page's Run and plan hints, the navigation badges, and the naming of another store
+  that could not be read. A handler that compares resource names exactly is no longer passed by `?store=DEFAULT` or an
+  empty `?db=`. The navigation badges' cache is keyed on those names too, so a projection write's invalidation reaches
+  it however the database was spelt.
+- A stream compaction cancelled from inside Marten after its save began is audited as a failure that says so, instead
+  of leaving no audit entry.
+- The database browser labels a scope the store policy refuses as `ScopeRefused`, and one that names nothing as
+  `NotFound`, where both read as unavailable. A refused scope reads the same whether or not the store or database
+  exists.
+- The Health page's "Judged: …" coverage, the Storage page's Tables tile and the Maintenance page's "Judged: …" line and
+  vacuum-horizon note count tables in schemas only `BrowsableSchemas` admits only for a visitor the database browser
+  admits to them; anyone else is told the count for the source's own schemas, without the sweep's cap, whose
+  arithmetic would give the other count back. "Another registered Marten store's tables are not judged here" is no
+  longer said because of a hidden type's table, `mt_hilo`, or a table the swept store declares too.
+- Relationships no longer counts a declared key into a hidden type, or into Marten's bookkeeping, in a schema the
+  visitor is not shown. A database failure while resolving a scope is shown by its SQLSTATE only, on the database
+  browser and on Relationships, instead of Postgres' words.
+- The database browser names `SqlConsoleRole` in a sequence's "neither SELECT nor USAGE" refusal only to a visitor the
+  store policy passes for the database as a whole; a visitor passed only for a tenant is told that the role the studio
+  reads as may not read it.
+- The latest-tested Marten is 9.54.2 (from 9.54.1); the floor stays at 9.39.0.
+
 # 0.5.0
 
 0.5 makes the studio two packages, and adds the health and diagnostics work of issue #8. Postgres Studio

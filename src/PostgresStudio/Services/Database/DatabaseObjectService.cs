@@ -1,3 +1,5 @@
+using Npgsql;
+
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -66,10 +68,10 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        (ResolvedSource? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
+        (ResolvedSource? resolved, DatabaseRefusal refusal, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
         if (resolved is null)
         {
-            return DatabaseBrowserOverview.Unavailable(refused!);
+            return DatabaseBrowserOverview.Unavailable(refused!, refusal);
         }
 
         DatabaseGate? known = null;
@@ -434,9 +436,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             {
                 return Refuse(
                     DatabaseRefusal.NoPrivilege,
-                    settings.SqlConsoleRole is { } role
-                        ? "The role '" + role + "' (" + settings.OptionName("SqlConsoleRole") + ") has neither SELECT nor USAGE on it."
-                        : "The store's Postgres role has neither SELECT nor USAGE on it.",
+                    await SequenceNoPrivilegeAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false),
                     audited: false);
             }
 
@@ -459,6 +459,35 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             return Refuse(DatabaseRefusal.Unavailable, DatabaseAccess.CatalogFailure(exception, known), audited: false);
         }
+    }
+
+    /// <summary>What a sequence value refused for the reading role's want of a privilege says, when the role is not named.</summary>
+    internal const string SequenceNoPrivilegeUnnamed = "The role the studio reads as has neither SELECT nor USAGE on it.";
+
+    /// <summary>
+    /// Why the reading role may not read a sequence's value - naming <c>SqlConsoleRole</c> only to a visitor past the Database
+    /// gate (H1's R4, H1b).
+    /// </summary>
+    /// <remarks>
+    /// The name of the role the studio reads as is Database-gate information (D29): the store policy asked about the database
+    /// as a whole, with no tenant. The value of Marten's own sequence in the store's own schemas is the Schema screen's
+    /// structure, read with the visitor's own scope, tenant and all - so a visitor the store policy passes only for a tenant
+    /// reached this sentence, and was told the role. A scope with no tenant has passed that gate already: the resolver asked
+    /// it, by the spelling and again by the registered names, and so does every <c>BrowseDatabase</c> read.
+    /// </remarks>
+    private async Task<string> SequenceNoPrivilegeAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken)
+    {
+        if (settings.SqlConsoleRole is not { } role)
+        {
+            return "The store's Postgres role has neither SELECT nor USAGE on it.";
+        }
+
+        bool named = resolved.Scope.TenantId is null
+            || await access.PassesDatabaseGateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+
+        return named
+            ? "The role '" + role + "' (" + settings.OptionName("SqlConsoleRole") + ") has neither SELECT nor USAGE on it."
+            : SequenceNoPrivilegeUnnamed;
     }
 
     private async Task<DatabaseObjectDefinition> ReadDefinitionAsync(
@@ -673,17 +702,21 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         if (!store.Found)
         {
-            return Route.Refused(DatabaseRefusal.Unavailable, store.Refused ?? "The store could not be found.");
+            // Labelled as the lookup answered (H1): the store policy's refusal of this scope, a key nothing is registered
+            // under, or a source that will not build - each with the sentence that already says which.
+            return Route.Refused(
+                store.RefusedAs == DatabaseRefusal.None ? DatabaseRefusal.Unavailable : store.RefusedAs,
+                store.Refused ?? "The store could not be found.");
         }
 
         if (!store.Declarations.Succeeded)
         {
-            // Another store that will not build is named only to a visitor its store policy passes (D27). No
-            // database is resolved yet, so that policy is asked with the visitor's own database id, as the
-            // Schema screen's classification asks it.
+            // Another store that will not build is named only to a visitor its store policy passes (D27) - asked about
+            // this database by its own identity, never the visitor's spelling of it (D29, H1). No database is resolved
+            // yet, so the resolver is asked for it, with no tenant; a scope that will not resolve names no other store.
             return Route.Refused(
                 DatabaseRefusal.Unavailable,
-                await access.DescribeFailureAsync(store.Declarations, scope.DatabaseId, cancellationToken).ConfigureAwait(false));
+                await DescribeFailureAsync(store, scope, cancellationToken).ConfigureAwait(false));
         }
 
         RouteKind kind = decide(store.Declarations);
@@ -712,10 +745,10 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             // 2a. The store's own structure: the visitor's own scope, tenant and all, as every other screen
             //     resolves it. No capability is needed, so nothing is refused here that a capability would.
-            (ResolvedSource? resolved, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
+            (ResolvedSource? resolved, DatabaseRefusal refusal, string? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
 
             return resolved is null
-                ? Route.Refused(DatabaseRefusal.Unavailable, refused!)
+                ? Route.Refused(refusal, refused!)
                 : new Route(resolved, DatabaseRefusal.None, null);
         }
 
@@ -793,22 +826,102 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     };
 
     /// <summary>
-    /// The visitor's scope, resolved as a read - or the resolver's own sentence, which says the same thing
-    /// for a scope that is refused and one that does not exist.
+    /// The visitor's scope, resolved as a read - or the resolver's own sentence, and which answer it is (H1).
     /// </summary>
-    private async Task<(ResolvedSource? Resolved, string? Refused)> ResolveAsync(
+    /// <remarks>
+    /// <para>
+    /// <b>Labelled honestly, enumerating nothing.</b> A scope the store policy refuses is
+    /// <see cref="DatabaseRefusal.ScopeRefused" /> - the resolver asks the policy before it looks anything up, so that
+    /// label and its sentence are the same whether or not the store, the database or the tenant exist. A scope the policy
+    /// passed that names nothing is <see cref="DatabaseRefusal.NotFound" />, and a source that will not build
+    /// <see cref="DatabaseRefusal.Unavailable" />: the resolver's sentence for each already says which, so the label tells
+    /// the visitor nothing the sentence does not. Before, all three were "unavailable", and a store policy's refusal read
+    /// as a fault.
+    /// </para>
+    /// <para>
+    /// <b>Nothing else is thrown at the page either.</b> Resolving can query the database - a dynamic tenancy's list of
+    /// databases, tenant discovery - and a failure there carries Postgres' own words, which may name a schema this
+    /// visitor's gate withholds; with no gate read yet there is nothing to mask them with, so they are withheld and only
+    /// the SQLSTATE is said (D27's rule for the Schema screen).
+    /// </para>
+    /// </remarks>
+    private async Task<(ResolvedSource? Resolved, DatabaseRefusal Refusal, string? Refused)> ResolveAsync(
         StudioScope scope,
         CancellationToken cancellationToken)
     {
         try
         {
-            return (await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false), null);
+            return (await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false), DatabaseRefusal.None, null);
         }
-        catch (Exception exception) when (exception is StudioNotAuthorizedException or KeyNotFoundException
-            or StudioStoreUnavailableException)
+        catch (StudioNotAuthorizedException exception)
         {
-            return (null, exception.Message);
+            return (null, DatabaseRefusal.ScopeRefused, exception.Message);
         }
+        catch (KeyNotFoundException exception)
+        {
+            return (null, DatabaseRefusal.NotFound, exception.Message);
+        }
+        catch (StudioStoreUnavailableException exception)
+        {
+            return (null, DatabaseRefusal.Unavailable, exception.Message);
+        }
+        catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
+        {
+            return (null, DatabaseRefusal.Unavailable, ScopeReadFailure(exception));
+        }
+    }
+
+    /// <summary>
+    /// What a page is told when resolving the scope itself failed in the database: the SQLSTATE, never Postgres' words -
+    /// no gate has been read to mask a schema they name.
+    /// </summary>
+    /// <remarks>
+    /// Any other failure's words are said, escaped and bounded (<see cref="StudioLogValue.CapText" />, H1b): an
+    /// <see cref="InvalidOperationException" /> or a <see cref="TimeoutException" /> here can be a host's - its
+    /// <c>IPostgresDatabaseSource.ListAsync</c> threw it - and so carry anything, a line break or a megabyte included, onto
+    /// the page and into whatever records the refusal.
+    /// </remarks>
+    internal static string ScopeReadFailure(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception is PostgresException postgres
+            ? "The scope could not be resolved: Postgres refused a read (" + postgres.SqlState + "). Its own words are withheld: "
+              + "the schemas they may name could not be checked for you."
+            : exception is NpgsqlException
+                ? "The scope could not be resolved: the database could not be reached."
+                : "The scope could not be resolved: " + StudioLogValue.CapText(exception.Message);
+    }
+
+    /// <summary>
+    /// <see cref="DatabaseAccess.DescribeFailureAsync" /> for a store whose declarations could not all be read, before the
+    /// page has resolved a database: another store is named only to a visitor that store's policy passes for this database,
+    /// asked by this database's own identity (D29) and never the visitor's spelling of it. The identity is the resolver's -
+    /// the scope resolved with no tenant, so no tenant is discovered, and through the one place a source's databases are
+    /// listed - and a scope that will not resolve so names no other store (fail closed).
+    /// </summary>
+    private async Task<string> DescribeFailureAsync(DatabaseStoreLookup store, StudioScope scope, CancellationToken cancellationToken)
+    {
+        DatabaseDeclarations declared = store.Declarations!;
+        string unnamed = declared.Failure ?? "The database browser is unavailable.";
+
+        if (declared.FailedStoreKey is null || declared.NamedFailure is null)
+        {
+            return unnamed;
+        }
+
+        ResolvedSource resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(scope with { TenantId = null }, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return unnamed;
+        }
+
+        return await access.DescribeFailureAsync(declared, resolved.Target.Identity, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Which way a read goes, decided from the declarations alone.</summary>

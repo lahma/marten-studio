@@ -49,14 +49,20 @@ internal sealed record DatabaseDeclarations(
 /// <param name="Source">The built source.</param>
 /// <param name="Declarations">Every registered source's declarations, read with this one as the resolved source.</param>
 /// <param name="Refused">
-/// Why there is none: the same sentence <see cref="StudioSourceResolver.ResolveAsync" /> would have thrown,
-/// which says the same thing for a source that is refused and one that does not exist.
+/// Why there is none: the same sentence <see cref="StudioSourceResolver.ResolveAsync" /> would have thrown - for a source
+/// the store policy refuses, the same whether or not it exists, because the policy is asked first.
+/// </param>
+/// <param name="RefusedAs">
+/// Which answer <paramref name="Refused" /> is (H1): <see cref="DatabaseRefusal.ScopeRefused" /> for the store policy,
+/// <see cref="DatabaseRefusal.NotFound" /> for a key nothing is registered under, <see cref="DatabaseRefusal.Unavailable" />
+/// for a source that will not build. Taken from the same answer as the sentence, so it says nothing the sentence does not.
 /// </param>
 internal sealed record DatabaseStoreLookup(
     StudioSourceRegistration? Registration,
     IStudioSource? Source,
     DatabaseDeclarations? Declarations,
-    string? Refused)
+    string? Refused,
+    DatabaseRefusal RefusedAs = DatabaseRefusal.None)
 {
     /// <summary>Whether the source was found.</summary>
     [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(Registration), nameof(Source), nameof(Declarations))]
@@ -280,17 +286,17 @@ internal sealed class DatabaseAccess
     /// </summary>
     /// <remarks>
     /// The store policy is asked about the visitor's own scope before anything is looked up, exactly as
-    /// <see cref="StudioSourceResolver.ResolveAsync" /> asks it, so a store the visitor may not see and one
-    /// that does not exist answer with the same sentence. That is an in-process question; tenant discovery,
-    /// which can query the database, is never run here.
+    /// <see cref="StudioSourceResolver.ResolveAsync" /> asks it, so a store the visitor may not see answers with the
+    /// same sentence, and the same <see cref="DatabaseRefusal.ScopeRefused" /> label, whether or not it exists. That is an
+    /// in-process question; tenant discovery, which can query the database, is never run here.
     /// </remarks>
     public Task<DatabaseStoreLookup> FindStoreAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         FindStoreAsync(scope, null, null, cancellationToken);
 
     /// <summary>
     /// <see cref="FindStoreAsync(StudioScope, CancellationToken)" />, with the store policy's refusal written
-    /// to the audit ring (and event 9203) under <paramref name="action" /> and <paramref name="target" /> -
-    /// the refusal is the same sentence a missing store gets, and the trail is where the difference is kept.
+    /// to the audit ring (and event 9203) under <paramref name="action" /> and <paramref name="target" /> - the
+    /// refusal reads the same whether or not the store exists, and the trail is where who asked for what is kept.
     /// </summary>
     /// <remarks>
     /// The entry is recorded under <c>BrowseDatabase</c>, as every other refusal of a browser read is: its
@@ -318,14 +324,18 @@ internal sealed class DatabaseAccess
                 audit.RecordScopeDenied(scope, StorePolicyName(settings), action, target ?? string.Empty, StudioCapability.BrowseDatabase);
             }
 
-            return new DatabaseStoreLookup(null, null, null, new StudioNotAuthorizedException(scope).Message);
+            // Labelled as what it is - the store policy's refusal of this scope - and still before anything is looked up,
+            // so a store or database the visitor may not see gets this label whether or not it exists (H1).
+            return new DatabaseStoreLookup(null, null, null, new StudioNotAuthorizedException(scope).Message, DatabaseRefusal.ScopeRefused);
         }
 
         StudioSourceRegistration? registration = sources.Find(scope.StoreKey);
 
         if (registration is null)
         {
-            return new DatabaseStoreLookup(null, null, null, $"No {descriptor.SourceNoun} is registered under '{scope.StoreKey}'.");
+            // The resolver's own sentence, the visitor's spelling escaped and bounded as it escapes it (H1).
+            return new DatabaseStoreLookup(
+                null, null, null, $"No {descriptor.SourceNoun} is registered under '{StudioLogValue.Cap(scope.StoreKey)}'.", DatabaseRefusal.NotFound);
         }
 
         StoreAvailability availability = sources.TryResolve(registration, out IStudioSource? source);
@@ -333,7 +343,11 @@ internal sealed class DatabaseAccess
         if (!availability.IsAvailable || source is null)
         {
             return new DatabaseStoreLookup(
-                null, null, null, new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason", descriptor.SourceNoun).Message);
+                null,
+                null,
+                null,
+                new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason", descriptor.SourceNoun).Message,
+                DatabaseRefusal.Unavailable);
         }
 
         // The declarations of the source as found, not of a database of it: nothing about its databases or tenants
@@ -389,6 +403,23 @@ internal sealed class DatabaseAccess
     }
 
     /// <summary>
+    /// Whether this visitor passes D29's Database gate for the database <paramref name="resolved" /> names: the store policy,
+    /// asked about the database as a whole - no tenant - by the registered key and the database's own identity. What a name
+    /// only that gate shows (the role the studio reads as, say) is shown behind.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="resolved">What it resolved to.</param>
+    /// <param name="cancellationToken">Cancels the question.</param>
+    public async Task<bool> PassesDatabaseGateAsync(StudioScope scope, ResolvedSource resolved, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(resolved);
+
+        StudioScope whole = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target) with { TenantId = null };
+        return await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// The whole gate for a resolved scope: declarations (fail closed), capability, policy, every other
     /// registered source's policies (<see cref="IDatabaseDeclarationsSource.OtherSourcesAsync" />), and the
     /// database's live schema list, which <c>"*"</c> and the withheld count need.
@@ -411,7 +442,13 @@ internal sealed class DatabaseAccess
                 await DescribeFailureAsync(declared, resolved.Target.Identity, cancellationToken).ConfigureAwait(false));
         }
 
-        DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(scope, cancellationToken).ConfigureAwait(false);
+        // The policies are asked about the source and database the scope resolved to, by the registered key and the
+        // database's own identity - never the visitor's spelling of either (D29, H1): the enforcement behind every read
+        // this gate opens asks by those names (the resolver's re-ask), so a gate asked by the spelling could open what the
+        // enforcement then refuses, and show the structure of schemas behind it in the meantime.
+        DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(
+                StudioSourceResolver.Named(scope, resolved.Source, resolved.Target), cancellationToken)
+            .ConfigureAwait(false);
 
         IReadOnlyDictionary<string, DatabaseStoreAccess> others = await declarations
             .OtherSourcesAsync(resolved, declared.Classifier, answer.CapabilityEnabled, cancellationToken)

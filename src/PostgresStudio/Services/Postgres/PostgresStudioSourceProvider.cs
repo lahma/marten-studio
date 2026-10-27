@@ -231,7 +231,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && timer.IsCancellationRequested)
         {
             throw new TimeoutException(
-                "The database source '" + key + "' did not hand over database '" + name + "' within "
+                "The database source '" + key + "' did not hand over database '" + StudioLogValue.Cap(name) + "' within "
                 + timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s.",
                 exception);
         }
@@ -355,16 +355,18 @@ internal sealed class PostgresHostSource : IStudioSource
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
+            // The name is the host's list's and the reason the host's exception's: neither is the studio's text, and the
+            // message is logged and rendered whole, so both go in escaped and bounded (H1).
             throw new StudioStoreUnavailableException(
                 Registration.Key,
-                "its database '" + database.Identity + "' could not be opened: " + exception.Message,
+                "its database '" + StudioLogValue.Cap(database.Identity) + "' could not be opened: " + StudioLogValue.CapText(exception.Message),
                 "data source");
         }
 
         if (dataSource is null)
         {
             throw new KeyNotFoundException(
-                "data source '" + Registration.Key + "' no longer has a database named '" + database.Identity + "'.");
+                "data source '" + Registration.Key + "' no longer has a database named '" + StudioLogValue.Cap(database.Identity) + "'.");
         }
 
         return new ResolvedSource(scope, Registration, new DataSourceDatabase(database.Identity, dataSource));
@@ -418,13 +420,18 @@ internal static class PostgresTenancy
     /// here, for a host's database source and for a single data source alike (PostgresStudioResource's remarks).
     /// </para>
     /// </remarks>
+    /// <remarks>
+    /// The tenant is the visitor's own text, from <c>?tenant=</c> or a circuit, and the message is logged and audited
+    /// whole (H1): it goes in escaped and bounded (<see cref="StudioLogValue.Cap" />), as the resolver's own refusals do.
+    /// </remarks>
     /// <exception cref="KeyNotFoundException"><paramref name="scope" /> names a tenant, or no database.</exception>
     public static void RefuseTenant(StudioScope scope, string sourceKey)
     {
         if (scope.TenantId is { } tenant)
         {
             throw new KeyNotFoundException(
-                "'" + tenant + "' is not a tenant of data source '" + sourceKey + "': Postgres Studio's sources have no tenants.");
+                "'" + StudioLogValue.Cap(tenant) + "' is not a tenant of data source '" + sourceKey
+                + "': Postgres Studio's sources have no tenants.");
         }
 
         if (string.IsNullOrEmpty(scope.DatabaseId))
