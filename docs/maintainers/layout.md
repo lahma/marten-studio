@@ -84,9 +84,11 @@ tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console 
 tests/PostgresStudio.Integration.Tests/Sources/  Live Postgres: discovery, and isolation between a host source's
                                          databases through every cache
 src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
-                                         Postgres identifier becomes SQL text (hard rule 4); hypopg's calls (X2)
+                                         Postgres identifier becomes SQL text (hard rule 4); hypopg's calls (X2); the
+                                         blocking chain's hand-over text (X3); partition bounds and column skew (X4)
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
-                                         other (hard rule 4); Marten's own DDL for a what-if (X2)
+                                         other (hard rule 4); Marten's own DDL for a what-if (X2); the dead-letter
+                                         groups (M3)
 src/PostgresStudio/Components/Layout/    Shell chrome: layout, nav, scope selector, capability chip, the
                                          preferences popover (theme and time zone, behind the gear)
 src/PostgresStudio/Components/Pages/     The shared routed pages; each @page must be rooted at /postgres
@@ -109,10 +111,12 @@ src/PostgresStudio/Services/Query/       The SQL console service, export, saved 
 tests/MartenStudio.Tests/Json/           Unit and bUnit tests for the JSON toolkit
 tests/MartenStudio.Tests/Sql/            SQL builders, guard theory, grammar, advisor - no database
 tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, builders, catalog, estimator
-src/MartenStudio/Services/Documents/      Document read and write services and their DTOs
+src/MartenStudio/Services/Documents/      Document read and write services and their DTOs; the newest-first orders and
+                                         Marten's edit preview (M5)
 tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
-src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker
+src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker; the lag history
+                                         (M2); the progression-row classifier and the daemon topology (M47)
 src/PostgresStudio/Services/Live/         Snapshot cache, the per-page polling helper (D10), the nav indicators
 src/MartenStudio/Services/Live/           The tracker observer: the in-process daemon's latest shard state (D10)
 src/PostgresStudio/Services/Settings/     The shared studio's settings seam, descriptor, links, mount path, registration
@@ -124,10 +128,14 @@ samples/MartenStudio.SampleDomain/Events/ The demo events and the three projecti
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
 tests/MartenStudio.Integration.Tests/Projections/  Live Postgres + a real Solo daemon
 tests/MartenStudio.Integration.Tests/Logging/  Live hosts with no daemon and an externally managed one: no Warning from polling
-src/MartenStudio/Services/Events/         Event data service, aggregate invoker, event DTOs and links
-src/MartenStudio/Components/Pages/Events/ Streams, stream detail, feed, event types, dead letters
-tests/MartenStudio.Tests/Events/          Event builder cases, links, and the five page tests - no database
-tests/MartenStudio.Integration.Tests/Events/  Live Postgres: the event reads and the dead-letter writes
+src/MartenStudio/Services/Events/         Event data service, aggregate invoker, event DTOs and links; the stepper's
+                                         fold (M1); the dead-letter grouping and fingerprint (M3)
+src/MartenStudio/Components/Pages/Events/ Streams, stream detail and its stepper, feed, event types, dead letters and
+                                         their groups by cause
+tests/MartenStudio.Tests/Events/          Event builder cases, links, the page tests, the stepper's fold and the
+                                         dead-letter groups - no database
+tests/MartenStudio.Integration.Tests/Events/  Live Postgres: the event reads and the dead-letter writes, the stepper
+                                         against Marten's own fold, and the dead-letter groups over a corpus
 src/MartenStudio/Services/Schema/         Schema data service, index advice, migration risk and their DTOs
 src/PostgresStudio/Services/Schema/       The DDL tokenizer, schema declarations, storage parameters, index redundancy
 src/MartenStudio/Services/Configuration/  The read-only StoreOptions describer and its DTOs
@@ -161,9 +169,11 @@ tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, 
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: thirteen scenarios, the D19 gate, the large-data passes
 src/PostgresStudio/Services/Database/     The database browser: the per-visitor gate, the schema matcher, the
-                                         ownership classifier, the catalog cache and the object service
+                                         ownership classifier, the catalog cache and the object service; Sessions'
+                                         lock graph (X3)
 src/PostgresStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
-                                         object detail and its tabs, the Rows and Relationships slots
+                                         object detail and its tabs, the Rows and Relationships slots; Sessions and
+                                         its Blocking tab (X3)
 tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
 tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
                                          and the relational demo schemas' idempotency and demo-data flows
