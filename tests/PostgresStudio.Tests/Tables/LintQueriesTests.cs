@@ -28,6 +28,21 @@ public partial class LintQueriesTests
             : PartitionQueries.ListStatements[index];
     }
 
+    /// <summary>
+    /// INT-W1: the health runner's one preamble statement pins <c>search_path</c> as every catalog read does and <c>DateStyle</c>
+    /// to ISO beside it - the output style alone, local to the transaction, with no value from anybody - so T20 reads its bounds
+    /// on any server. The live half is <c>PartitionHeadroomLiveTests</c>, on a database whose sessions default to <c>SQL, DMY</c>.
+    /// </summary>
+    [Fact]
+    public void The_health_runner_pins_search_path_and_an_ISO_DateStyle_for_its_transaction_only()
+    {
+        HealthSessionQueries.PinSessionSql.Should().Contain("pg_catalog.set_config('search_path', 'pg_catalog', true)")
+            .And.Contain("pg_catalog.set_config('datestyle', 'ISO', true)")
+            .And.NotContain("@", "a session setting takes no value from anybody")
+            .And.NotContain("MDY").And.NotContain("DMY", "only the output style is set; the field order stays the session's");
+        PartitionBoundText.IsIsoDateStyle("ISO, DMY").Should().BeTrue("what a DMY session reads back under the pin");
+    }
+
     [Fact]
     public void X4s_reads_deparse_only_bounds_with_no_relation_and_leave_the_parsing_to_the_studio()
     {

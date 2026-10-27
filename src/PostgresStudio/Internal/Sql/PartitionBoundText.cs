@@ -94,8 +94,9 @@ internal sealed record RangeSummary(
 /// <para>
 /// <b>ISO only.</b> Under <c>SQL</c>, <c>Postgres</c> or <c>German</c> output a <c>timestamptz</c> bound carries a zone
 /// abbreviation rather than an offset (<c>'01/10/2026 00:00:00 UTC'</c>), which is not an instant on its own, so a time bound
-/// is read only under an ISO <c>DateStyle</c> - Postgres' default, and what <c>initdb</c> sets - and is otherwise not judged.
-/// Integer bounds do not depend on it.
+/// is read only under an ISO <c>DateStyle</c> - Postgres' default, what <c>initdb</c> sets, and what the health runner pins
+/// for its own transactions whatever the server, database or role sets (<see cref="HealthSessionQueries" />, INT-W1) - and is
+/// otherwise not judged. Integer bounds do not depend on it.
 /// </para>
 /// </remarks>
 internal static partial class PartitionBoundText

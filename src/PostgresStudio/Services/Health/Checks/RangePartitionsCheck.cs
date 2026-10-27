@@ -69,7 +69,9 @@ internal sealed record DataRunway(double Upper, double? Width, double PopulatedU
 /// <para>
 /// <b>Read without a lock</b> (<see cref="PartitionQueries" />): the bounds through <c>pg_get_expr(relpartbound, 0)</c>, which
 /// opens no relation, parsed by <see cref="PartitionBoundText" />; a <c>timestamp</c> key is read as UTC, and a time bound only
-/// under an ISO <c>DateStyle</c> - a range whose bounds were written in another is not judged, and the row says so.
+/// under an ISO <c>DateStyle</c>, which the health runner pins for its own transactions (<see cref="HealthSessionQueries" />,
+/// INT-W1) whatever the server, database or role sets - a range whose bounds were written in another, which only a read
+/// outside the runner can see, is not judged, and the row says so.
 /// </para>
 /// </remarks>
 [HealthCheck("T20", HealthArea.Tables, HealthCostTier.Catalog, "Range partitions running out", Variants = [RunningOutVariant, DefaultRowsVariant], Gate = HealthGate.Database)]

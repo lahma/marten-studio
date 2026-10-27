@@ -445,7 +445,8 @@ internal sealed class HealthSqlRunner
                     open,
                     async (transaction, token) =>
                     {
-                        await DatabaseCatalogQueries.PinSearchPathAsync(open, transaction, commandTimeoutSeconds, token)
+                        // search_path to pg_catalog and DateStyle to ISO, in one statement (HealthSessionQueries).
+                        await HealthSessionQueries.PinSessionAsync(open, transaction, commandTimeoutSeconds, token)
                             .ConfigureAwait(false);
 
                         List<T> rows = [];

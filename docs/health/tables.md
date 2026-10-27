@@ -985,8 +985,9 @@ behind a migration's `ACCESS EXCLUSIVE`, and `pg_get_partkeydef` behind one on t
 holds no column reference - is deparsed without opening anything (measured on 14.24 and 18.6, 2026-10-26). The bound text is
 Postgres' own output of each constant, and the studio parses it (0.6): integers bare or quoted as Postgres writes them,
 `MINVALUE`, `MAXVALUE` and `'infinity'`, and a time bound only under an ISO `DateStyle` - Postgres' default - since under
-`SQL`, `Postgres` or `German` a `timestamptz` bound carries a zone abbreviation rather than an offset. A time range written in
-another `DateStyle` is not judged, and the row says so; a date before the common era is not read. A `timestamp` key is read
+`SQL`, `Postgres` or `German` a `timestamptz` bound carries a zone abbreviation rather than an offset. The health runner pins
+`DateStyle` to ISO for its own read-only transactions, so the bounds are read whatever `DateStyle` the server, the database or
+the role sets; a date before the common era is not read. A `timestamp` key is read
 as UTC; a `timestamptz` range's month boundaries are looked for in the session's `TimeZone` (read with the bounds,
 lock-free), so a range cut at local midnights is still months - and where that zone is one the studio's host does not know,
 the caveat says the months were looked for in UTC. The remedy is the next period's `CREATE TABLE ... PARTITION OF ... FOR

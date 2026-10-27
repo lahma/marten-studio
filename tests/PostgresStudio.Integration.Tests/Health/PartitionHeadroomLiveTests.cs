@@ -55,6 +55,64 @@ public class PartitionHeadroomLiveTests(PostgresFixture postgres)
         host.Logs.WarningsOrWorse.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// INT-W1: the health runner pins <c>DateStyle</c> to ISO beside <c>search_path</c>, so T20 reads a time range's bounds
+    /// where the sessions default to another style - here the role's default in this database, <c>SQL, DMY</c>, which every
+    /// session the studio's pool opens takes - and judges the range as it does anywhere else. The pin changes only how a date
+    /// or a time is written as text, so every check runs to the outcome it reaches on a twin database in Postgres' default.
+    /// </summary>
+    [PostgresFact]
+    [HealthFires("T20")]
+    public async Task A_monthly_range_is_judged_where_the_sessions_default_to_another_DateStyle()
+    {
+        string[] range =
+        [
+            "create table x4.events (at timestamptz not null, v int) partition by range (at)",
+            "create table x4.events_2026_09 partition of x4.events for values from ('2026-09-01 00:00+00') to ('2026-10-01 00:00+00')",
+            "create table x4.events_2026_10 partition of x4.events for values from ('2026-10-01 00:00+00') to ('2026-11-01 00:00+00')",
+            "insert into x4.events select '2026-10-20 00:00+00'::timestamptz + (g || ' minutes')::interval, g from pg_catalog.generate_series(1, 300) g",
+        ];
+
+        string database = await DatabaseAsync("x4_t20_datestyle");
+        await ExecuteInAsync(database, range);
+        await ExecuteInAsync(
+            database,
+            "do $$ begin execute pg_catalog.format('alter role %I in database %I set datestyle = %L', current_user, pg_catalog.current_database(), 'SQL, DMY'); end $$");
+        await ExecuteInAsync(database, "analyze x4.events");
+
+        string twin = await DatabaseAsync("x4_t20_datestyle_iso");
+        await ExecuteInAsync(twin, range);
+        await ExecuteInAsync(twin, "analyze x4.events");
+
+        // Not vacuous: a new session there - unpooled, as a pooled one opened before the default keeps ISO as its reset
+        // value - writes the bound the way the studio's own new sessions get it, not in ISO.
+        await using (NpgsqlConnection plain = await OpenAsync(new NpgsqlConnectionStringBuilder(database) { Pooling = false }.ConnectionString, Token))
+        {
+            (await ScalarAsync(plain, "show datestyle")).Should().Be("SQL, DMY");
+            (await ScalarAsync(plain, "select pg_catalog.pg_get_expr(c.relpartbound, 0) from pg_catalog.pg_class c where c.oid = 'x4.events_2026_10'::pg_catalog.regclass"))
+                .Should().NotContain("2026-10-01", "SQL, DMY writes 01/10/2026, which T20's parser reads only as ISO");
+        }
+
+        await using StudioHost host = Host(database);
+        await using StudioHost iso = Host(twin);
+
+        HealthReport report = await ReportAsync(host);
+        HealthReport baseline = await ReportAsync(iso);
+
+        HealthReportFinding finding = About(report, "T20", "x4.events").Should().ContainSingle().Subject;
+        finding.Severity.Should().Be(HealthSeverity.Critical, "the newest partition ends in six days, and no DEFAULT takes November's rows");
+        finding.Finding.Title.Should().Contain("runs out at 2026-11-01 00:00 UTC");
+        finding.Finding.Remedy!.Code.Should().Be(
+            "CREATE TABLE \"x4\".\"events_p20261101\" PARTITION OF \"x4\".\"events\" FOR VALUES FROM ('2026-11-01 00:00:00+00') TO ('2026-12-01 00:00:00+00');",
+            "the same next month as under ISO: the bounds were read in ISO");
+        report.Checks.Single(static x => x.Code == "T20").Note.Should().BeNull("every bound was read, none left unjudged");
+
+        report.Checks.Select(static x => (x.Code, x.Outcome)).Should().BeEquivalentTo(
+            baseline.Checks.Select(static x => (x.Code, x.Outcome)),
+            "the pin makes only date and time output ISO; no other health read depends on the session's DateStyle");
+        host.Logs.WarningsOrWorse.Should().BeEmpty();
+    }
+
     [PostgresFact]
     [HealthFires("T20")]
     public async Task An_integer_range_whose_rows_reach_its_newest_partition_and_one_with_rows_in_its_default_are_warnings()
@@ -246,6 +304,12 @@ public class PartitionHeadroomLiveTests(PostgresFixture postgres)
             await connection.DisposeAsync();
             throw;
         }
+    }
+
+    private static async Task<string?> ScalarAsync(NpgsqlConnection connection, string sql)
+    {
+        await using NpgsqlCommand command = new(sql, connection);
+        return (string?) await command.ExecuteScalarAsync(Token);
     }
 
     /// <summary>Runs statements on one connection of the test's own to <paramref name="connectionString" />, then flushes its statistics.</summary>
