@@ -247,6 +247,64 @@ public class DatabaseGateLiveTests(DatabaseGateLiveTests.Fixture database) : ICl
         overview.Access.WithheldSchemaCount.Should().Be(1);
     }
 
+    [PostgresFact]
+    public async Task An_index_is_shown_with_its_estimated_size_and_its_scans()
+    {
+        await OwnedDatabases.ExecuteAsync(
+            database.ConnectionString,
+            """
+            create table public.idx_use (id int primary key, v int);
+            insert into public.idx_use select g, g from generate_series(1, 1000) g;
+            create index idx_use_v on public.idx_use (v);
+            """,
+            Token);
+
+        try
+        {
+            await using (var connection = new NpgsqlConnection(database.ConnectionString))
+            {
+                await connection.OpenAsync(Token);
+                await using (var vacuum = new NpgsqlCommand("vacuum analyze public.idx_use", connection))
+                {
+                    await vacuum.ExecuteNonQueryAsync(Token);
+                }
+
+                await using var scan = new NpgsqlCommand(
+                    "set enable_seqscan = off; select * from public.idx_use where v = 5; select pg_catalog.pg_stat_force_next_flush();",
+                    connection);
+                await scan.ExecuteNonQueryAsync(Token);
+            }
+
+            await using StudioHost host = Host(static o => o.Capabilities = PostgresStudioCapabilities.All());
+            await using StudioCircuit circuit = host.Circuit();
+            IDatabaseObjectService objects = circuit.Get<IDatabaseObjectService>();
+
+            DatabaseIndexInfo? index = null;
+            DateTimeOffset deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (true)
+            {
+                DatabaseObjectDetail detail = await objects.GetObjectAsync(Scope, "public", "idx_use", Token);
+                detail.Found.Should().BeTrue(detail.Reason);
+                index = detail.Indexes.Single(static x => x.Name == "idx_use_v");
+                if (index.Scans >= 1 || DateTimeOffset.UtcNow > deadline)
+                {
+                    break;
+                }
+
+                await Task.Delay(250, Token);
+            }
+
+            index.SizeBytes.Should().BeGreaterThan(0);
+            index.Scans.Should().BeGreaterThanOrEqualTo(1);
+            index.LastScan.Should().NotBeNull("the container is PostgreSQL 17");
+            index.IsReady.Should().BeTrue();
+        }
+        finally
+        {
+            await OwnedDatabases.ExecuteAsync(database.ConnectionString, "drop table if exists public.idx_use", CancellationToken.None);
+        }
+    }
+
     private StudioHost Host(
         Action<PostgresStudioOptions> studio,
         Func<PostgresStudioResource, System.Security.Claims.ClaimsPrincipal, bool>? writePolicy = null) =>

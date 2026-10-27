@@ -1,3 +1,5 @@
+@using System.Globalization
+@using PostgresStudio.Services.Schema
 @using PostgresStudio.Services.Settings
 @using PostgresStudio.Services.Database
 @using PostgresStudio.Components.Shared
@@ -84,6 +86,9 @@
                         <tr>
                             <th scope="col">Name</th>
                             <th scope="col">Definition</th>
+                            <th scope="col">Size</th>
+                            <th scope="col">Scans</th>
+                            <th scope="col">Last scan</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -109,6 +114,10 @@
                                         {
                                             <span class="ms-db-badge ms-db-badge-warning" title="Invalid: a CREATE INDEX CONCURRENTLY that failed. Postgres keeps it up to date and never uses it; drop it and build it again.">invalid</span>
                                         }
+                                        @if (!index.IsReady)
+                                        {
+                                            <span class="ms-db-badge ms-db-badge-warning" title="Not ready: an index build is still running or failed before it could take writes.">not ready</span>
+                                        }
                                     </span>
                                 </td>
                                 <td class="ms-db-cell-sql">
@@ -118,11 +127,15 @@
                                         <VectorIndexSummary Model="vector" />
                                     }
                                 </td>
+                                <td class="ms-db-cell-number">@(index.SizeBytes is { } size ? "~" + SchemaFormat.Bytes(size) : "—")</td>
+                                <td class="ms-db-cell-number" title="@ScansTitle(index)">@(index.Scans is { } scans ? DatabasePresentation.Number(scans) : "—")</td>
+                                <td class="ms-db-cell-number">@(index.LastScan is { } last ? last.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture) : "—")</td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </TableScroll>
+            <p class="ms-muted ms-db-index-note">Sizes are estimates as of the last VACUUM, ANALYZE or build. Scans count since the database's statistics were last reset; Storage says when. Last scan needs PostgreSQL 16.</p>
         }
     </section>
 
@@ -249,6 +262,11 @@
         + "references - and every update of that table's key - reads the whole pointing table to find the rows that point at "
         + "it. Postgres indexes a primary key and a unique constraint by itself, never a foreign key. Health's T15 says so once "
         + "the table is 8 MiB.";
+
+    private static string? ScansTitle(DatabaseIndexInfo index) =>
+        index is { TuplesRead: { } read, TuplesFetched: { } fetched }
+            ? $"{DatabasePresentation.Number(read)} index entries read, {DatabasePresentation.Number(fetched)} table rows fetched"
+            : null;
 
     private static string ConstraintKind(DatabaseConstraintKind kind) => kind switch
     {

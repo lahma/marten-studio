@@ -407,6 +407,12 @@ internal sealed record CatalogConstraint(string Name, string Kind, string Defini
 /// <param name="OperatorClasses">For an <c>hnsw</c> or <c>ivfflat</c> index, each key column's operator class; otherwise <see langword="null" />.</param>
 /// <param name="KeyDefinitions">For the same, each key column as <c>pg_get_indexdef(oid, k, true)</c> prints it.</param>
 /// <param name="Options">For the same, the index's <c>reloptions</c>.</param>
+/// <param name="SizeBytes">An estimate: <c>relpages</c> times the block size.</param>
+/// <param name="Scans"><c>pg_stat_all_indexes.idx_scan</c>.</param>
+/// <param name="LastScan"><c>last_idx_scan</c>, from PostgreSQL 16.</param>
+/// <param name="TuplesRead"><c>idx_tup_read</c>.</param>
+/// <param name="TuplesFetched"><c>idx_tup_fetch</c>.</param>
+/// <param name="IsReady"><c>indisready</c>.</param>
 internal sealed record CatalogIndex(
     string Name,
     string Definition,
@@ -420,7 +426,13 @@ internal sealed record CatalogIndex(
     bool AccessMethodIsPgVector = false,
     IReadOnlyList<string?>? OperatorClasses = null,
     IReadOnlyList<string?>? KeyDefinitions = null,
-    IReadOnlyList<string>? Options = null);
+    IReadOnlyList<string>? Options = null,
+    long? SizeBytes = null,
+    long? Scans = null,
+    DateTimeOffset? LastScan = null,
+    long? TuplesRead = null,
+    long? TuplesFetched = null,
+    bool IsReady = true);
 
 /// <summary>Everything the detail view reads about one relation, in one transaction.</summary>
 /// <param name="Relation">The relation's own row.</param>
@@ -1490,6 +1502,7 @@ internal static class DatabaseCatalogQueries
     /// and queues behind somebody's <c>ACCESS EXCLUSIVE</c> lock on it, where the read-only session's
     /// <c>lock_timeout</c> ends the wait (<c>PgVectorLiveTests</c> measures it); nothing is still held once a call returns.
     /// This is a by-oid read of one relation, which may lock that relation briefly (see the class remarks), never a list.
+    /// The size is <c>relpages</c> times the block size, an estimate as of the last VACUUM, ANALYZE or build, because a size function would open the index; the counters are <c>pg_stat_all_indexes</c>', whose <c>last_idx_scan</c> is read through <c>to_jsonb</c> as it exists only from PostgreSQL 16.
     /// </remarks>
     internal const string IndexesSql =
         """
@@ -1524,10 +1537,17 @@ internal static class DatabaseCatalogQueries
                    (select pg_catalog.array_agg(pg_catalog.pg_get_indexdef(i.indexrelid, k, true) order by k)
                       from pg_catalog.generate_series(1, i.indnkeyatts::int) as k)
                end,
-               case when am.amname in ('hnsw', 'ivfflat') then ic.reloptions end
+               case when am.amname in ('hnsw', 'ivfflat') then ic.reloptions end,
+               ic.relpages::bigint * pg_catalog.current_setting('block_size')::bigint,
+               s.idx_scan,
+               (pg_catalog.to_jsonb(s) ->> 'last_idx_scan')::timestamptz,
+               s.idx_tup_read,
+               s.idx_tup_fetch,
+               i.indisready
         from pg_catalog.pg_index i
         join pg_catalog.pg_class ic on ic.oid = i.indexrelid
         join pg_catalog.pg_am am on am.oid = ic.relam
+        left join pg_catalog.pg_stat_all_indexes s on s.indexrelid = i.indexrelid
         where i.indrelid = @oid
         order by i.indisprimary desc, ic.relname
         """;
@@ -2160,7 +2180,13 @@ internal static class DatabaseCatalogQueries
                     !reader.IsDBNull(9) && reader.GetBoolean(9),
                     reader.IsDBNull(10) ? null : reader.GetFieldValue<string?[]>(10),
                     reader.IsDBNull(11) ? null : reader.GetFieldValue<string?[]>(11),
-                    reader.IsDBNull(12) ? null : reader.GetFieldValue<string[]>(12)),
+                    reader.IsDBNull(12) ? null : reader.GetFieldValue<string[]>(12),
+                    reader.IsDBNull(13) ? null : reader.GetInt64(13),
+                    reader.IsDBNull(14) ? null : reader.GetInt64(14),
+                    reader.IsDBNull(15) ? null : reader.GetFieldValue<DateTimeOffset>(15),
+                    reader.IsDBNull(16) ? null : reader.GetInt64(16),
+                    reader.IsDBNull(17) ? null : reader.GetInt64(17),
+                    reader.IsDBNull(18) || reader.GetBoolean(18)),
                 commandTimeoutSeconds,
                 cancellationToken)
             .ConfigureAwait(false);
