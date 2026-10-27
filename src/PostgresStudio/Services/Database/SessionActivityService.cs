@@ -236,9 +236,112 @@ internal sealed class SessionActivityService : ISessionActivityService
             Budget = snapshot.Connections?.ToBudget(),
             ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
             Caveats = caveats,
+            Blocking = CountsOf(snapshot.Blocking),
+            LockStatistics = snapshot.LockStatistics,
             Details = details,
             Statements = snapshot.Statements,
         };
+    }
+
+    /// <summary>Sessions › Blocking's numbers (X3): how many chains, how many sessions they hold up, for how long - naming nobody.</summary>
+    internal static SessionBlockingCounts CountsOf(LockTableRead? read)
+    {
+        if (read is null || read.Nodes.Count == 0)
+        {
+            return SessionBlockingCounts.None;
+        }
+
+        IReadOnlyList<BlockingChain<LockGraphNode>> chains = Chains(read);
+        List<BlockingChain<LockGraphNode>> headed = [.. chains.Where(static x => !x.HeadWaits && !x.Root.Node.WaitsForALock)];
+
+        // Every waiting session is held up by somebody, a session in a cycle included, and each counts once.
+        return new SessionBlockingCounts(
+            headed.Count,
+            read.Waiting.Select(static x => x.ProcessId).Distinct().Count(),
+            read.Waiting.Select(static x => (TimeSpan?) x.Wanted!.Waited).Max(),
+            headed.Count(static x => x.Root.Node.SameDatabase && x.Root.Node.IsIdleInTransaction),
+            chains.Count - headed.Count);
+    }
+
+    /// <summary>The read's chains, through the one tree builder C12 judges with.</summary>
+    private static IReadOnlyList<BlockingChain<LockGraphNode>> Chains(LockTableRead read) =>
+        BlockingForest.Build(read.Nodes, static x => x.ProcessId, static x => x.BlockedBy, static x => x.Wanted?.Waited);
+
+    /// <summary>
+    /// Sessions › Blocking's tree for this visitor (X3): every chain, each session with what it waits for in the studio's
+    /// words and the relation masked through <paramref name="withheld" /> (D27).
+    /// </summary>
+    internal static IReadOnlyList<BlockingChainView> TreeOf(LockTableRead? read, SessionLockLabels labels, IReadOnlySet<string>? withheld)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+
+        if (read is null || read.Nodes.Count == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. Chains(read).Select(chain => new BlockingChainView(
+                View(chain.Root),
+                chain.HeadWaits || chain.Root.Node.WaitsForALock,
+                chain.Blocked.Count,
+                BlockingForest.Longest(chain.Root, static x => x.Wanted?.Waited) is { } longest && longest > TimeSpan.Zero ? longest : null)),
+        ];
+
+        BlockingNodeView View(BlockingBranch<LockGraphNode> branch)
+        {
+            LockGraphNode node = branch.Node;
+            LockTarget? target = node.Wanted is { } wanted
+                ? labels.Describe(wanted.LockType, wanted.Relation, wanted.AdvisoryKey, wanted.TupleRelation)
+                : null;
+
+            return new BlockingNodeView
+            {
+                ProcessId = node.ProcessId,
+                User = node.User,
+                Application = node.Application,
+                ClientAddress = node.ClientAddress,
+                State = node.State,
+                WaitEventType = node.WaitEventType,
+                WaitEvent = node.WaitEvent,
+                TransactionAge = node.TransactionAge,
+                StateAge = node.StateAge,
+                Waited = node.Wanted?.Waited,
+                ExactWait = node.Wanted?.ExactStart ?? true,
+                WantedMode = node.Wanted?.Mode,
+                HeldModes = node.HeldModes,
+
+                // A label names only this store's own objects and Postgres' catalogs; masked all the same, as the lock list's is.
+                Target = target is null ? null : withheld is null ? target.Label : WithheldNames.Redact(target.Label, withheld) ?? target.Label,
+                Relation = target is null ? null : RelationShown(target, withheld),
+                SameDatabase = node.SameDatabase,
+                Known = node.Known,
+                VacuumLabel = node.VacuumLabel,
+                BlockedBy = node.BlockedBy,
+                Repeat = branch.Repeat,
+                Waiters = [.. branch.Waiters.Select(View)],
+            };
+        }
+    }
+
+    /// <summary>
+    /// A waited-for relation as Sessions › Blocking shows it (D27): qualified, for one in a schema the visitor may see;
+    /// <see cref="WithheldNames.Token" /> alone - its name blanked, as a structured field is - for one in a schema they may not;
+    /// nothing for one nobody is told about, or when the visitor's withheld schemas could not be read.
+    /// </summary>
+    internal static string? RelationShown(LockTarget target, IReadOnlySet<string>? withheld)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (target.Schema is not { } schema || target.Name is not { } name || withheld is null)
+        {
+            return null;
+        }
+
+        return withheld.Contains(schema) && !BrowsableSchemaMatcher.IsSystemSchema(schema)
+            ? WithheldNames.Token
+            : DatabaseLinks.QualifiedName(schema, name);
     }
 
     /// <inheritdoc />
@@ -346,6 +449,7 @@ internal sealed class SessionActivityService : ISessionActivityService
                 }),
             ],
             Prepared = [.. snapshot.Prepared.Select(static x => new PreparedDetailRow(x.Gid, x.Owner, x.Prepared, x.Age))],
+            Blocking = TreeOf(snapshot.Blocking, labels, withheld),
             Applications = snapshot.Connections?.Applications ?? [],
             ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
             StatementsWithheld = withheld is null,

@@ -52,11 +52,12 @@ public class ActivityViewsOffThePollPathTests
     private const string HorizonBuilder = "src/PostgresStudio/Internal/Sql/HealthHorizonQueries.cs";
 
     /// <summary>
-    /// The table checks' builder (W5-VERS): its index read takes one snapshot of <c>pg_locks</c> for an
-    /// <c>AccessExclusiveLock</c> held or awaited on a listed table, so that it never deparses an index of a table a
-    /// migration is altering (<c>pg_get_indexdef</c> opens the table and would queue behind it). It runs only in the
-    /// regular sweep, at <c>HealthInterval</c>, through the sweep's shared index read - which only the health checks call
-    /// (the net below).
+    /// The table checks' builder (W5-VERS). Its index read never deparses an index of a table a migration is altering
+    /// (<c>pg_get_indexdef</c> opens the table and would queue behind it), and until X3 took its own snapshot of
+    /// <c>pg_locks</c> to know which: from 0.6 the sweep's one read of the lock table (<c>HealthConnectionQueries.LockTable</c>)
+    /// hands it the relations under an <c>AccessExclusiveLock</c> as a parameter, so it reads no activity view and needs no
+    /// exemption. It still runs only in the regular sweep, at <c>HealthInterval</c>, through the sweep's shared index read -
+    /// which only the health checks call (the net below).
     /// </summary>
     private const string TableBuilder = "src/PostgresStudio/Internal/Sql/HealthTableQueries.cs";
 
@@ -108,7 +109,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or TableBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -122,7 +123,7 @@ public class ActivityViewsOffThePollPathTests
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(HorizonBuilder.Split('/'))))
             .Should().BeTrue("the horizon builder reads pg_stat_activity and pg_prepared_xacts for T14, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(TableBuilder.Split('/'))))
-            .Should().BeTrue("the table builder reads pg_locks for its index read, so its exemption is not an exemption for nothing");
+            .Should().BeFalse("the table builder takes the sweep's one read of the lock table as parameters (X3), and has no exemption");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ReplicationBuilder.Split('/'))))
             .Should().BeTrue("the replication builder joins pg_stat_activity for the senders' databases, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(AuroraBuilder.Split('/'))))
@@ -379,7 +380,7 @@ public class ActivityViewsOffThePollPathTests
 
         // C10 (H10) reads no activity view - only pg_backend_pid(), twice - and runs in the same regular sweep; nor does C11
         // (W5-CAP), which reads pg_stat_database and the shared statistics views through the statistics window.
-        checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11");
+        checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11", "C12");
         checks.Should().OnlyContain(x => regular.Contains(x.Info.Tier), "a regular sweep is cached for HealthInterval, never RefreshInterval");
     }
 

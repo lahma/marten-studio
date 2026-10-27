@@ -121,8 +121,11 @@ internal sealed class IdleInTransactionCheck : HealthCheck<IdleInTransactionFact
         // Only the source's own advisory keys are wanted here, so no relation classifier is built.
         SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, classifier: null);
 
+        // Who holds those keys, and how many relation locks each session holds: the sweep's one read of the lock table (X3).
+        LockTableRead locks = await LockTableReads.SharedAsync(context).ConfigureAwait(false);
+
         IReadOnlyList<(SessionVisibility Visibility, IdleSession? Session, long Total)> rows = await context.Sql
-            .QueryAsync(HealthConnectionQueries.IdleInTransaction(floor, labels.DaemonLockIds), Map, cancellationToken)
+            .QueryAsync(HealthConnectionQueries.IdleInTransaction(floor, locks.HoldersOf(labels.DaemonLockIds), locks.RelationLocks), Map, cancellationToken)
             .ConfigureAwait(false);
 
         return new IdleInTransactionFacts(

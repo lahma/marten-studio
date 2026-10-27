@@ -453,8 +453,11 @@ internal sealed class HorizonHeldCheck : HealthCheck<HorizonFacts>
         // Only the source's own advisory keys are wanted, so no relation classifier is built.
         SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, classifier: null);
 
+        // Who holds those keys: the sweep's one read of the lock table (X3).
+        LockTableRead locks = await LockTableReads.SharedAsync(context).ConfigureAwait(false);
+
         IReadOnlyList<(bool CanReadAllStats, long HiddenSessions, HealthHorizonHolderRow? Holder)> rows = await context.Sql
-            .QueryAsync(HealthHorizonQueries.Holders(labels.DaemonLockIds), HealthHorizonQueries.ReadHolder, cancellationToken)
+            .QueryAsync(HealthHorizonQueries.Holders(locks.HoldersOf(labels.DaemonLockIds)), HealthHorizonQueries.ReadHolder, cancellationToken)
             .ConfigureAwait(false);
 
         ReplicationSlotSnapshot slots = await ReplicationSlotSnapshot.SharedAsync(context).ConfigureAwait(false);

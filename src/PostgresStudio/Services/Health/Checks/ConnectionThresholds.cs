@@ -49,6 +49,19 @@ internal static class ConnectionThresholds
     /// <summary>C06: …and this long is Critical.</summary>
     public static readonly TimeSpan LockWaitCritical = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// C12 <c>idle-head</c>: a session idle in its transaction at the head of a chain, with somebody behind it waiting this
+    /// long, is a Warning - short, because nothing but the application that opened the transaction, or a person, ends that
+    /// wait.
+    /// </summary>
+    public static readonly TimeSpan BlockingIdleHeadWarning = TimeSpan.FromSeconds(10);
+
+    /// <summary>C12 <c>long-chain</c>: a chain whose oldest wait is this long, whatever its head is doing, is a Warning…</summary>
+    public static readonly TimeSpan BlockingChainWarning = TimeSpan.FromMinutes(2);
+
+    /// <summary>C12: …and a chain of either kind whose oldest wait is this long is Critical - C06's Critical line.</summary>
+    public static readonly TimeSpan BlockingChainCritical = TimeSpan.FromMinutes(5);
+
     /// <summary>C07: a prepared transaction this old is Critical.</summary>
     public static readonly TimeSpan PreparedTransactionCritical = TimeSpan.FromMinutes(5);
 

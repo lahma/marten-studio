@@ -5,9 +5,9 @@ using NpgsqlTypes;
 namespace PostgresStudio.Internal.Sql;
 
 /// <summary>
-/// The statements of the connection and session checks (C02-C08) and of Database › Sessions: reads of
-/// <c>pg_stat_activity</c>, <c>pg_locks</c>, <c>pg_prepared_xacts</c>, <c>pg_stat_database</c> and the
-/// server's connection settings, and nothing else.
+/// The statements of the connection and session checks (C02-C08, C12) and of Database › Sessions: reads of
+/// <c>pg_stat_activity</c>, <c>pg_locks</c>, <c>pg_prepared_xacts</c>, <c>pg_stat_database</c>, PostgreSQL 19's
+/// <c>pg_stat_lock</c> and the server's connection settings, and nothing else.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,8 +23,15 @@ namespace PostgresStudio.Internal.Sql;
 /// <c>datname = current_database()</c>, to client backends, and away from the studio's own backend
 /// (<c>pg_backend_pid()</c>). The one exception is <see cref="ServerConnections" />, which counts the client
 /// backends of the whole server - only a count, and the only number <c>max_connections</c> can be compared
-/// with, because every database on the server spends the same budget. <see cref="Blockers" /> reads a blocker
+/// with, because every database on the server spends the same budget. <see cref="LockTable" /> reads a blocker
 /// in another database by process id, and names nothing about it.
+/// </para>
+/// <para>
+/// <b>The lock table once per sweep</b> (X3, H3's half). A regular sweep reads <c>pg_locks</c> in one statement,
+/// <see cref="LockTable" />, and every check that needs it takes its answer from the sweep's shared read - C04's relation
+/// locks, C04's and T14's daemon-lock holders, C06's and C12's waiters and blockers, and the table checks' strong and
+/// <c>ACCESS EXCLUSIVE</c> locks, which travel into their statements as parameters. Before 0.6 five statements of a
+/// sweep read it seven times.
 /// </para>
 /// <para>
 /// <b>A session this role cannot see into is still a session.</b> A role that is neither a member of
@@ -203,15 +210,219 @@ internal static class HealthConnectionQueries
         "       (select d.datconnlimit from pg_catalog.pg_database d where d.datname = current_database()) as database_limit");
 
     /// <summary>
+    /// The modes a lock on a table must be in to stop autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> - every mode it conflicts
+    /// with, which is every mode from <c>SHARE UPDATE EXCLUSIVE</c> up (W5-V1's autovacuum triggers).
+    /// </summary>
+    private const string StrongModes =
+        "('ShareUpdateExclusiveLock', 'ShareLock', 'ShareRowExclusiveLock', 'ExclusiveLock', 'AccessExclusiveLock')";
+
+    /// <summary>
+    /// The lock table, read once (X3, H3's half): one statement that reads <c>pg_locks</c> a single time - a materialized
+    /// CTE, so the plan has one <c>Function Scan on pg_lock_status</c> however often the statement refers to it - and
+    /// answers every question a regular sweep and Database › Sessions › Blocking ask of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Who asks what.</b> The first row (<c>kind = 0</c>) carries what the sweep's other reads take as parameters, so
+    /// none of them reads the lock table again: the relations of this database somebody holds or awaits
+    /// <c>ACCESS EXCLUSIVE</c> on (the index read's deparse guard, <c>HealthTableQueries.IndexesSql</c>); the relations
+    /// somebody other than a running <c>VACUUM</c> or <c>ANALYZE</c> - or a prepared transaction, whose locks have no
+    /// process - holds or awaits a lock on that autovacuum's <c>SHARE UPDATE EXCLUSIVE</c> conflicts with (the table read's
+    /// autovacuum triggers, <c>HealthTableQueries.TablesSql</c>); how many relation locks each session of this database
+    /// holds (C04); and the one-key advisory locks each holds (C04 and T14 recognise the daemon's leader by them). Then a
+    /// row per session in the blocking graph (<c>kind = 1</c>): every client session of this database that waits for a
+    /// lock, oldest wait first, with what it waits for and who blocks it, and every session that blocks one of them, with
+    /// the modes it holds on what its waiters want. C06 and C12 judge those rows, and Sessions › Blocking draws them.
+    /// </para>
+    /// <para>
+    /// <b>Locks nothing it lists</b> (D27). Relations are resolved to their owners by oid through the catalog
+    /// (<see cref="OwnersCte" />) - never a <c>::regclass</c> output cast, which errors on an oid dropped since the
+    /// snapshot - and the locked relation's own name is never selected. <c>pg_blocking_pids</c> is called for a session
+    /// whose <c>wait_event_type</c> is <c>Lock</c> and nobody else (the PROBE measured it at about 2 ms over 50 waiters among
+    /// 500 sessions on PostgreSQL 17, and 6.9 ms called for every backend).
+    /// </para>
+    /// <para>
+    /// <b>A blocker in another database</b> - possible on a shared catalog - is read by process id, and only its state's
+    /// class, its timings, whether it has written and whether it is a <c>VACUUM</c> are returned: its state, role,
+    /// application and client are this database's to say nothing of, as <c>Blockers</c> said nothing of them in 0.5.
+    /// </para>
+    /// </remarks>
+    internal const string LockTableSql =
+        "with recursive locks as materialized (\n" +
+        "  select l.locktype, l.database, l.relation, l.page, l.tuple, l.virtualxid, l.transactionid,\n" +
+        "         l.classid, l.objid, l.objsubid, l.pid, l.mode, l.granted,\n" +
+        "         case when not l.granted then (to_jsonb(l) ->> 'waitstart')::timestamptz end as waitstart\n" +
+        "    from pg_locks l\n" +
+        "),\n" +
+        "here as (select d.oid from pg_catalog.pg_database d where d.datname = current_database()),\n" +
+        VisibilityCte + ",\n" +
+        "own as (\n" +
+        "  select a.pid from pg_stat_activity a\n" +
+        "   where a.datname = current_database()\n" +
+        "     and " + ClientSession + "\n" +
+        "     and a.pid <> pg_backend_pid()\n" +
+        "),\n" +
+        "maintenance as (\n" +
+        "  select v.pid from pg_catalog.pg_stat_progress_vacuum v\n" +
+        "  union all\n" +
+        "  select z.pid from pg_catalog.pg_stat_progress_analyze z\n" +
+        "),\n" +
+        "relations as (\n" +
+        "  select array_agg(distinct k.relation) filter (where k.mode = 'AccessExclusiveLock') as exclusive,\n" +
+        "         array_agg(distinct k.relation) filter (where k.pid is null\n" +
+        "             or (k.pid <> pg_backend_pid() and k.pid not in (select m.pid from maintenance m))) as strong\n" +
+        "    from locks k\n" +
+        "   where k.locktype = 'relation'\n" +
+        "     and k.database = (select h.oid from here h)\n" +
+        "     and k.mode in " + StrongModes + "\n" +
+        "),\n" +
+        "counted as (\n" +
+        "  select k.pid, count(*) as relation_locks\n" +
+        "    from locks k\n" +
+        "   where k.granted and k.locktype = 'relation' and k.pid in (select o.pid from own o)\n" +
+        "   group by k.pid\n" +
+        "),\n" +
+        "advisory as (\n" +
+        "  select k.pid, ((k.classid::int8 << 32) | k.objid::int8) as advisory_key\n" +
+        "    from locks k\n" +
+        "   where k.granted and k.locktype = 'advisory' and k.objsubid = 1 and k.pid in (select o.pid from own o)\n" +
+        "),\n" +
+        "wanted as (\n" +
+        "  select distinct on (k.pid) k.pid, k.locktype, k.mode, k.database, k.relation, k.page, k.tuple, k.virtualxid,\n" +
+        "         k.transactionid, k.classid, k.objid, k.objsubid, k.waitstart\n" +
+        "    from locks k\n" +
+        "   where not k.granted and k.pid is not null\n" +
+        "   order by k.pid, k.locktype\n" +
+        "),\n" +
+        "waiting as (\n" +
+        "  select w.pid, w.locktype, w.mode, w.database, w.relation, w.page, w.tuple, w.virtualxid, w.transactionid,\n" +
+        "         w.classid, w.objid, w.objsubid,\n" +
+        "         case when w.locktype = 'advisory' and w.objsubid = 1 then ((w.classid::int8 << 32) | w.objid::int8) end as advisory_key,\n" +
+        "         (select t.relation from locks t where t.pid = w.pid and t.locktype = 'tuple' order by t.granted desc limit 1) as tuple_relation,\n" +
+        "         w.waitstart is not null as exact_start,\n" +
+        "         extract(epoch from (now() - coalesce(w.waitstart, a.state_change)))::float8 as waited_seconds,\n" +
+        "         pg_blocking_pids(w.pid) as blocked_by,\n" +
+        "         count(*) over () as total\n" +
+        "    from wanted w\n" +
+        "    join pg_stat_activity a on a.pid = w.pid\n" +
+        "   where a.datname = current_database()\n" +
+        "     and " + ClientSession + "\n" +
+        "     and a.pid <> pg_backend_pid()\n" +
+        "     and a.wait_event_type = 'Lock'\n" +
+        "   order by coalesce(w.waitstart, a.state_change), w.pid\n" +
+        "   limit @limit\n" +
+        "),\n" +
+        "blocking as (\n" +
+        "  select distinct b.pid from waiting w cross join lateral unnest(w.blocked_by) as b(pid) where b.pid <> pg_backend_pid()\n" +
+        "),\n" +
+        "held as (\n" +
+        "  select b.pid, array_agg(distinct k.mode order by k.mode) as modes\n" +
+        "    from waiting w\n" +
+        "    cross join lateral unnest(w.blocked_by) as b(pid)\n" +
+        "    join locks k on k.pid = b.pid and k.granted and k.locktype = w.locktype\n" +
+        "                and k.database is not distinct from w.database and k.relation is not distinct from w.relation\n" +
+        "                and k.page is not distinct from w.page and k.tuple is not distinct from w.tuple\n" +
+        "                and k.virtualxid is not distinct from w.virtualxid and k.transactionid is not distinct from w.transactionid\n" +
+        "                and k.classid is not distinct from w.classid and k.objid is not distinct from w.objid\n" +
+        "                and k.objsubid is not distinct from w.objsubid\n" +
+        "   group by b.pid\n" +
+        "),\n" +
+        "nodes as (\n" +
+        "  select w.pid from waiting w\n" +
+        "  union\n" +
+        "  select b.pid from blocking b\n" +
+        "),\n" +
+        "locked as (\n" +
+        "  select w.relation from waiting w where w.locktype in ('relation', 'tuple') and w.relation is not null\n" +
+        "  union\n" +
+        "  select w.tuple_relation from waiting w where w.tuple_relation is not null\n" +
+        "),\n" +
+        OwnersCte + "\n" +
+        "select 0 as kind, v.can_read_all_stats, v.hidden_sessions, current_setting('server_version_num')::int4 as server_version,\n" +
+        "       r.exclusive, r.strong,\n" +
+        "       (select array_agg(c.pid order by c.pid) from counted c) as relation_lock_pids,\n" +
+        "       (select array_agg(c.relation_locks order by c.pid) from counted c) as relation_lock_counts,\n" +
+        "       (select array_agg(d.pid order by d.pid, d.advisory_key) from advisory d) as advisory_pids,\n" +
+        "       (select array_agg(d.advisory_key order by d.pid, d.advisory_key) from advisory d) as advisory_keys,\n" +
+        "       coalesce((select max(w.total) from waiting w), 0)::int8 as waiting_total,\n" +
+        "       null::int4 as pid, null::bool as same_database, null::bool as known, null::text as state, null::text as usename,\n" +
+        "       null::text as application_name, null::text as client_addr, null::timestamptz as backend_start,\n" +
+        "       null::text as wait_event_type, null::text as wait_event, null::float8 as transaction_seconds,\n" +
+        "       null::float8 as state_seconds, null::bool as has_xid, null::bool as vacuum, null::text as backend_type,\n" +
+        "       null::bool as prevents_wraparound, null::bool as waiter, null::text as locktype, null::text as mode,\n" +
+        "       null::text as owner_schema, null::text as owner_name, null::text as owner_kind, null::text as part,\n" +
+        "       null::text as tuple_owner_schema, null::text as tuple_owner_name, null::text as tuple_owner_kind, null::text as tuple_part,\n" +
+        "       null::int8 as advisory_key, null::bool as exact_start, null::float8 as waited_seconds,\n" +
+        "       null::int4[] as blocked_by, null::text[] as held_modes\n" +
+        "  from visibility v cross join relations r\n" +
+        "union all\n" +
+        "select 1, null, null, null, null, null, null, null, null, null, null,\n" +
+        "       n.pid, a.datname = current_database(), a.pid is not null,\n" +
+        "       case when a.datname = current_database() then a.state end,\n" +
+        "       case when a.datname = current_database() then a.usename::text end,\n" +
+        "       case when a.datname = current_database() then a.application_name end,\n" +
+        "       case when a.datname = current_database() then host(a.client_addr) end,\n" +
+        "       case when a.datname = current_database() then a.backend_start end,\n" +
+        "       a.wait_event_type,\n" +
+        "       case when a.datname = current_database() then a.wait_event end,\n" +
+        "       extract(epoch from (now() - a.xact_start))::float8,\n" +
+        "       extract(epoch from (now() - a.state_change))::float8,\n" +
+        "       a.backend_xid is not null,\n" +
+        "       exists (select 1 from pg_catalog.pg_stat_progress_vacuum v where v.pid = n.pid),\n" +
+        "       a.backend_type::text,\n" +
+        "       case when a.backend_type = 'autovacuum worker' then a.query like 'autovacuum:%(to prevent wraparound)%' end,\n" +
+        "       w.pid is not null, w.locktype, w.mode,\n" +
+        "       case when w.locktype in ('relation', 'tuple') then ro.owner_schema end,\n" +
+        "       case when w.locktype in ('relation', 'tuple') then ro.owner_name end,\n" +
+        "       case when w.locktype in ('relation', 'tuple') then ro.owner_kind end,\n" +
+        "       case when w.locktype in ('relation', 'tuple') then ro.part end,\n" +
+        "       tro.owner_schema, tro.owner_name, tro.owner_kind, tro.part,\n" +
+        "       w.advisory_key, w.exact_start, w.waited_seconds, w.blocked_by, h.modes\n" +
+        "  from nodes n\n" +
+        "  left join pg_stat_activity a on a.pid = n.pid\n" +
+        "  left join waiting w on w.pid = n.pid\n" +
+        "  left join held h on h.pid = n.pid\n" +
+        "  left join owners ro on ro.locked = w.relation\n" +
+        "  left join owners tro on tro.locked = w.tuple_relation\n" +
+        " order by 1, 41 desc nulls last, 12";
+
+    /// <summary>The lock table, read once for a sweep and for Database › Sessions (<see cref="LockTableSql" />).</summary>
+    public static HealthQuery LockTable() => new(LockTableSql, [Integer("limit", MaxSessions)]);
+
+    /// <summary>
+    /// PostgreSQL 19's <c>pg_stat_lock</c>: per lock type, how many lock requests had to wait, for how long in all
+    /// (milliseconds), and how often a backend's fast-path slots were full - cumulative since <c>stats_reset</c>, for the
+    /// whole server. Asked only of a server the lock table read says is 19 or later: below it the view does not exist, and
+    /// naming it is <c>42P01</c>.
+    /// </summary>
+    public static HealthQuery LockStatistics() => new(
+        "select s.locktype, s.waits, s.wait_time, s.fastpath_exceeded, s.stats_reset\n" +
+        "  from pg_catalog.pg_stat_lock s\n" +
+        " order by s.locktype");
+
+    /// <summary>
     /// The sessions of this database that are idle inside a transaction, oldest first, with what they hold -
     /// whether they have a transaction id (they wrote), a snapshot (they pin vacuum), relation locks (they
     /// block DDL) - and whether they hold one of Marten's own daemon locks. C04.
     /// </summary>
+    /// <remarks>
+    /// The lock counts and the daemon-lock holders come from the sweep's one read of the lock table
+    /// (<see cref="LockTable" />) as parameters, so this statement reads <c>pg_stat_activity</c> and nothing of
+    /// <c>pg_locks</c>.
+    /// </remarks>
     /// <param name="floor">The shortest idle time worth reading at all; the evaluator applies the thresholds.</param>
-    /// <param name="daemonLockIds">The advisory lock keys Marten's daemon negotiates leadership with.</param>
-    public static HealthQuery IdleInTransaction(TimeSpan floor, IReadOnlyCollection<long> daemonLockIds)
+    /// <param name="daemonLockHolders">The sessions holding one of the advisory keys the source's daemon leads with.</param>
+    /// <param name="relationLocks">How many relation locks each session holds, by process id.</param>
+    public static HealthQuery IdleInTransaction(
+        TimeSpan floor,
+        IReadOnlyCollection<int> daemonLockHolders,
+        IReadOnlyDictionary<int, long> relationLocks)
     {
-        ArgumentNullException.ThrowIfNull(daemonLockIds);
+        ArgumentNullException.ThrowIfNull(daemonLockHolders);
+        ArgumentNullException.ThrowIfNull(relationLocks);
+
+        int[] pids = [.. relationLocks.Keys.Order()];
+        long[] counts = [.. pids.Select(x => relationLocks[x])];
 
         return new HealthQuery(
             "with " + VisibilityCte + ",\n" +
@@ -222,9 +433,9 @@ internal static class HealthConnectionQueries
             "         extract(epoch from (now() - a.xact_start))::float8 as transaction_seconds,\n" +
             "         a.backend_xid is not null as has_xid,\n" +
             "         a.backend_xmin is not null as has_xmin,\n" +
-            "         (select count(*) from pg_locks l where l.pid = a.pid and l.granted and l.locktype = 'relation') as relation_locks,\n" +
-            "         exists (select 1 from pg_locks l where l.pid = a.pid and l.granted and l.locktype = 'advisory'\n" +
-            "                    and " + AdvisoryKey + " = any(@daemon_lock_ids)) as holds_daemon_lock,\n" +
+            "         coalesce((select r.relation_locks from unnest(@relation_lock_pids::int4[], @relation_lock_counts::int8[]) as r(pid, relation_locks)\n" +
+            "                    where r.pid = a.pid), 0)::int8 as relation_locks,\n" +
+            "         a.pid = any(@daemon_lock_holders::int4[]) as holds_daemon_lock,\n" +
             "         count(*) over () as total\n" +
             "    from pg_stat_activity a\n" +
             "   where a.datname = current_database()\n" +
@@ -241,7 +452,9 @@ internal static class HealthConnectionQueries
             "  from visibility v left join idle i on true",
             [
                 Seconds("floor_seconds", floor),
-                LongArray("daemon_lock_ids", daemonLockIds),
+                IntegerArray("daemon_lock_holders", daemonLockHolders),
+                IntegerArray("relation_lock_pids", pids),
+                LongArray("relation_lock_counts", counts),
                 Integer("limit", MaxOffenders),
             ]);
     }
@@ -268,115 +481,6 @@ internal static class HealthConnectionQueries
         "       r.backend_start, r.query_start, r.wait_event_type, r.running_seconds, r.total\n" +
         "  from visibility v left join running r on true",
         [Seconds("floor_seconds", floor), Integer("limit", MaxOffenders)]);
-
-    /// <summary>
-    /// The sessions of this database that wait for a lock, longest first: what they wait for, in which mode,
-    /// for how long, and who blocks them. C06.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// What is waited for is the waiter's ungranted lock: a relation, a tuple, an advisory key, or another
-    /// transaction. A row lock shows as a wait on the holder's transaction id, with the waiter already holding
-    /// the tuple lock on the row's relation - so that relation is read too, which is what lets the check say "an
-    /// <c>mt_streams</c> row". Both are returned as their owners (<see cref="OwnersCte" />): a row of a
-    /// partition is a row of the partitioned table.
-    /// </para>
-    /// <para>
-    /// How long: <c>pg_locks.waitstart</c> where the server has it (PostgreSQL 14+), else the session's last
-    /// state change - an upper bound, said so in the caveat.
-    /// </para>
-    /// </remarks>
-    /// <param name="floor">The shortest wait worth reading at all; the evaluator applies the thresholds.</param>
-    public static HealthQuery LockWaits(TimeSpan floor) => new(
-        "with recursive " + VisibilityCte + ",\n" +
-        "waits as (\n" +
-        "  select distinct on (l.pid) l.pid, l.locktype, l.mode, l.relation,\n" +
-        "         " + AdvisoryKey + " as advisory_key,\n" +
-        "         (to_jsonb(l) ->> 'waitstart')::timestamptz as waitstart\n" +
-        "    from pg_locks l\n" +
-        "   where not l.granted\n" +
-        "   order by l.pid, l.locktype\n" +
-        "),\n" +
-        "waiting as (\n" +
-        "  select w.pid, w.locktype, w.mode,\n" +
-        "         case when w.locktype in ('relation', 'tuple') then w.relation end as relation,\n" +
-        "         (select t.relation from pg_locks t where t.pid = w.pid and t.locktype = 'tuple' order by t.granted desc limit 1) as tuple_relation,\n" +
-        "         w.advisory_key, w.waitstart is not null as exact_start,\n" +
-        "         extract(epoch from (now() - coalesce(w.waitstart, a.state_change)))::float8 as waited_seconds,\n" +
-        "         a.usename::text as usename, a.application_name, host(a.client_addr) as client_addr, a.wait_event,\n" +
-        "         pg_blocking_pids(w.pid) as blocked_by,\n" +
-        "         count(*) over () as total\n" +
-        "    from waits w\n" +
-        "    join pg_stat_activity a on a.pid = w.pid\n" +
-        "   where a.datname = current_database()\n" +
-        "     and " + ClientSession + "\n" +
-        "     and a.pid <> pg_backend_pid()\n" +
-        "     and a.wait_event_type = 'Lock'\n" +
-        "     and coalesce(w.waitstart, a.state_change) <= now() - make_interval(secs => @floor_seconds)\n" +
-        "   order by coalesce(w.waitstart, a.state_change)\n" +
-        "   limit @limit\n" +
-        "),\n" +
-        "locked as (\n" +
-        "  select w.relation from waiting w where w.relation is not null\n" +
-        "  union\n" +
-        "  select w.tuple_relation from waiting w where w.tuple_relation is not null\n" +
-        "),\n" +
-        OwnersCte + "\n" +
-        "select v.can_read_all_stats, v.hidden_sessions, w.pid, w.locktype, w.mode,\n" +
-        "       ro.owner_schema, ro.owner_name, ro.owner_kind, ro.part,\n" +
-        "       w.advisory_key, w.exact_start, w.waited_seconds, w.usename, w.application_name, w.client_addr, w.wait_event,\n" +
-        "       tro.owner_schema, tro.owner_name, tro.owner_kind, tro.part,\n" +
-        "       w.blocked_by, w.total\n" +
-        "  from visibility v\n" +
-        "  left join waiting w on true\n" +
-        "  left join owners ro on ro.locked = w.relation\n" +
-        "  left join owners tro on tro.locked = w.tuple_relation",
-        [Seconds("floor_seconds", floor), Integer("limit", MaxOffenders)]);
-
-    /// <summary>
-    /// The sessions blocking the waiters <see cref="LockWaits" /> found, by process id: which database they
-    /// are in, their state, how long their transaction has been open, and whether they wait themselves - which
-    /// is what finds the head of a chain. C06.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A blocker can be in another database - a lock on a shared catalog is the server's - and nothing about such a
-    /// session is this database's to say: its state, role, application and client are null, and the finding says
-    /// "a session in another database".
-    /// </para>
-    /// <para>
-    /// <b>A <c>VACUUM</c> at the head</b> (W5-V1): whether the blocker has a row in <c>pg_stat_progress_vacuum</c> - whose
-    /// process id every role may read (B0 §7c) - its <c>backend_type</c>, and whether it is autovacuum running to prevent
-    /// wraparound, which only a role that may read the worker's <c>query</c> (<c>pg_read_all_stats</c>) is told. The query is
-    /// read for that test alone and never returned: it names the table.
-    /// </para>
-    /// </remarks>
-    /// <param name="processIds">The blockers' process ids, from <c>pg_blocking_pids</c>.</param>
-    public static HealthQuery Blockers(IReadOnlyCollection<int> processIds)
-    {
-        ArgumentNullException.ThrowIfNull(processIds);
-
-        return new HealthQuery(
-            "select a.pid, a.datname = current_database() as same_database,\n" +
-            "       case when a.datname = current_database() then a.state end as state,\n" +
-            "       case when a.datname = current_database() then a.usename::text end as usename,\n" +
-            "       case when a.datname = current_database() then a.application_name end as application_name,\n" +
-            "       case when a.datname = current_database() then host(a.client_addr) end as client_addr,\n" +
-            "       extract(epoch from (now() - a.xact_start))::float8 as transaction_seconds,\n" +
-            "       extract(epoch from (now() - a.state_change))::float8 as state_seconds,\n" +
-            "       a.backend_xid is not null as has_xid,\n" +
-            "       a.wait_event_type = 'Lock' as waiting,\n" +
-            "       v.pid is not null as vacuum,\n" +
-            "       a.backend_type::text as backend_type,\n" +
-            "       case when a.backend_type = 'autovacuum worker' then a.query like 'autovacuum:%(to prevent wraparound)%' end as prevents_wraparound\n" +
-            "  from pg_stat_activity a\n" +
-            "  left join pg_catalog.pg_stat_progress_vacuum v on v.pid = a.pid\n" +
-            " where a.pid = any(@pids)\n" +
-            "   and a.pid <> pg_backend_pid()\n" +
-            " order by a.pid\n" +
-            " limit @limit",
-            [IntegerArray("pids", processIds), Integer("limit", MaxOffenders)]);
-    }
 
     /// <summary>
     /// This database's prepared transactions, oldest first, and <c>max_prepared_transactions</c> - one row

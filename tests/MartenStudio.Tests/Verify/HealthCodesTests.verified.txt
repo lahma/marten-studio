@@ -9,6 +9,7 @@ C08 | Connections | deadlocks, rollbacks, temp-files | - | both | since 0.4 | cu
 C09 | Connections | - | - | Marten | since 0.4 | current
 C10 | Connections | - | - | Marten | since 0.4 | current
 C11 | Connections | - | - | both | since 0.5 | current
+C12 | Connections | idle-head, long-chain | - | both | since 0.6 | current
 D01 | Daemon | - | - | Marten | since 0.4 | current
 D02 | Daemon | no-daemon, lock-held-idle | - | Marten | since 0.4 | current
 D03 | Daemon | - | shard | Marten | since 0.4 | current

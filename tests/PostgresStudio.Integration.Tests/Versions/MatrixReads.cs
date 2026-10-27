@@ -93,6 +93,22 @@ internal static class MatrixReads
         // ---- The Overview, Sessions and Relationships --------------------------------------------------------------
         new("overview: server and platform", true, static (x, t) => OverviewServerQueries.ReadPlatformAsync(x.Connection, x.Transaction, x.Timeout, t)),
         new("sessions: snapshot", true, static (x, t) => x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t)),
+
+        // ---- X3: Sessions › Blocking's lock table read, and PostgreSQL 19's pg_stat_lock, read on 19 and absent below --------
+        new("sessions: blocking and pg_stat_lock", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            LockTableRead blocking = snapshot.Blocking ?? throw new InvalidOperationException("The sessions snapshot read no lock table.");
+
+            if (PostgresFeatures.Has(PostgresFeature.PgStatLock, blocking.ServerVersion))
+            {
+                Found(snapshot.LockStatistics?.FirstOrDefault(static y => y.LockType == "relation"), "pg_stat_lock row for relation locks, on PostgreSQL 19");
+            }
+            else if (snapshot.LockStatistics is not null)
+            {
+                throw new InvalidOperationException("pg_stat_lock was read on server_version_num " + blocking.ServerVersion + ", below 19, where it does not exist.");
+            }
+        }),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
 
