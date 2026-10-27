@@ -31,7 +31,7 @@
        builds with, and so the tag its health docs links point at - and VersionFallbackTests holds it to CHANGELOG.md's top
        version. -->
   <PropertyGroup>
-    <VersionPrefix>0.6.1</VersionPrefix>
+    <VersionPrefix>0.7.0</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup>

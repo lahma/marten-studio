@@ -1,3 +1,21 @@
+# 0.7.0
+
+0.7 adds two things hosts asked for after 0.6: each index's size and use on its table's Keys & indexes tab, and links
+from the diagnostics API to the studio's own pages.
+
+- Database › an object › Keys & indexes shows each index's size, scans and last scan beside its definition (#21). The
+  size is `relpages` times the block size, an estimate as of the last VACUUM, ANALYZE or build, because a size
+  function would lock the index. The counters are `pg_stat_all_indexes`'; last scan needs PostgreSQL 16. Index
+  entries read and table rows fetched are in the Scans cell's title, and an index still being built is badged
+  "not ready". These are catalog statistics, so the source policy is the only gate: `BrowseDatabase` is not needed.
+- The diagnostics API links into the studio (#24). Each `PostgresFinding` has `StudioPath`, its card on the Health
+  page, and `StudioLinks`, the screens that help with it. `IPostgresDiagnostics.GetStudioPath(database, page)` gives
+  the path of Health, Sessions, its blocking view, Statements, Maintenance, Storage or Server for a database, with
+  `PostgresStudioPage` naming the page. Each path is relative to the studio's mount path, with the database's scope
+  in its query, so a host no longer copies the studio's routes. Public API: two new types (`PostgresStudioLink`,
+  `PostgresStudioPage`), two `PostgresFinding` properties and a default interface member, all extend-only (D31).
+  MartenStudio's own surface is unchanged.
+
 # 0.6.1
 
 A patch for two bugs found on 0.6.0.

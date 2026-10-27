@@ -430,7 +430,7 @@ storage, statements, settings and extensions, and connections. Two interfaces po
 `IPostgresDatabaseSource`, named with `AddDatabaseSource`, lists a host's own databases and hands the studio each one's
 `NpgsqlDataSource` on demand; `IPostgresCapacitySource`, found in DI, reports compute capacity that SQL cannot see,
 such as Aurora Serverless v2's ACU. PostgresStudio's public surface is D30's six registration types, the six inbound
-types and this read model's nineteen; its Verify baseline is the list (hard rule 7). MartenStudio's surface does not
+types and this read model's twenty-one; its Verify baseline is the list (hard rule 7). MartenStudio's surface does not
 change: its hosts reach the read model through the PostgresStudio assembly its exact pin names.
 
 *Why public, when D12 keeps the data seam internal.* The read model is results, not seams. There is no
