@@ -35,6 +35,32 @@ public class DaemonTopologyTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
+    /// <summary>
+    /// INT-W1, H1's rule: a shard or projection the circuit named is the visitor's text - a Stop of a shard no agent runs for
+    /// never has it looked up - so every topology refusal carries it escaped and bounded, as H1 has a refusal carry a
+    /// projection or shard name, and 9209 log its target.
+    /// </summary>
+    [Fact]
+    public void A_shard_or_projection_the_circuit_named_reaches_each_refusal_escaped_and_bounded()
+    {
+        const string Hostile = "Ghost\r\n\u001b[2J:All";
+        string capped = StudioLogValue.Cap(Hostile)!;
+
+        string[] refusals =
+        [
+            DaemonTopologyWording.AlreadyRunning(Hostile),
+            DaemonTopologyWording.NothingToStop(Hostile, hotCold: true),
+            DaemonTopologyWording.LedElsewhere(Hostile),
+            DaemonTopologyWording.RewindLedElsewhere(Hostile),
+        ];
+
+        refusals.Should().OnlyContain(x => x.Contains(capped, StringComparison.Ordinal) && !x.Contains('\r') && !x.Contains('\u001b'));
+        DaemonTopologyWording.NothingToStop(new string('x', 5_000), hotCold: false).Should()
+            .NotContain(new string('x', 300), "a name is bounded at 256 characters");
+        DaemonTopologyWording.NothingToStop("Trips:All", hotCold: false).Should().StartWith("No agent for Trips:All runs on this node",
+            "an ordinary name reads as it always did");
+    }
+
     private static DocumentStore Store(DaemonMode mode, bool twoDatabases = false) => DocumentStore.For(options =>
     {
         if (twoDatabases)

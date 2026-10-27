@@ -5,6 +5,7 @@ using Marten;
 
 using MartenStudio.Services.Configuration;
 
+using PostgresStudio.Services;
 using PostgresStudio.Services.Json;
 
 namespace MartenStudio.Services.Documents;
@@ -160,7 +161,9 @@ internal static class MartenEditPreview
 
     private static MartenPreviewCheck Refused(Exception exception)
     {
-        string message = exception.Message;
+        // Marten's words can carry what the visitor typed - the edited JSON, its id - so they reach the dialog escaped and
+        // bounded, as error words reach every refusal (H1; INT-W1), then cut to the dialog's own length.
+        string message = StudioLogValue.CapText(exception.Message) ?? string.Empty;
 
         if (message.Length > MaxReasonLength)
         {

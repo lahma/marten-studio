@@ -841,11 +841,12 @@ internal sealed partial class EventDataService : IEventDataService
             if (candidate is null)
             {
                 // Never Type.GetType on a string a browser supplied: the picker offers the store's own
-                // types and nothing else is replayable.
+                // types and nothing else is replayable. The name is the browser's text, so it reaches the refusal
+                // escaped and bounded - as the stepper's word-for-word copy of this refusal does (H1; INT-W1).
                 return AggregateSnapshot.Failed(
                     typeName,
                     version,
-                    new EventDataError($"'{typeName}' is not one of this store's aggregate types.", null, false));
+                    new EventDataError($"'{StudioLogValue.Cap(typeName)}' is not one of this store's aggregate types.", null, false));
             }
 
             IdParseResult parsed = ParseStreamIdFor(resolved, streamId);

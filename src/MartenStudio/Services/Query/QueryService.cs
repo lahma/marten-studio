@@ -586,13 +586,25 @@ internal sealed class QueryService : IQueryService
             return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.Unavailable, exception.Message);
         }
 
-        if (FindDocumentType(resolved, request.Alias) is not { } documentType)
+        // The answer that lifts the clause guard's nested-read rules below is asked again by the registered key and the
+        // database's own identity when the visitor spelled either another way, as a run asks it (D29, H1; INT-W1).
+        StudioScope named = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target);
+
+        if (!ReferenceEquals(named, scope) && !await MayRunSqlAsync(named, cancellationToken).ConfigureAwait(false))
         {
-            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.NotFound,
-                $"Marten store '{scope.StoreKey}' has no visible document type with alias '{request.Alias}'.");
+            audit.RecordScopeDenied(SqlScope(named), value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)", WhatIfAction, target, StudioCapability.RunSql);
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy,
+                "No plan to compare: fetching one runs EXPLAIN through the SQL console. " + SqlConsoleService.SqlRefusedMessage);
         }
 
-        // The visitor passed RunSql above, which is what lifts the clause guard's nested-read rules for a run too.
+        if (FindDocumentType(resolved, request.Alias) is not { } documentType)
+        {
+            // Both names are the visitor's text, escaped and bounded as a run's refusal of the same alias is (H1; INT-W1).
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.NotFound,
+                $"Marten store '{StudioLogValue.Cap(scope.StoreKey)}' has no visible document type with alias '{StudioLogValue.Cap(request.Alias)}'.");
+        }
+
+        // The visitor passed RunSql above, by both spellings, which is what lifts the clause guard's nested-read rules for a run too.
         if (!QuerySqlComposer.CheckClause(request.WhereClause, allowNestedReads: true).Allowed)
         {
             return WhatIfResult.NotCompared(index, "Not compared: the clause is one the studio does not run.");

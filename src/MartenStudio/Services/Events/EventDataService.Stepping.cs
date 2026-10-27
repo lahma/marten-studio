@@ -354,7 +354,8 @@ internal sealed partial class EventDataService
 
         if (candidate is null)
         {
-            return StepOpening.Refused(typeName, $"'{typeName}' is not one of this store's aggregate types.");
+            // The type name is the visitor's text (?type=), so it reaches the refusal escaped and bounded (H1; INT-W1).
+            return StepOpening.Refused(typeName, $"'{StudioLogValue.Cap(typeName)}' is not one of this store's aggregate types.");
         }
 
         IdParseResult parsed = ParseStreamIdFor(resolved, streamId);

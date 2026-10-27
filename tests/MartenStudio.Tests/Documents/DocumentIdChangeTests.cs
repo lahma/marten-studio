@@ -42,6 +42,30 @@ public class DocumentIdChangeTests
             .And.Contain("Change the id back");
     }
 
+    /// <summary>
+    /// INT-W1, checked against H1's rule: the id the visitor typed into the JSON reaches the refusal with no control character
+    /// and bounded - through the write path's own <see cref="WriteAuditText.Sanitize(string?, int)" />, as every id a write
+    /// names does - so it needs no second treatment.
+    /// </summary>
+    [Fact]
+    public void An_id_the_visitor_typed_reaches_the_refusal_sanitized_and_bounded()
+    {
+        using DocumentStore store = Store();
+        MemberInfo member = typeof(StringKeyed).GetProperty(nameof(StringKeyed.Id))!;
+        const string Hostile = "orders/2\r\n\u001b[2J";
+
+        string? refusal = DocumentWriteService.IdChange(
+            store.Options.Serializer(), typeof(StringKeyed), new(member, "orders/1"), "{}", new StringKeyed { Id = Hostile });
+
+        refusal.Should().Contain("'" + WriteAuditText.Sanitize(Hostile, WriteAuditText.MaxTokenLength) + "'")
+            .And.NotContain("\r").And.NotContain("\n").And.NotContain("\u001b");
+
+        string? long_ = DocumentWriteService.IdChange(
+            store.Options.Serializer(), typeof(StringKeyed), new(member, "orders/1"), "{}", new StringKeyed { Id = new string('x', 5_000) });
+
+        long_.Should().NotContain(new string('x', WriteAuditText.MaxTokenLength + 1), "an id is bounded where the write path bounds it");
+    }
+
     /// <summary>A strong-typed id compares as the value it is, not as its text.</summary>
     [Fact]
     public void A_strong_typed_id_compares_as_a_value()
@@ -156,5 +180,12 @@ public class DocumentIdChangeTests
     {
         /// <summary>The identity.</summary>
         public Key Id { get; set; } = new();
+    }
+
+    /// <summary>A document keyed by a string, which the refusal prints as it is.</summary>
+    public sealed class StringKeyed
+    {
+        /// <summary>The identity.</summary>
+        public string Id { get; set; } = string.Empty;
     }
 }

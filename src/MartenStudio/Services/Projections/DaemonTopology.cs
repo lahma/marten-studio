@@ -8,6 +8,8 @@ using Marten.Storage;
 
 using MartenStudio.Services.Health.Checks;
 
+using PostgresStudio.Services;
+
 using MartenCoordinator = Marten.Events.Daemon.Coordination.IProjectionCoordinator;
 
 namespace MartenStudio.Services.Projections;
@@ -254,26 +256,30 @@ internal static class DaemonTopologyWording
         return daemon.RunsHere(shard) ? null : NothingToStop(shard, daemon.IsHotCold);
     }
 
+    // The shard and projection below are what the circuit named - a visitor's text until the daemon has looked it up, and a
+    // Stop of a shard no agent runs for never does - so each refusal carries it escaped and bounded, as H1 has every
+    // refusal carry a projection or shard name and 9209 log its target (INT-W1).
+
     /// <summary>Start of a shard whose agent already runs here: the daemon's start is idempotent, and starts nothing.</summary>
     public static string AlreadyRunning(string shard) =>
-        shard + " is already running on this node, so Start would do nothing: nothing was started.";
+        StudioLogValue.Cap(shard) + " is already running on this node, so Start would do nothing: nothing was started.";
 
     /// <summary>Stop of a shard no agent runs for here.</summary>
     /// <param name="shard">The shard.</param>
     /// <param name="hotCold">Whether the daemon runs HotCold, where the shard may run on another node.</param>
     public static string NothingToStop(string shard, bool hotCold) =>
-        "No agent for " + shard + " runs on this node, so Stop would do nothing: nothing was stopped."
+        "No agent for " + StudioLogValue.Cap(shard) + " runs on this node, so Stop would do nothing: nothing was stopped."
         + (hotCold ? " Under HotCold it runs on whichever node holds its leadership lock." : string.Empty);
 
     /// <summary>Start, under HotCold, of a shard whose leadership lock this node does not hold.</summary>
     public static string LedElsewhere(string shard) =>
-        "Under HotCold, " + shard + " runs on the node that holds its leadership lock, and this node does not hold it: an "
+        "Under HotCold, " + StudioLogValue.Cap(shard) + " runs on the node that holds its leadership lock, and this node does not hold it: an "
         + "agent started here would run beside that node's, and the two would write the same progression row. Nothing was "
         + "started. Resume the daemon here, and the coordinators start it wherever the lock is held.";
 
     /// <summary>A rewind, under HotCold, of a projection whose leadership lock this node does not hold.</summary>
     public static string RewindLedElsewhere(string projection) =>
-        "Under HotCold, " + projection + " runs on the node that holds its leadership lock, and this node does not hold it: a "
+        "Under HotCold, " + StudioLogValue.Cap(projection) + " runs on the node that holds its leadership lock, and this node does not hold it: a "
         + "rewind here would restart its agents on this node, beside that node's. Rewind it from the node that runs it - its "
         + "projections screen says it leads the shards.";
 

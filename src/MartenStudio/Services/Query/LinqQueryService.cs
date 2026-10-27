@@ -517,13 +517,16 @@ internal sealed class LinqQueryService : ILinqQueryService
         HypotheticalIndex index,
         CancellationToken cancellationToken)
     {
-        StudioScope planScope = QueryService.SqlScope(run.Scope);
+        // The plan's question, asked as LINQ mode's own plan asks it (PlanAsync): by the registered key and the database's own
+        // identity, never the visitor's spelling of either, and audited against that same resource (D29, H1; INT-W1).
+        StudioScope named = StudioSourceResolver.Named(run.Scope, resolved.Source, resolved.Target);
+        StudioScope planScope = QueryService.SqlScope(named);
 
         LinqQueryResult Done(WhatIfResult whatIf) =>
             new(run.Request.Alias, [], false, 0, run.PageSize, sql, parameters, TimeSpan.Zero) { WhatIf = whatIf };
 
         // The plan's question: a plan describes the table as a whole.
-        if (!await MayExplainAsync(run.Scope, cancellationToken).ConfigureAwait(false))
+        if (!await MayExplainAsync(named, cancellationToken).ConfigureAwait(false))
         {
             audit.RecordScopeDenied(planScope, WritePolicyName(value), run.Action, run.Target, StudioCapability.RunLinqQueries);
             return Done(WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, PlanRefusedMessage));

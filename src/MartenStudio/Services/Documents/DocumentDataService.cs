@@ -19,6 +19,7 @@ using Weasel.Core;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Services.Documents;
 
@@ -838,6 +839,24 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         try
         {
             resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            // The plan's gate asked again by the registered key and the database's own identity when the visitor spelled
+            // either another way, as LINQ mode's plan asks it - and the what-if audited against that resource - so a policy
+            // that compares names exactly is not passed by another spelling of them (D29, H1; INT-W1).
+            StudioScope named = QueryService.SqlScope(StudioSourceResolver.Named(scope, resolved.Source, resolved.Target));
+
+            if (named != planScope)
+            {
+                if (!await authorization.IsAuthorizedAsync(named, capability: null, cancellationToken).ConfigureAwait(false)
+                    || !await authorization.IsAuthorizedAsync(named, nameof(StudioCapability.RunLinqQueries), cancellationToken).ConfigureAwait(false))
+                {
+                    audit.RecordScopeDenied(named, options.Value.WriteAuthorizationPolicy ?? options.Value.StoreAuthorizationPolicy ?? "(none)",
+                        WhatIfAction, target, StudioCapability.RunLinqQueries);
+                    return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy, LinqQueryService.PlanRefusedMessage);
+                }
+
+                planScope = named;
+            }
 
             await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
