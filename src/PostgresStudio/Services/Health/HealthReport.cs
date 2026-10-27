@@ -67,7 +67,11 @@ internal sealed record HealthReportFinding(
     /// The page anchor of the finding's card, unique within a report: the report suffixes one whose key reads
     /// like another's, because an element id is one per page.
     /// </summary>
-    public string Anchor { get; init; } = "finding-" + HealthCheckInfo.Anchor(Finding.Key.Replace('|', '-'));
+    public string Anchor { get; init; } = AnchorFor(Finding);
+
+    /// <summary>The element id of a finding's card on the Health page.</summary>
+    /// <param name="finding">The finding.</param>
+    internal static string AnchorFor(HealthFinding finding) => "finding-" + HealthCheckInfo.Anchor(finding.Key.Replace('|', '-'));
 }
 
 /// <summary>One check's status row: whether it ran, and what it found or why not.</summary>

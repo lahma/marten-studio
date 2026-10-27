@@ -76,6 +76,15 @@ public sealed record PostgresFinding
     /// <summary>The check's documentation, pinned to this release.</summary>
     public string DocsUrl { get; init; } = "";
 
+    /// <summary>
+    /// The finding's card on the studio's Health page, for this database, relative to the studio's mount path with no
+    /// leading slash (<see cref="PostgresStudioLink" />). Empty for a finding built outside the studio.
+    /// </summary>
+    public string StudioPath { get; init; } = "";
+
+    /// <summary>The studio screens that help with it (<c>Open the index advisor</c>), in the same relative form.</summary>
+    public IReadOnlyList<PostgresStudioLink> StudioLinks { get; init; } = [];
+
     /// <summary>When its facts were read.</summary>
     public DateTimeOffset MeasuredAt { get; init; }
 

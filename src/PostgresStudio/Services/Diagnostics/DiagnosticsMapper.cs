@@ -142,12 +142,21 @@ internal static class DiagnosticsMapper
     /// <param name="info">Its check.</param>
     /// <param name="gate">The host gate.</param>
     /// <param name="runtime">The studio's runtime, for what a remedy needs that this host lacks.</param>
-    public static PostgresFinding Finding(HealthFinding finding, HealthCheckInfo info, HostGate gate, IStudioRuntime runtime)
+    /// <param name="sourceParameter">The studio's source parameter, for the finding's links.</param>
+    /// <param name="scope">The database the finding is about, for the finding's links.</param>
+    public static PostgresFinding Finding(
+        HealthFinding finding,
+        HealthCheckInfo info,
+        HostGate gate,
+        IStudioRuntime runtime,
+        string sourceParameter,
+        StudioScope scope)
     {
         ArgumentNullException.ThrowIfNull(finding);
         ArgumentNullException.ThrowIfNull(info);
         ArgumentNullException.ThrowIfNull(gate);
         ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(scope);
 
         StudioFeatureRequirement? feature = finding.Remedy?.Requires;
 
@@ -168,6 +177,10 @@ internal static class DiagnosticsMapper
             ActionRequires = feature is not null && !runtime.IsAvailable(feature) ? feature.Needs : null,
             Evidence = [.. finding.Evidence.Select(gate.Evidence)],
             DocsUrl = info.DocsUrl,
+            StudioPath = HealthLinks.Relative(sourceParameter, HealthLinks.Route, scope) + "#" + HealthReportFinding.AnchorFor(finding),
+            StudioLinks = finding.Link is { } link
+                ? [new PostgresStudioLink { Label = link.Label, Path = HealthLinks.Relative(sourceParameter, link.Route, scope, link.Query) }]
+                : [],
             MeasuredAt = finding.MeasuredAt,
         };
     }

@@ -31,7 +31,7 @@ public partial class DiagnosticsApiIsNotServedTests
 
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
 
-    /// <summary>The read model's nineteen types, by the files that declare them.</summary>
+    /// <summary>The read model's nineteen types and the two links into the studio, by the files that declare them.</summary>
     internal static string[] ReadModel() =>
     [
         .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "PostgresStudio", "Diagnostics"), "*.cs")
@@ -99,7 +99,7 @@ public partial class DiagnosticsApiIsNotServedTests
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
         string[] readModel = ReadModel();
-        readModel.Should().HaveCount(19, "the read model's nineteen types are found, or the scan checks nothing")
+        readModel.Should().HaveCount(21, "the read model's twenty-one types are found, or the scan checks nothing")
             .And.Contain("PostgresDiagnosticsSnapshot");
 
         List<string> offences = [.. files.SelectMany(file => Offences(SourceScanner.Relative(file), File.ReadAllText(file), readModel))];

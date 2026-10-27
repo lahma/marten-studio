@@ -13,6 +13,7 @@ namespace PostgresStudio
     {
         System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresCheck> Checks { get; }
         System.Threading.Tasks.Task<PostgresStudio.PostgresDiagnosticsSnapshot> GetSnapshotAsync(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresDiagnosticsRequest request, System.Threading.CancellationToken cancellationToken = default);
+        string GetStudioPath(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresStudioPage page);
         System.Collections.Generic.IAsyncEnumerable<PostgresStudio.PostgresDatabaseRef> ListDatabasesAsync(System.Threading.CancellationToken cancellationToken = default);
     }
     public enum PostgresActionKind
@@ -139,6 +140,8 @@ namespace PostgresStudio
         public string Key { get; }
         public System.DateTimeOffset MeasuredAt { get; init; }
         public PostgresStudio.PostgresSeverity Severity { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresStudioLink> StudioLinks { get; init; }
+        public string StudioPath { get; init; }
         public string? Subject { get; init; }
         public string? TenantId { get; init; }
         public string Title { get; init; }
@@ -266,6 +269,12 @@ namespace PostgresStudio
     {
         public static Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder AddPostgresStudio(this Microsoft.Extensions.DependencyInjection.IHealthChecksBuilder builder, string name = "postgres-studio", Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus? failureStatus = default, System.Collections.Generic.IEnumerable<string>? tags = null, System.TimeSpan? timeout = default) { }
     }
+    public sealed record PostgresStudioLink : System.IEquatable<PostgresStudio.PostgresStudioLink>
+    {
+        public PostgresStudioLink() { }
+        public string Label { get; init; }
+        public string Path { get; init; }
+    }
     public sealed class PostgresStudioOptions
     {
         public PostgresStudioOptions() { }
@@ -289,6 +298,16 @@ namespace PostgresStudio
         public string? WriteAuthorizationPolicy { get; set; }
         public PostgresStudio.PostgresStudioOptions AddDataSource(string name, System.Func<System.IServiceProvider, Npgsql.NpgsqlDataSource> resolve) { }
         public PostgresStudio.PostgresStudioOptions AddDatabaseSource(string name, System.Func<System.IServiceProvider, PostgresStudio.IPostgresDatabaseSource> resolve) { }
+    }
+    public enum PostgresStudioPage
+    {
+        Health = 0,
+        Sessions = 1,
+        Blocking = 2,
+        Statements = 3,
+        Maintenance = 4,
+        Storage = 5,
+        Server = 6,
     }
     public sealed record PostgresStudioResource : System.IEquatable<PostgresStudio.PostgresStudioResource>
     {

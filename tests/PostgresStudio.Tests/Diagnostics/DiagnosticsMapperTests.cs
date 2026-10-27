@@ -89,7 +89,7 @@ public class DiagnosticsMapperTests
             Remedy = HealthRemedy.ForMigration("REINDEX INDEX CONCURRENTLY \"public\".\"orders_idx\";", "Rebuilds it."),
         };
 
-        PostgresFinding mapped = DiagnosticsMapper.Finding(finding, info, Gate(false), NoStudioRuntime.Instance);
+        PostgresFinding mapped = DiagnosticsMapper.Finding(finding, info, Gate(false), NoStudioRuntime.Instance, "store", new PostgresStudio.Services.StudioScope("main", "db1", null));
 
         mapped.Code.Should().Be("T03");
         mapped.Variant.Should().Be("index");
