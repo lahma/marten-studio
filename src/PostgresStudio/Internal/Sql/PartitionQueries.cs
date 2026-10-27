@@ -7,7 +7,7 @@ namespace PostgresStudio.Internal.Sql;
 /// <summary>
 /// One partitioned table of the judged set, as <see cref="PartitionQueries.PartitionsSql" /> read it (T19, T20): its
 /// partitioning, what one query that is not pruned locks of it, and - for a single-column range on a time or integer key -
-/// where its newest partition ends.
+/// where its newest partition ends and where its rows stop.
 /// </summary>
 /// <remarks>Init properties, so a unit test states only what its case is about. Never a partition's name.</remarks>
 internal sealed record HealthPartitionedTableRow
@@ -51,13 +51,34 @@ internal sealed record HealthPartitionedTableRow
     /// <summary>The lower bound of that same partition, or <see langword="null" /> for <c>MINVALUE</c>.</summary>
     public double? NewestLower { get; init; }
 
-    /// <summary>Whether a partition's upper bound is <c>MAXVALUE</c>: then no range ever runs out.</summary>
+    /// <summary>Whether a partition's upper bound is <c>MAXVALUE</c> (or <c>'infinity'</c>): then no range ever runs out.</summary>
     public bool UnboundedAbove { get; init; }
+
+    /// <summary>
+    /// The upper bound of the highest of the root's own partitions that holds rows by the catalog's estimate (its
+    /// sub-partitions' summed) - where the data stops - or <see langword="null" /> when none does, or none was read (X4).
+    /// </summary>
+    public double? PopulatedUpper { get; init; }
+
+    /// <summary>How many of the root's own partitions lie wholly above <see cref="PopulatedUpper" />: the empty ones left (X4).</summary>
+    public int EmptyAbove { get; init; }
+
+    /// <summary>
+    /// How many of the root's own range bounds the studio did not read (<see cref="PartitionBoundText" />): a date before Christ,
+    /// or a time bound under a <c>DateStyle</c> other than ISO (X4).
+    /// </summary>
+    public int UnreadBounds { get; init; }
+
+    /// <summary>The session's <c>DateStyle</c>, which a time bound was written in (X4); <see langword="null" /> reads as ISO.</summary>
+    public string? DateStyle { get; init; }
 
     /// <summary>Whether it has a <c>DEFAULT</c> partition.</summary>
     public bool HasDefault { get; init; }
 
-    /// <summary>The default partition's rows: the greater of its <c>reltuples</c> and its <c>n_live_tup</c>; zero for none.</summary>
+    /// <summary>
+    /// The default partition's rows: the greater of its <c>reltuples</c> and its <c>n_live_tup</c> (its sub-partitions' summed);
+    /// zero for none.
+    /// </summary>
     public double DefaultRows { get; init; }
 
     /// <summary><c>max_locks_per_transaction</c>.</summary>
@@ -105,10 +126,18 @@ internal sealed record HealthPartitionedTableRow
 /// <c>pg_partitioned_table.partattrs</c> and <c>pg_attribute</c>, never deparsed.
 /// </para>
 /// <para>
-/// <b>Read back in the same session.</b> A time bound is deparsed in the session's <c>DateStyle</c> and <c>TimeZone</c> and cast
-/// back to its type in the same statement, so it round-trips whatever they are; a <c>timestamp</c> key is read as UTC. The
-/// session's <c>TimeZone</c> comes back beside it, so a <c>timestamptz</c> range cut at local midnights is recognised as months
-/// in that zone (W5-B1 review F10).
+/// <b>Read as text, parsed in C#</b> (X4). The statement returns each of a single-column range's partitions' bound text, the
+/// <c>DEFAULT</c> partition's left out, with its estimated rows, and the session's <c>DateStyle</c> and <c>TimeZone</c>;
+/// <see cref="PartitionBoundText" /> reads the text - a pure function the tests hold to strings captured from 14.24 and 18.6 -
+/// and <see cref="ReadPartitionedTable" /> rolls it up. A time bound is read only under an ISO <c>DateStyle</c>, a
+/// <c>timestamp</c> key as UTC, and a <c>timestamptz</c> range cut at local midnights is recognised as months in the session's
+/// <c>TimeZone</c> (W5-B1 review F10). Only a range's own partitions are deparsed: a tenant-partitioned table's thousands are
+/// list partitions, counted and never read, and the <c>DEFAULT</c> partition is <c>pg_partitioned_table.partdefid</c>.
+/// </para>
+/// <para>
+/// <b>Rows as the catalog estimates them</b>: the greater of <c>reltuples</c> and <c>pg_stat_get_live_tuples</c> - a statistics
+/// counter, no lock - for each leaf, summed into the partition of the root it sits under. Where the rows stop is what an
+/// integer range is judged by.
 /// </para>
 /// </remarks>
 internal static class PartitionQueries
@@ -123,80 +152,46 @@ internal static class PartitionQueries
             join pg_catalog.pg_class c on c.relnamespace = n.oid and c.relname = m.table_name
             where c.relkind = 'p'
         ),
-        tree (root, relid, depth) as (
-            select l.oid, i.inhrelid, 1
+        tree (root, top, relid, depth) as (
+            select l.oid, i.inhrelid, i.inhrelid, 1
             from listed l
             join pg_catalog.pg_inherits i on i.inhparent = l.oid
             union all
-            select t.root, i.inhrelid, t.depth + 1
+            select t.root, t.top, i.inhrelid, t.depth + 1
             from tree t
             join pg_catalog.pg_inherits i on i.inhparent = t.relid
         ),
         members as (
-            select t.root, t.depth, c.oid, c.relkind, c.reltuples, c.relpartbound,
-                   (select pg_catalog.count(*) from pg_catalog.pg_index x where x.indrelid = c.oid) as indexes
+            select t.root, t.top, t.depth, c.oid, c.relkind, c.relpartbound,
+                   (select pg_catalog.count(*) from pg_catalog.pg_index x where x.indrelid = c.oid) as indexes,
+                   case when c.relkind = 'r'
+                        then greatest(c.reltuples::float8, 0, coalesce(pg_catalog.pg_stat_get_live_tuples(c.oid), 0)::float8)
+                        else 0
+                   end as tuples
             from tree t
             join pg_catalog.pg_class c on c.oid = t.relid
         ),
+        rolled as (
+            select m.top, pg_catalog.sum(m.tuples)::float8 as tuples
+            from members m
+            group by m.top
+        ),
         keyed as (
-            select l.oid, l.nspname, l.relname, p.partstrat, p.partnatts,
+            select l.oid, l.nspname, l.relname, p.partstrat, p.partnatts, p.partdefid,
                    case when p.partnatts = 1 and p.partattrs[0] > 0 then a.atttypid end as key_type
             from listed l
             join pg_catalog.pg_partitioned_table p on p.partrelid = l.oid
             left join pg_catalog.pg_attribute a on a.attrelid = l.oid and a.attnum = p.partattrs[0]
         ),
-        bounds as (
-            select m.root, m.oid, m.reltuples,
-                   b.bound = 'DEFAULT' as is_default,
-                   pg_catalog.substring(b.bound, '^FOR VALUES FROM \((.*)\) TO \(.*\)$') as lower_text,
-                   pg_catalog.substring(b.bound, '^FOR VALUES FROM \(.*\) TO \((.*)\)$') as upper_text
+        ranged as (
+            select m.root, m.oid, r.tuples, pg_catalog.pg_get_expr(m.relpartbound, 0) as bound
             from members m
-            cross join lateral (select pg_catalog.pg_get_expr(m.relpartbound, 0) as bound) b
+            join keyed k on k.oid = m.root
+            join rolled r on r.top = m.oid
             where m.depth = 1
-        ),
-        valued as (
-            select b.root, b.upper_text,
-                   case when k.key_type in ('pg_catalog.date'::pg_catalog.regtype, 'pg_catalog.timestamp'::pg_catalog.regtype,
-                                            'pg_catalog.timestamptz'::pg_catalog.regtype, 'pg_catalog.int2'::pg_catalog.regtype,
-                                            'pg_catalog.int4'::pg_catalog.regtype, 'pg_catalog.int8'::pg_catalog.regtype)
-                        then b.lower_text end as lower_value_text,
-                   case when k.key_type in ('pg_catalog.date'::pg_catalog.regtype, 'pg_catalog.timestamp'::pg_catalog.regtype,
-                                            'pg_catalog.timestamptz'::pg_catalog.regtype, 'pg_catalog.int2'::pg_catalog.regtype,
-                                            'pg_catalog.int4'::pg_catalog.regtype, 'pg_catalog.int8'::pg_catalog.regtype)
-                        then b.upper_text end as upper_value_text,
-                   k.key_type
-            from bounds b
-            join keyed k on k.oid = b.root
-            where not b.is_default
               and k.partstrat = 'r'
-        ),
-        read_back as (
-            select v.root, v.upper_text,
-                   (select case
-                               when x.t is null then null
-                               when v.key_type = 'pg_catalog.timestamptz'::pg_catalog.regtype and x.t ~ '^''[^'']*''$'
-                                   then extract(epoch from pg_catalog.btrim(x.t, '''')::timestamptz)::float8
-                               when v.key_type = 'pg_catalog.timestamp'::pg_catalog.regtype and x.t ~ '^''[^'']*''$'
-                                   then extract(epoch from pg_catalog.btrim(x.t, '''')::timestamp)::float8
-                               when v.key_type = 'pg_catalog.date'::pg_catalog.regtype and x.t ~ '^''[^'']*''$'
-                                   then extract(epoch from pg_catalog.btrim(x.t, '''')::date::timestamp)::float8
-                               when pg_catalog.btrim(x.t, '''') ~ '^-?[0-9]+$'
-                                   then pg_catalog.btrim(x.t, '''')::numeric::float8
-                           end
-                    from (select v.upper_value_text as t) x) as upper_value,
-                   (select case
-                               when x.t is null then null
-                               when v.key_type = 'pg_catalog.timestamptz'::pg_catalog.regtype and x.t ~ '^''[^'']*''$'
-                                   then extract(epoch from pg_catalog.btrim(x.t, '''')::timestamptz)::float8
-                               when v.key_type = 'pg_catalog.timestamp'::pg_catalog.regtype and x.t ~ '^''[^'']*''$'
-                                   then extract(epoch from pg_catalog.btrim(x.t, '''')::timestamp)::float8
-                               when v.key_type = 'pg_catalog.date'::pg_catalog.regtype and x.t ~ '^''[^'']*''$'
-                                   then extract(epoch from pg_catalog.btrim(x.t, '''')::date::timestamp)::float8
-                               when pg_catalog.btrim(x.t, '''') ~ '^-?[0-9]+$'
-                                   then pg_catalog.btrim(x.t, '''')::numeric::float8
-                           end
-                    from (select v.lower_value_text as t) x) as lower_value
-            from valued v
+              and k.partnatts = 1
+              and m.oid <> k.partdefid
         ),
         settings as (
             select pg_catalog.current_setting('max_locks_per_transaction')::int as max_locks,
@@ -204,7 +199,8 @@ internal static class PartitionQueries
                    pg_catalog.current_setting('max_prepared_transactions')::int as max_prepared,
                    (select s.context::text from pg_catalog.pg_settings s where s.name = 'max_locks_per_transaction') as max_locks_context,
                    pg_catalog.current_setting('server_version_num')::int as server_version,
-                   pg_catalog.current_setting('TimeZone') as time_zone
+                   pg_catalog.current_setting('TimeZone') as time_zone,
+                   pg_catalog.current_setting('DateStyle') as date_style
         )
         select k.nspname::text,
                k.relname::text,
@@ -216,30 +212,19 @@ internal static class PartitionQueries
                (select coalesce(pg_catalog.sum(m.indexes), 0) from members m where m.root = k.oid and m.relkind = 'r')::bigint,
                ((select pg_catalog.count(*) from pg_catalog.pg_index x where x.indrelid = k.oid)
                 + (select coalesce(pg_catalog.sum(m.indexes), 0) from members m where m.root = k.oid and m.relkind = 'p'))::int,
-               (select pg_catalog.count(*) from read_back r where r.root = k.oid and r.upper_value is not null)::int,
-               n.upper_value,
-               n.lower_value,
-               exists (select 1 from read_back r where r.root = k.oid and r.upper_text = 'MAXVALUE'),
-               exists (select 1 from bounds b where b.root = k.oid and b.is_default),
-               coalesce((select pg_catalog.max(greatest(b.reltuples::float8, 0, coalesce(s.n_live_tup, 0)::float8))
-                         from bounds b
-                         left join pg_catalog.pg_stat_all_tables s on s.relid = b.oid
-                         where b.root = k.oid and b.is_default), 0),
+               (select pg_catalog.array_agg(g.bound order by g.oid) from ranged g where g.root = k.oid),
+               (select pg_catalog.array_agg(g.tuples order by g.oid) from ranged g where g.root = k.oid),
+               k.partdefid <> 0,
+               coalesce((select r.tuples from rolled r where r.top = k.partdefid), 0)::float8,
                st.max_locks,
                st.max_connections,
                st.max_prepared,
                st.max_locks_context,
                st.server_version,
-               st.time_zone
+               st.time_zone,
+               st.date_style
         from keyed k
         cross join settings st
-        left join lateral (
-            select r.upper_value, r.lower_value
-            from read_back r
-            where r.root = k.oid and r.upper_value is not null
-            order by r.upper_value desc
-            limit 1
-        ) n on true
         order by 1, 2
         """;
 
@@ -268,10 +253,20 @@ internal static class PartitionQueries
             ]);
     }
 
-    /// <summary>Maps one row of <see cref="PartitionsSql" />.</summary>
+    /// <summary>Maps one row of <see cref="PartitionsSql" />, its range bounds read by <see cref="PartitionBoundText" />.</summary>
     public static HealthPartitionedTableRow ReadPartitionedTable(NpgsqlDataReader reader)
     {
         ArgumentNullException.ThrowIfNull(reader);
+
+        string? keyType = reader.IsDBNull(4) ? null : reader.GetString(4);
+        string? dateStyle = reader.IsDBNull(19) ? null : reader.GetString(19);
+        RangeSummary range = reader.IsDBNull(9)
+            ? RangeSummary.Empty
+            : PartitionBoundText.Summarise(
+                reader.GetFieldValue<string[]>(9),
+                reader.IsDBNull(10) ? [] : reader.GetFieldValue<double[]>(10),
+                keyType,
+                dateStyle);
 
         return new HealthPartitionedTableRow
         {
@@ -279,23 +274,27 @@ internal static class PartitionQueries
             Table = reader.GetString(1),
             Strategy = reader.GetString(2),
             KeyColumns = reader.GetInt32(3),
-            KeyType = reader.IsDBNull(4) ? null : reader.GetString(4),
+            KeyType = keyType,
             Leaves = reader.GetInt32(5),
             Intermediates = reader.GetInt32(6),
             LeafIndexes = reader.GetInt64(7),
             PartitionedIndexes = reader.GetInt32(8),
-            BoundedPartitions = reader.GetInt32(9),
-            NewestUpper = reader.IsDBNull(10) ? null : reader.GetDouble(10),
-            NewestLower = reader.IsDBNull(11) ? null : reader.GetDouble(11),
-            UnboundedAbove = reader.GetBoolean(12),
-            HasDefault = reader.GetBoolean(13),
-            DefaultRows = reader.GetDouble(14),
-            MaxLocksPerTransaction = reader.GetInt32(15),
-            MaxConnections = reader.GetInt32(16),
-            MaxPreparedTransactions = reader.GetInt32(17),
-            MaxLocksContext = reader.IsDBNull(18) ? null : reader.GetString(18),
-            ServerVersion = reader.GetInt32(19),
-            TimeZone = reader.IsDBNull(20) ? null : reader.GetString(20),
+            BoundedPartitions = range.Bounded,
+            NewestUpper = range.NewestUpper,
+            NewestLower = range.NewestLower,
+            UnboundedAbove = range.UnboundedAbove,
+            PopulatedUpper = range.PopulatedUpper,
+            EmptyAbove = range.EmptyAbove,
+            UnreadBounds = range.Unread,
+            HasDefault = reader.GetBoolean(11),
+            DefaultRows = reader.GetDouble(12),
+            MaxLocksPerTransaction = reader.GetInt32(13),
+            MaxConnections = reader.GetInt32(14),
+            MaxPreparedTransactions = reader.GetInt32(15),
+            MaxLocksContext = reader.IsDBNull(16) ? null : reader.GetString(16),
+            ServerVersion = reader.GetInt32(17),
+            TimeZone = reader.IsDBNull(18) ? null : reader.GetString(18),
+            DateStyle = dateStyle,
         };
     }
 }

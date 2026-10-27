@@ -64,6 +64,7 @@ T14 | Tables | - | - | both | since 0.4 | current
 T15 | Tables | uncovered, partly-covered | foreign key | both | since 0.5 | current
 T16 | Tables | - | - | both | since 0.5 | current
 T17 | Tables | - | - | Marten | since 0.5 | current
+T18 | Tables | - | table | Marten | since 0.6 | current
 T19 | Tables | per-transaction, capacity | table | both | since 0.5 | current
 T20 | Tables | running-out, default-partition-rows | table | both | since 0.5 | current
 T22 | Tables | - | table | Marten | since 0.4 | current

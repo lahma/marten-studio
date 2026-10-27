@@ -220,7 +220,7 @@ internal static partial class MigrationSqlText
     /// A range bound as SQL spells it for <paramref name="keyType" />: <c>'2026-12-01'</c> for a <c>date</c>,
     /// <c>'2026-12-01 00:00:00'</c> for a <c>timestamp</c> (the value read as UTC), <c>'2026-12-01 00:00:00+00'</c> for a
     /// <c>timestamptz</c>, the whole number for an integer type - or <see langword="null" /> for any other type or a value
-    /// that is not finite or not whole.
+    /// that is not finite, not whole, or an integer past 2^53, which a double does not hold exactly.
     /// </summary>
     /// <param name="keyType">The key's type, as <c>format_type</c> spells it.</param>
     /// <param name="value">Unix seconds for a time key, the number for an integer one.</param>
@@ -234,7 +234,8 @@ internal static partial class MigrationSqlText
         switch (keyType)
         {
             case "smallint" or "integer" or "bigint":
-                return Math.Floor(value) == value && value is >= long.MinValue and <= long.MaxValue
+                // Past 2^53 a double holds no exact whole number, so a bound written from one could be off by a few (X4).
+                return Math.Floor(value) == value && Math.Abs(value) <= 9_007_199_254_740_992d
                     ? ((long) value).ToString(CultureInfo.InvariantCulture)
                     : null;
 

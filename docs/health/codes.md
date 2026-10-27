@@ -94,6 +94,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [T15](tables.md#t15-foreign-key-without-a-covering-index) | Foreign key without a covering index | Tables | `uncovered`, `partly-covered` | foreign key | both | 0.5 | - |
 | [T16](tables.md#t16-autovacuum-workers-saturated) | Autovacuum workers saturated | Tables | - | - | both | 0.5 | - |
 | [T17](tables.md#t17-orphaned-document-tables) | Orphaned document tables | Tables | - | - | Marten | 0.5 | - |
+| [T18](tables.md#t18-tenant-skew) | Tenant skew | Tables | - | table | Marten | 0.6 | - |
 | [T19](tables.md#t19-partitions-against-the-lock-table) | Partitions against the lock table | Tables | `per-transaction`, `capacity` | table | both | 0.5 | - |
 | [T20](tables.md#t20-range-partitions-running-out) | Range partitions running out | Tables | `running-out`, `default-partition-rows` | table | both | 0.5 | - |
 | [T22](tables.md#t22-optimistic-concurrency-conflicts) | Optimistic-concurrency conflicts | Tables | - | table | Marten | 0.4 | - |

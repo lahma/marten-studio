@@ -608,12 +608,63 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
                 + "partition, and drops nothing. A managed rolling range always has a DEFAULT partition, so rows past the window "
                 + "are never rejected - but they stay in the default, and the period they belong to cannot be created while they "
                 + "are there. periodsAhead of 2 or more leaves room for a missed run.")
+            : StaticRange(table, type, next);
+    }
+
+    /// <summary>
+    /// A static <c>ByRange()</c>'s next range (X4): the <c>.AddRange(...)</c> line its declaration takes, with the bounds as the
+    /// CLR values Weasel's <c>RangePartitioning.AddRange&lt;T&gt;</c> formats - present, with the <c>DEFAULT</c> partition it
+    /// always writes, at Weasel 9.33.0 (Marten 9.39.0) and 9.47.0 (Marten 9.54.2).
+    /// </summary>
+    private static HealthRemedy StaticRange(StudioTable table, string type, RangePartitionNext next)
+    {
+        string explanation =
+            "Marten creates exactly the ranges the configuration declares, so the next one is a line of configuration and an apply, "
+            + "which creates " + table.Table + "_" + next.Suffix + ". A static ByRange() always has a DEFAULT partition, so rows past "
+            + "the newest range are never rejected - but they stay in the DEFAULT, and creating the range they belong to scans it "
+            + "under an ACCESS EXCLUSIVE lock and fails while they are there."
+            + (next.PeriodsAfter > 0 ? " The newest bound passed more than a period ago: declare the next range and each period up to now." : string.Empty)
+            + (RangePartitionsCheck.IsTimeKey(next.KeyType) ? " ByRollingRange(...) is the declaration Marten keeps ahead by itself." : string.Empty);
+
+        return ClrBound(next.KeyType, next.From) is { } from && ClrBound(next.KeyType, next.To) is { } to
+            ? new HealthRemedy(
+                "// opts.Schema.For<" + type + ">() declares this table's ranges with ByRange() in its PartitionOn(...): declare the\n"
+                + "// next one beside them, then apply the configuration.\n"
+                + ".AddRange(\"" + next.Suffix + "\", " + from + ", " + to + ")",
+                explanation)
             : new HealthRemedy(
                 "// opts.Schema.For<" + type + ">() partitions this table by fixed ranges (ByRange()): add the next period's range\n"
                 + "// to that declaration (.AddRange(...)) and apply the configuration - or move it to ByRollingRange(...), which\n"
                 + "// Marten keeps ahead by itself.",
-                "Marten creates exactly the ranges the configuration declares, so the next one is a line of configuration and an apply."
-                + (next.PeriodsAfter > 0 ? " The newest bound passed more than a period ago: declare the next range and each period up to now." : string.Empty));
+                explanation);
+    }
+
+    /// <summary>
+    /// A range bound as the C# value <c>AddRange&lt;T&gt;</c> takes for <paramref name="keyType" />: <c>3000</c> (<c>3000L</c> for
+    /// a <c>bigint</c>), <c>new DateTime(2026, 12, 1, 0, 0, 0)</c> for a <c>date</c> or <c>timestamp</c>, and
+    /// <c>new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero)</c> for a <c>timestamptz</c> - each the value
+    /// <see cref="MigrationSqlText.RangeBoundLiteral" /> would write, and which Weasel compares with what Postgres echoes back by
+    /// the instant - or <see langword="null" /> where that writes none.
+    /// </summary>
+    internal static string? ClrBound(string keyType, double value)
+    {
+        if (MigrationSqlText.RangeBoundLiteral(keyType, value) is null)
+        {
+            return null;
+        }
+
+        if (RangePartitionsCheck.IsIntegerKey(keyType))
+        {
+            return ((long) value).ToString(System.Globalization.CultureInfo.InvariantCulture) + (keyType == "bigint" ? "L" : string.Empty);
+        }
+
+        DateTime at = DateTimeOffset.FromUnixTimeMilliseconds((long) Math.Round(value * 1000d)).UtcDateTime;
+        string parts = string.Join(", ", new[] { at.Year, at.Month, at.Day, at.Hour, at.Minute, at.Second }
+            .Select(static x => x.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+        return keyType == "timestamp with time zone"
+            ? "new DateTimeOffset(" + parts + ", TimeSpan.Zero)"
+            : "new DateTime(" + parts + ")";
     }
 }
 

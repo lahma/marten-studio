@@ -888,6 +888,14 @@ internal static class CheckWordCases
             new PartitionFacts(At, [Monthly(new(2026, 12, 1, 0, 0, 0, TimeSpan.Zero), new(2027, 1, 1, 0, 0, 0, TimeSpan.Zero))], [Events]));
         yield return Case<RangePartitionsCheck>("no partitioned table", PartitionFacts.None(At));
 
+        // X4: an integer range whose rows reach its newest partition, and a time range written in another DateStyle.
+        yield return Case<RangePartitionsCheck>(
+            "rows in the newest integer partition",
+            new PartitionFacts(At, [Monthly(default, default) with { KeyType = "bigint", NewestLower = 3_000, NewestUpper = 4_000, PopulatedUpper = 4_000 }], [Events]));
+        yield return Case<RangePartitionsCheck>(
+            "bounds in another DateStyle",
+            new PartitionFacts(At, [Monthly(default, default) with { NewestLower = null, NewestUpper = null, UnreadBounds = 12, DateStyle = "SQL, DMY" }], [Events]));
+
         // T24 - a table, its TOAST table and some partitions switched off.
         yield return Case<AutovacuumDisabledCheck>(
             "switched off, and past half the freeze age",
