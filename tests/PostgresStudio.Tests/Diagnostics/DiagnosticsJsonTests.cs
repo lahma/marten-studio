@@ -109,6 +109,7 @@ public class DiagnosticsJsonTests
                     ShareOfDatabase = 0.5075,
                     HotUpdateRatio = 0.25,
                     GrowthBytesPerDay = 600_000_000,
+                    AllVisibleRatio = 0.75,
                 },
                 new PostgresTableStorage
                 {
@@ -171,6 +172,9 @@ public class DiagnosticsJsonTests
                 new PostgresExtension { Name = "pg_stat_statements", InstalledVersion = "1.11", AvailableVersion = "1.11", Usable = true },
                 new PostgresExtension { Name = "pgstattuple", AvailableVersion = "1.5", Note = "Not installed in this database." },
             ],
+            DataChecksums = true,
+            ChecksumFailures = 2,
+            LastChecksumFailure = At.AddHours(-1),
         },
         Connections = new PostgresConnectionsSection
         {
@@ -186,6 +190,15 @@ public class DiagnosticsJsonTests
                 new PostgresConnectionCounts { ApplicationName = "", Total = 2, Idle = 1, StateUnknown = 1 },
             ],
             AllSessionsVisible = false,
+        },
+        Wal = new PostgresWalSection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            MeasuredAt = At,
+            Records = 123_456_789,
+            FullPageImages = 4_567_890,
+            Bytes = 98_765_432_100,
+            StatsReset = At.AddDays(-30),
         },
         Withheld = new Dictionary<string, string> { ["connections.byApplication"] = HostGate.WithheldSection, ["statements"] = HostGate.WithheldSection },
     };
@@ -242,6 +255,59 @@ public class DiagnosticsJsonTests
         root.GetProperty("findings").GetProperty("items")[0].GetProperty("key").GetString().Should().Be("T07|dead-rows|public.orders");
         root.GetProperty("generatedAt").GetString().Should().Be("2026-11-02T06:00:04.0000000+00:00");
         root.GetProperty("storage").GetProperty("databaseBytes").GetInt64().Should().Be(51_234_567_890, "byte counts are numbers");
+    }
+
+    [Fact]
+    public void The_baseline_additions_are_new_keys_and_the_version_stays_1()
+    {
+        using JsonDocument json = JsonDocument.Parse(Full().ToJson());
+        JsonElement root = json.RootElement;
+
+        root.GetProperty("schemaVersion").GetInt32().Should().Be(1, "keys were added, none removed or changed");
+
+        JsonElement wal = root.GetProperty("wal");
+        wal.GetProperty("outcome").GetString().Should().Be("read");
+        wal.GetProperty("records").GetInt64().Should().Be(123_456_789);
+        wal.GetProperty("fullPageImages").GetInt64().Should().Be(4_567_890);
+        wal.GetProperty("bytes").GetInt64().Should().Be(98_765_432_100, "byte counts are numbers");
+        wal.GetProperty("statsReset").GetString().Should().Be("2026-10-03T06:00:01.0000000+00:00");
+
+        JsonElement settings = root.GetProperty("settings");
+        settings.GetProperty("dataChecksums").GetBoolean().Should().BeTrue();
+        settings.GetProperty("checksumFailures").GetInt64().Should().Be(2);
+        settings.GetProperty("lastChecksumFailure").GetString().Should().Be("2026-11-02T05:00:01.0000000+00:00");
+
+        JsonElement tables = root.GetProperty("storage").GetProperty("largestTables");
+        tables[0].GetProperty("allVisibleRatio").GetDouble().Should().Be(0.75);
+        tables[1].GetProperty("allVisibleRatio").ValueKind.Should().Be(JsonValueKind.Null, "the catalog counted no pages");
+    }
+
+    [Fact]
+    public void A_wal_section_that_was_not_read_keeps_its_outcome_and_reason_and_every_number_null()
+    {
+        PostgresDiagnosticsSnapshot snapshot = Minimal() with
+        {
+            Wal = new PostgresWalSection { Outcome = PostgresReadOutcome.NotApplicable, Reason = "Not applicable on Aurora: Aurora's storage layer does this." },
+            Settings = new PostgresSettingsSection { Outcome = PostgresReadOutcome.Failed },
+        };
+
+        using JsonDocument json = JsonDocument.Parse(snapshot.ToJson());
+        JsonElement wal = json.RootElement.GetProperty("wal");
+
+        wal.GetProperty("outcome").GetString().Should().Be("notApplicable");
+        wal.GetProperty("reason").GetString().Should().StartWith("Not applicable on Aurora");
+
+        foreach (string key in (string[]) ["records", "fullPageImages", "bytes", "statsReset"])
+        {
+            wal.GetProperty(key).ValueKind.Should().Be(JsonValueKind.Null, key);
+        }
+
+        JsonElement settings = json.RootElement.GetProperty("settings");
+
+        foreach (string key in (string[]) ["dataChecksums", "checksumFailures", "lastChecksumFailure"])
+        {
+            settings.GetProperty(key).ValueKind.Should().Be(JsonValueKind.Null, key + ": not known is null, never false or zero");
+        }
     }
 
     [Fact]

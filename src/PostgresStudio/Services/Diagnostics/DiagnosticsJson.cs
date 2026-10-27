@@ -134,6 +134,7 @@ internal static class DiagnosticsJson
         Statements(json, snapshot.Statements);
         Settings(json, snapshot.Settings);
         Connections(json, snapshot.Connections);
+        Wal(json, snapshot.Wal);
 
         json.WriteStartObject("withheld");
         foreach (KeyValuePair<string, string> section in snapshot.Withheld.OrderBy(static x => x.Key, StringComparer.Ordinal))
@@ -273,6 +274,7 @@ internal static class DiagnosticsJson
             Number(json, "shareOfDatabase", table.ShareOfDatabase);
             Number(json, "hotUpdateRatio", table.HotUpdateRatio);
             Integer(json, "growthBytesPerDay", table.GrowthBytesPerDay);
+            Number(json, "allVisibleRatio", table.AllVisibleRatio);
             json.WriteEndObject();
         }
 
@@ -362,6 +364,30 @@ internal static class DiagnosticsJson
         }
 
         json.WriteEndArray();
+        Boolean(json, "dataChecksums", settings.DataChecksums);
+        Integer(json, "checksumFailures", settings.ChecksumFailures);
+        Time(json, "lastChecksumFailure", settings.LastChecksumFailure);
+        json.WriteEndObject();
+    }
+
+    private static void Wal(Utf8JsonWriter json, PostgresWalSection? wal)
+    {
+        json.WritePropertyName("wal");
+
+        if (wal is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(wal.Outcome));
+        Text(json, "reason", wal.Reason);
+        Time(json, "measuredAt", wal.MeasuredAt);
+        Integer(json, "records", wal.Records);
+        Integer(json, "fullPageImages", wal.FullPageImages);
+        Integer(json, "bytes", wal.Bytes);
+        Time(json, "statsReset", wal.StatsReset);
         json.WriteEndObject();
     }
 

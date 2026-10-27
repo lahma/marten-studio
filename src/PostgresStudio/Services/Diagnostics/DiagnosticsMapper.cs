@@ -275,6 +275,9 @@ internal static class DiagnosticsMapper
     /// <summary>A count as the public type's <see cref="int" />, clamped.</summary>
     internal static int Count(long value) => (int) Math.Clamp(value, 0, int.MaxValue);
 
+    /// <summary>A share held to 0 to 1; one the catalog does not give, or one that is not a number, is null.</summary>
+    internal static double? Ratio(double? value) => value is { } number && double.IsFinite(number) ? Math.Clamp(number, 0, 1) : null;
+
     /// <summary>One curated setting, as the Server page lists it.</summary>
     /// <param name="row">The row.</param>
     public static PostgresSetting Setting(ServerSettingRow row)

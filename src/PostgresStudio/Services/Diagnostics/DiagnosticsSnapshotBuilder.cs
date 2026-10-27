@@ -3,6 +3,7 @@ using System.Globalization;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Statements;
@@ -12,7 +13,8 @@ namespace PostgresStudio.Services.Diagnostics;
 
 /// <summary>
 /// The diagnostics API's sections, from the facts the pages read (API design §6.2): never a second read of anything - the
-/// sweep's results, the Storage page's facts, the Statements page's facts, the Server page's facts and the sessions snapshot -
+/// sweep's results, the Storage page's facts, the Statements page's facts, the Server page's facts, the Replication page's facts
+/// (the write-ahead log) and the sessions snapshot -
 /// shown through the host gate. Pure, so every field's source is a unit test's.
 /// </summary>
 internal static class DiagnosticsSnapshotBuilder
@@ -132,6 +134,7 @@ internal static class DiagnosticsSnapshotBuilder
                         ShareOfDatabase = share > 0 ? Math.Clamp((double) table.TotalBytes / share, 0, 1) : 0,
                         HotUpdateRatio = table.HotUpdateRatio,
                         GrowthBytesPerDay = window is null ? null : Whole(table.GrowthBytesPerDay(window)),
+                        AllVisibleRatio = DiagnosticsMapper.Ratio(table.AllVisibleRatio),
                     }),
             ],
         };
@@ -232,6 +235,47 @@ internal static class DiagnosticsSnapshotBuilder
             MeasuredAt = facts.ReadAt,
             Settings = [.. facts.CuratedSettings().Select(DiagnosticsMapper.Setting)],
             Extensions = [.. facts.Chips().Select(DiagnosticsMapper.Extension)],
+            DataChecksums = facts.Posture.Value?.ChecksumsOn,
+            ChecksumFailures = facts.Posture.Value?.ChecksumFailures,
+            LastChecksumFailure = facts.Posture.Value?.LastChecksumFailure,
+        };
+    }
+
+    /// <summary>
+    /// The write-ahead log section from the Replication page's facts: <c>pg_stat_wal</c> as that page reads it (the platform and
+    /// release gates are applied there, so Aurora and a release without the view are <see cref="PostgresReadOutcome.NotApplicable" />
+    /// with the page's own sentence). Never gated: nothing in it is another program's work.
+    /// </summary>
+    /// <param name="facts">The Replication page's facts.</param>
+    public static PostgresWalSection Wal(ReplicationFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        ReplicationRead<WalStatistics> read = facts.Wal;
+
+        if (read.Value is not { } wal)
+        {
+            return new PostgresWalSection
+            {
+                Outcome = read.Outcome switch
+                {
+                    ReplicationReadOutcome.NotApplicable or ReplicationReadOutcome.NeedsVersion => PostgresReadOutcome.NotApplicable,
+                    ReplicationReadOutcome.Failed => PostgresReadOutcome.Failed,
+                    _ => PostgresReadOutcome.Unavailable,
+                },
+                Reason = read.Note ?? "pg_stat_wal returned no row.",
+                MeasuredAt = facts.ReadAt,
+            };
+        }
+
+        return new PostgresWalSection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            MeasuredAt = facts.ReadAt,
+            Records = wal.Records,
+            FullPageImages = wal.FullPageImages,
+            Bytes = Whole(wal.Bytes),
+            StatsReset = wal.StatsReset,
         };
     }
 

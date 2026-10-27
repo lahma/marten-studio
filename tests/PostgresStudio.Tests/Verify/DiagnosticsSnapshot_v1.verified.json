@@ -121,7 +121,8 @@
         "estimatedRows": 300000000,
         "shareOfDatabase": 0.5075,
         "hotUpdateRatio": 0.25,
-        "growthBytesPerDay": 600000000
+        "growthBytesPerDay": 600000000,
+        "allVisibleRatio": 0.75
       },
       {
         "schema": "quartz",
@@ -135,7 +136,8 @@
         "estimatedRows": 3,
         "shareOfDatabase": 0,
         "hotUpdateRatio": null,
-        "growthBytesPerDay": null
+        "growthBytesPerDay": null,
+        "allVisibleRatio": null
       }
     ]
   },
@@ -224,7 +226,10 @@
         "usable": false,
         "note": "Not installed in this database."
       }
-    ]
+    ],
+    "dataChecksums": true,
+    "checksumFailures": 2,
+    "lastChecksumFailure": "2026-11-02T05:00:01.0000000+00:00"
   },
   "connections": {
     "outcome": "read",
@@ -266,6 +271,15 @@
       }
     ],
     "allSessionsVisible": false
+  },
+  "wal": {
+    "outcome": "read",
+    "reason": null,
+    "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
+    "records": 123456789,
+    "fullPageImages": 4567890,
+    "bytes": 98765432100,
+    "statsReset": "2026-10-03T06:00:01.0000000+00:00"
   },
   "withheld": {
     "connections.byApplication": "Activity-grade: call with IncludeActivity = true",

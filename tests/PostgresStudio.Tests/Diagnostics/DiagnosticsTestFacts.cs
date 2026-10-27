@@ -122,6 +122,7 @@ internal static class DiagnosticsTestFacts
                     Deletes = 0,
                     Updates = 400,
                     HotUpdates = 100,
+                    AllVisibleRatio = 0.75,
                 }),
             new StorageTableFacts(
                 new StudioTable("quartz", "qrtz_triggers", StudioTableKind.Relational, StudioTableOwnership.Library)

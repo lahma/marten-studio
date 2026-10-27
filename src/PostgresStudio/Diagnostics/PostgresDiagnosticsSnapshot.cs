@@ -63,6 +63,9 @@ public sealed record PostgresDiagnosticsSnapshot
     /// <summary>Connections and headroom.</summary>
     public PostgresConnectionsSection? Connections { get; init; }
 
+    /// <summary>The write-ahead log's counters: records, full-page images and bytes since the statistics last began.</summary>
+    public PostgresWalSection? Wal { get; init; }
+
     /// <summary>
     /// Sections asked for and not included, by section name (<c>statements</c>), with the reason - for the API, the
     /// <see cref="PostgresDiagnosticsRequest.IncludeActivity" /> it would take; in the studio's own download, the gate the

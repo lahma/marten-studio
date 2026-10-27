@@ -125,7 +125,9 @@ internal static class ServerPostureQueries
         "       pg_catalog.pg_is_in_recovery() as in_recovery,\n" +
         "       pg_catalog.pg_postmaster_start_time() as started,\n" +
         "       (select s.setting from pg_catalog.pg_settings s where s.name = 'data_checksums') as data_checksums,\n" +
-        "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'pg_stat_statements.max') as statements_loaded";
+        "       exists (select 1 from pg_catalog.pg_settings s where s.name = 'pg_stat_statements.max') as statements_loaded,\n" +
+        "       (select d.checksum_failures from pg_catalog.pg_stat_database d where d.datname = pg_catalog.current_database()) as checksum_failures,\n" +
+        "       (select d.checksum_last_failure from pg_catalog.pg_stat_database d where d.datname = pg_catalog.current_database()) as checksum_last_failure";
 
     private const string ExtensionsSql =
         "select n.name,\n" +

@@ -34,6 +34,12 @@ internal sealed record StorageTableFacts(StudioTable Table, StorageTableRow Row)
     public double? HotUpdateRatio => Row is { Updates: > 0 and { } updates, HotUpdates: { } hot } ? (double) hot / updates : null;
 
     /// <summary>
+    /// The share of its heap's pages the visibility map marks all-visible, 0 to 1 (<c>relallvisible / relpages</c>, as of the
+    /// last <c>VACUUM</c> or <c>ANALYZE</c>); <see langword="null" /> while the catalog counts no pages.
+    /// </summary>
+    public double? AllVisibleRatio => Row.AllVisibleRatio;
+
+    /// <summary>
     /// The share of updates that went to another page (PostgreSQL 16+, <c>n_tup_newpage_upd</c>): B0's "why not HOT" - no room on
     /// the page. <see langword="null" /> below 16 or with no updates.
     /// </summary>

@@ -90,6 +90,7 @@ namespace PostgresStudio
         public bool Settings { get; init; }
         public bool Statements { get; init; }
         public bool Storage { get; init; }
+        public bool Wal { get; init; }
         public static PostgresStudio.PostgresDiagnosticsRequest AllSections { get; }
         public static PostgresStudio.PostgresDiagnosticsRequest FindingsOnly { get; }
     }
@@ -112,6 +113,7 @@ namespace PostgresStudio
         public PostgresStudio.PostgresSettingsSection? Settings { get; init; }
         public PostgresStudio.PostgresStatementsSection? Statements { get; init; }
         public PostgresStudio.PostgresStorageSection? Storage { get; init; }
+        public PostgresStudio.PostgresWalSection? Wal { get; init; }
         public System.Collections.Generic.IReadOnlyDictionary<string, string> Withheld { get; init; }
         public string ToJson() { }
     }
@@ -200,7 +202,10 @@ namespace PostgresStudio
     public sealed record PostgresSettingsSection : System.IEquatable<PostgresStudio.PostgresSettingsSection>
     {
         public PostgresSettingsSection() { }
+        public long? ChecksumFailures { get; init; }
+        public bool? DataChecksums { get; init; }
         public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresExtension> Extensions { get; init; }
+        public System.DateTimeOffset? LastChecksumFailure { get; init; }
         public System.DateTimeOffset MeasuredAt { get; init; }
         public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
         public string? Reason { get; init; }
@@ -334,6 +339,7 @@ namespace PostgresStudio
     public sealed record PostgresTableStorage : System.IEquatable<PostgresStudio.PostgresTableStorage>
     {
         public PostgresTableStorage() { }
+        public double? AllVisibleRatio { get; init; }
         public long EstimatedRows { get; init; }
         public long? GrowthBytesPerDay { get; init; }
         public double? HotUpdateRatio { get; init; }
@@ -346,5 +352,16 @@ namespace PostgresStudio
         public long TableBytes { get; init; }
         public long ToastBytes { get; init; }
         public long TotalBytes { get; init; }
+    }
+    public sealed record PostgresWalSection : System.IEquatable<PostgresStudio.PostgresWalSection>
+    {
+        public PostgresWalSection() { }
+        public long? Bytes { get; init; }
+        public long? FullPageImages { get; init; }
+        public System.DateTimeOffset MeasuredAt { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public string? Reason { get; init; }
+        public long? Records { get; init; }
+        public System.DateTimeOffset? StatsReset { get; init; }
     }
 }

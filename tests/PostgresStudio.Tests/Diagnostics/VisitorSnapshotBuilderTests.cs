@@ -256,6 +256,53 @@ public class VisitorSnapshotBuilderTests
         });
     }
 
+    [Fact]
+    public void The_download_carries_the_checksum_state_and_failures_and_the_all_visible_ratio_the_pages_already_hold_and_no_wal()
+    {
+        StorageView storage = new()
+        {
+            MeasuredAt = At,
+            DatabaseBytes = 1_000_000,
+            EstimatedDatabaseBytes = 900_000,
+            Tables =
+            [
+                new StorageTableView("public", "orders", null, StudioTableOwnership.Owned, null, 600_000, 500_000, 80_000, 20_000, 1_000, 0.6, 0.9, null, 1234.4, AllVisibleRatio: 0.8),
+                new StorageTableView("public", "empty", null, StudioTableOwnership.Owned, null, 8_192, 8_192, 0, 0, -1, 0.1, null, null, null),
+            ],
+        };
+        ServerPageView server = Server() with
+        {
+            DataChecksums = "on",
+            ChecksumFailures = 2,
+            LastChecksumFailure = At.AddHours(-3),
+        };
+
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), storage, Statements(true), server, Summary(), Details(true), Registry, "p", At);
+
+        snapshot.Settings!.DataChecksums.Should().BeTrue();
+        snapshot.Settings.ChecksumFailures.Should().Be(2);
+        snapshot.Settings.LastChecksumFailure.Should().Be(At.AddHours(-3));
+        snapshot.Storage!.LargestTables.Select(static x => x.AllVisibleRatio).Should().Equal(0.8, null);
+        snapshot.Wal.Should().BeNull("the Replication page's facts are not the download's; the API's snapshot carries them");
+
+        using JsonDocument document = JsonDocument.Parse(snapshot.ToJson());
+        document.RootElement.GetProperty("wal").ValueKind.Should().Be(JsonValueKind.Null, "the key is there, as every key always is");
+        document.RootElement.GetProperty("schemaVersion").GetInt32().Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("on", true)]
+    [InlineData("off", false)]
+    [InlineData("not read", null)]
+    public void The_checksum_setting_the_page_shows_is_a_bool_only_when_it_was_read(string shown, bool? expected)
+    {
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server() with { DataChecksums = shown }, Summary(), Details(true), Registry, "p", At);
+
+        snapshot.Settings!.DataChecksums.Should().Be(expected);
+    }
+
     [Theory]
     [InlineData("postgres", "default", "", "postgres-snapshot-default-default-20261102T060001Z.json")]
     [InlineData("marten", "tenants", "acme db/1", "marten-snapshot-tenants-acme-db-1-20261102T060001Z.json")]

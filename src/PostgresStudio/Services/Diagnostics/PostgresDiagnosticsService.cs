@@ -30,7 +30,7 @@ namespace PostgresStudio.Services.Diagnostics;
 /// <para>
 /// <b>The pages' reads, never new ones.</b> A snapshot is the regular sweep (<see cref="HealthSweepCache" />, the one every page
 /// shares, one per <c>HealthInterval</c> per database), and, as asked, the deeper and statement sweeps and the Storage,
-/// Statements, Server and sessions facts - each through the cache the page reads it through. A read the caches already hold
+/// Statements, Server, Replication (the write-ahead log) and sessions facts - each through the cache the page reads it through. A read the caches already hold
 /// costs nothing; one they do not passes the process's <see cref="FreshReadLimiter" />, two at a time.
 /// </para>
 /// <para>
@@ -350,6 +350,11 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             snapshot = snapshot with { Connections = await ConnectionsAsync(resolved, scope, gate, cancellationToken).ConfigureAwait(false) };
         }
 
+        if (request.Wal)
+        {
+            snapshot = snapshot with { Wal = await WalAsync(resolved, scope, cancellationToken).ConfigureAwait(false) };
+        }
+
         return snapshot with { Withheld = withheld };
     }
 
@@ -413,6 +418,9 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
                 : null,
             Connections = request.Connections
                 ? new PostgresConnectionsSection { Outcome = PostgresReadOutcome.Failed, Reason = NotReachedSection, MeasuredAt = now }
+                : null,
+            Wal = request.Wal
+                ? new PostgresWalSection { Outcome = PostgresReadOutcome.Failed, Reason = NotReachedSection, MeasuredAt = now }
                 : null,
             Withheld = withheld,
         };
@@ -559,6 +567,27 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
     }
 
     /// <summary>
+    /// The write-ahead log section: the Replication page's facts - its one single-flight read per database per interval, with
+    /// the platform and release gates applied there - and <c>pg_stat_wal</c> from them. Never a read of its own.
+    /// </summary>
+    private async Task<PostgresWalSection> WalAsync(ResolvedSource resolved, IServiceProvider scope, CancellationToken cancellationToken)
+    {
+        ReplicationFactsCache replication = scope.GetRequiredService<ReplicationFactsCache>();
+
+        try
+        {
+            ReplicationFacts facts = await limiter.RunAsync(replication.IsCached(resolved), token => replication.GetAsync(resolved, token), cancellationToken)
+                .ConfigureAwait(false);
+            return DiagnosticsSnapshotBuilder.Wal(facts);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            (PostgresReadOutcome outcome, string reason) = Failure("wal", exception, resolved);
+            return new PostgresWalSection { Outcome = outcome, Reason = reason, MeasuredAt = timeProvider.GetUtcNow() };
+        }
+    }
+
+    /// <summary>
     /// Every registered store's classifier, read from configuration with no connection, for the host's statement screen - or
     /// <see langword="null" /> when it cannot be read, which withholds every statement's text while types may be hidden.
     /// </summary>
@@ -656,6 +685,11 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         if (request.Connections)
         {
             sections.Add("connections");
+        }
+
+        if (request.Wal)
+        {
+            sections.Add("wal");
         }
 
         string flags = (request.IncludeActivity ? "+activity" : string.Empty) + (request.RunDeeperChecks ? "+deeper" : string.Empty);

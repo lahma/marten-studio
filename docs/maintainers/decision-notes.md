@@ -466,11 +466,11 @@ PostgreSQL diagnostics services, and keep at most a page of their own over this.
 `IPostgresDiagnostics` is registered by `AddPostgresStudio()` and by `AddMartenStudio()`, one per process like the
 studio. It lists the databases the studio would list (`ListDatabasesAsync`). For each database it returns a
 `PostgresDiagnosticsSnapshot` (`GetSnapshotAsync`): the findings, by stable code and variant, and typed sections for
-storage, statements, settings and extensions, and connections. Two interfaces point the other way:
+storage, statements, settings and extensions, connections and the write-ahead log. Two interfaces point the other way:
 `IPostgresDatabaseSource`, named with `AddDatabaseSource`, lists a host's own databases and hands the studio each one's
 `NpgsqlDataSource` on demand; `IPostgresCapacitySource`, found in DI, reports compute capacity that SQL cannot see,
 such as Aurora Serverless v2's ACU. PostgresStudio's public surface is D30's six registration types, the six inbound
-types and this read model's twenty-one; its Verify baseline is the list (hard rule 7). MartenStudio's surface does not
+types and this read model's twenty-two; its Verify baseline is the list (hard rule 7). MartenStudio's surface does not
 change: its hosts reach the read model through the PostgresStudio assembly its exact pin names.
 
 *Why public, when D12 keeps the data seam internal.* The read model is results, not seams. There is no
@@ -496,6 +496,23 @@ process; a cache hit waits behind nothing. Listing never enumerates a tenancy th
 held ones (D27, hard rule 14). A host's database source must list without creating anything, and its names are
 identities: they key policies, history and mutes, and survive a database moving server. The studio keeps per-database
 state for at most 64 databases, the least recently used forgotten first (`HealthDatabaseBound`).
+
+*The measurement baseline (#31, 0.9).* A host that takes a baseline per environment after a PostgreSQL upgrade needed
+three things the snapshot lacked, all catalog statistics with no Activity gate, so none is ever withheld, and all
+additions to `schemaVersion` 1. **`Wal`** (`PostgresWalSection`: `Records`, `FullPageImages`, `Bytes`, `StatsReset`) is
+`pg_stat_wal` as the Replication page reads it: the API's WAL section is that page's `ReplicationFacts.Wal` through
+`ReplicationFactsCache`, its one single-flight read per database per interval, so the platform gate (Aurora is
+`NotApplicable`) and the release gate are the page's and there is no second read. It carries no write or sync counter:
+`wal_write` and `wal_sync` are in `pg_stat_wal` on 14 to 17 and gone from it on 18 (`pg_stat_wal` has five columns
+there, read on 18.6), where they went to `pg_stat_io`, and a section whose members come and go with the release is no
+baseline across an upgrade. **`DataChecksums`, `ChecksumFailures`, `LastChecksumFailure`** are on the settings section,
+from the Server page's connection posture, which already read `data_checksums` and now reads this database's
+`pg_stat_database.checksum_failures` and `checksum_last_failure` in the same statement; the count is null while
+checksums are off (as the column is) and nought is a count. **`AllVisibleRatio`** is on each of the largest tables,
+`relallvisible / relpages` summed over a partitioned table's leaves in the Storage page's own table read, held to 0 to 1
+and null while `relpages = 0`; the heap's own count as of the last `VACUUM` or `ANALYZE`, never `pg_visibility`. The
+studio's own download (`VisitorSnapshotBuilder`) carries the checksum fields and the ratio, which the Server and Storage
+views now hold, and `wal: null`: the Replication facts are not a page that builder asks.
 
 ## Testing, item 7
 

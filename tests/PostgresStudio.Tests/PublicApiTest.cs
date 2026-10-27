@@ -59,8 +59,9 @@ public class PublicApiTest
     }
 
     /// <summary>
-    /// The thirty-three public types, by name, so an extra one fails with its name rather than a diff: the six registration
-    /// types, the six inbound types and the nineteen of the diagnostics read model (API design §5.1) and the two that link into the studio (issue #24).
+    /// The thirty-four public types, by name, so an extra one fails with its name rather than a diff: the six registration
+    /// types, the six inbound types and the twenty of the diagnostics read model (API design §5.1, and issue #31's
+    /// <c>PostgresWalSection</c>) and the two that link into the studio (issue #24).
     /// </summary>
     [Fact]
     public void The_public_types_are_the_registration_types_the_inbound_types_and_the_diagnostics_read_model()
@@ -106,6 +107,7 @@ public class PublicApiTest
             "PostgresStudio.PostgresStudioResource",
             "PostgresStudio.PostgresStudioServiceCollectionExtensions",
             "PostgresStudio.PostgresTableOwnership",
-            "PostgresStudio.PostgresTableStorage");
+            "PostgresStudio.PostgresTableStorage",
+            "PostgresStudio.PostgresWalSection");
     }
 }

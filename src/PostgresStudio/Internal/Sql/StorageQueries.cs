@@ -56,6 +56,13 @@ internal sealed record StorageTableRow
 
     /// <summary><c>n_tup_newpage_upd</c> (PostgreSQL 16+): the updates that went to another page; null below 16.</summary>
     public long? NewPageUpdates { get; init; }
+
+    /// <summary>
+    /// <c>relallvisible</c> over <c>relpages</c>, the heap's pages the visibility map marks all-visible as of the last
+    /// <c>VACUUM</c> or <c>ANALYZE</c>, summed over the leaves of a partitioned table: 0 to 1, <see langword="null" /> while
+    /// the catalog counts no pages.
+    /// </summary>
+    public double? AllVisibleRatio { get; init; }
 }
 
 /// <summary>
@@ -128,6 +135,7 @@ internal static class StorageQueries
         rolled as (
             select t.root,
                    pg_catalog.sum(d.relpages::bigint) as heap_pages,
+                   pg_catalog.sum(d.relallvisible::bigint) as all_visible_pages,
                    pg_catalog.sum((select coalesce(pg_catalog.sum(ic.relpages::bigint), 0)
                                    from pg_catalog.pg_index x
                                    join pg_catalog.pg_class ic on ic.oid = x.indexrelid
@@ -161,7 +169,9 @@ internal static class StorageQueries
                r.del::bigint,
                r.upd::bigint,
                r.hot::bigint,
-               r.newpage::bigint
+               r.newpage::bigint,
+               case when coalesce(r.heap_pages, 0) > 0
+                    then least(r.all_visible_pages::float8 / r.heap_pages::float8, 1::float8) end
         from listed l
         left join rolled r on r.root = l.oid
         cross join (select pg_catalog.current_setting('block_size')::bigint as block_size) b
@@ -228,6 +238,7 @@ internal static class StorageQueries
             Updates = Nullable(reader, 9),
             HotUpdates = Nullable(reader, 10),
             NewPageUpdates = Nullable(reader, 11),
+            AllVisibleRatio = reader.IsDBNull(12) ? null : reader.GetDouble(12),
         };
     }
 
