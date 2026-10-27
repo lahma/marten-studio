@@ -263,7 +263,8 @@ public class DeadLetterGroupQueriesTests
         plain.CommandText.Should().NotContain("lateral").And.NotContain("group_");
 
         grouped.CommandText.Should().StartWith(
-            "select d.\"id\", d.\"data\"\nfrom \"studio_events\".\"mt_doc_deadletterevent\" as d\nleft join lateral (");
+            "select d.\"id\", d.\"data\"\nfrom (select d.\"id\", d.\"data\"\n      from \"studio_events\".\"mt_doc_deadletterevent\" as d\n");
+        grouped.CommandText.Should().Contain("      limit @group_window) as d\nleft join lateral (");
         grouped.CommandText.Should().Contain("  and ev.event_type is not distinct from @group_event_type\n")
             .And.Contain(") is not distinct from @group_fingerprint\n");
         grouped.Parameters["tenant"].Value.Should().Be("acme");
@@ -273,6 +274,100 @@ public class DeadLetterGroupQueriesTests
         // INT-W1: the group's event lookup and M1's event filter both read the sequence key, and bind it once between them.
         grouped.Parameters.Where(static x => x.ParameterName == "sequence_key").Should().ContainSingle("the lookup and M1's filter share it");
         grouped.CommandText.Should().Contain(" ->> @sequence_key = any(@sequences))\n");
+    }
+
+    /// <summary>
+    /// SEC-FIX: the list opened on a group - a <c>?group=</c> anyone can write by hand - looks for the group's letters only
+    /// among the scope's newest letters the grouped view groups, newest first as it reads them, so the fingerprint's
+    /// <c>regexp_replace</c> chain runs over at most that many letters, and never over the whole table.
+    /// </summary>
+    [Fact]
+    public void The_list_opened_on_a_group_looks_only_among_the_newest_letters_the_grouped_view_groups()
+    {
+        using NpgsqlCommand grouped = DeadLetterQueries.BuildPage(
+            Table, Keys, new DeadLetterPageQuery { TenantId = "acme", Group = Group, Events = Source(), GroupWindow = 1_000_000 });
+
+        string sql = grouped.CommandText;
+
+        sql.Should().StartWith(
+            "select d.\"id\", d.\"data\"\n"
+            + "from (select d.\"id\", d.\"data\"\n"
+            + "      from \"studio_events\".\"mt_doc_deadletterevent\" as d\n"
+            + "      where (@tenant is null or d.\"data\" ->> @tenant_key = @tenant)\n"
+            + "      order by (d.\"data\" ->> @timestamp_key)::timestamptz desc, d.\"id\" desc\n"
+            + "      limit @group_window) as d\n"
+            + "left join lateral (");
+        sql.IndexOf("limit @group_window", StringComparison.Ordinal).Should().BeLessThan(
+            sql.IndexOf("regexp_replace", StringComparison.Ordinal), "the window is cut before any letter is fingerprinted");
+        sql.Should().EndWith("order by (d.\"data\" ->> @timestamp_key)::timestamptz desc, d.\"id\" desc\nlimit @limit offset @offset");
+
+        grouped.Parameters["group_window"].Value.Should().Be(DeadLetterGroupLimits.MaxLettersGrouped, "the grouped view's bound, whatever is asked");
+        grouped.Parameters["group_window"].NpgsqlDbType.Should().Be(NpgsqlDbType.Integer);
+
+        foreach (string name in new[] { "tenant", "tenant_key", "timestamp_key", "projection_key", "sequence_key" })
+        {
+            grouped.Parameters.Where(x => x.ParameterName == name).Should().ContainSingle("one value per name: {0}", name);
+        }
+
+        using NpgsqlCommand small = DeadLetterQueries.BuildPage(
+            Table, Keys, new DeadLetterPageQuery { Group = Group, Events = Source(), GroupWindow = 4 });
+        small.Parameters["group_window"].Value.Should().Be(4);
+
+        using NpgsqlCommand plain = DeadLetterQueries.BuildPage(Table, Keys, new DeadLetterPageQuery { TenantId = "acme", GroupWindow = 4 });
+        plain.CommandText.Should().StartWith("select d.\"id\", d.\"data\"\nfrom \"studio_events\".\"mt_doc_deadletterevent\" as d\nwhere ",
+            "the list with no group reads the table as it always did");
+        plain.Parameters.Contains("group_window").Should().BeFalse();
+    }
+
+    /// <summary>A soft-deleted table's filter goes inside the window, which is the only place its column is.</summary>
+    [Fact]
+    public void A_soft_deleted_tables_filter_is_applied_inside_the_groups_window()
+    {
+        DocumentTableInfo softDeleted = Table with
+        {
+            SoftDeleteEnabled = true,
+            MetadataColumns = [new DocumentMetadataColumnInfo(DocumentMetadataColumn.IsSoftDeleted, "mt_deleted")],
+        };
+
+        using NpgsqlCommand grouped = DeadLetterQueries.BuildPage(softDeleted, Keys, new DeadLetterPageQuery { Group = Group, Events = Source() });
+
+        string sql = grouped.CommandText;
+        int window = sql.IndexOf("limit @group_window", StringComparison.Ordinal);
+
+        sql.IndexOf("d.\"mt_deleted\" = false", StringComparison.Ordinal).Should().BeInRange(0, window, "the window holds only live letters");
+        sql.LastIndexOf("mt_deleted", StringComparison.Ordinal).Should().BeLessThan(window, "the window's rows carry no mt_deleted to filter on again");
+    }
+
+    /// <summary>
+    /// Whether the window cut: the scope's letters counted no further than the window and one - no order, no body, no
+    /// fingerprint - in the scope's tenant, live rows only.
+    /// </summary>
+    [Fact]
+    public void Whether_the_window_cut_is_a_count_that_stops_one_past_it()
+    {
+        DocumentTableInfo softDeleted = Table with
+        {
+            SoftDeleteEnabled = true,
+            MetadataColumns = [new DocumentMetadataColumnInfo(DocumentMetadataColumn.IsSoftDeleted, "mt_deleted")],
+        };
+
+        using NpgsqlCommand command = DeadLetterGroupQueries.BuildLetterWindowCount(softDeleted, Keys, "acme", 1_000_000);
+
+        command.CommandText.Should().Be(
+            "select count(*) as letters\n"
+            + "from (select 1\n"
+            + "      from \"studio_events\".\"mt_doc_deadletterevent\" as d\n"
+            + "      where (@tenant is null or d.\"data\" ->> @tenant_key = @tenant)\n"
+            + "        and d.\"mt_deleted\" = false\n"
+            + "      limit @limit) as w");
+        command.Parameters["limit"].Value.Should().Be(DeadLetterGroupLimits.MaxLettersGrouped + 1, "the bound and one more, whatever is asked");
+        command.Parameters["tenant"].Value.Should().Be("acme");
+        command.Parameters["tenant_key"].Value.Should().Be("TenantId");
+
+        using NpgsqlCommand small = DeadLetterGroupQueries.BuildLetterWindowCount(Table, Keys, null, 4);
+        small.Parameters["limit"].Value.Should().Be(5);
+        small.Parameters["tenant"].Value.Should().Be(DBNull.Value);
+        small.CommandText.Should().NotContain("mt_deleted").And.NotContain("order by").And.NotContain("regexp_replace");
     }
 
     /// <summary>With no events table the group's event type cannot be read, so only a group without one matches.</summary>

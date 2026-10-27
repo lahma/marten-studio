@@ -451,6 +451,13 @@ internal sealed record DeadLetterPage(
 
     /// <summary>Whether the host hides <c>DeadLetterEvent</c>, so nothing was read (<see cref="Hidden" />).</summary>
     public bool IsHidden { get; init; }
+
+    /// <summary>
+    /// Whether the list was opened on a group and the scope holds more letters than the grouped view groups
+    /// (<see cref="DeadLetterGroupLimits.MaxLettersGrouped" />): the group's letters listed are those among the newest, as the
+    /// group's counts are, and the page says so with <see cref="DeadLetterGroupText.LettersCut" />.
+    /// </summary>
+    public bool LettersCut { get; init; }
 }
 
 /// <summary>What the dead-letter list is asking for.</summary>

@@ -1234,11 +1234,13 @@ internal sealed partial class EventDataService : IEventDataService
                 // One more than asked for, so "is there another page" is answered without a count.
                 Limit = pageSize + 1,
 
-                // A group opened from the grouped view: its letters, found by the grouped view's own predicates (M3).
+                // A group opened from the grouped view: its letters, found by the grouped view's own predicates (M3), among
+                // the newest letters the grouped view groups (SEC-FIX) - so a ?group= written by hand fingerprints no more.
                 Group = query.Group,
                 Events = query.Group is null
                     ? null
                     : await DescribeEventSourceAsync(resolved, connection, cancellationToken).ConfigureAwait(false),
+                GroupWindow = groups.LettersGrouped,
             };
 
             DeadLetterJsonKeys keys = DeadLetterJsonKeys.For(
@@ -1281,7 +1283,13 @@ internal sealed partial class EventDataService : IEventDataService
                 rows.RemoveRange(pageSize, rows.Count - pageSize);
             }
 
-            return new DeadLetterPage(rows, hasMore);
+            // Whether the window cut - a count that stops one past it, with no order and no fingerprint - so the page can say
+            // its letters are the newest ones', as the grouped view says of its counts.
+            bool lettersCut = page.Group is not null
+                && await CountLettersUpToAsync(table, keys, resolved.TenantId, page.GroupWindow, connection, cancellationToken).ConfigureAwait(false)
+                    > page.GroupWindow;
+
+            return new DeadLetterPage(rows, hasMore) { LettersCut = lettersCut };
         }
         catch (Exception exception) when (IsReadFailure(exception))
         {

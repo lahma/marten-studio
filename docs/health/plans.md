@@ -149,9 +149,19 @@ supplied and folds the values in as constants when any is. Prepared under `force
 with no values whatever `EXECUTE` passes - the same generic plan `GENERIC_PLAN` prints.
 
 **No plan, and why.** A text withheld when it was read (it still carries a literal as written, or is not a plain query or
-write), withheld from you (a schema you may not see, a hidden document type, another store's table), cut at 4,096
-characters, not a single plain `select`, or one that locks the rows it reads gets no plan, and the drill-in says which.
-Planning a write takes the lock its execution would, which no read of this page may take.
+write), withheld from you (a hidden document type, another store's table), one that names a schema you may not see, cut at
+4,096 characters, not a single plain `select`, or one that locks the rows it reads gets no plan, and the drill-in says
+which. Planning a write takes the lock its execution would, which no read of this page may take.
+
+**A text that names a schema you may not see is never planned** (0.6.0), nor is a What if? asked of it. A schema-qualified
+name resolves whatever the `search_path` is, and the planner expands a view, and inlines a `LANGUAGE sql` function, into
+the tables they read: `select … from hr.v_vip`, where `hr.v_vip` is `select … from public.orders where tier = 'vip'`, plans
+as a scan of `public.orders` with `Filter: (orders.tier = 'vip'::text)` - the definition of a view the database browser
+never shows you. Even a `plpgsql` function's call prints its default arguments. A text is "one that names" a schema when
+your own view of it shows `‹withheld›` anywhere: as a qualifier, quoted or not, but also inside a string literal (which can
+be a reference, as `'hr.v_vip'::regclass` is) or as a word that happens to spell the schema's name. While any schema is
+withheld from you, a text that spells a name in Unicode escapes (`U&"…"`) is not planned either, because the mask cannot
+read it.
 
 **Masked for you.** The plan is explained with `VERBOSE`, so every relation it reads carries its schema. A plan that reads
 a table in a schema you may not see - through a view, say - is not shown at all, and nor is one that names a hidden
@@ -159,6 +169,11 @@ document type's table or another store's you may not see. Otherwise every name a
 statement's text is (`‹withheld›` for a withheld schema), and the transaction's `search_path` is the console role's own
 less every schema you may not see, so a name the plan prints from such a schema carries its schema and is masked too. A
 statement that names a table only through one of those schemas then fails to plan, and says so.
+
+**Known limit.** A view or a `LANGUAGE sql` function in a schema you *may* see, that itself reads or calls into one you may
+not, is expanded or inlined like any other: a plan of a statement that names it shows its conditions, and a scan of a
+withheld schema's table among them still hides the whole plan. The database browser refuses such a view's query, so a host
+whose views cross schemas this way should keep `ViewDatabaseActivity` for people who may read both.
 
 **Audited.** Each plan is an Activity entry, "Plan database statement", naming the `queryid` and never the text.
 

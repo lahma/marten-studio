@@ -279,7 +279,17 @@ public sealed class DeadLetterGroupsFixture(PostgresFixture postgres) : IAsyncLi
         return (long) (await command.ExecuteScalarAsync())!;
     }
 
-    private (IEventDataService Events, StudioActionLogService Audit) Build(MartenStudioCapabilities capabilities, bool hideDeadLetters)
+    /// <summary>
+    /// A studio, every capability on, whose grouped view groups at most <paramref name="lettersGrouped" /> letters - the
+    /// production bound is 20,000, which a test would take minutes to write past.
+    /// </summary>
+    internal IEventDataService WithLettersGrouped(int lettersGrouped) =>
+        Build(MartenStudioCapabilities.All(), hideDeadLetters: false, lettersGrouped).Events;
+
+    private (IEventDataService Events, StudioActionLogService Audit) Build(
+        MartenStudioCapabilities capabilities,
+        bool hideDeadLetters,
+        int lettersGrouped = DeadLetterGroupLimits.MaxLettersGrouped)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -287,7 +297,7 @@ public sealed class DeadLetterGroupsFixture(PostgresFixture postgres) : IAsyncLi
         services.AddSingleton<AuthenticationStateProvider, StubAuthenticationStateProvider>();
         services.AddSingleton<IDocumentStore>(Store);
         services.AddSingleton<IAuthorizationService>(Policy);
-        services.AddSingleton(new DeadLetterGroupCache(groupClock, TimeSpan.FromSeconds(5)));
+        services.AddSingleton(new DeadLetterGroupCache(groupClock, TimeSpan.FromSeconds(5)) { LettersGrouped = lettersGrouped });
         services.AddMartenStudio(options =>
         {
             options.Capabilities = capabilities;
@@ -416,6 +426,47 @@ public class DeadLetterGroupsLiveTests(DeadLetterGroupsFixture fixture) : IClass
         page.Rows.Should().OnlyContain(static x => x.ExceptionType == "InvalidOperationException" && x.ProjectionName == Projection);
         page.Rows.Select(static x => x.EventSequence)
             .Should().BeEquivalentTo(fixture.AcmePoison.Concat(fixture.GlobexPoison));
+    }
+
+    /// <summary>
+    /// SEC-FIX: the list opened on a group - whose <c>?group=</c> anyone can write by hand - looks for its letters only among
+    /// the newest letters the grouped view groups, so the SQL fingerprint runs over that many at most; it lists the letters
+    /// the group counts, newest first, and says when the window cut. The skip's count is not windowed: it reads all of the
+    /// group's letters, as the sentence says.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_list_opened_on_a_group_looks_only_among_the_letters_the_grouped_view_groups_and_says_when_that_cut()
+    {
+        const int Window = 4;
+        StudioScope everyone = DeadLetterGroupsFixture.Scope();
+
+        // Six letters of a group of their own, the newest in the database: more than the test's bound of four in all.
+        List<long> sequences = await fixture.AppendAsync(DeadLetterGroupsFixture.Acme, 6, static index => new GroupCapEvent(index));
+        await fixture.StoreLettersAsync("WindowProjection", "FormatException", DeadLetterGroupsFixture.Acme, sequences);
+
+        IEventDataService bounded = fixture.WithLettersGrouped(Window);
+
+        DeadLetterGroupList list = await bounded.ListDeadLetterGroupsAsync(everyone, Token);
+        list.LettersTruncated.Should().BeTrue("the database holds more letters than the bound");
+        DeadLetterGroup group = Single(list, "FormatException");
+        group.Letters.Should().Be(Window, "the newest letters are this group's");
+
+        DeadLetterPage page = await bounded.ListDeadLettersAsync(everyone, new DeadLetterQuery { Group = group.Key, PageSize = 50 }, Token);
+
+        page.Error.Should().BeNull();
+        page.Rows.Should().HaveCount(Window, "the list shows the letters the group counts, and no older one");
+        page.LettersCut.Should().BeTrue("the page says the window cut, in the grouped view's sentence");
+
+        // The production bound, over the same database: every letter of the group, and nothing cut.
+        DeadLetterPage whole = await fixture.Events.ListDeadLettersAsync(everyone, new DeadLetterQuery { Group = group.Key, PageSize = 50 }, Token);
+
+        whole.Rows.Should().HaveCount(sequences.Count);
+        whole.LettersCut.Should().BeFalse();
+        page.Rows.Select(static x => x.Id).Should().Equal(whole.Rows.Take(Window).Select(static x => x.Id), "the window holds the newest of them");
+
+        // The same group's skip is counted over all of its letters - it is not the list - and still only its own.
+        DeadLetterGroupSkipPlan plan = await bounded.DescribeDeadLetterGroupSkipAsync(everyone, group.Key, Token);
+        plan.NotYetSkipped.Should().Be(sequences.Count);
     }
 
     /// <summary>

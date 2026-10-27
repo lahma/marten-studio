@@ -6,6 +6,7 @@ using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 using PostgresStudio.Services.Statements;
@@ -17,8 +18,9 @@ namespace PostgresStudio.Tests.Statements;
 
 /// <summary>
 /// The drill-in's half of the Statements service (X1), with no database: the page's gate before anything is read or planned,
-/// a statement the sweep did not read, a text withheld from the visitor, and the plan's own withholding rules - a relation in a
-/// withheld schema, a store the visitor may not see - over hand-made plan JSON. The plan itself is the live suite's.
+/// a statement the sweep did not read, a text withheld from the visitor, a text that names a schema the visitor may not see
+/// (SEC-FIX), and the plan's own withholding rules - a relation in a withheld schema, a store the visitor may not see - over
+/// hand-made plan JSON. The plan itself is the live suite's.
 /// </summary>
 public class StatementPlanServiceTests
 {
@@ -186,6 +188,153 @@ public class StatementPlanServiceTests
         const string Json = """[{"Plan": {"Node Type": "Result"}}]""";
 
         StatementsService.WithheldPlan(Json, StatementScreen.Unchecked(false), Hr).Should().StartWith("Not shown.").And.Contain(SessionQueryText.SchemasUncheckedNote);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The text's own withholding, pure (SEC-FIX): a text that names a withheld schema is never planned, because the plan
+    // of a view or a SQL function there is made of that schema's definitions over tables the visitor may see.
+    // ---------------------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("select v.note from hr.v_vip v where v.id = $1", "a bare qualifier")]
+    [InlineData("select v.note from \"hr\".v_vip v where v.id = $1", "a double-quoted qualifier")]
+    [InlineData("select v.note from \"hr\" . \"v_vip\" v", "a double-quoted qualifier with spaces before its dot")]
+    [InlineData("select v.note from HR.v_vip v", "a bare qualifier in capitals, which Postgres folds to hr")]
+    [InlineData("select v.note from hr/* ‹withheld› */.v_vip v", "a comment between the qualifier and its dot")]
+    [InlineData("select v.note from hr\n.v_vip v", "a line break before the dot")]
+    [InlineData("select o.note from public.orders o where o.id = $1 and hr.is_vip(o.tier)", "a function's qualifier")]
+    [InlineData("select o.id from public.orders o where o.tier operator(hr.===) $1", "an operator's qualifier")]
+    [InlineData("select $1::hr.grade", "a type's qualifier")]
+    [InlineData("select v.note from app.hr.v_vip v", "a qualifier behind the database's name")]
+    [InlineData("select v.note from hr.\"V vip\" v", "a qualifier in front of a quoted name")]
+    public void A_text_that_names_a_withheld_schema_as_a_qualifier_is_not_planned(string text, string because)
+    {
+        StatementsService.TextNamesWithheld(text, Hr).Should().Be(StatementsService.NamesWithheldSchema, because);
+    }
+
+    [Fact]
+    public void A_quoted_qualifier_naming_a_withheld_schema_with_capitals_or_a_space_is_not_planned()
+    {
+        HashSet<string> withheld = new(StringComparer.Ordinal) { "HR Data", "Payroll" };
+
+        StatementsService.TextNamesWithheld("select s.amount from \"HR Data\".salaries s", withheld).Should().Be(StatementsService.NamesWithheldSchema);
+        StatementsService.TextNamesWithheld("select s.amount from \"Payroll\".\"Run\" s", withheld).Should().Be(StatementsService.NamesWithheldSchema);
+        StatementsService.TextNamesWithheld("select s.amount from public.salaries s", withheld).Should().BeNull();
+    }
+
+    /// <summary>
+    /// Decided: a schema named only inside a string literal is refused too. The visitor's text shows <c>‹withheld›</c> there, and
+    /// a literal can be a reference - <c>'hr.v_vip'::regclass</c>, <c>to_regclass</c>, <c>nextval</c> - which only Postgres'
+    /// parse tells apart from a literal that is not.
+    /// </summary>
+    [Theory]
+    [InlineData("select pg_catalog.to_regclass('hr.v_vip')")]
+    [InlineData("select pg_catalog.nextval('hr.order_seq')")]
+    [InlineData("select o.note from public.orders o where o.region = 'hr.north'")]
+    public void A_withheld_schema_named_only_inside_a_string_literal_is_not_planned_either(string text)
+    {
+        StatementsService.TextNamesWithheld(text, Hr).Should().Be(StatementsService.NamesWithheldSchema);
+    }
+
+    /// <summary>
+    /// A comment never reaches the predicate - the statement sweep masks every comment when it reads a text - and one that did,
+    /// naming a withheld schema, would be refused too; the comment mask itself is not.
+    /// </summary>
+    [Fact]
+    public void A_comment_that_names_a_withheld_schema_is_not_planned_and_the_reads_own_comment_mask_is()
+    {
+        StatementsService.TextNamesWithheld("/* reads hr.v_vip */ select 1", Hr).Should().Be(StatementsService.NamesWithheldSchema);
+        StatementsService.TextNamesWithheld("select 1 -- hr\n", Hr).Should().Be(StatementsService.NamesWithheldSchema);
+
+        StatementsService.TextNamesWithheld(
+            StatementReads.CommentMask + " select o.note from public.orders o where o.id = $1", Hr).Should().BeNull(
+            "the read's own mask names no schema");
+    }
+
+    /// <summary>The text's mask finds every whole word that spells the schema, and a text it changes is not planned.</summary>
+    [Fact]
+    public void A_word_that_spells_a_withheld_schema_is_masked_in_the_text_so_the_text_is_not_planned()
+    {
+        StatementsService.TextNamesWithheld("select o.hr from public.orders o where o.id = $1", Hr).Should().Be(StatementsService.NamesWithheldSchema);
+    }
+
+    [Theory]
+    [InlineData("select o.note from public.orders o where o.id = $1")]
+    [InlineData("select o.hr_note from public.orders o where o.thr = $1", "a name that merely starts or ends with the schema's")]
+    [InlineData("select o.note from public.\"hr-archive\" o")]
+    public void A_text_that_names_only_what_the_visitor_may_see_is_planned(string text, string because = "")
+    {
+        StatementsService.TextNamesWithheld(text, Hr).Should().BeNull(because);
+    }
+
+    [Fact]
+    public void With_nothing_withheld_every_text_may_be_planned()
+    {
+        HashSet<string> none = new(StringComparer.Ordinal);
+
+        StatementsService.TextNamesWithheld("select v.note from hr.v_vip v", none).Should().BeNull();
+        StatementsService.TextNamesWithheld("select v.note from U&\"\\0068\\0072\".v_vip v", none).Should().BeNull();
+    }
+
+    /// <summary>Postgres decodes <c>U&amp;"\0068\0072"</c> to <c>hr</c>, and the mask does not: while anything is withheld, it is not planned.</summary>
+    [Theory]
+    [InlineData("select v.note from U&\"\\0068\\0072\".v_vip v")]
+    [InlineData("select v.note from u&\"h\\0072\".v_vip v")]
+    [InlineData("select v.note from U&\"!0068!0072\" UESCAPE '!'.v_vip v")]
+    public void A_name_in_unicode_escapes_is_not_planned_while_a_schema_is_withheld(string text)
+    {
+        StatementsService.TextNamesWithheld(text, Hr).Should().Be(StatementsService.NamesEscapedIdentifier);
+    }
+
+    /// <summary>The reader - the one place that prepares - refuses it again before it opens a connection.</summary>
+    [Fact]
+    public async Task The_reader_refuses_a_text_that_names_a_withheld_schema_before_it_opens_a_connection()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        StatementPlanReader reader = new(context.Services.GetRequiredService<IStudioSettings>(), NullLogger<StatementPlanReader>.Instance);
+        NoConnection database = new();
+
+        StatementPlanRead read = await reader.ReadAsync(database, 1, "select v.note from hr.v_vip v where v.id = $1", truncated: false, Hr, Token);
+
+        read.Json.Should().BeNull();
+        read.NotPlanned.Should().Be(StatementsService.NamesWithheldSchema);
+        read.Statements.Should().BeEmpty("nothing ran");
+
+        HypotheticalIndex index = new()
+        {
+            Key = HypotheticalIndexCandidates.Key("public", "orders", ["id"]),
+            Definition = "CREATE INDEX ON \"public\".\"orders\" (\"id\");",
+            Caption = "an index on public.orders (id)",
+            Schema = "public",
+            Table = "orders",
+            Columns = ["id"],
+        };
+        (HypotheticalIndexRead? hypothetical, string? notPlanned) = await reader.WhatIfAsync(
+            database, 1, "select v.note from hr.v_vip v where v.id = $1", truncated: false, Hr, index, static _ => null, Token);
+
+        hypothetical.Should().BeNull();
+        notPlanned.Should().Be(StatementsService.NamesWithheldSchema);
+        database.Opened.Should().Be(0, "nothing was prepared, so nothing was connected to");
+    }
+
+    /// <summary>A database no test may connect to.</summary>
+    private sealed class NoConnection : IStudioDatabase
+    {
+        public int Opened { get; private set; }
+
+        public string Identity => "default";
+
+        public string Name => "app";
+
+        public string Server => "nowhere";
+
+        public Npgsql.NpgsqlDataSource? DataSource => null;
+
+        public Npgsql.NpgsqlConnection CreateConnection(StudioConnectionUsage usage)
+        {
+            Opened++;
+            throw new InvalidOperationException("No connection may be opened here.");
+        }
     }
 
     [Fact]

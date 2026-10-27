@@ -283,7 +283,8 @@ internal interface IStatementsService
 /// <para>
 /// <b>The drill-in (X1).</b> <see cref="PlanAsync" /> passes the same gate, finds the statement among those the statement sweep
 /// read, and plans it only when this visitor may read its text and T02 would plan it: never a text withheld at read or by the
-/// visitor's mask, never a write or a locking read, never a cut text. The plan is the generic plan, planned as
+/// visitor's mask, never one that names a schema they may not see (<see cref="TextNamesWithheld" />), never a write or a
+/// locking read, never a cut text. The plan is the generic plan, planned as
 /// <c>SqlConsoleRole</c> under the visitor's own <c>search_path</c> (<see cref="StatementPlanReader" />); a plan that reads a
 /// table in a schema the visitor may not see, or a table the statement rules withhold, is not shown; every other plan is masked
 /// as the text is. Each plan is one Activity entry, naming the <c>queryid</c> and never the text.
@@ -306,6 +307,14 @@ internal sealed class StatementsService : IStatementsService
     /// <summary>What the drill-in says of a plan that reads a table in a schema the visitor may not see.</summary>
     internal const string PlanReadsWithheldSchema =
         "Not shown: its plan reads a table in a schema you may not see - through a view, or a function with a SQL-standard body.";
+
+    /// <summary>What the drill-in says of a text that names a schema the visitor may not see (<see cref="TextNamesWithheld" />).</summary>
+    internal const string NamesWithheldSchema =
+        "Not planned: it names a schema you may not see, and its plan would show what that schema's views and SQL functions are made of.";
+
+    /// <summary>What the drill-in says of a text that spells a name in Unicode escapes while a schema is withheld from the visitor.</summary>
+    internal const string NamesEscapedIdentifier =
+        "Not planned: it spells a name in Unicode escapes (U&\"…\"), which the studio cannot check against the schemas you may not see.";
 
     /// <summary>What the audit ring says was read.</summary>
     internal const string Target = "top statements by execution time (pg_stat_statements)";
@@ -533,6 +542,13 @@ internal sealed class StatementsService : IStatementsService
             return view with { NoPlan = ExpensiveStatementsCheck.NotPlannedWithheld };
         }
 
+        // A text that names a schema the visitor may not see is never planned: the plan of a view or a SQL function there is
+        // made of that schema's definitions, over tables the visitor may see (TextNamesWithheld). Before anything is prepared.
+        if (TextNamesWithheld(statementText, withheld) is { } named)
+        {
+            return view with { NoPlan = named };
+        }
+
         StatementPlanRefusal refusal = HealthStatementQueries.Refusal(statementText, fact.TextTruncated);
 
         if (refusal != StatementPlanRefusal.None)
@@ -638,6 +654,12 @@ internal sealed class StatementsService : IStatementsService
             return WhatIfResult.NotCompared(index, ExpensiveStatementsCheck.NotPlannedWithheld);
         }
 
+        // The drill-in's own refusal of a text that names a schema the visitor may not see, before anything is imagined.
+        if (TextNamesWithheld(statementText, withheld) is { } named)
+        {
+            return WhatIfResult.NotCompared(index, named);
+        }
+
         StatementPlanRefusal refusal = HealthStatementQueries.Refusal(statementText, fact.TextTruncated);
 
         if (refusal != StatementPlanRefusal.None)
@@ -682,6 +704,60 @@ internal sealed class StatementsService : IStatementsService
 
         audit.Record(WhatIfAction, target, succeeded: result.Before is not null, result.Outcome(), StudioCapability.ViewDatabaseActivity, whole);
         return result;
+    }
+
+    /// <summary>
+    /// Why a recorded text may not be planned for a visitor who may not see <paramref name="withheld" />, or
+    /// <see langword="null" />: it names one of those schemas (<see cref="NamesWithheldSchema" />), or it spells a name in
+    /// Unicode escapes while any schema is withheld (<see cref="NamesEscapedIdentifier" />). Pure, and asked before anything is
+    /// prepared - by the drill-in's plan and its what-if, and by <see cref="StatementPlanReader" /> again.
+    /// </summary>
+    /// <param name="text">The text <c>pg_stat_statements</c> recorded, as the statement sweep read it (its comments masked).</param>
+    /// <param name="withheld">The schemas the visitor may not see (<see cref="DatabaseGate.WithheldSchemas" />).</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the plan alone cannot judge it.</b> <see cref="WithheldPlan" /> refuses a plan that <em>scans</em> a table in a
+    /// withheld schema. But the planner expands a view, and inlines a <c>LANGUAGE sql</c> function, into nodes over the tables
+    /// they read, and <c>VERBOSE</c> prints their conditions and constants: <c>select … from hr.v_vip</c>, where
+    /// <c>hr.v_vip</c> is <c>select … from public.orders where tier = 'vip'</c>, plans as a scan of <c>public.orders</c> with
+    /// <c>Filter: (orders.tier = 'vip'::text)</c> - the definition of a view the database browser never shows this visitor.
+    /// The <c>search_path</c> the plan runs under has every withheld schema taken off it, so only a schema-qualified name
+    /// reaches one; and even a <c>plpgsql</c> function's call prints its default arguments (<c>hr.graded(o.id, 7)</c>). So a
+    /// text that names a withheld schema is not planned at all.
+    /// </para>
+    /// <para>
+    /// <b>Found by the text's own mask.</b> The visitor reads the text through <see cref="PostgresErrorText.Redact" /> (<see
+    /// cref="SessionQueryText.Present(string?, bool, StatementScreen, int)" />), and a text that mask changes is not planned:
+    /// the drill-in plans only a text the visitor reads unmasked. That mask finds a schema as a qualifier, bare or
+    /// double-quoted, with whitespace or a comment before its dot, and as every whole token that spells it - so it also
+    /// refuses a text that names the schema only in a string literal or a comment, or as a word that happens to spell it (a
+    /// column named <c>hr</c>), where the visitor's text shows <c>‹withheld›</c> already. Deliberately: a literal can be a
+    /// reference (<c>'hr.v_vip'::regclass</c>, <c>to_regclass</c>, <c>nextval</c>) that only Postgres' parse tells apart, and a
+    /// comment never reaches here anyway, because the statement sweep masks every comment when it reads the text.
+    /// </para>
+    /// <para>
+    /// <b>Unicode escapes.</b> Postgres decodes <c>U&amp;"\0068\0072"</c> to <c>hr</c>; the mask does not decode it. So while any
+    /// schema is withheld, a text with a <c>U&amp;"</c> anywhere in it is not planned.
+    /// </para>
+    /// </remarks>
+    internal static string? TextNamesWithheld(string text, IReadOnlySet<string> withheld)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(withheld);
+
+        if (withheld.Count == 0)
+        {
+            return null;
+        }
+
+        if (!string.Equals(PostgresErrorText.Redact(text, withheld), text, StringComparison.Ordinal))
+        {
+            return NamesWithheldSchema;
+        }
+
+        // Postgres' lexer reads u&" as the start of a Unicode-escaped identifier wherever it stands outside a literal or a
+        // comment; inside one it names nothing, and refusing it there too costs a plan and leaks nothing.
+        return text.Contains("u&\"", StringComparison.OrdinalIgnoreCase) ? NamesEscapedIdentifier : null;
     }
 
     /// <summary>
