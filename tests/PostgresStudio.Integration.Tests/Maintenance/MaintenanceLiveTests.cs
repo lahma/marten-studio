@@ -55,7 +55,12 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
     {
         await using AutovacuumServer server = await AutovacuumServer.StartAsync(major);
 
+        // The load commits synchronously (the statements share one connection, so the setting holds for all of them): the
+        // Testcontainers server runs with synchronous_commit = off, and a committed row is hinted only once the WAL writer has
+        // flushed its commit record, which a VACUUM that follows at once can precede - and a page with a row not hinted
+        // committed is neither marked all-visible nor frozen (BaselineLiveTests measured it).
         await server.ExecuteAsync(
+            "set synchronous_commit = on",
             "create schema ps_g2",
             "create table ps_g2.ev (id bigint, payload text) with (autovacuum_vacuum_insert_threshold = 1000, "
             + "autovacuum_vacuum_insert_scale_factor = 0.5, autovacuum_analyze_threshold = 1000000000, autovacuum_enabled = false)",

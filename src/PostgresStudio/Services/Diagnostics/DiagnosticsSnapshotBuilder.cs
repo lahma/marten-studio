@@ -242,9 +242,10 @@ internal static class DiagnosticsSnapshotBuilder
     }
 
     /// <summary>
-    /// The write-ahead log section from the Replication page's facts: <c>pg_stat_wal</c> as that page reads it (the platform and
-    /// release gates are applied there, so Aurora and a release without the view are <see cref="PostgresReadOutcome.NotApplicable" />
-    /// with the page's own sentence). Never gated: nothing in it is another program's work.
+    /// The write-ahead log section from the Replication page's facts: <c>pg_stat_wal</c> as that page reads it, with the WAL
+    /// writes and syncs the same on every release (the platform and release gates are applied there, so Aurora and a release
+    /// without the view are <see cref="PostgresReadOutcome.NotApplicable" /> with the page's own sentence). Never gated:
+    /// nothing in it is another program's work.
     /// </summary>
     /// <param name="facts">The Replication page's facts.</param>
     public static PostgresWalSection Wal(ReplicationFacts facts)
@@ -275,6 +276,10 @@ internal static class DiagnosticsSnapshotBuilder
             Records = wal.Records,
             FullPageImages = wal.FullPageImages,
             Bytes = Whole(wal.Bytes),
+            Writes = wal.Writes,
+            Syncs = wal.Syncs,
+            WriteTimeMs = Finite(wal.WriteTimeMs),
+            SyncTimeMs = Finite(wal.SyncTimeMs),
             StatsReset = wal.StatsReset,
         };
     }
@@ -322,4 +327,6 @@ internal static class DiagnosticsSnapshotBuilder
     private static int Count(long value) => DiagnosticsMapper.Count(value);
 
     private static long? Whole(double? value) => value is { } number && double.IsFinite(number) ? (long) Math.Round(number) : null;
+
+    private static double? Finite(double? value) => value is { } number && double.IsFinite(number) ? number : null;
 }

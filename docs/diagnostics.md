@@ -81,7 +81,7 @@ PostgresDiagnosticsSnapshot s = await diagnostics.GetSnapshotAsync(
 | `Statements` | the most expensive statements over the statement checks' window | `Statements` |
 | `Settings` | the curated server settings and the extensions, and whether data checksums are on and what they have counted | `Settings` |
 | `Connections` | sessions by state for the database, the server's connection budget, and sessions per application | `Connections` |
-| `Wal` | the write-ahead log's records, full-page images and bytes since the statistics last began | `Wal` |
+| `Wal` | the write-ahead log's records, full-page images, bytes, writes and syncs (and their times when the server times them) since the statistics last began | `Wal` |
 | `Withheld` | each section or part left out, keyed by its name, with what it would take | always |
 
 `PostgresDiagnosticsRequest.FindingsOnly` asks for the findings alone; `PostgresDiagnosticsRequest.AllSections` for every
@@ -94,11 +94,26 @@ the statements and their window (`Statements.StatisticsSince`, `Statements.Windo
 the settings and the connection budget (`Settings`, `Connections`), and three more that are cumulative counts of the
 server's own, never Activity-grade and so never withheld:
 
-- **`Wal`** is `pg_stat_wal`: `Records`, `FullPageImages` and `Bytes` since `StatsReset`. WAL volume is what a
-  point-in-time-recovery window has to keep; two snapshots' `Bytes` over the time between their `MeasuredAt` is a rate,
-  while `StatsReset` is the same in both. It is the Replication page's read, shared with it: on Amazon Aurora, whose
-  storage layer writes no WAL of yours, `Outcome` is `NotApplicable` with the reason. It carries no write or sync
-  counter, which `pg_stat_wal` has on PostgreSQL 14 to 17 and gave up to `pg_stat_io` on 18.
+- **`Wal`** is `pg_stat_wal`: `Records`, `FullPageImages` and `Bytes` since `StatsReset`, and the server's WAL writes and
+  syncs (below). WAL volume is what a point-in-time-recovery window has to keep; two snapshots' `Bytes` over the time
+  between their `MeasuredAt` is a rate, while `StatsReset` is the same in both. It is the Replication page's read, shared
+  with it: on Amazon Aurora, whose storage layer writes no WAL of yours, `Outcome` is `NotApplicable` with the reason.
+  - **`Writes`** and **`Syncs`** are the server's WAL writes and `fsync`s since the reset, and mean the same on every
+    release, so they compare across an upgrade. On PostgreSQL 14 to 17 they are `pg_stat_wal`'s `wal_write` and
+    `wal_sync`; on 18, which moved them, they are `pg_stat_io`'s rows with `object = 'wal'`, summed over every backend
+    type that writes WAL (`writes`, `fsyncs`). Only the `normal` context is summed: 18's `pg_stat_io` also counts the
+    creation of a WAL segment, in context `init`, which `pg_stat_wal` never counted, and including it would make a
+    server's syncs jump on upgrading without the server doing anything different. On a server committing synchronously
+    both follow its commits, a commit costing about one of each (measured on 14, 17, 18 and 19), and with `fsync = off`
+    the syncs stay at nought.
+  - **`WriteTimeMs`** and **`SyncTimeMs`** are the time those took, in milliseconds. They are `null` unless
+    `track_wal_io_timing` is on - the one setting that times WAL I/O on every release. On 18 and later it still is, and
+    `track_io_timing` does not: it times a relation's I/O and no WAL row (measured on 18.6 and 19rc1). The server counts a
+    zero while timing is off, which is no time, so the section says `null`, and a time is "since the reset" only if the
+    setting was on the whole while.
+  - On 18 and later the writes and syncs come from `pg_stat_io`, which is reset on its own (`pg_stat_reset_shared('io')`),
+    so `StatsReset` there is the later of its reset and `pg_stat_wal`'s: a counter is comparable between two snapshots
+    exactly while `StatsReset` is the same in both. The Replication page's "Writes and syncs" line shows the same numbers.
 - **`Settings.DataChecksums`** says whether the server checks page checksums, and **`Settings.ChecksumFailures`** with
   **`LastChecksumFailure`** what this database has counted (`pg_stat_database.checksum_failures`): null while checksums are
   off, where the server counts none, and any number above zero is corruption. Checksums are chosen when a cluster is made,

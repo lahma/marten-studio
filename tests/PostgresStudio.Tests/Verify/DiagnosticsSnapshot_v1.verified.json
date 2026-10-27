@@ -279,6 +279,10 @@
     "records": 123456789,
     "fullPageImages": 4567890,
     "bytes": 98765432100,
+    "writes": 41000123,
+    "syncs": 38500456,
+    "writeTimeMs": 12345.5,
+    "syncTimeMs": 987654.25,
     "statsReset": "2026-10-03T06:00:01.0000000+00:00"
   },
   "withheld": {

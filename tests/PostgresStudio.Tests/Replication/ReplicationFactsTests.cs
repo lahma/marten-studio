@@ -139,6 +139,64 @@ public class ReplicationFactsTests
         ReplicationQueries.Io().Sql.Should().Contain("group by x.backend_type, x.object", "18's WAL rows are a group of their own, by object");
     }
 
+    // ---- The WAL writes and syncs: one meaning, two homes --------------------------------------
+
+    [Fact]
+    public void Up_to_17_the_wal_writes_and_syncs_are_pg_stat_wals_and_read_nothing_of_pg_stat_io()
+    {
+        string sql = ReplicationQueries.Wal(ioWal: false).Sql;
+
+        sql.Should().Contain("from pg_catalog.pg_stat_wal w")
+            .And.Contain("(x.j ->> 'wal_write')::int8 as wal_write").And.Contain("(x.j ->> 'wal_sync')::int8 as wal_sync")
+            .And.Contain("(x.j ->> 'wal_write_time')::float8").And.Contain("(x.j ->> 'wal_sync_time')::float8")
+            .And.NotContain("pg_stat_io", "14-17 have the counters in pg_stat_wal, and 16 and 17's pg_stat_io has no WAL rows");
+        sql.Should().Contain("case when t.timed then (x.j ->> 'wal_write_time')::float8 end", "a zero while timing is off is no time")
+            .And.Contain("case when t.timed then (x.j ->> 'wal_sync_time')::float8 end");
+        sql.Should().Contain("pg_catalog.current_setting('track_wal_io_timing', true) = 'on'", "the one setting that times WAL I/O");
+    }
+
+    [Fact]
+    public void From_18_the_wal_writes_and_syncs_are_the_normal_context_of_pg_stat_ios_wal_rows_summed()
+    {
+        string sql = ReplicationQueries.Wal(ioWal: true).Sql;
+
+        sql.Should().Contain("from pg_catalog.pg_stat_io i").And.Contain("where i.object = 'wal' and i.context = 'normal'",
+            "18 also counts a WAL segment's creation, in context init, which pg_stat_wal never did");
+        sql.Should().Contain("pg_catalog.sum((s.j ->> 'writes')::numeric)::int8").And.Contain("pg_catalog.sum((s.j ->> 'fsyncs')::numeric)::int8")
+            .And.Contain("pg_catalog.sum((s.j ->> 'write_time')::float8)").And.Contain("pg_catalog.sum((s.j ->> 'fsync_time')::float8)");
+        sql.Should().Contain("io.writes as wal_write").And.Contain("io.syncs as wal_sync",
+            "the same columns, in the same places, as the statement for 14-17: one mapping reads both");
+        sql.Should().NotContain("'wal_write'", "18's pg_stat_wal has no write column");
+        sql.Should().Contain("case when t.timed then io.write_time end").And.Contain("case when t.timed then io.sync_time end");
+        sql.Should().Contain("pg_catalog.current_setting('track_wal_io_timing', true) = 'on'")
+            .And.NotContain("track_io_timing", "track_io_timing times relations' I/O and no WAL row (measured on 18.6 and 19rc1)");
+        sql.Should().Contain("greatest((x.j ->> 'stats_reset')::timestamptz, io.stats_reset) as stats_reset",
+            "pg_stat_io is reset on its own, so the counters began no later than the later reset");
+    }
+
+    [Fact]
+    public void Both_wal_statements_return_the_same_nine_columns_in_the_same_order()
+    {
+        static string[] Columns(string sql) =>
+            [.. Regex.Matches(sql, @"\bas (\w+),?\n", RegexOptions.CultureInvariant).Select(static x => x.Groups[1].Value)];
+
+        string[] expected = ["wal_records", "wal_fpi", "wal_bytes", "wal_buffers_full", "wal_write", "wal_sync", "wal_write_time", "wal_sync_time", "stats_reset"];
+
+        Columns(ReplicationQueries.Wal(false).Sql).Take(9).Should().Equal(expected);
+        Columns(ReplicationQueries.Wal(true).Sql).Take(9).Should().Equal(expected);
+    }
+
+    [Theory]
+    [InlineData(140013, false)]
+    [InlineData(170011, false)]
+    [InlineData(180006, true)]
+    [InlineData(190000, true)]
+    public void The_wal_counters_come_from_pg_stat_io_from_the_release_that_moved_them(int version, bool ioWal)
+    {
+        PostgresFeatures.Since(PostgresFeature.PgStatIoWal).Should().Be(180000);
+        PostgresFeatures.Has(PostgresFeature.PgStatIoWal, version).Should().Be(ioWal);
+    }
+
     [Fact]
     public void The_per_release_reads_are_gated_on_the_feature_table()
     {
@@ -164,7 +222,7 @@ public class ReplicationFactsTests
         [
             ReplicationQueries.Recovery(true).Sql, ReplicationQueries.Standbys().Sql, ReplicationQueries.SlotStatistics(true).Sql,
             ReplicationQueries.Settings().Sql, ReplicationQueries.Archiver().Sql, ReplicationQueries.WalDirectory().Sql,
-            ReplicationQueries.Wal().Sql, ReplicationQueries.Checkpoints(true).Sql, ReplicationQueries.Io().Sql,
+            ReplicationQueries.Wal(false).Sql, ReplicationQueries.Wal(true).Sql, ReplicationQueries.Checkpoints(true).Sql, ReplicationQueries.Io().Sql,
             ReplicationQueries.Tablespaces().Sql,
         ];
 

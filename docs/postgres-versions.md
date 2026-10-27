@@ -66,7 +66,8 @@ progress per index; `pg_stat_statements`' renamed I/O-time columns (`shared_blk_
 `pg_wait_events` view; the `pg_maintain` role; and EXPLAIN's JIT timings as an object.
 
 **On 18 you also get** `pg_class.relallfrozen` and `autovacuum_vacuum_max_threshold`, which change when autovacuum
-runs; `pg_stat_io`'s byte counters and its WAL rows (and `pg_stat_wal` loses its write and sync columns);
+runs; `pg_stat_io`'s byte counters and its WAL rows (and `pg_stat_wal` loses its write and sync columns - the studio
+reads the WAL writes and syncs from the WAL rows there, so they mean the same on every release);
 `pg_stat_checkpointer.num_done`; NOT NULL constraints in `pg_constraint`; EXPLAIN's fractional row counts and its
 buffers by default; `idle_replication_slot_timeout`; data checksums on by default for a new cluster; and the total
 vacuum and analyse times per table. Two of 18's changes needed a fix in the studio itself:

@@ -685,16 +685,22 @@ internal sealed record WalDirectoryFacts(long ReadyFiles, long Files, long Bytes
     }
 }
 
-/// <summary><c>pg_stat_wal</c> (PostgreSQL 14+): what the server has written to WAL since the statistics were reset.</summary>
+/// <summary>
+/// The WAL counters (PostgreSQL 14+): what the server has written to WAL since the statistics were reset - <c>pg_stat_wal</c>,
+/// and the writes and syncs <see cref="ReplicationQueries.Wal" /> reads the same way on every release.
+/// </summary>
 /// <param name="Records">WAL records.</param>
 /// <param name="FullPageImages">Full-page images among them - the first change to a page after a checkpoint.</param>
 /// <param name="Bytes">Bytes of WAL.</param>
 /// <param name="BuffersFull">Times WAL was written because the WAL buffers were full.</param>
-/// <param name="Writes">WAL writes (14-17; 18 moved them to <c>pg_stat_io</c>).</param>
-/// <param name="Syncs">WAL syncs (14-17).</param>
-/// <param name="WriteTimeMs">Time spent writing (14-17, with <c>track_wal_io_timing</c>).</param>
-/// <param name="SyncTimeMs">Time spent syncing (14-17, with <c>track_wal_io_timing</c>).</param>
-/// <param name="StatsReset">When the statistics were last reset.</param>
+/// <param name="Writes">WAL writes: <c>pg_stat_wal.wal_write</c> (14-17), <c>pg_stat_io</c>'s WAL rows from 18.</param>
+/// <param name="Syncs">WAL syncs: <c>pg_stat_wal.wal_sync</c> (14-17), <c>pg_stat_io</c>'s <c>fsyncs</c> from 18.</param>
+/// <param name="WriteTimeMs">Time spent writing, in milliseconds - <see langword="null" /> unless <c>track_wal_io_timing</c> is on.</param>
+/// <param name="SyncTimeMs">Time spent syncing, in milliseconds - <see langword="null" /> unless <c>track_wal_io_timing</c> is on.</param>
+/// <param name="StatsReset">
+/// When the counters last began from nothing: <c>pg_stat_wal.stats_reset</c>, and from 18 the later of that and
+/// <c>pg_stat_io</c>'s, which is reset on its own.
+/// </param>
 internal sealed record WalStatistics(
     long Records,
     long FullPageImages,
@@ -727,7 +733,7 @@ internal sealed record WalStatistics(
             return null;
         }
 
-        var query = ReplicationQueries.Wal();
+        var query = ReplicationQueries.Wal(PostgresFeatures.Has(PostgresFeature.PgStatIoWal, server.VersionNumber));
         IReadOnlyList<WalStatistics> rows = await context.Sql
             .QueryAsync(
                 query,

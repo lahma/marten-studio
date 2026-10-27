@@ -502,10 +502,20 @@ three things the snapshot lacked, all catalog statistics with no Activity gate, 
 additions to `schemaVersion` 1. **`Wal`** (`PostgresWalSection`: `Records`, `FullPageImages`, `Bytes`, `StatsReset`) is
 `pg_stat_wal` as the Replication page reads it: the API's WAL section is that page's `ReplicationFacts.Wal` through
 `ReplicationFactsCache`, its one single-flight read per database per interval, so the platform gate (Aurora is
-`NotApplicable`) and the release gate are the page's and there is no second read. It carries no write or sync counter:
-`wal_write` and `wal_sync` are in `pg_stat_wal` on 14 to 17 and gone from it on 18 (`pg_stat_wal` has five columns
-there, read on 18.6), where they went to `pg_stat_io`, and a section whose members come and go with the release is no
-baseline across an upgrade. **`DataChecksums`, `ChecksumFailures`, `LastChecksumFailure`** are on the settings section,
+`NotApplicable`) and the release gate are the page's and there is no second read. 0.9.0 left out the write and sync
+counters: `wal_write` and `wal_sync` are in `pg_stat_wal` on 14 to 17 and gone from it on 18 (`pg_stat_wal` has five
+columns there, read on 18.6), where they went to `pg_stat_io`, and a section whose members come and go with the release
+is no baseline across an upgrade. **0.9-C added them as `Writes`, `Syncs`, `WriteTimeMs` and `SyncTimeMs`, with one
+meaning on every release**, which is why the 18 read is not simply "sum `pg_stat_io`'s WAL rows": measured on 14.24,
+17.11, 18.6 and 19rc1 (2,000 one-statement commits are about 2,000 writes and 2,000 syncs, some 14 ms of writing and
+4,050 ms of syncing on each), 18's WAL rows split by context, and `init` - the creation of a WAL segment, 12 writes and 12
+syncs in a bulk insert beside the `normal` context's 51 syncs - is I/O `pg_stat_wal` never counted, so only `normal` is
+summed (`ReplicationQueries.Wal`). The times are null unless `track_wal_io_timing` is on, on 18 and 19 too: with
+`track_io_timing` alone the WAL rows' times stay at nought (18.6, 19rc1), the setting times relations' I/O only, and both
+views keep a zero while timing is off, which is no time. `pg_stat_io` has a reset of its own, so from 18 `StatsReset` is
+the later of the two. On a streaming standby, 2,500 replicated commits left 17's `pg_stat_wal` and 18's `walreceiver`
+rows at nought writes and syncs (looked at for some seconds), so nothing is said about standbys; with `fsync = off` the
+syncs are nought on both homes (measured on 17.11 and 18.6). **`DataChecksums`, `ChecksumFailures`, `LastChecksumFailure`** are on the settings section,
 from the Server page's connection posture, which already read `data_checksums` and now reads this database's
 `pg_stat_database.checksum_failures` and `checksum_last_failure` in the same statement; the count is null while
 checksums are off (as the column is) and nought is a count. **`AllVisibleRatio`** is on each of the largest tables,
