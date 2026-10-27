@@ -1,3 +1,33 @@
+# 0.9.0
+
+0.9 adds Query › Plan, a plan analyzer, and makes the diagnostics snapshot a measurement baseline.
+
+- Query › Plan (#28, phase 1), under `RunSql` and the write policy like the console.
+  - Modes: Explain, Explain analyze (only through the console's guard, inside its read-only transaction and statement
+    timeout), and a generic plan for text with `$n` placeholders. Typed values give the plan for those values.
+  - Options: BUFFERS, TIMING, VERBOSE, SETTINGS and WAL, plus MEMORY and SERIALIZE from PostgreSQL 17.
+  - A JSON plan pasted from elsewhere is drawn without reading the database.
+  - Views: the tree; a sortable node table that shares the selected node with the tree; a summary strip; the critical
+    path; heat colouring by self time, misestimate, buffers read or temp I/O; and every key Postgres printed, with what
+    it means.
+  - Export: copy as JSON or Markdown, download `plan.json`, or download `plan.speedscope.json` to open at
+    speedscope.app.
+  - The address reopens the same statement and options and never runs it.
+  - The console gains an "Open in Plan" link.
+- Six plan insights, P09-P14: an index-only scan fetching the heap, a filter discarding most rows after an index, a
+  hash join or aggregate in batches, JIT costing more than it saves, planning slower than execution, and Memoize mostly
+  missing.
+- The diagnostics snapshot (#31):
+  - a `Wal` section (`pg_stat_wal`'s records, full-page images, bytes and reset time);
+  - the settings section's `DataChecksums`, `ChecksumFailures` and `LastChecksumFailure`;
+  - each largest table's `AllVisibleRatio`.
+  - All are additions; `schemaVersion` stays 1.
+- `PostgresStudioPage` gains `Plan`, `Holders`, `Replication` and `Overview`, and `GetStudioPath` answers each (#30).
+- Three timing-sensitive live tests fixed at their causes (#27):
+  - a statistics reset in the shared database;
+  - a progression row that arrives after its dead letter;
+  - a VACUUM that skipped a pinned page.
+
 # 0.8.0
 
 0.8 answers the two requests left open after 0.7: definitions can be shown without rows, and Database › Sessions says
