@@ -1,3 +1,13 @@
+# 0.6.1
+
+A patch for two bugs found on 0.6.0.
+
+- Postgres Studio's Relationships draws the foreign keys between the schemas `BrowsableSchemas` names exactly with
+  `BrowseDatabase` off, as the documented gate says: they are the source's own structure. Only schemas `"*"` admits
+  still wait for the capability (#18).
+- Database › Sessions keeps each statement to a six-line box that scrolls, so in a narrow window a long statement no
+  longer makes its row hundreds of pixels tall (#19).
+
 # 0.6.0
 
 0.6 makes the studio explain what it sees. A query plan is drawn as a tree, with insights that say what in it is

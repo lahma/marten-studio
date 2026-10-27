@@ -433,7 +433,7 @@ nothing. `StylesheetTests` (plus its `.Shell` part) pins the ones that were meas
 `UX-6`, `StylesheetTests.FinalPolish` `UX-7` and `StylesheetTests.QueryRefusal` `UX-8`; from 0.5.0 each section's own
 stylesheet test reads it out of `studio.css` by its header. 0.6.0 appended `M1`, `X3`, `M3` (tested in
 `DeadLetterGroupsTests`), `M2`, `X1`, `X2`, `M47` and `UI-0.6` (tested in
-`StylesheetTests.UiSweep`), in that order. `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
+`StylesheetTests.UiSweep`), in that order. 0.6.1 appended `UI-0.6.1`, tested there too. `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
 no specificity, so any rule that names a link wins over it. Earlier releases' sections: decision-notes.md, D26.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
