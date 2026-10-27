@@ -104,6 +104,13 @@ internal enum DocumentListState
 /// </summary>
 internal sealed record DocumentPage
 {
+    /// <summary>
+    /// X2: the index Marten would create for each verdict whose line declares one on a column this page's statement already
+    /// reads - a duplicated field, <c>mt_last_modified</c>, <c>mt_deleted_at</c> - for hypopg to imagine under the page's own
+    /// statement. Empty when there is none.
+    /// </summary>
+    public IReadOnlyList<HypotheticalIndex> WhatIf { get; init; } = [];
+
     /// <summary>The columns, in order. The first is always the id.</summary>
     public IReadOnlyList<DocumentColumnHeader> Columns { get; init; } = [];
 

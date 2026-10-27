@@ -147,6 +147,30 @@ internal sealed class FakeQueryService : IQueryService, ISqlConsoleService
             [], [], false, 500, TimeSpan.FromMilliseconds(2), [], null, null);
     }
 
+    /// <summary>X2: what a what-if answers, on either seam; hypopg not installed when a test says nothing.</summary>
+    public Func<HypotheticalIndex, WhatIfResult>? WhatIf { get; set; }
+
+    /// <summary>Every what-if asked of the console seam, with the statement it was for.</summary>
+    public List<(string Statement, HypotheticalIndex Index)> ConsoleWhatIfs { get; } = [];
+
+    /// <summary>Every what-if asked of Mode A, with the request it was for.</summary>
+    public List<(MartenQueryRequest Request, HypotheticalIndex Index)> MartenWhatIfs { get; } = [];
+
+    public Task<WhatIfResult> WhatIfAsync(StudioScope scope, string statement, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        ConsoleWhatIfs.Add((statement, index));
+        return Task.FromResult(AnswerWhatIf(index));
+    }
+
+    public Task<WhatIfResult> WhatIfAsync(StudioScope scope, MartenQueryRequest request, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        MartenWhatIfs.Add((request, index));
+        return Task.FromResult(AnswerWhatIf(index));
+    }
+
+    private WhatIfResult AnswerWhatIf(HypotheticalIndex index) =>
+        WhatIf?.Invoke(index) ?? WhatIfResult.NotCompared(index, HypotheticalIndexAvailability.NotInstalledSentence, HypotheticalIndexState.NotInstalled);
+
     /// <summary>Lets a gated run finish.</summary>
     public void Release() => Gate?.TrySetResult();
 

@@ -26,6 +26,7 @@ using NpgsqlTypes;
 using Weasel.Core;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Query;
 
@@ -145,6 +146,7 @@ internal sealed class LinqQueryService : ILinqQueryService
     private readonly ILogger<LinqQueryService> logger;
     private readonly IServiceProvider services;
     private readonly DatabaseReachAuthorization reach;
+    private readonly HypotheticalIndexReader hypothetical;
 
     /// <summary>The signatures this circuit has already recorded a success for, per store, database, tenant and type.</summary>
     private readonly TableRowAuditLedger ledger = new();
@@ -158,7 +160,8 @@ internal sealed class LinqQueryService : ILinqQueryService
         IndexCatalog indexCatalog,
         IOptions<MartenStudioOptions> options,
         ILogger<LinqQueryService> logger,
-        IServiceProvider services)
+        IServiceProvider services,
+        HypotheticalIndexReader hypothetical)
     {
         this.resolver = resolver;
         this.authorization = authorization;
@@ -169,6 +172,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         this.options = options;
         this.logger = logger;
         this.services = services;
+        this.hypothetical = hypothetical;
         reach = new DatabaseReachAuthorization(authorization, logger);
     }
 
@@ -236,14 +240,80 @@ internal sealed class LinqQueryService : ILinqQueryService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
 
+        return await RunCoreAsync(await NewRunAsync(scope, request).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>What the audit ring calls a LINQ what-if (X2).</summary>
+    internal const string LinqWhatIfAction = "LinqWhatIf";
+
+    /// <summary>What a what-if says of an index this query's advice does not offer.</summary>
+    internal const string NotOfferedMessage =
+        "Not compared: the studio imagines only the index Marten would create on a member this query filters or orders on.";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>The run's own gate, then the plan's.</b> The request goes through every step <see cref="RunAsync" /> takes - the
+    /// capability, the policies with the scope's tenant, reach, the screen, the parse, the guard, Marten's translation and the
+    /// statement guard - recorded under <see cref="LinqWhatIfAction" />, and then through the plan's question: <c>RunLinqQueries</c>
+    /// for the database as a whole, because a plan's estimates count every tenant's rows. Nothing is read: the statement is
+    /// planned twice, never run.
+    /// </para>
+    /// <para>
+    /// <b>Marten's index, found again.</b> The index must be one <see cref="LinqIndexAdvisor.Hypothetical" /> builds from this
+    /// composed query - Marten's own DDL (<see cref="MartenIndexDdl" />) for a member it filters or orders on - matched by key
+    /// and definition, so a page can only ask for what the advice offered.
+    /// </para>
+    /// </remarks>
+    public async Task<WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        LinqQueryRequest request,
+        HypotheticalIndex index,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(index);
+
+        Run run = await NewRunAsync(scope, request with { Offset = 0 }).ConfigureAwait(false) with { Action = LinqWhatIfAction, WhatIf = index };
+
+        try
+        {
+            LinqQueryResult result = await RunCoreAsync(run, cancellationToken).ConfigureAwait(false);
+            return result.WhatIf ?? WhatIfResult.NotCompared(index, result.Refusal?.Message ?? "Not compared.");
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            return WhatIfResult.Refused(index, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff, denied.Message);
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, WholeDatabaseRefusedMessage);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            return WhatIfResult.Refused(index, DatabaseRefusal.Unavailable, exception.Message);
+        }
+    }
+
+    private async Task<Run> NewRunAsync(StudioScope scope, LinqQueryRequest request)
+    {
         MartenStudioOptions value = options.Value;
-        var run = new Run(
+
+        return new Run(
             scope,
             request,
             await authorization.UserNameAsync().ConfigureAwait(false),
             request.Where ?? string.Empty,
             request.OrderBy ?? string.Empty,
             Math.Clamp(request.PageSize ?? value.DefaultPageSize, 1, value.MaxPageSize));
+    }
+
+    private async Task<LinqQueryResult> RunCoreAsync(Run run, CancellationToken cancellationToken)
+    {
+        StudioScope scope = run.Scope;
+        LinqQueryRequest request = run.Request;
+        MartenStudioOptions value = options.Value;
 
         // 1. The capability: refused before anything is resolved, parsed or asked of a policy - and with none of the
         //    text recorded. The page offers no Run button while the capability is off, so a run that gets here was
@@ -254,7 +324,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (StudioCapabilityDeniedException denied)
         {
-            audit.RecordCapabilityDenied(denied, LinqQueryAction, run.CapabilityTarget);
+            audit.RecordCapabilityDenied(denied, run.Action, run.CapabilityTarget);
             logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, "capability", denied.Message, TextNotRecorded, TextNotRecorded);
             throw;
         }
@@ -268,7 +338,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (StudioNotAuthorizedException denied)
         {
-            audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), LinqQueryAction, run.Target, StudioCapability.RunLinqQueries);
+            audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), run.Action, run.Target, StudioCapability.RunLinqQueries);
             logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, "authorization", "not authorized for this scope", run.LoggedWhere, run.LoggedOrderBy);
             throw;
         }
@@ -320,7 +390,7 @@ internal sealed class LinqQueryService : ILinqQueryService
             }
             catch (StudioNotAuthorizedException denied)
             {
-                audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), LinqQueryAction, run.Target, StudioCapability.RunLinqQueries);
+                audit.RecordScopeDenied(denied.Scope, WritePolicyName(value), run.Action, run.Target, StudioCapability.RunLinqQueries);
                 logger.LinqQueryRefused(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, "authorization",
                     "not authorized for this database as a whole", run.LoggedWhere, run.LoggedOrderBy);
                 throw;
@@ -414,9 +484,104 @@ internal sealed class LinqQueryService : ILinqQueryService
             table.SoftDeleteEnabled ? request.Deleted : DeletedFilter.Exclude,
             table.SoftDeleteEnabled);
 
+        // X2: a what-if plans the statement, twice, and reads nothing.
+        if (run.WhatIf is { } index)
+        {
+            return await WhatIfCoreAsync(run, resolved, target, table, composed, sql, parameters, value, index, cancellationToken).ConfigureAwait(false);
+        }
+
         // 10. The read, in the studio's read-only transaction.
         return await ExecuteAsync(run, resolved, target, table, composed, sql, parameters, scopeFacts, value, cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// X2: the plan's own question, then Marten's statement planned before and after the index Marten would create, which hypopg
+    /// imagines and resets before the connection goes back (<see cref="HypotheticalIndexReader" />).
+    /// </summary>
+    private async Task<LinqQueryResult> WhatIfCoreAsync(
+        Run run,
+        ResolvedScope resolved,
+        LinqTarget target,
+        DocumentTableInfo table,
+        ComposedLinqQuery composed,
+        string sql,
+        IReadOnlyList<LinqParameterInfo> parameters,
+        MartenStudioOptions value,
+        HypotheticalIndex index,
+        CancellationToken cancellationToken)
+    {
+        StudioScope planScope = QueryService.SqlScope(run.Scope);
+
+        LinqQueryResult Done(WhatIfResult whatIf) =>
+            new(run.Request.Alias, [], false, 0, run.PageSize, sql, parameters, TimeSpan.Zero) { WhatIf = whatIf };
+
+        // The plan's question: a plan describes the table as a whole.
+        if (!await MayExplainAsync(run.Scope, cancellationToken).ConfigureAwait(false))
+        {
+            audit.RecordScopeDenied(planScope, WritePolicyName(value), run.Action, run.Target, StudioCapability.RunLinqQueries);
+            return Done(WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, PlanRefusedMessage));
+        }
+
+        JsonNamingPolicy? naming = target.Root.Casing switch
+        {
+            Casing.CamelCase => JsonNamingPolicy.CamelCase,
+            Casing.SnakeCase => JsonNamingPolicy.SnakeCaseLower,
+            _ => null,
+        };
+
+        IReadOnlyList<HypotheticalIndex> offered = composed.Composed is null || composed.Source is null
+            ? []
+            : LinqIndexAdvisor.Hypothetical(composed.Composed, composed.Source, target.Root.IdMember, table, target.Root, name => naming?.ConvertName(name) ?? name);
+
+        if (!offered.Any(x => x.Same(index)))
+        {
+            audit.Record(run.Action, run.Target, succeeded: false, NotOfferedMessage, StudioCapability.RunLinqQueries, planScope);
+            return Done(WhatIfResult.NotCompared(index, NotOfferedMessage));
+        }
+
+        NpgsqlCommand marten = composed.Command!;
+        int commandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds) + 5;
+
+        HypotheticalIndexPlanner planner = new(async (connection, transaction, token) =>
+        {
+            // EXPLAIN, never ANALYZE: the statement is planned, not run - and a hypothetical index serves no ANALYZE anyway.
+            await using NpgsqlCommand command = LinqQuerySql.Bind(LinqQuerySql.Explain(sql), marten, connection, transaction, commandTimeout);
+            await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+
+            if (!await reader.ReadAsync(token).ConfigureAwait(false) || await reader.IsDBNullAsync(0, token).ConfigureAwait(false))
+            {
+                return null;
+            }
+
+            string text = reader.GetString(0);
+            return text.Length <= MaxPlanCharacters ? text : null;
+        });
+
+        WhatIfResult result;
+
+        try
+        {
+            HypotheticalIndexRead read = await hypothetical.ReadAsync(MartenStudioDatabase.Of(resolved.Database), index, planner, cancellationToken)
+                .ConfigureAwait(false);
+            result = WhatIfResult.From(index, read);
+        }
+        catch (OperationCanceledException)
+        {
+            audit.Record(run.Action, run.Target, succeeded: false, "cancelled", StudioCapability.RunLinqQueries, planScope);
+            throw;
+        }
+        catch (Exception exception) when (QueryService.FindPostgresException(exception) is { } postgres)
+        {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(postgres.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (Exception exception) when (exception is NpgsqlException or SocketException or InvalidOperationException)
+        {
+            result = WhatIfResult.NotCompared(index, "Not compared: the what-if failed (" + exception.GetType().Name + ").");
+        }
+
+        audit.Record(run.Action, run.Target, succeeded: result.Before is not null, result.Outcome(), StudioCapability.RunLinqQueries, planScope);
+        return Done(result);
     }
 
     private async Task<LinqQueryResult> ExecuteAsync(
@@ -789,7 +954,8 @@ internal sealed class LinqQueryService : ILinqQueryService
                 physical,
                 indexes,
                 name => naming?.ConvertName(name) ?? name,
-                planJson);
+                planJson,
+                target.Root);
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
@@ -973,7 +1139,7 @@ internal sealed class LinqQueryService : ILinqQueryService
 
     private void AuditFailure(Run run, LinqStage stage, string reason)
     {
-        audit.Record(LinqQueryAction, run.Target, succeeded: false, reason, StudioCapability.RunLinqQueries, run.AuditScope);
+        audit.Record(run.Action, run.Target, succeeded: false, reason, StudioCapability.RunLinqQueries, run.AuditScope);
 
         if (logger.IsEnabled(LogLevel.Information))
         {
@@ -1023,6 +1189,12 @@ internal sealed class LinqQueryService : ILinqQueryService
     /// <summary>One request, with what every step of it needs to say who, what and where.</summary>
     private sealed record Run(StudioScope Scope, LinqQueryRequest Request, string User, string Where, string OrderBy, int PageSize)
     {
+        /// <summary>What the audit ring calls this run: a LINQ query, or a what-if over one (X2).</summary>
+        public string Action { get; init; } = LinqQueryAction;
+
+        /// <summary>X2: the index to imagine, for a run that compares plans rather than reading rows.</summary>
+        public HypotheticalIndex? WhatIf { get; init; }
+
         /// <summary>
         /// The scope the audit entries are recorded under: the request's own, or - for a collection not divided by
         /// tenant, read from a tenant scope - the database as a whole, which is what such a read reaches. The ring

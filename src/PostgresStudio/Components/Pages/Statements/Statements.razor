@@ -5,6 +5,7 @@
 @using PostgresStudio.Services.Health
 @using PostgresStudio.Services.Health.Checks
 @using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Query
 @using PostgresStudio.Services.Settings
 @using PostgresStudio.Services.Sources
 @using PostgresStudio.Services.Statements
@@ -441,6 +442,36 @@
         }
     }
 
+    // X2: the drill-in's what-if, one per plan, so the comparison under it stays until the plan is planned again.
+    private StatementPlanView? whatIfPlan;
+    private WhatIfSource? whatIf;
+
+    /// <summary>
+    /// The plan's "What if?": the indexes it suggests, each planned through the drill-in's own gate and audited by queryid
+    /// (<see cref="IStatementsService.WhatIfAsync" />), which imagines only an index the plan it plans again still suggests.
+    /// </summary>
+    private WhatIfSource WhatIfFor(StatementPlanView shown)
+    {
+        if (!ReferenceEquals(shown, whatIfPlan) || whatIf is null)
+        {
+            whatIfPlan = shown;
+            long id = shown.QueryId;
+            whatIf = new WhatIfSource
+            {
+                RunAsync = async (index, token) =>
+                {
+                    StudioScope? scope = State.ActiveScope;
+                    return scope is null
+                        ? WhatIfResult.NotCompared(index, "Not compared: no database is selected.")
+                        : await StatementsData.WhatIfAsync(scope, id, index, token);
+                },
+                Note = "Each is planned as the drill-in plans: the generic plan, as SqlConsoleRole, under your own search_path.",
+            };
+        }
+
+        return whatIf;
+    }
+
     /// <summary>The drill-in: one statement as the visitor may read it, and its plan.</summary>
     private RenderFragment Drill(long queryId) => __builder =>
     {
@@ -497,7 +528,7 @@
 
                 @if (shown.Plan is { } tree)
                 {
-                    <PlanView Plan="tree" Caption="@shown.Caveat" Label="@("The generic plan of statement " + id)" />
+                    <PlanView Plan="tree" Caption="@shown.Caveat" Label="@("The generic plan of statement " + id)" WhatIf="@WhatIfFor(shown)" />
                 }
                 else if (shown.NoPlan is { Length: > 0 } why)
                 {

@@ -12137,3 +12137,141 @@ a.ms-schema-health-mark:focus-visible {
         flex-basis: 5rem;
     }
 }
+
+/* ==========================================================================
+   X2. What if? A hypothetical index, and the plan now and under it
+
+   0.6's what-if packet (X2). Appended after X1 in D26 order; every selector is this packet's own (ms-whatif-), so nothing here
+   re-declares an earlier rule. The two plans sit side by side where there is room and stack where there is not; each side may
+   shrink below its content (min-width: 0), so a wide plan scrolls inside its own PlanView region (D25) and never widens the
+   page. A definition is code a person reads before trusting it, so it wraps anywhere rather than running off the edge.
+   ========================================================================== */
+
+.ms-whatif {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin-top: var(--ms-space-md);
+    padding-top: var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-whatif-title {
+    margin: 0;
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-whatif-lead,
+.ms-whatif-note,
+.ms-whatif-name,
+.ms-whatif-caveat {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-whatif-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-whatif-candidate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-whatif-candidate-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    flex: 1 1 20rem;
+}
+
+.ms-whatif-caption {
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-whatif-candidate-note {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-whatif-definition {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.ms-whatif-run {
+    flex: 0 0 auto;
+}
+
+.ms-whatif-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-whatif-imagined,
+.ms-whatif-verdict {
+    margin: 0;
+}
+
+.ms-whatif-verdict {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-border-strong);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-whatif-used {
+    border-left-color: var(--ms-color-success);
+    background: var(--ms-color-success-bg);
+}
+
+.ms-whatif-unused {
+    border-left-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-whatif-compare {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ms-space-md);
+    min-width: 0;
+}
+
+.ms-whatif-side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-whatif-side-title {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+@media (max-width: 1100px) {
+    .ms-whatif-compare {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

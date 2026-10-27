@@ -129,6 +129,24 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
         StudioScope scope,
         int limit,
         CancellationToken cancellationToken = default) => Task.FromResult(RecentResult);
+
+    /// <summary>X2: what a what-if answers; hypopg not installed when a test says nothing.</summary>
+    public Func<PostgresStudio.Services.Query.HypotheticalIndex, PostgresStudio.Services.Query.WhatIfResult>? WhatIf { get; set; }
+
+    /// <summary>Every what-if the page asked for.</summary>
+    public List<(string Alias, DocumentListRequest Request, PostgresStudio.Services.Query.HypotheticalIndex Index)> WhatIfs { get; } = [];
+
+    public Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        string alias,
+        DocumentListRequest request,
+        PostgresStudio.Services.Query.HypotheticalIndex index,
+        CancellationToken cancellationToken = default)
+    {
+        WhatIfs.Add((alias, request, index));
+        return Task.FromResult(WhatIf?.Invoke(index) ?? PostgresStudio.Services.Query.WhatIfResult.NotCompared(
+            index, PostgresStudio.Services.Query.HypotheticalIndexAvailability.NotInstalledSentence, PostgresStudio.Services.Query.HypotheticalIndexState.NotInstalled));
+    }
 }
 
 /// <summary>Builders for the shapes the documents pages are handed, so a test reads as what it is about.</summary>

@@ -125,6 +125,12 @@
                 </p>
             }
         </section>
+
+        @if (WhatIf is not null)
+        {
+            @* X2: the indexes this plan suggests, and how Postgres would plan it under each - through the plan's own gate. *@
+            <WhatIfPanel Source="WhatIf" Plan="plan" />
+        }
     }
 
     @if (Plan is null && !string.IsNullOrWhiteSpace(Json))
@@ -170,6 +176,13 @@
     /// <summary>The raw JSON's download name.</summary>
     [Parameter]
     public string DownloadFileName { get; set; } = "plan.json";
+
+    /// <summary>
+    /// X2: how to run a what-if from this plan, a <c>WhatIfSource</c> (<see cref="object" />, as <see cref="Plan" /> is) - or
+    /// <see langword="null" />, and no "What if?" is offered: the two plans a what-if draws side by side are drawn without one.
+    /// </summary>
+    [Parameter]
+    public object? WhatIf { get; set; }
 
     protected override void OnParametersSet()
     {

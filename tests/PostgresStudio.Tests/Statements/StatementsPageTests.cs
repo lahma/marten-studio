@@ -53,6 +53,19 @@ public class StatementsPageTests
             Plans.Add(queryId);
             return Task.FromResult(plan?.Invoke(queryId) ?? new StatementPlanView { QueryId = queryId, NoPlan = StatementsService.NotAmong });
         }
+
+        /// <summary>Every what-if the drill-in asked for (X2).</summary>
+        public List<(long QueryId, HypotheticalIndex Index)> WhatIfs { get; } = [];
+
+        /// <summary>What a what-if answers; hypopg not installed when a test says nothing.</summary>
+        public Func<HypotheticalIndex, WhatIfResult>? WhatIf { get; set; }
+
+        public Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default)
+        {
+            WhatIfs.Add((queryId, index));
+            return Task.FromResult(WhatIf?.Invoke(index)
+                ?? WhatIfResult.NotCompared(index, HypotheticalIndexAvailability.NotInstalledSentence, HypotheticalIndexState.NotInstalled));
+        }
     }
 
     private static async Task<(PostgresStudioComponentContext Context, FakeStatements Service)> ContextAsync(

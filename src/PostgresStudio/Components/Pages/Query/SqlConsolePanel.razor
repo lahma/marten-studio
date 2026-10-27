@@ -89,7 +89,8 @@
                         Plan="@result.PlanJson"
                         PlanFirst="true"
                         PlanUnavailable="@(result.PlanUnavailable ?? NoPlan)"
-                        Messages="@result.Notices" />
+                        Messages="@result.Notices"
+                        WhatIf="@WhatIfFor(result)" />
 
             @if (result.Succeeded && result.PlanJson is null)
             {
@@ -289,6 +290,36 @@
         }
     }
 
+    // X2: the what-if for the plan on screen - one per result, so the panel under the plan keeps what it compared until the
+    // next run replaces the plan.
+    private SqlConsoleResult? whatIfResult;
+    private WhatIfSource? whatIf;
+
+    /// <summary>
+    /// The plan's "What if?", for a plan an Explain button drew: the statement it planned, planned again through the console's
+    /// own gate (<see cref="ISqlConsoleService.WhatIfAsync" />) - never for a typed EXPLAIN, whose statement is not one to wrap.
+    /// </summary>
+    private WhatIfSource? WhatIfFor(SqlConsoleResult result)
+    {
+        if (!ReferenceEquals(result, whatIfResult))
+        {
+            whatIfResult = result;
+            string? planned = Current.Planned;
+            whatIf = planned is null ? null : new WhatIfSource
+            {
+                RunAsync = async (index, token) =>
+                {
+                    StudioScope? scope = State.ActiveScope;
+                    return scope is null
+                        ? WhatIfResult.NotCompared(index, "Not compared: no database is selected.")
+                        : await SqlConsole.WhatIfAsync(scope, planned, index, token);
+                },
+            };
+        }
+
+        return whatIf;
+    }
+
     private Task RunAsync(string text) => RunAsync(text, SqlExplain.None);
 
     /// <summary>Explain: the statement's plan, planned and never run (X1).</summary>
@@ -321,6 +352,7 @@
             SqlConsoleResult result = await SqlConsole.RunSqlAsync(scope, new SqlConsoleRequest(session.Text) { Explain = explain }, cts.Token);
 
             session.Result = result;
+            session.Planned = explain != SqlExplain.None && result.PlanJson is not null ? session.Text : null;
 
             if (result.Rejection is { } rejection)
             {

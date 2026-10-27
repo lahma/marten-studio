@@ -527,6 +527,93 @@ internal sealed class QueryService : IQueryService
         }
     }
 
+    /// <summary>What the audit ring calls a what-if over a Mode A plan (X2): a <c>RunSql</c> run, as the plan is.</summary>
+    internal const string WhatIfAction = "ExplainQuery what-if";
+
+    /// <inheritdoc />
+    public async Task<WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        MartenQueryRequest request,
+        HypotheticalIndex index,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(index);
+
+        MartenStudioOptions value = options.Value;
+        string target = Target(request.WhereClause);
+        ResolvedScope resolved;
+
+        // The plan's gate first - RunSql, then the store and write policies for the database as a whole, as the console asks
+        // them - so a visitor it refuses costs nothing: no catalog read, no connection.
+        try
+        {
+            capabilities.Require(StudioCapability.RunSql);
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            audit.RecordCapabilityDenied(denied, WhatIfAction, target);
+            return WhatIfResult.Refused(index,
+                capabilities.ReadOnly ? PostgresStudio.Services.Database.DatabaseRefusal.ReadOnly : PostgresStudio.Services.Database.DatabaseRefusal.CapabilityOff,
+                denied.Message);
+        }
+
+        if (!await MayRunSqlAsync(scope, cancellationToken).ConfigureAwait(false))
+        {
+            audit.RecordScopeDenied(SqlScope(scope), value.WriteAuthorizationPolicy ?? value.StoreAuthorizationPolicy ?? "(none)", WhatIfAction, target, StudioCapability.RunSql);
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy,
+                "No plan to compare: fetching one runs EXPLAIN through the SQL console. " + SqlConsoleService.SqlRefusedMessage);
+        }
+
+        // The scope and the type, as a run asks them; the clause's guard, as a run applies it.
+        try
+        {
+            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            audit.RecordScopeDenied(scope, ReadPolicyName(value), WhatIfAction, target);
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.StorePolicy, "Your account may not query this store.");
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        if (FindDocumentType(resolved, request.Alias) is not { } documentType)
+        {
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.NotFound,
+                $"Marten store '{scope.StoreKey}' has no visible document type with alias '{request.Alias}'.");
+        }
+
+        // The visitor passed RunSql above, which is what lifts the clause guard's nested-read rules for a run too.
+        if (!QuerySqlComposer.CheckClause(request.WhereClause, allowNestedReads: true).Allowed)
+        {
+            return WhatIfResult.NotCompared(index, "Not compared: the clause is one the studio does not run.");
+        }
+
+        DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType);
+        int limit = Math.Clamp(request.PageSize ?? value.DefaultPageSize, 1, value.MaxPageSize);
+        string? tenantId = scope.TenantId is { Length: > 0 } scoped ? scoped : null;
+
+        try
+        {
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            table = table.WithPhysicalColumns(await columnCatalog.GetAsync(connection, table.Schema, table.Table, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception exception) when (exception is NpgsqlException or System.Net.Sockets.SocketException)
+        {
+            return WhatIfResult.NotCompared(index, "Not compared: the studio could not connect to this database.");
+        }
+
+        ComposedQuery composed = QuerySqlComposer.Compose(table, request.WhereClause, limit, tenantId, request.IncludeDeleted);
+
+        // The plan's own gate: Mode A's plan is fetched through the console's, so the what-if is too (RunSql).
+        return await console.WhatIfAsync(scope, composed.Statement, composed.Bind, index, WhatIfAction, cancellationToken).ConfigureAwait(false);
+    }
+
     private IEnumerable<IDocumentType> VisibleDocumentTypes(ResolvedScope resolved)
     {
         Func<Type, bool>? isVisible = options.Value.IsDocumentTypeVisible;

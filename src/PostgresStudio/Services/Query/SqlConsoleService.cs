@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Sockets;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -71,6 +72,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
     private readonly IStudioSettings settings;
     private readonly ILogger<SqlConsoleService> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
+    private readonly HypotheticalIndexReader hypothetical;
 
     public SqlConsoleService(
         StudioSourceResolver resolver,
@@ -78,7 +80,8 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         StudioActionLog audit,
         IStudioSettings settings,
         ILogger<SqlConsoleService> logger,
-        AuthenticationStateProvider authenticationStateProvider)
+        AuthenticationStateProvider authenticationStateProvider,
+        HypotheticalIndexReader? hypothetical = null)
     {
         this.resolver = resolver;
         this.capabilities = capabilities;
@@ -86,7 +89,139 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         this.settings = settings;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
+        this.hypothetical = hypothetical ?? new HypotheticalIndexReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<HypotheticalIndexReader>.Instance);
     }
+
+    /// <summary>What the audit ring calls a what-if from the console (X2): a <c>RunSql</c> run, recorded by capability and statement.</summary>
+    internal const string WhatIfAction = "RunSql what-if";
+
+    /// <inheritdoc />
+    public Task<WhatIfResult> WhatIfAsync(StudioScope scope, string statement, HypotheticalIndex index, CancellationToken cancellationToken = default) =>
+        WhatIfAsync(scope, statement, null, index, WhatIfAction, cancellationToken);
+
+    /// <summary>
+    /// X2: the console's gate, as <see cref="ExecuteAsync" /> asks it - the capability, the write policy for the database as a whole,
+    /// the statement guard - then the statement planned before and after one hypothetical index, in the read-only transaction
+    /// (<see cref="HypotheticalIndexReader" />). Every refusal is a value, and audited under <c>RunSql</c> with the statement's
+    /// target, as a console run is; the outcome names no index.
+    /// </summary>
+    /// <param name="scope">The scope; its tenant is ignored (<see cref="SqlScope" />).</param>
+    /// <param name="statement">The statement as typed, or as a studio screen composed it.</param>
+    /// <param name="bind">Binds a composed statement's values - Mode A's - so the plan is the one its read ran.</param>
+    /// <param name="index">The index to imagine. Only one the studio's builder writes is imagined: its definition is built again from its parts.</param>
+    /// <param name="action">What the audit ring calls it.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    internal async Task<WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        string statement,
+        Action<NpgsqlCommand>? bind,
+        HypotheticalIndex index,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(index);
+
+        statement ??= string.Empty;
+        string sent = ExplainStatements.Wrap(statement, SqlExplain.Plan);
+        string target = Target(sent);
+        string user = UserName();
+
+        // 1. The capability, before anything is resolved.
+        try
+        {
+            capabilities.Require(StudioCapability.RunSql);
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            audit.RecordCapabilityDenied(denied, action, target);
+            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
+            return WhatIfResult.Refused(index, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff, denied.Message);
+        }
+
+        // 2. The write policy, for the database as a whole: nothing narrows a statement to a tenant.
+        StudioScope sqlScope = SqlScope(scope);
+        ResolvedSource resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(sqlScope, nameof(StudioCapability.RunSql), cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
+            return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, SqlRefusedMessage);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.RunSql, sqlScope);
+            return WhatIfResult.Refused(index, DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        // 3. The guard, over the statement as typed; and an index only the studio's builder wrote.
+        SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
+        string? refused = !guard.Allowed ? SqlRejection.FromGuard(guard).Message
+            : string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase) ? AlreadyExplainMessage
+            : !IsBuilt(index) ? NotBuiltMessage
+            : null;
+
+        if (refused is not null)
+        {
+            audit.Record(action, target, succeeded: false, refused, StudioCapability.RunSql, sqlScope);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
+            return WhatIfResult.NotCompared(index, refused);
+        }
+
+        int commandTimeout = (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
+        HypotheticalIndexPlanner planner = new(
+            (connection, transaction, token) => ExplainStatements.ReadPlanAsync(connection, transaction, sent, bind, commandTimeout, token));
+
+        WhatIfResult result;
+
+        try
+        {
+            HypotheticalIndexRead read = await hypothetical.ReadAsync(resolved.Target, index, planner, cancellationToken).ConfigureAwait(false);
+            result = WhatIfResult.From(index, read);
+        }
+        catch (OperationCanceledException)
+        {
+            audit.Record(action, target, succeeded: false, "cancelled", StudioCapability.RunSql, sqlScope);
+            throw;
+        }
+        catch (PostgresException exception)
+        {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (Exception exception) when (exception is NpgsqlException or SocketException or InvalidOperationException)
+        {
+            result = WhatIfResult.NotCompared(index, "Not compared: the what-if failed (" + exception.GetType().Name + ").");
+        }
+
+        bool compared = result.Before is not null;
+        audit.Record(action, target, succeeded: compared, result.Outcome(), StudioCapability.RunSql, sqlScope);
+
+        if (compared)
+        {
+            logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, 0, 0, sent);
+        }
+        else
+        {
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, result.Outcome(), sent);
+        }
+
+        return result;
+    }
+
+    /// <summary>What a what-if says of an index the studio's builder did not write.</summary>
+    internal const string NotBuiltMessage =
+        "Not compared: the studio imagines only an index its own builder writes from a plan's table and columns.";
+
+    /// <summary>Whether <paramref name="index" /> is one <see cref="MigrationSqlText.CreateIndex" /> writes, from its own parts.</summary>
+    internal static bool IsBuilt(HypotheticalIndex index) =>
+        index.Origin == HypotheticalIndexOrigin.Plan
+        && MigrationSqlText.CreateIndex(index.Schema, index.Table, index.Columns) is { } built
+        && string.Equals(built, index.Definition, StringComparison.Ordinal);
 
     /// <inheritdoc />
     public async Task<SqlConsoleResult> RunSqlAsync(

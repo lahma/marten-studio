@@ -219,6 +219,9 @@ internal static class StudioCoreRegistration
         // plan's own - and the per-visitor service it answers to.
         services.TryAddSingleton<StatementPlanReader>();
         services.TryAddScoped<IStatementsService, StatementsService>();
+        // X2: the what-if engine - hypopg's availability cached per database, every hypothetical index reset on the connection
+        // it was made on - shared by the console, the drill-in and MartenStudio's advisors.
+        services.TryAddSingleton<HypotheticalIndexReader>();
 
         // W5-API: the Health page's Snapshot menu. The circuit's, because it asks each page's service as this visitor; it never
         // reaches the diagnostics API, which each Add*Studio registers for host code alone.

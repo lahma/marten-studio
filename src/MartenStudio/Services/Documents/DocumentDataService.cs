@@ -107,19 +107,31 @@ internal sealed partial class DocumentDataService : IDocumentDataService
     private readonly ColumnCatalog columnCatalog;
     private readonly IndexCatalog indexCatalog;
     private readonly ILogger<DocumentDataService> logger;
+    private readonly StudioCapabilityGuard capabilities;
+    private readonly StudioActionLog audit;
+    private readonly StudioAuthorization authorization;
+    private readonly HypotheticalIndexReader hypothetical;
 
     public DocumentDataService(
         IOptions<MartenStudioOptions> options,
         StudioScopeResolver resolver,
         ColumnCatalog columnCatalog,
         IndexCatalog indexCatalog,
-        ILogger<DocumentDataService> logger)
+        ILogger<DocumentDataService> logger,
+        StudioCapabilityGuard capabilities,
+        StudioActionLog audit,
+        StudioAuthorization authorization,
+        HypotheticalIndexReader hypothetical)
     {
         this.options = options;
         this.resolver = resolver;
         this.columnCatalog = columnCatalog;
         this.indexCatalog = indexCatalog;
         this.logger = logger;
+        this.capabilities = capabilities;
+        this.audit = audit;
+        this.authorization = authorization;
+        this.hypothetical = hypothetical;
     }
 
     private int CommandTimeoutSeconds => Math.Max(1, (int) options.Value.QueryTimeout.TotalSeconds);
@@ -551,7 +563,8 @@ internal sealed partial class DocumentDataService : IDocumentDataService
         NpgsqlConnection connection,
         CollectionContext context,
         DocumentListRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<NpgsqlCommand, IReadOnlyList<HypotheticalIndex>, DocumentPage>? capture = null)
     {
         DocumentTableInfo table = context.Table;
 
@@ -623,6 +636,7 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         IndexAdvice advice = IndexAdvisor.Evaluate(table, indexes, predicates, sort);
         SearchVerdict verdict = BuildVerdict(parse, advice, predicates);
+        IReadOnlyList<HypotheticalIndex> whatIf = context.DocumentType is { } mapping ? WhatIfIndexes(mapping, table, advice, sort) : [];
 
         var pageSize = Math.Clamp(
             request.PageSize <= 0 ? options.Value.DefaultPageSize : request.PageSize,
@@ -684,11 +698,223 @@ internal sealed partial class DocumentDataService : IDocumentDataService
 
         await using (command)
         {
-            return await ReadPageAsync(
+            // X2: a what-if takes the statement the page would run, and runs nothing.
+            if (capture is not null)
+            {
+                return capture(command, whatIf);
+            }
+
+            DocumentPage page = await ReadPageAsync(
                     connection, command, table, context, request, verdict, estimate, visible, available,
                     queryColumns, sort, direction, sortOrdinal, pageSize, cancellationToken)
                 .ConfigureAwait(false);
+
+            return page with { WhatIf = whatIf };
         }
+    }
+
+    /// <summary>What the audit ring calls a what-if over a Documents list (X2).</summary>
+    internal const string WhatIfAction = "DocumentsWhatIf";
+
+    /// <summary>What a Documents what-if says of an index this list's advice does not offer.</summary>
+    internal const string NotOfferedMessage =
+        "Not compared: the studio imagines only the index Marten would create on a column this list's statement already reads.";
+
+    /// <summary>
+    /// X2: the index Marten would create for each of the advice's lines that declares one on a column the page's own statement
+    /// reads - <c>Index(x =&gt; x.Member)</c> on a duplicated field, <c>IndexLastModified()</c>, <c>SoftDeletedWithIndex()</c> - as
+    /// Marten writes it (<see cref="MartenIndexDdl" />). Never a <c>Duplicate</c> line: it adds a column, and the page reads a
+    /// JSON path with <c>#&gt;&gt;</c>, which no index Marten declares serves (LINQ mode on Query plans Marten's own statement). Pure.
+    /// </summary>
+    internal static IReadOnlyList<HypotheticalIndex> WhatIfIndexes(IDocumentType mapping, DocumentTableInfo table, IndexAdvice advice, DocumentColumn sort)
+    {
+        ArgumentNullException.ThrowIfNull(mapping);
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(advice);
+
+        List<HypotheticalIndex> found = [];
+
+        for (int i = 0; i < advice.Predicates.Count; i++)
+        {
+            (DocumentPredicate predicate, IndexVerdict verdict) = (advice.Predicates[i].Predicate, advice.Predicates[i].Verdict);
+
+            if (verdict.Level == IndexVerdictLevel.Green || verdict.Suggestion is not { } line)
+            {
+                continue;
+            }
+
+            string? definition = predicate switch
+            {
+                DocumentPredicate.FieldCompare compare when line.Contains(".Index(", StringComparison.Ordinal)
+                    && table.FindDuplicated(compare.Path) is { IsMetadataAlias: false } duplicated
+                    && DuplicatedMembers(mapping, duplicated.ColumnName) is { } members => MartenIndexDdl.Computed(mapping, members),
+                DocumentPredicate.IsDeleted when line.Contains("SoftDeletedWithIndex()", StringComparison.Ordinal)
+                    && table.MetadataColumnName(DocumentMetadataColumn.SoftDeletedAt) is { } deletedAt
+                    && table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted) is { } deleted => MartenIndexDdl.OnColumn(mapping, deletedAt, deleted),
+                _ => null,
+            };
+
+            Add("filter " + i.ToString(CultureInfo.InvariantCulture), definition, line);
+        }
+
+        if (advice.Sort is { Level: not IndexVerdictLevel.Green, Suggestion: { } sortLine })
+        {
+            string? definition = sort switch
+            {
+                DocumentColumn.Metadata { Column: DocumentMetadataColumn.LastModified } when sortLine.Contains("IndexLastModified()", StringComparison.Ordinal)
+                    && table.MetadataColumnName(DocumentMetadataColumn.LastModified) is { } column => MartenIndexDdl.OnColumn(mapping, column),
+                DocumentColumn.Duplicated duplicated when DuplicatedMembers(mapping, duplicated.ColumnName) is { } members => MartenIndexDdl.Computed(mapping, members),
+                _ => null,
+            };
+
+            Add("sort", definition, sortLine);
+        }
+
+        return found;
+
+        void Add(string key, string? definition, string line)
+        {
+            if (definition is not null && !found.Any(x => string.Equals(x.Definition, definition, StringComparison.Ordinal)))
+            {
+                found.Add(MartenIndexDdl.Index("documents:" + key, definition, line, table, duplicate: false));
+            }
+        }
+    }
+
+    /// <summary>The members of the duplicated field Marten stores in <paramref name="column" />, or <see langword="null" />.</summary>
+    private static System.Reflection.MemberInfo[]? DuplicatedMembers(IDocumentType mapping, string column) =>
+        MartenStudio.Internal.MartenDuplicatedFields.Physical(mapping).FirstOrDefault(x => string.Equals(x.ColumnName, column, StringComparison.Ordinal))?.Members;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>The plan's gate, the Query page's.</b> The advisor that offers these indexes is the one LINQ mode shows on the Query page,
+    /// and its plan is asked as LINQ mode's is: <c>RunLinqQueries</c>, then the store policy and the write policy for the database as
+    /// a whole, because a plan's estimates count every tenant's rows - refused before anything is read, and audited.
+    /// </para>
+    /// <para>
+    /// <b>The page's own statement, composed again.</b> The list is built exactly as <see cref="ListAsync" /> builds it, from the
+    /// same request, and planned twice, never run - and only an index <see cref="WhatIfIndexes" /> offers for it is imagined.
+    /// </para>
+    /// </remarks>
+    public async Task<WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        string alias,
+        DocumentListRequest request,
+        HypotheticalIndex index,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(index);
+
+        string target = QueryService.Target(alias + ": " + (string.IsNullOrWhiteSpace(request.Search) ? "(all)" : request.Search));
+        StudioScope planScope = QueryService.SqlScope(scope);
+
+        try
+        {
+            capabilities.Require(StudioCapability.RunLinqQueries);
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            audit.RecordCapabilityDenied(denied, WhatIfAction, target);
+            return WhatIfResult.Refused(index,
+                capabilities.ReadOnly ? PostgresStudio.Services.Database.DatabaseRefusal.ReadOnly : PostgresStudio.Services.Database.DatabaseRefusal.CapabilityOff,
+                denied.Message);
+        }
+
+        if (!await authorization.IsAuthorizedAsync(planScope, capability: null, cancellationToken).ConfigureAwait(false)
+            || !await authorization.IsAuthorizedAsync(planScope, nameof(StudioCapability.RunLinqQueries), cancellationToken).ConfigureAwait(false))
+        {
+            audit.RecordScopeDenied(planScope, options.Value.WriteAuthorizationPolicy ?? options.Value.StoreAuthorizationPolicy ?? "(none)",
+                WhatIfAction, target, StudioCapability.RunLinqQueries);
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy, LinqQueryService.PlanRefusedMessage);
+        }
+
+        NpgsqlCommand? statement = null;
+        IReadOnlyList<HypotheticalIndex> offered = [];
+        ResolvedScope resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            if (await LoadContextAsync(resolved, connection, alias, cancellationToken).ConfigureAwait(false) is { } context)
+            {
+                await ListCoreAsync(resolved, connection, context, request with { RunAnyway = true }, cancellationToken, (built, indexes) =>
+                {
+                    // Kept past the list's own command, which is disposed when it returns: the text and a copy of every value.
+                    statement = new NpgsqlCommand(built.CommandText);
+
+                    foreach (NpgsqlParameter parameter in built.Parameters)
+                    {
+                        statement.Parameters.Add(parameter.Clone());
+                    }
+
+                    offered = indexes;
+                    return DocumentPage.Failed(string.Empty);
+                }).ConfigureAwait(false);
+            }
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            audit.RecordScopeDenied(scope, options.Value.StoreAuthorizationPolicy ?? "(none)", WhatIfAction, target);
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.StorePolicy, "You are not authorized for this store, database or tenant.");
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            return WhatIfResult.Refused(index, PostgresStudio.Services.Database.DatabaseRefusal.Unavailable, exception.Message);
+        }
+        catch (Exception exception) when (exception is NpgsqlException or System.Net.Sockets.SocketException)
+        {
+            return WhatIfResult.NotCompared(index, "Not compared: the studio could not read this collection (" + exception.GetType().Name + ").");
+        }
+
+        await using NpgsqlCommand? owned = statement;
+
+        if (owned is not { } built || !offered.Any(x => x.Same(index)))
+        {
+            audit.Record(WhatIfAction, target, succeeded: false, NotOfferedMessage, StudioCapability.RunLinqQueries, planScope);
+            return WhatIfResult.NotCompared(index, NotOfferedMessage);
+        }
+
+        int commandTimeout = CommandTimeoutSeconds + 5;
+        HypotheticalIndexPlanner planner = new(async (connection, transaction, token) =>
+        {
+            // EXPLAIN, never ANALYZE: the page's statement is planned, not run.
+            await using NpgsqlCommand explain = LinqQuerySql.Bind(LinqQuerySql.Explain(built.CommandText), built, connection, transaction, commandTimeout);
+            await using NpgsqlDataReader reader = await explain.ExecuteReaderAsync(token).ConfigureAwait(false);
+
+            return await reader.ReadAsync(token).ConfigureAwait(false) && !await reader.IsDBNullAsync(0, token).ConfigureAwait(false)
+                ? reader.GetString(0)
+                : null;
+        });
+
+        WhatIfResult result;
+
+        try
+        {
+            result = WhatIfResult.From(index, await hypothetical.ReadAsync(MartenStudioDatabase.Of(resolved.Database), index, planner, cancellationToken).ConfigureAwait(false));
+        }
+        catch (OperationCanceledException)
+        {
+            audit.Record(WhatIfAction, target, succeeded: false, "cancelled", StudioCapability.RunLinqQueries, planScope);
+            throw;
+        }
+        catch (PostgresException exception)
+        {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (Exception exception) when (exception is NpgsqlException or System.Net.Sockets.SocketException or InvalidOperationException)
+        {
+            result = WhatIfResult.NotCompared(index, "Not compared: the what-if failed (" + exception.GetType().Name + ").");
+        }
+
+        audit.Record(WhatIfAction, target, succeeded: result.Before is not null, result.Outcome(), StudioCapability.RunLinqQueries, planScope);
+        return result;
     }
 
     /// <summary>Runs the built list read, or withholds it because the filter's verdict is red.</summary>

@@ -161,3 +161,43 @@ less every schema you may not see, so a name the plan prints from such a schema 
 statement that names a table only through one of those schemas then fails to plan, and says so.
 
 **Audited.** Each plan is an Activity entry, "Plan database statement", naming the `queryid` and never the text.
+
+## What if? A hypothetical index
+
+Where the studio suggests an index, [hypopg](https://github.com/HypoPG/hypopg) can show whether it would help. Under a plan
+that suggests one, **What if?** plans the same statement again with that one index imagined - an index the planner sees,
+in this one session, and the table never gets - and draws the plan now and the plan with the index side by side, with the
+estimated cost of each and whether Postgres used the index (it is named `<oid>btree_…` in the plan). Both are plain plans:
+a hypothetical index serves `EXPLAIN`, never `EXPLAIN ANALYZE`.
+
+**Which index.** Under a plan, the index on the plain columns a sequential scan's filter compares, equality first (P04's
+shape), and on the join key a nested loop's inner side reads whole (P05's) - written by the same builder as every
+migration remedy, every name quoted. A filter that compares an expression, a JSON member or a `LIKE` pattern suggests
+none: no btree on its columns would serve it, and hypopg imagines btree, BRIN, hash and bloom indexes, never GIN or GiST.
+For a Marten statement the index is exactly the one Marten would create for the advisor's `StoreOptions` line, as Marten
+writes it: LINQ mode's computed index on the member (`Duplicate` adds a column hypopg cannot imagine, so it stands in
+with the computed index `Index(x => x.Member)` would create, and says so), and on Documents `IndexLastModified()`,
+`SoftDeletedWithIndex()` or the index on a duplicated field that has lost its own. The Documents list reads a JSON member
+with `#>>`, which no index Marten declares serves, so it offers none for a JSON member: LINQ mode plans Marten's own
+statement for that. The server only ever imagines an index it would have offered for that statement itself.
+
+**Where, and behind which gate.** The gate of the plan it accompanies:
+
+- the SQL console's Explain plans (`RunSql`, audited as a `RunSql` run by the statement);
+- Query's Marten where clause (Mode A's plan, through the console's gate);
+- the Statements drill-in (the page's gate, planned as `SqlConsoleRole` under your own `search_path`, masked like the
+  drill-in's plan, and audited by `queryid`);
+- LINQ mode's index advice and the Documents list's (`RunLinqQueries` for the database as a whole, as LINQ mode's plan is).
+
+**Nothing is created, and nothing is left behind.** It runs in a read-only transaction under `statement_timeout` and
+`lock_timeout`, and never runs `CREATE EXTENSION` or creates an index. A hypothetical index lives in the backend and
+survives `ROLLBACK`, and a pooled backend is the host's next caller's, so `hypopg_reset()` is the transaction's last
+statement; a what-if that fails or is cancelled resets it again on the same connection before it goes back; and one whose
+reset fails ends its own session (`pg_terminate_backend(pg_backend_pid())`), so the backend - and the index with it -
+never returns to the pool. The studio does not clear the pool: that would close the host's idle connections.
+
+**When hypopg is not there.** The studio reads `pg_extension` and the privileges of the role it plans as, once a minute
+per database, and says which: hypopg is not installed (installing it - its package on the server, then
+`CREATE EXTENSION hypopg` - is the host's decision), or it is installed and that role may not use it (it needs `USAGE`
+on hypopg's schema and `EXECUTE` on `hypopg_create_index` and `hypopg_reset`). On a managed platform, whether hypopg is
+offered at all is in the provider's list of supported extensions.

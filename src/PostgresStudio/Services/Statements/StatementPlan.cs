@@ -134,12 +134,88 @@ internal sealed class StatementPlanReader
     private readonly IStudioSettings settings;
     private readonly ILogger<StatementPlanReader> logger;
     private readonly IHealthStatementObserver? observer;
+    private readonly HypotheticalIndexReader hypothetical;
 
-    public StatementPlanReader(IStudioSettings settings, ILogger<StatementPlanReader> logger, IHealthStatementObserver? observer = null)
+    public StatementPlanReader(
+        IStudioSettings settings,
+        ILogger<StatementPlanReader> logger,
+        IHealthStatementObserver? observer = null,
+        HypotheticalIndexReader? hypothetical = null)
     {
         this.settings = settings;
         this.logger = logger;
         this.observer = observer;
+        this.hypothetical = hypothetical ?? new HypotheticalIndexReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<HypotheticalIndexReader>.Instance);
+    }
+
+    /// <summary>
+    /// X2: the generic plan of <paramref name="text" /> before and after one hypothetical index, as <see cref="ReadAsync" />
+    /// plans it - <c>SqlConsoleRole</c>, the visitor's <c>search_path</c>, the read-only transaction - with hypopg asked for the
+    /// index between the two and reset before the connection goes back (<see cref="HypotheticalIndexReader" />).
+    /// </summary>
+    /// <param name="database">The database, resolved through the Statements page's gate.</param>
+    /// <param name="queryId">The statement's <c>queryid</c>.</param>
+    /// <param name="text">Its text, as the statement sweep read it.</param>
+    /// <param name="truncated">Whether that text was cut.</param>
+    /// <param name="withheld">The schemas the visitor may not see: taken off the <c>search_path</c>.</param>
+    /// <param name="index">The index to imagine.</param>
+    /// <param name="vet">Judges the plan without the index before anything is imagined (<see cref="HypotheticalIndexPlanner.Vet" />).</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the cleanup after it.</param>
+    /// <returns>What the engine read, or why the text is not planned.</returns>
+    public async Task<(HypotheticalIndexRead? Read, string? NotPlanned)> WhatIfAsync(
+        IStudioDatabase database,
+        long queryId,
+        string text,
+        bool truncated,
+        IReadOnlySet<string> withheld,
+        HypotheticalIndex index,
+        Func<string, string?> vet,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(withheld);
+        ArgumentNullException.ThrowIfNull(index);
+        ArgumentNullException.ThrowIfNull(vet);
+
+        if (StatementPlanQueries.GenericPlan(text, truncated) is not { } batch)
+        {
+            return (null, Health.Checks.ExpensiveStatementsCheck.RefusalText(HealthStatementQueries.Refusal(text, truncated)));
+        }
+
+        TimeSpan statementTimeout = settings.QueryTimeout < HealthSweeper.MaxStatementTimeout ? settings.QueryTimeout : HealthSweeper.MaxStatementTimeout;
+        int commandTimeout = (int) Math.Ceiling(statementTimeout.TotalSeconds) + 5;
+
+        HypotheticalIndexPlanner planner = new(
+            PlanAsync: async (connection, transaction, token) =>
+            {
+                (string? json, _) = await StatementPlanQueries
+                    .ReadPlanAsync(connection, transaction, batch, ExplainStatements.MaxPlanCharacters, commandTimeout, token)
+                    .ConfigureAwait(false);
+                return json;
+            },
+            PrepareAsync: async (connection, transaction, token) =>
+            {
+                IReadOnlyList<string> path = await StatementPlanQueries.ReadSearchPathAsync(connection, transaction, commandTimeout, token).ConfigureAwait(false);
+                await StatementPlanQueries
+                    .SetSearchPathAsync(connection, transaction, StatementPlanQueries.SearchPath(path.Where(x => !withheld.Contains(x))), commandTimeout, token)
+                    .ConfigureAwait(false);
+            },
+            Vet: vet,
+            AfterFailureAsync: connection =>
+                ForgetAsync(connection, new ReadOnlySqlSession(new ReadOnlySqlOptions { StatementTimeout = statementTimeout, Role = settings.SqlConsoleRole }), commandTimeout, queryId));
+
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return (await hypothetical.ReadAsync(database, index, planner, cancellationToken).ConfigureAwait(false), null);
+            }
+            catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.DuplicatePreparedStatement && attempt == 0)
+            {
+                // The name was on that session - left by a plan that could not take it back. The failure path took it back; once more.
+            }
+        }
     }
 
     /// <summary>

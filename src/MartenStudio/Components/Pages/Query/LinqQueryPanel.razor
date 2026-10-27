@@ -176,7 +176,8 @@
                         SqlNote="@SqlNote(current)"
                         Plan="@plan?.PlanJson"
                         PlanUnavailable="@PlanNote(plan)"
-                        Messages="@Messages(current)" />
+                        Messages="@Messages(current)"
+                        WhatIf="@(advice is null ? null : whatIf)" />
 
             @if (advice is { Verdicts.Count: > 0 } shown)
             {
@@ -314,6 +315,25 @@
     private LinqQueryResult? result;
     private ExplainResult? plan;
     private LinqIndexAdvice? advice;
+    private WhatIfSource? whatIf;
+
+    /// <summary>
+    /// X2: the advice's "What if?" - the index Marten would create for each line that declares one on a member, offered under the
+    /// plan, and planned again through LINQ mode's own gate from the query the advice is about (<see cref="ILinqQueryService.WhatIfAsync" />).
+    /// </summary>
+    private WhatIfSource? WhatIfFor(LinqIndexAdvice? given, LinqQueryRequest request) =>
+        given is not { WhatIf.Count: > 0 } ? null : new WhatIfSource
+        {
+            Candidates = given.WhatIf,
+            Note = "Each is the index Marten would create for the advice's line, as Marten writes it, imagined under Marten's own statement for this query.",
+            RunAsync = async (index, token) =>
+            {
+                StudioScope? scope = State.ActiveScope;
+                return scope is null
+                    ? WhatIfResult.NotCompared(index, "Not compared: no database is selected.")
+                    : await Linq.WhatIfAsync(scope, request, index, token);
+            },
+        };
 
     private string? whereError;
     private int whereErrorPosition = -1;
@@ -540,10 +560,8 @@
 
         try
         {
-            LinqQueryResult run = await Linq.RunAsync(
-                scope,
-                new LinqQueryRequest(alias, where, orderBy, pageSize, offset, deleted, IncludePlan: offset == 0 && status?.MayExplain == true),
-                cts.Token);
+            LinqQueryRequest request = new(alias, where, orderBy, pageSize, offset, deleted, IncludePlan: offset == 0 && status?.MayExplain == true);
+            LinqQueryResult run = await Linq.RunAsync(scope, request, cts.Token);
 
             result = run;
 
@@ -552,6 +570,7 @@
             {
                 plan = run.Plan ?? (status?.MayExplain == true ? null : ExplainResult.Unavailable(LinqQueryService.PlanRefusedMessage));
                 advice = run.Advice;
+                whatIf = WhatIfFor(run.Advice, request);
             }
 
             if (run.Refusal is { } refusal)

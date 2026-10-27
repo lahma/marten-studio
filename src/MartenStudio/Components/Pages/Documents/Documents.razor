@@ -4,6 +4,7 @@
 @using Microsoft.Extensions.Options
 @using MartenStudio.Services.Documents
 @using MartenStudio.Services.Query
+@using PostgresStudio.Components.Pages.Query
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
 @using PostgresStudio.Services.Query
@@ -75,7 +76,27 @@
     private CollectionRail rail = new([]);
     private CollectionInfo? collection;
     private DocumentPage list = new();
+    private WhatIfSource? whatIf;
     private RecentDocuments recent = RecentDocuments.None;
+
+    /// <summary>
+    /// X2: the list's "What if?" - the index Marten would create for each of the advice's lines that declares one on a column this
+    /// list's statement already reads - planned again from the request this list was read with (<see cref="IDocumentDataService.WhatIfAsync" />).
+    /// </summary>
+    private WhatIfSource? WhatIfFor(DocumentPage page, string alias, DocumentListRequest request) =>
+        page.WhatIf.Count == 0 ? null : new WhatIfSource
+        {
+            Candidates = page.WhatIf,
+            Note = "Each is the index Marten would create for the advice's line, imagined under this list's own statement. A Duplicate "
+                   + "line adds a column, which hypopg cannot imagine: LINQ mode on the Query page plans Marten's own statement for that.",
+            RunAsync = async (index, token) =>
+            {
+                StudioScope? scope = State.ActiveScope;
+                return scope is null
+                    ? WhatIfResult.NotCompared(index, "Not compared: no database is selected.")
+                    : await Data.WhatIfAsync(scope, alias, request, index, token);
+            },
+        };
     private string? loadError;
     private bool loading = true;
     private string? loadedSignature;
@@ -246,7 +267,10 @@
                 }
                 else
                 {
-                    list = await Data.ListAsync(scope, alias, BuildRequest(), token);
+                    DocumentListRequest request = BuildRequest();
+                    whatIf = null;
+                    list = await Data.ListAsync(scope, alias, request, token);
+                    whatIf = WhatIfFor(list, alias, request);
                     Browser.RememberPage(alias, [.. list.Rows.Select(static x => x.Id)], CurrentRelativeUrl());
                 }
             }
@@ -378,6 +402,12 @@
                                     ParameterNames="list.ParameterNames"
                                     Blocked="@(list.State == DocumentListState.BlockedByVerdict)"
                                     OnRunAnyway="RunAnywayAsync" />
+
+                @if (whatIf is not null && Capabilities.IsEnabled(StudioCapability.RunLinqQueries))
+                {
+                    @* X2: the index Marten would create for the advice's line, imagined under this list's own statement. *@
+                    <WhatIfPanel Source="whatIf" />
+                }
 
                 @if (list.State == DocumentListState.Failed)
                 {

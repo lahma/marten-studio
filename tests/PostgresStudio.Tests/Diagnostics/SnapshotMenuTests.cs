@@ -46,6 +46,10 @@ public class SnapshotMenuTests
 
         public Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("The Snapshot menu never plans a statement.");
+
+        public Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
+            StudioScope scope, long queryId, PostgresStudio.Services.Query.HypotheticalIndex index, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The Snapshot menu never imagines an index.");
     }
 
     private sealed class FakeServer : IServerPageService

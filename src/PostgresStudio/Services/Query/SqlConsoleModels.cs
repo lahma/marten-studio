@@ -106,8 +106,18 @@ internal sealed class SqlConsoleSession
     /// <summary>The status line under the editor: the row count and time, or "Cancelled.".</summary>
     public string? Status { get; set; }
 
+    /// <summary>
+    /// The statement an Explain button planned into <see cref="Result" /> - which a what-if (X2) plans again - or
+    /// <see langword="null" /> when the result is not one of theirs. The editor's text may have moved on since.
+    /// </summary>
+    public string? Planned { get; set; }
+
     /// <summary>Forgets the last result, as a scope change does.</summary>
-    public void ForgetResult() => Result = null;
+    public void ForgetResult()
+    {
+        Result = null;
+        Planned = null;
+    }
 }
 
 /// <summary>

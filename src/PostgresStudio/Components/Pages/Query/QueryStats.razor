@@ -65,7 +65,7 @@
             @if (!string.IsNullOrWhiteSpace(Plan))
             {
                 @* X1: the plan as a tree, with its insights, and the JSON Postgres printed under it. *@
-                <PlanView Json="@Plan" Caption="@PlanCaption" Label="Query plan" />
+                <PlanView Json="@Plan" Caption="@PlanCaption" Label="Query plan" WhatIf="WhatIf" />
             }
             else
             {
@@ -161,6 +161,10 @@
     /// <summary>Anything Postgres raised while the statement ran.</summary>
     [Parameter]
     public IReadOnlyList<string> Messages { get; set; } = [];
+
+    /// <summary>X2: the plan's "What if?", handed to the plan view (a <c>WhatIfSource</c>), or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public object? WhatIf { get; set; }
 
     private string? shownPlan;
 

@@ -49,4 +49,19 @@ internal interface IQueryService
 
     /// <summary>The idle panel's examples, built from this store's own aliases and tables.</summary>
     Task<QueryExamples> BuildExamplesAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: a Mode A statement's plan now and under one hypothetical index its plan suggested - composed again from the request
+    /// exactly as <see cref="RunMartenQueryAsync" /> composes it, and planned through the SQL console's gate, as Mode A's plan
+    /// is (<c>RunSql</c>). Every refusal is a value, audited; nothing is thrown but for cancellation.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="request">The clause the plan was of.</param>
+    /// <param name="index">The index to imagine: one the plan suggested.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        MartenQueryRequest request,
+        PostgresStudio.Services.Query.HypotheticalIndex index,
+        CancellationToken cancellationToken = default);
 }

@@ -61,6 +61,37 @@ internal static class ExplainStatements
         };
     }
 
+    /// <summary>
+    /// Runs <paramref name="sql" /> - an <c>EXPLAIN (FORMAT JSON)</c> of a statement - with <paramref name="bind" />'s values, and
+    /// reads its plan: the first row's one value, or <see langword="null" /> when there is none or it is longer than
+    /// <see cref="MaxPlanCharacters" />. X2's what-if plans its statement through this, twice.
+    /// </summary>
+    public static async Task<string?> ReadPlanAsync(
+        Npgsql.NpgsqlConnection connection,
+        Npgsql.NpgsqlTransaction transaction,
+        string sql,
+        Action<Npgsql.NpgsqlCommand>? bind,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sql);
+
+        await using Npgsql.NpgsqlCommand command = new(sql, connection, transaction) { CommandTimeout = commandTimeoutSeconds };
+        bind?.Invoke(command);
+
+        await using Npgsql.NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+        if (reader.FieldCount != 1 || !await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            || await reader.IsDBNullAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            return null;
+        }
+
+        string plan = reader.GetString(0);
+        return plan.Length <= MaxPlanCharacters ? plan : null;
+    }
+
     /// <summary>Whether a result's columns are the one <c>json</c> column <c>EXPLAIN (FORMAT JSON)</c> returns.</summary>
     public static bool IsPlanColumn(string name, string postgresType) =>
         string.Equals(name, PlanColumn, StringComparison.Ordinal) && string.Equals(postgresType, "json", StringComparison.Ordinal);

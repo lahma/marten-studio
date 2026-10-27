@@ -232,6 +232,17 @@ internal interface IStatementsService
     /// <param name="queryId">The statement's <c>queryid</c>.</param>
     /// <param name="cancellationToken">Cancels the plan.</param>
     Task<StatementPlanView> PlanAsync(StudioScope scope, long queryId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: the drill-in's generic plan of one statement now and under one hypothetical index - behind the same gate as the
+    /// drill-in, planned the same way, masked the same way, and audited by <c>queryid</c>. Only an index the plan itself suggests
+    /// is imagined. Never throws but for cancellation.
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped.</param>
+    /// <param name="queryId">The statement's <c>queryid</c>.</param>
+    /// <param name="index">The index to imagine, as the drill-in's plan suggested it.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -578,6 +589,99 @@ internal sealed class StatementsService : IStatementsService
             PlannedAt = timeProvider.GetUtcNow(),
             Statements = planned.Statements,
         };
+    }
+
+    /// <summary>What the audit ring calls a what-if on the drill-in (X2).</summary>
+    internal const string WhatIfAction = "What-if database statement";
+
+    /// <summary>What the drill-in says of an index its own plan does not suggest.</summary>
+    internal const string NotSuggested =
+        "Not compared: that index is not one this statement's plan suggests now - the plan may have changed since it was drawn.";
+
+    /// <inheritdoc />
+    public async Task<WhatIfResult> WhatIfAsync(StudioScope scope, long queryId, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(index);
+
+        // 1-3. The drill-in's own gate, which is the page's.
+        (StatementsView? refused, ResolvedSource? passed, StudioScope whole) = await PassAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (refused is not null || passed is not { } database)
+        {
+            return WhatIfResult.Refused(index, refused?.Refusal ?? DatabaseRefusal.Unavailable, refused?.Reason ?? "The database could not be resolved.");
+        }
+
+        // 4-5. The statement, among those read, as this visitor may see it - the drill-in's own refusals, in its words.
+        StatementFacts read;
+
+        try
+        {
+            read = await facts.ReadAsync(database, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return WhatIfResult.Refused(index, DatabaseRefusal.Unavailable, Failure(exception, database));
+        }
+
+        if (read.State != StatementsState.Read || read.Statements.FirstOrDefault(x => x.QueryId == queryId) is not { } fact)
+        {
+            return WhatIfResult.NotCompared(index, NotAmong);
+        }
+
+        DatabaseGateRead? gate = await GateAsync(whole, database, cancellationToken).ConfigureAwait(false);
+        StatementScreen screen = StatementScreen.Of(gate, settings.IsDocumentTypeVisible is not null);
+        StatementRowView row = Show(read, gate).Rows.First(x => x.QueryId == queryId);
+
+        if (fact.Text is not { } statementText || row.Text is null || screen.Withheld is not { } withheld)
+        {
+            return WhatIfResult.NotCompared(index, ExpensiveStatementsCheck.NotPlannedWithheld);
+        }
+
+        StatementPlanRefusal refusal = HealthStatementQueries.Refusal(statementText, fact.TextTruncated);
+
+        if (refusal != StatementPlanRefusal.None)
+        {
+            return WhatIfResult.NotCompared(index, ExpensiveStatementsCheck.RefusalText(refusal));
+        }
+
+        // 6. The two plans, as SqlConsoleRole under the visitor's search_path, with only an index this plan suggests imagined.
+        string target = "queryid " + queryId.ToString(CultureInfo.InvariantCulture);
+        string Mask(string name) => PostgresErrorText.Redact(name, withheld) ?? name;
+
+        string? Vet(string json) =>
+            WithheldPlan(json, screen, withheld)
+            ?? (QueryPlanReader.Read(json, Mask).Plan is { } plan && HypotheticalIndexCandidates.FromPlan(plan).Any(x => x.Same(index))
+                ? null
+                : NotSuggested);
+
+        WhatIfResult result;
+
+        try
+        {
+            (HypotheticalIndexRead? hypothetical, string? notPlanned) = await planner
+                .WhatIfAsync(database.Target, queryId, statementText, fact.TextTruncated, withheld, index, Vet, cancellationToken)
+                .ConfigureAwait(false);
+
+            result = hypothetical is null
+                ? WhatIfResult.NotCompared(index, notPlanned ?? "Not planned.")
+                : hypothetical.AfterJson is { } after && WithheldPlan(after, screen, withheld) is { } withholding
+                    ? WhatIfResult.NotCompared(index, withholding, hypothetical.Availability.State)
+                    : WhatIfResult.From(index, hypothetical, Mask);
+        }
+        catch (PostgresException exception)
+        {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            result = WhatIfResult.NotCompared(index, PostgresFailure.IsConnectionFailure(exception)
+                ? "Not compared: the studio could not connect to this database."
+                : "Not compared: the what-if failed (" + exception.GetType().Name + ").");
+        }
+
+        audit.Record(WhatIfAction, target, succeeded: result.Before is not null, result.Outcome(), StudioCapability.ViewDatabaseActivity, whole);
+        return result;
     }
 
     /// <summary>

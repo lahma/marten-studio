@@ -208,6 +208,18 @@ public class ExpensiveStatementsCheckTests
     }
 
     [Fact]
+    public void A_statement_on_no_document_table_links_to_its_own_drill_in_where_what_if_imagines_the_index()
+    {
+        ObservedStatement events = Statement(7, "select s.id from " + Streams.Schema + "." + Streams.Table + " as s where s.version = $1", [Streams], 100_000, 0.5 * 3_600_000);
+
+        HealthFinding finding = Judge(Read(events)).Findings.Single();
+
+        finding.Link!.Route.Should().Be(PostgresStudio.Services.Statements.StatementLinks.Route, "X2: the drill-in plans it and offers What if?");
+        finding.Link.Query.Should().ContainSingle().Which.Should().Be(
+            new KeyValuePair<string, string?>(PostgresStudio.Services.Statements.StatementLinks.QueryIdParameter, "7"));
+    }
+
+    [Fact]
     public void A_json_path_with_literal_keys_and_a_containment_test_go_to_the_advisor()
     {
         StatementPlan plan = new(1,
