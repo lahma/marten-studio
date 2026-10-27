@@ -12173,3 +12173,139 @@ a.ms-schema-health-mark:focus-visible {
         padding-left: var(--ms-space-sm);
     }
 }
+
+/* ==========================================================================
+   M3. Events > Dead letters, grouped by cause
+
+   0.6's dead-letter groups: the List / Grouped by cause switch (the shared ms-tabs, unchanged), the list's one-group
+   note, the grouped view's table and the bulk skip's dialog. Appended in D26 order; every selector is this packet's own
+   (ms-dl-views, ms-dl-group, ms-dl-groups), so nothing here re-declares an earlier rule. Notes use the secondary text
+   colour, not the muted one: UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-dl-views {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-dl-group-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-left: 3px solid var(--ms-color-border);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-group-filter-key {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-dl-groups-intro,
+.ms-dl-groups-note,
+.ms-dl-group-cap {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-groups-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-dl-groups-summary {
+    font-weight: var(--ms-font-weight-medium);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-dl-groups-read {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-group-projection,
+.ms-dl-group-type,
+.ms-dl-group-exception {
+    display: block;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-group-shard,
+.ms-dl-group-type-missing,
+.ms-dl-group-skipped,
+.ms-dl-group-tenants-unnamed {
+    display: block;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* The fingerprint is what the group is: it wraps inside its column rather than widening the table (D25). */
+.ms-dl-group-fingerprint {
+    display: block;
+    max-width: 48ch;
+    margin-top: var(--ms-space-xs);
+    overflow-wrap: anywhere;
+    white-space: normal;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-dl-group-sample {
+    max-width: 48ch;
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-dl-group-sample pre {
+    margin: var(--ms-space-xs) 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-dl-group-count {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ms-dl-group-tenants {
+    max-width: 24ch;
+}
+
+.ms-dl-group-tenant-names {
+    display: block;
+    overflow-wrap: anywhere;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-dl-group-actions {
+    white-space: nowrap;
+}
+
+.ms-dl-group-actions .ms-dl-group-cap {
+    display: block;
+    max-width: 32ch;
+    margin-top: var(--ms-space-xs);
+    white-space: normal;
+}
+
+.ms-dl-group-plan-count {
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+@media (max-width: 640px) {
+    .ms-dl-group-fingerprint,
+    .ms-dl-group-sample {
+        max-width: 32ch;
+    }
+}

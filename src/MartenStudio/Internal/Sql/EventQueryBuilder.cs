@@ -575,11 +575,7 @@ internal static class EventQueryBuilder
             sql.Append("where ").Append(Column(Alias, "seq_id")).Append(" = ")
                 .Append(parameters.Add(NpgsqlDbType.Bigint, sequence, "seq"));
 
-            if (table.HasTenantId)
-            {
-                sql.Append("\n  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, tenantId, "tenant"))
-                    .Append(" is null or ").Append(Column(Alias, "tenant_id")).Append(" = @tenant)");
-            }
+            AppendSequenceTenant(sql, parameters, table, tenantId);
 
             command.CommandText = sql.ToString();
             return command;
@@ -588,6 +584,60 @@ internal static class EventQueryBuilder
         {
             command.Dispose();
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Which of <paramref name="sequences" /> are events of this scope: the proof a skip makes for every sequence before
+    /// it hands the sequences to <c>MarkEventsAsSkipped</c> (hard rule 15), one statement for one sequence or a thousand.
+    /// </summary>
+    /// <param name="table">The discovered event tables.</param>
+    /// <param name="sequences">The <c>seq_id</c>s to prove.</param>
+    /// <param name="tenantId">The scope's tenant.</param>
+    /// <remarks>
+    /// The predicate is <see cref="BuildEventBySequence" />'s - the same tenant clause, written once - so a sequence this
+    /// returns is one the dead-letter expansion would show the scope, and one it leaves out is one it would not. Only
+    /// <c>seq_id</c> is read: the proof needs no body.
+    /// </remarks>
+    public static NpgsqlCommand BuildSequencesInScope(EventTableInfo table, IReadOnlyCollection<long> sequences, string? tenantId)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(sequences);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var parameters = new ParameterBuilder(command);
+            var sql = new StringBuilder();
+
+            sql.Append("select ").Append(Column(Alias, "seq_id")).Append('\n');
+            sql.Append("from ").Append(table.QualifiedEvents).Append(AsAlias).Append('\n');
+            sql.Append("where ").Append(Column(Alias, "seq_id")).Append(" = any(")
+                .Append(parameters.Add(NpgsqlDbType.Array | NpgsqlDbType.Bigint, sequences.ToArray(), "seqs")).Append(')');
+
+            AppendSequenceTenant(sql, parameters, table, tenantId);
+
+            command.CommandText = sql.ToString();
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The tenant clause of a read by sequence: on a table with <c>tenant_id</c>, the scope's tenant or, with none, every
+    /// tenant. A dead letter's sequence may be another tenant's, and this is what turns it into "no such event here".
+    /// </summary>
+    private static void AppendSequenceTenant(StringBuilder sql, ParameterBuilder parameters, EventTableInfo table, string? tenantId)
+    {
+        if (table.HasTenantId)
+        {
+            sql.Append("\n  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, tenantId, "tenant"))
+                .Append(" is null or ").Append(Column(Alias, "tenant_id")).Append(" = @tenant)");
         }
     }
 

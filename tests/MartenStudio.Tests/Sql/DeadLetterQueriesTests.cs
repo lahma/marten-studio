@@ -131,12 +131,12 @@ public class DeadLetterQueriesTests
     [Fact]
     public void The_json_keys_follow_the_serializers_casing()
     {
-        DeadLetterJsonKeys.For(null).Should().Be(
-            new DeadLetterJsonKeys("TenantId", "ProjectionName", "ShardName", "ExceptionType", "Timestamp", "EventSequence"));
-        DeadLetterJsonKeys.For(JsonNamingPolicy.CamelCase).Should().Be(
-            new DeadLetterJsonKeys("tenantId", "projectionName", "shardName", "exceptionType", "timestamp", "eventSequence"));
-        DeadLetterJsonKeys.For(JsonNamingPolicy.SnakeCaseLower).Should().Be(
-            new DeadLetterJsonKeys("tenant_id", "projection_name", "shard_name", "exception_type", "timestamp", "event_sequence"));
+        DeadLetterJsonKeys.For(null).Should().Be(new DeadLetterJsonKeys(
+            "TenantId", "ProjectionName", "ShardName", "ExceptionType", "Timestamp", "ExceptionMessage", "EventSequence"));
+        DeadLetterJsonKeys.For(JsonNamingPolicy.CamelCase).Should().Be(new DeadLetterJsonKeys(
+            "tenantId", "projectionName", "shardName", "exceptionType", "timestamp", "exceptionMessage", "eventSequence"));
+        DeadLetterJsonKeys.For(JsonNamingPolicy.SnakeCaseLower).Should().Be(new DeadLetterJsonKeys(
+            "tenant_id", "projection_name", "shard_name", "exception_type", "timestamp", "exception_message", "event_sequence"));
     }
 
     /// <summary>

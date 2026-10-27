@@ -468,6 +468,9 @@ internal sealed record DeadLetterQuery
     /// <summary>Only those about the event of this sequence - the stepper's link to a step's dead letters (M1).</summary>
     public long? EventSequence { get; init; }
 
+    /// <summary>Only this group's (M3: a group opened from the grouped view), on top of the filters above.</summary>
+    public DeadLetterGroupKey? Group { get; init; }
+
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
 

@@ -1,0 +1,491 @@
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject ToastService Toasts
+@inject IOptions<MartenStudioOptions> Options
+
+@* M3: the dead letters grouped by cause - Events > Dead letters with ?view=grouped. A component of its own, so the list
+   page around it changes by a few lines. Opening a group is a link back to that list with ?group=, where every
+   per-letter action is; "Skip this group" is the one action here, and the service refuses it for every reason single
+   Skip is refused (AGENTS.md hard rule 5) - what is disabled here is the convenience. *@
+
+<section class="ms-dl-groups" aria-label="Dead letters grouped by cause">
+    <p class="ms-dl-groups-intro">@DeadLetterGroupText.Intro</p>
+
+    @if (!CanManage)
+    {
+        <CapabilityDisabled Capability="@nameof(StudioCapability.ManageDeadLetters)" Action="Skipping a group's events" />
+    }
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (list is { IsHidden: true })
+    {
+        <div class="ms-empty ms-dead-letters-hidden">
+            <p class="ms-empty-title">@DeadLetterVisibility.HiddenMessage</p>
+        </div>
+    }
+    else if ((list?.Error ?? shape?.Error) is { } error)
+    {
+        <ErrorAlert Message="@error.Display" OnRetry="@(error.CanRetry ? EventCallback.Factory.Create(this, RefreshAsync) : default)" />
+    }
+    else if (shape is { Available: true, EventTablesExist: false })
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">This store has no event storage yet</p>
+            <p class="ms-empty-description">
+                Nothing has appended an event, so no projection has run and nothing can have failed on one.
+            </p>
+        </div>
+    }
+    else if (list is null || list.Groups.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No dead letters</p>
+            <p class="ms-empty-description">No projection in this database has failed on an event.</p>
+        </div>
+    }
+    else
+    {
+        <div class="ms-dl-groups-toolbar">
+            <span class="ms-dl-groups-summary">@Summary(list)</span>
+            @if (list.ReadAt is { } readAt)
+            {
+                <span class="ms-dl-groups-read">read <TimeAgo Timestamp="readAt" /></span>
+            }
+            <button type="button" class="ms-button ms-btn-sm ms-dl-groups-refresh" disabled="@working" @onclick="RefreshAsync">Refresh</button>
+        </div>
+
+        @if (list.LettersTruncated)
+        {
+            <p class="ms-dl-groups-note ms-dl-groups-cut">@DeadLetterGroupText.LettersCut</p>
+        }
+
+        <TableScroll Label="Dead-letter groups table">
+            <table class="ms-table ms-dl-groups-table">
+                <thead>
+                    <tr>
+                        <th>Projection</th>
+                        <th>Event type</th>
+                        <th>Exception</th>
+                        <th class="ms-dl-group-count">Letters</th>
+                        <th class="ms-dl-group-count">Events</th>
+                        <th>First seen</th>
+                        <th>Last seen</th>
+                        <th>Tenants</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (DeadLetterGroup group in list.Groups)
+                    {
+                        <tr class="ms-table-row ms-dl-group" @key="group.Key">
+                            <td class="ms-table-cell">
+                                <span class="ms-dl-group-projection">@(group.Key.ProjectionName ?? "(none)")</span>
+                                <span class="ms-dl-group-shard">@(group.Key.ShardName ?? "(no shard)")</span>
+                            </td>
+                            <td class="ms-table-cell">
+                                @if (group.Key.EventType is { } eventType)
+                                {
+                                    <span class="ms-dl-group-type">@eventType</span>
+                                }
+                                else
+                                {
+                                    <span class="ms-dl-group-type-missing">not in mt_events</span>
+                                }
+                            </td>
+                            <td class="ms-table-cell">
+                                <span class="ms-dl-group-exception">@(group.Key.ExceptionType ?? "(none)")</span>
+                                @if (group.Key.Fingerprint is { Length: > 0 } fingerprint)
+                                {
+                                    <code class="ms-dl-group-fingerprint">@fingerprint</code>
+                                }
+                                @if (group.SampleMessage is { Length: > 0 } sample)
+                                {
+                                    <details class="ms-dl-group-sample">
+                                        <summary>A sample message</summary>
+                                        <pre>@sample</pre>
+                                    </details>
+                                }
+                            </td>
+                            <td class="ms-table-cell ms-dl-group-count">@Number(group.Letters)</td>
+                            <td class="ms-table-cell ms-dl-group-count">
+                                @Number(group.Events)
+                                @if (group.EventsSkipped is long skipped && skipped > 0)
+                                {
+                                    <span class="ms-dl-group-skipped">@Number(skipped) skipped</span>
+                                }
+                            </td>
+                            <td class="ms-table-cell"><TimeAgo Timestamp="group.FirstSeen" /></td>
+                            <td class="ms-table-cell"><TimeAgo Timestamp="group.LastSeen" /></td>
+                            <td class="ms-table-cell ms-dl-group-tenants">
+                                <span class="ms-dl-group-tenant-count">@Number(group.TenantCount)</span>
+                                @if (group.TenantNames.Count > 0)
+                                {
+                                    <span class="ms-dl-group-tenant-names">@string.Join(", ", group.TenantNames)</span>
+                                }
+                                @if (group.TenantsNotNamed > 0)
+                                {
+                                    <span class="ms-dl-group-tenants-unnamed">@Number(group.TenantsNotNamed) not named here</span>
+                                }
+                            </td>
+                            <td class="ms-table-cell ms-table-cell-actions ms-dl-group-actions">
+                                <a class="ms-button ms-btn-sm ms-dl-group-open" href="@OpenHref(group)">Open</a>
+                                @if (CanManage)
+                                {
+                                    @* Disabled, never hidden, for a reason the visitor can read: the policy, the store's
+                                       numbering, the column, a group with nothing left. *@
+                                    <button type="button"
+                                            class="ms-button ms-btn-sm ms-dl-group-skip"
+                                            disabled="@(working || SkipRefusal(group) is not null)"
+                                            title="@(SkipRefusal(group) ?? SkipTitle(group))"
+                                            @onclick="() => OpenSkipAsync(group)">
+                                        Skip this group
+                                    </button>
+                                }
+                                @if (group.EventsNotSkipped > DeadLetterGroupLimits.MaxEventsPerSkip)
+                                {
+                                    <span class="ms-dl-group-cap">@DeadLetterGroupText.CapNote(group.EventsNotSkipped.Value)</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+
+        @if (list.IsTruncated)
+        {
+            <p class="ms-dl-groups-note">
+                Showing the @Number(list.Groups.Count) largest of @Number(list.TotalGroups) groups.
+            </p>
+        }
+
+        <WriteRefusal Refused="@(CanManage && !mayManage)" Capability="@nameof(StudioCapability.ManageDeadLetters)" />
+    }
+
+    @if (!string.IsNullOrWhiteSpace(actionError))
+    {
+        <ErrorAlert Message="@actionError" />
+    }
+</section>
+
+<ConfirmDialog IsOpen="@(pending is not null && plan is not null)"
+               Title="Skip this group's events?"
+               Message="@DialogMessage"
+               ConfirmationPhrase="@plan?.ConfirmationPhrase"
+               ConfirmText="Skip events"
+               OnConfirm="ConfirmAsync"
+               OnCancel="CancelDialog">
+    @if (pending is { } group && plan is { } skip)
+    {
+        <div class="ms-kv ms-dl-group-plan">
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Group</span>
+                <span class="ms-kv-value ms-mono">@group.Key.Describe()</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Events this action skips</span>
+                <span class="ms-kv-value ms-dl-group-plan-count">@Number(skip.ToSkip)</span>
+            </div>
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">Already skipped</span>
+                <span class="ms-kv-value">@Number(skip.AlreadySkipped)</span>
+            </div>
+            @if (skip.OverCap)
+            {
+                <div class="ms-kv-row">
+                    <span class="ms-kv-key">Left for another action</span>
+                    <span class="ms-kv-value">@Number(skip.NotYetSkipped - skip.ToSkip)</span>
+                </div>
+            }
+            @if (skip.TenantId is { } tenant)
+            {
+                <div class="ms-kv-row">
+                    <span class="ms-kv-key">Tenant</span>
+                    <span class="ms-kv-value ms-mono">@tenant</span>
+                </div>
+            }
+        </div>
+
+        @if (skip.OverCap)
+        {
+            <p class="ms-dl-group-cap">@DeadLetterGroupText.CapNote(skip.NotYetSkipped)</p>
+        }
+    }
+</ConfirmDialog>
+
+@code {
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private DeadLetterGroupList? list;
+    private EventStoreShape? shape;
+    private DeadLetterGroup? pending;
+    private StudioScope? pendingScope;
+    private DeadLetterGroupSkipPlan? plan;
+    private bool loading = true;
+    private bool working;
+    private string? actionError;
+    private string? signature;
+
+    /// <summary>
+    /// Whether the write policy lets this visitor manage dead letters in the scope on screen - asked once per load, never
+    /// memoised, and not the enforcement: the service asks again (hard rule 5).
+    /// </summary>
+    private bool mayManage = true;
+
+    private bool CanManage => Capabilities.IsEnabled(StudioCapability.ManageDeadLetters);
+
+    /// <summary>Whether this store numbers events per tenant (<c>UseTenantPartitionedEvents</c>).</summary>
+    private bool PerTenantSequences => shape is { PerTenantSequences: true };
+
+    private string DialogMessage => pending is null || plan is null
+        ? string.Empty
+        : "Every event of this group that is not skipped yet - "
+          + Number(plan.ToSkip) + (plan.ToSkip == 1 ? " event" : " events")
+          + (plan.TenantId is { } tenant ? " of tenant " + tenant : string.Empty)
+          + ", the lowest sequence numbers first - is marked skipped, so the daemon steps over it. The events stay in "
+          + "the store, the dead letters stay too, and every projection that reads these events from now on will not see them.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ReloadIfChangedAsync();
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        await ReloadIfChangedAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReloadIfChangedAsync()
+    {
+        string current = string.Join('\u001f', State.ActiveScope?.StoreKey, State.ActiveScope?.DatabaseId, State.ActiveScope?.TenantId);
+        if (string.Equals(current, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        signature = current;
+        await LoadAsync();
+    }
+
+    private Task RefreshAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            loading = false;
+            return;
+        }
+
+        loading = true;
+        StateHasChanged();
+
+        try
+        {
+            CancellationToken token = pageCancellation.Token;
+
+            // First, before anything that can fail: the controls must not keep the last visitor's answer.
+            mayManage = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ManageDeadLetters, token);
+
+            shape = await Events.DescribeAsync(scope, token);
+
+            // As the list: a database with no event tables has never had a dead letter, so nothing is asked.
+            list = shape.EventTablesExist
+                ? await Events.ListDeadLetterGroupsAsync(scope, token)
+                : DeadLetterGroupList.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            list = DeadLetterGroupList.Failed(new EventDataError(exception.Message, null, true));
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    /// <summary>
+    /// The scope a skip of <paramref name="group" /> is asked in, or <see langword="null" /> when there is none: under
+    /// per-tenant sequences with "All tenants" selected, the group's one tenant - the single Skip's rule (its WriteScope) -
+    /// and only when the group's letters name exactly one tenant this visitor is shown; elsewhere the scope as selected.
+    /// </summary>
+    private StudioScope? SkipScope(DeadLetterGroup group)
+    {
+        if (State.ActiveScope is not { } scope)
+        {
+            return null;
+        }
+
+        if (!PerTenantSequences || scope.TenantId is not null)
+        {
+            return scope;
+        }
+
+        return group is { TenantCount: 1, TenantNames: [var tenant] } ? scope with { TenantId = tenant } : null;
+    }
+
+    /// <summary>Why "Skip this group" is disabled for <paramref name="group" />, or <see langword="null" /> when it is not.</summary>
+    private string? SkipRefusal(DeadLetterGroup group)
+    {
+        if (!mayManage)
+        {
+            return WritePolicyRefusal.For(StudioCapability.ManageDeadLetters);
+        }
+
+        if (PerTenantSequences && shape is not { TenantSkipping: true })
+        {
+            return StreamCompactionRules.SkipNeedsOneSequence;
+        }
+
+        if (list is not { RecordsSkips: true })
+        {
+            return EventDataService.NoSkipColumnMessage;
+        }
+
+        if (SkipScope(group) is null)
+        {
+            return DeadLetterGroupText.SkipNeedsOneTenant(group.TenantCount);
+        }
+
+        return group.EventsNotSkipped is null or 0 ? DeadLetterGroupText.NothingLeft : null;
+    }
+
+    private static string SkipTitle(DeadLetterGroup group) =>
+        "Marks this group's " + Number(group.EventsNotSkipped ?? 0) + " events that are not skipped yet as skipped, "
+        + "after a confirmation that shows the count";
+
+    private async Task OpenSkipAsync(DeadLetterGroup group)
+    {
+        actionError = null;
+
+        if (SkipRefusal(group) is { } refusal)
+        {
+            actionError = refusal;
+            return;
+        }
+
+        if (SkipScope(group) is not { } scope)
+        {
+            return;
+        }
+
+        working = true;
+
+        try
+        {
+            // Asked now, not taken from the table: the dialog's count is the count the service will check the typed one
+            // against, and the table may be a refresh interval old.
+            DeadLetterGroupSkipPlan described = await Events.DescribeDeadLetterGroupSkipAsync(scope, group.Key, pageCancellation.Token);
+
+            if (described.Refusal is { } refused)
+            {
+                actionError = refused;
+                return;
+            }
+
+            if (described.ToSkip == 0)
+            {
+                actionError = DeadLetterGroupText.NothingLeft;
+                return;
+            }
+
+            plan = described;
+            pendingScope = scope;
+            pending = group;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private void CancelDialog()
+    {
+        pending = null;
+        pendingScope = null;
+        plan = null;
+    }
+
+    private async Task ConfirmAsync(string typed)
+    {
+        DeadLetterGroup? group = pending;
+        StudioScope? scope = pendingScope;
+        CancelDialog();
+
+        if (group is null || scope is null)
+        {
+            return;
+        }
+
+        working = true;
+        actionError = null;
+
+        try
+        {
+            // The typed text travels to the service, which checks it against the count it would skip now.
+            long marked = await Events.SkipDeadLetterGroupAsync(scope, group.Key, typed, pageCancellation.Token);
+
+            await Toasts.Success(
+                Number(marked) + (marked == 1 ? " event" : " events") + " of this group marked as skipped"
+                + (scope.TenantId is { } tenant && PerTenantSequences ? " in tenant " + tenant + "." : "."));
+
+            await LoadAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            working = false;
+        }
+    }
+
+    private string OpenHref(DeadLetterGroup group) =>
+        EventLinks.To(Options.Value, EventLinks.DeadLettersRoute, State.ActiveScope, [new("group", group.Key.Encode())]);
+
+    private static string Summary(DeadLetterGroupList read) =>
+        Number(read.TotalLetters) + (read.TotalLetters == 1 ? " dead letter" : " dead letters") + " in "
+        + Number(read.TotalGroups) + (read.TotalGroups == 1 ? " group" : " groups");
+
+    private static string Number(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

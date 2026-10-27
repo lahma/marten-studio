@@ -40,6 +40,13 @@
     }
     else
     {
+    <DeadLetterViewBar Grouped="@IsGroupedView" Group="@Group" />
+    @if (IsGroupedView)
+    {
+        <DeadLetterGroups />
+    }
+    else
+    {
     <div class="ms-event-filters">
         <div class="ms-event-filter">
             <label class="ms-event-filter-label" for="ms-dl-projection">Projection</label>
@@ -278,6 +285,7 @@
         </nav>
     }
     }
+    }
 </div>
 
 <ConfirmDialog IsOpen="@(dialog is not DialogKind.None)"
@@ -449,13 +457,24 @@
     [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
     public string? Tenant { get; set; }
 
+    /// <summary>Which view: <c>grouped</c> for the dead letters grouped by cause (M3), anything else for the list.</summary>
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? View { get; set; }
+
+    /// <summary>Only this group's dead letters (M3), as the grouped view's Open link encodes it.</summary>
+    [SupplyParameterFromQuery(Name = "group")]
+    public string? Group { get; set; }
+
+    private bool IsGroupedView => string.Equals(View, "grouped", StringComparison.Ordinal);
+
     private int OffsetValue => Math.Max(0, Offset ?? 0);
 
     private bool HasFilters =>
         !string.IsNullOrWhiteSpace(Projection)
         || !string.IsNullOrWhiteSpace(Shard)
         || !string.IsNullOrWhiteSpace(Exception)
-        || Sequence is not null;
+        || Sequence is not null
+        || !string.IsNullOrWhiteSpace(Group);
 
     private int DetailColumnSpan => 7;
 
@@ -766,6 +785,13 @@
             return;
         }
 
+        // The grouped view reads for itself (DeadLetterGroups); the list is not read under it.
+        if (IsGroupedView)
+        {
+            loading = false;
+            return;
+        }
+
         loading = true;
         expanded = null;
         offending = null;
@@ -805,6 +831,7 @@
                     ShardName = Shard,
                     ExceptionType = Exception,
                     EventSequence = Sequence,
+                    Group = DeadLetterGroupKey.Decode(Group),
                     Offset = OffsetValue,
                     PageSize = PageSize,
                 }, token);
@@ -1078,6 +1105,7 @@
                 new("shard", Shard),
                 new("exception", Exception),
                 new("seq", EventLinks.Number(Sequence)),
+                new("group", Group),
                 new("offset", offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null),
             ]);
 
@@ -1087,7 +1115,7 @@
             Options.Value,
             EventLinks.DeadLettersRoute,
             State.ActiveScope,
-            [new("projection", Projection), new("shard", Shard), new("exception", Exception)]);
+            [new("projection", Projection), new("shard", Shard), new("exception", Exception), new("group", Group)]);
 
     /// <summary>
     /// The offending event in the stepper (M1), in the scope its stream link uses: the event's own tenant when the scope
@@ -1127,6 +1155,8 @@
             Shard,
             Exception,
             EventLinks.Number(Sequence),
+            View,
+            Group,
             OffsetValue.ToString(CultureInfo.InvariantCulture));
 
     public async ValueTask DisposeAsync()

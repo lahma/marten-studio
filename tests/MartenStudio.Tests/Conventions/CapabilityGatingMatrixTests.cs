@@ -92,6 +92,9 @@ public class CapabilityGatingMatrixTests
         new(typeof(IEventDataService), nameof(IEventDataService.ArchiveStreamAsync), StudioCapability.ArchiveStreams),
         new(typeof(IEventDataService), nameof(IEventDataService.DiscardDeadLetterAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.SkipEventAsync), StudioCapability.ManageDeadLetters),
+
+        // M3: the bulk skip, single Skip's path over one group's events.
+        new(typeof(IEventDataService), nameof(IEventDataService.SkipDeadLetterGroupAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.RewindSubscriptionAsync), StudioCapability.ManageDeadLetters),
         new(typeof(IEventDataService), nameof(IEventDataService.CompactStreamAsync), StudioCapability.CompactStreams),
 
@@ -182,6 +185,9 @@ public class CapabilityGatingMatrixTests
             // M1: the stepper is time travel one event at a time, and gated as time travel is - the store policy for the
             // scope, no capability. It runs the projection's own code exactly as AggregateAtVersionAsync does.
             "FindNextChangeAsync", "StepAsync",
+
+            // M3: the grouped view and what its bulk skip would do - reads; the skip itself is Mutating.
+            "DescribeDeadLetterGroupSkipAsync", "ListDeadLetterGroupsAsync",
         ],
         [typeof(IProjectionDataService)] =
         [
@@ -652,6 +658,12 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(DocumentConcurrencyToken))
         {
             return DocumentConcurrencyToken.None;
+        }
+
+        // A group the grouped view could have read, so a gate that ran after the group was looked at would be caught.
+        if (type == typeof(DeadLetterGroupKey))
+        {
+            return new DeadLetterGroupKey("OrderSummary", "All", "order_placed", "InvalidOperationException", "Failure to apply event #{n} Id({guid})");
         }
 
         if (type == typeof(SqlConsoleRequest))
