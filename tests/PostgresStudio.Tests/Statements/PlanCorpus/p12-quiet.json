@@ -1,0 +1,56 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Aggregate",
+      "Strategy": "Plain",
+      "Partial Mode": "Simple",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 100200.0,
+      "Total Cost": 100200.01,
+      "Plan Rows": 1,
+      "Plan Width": 8,
+      "Actual Startup Time": 4210.0,
+      "Actual Total Time": 4210.0,
+      "Actual Rows": 1.00,
+      "Actual Loops": 1,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events",
+          "Alias": "events",
+          "Startup Cost": 0.0,
+          "Total Cost": 98000.0,
+          "Plan Rows": 1000000,
+          "Plan Width": 0,
+          "Actual Startup Time": 0.03,
+          "Actual Total Time": 3900.1,
+          "Actual Rows": 1000000.00,
+          "Actual Loops": 1
+        }
+      ]
+    },
+    "Planning Time": 0.3,
+    "Triggers": [],
+    "JIT": {
+      "Functions": 6,
+      "Options": {
+        "Inlining": true,
+        "Optimization": true,
+        "Expressions": true,
+        "Deforming": true
+      },
+      "Timing": {
+        "Generation": 1.2,
+        "Inlining": 8.5,
+        "Optimization": 21.0,
+        "Emission": 14.5,
+        "Total": 45.2
+      }
+    },
+    "Execution Time": 4260.9
+  }
+]

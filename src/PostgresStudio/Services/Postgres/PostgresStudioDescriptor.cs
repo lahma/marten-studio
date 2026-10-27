@@ -1,6 +1,7 @@
 using PostgresStudio.Components.Pages;
 using PostgresStudio.Components.Pages.Query;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Postgres;
@@ -71,6 +72,9 @@ internal static class PostgresStudioDescriptor
         [
             new("Overview", "", "grid"),
             new("Query", "query", "query", Title: "The SQL console"),
+
+            // X3 (issue #28): a statement's plan drawn every way, and what to fix - the console's gate, a page of its own.
+            new("Plan", PlanLinks.Route, "plan", Title: "A statement's plan, drawn every way, with what to fix"),
         ]),
         new("Database",
         [

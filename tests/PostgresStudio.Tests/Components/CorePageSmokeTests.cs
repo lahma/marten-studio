@@ -205,7 +205,7 @@ public class CorePageSmokeTests
 
         string[] links = [.. menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent)];
         links.Should().Equal(
-            "Overview", "Query", "Tables", "Sessions", "Relationships", "Health", "Statements", "Maintenance", "Storage", "Replication", "Server", "Activity");
+            "Overview", "Query", "Plan", "Tables", "Sessions", "Relationships", "Health", "Statements", "Maintenance", "Storage", "Replication", "Server", "Activity");
     }
 
     /// <summary>

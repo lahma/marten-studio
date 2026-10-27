@@ -45,6 +45,12 @@ P05 | Plans | - | plan node | both | since 0.6 | current
 P06 | Plans | - | plan node | both | since 0.6 | current
 P07 | Plans | - | plan node | both | since 0.6 | current
 P08 | Plans | - | plan node | both | since 0.6 | current
+P09 | Plans | - | plan node | both | since 0.9 | current
+P10 | Plans | - | plan node | both | since 0.9 | current
+P11 | Plans | - | plan node | both | since 0.9 | current
+P12 | Plans | - | plan node | both | since 0.9 | current
+P13 | Plans | - | plan node | both | since 0.9 | current
+P14 | Plans | - | plan node | both | since 0.9 | current
 R01 | Replication | near-limit, inactive, lost | - | both | since 0.4 | current
 R02 | Replication | failing, backlog | - | both | since 0.5 | current
 R03 | Replication | primary-view, standby-view, paused, aurora-reader | - | both | since 0.5 | current

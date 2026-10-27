@@ -1,0 +1,59 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Inner",
+      "Startup Cost": 150.0,
+      "Total Cost": 2000.0,
+      "Plan Rows": 1000,
+      "Plan Width": 40,
+      "Actual Startup Time": 20.0,
+      "Actual Total Time": 50.0,
+      "Actual Rows": 1000.00,
+      "Actual Loops": 1,
+      "Hash Cond": "(o.customer_id = c.id)",
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "orders",
+          "Alias": "o",
+          "Startup Cost": 0.0,
+          "Total Cost": 1500.0,
+          "Plan Rows": 1000,
+          "Plan Width": 24,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 30.0,
+          "Actual Rows": 1000.00,
+          "Actual Loops": 1
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 100.0,
+          "Total Cost": 100.0,
+          "Plan Rows": 5000,
+          "Plan Width": 16,
+          "Actual Startup Time": 18.0,
+          "Actual Total Time": 18.0,
+          "Actual Rows": 5000.00,
+          "Actual Loops": 1,
+          "Hash Buckets": 8192,
+          "Original Hash Buckets": 8192,
+          "Hash Batches": 1,
+          "Original Hash Batches": 1,
+          "Peak Memory Usage": 300
+        }
+      ]
+    },
+    "Planning Time": 0.4,
+    "Triggers": [],
+    "Execution Time": 51.2
+  }
+]

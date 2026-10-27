@@ -13104,3 +13104,479 @@ a.ms-schema-health-mark:focus-visible {
     color: inherit;
     text-decoration: underline;
 }
+
+/* ==========================================================================
+   0.9-A. Query › Plan: the plan analyzer (issue #28, phase 1)
+
+   Appended in D26 order, after UI-0.8. The page, its summary strip, node table, heat, critical path, node detail and export are
+   this section's own (ms-plan-); it adds to X1's plan view (the tree, its nodes and its insights) and re-declares only
+   `.ms-plan-node`, to be a positioned box the keyboard's selection button can sit in. The tree and the table are both in a
+   TableScroll region (D25). Heat is a scale of four steps defined once as tokens, with the dark theme's own - never colour alone:
+   each node also prints its value as text, and the legend says what the colour is. Notes use the secondary text colour, not the
+   muted one: UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+:root {
+    --ms-plan-heat-1: #ca8a04;
+    --ms-plan-heat-2: #ea580c;
+    --ms-plan-heat-3: #dc2626;
+    --ms-plan-heat-4: #991b1b;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ms-plan-heat-1: #ca8a04;
+        --ms-plan-heat-2: #ea580c;
+        --ms-plan-heat-3: #f87171;
+        --ms-plan-heat-4: #fecaca;
+    }
+}
+
+.ms-studio[data-theme="light"] {
+    --ms-plan-heat-1: #ca8a04;
+    --ms-plan-heat-2: #ea580c;
+    --ms-plan-heat-3: #dc2626;
+    --ms-plan-heat-4: #991b1b;
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-plan-heat-1: #ca8a04;
+    --ms-plan-heat-2: #ea580c;
+    --ms-plan-heat-3: #f87171;
+    --ms-plan-heat-4: #fecaca;
+}
+
+.ms-plan-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+}
+
+.ms-plan-page-lead,
+.ms-plan-params-note,
+.ms-plan-paste-help,
+.ms-plan-export-note,
+.ms-plan-left-out {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-compose,
+.ms-plan-paste {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-plan-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm) var(--ms-space-lg);
+}
+
+.ms-plan-modes,
+.ms-plan-options,
+.ms-plan-params {
+    min-width: 0;
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-modes legend,
+.ms-plan-options legend,
+.ms-plan-params legend {
+    padding: 0 var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-modes,
+.ms-plan-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+}
+
+.ms-plan-mode,
+.ms-plan-option,
+.ms-plan-param-null,
+.ms-plan-critical-toggle,
+.ms-plan-heat-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    cursor: pointer;
+}
+
+.ms-plan-mode-off,
+.ms-plan-option-off {
+    color: var(--ms-color-text-secondary);
+    cursor: not-allowed;
+}
+
+.ms-plan-param-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-param {
+    display: grid;
+    grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr) max-content;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-param-type {
+    margin-left: var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-paste-label {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-paste-input {
+    width: 100%;
+}
+
+.ms-plan-paste-actions {
+    display: flex;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+/* The summary strip: one definition list, its items wrapping into as many columns as fit. A blank value shows a dash the
+   stylesheet puts there - the text is empty, so a screen reader reads a blank and never a zero. */
+
+.ms-plan-strip-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-plan-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-strip-item {
+    min-width: 0;
+}
+
+.ms-plan-strip-item dt {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-strip-item dd {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-strip-item dd:empty::before {
+    content: "\2013";
+    color: var(--ms-color-text-secondary);
+    font-weight: var(--ms-font-weight-normal);
+}
+
+.ms-plan-settings summary {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    cursor: pointer;
+}
+
+/* The controls above the plan: the view, the heat and the critical path. */
+
+.ms-plan-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-lg);
+}
+
+.ms-plan-view-switch {
+    display: inline-flex;
+    gap: var(--ms-space-xs);
+}
+
+.ms-plan-view-switch [aria-pressed="true"] {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-heat-select {
+    width: auto;
+}
+
+/* A node: positioned, so the selection button sits inside it. The card is clickable for a mouse and the button is the same
+   selection for a keyboard - a strip down the card's left edge, which the focus ring draws round. */
+
+.ms-plan-node {
+    position: relative;
+}
+
+.ms-plan-node-pick {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 0.75rem;
+    padding: 0;
+    border: 0;
+    border-radius: var(--ms-radius-md) 0 0 var(--ms-radius-md);
+    background: transparent;
+    cursor: pointer;
+}
+
+.ms-plan-node-pick:hover {
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-plan-node-selected {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    box-shadow: 0 0 0 2px var(--ms-color-primary);
+}
+
+.ms-plan-critical {
+    border-top: 3px solid var(--ms-color-executing);
+}
+
+.ms-plan-critical-flag {
+    border-color: var(--ms-color-executing);
+    color: var(--ms-color-executing);
+}
+
+.ms-plan-node.ms-plan-heat-1 {
+    border-left: 4px solid var(--ms-plan-heat-1);
+}
+
+.ms-plan-node.ms-plan-heat-2 {
+    border-left: 4px solid var(--ms-plan-heat-2);
+}
+
+.ms-plan-node.ms-plan-heat-3 {
+    border-left: 4px solid var(--ms-plan-heat-3);
+}
+
+.ms-plan-node.ms-plan-heat-4 {
+    border-left: 4px solid var(--ms-plan-heat-4);
+}
+
+.ms-plan-bar.ms-plan-heat-1::after {
+    background: var(--ms-plan-heat-1);
+}
+
+.ms-plan-bar.ms-plan-heat-2::after {
+    background: var(--ms-plan-heat-2);
+}
+
+.ms-plan-bar.ms-plan-heat-3::after {
+    background: var(--ms-plan-heat-3);
+}
+
+.ms-plan-bar.ms-plan-heat-4::after {
+    background: var(--ms-plan-heat-4);
+}
+
+.ms-plan-heat-line {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-heat-chip {
+    display: inline-block;
+    padding: 0 var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-left-width: 4px;
+    border-radius: var(--ms-radius-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-heat-chip.ms-plan-heat-1 {
+    border-left-color: var(--ms-plan-heat-1);
+}
+
+.ms-plan-heat-chip.ms-plan-heat-2 {
+    border-left-color: var(--ms-plan-heat-2);
+}
+
+.ms-plan-heat-chip.ms-plan-heat-3 {
+    border-left-color: var(--ms-plan-heat-3);
+}
+
+.ms-plan-heat-chip.ms-plan-heat-4 {
+    border-left-color: var(--ms-plan-heat-4);
+}
+
+/* The node table: sortable headers that are buttons, rows that select. */
+
+.ms-plan-table th,
+.ms-plan-table td {
+    vertical-align: top;
+}
+
+.ms-plan-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-sort,
+.ms-plan-pick {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    cursor: pointer;
+}
+
+.ms-plan-sort {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-table th[aria-sort="ascending"] .ms-plan-sort::after {
+    content: " \25B2";
+}
+
+.ms-plan-table th[aria-sort="descending"] .ms-plan-sort::after {
+    content: " \25BC";
+}
+
+.ms-plan-table-node {
+    padding-left: calc(var(--ms-space-sm) + var(--ms-plan-depth, 0) * var(--ms-space-md));
+    text-align: left;
+    font-weight: var(--ms-font-weight-normal);
+}
+
+.ms-plan-table-node .ms-plan-pick {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 var(--ms-space-xs);
+}
+
+.ms-plan-table-node .ms-chip {
+    margin-left: var(--ms-space-xs);
+}
+
+.ms-plan-table-id {
+    margin-right: var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-row {
+    cursor: pointer;
+}
+
+.ms-plan-row-selected {
+    background: var(--ms-color-primary-light);
+}
+
+.ms-plan-row.ms-plan-critical {
+    border-top: 0;
+    box-shadow: inset 3px 0 0 var(--ms-color-executing);
+}
+
+/* The selected node's keys. */
+
+.ms-plan-node-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    max-width: 100ch;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-primary);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-node-detail-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-node-detail-title,
+.ms-plan-key-group-title {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-plan-key-group-title {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ms-plan-key-help {
+    display: block;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* Export, and a finding's link to the page its remedy names. */
+
+.ms-plan-export {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+}
+
+.ms-plan-export-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-export-status {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-insight-link {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+@media (max-width: 640px) {
+    .ms-plan-param {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ms-plan-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

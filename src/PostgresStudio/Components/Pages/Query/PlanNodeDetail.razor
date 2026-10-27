@@ -1,0 +1,104 @@
+@using System.Globalization
+@using PostgresStudio.Services.Query
+
+@*
+    X3 (issue #28): every key Postgres printed for the selected node, grouped - the node, the estimate, what ran, buffers, I/O and
+    WAL, workers, sort/hash/memoize - each with a one-line sentence about what it means (PlanKeyCatalog), and the statement's JIT
+    block under them. A key the catalog has no sentence for is listed under "Other keys" with none: the studio says nothing it does
+    not know. The keys are PlanNode.Properties, which only an unmasked read keeps; this panel is drawn only for the Plan page's
+    plans, which are RunSql output (D27). Every class is ms-plan-, in studio.css's 0.9-A section.
+*@
+
+@if (node is not null && plan is not null)
+{
+    <section class="ms-plan-node-detail" aria-label="@("Detail of " + node.Description)">
+        <div class="ms-plan-node-detail-head">
+            <h3 class="ms-plan-node-detail-title">
+                <span class="ms-plan-table-id">@node.Id.ToString(CultureInfo.InvariantCulture)</span>
+                @node.Description
+            </h3>
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-node-detail-close" @onclick="CloseAsync">Clear selection</button>
+        </div>
+
+        @if (groups.Count == 0)
+        {
+            <p class="ms-muted ms-plan-node-detail-none">Postgres printed no keys for this node that are kept for it.</p>
+        }
+
+        @foreach ((PlanKeyGroup group, IReadOnlyList<(PlanProperty Property, PlanKeyMeaning? Meaning)> entries) in groups)
+        {
+            <section class="ms-plan-key-group" @key="group">
+                <h4 class="ms-plan-key-group-title">@PlanKeyCatalog.Title(group)</h4>
+                <dl class="ms-plan-detail-list ms-plan-key-list">
+                    @foreach ((PlanProperty property, PlanKeyMeaning? meaning) in entries)
+                    {
+                        <div class="ms-plan-detail" @key="property.Key">
+                            <dt>@property.Key</dt>
+                            <dd>
+                                <code class="ms-plan-detail-value">@property.Value</code>
+                                @if (meaning is not null)
+                                {
+                                    <span class="ms-plan-key-help">@meaning.Text</span>
+                                }
+                            </dd>
+                        </div>
+                    }
+                </dl>
+            </section>
+        }
+    </section>
+}
+
+@code {
+    private QueryPlan? plan;
+    private PlanNode? node;
+    private IReadOnlyList<(PlanKeyGroup Group, IReadOnlyList<(PlanProperty Property, PlanKeyMeaning? Meaning)> Entries)> groups = [];
+
+    /// <summary>The plan, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type).</summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    /// <summary>The node whose keys are listed, by its id, or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public int? NodeId { get; set; }
+
+    /// <summary>Raised when "Clear selection" is clicked.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        plan = Plan as QueryPlan;
+        node = plan is not null && NodeId is { } id ? plan.Nodes.FirstOrDefault(x => x.Id == id) : null;
+        groups = node is null ? [] : Group(node, plan!);
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    /// <summary>The node's keys, and under JIT the statement's, grouped in the order the groups are listed; an empty group is not listed.</summary>
+    internal static IReadOnlyList<(PlanKeyGroup Group, IReadOnlyList<(PlanProperty Property, PlanKeyMeaning? Meaning)> Entries)> Group(PlanNode node, QueryPlan plan)
+    {
+        List<(PlanProperty Property, PlanKeyMeaning? Meaning)> all =
+        [
+            .. node.Properties.Select(static x => (x, PlanKeyCatalog.Find(x.Key))),
+        ];
+
+        // The statement's JIT block belongs to no node; it is listed under every node's JIT group so the reader sees it where the
+        // numbers it explains are.
+        List<(PlanProperty Property, PlanKeyMeaning? Meaning)> jit =
+        [
+            .. plan.JitProperties.Select(static x => (new PlanProperty("JIT › " + x.Key, x.Value), PlanKeyCatalog.Find(x.Key))),
+        ];
+
+        return
+        [
+            .. Enum.GetValues<PlanKeyGroup>()
+                .Select(group => (
+                    Group: group,
+                    Entries: (IReadOnlyList<(PlanProperty Property, PlanKeyMeaning? Meaning)>) (group == PlanKeyGroup.Jit
+                        ? jit
+                        : [.. all.Where(x => (x.Meaning?.Group ?? PlanKeyGroup.Other) == group)])))
+                .Where(static x => x.Entries.Count > 0),
+        ];
+    }
+}

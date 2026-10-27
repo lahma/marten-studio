@@ -541,6 +541,51 @@
             catch {
                 return null;
             }
+        },
+
+        /*
+         * The textarea's value, handed to .NET in chunks (the Plan page's pasted plan). A Blazor Server circuit accepts 32 KB a
+         * message by default, a plan of thirty nodes is more than that, and a change event carrying one would end the circuit;
+         * the studio must not raise a host's limit, so the text stays in the browser until the visitor asks and goes over as
+         * BeginPaste, then PasteChunk for each chunk, in order. Answers the number of characters sent, -1 for text longer
+         * than `maxCharacters` (nothing is sent), and 0 when there is nothing or the circuit went away mid-way.
+         */
+        sendInChunks: async function (textarea, dotNetRef, chunkCharacters, maxCharacters) {
+            try {
+                const value = textarea && typeof textarea.value === "string" ? textarea.value : "";
+
+                if (value.length > maxCharacters) {
+                    return -1;
+                }
+
+                if (value.length === 0) {
+                    return 0;
+                }
+
+                const size = Math.max(1000, chunkCharacters | 0);
+                await dotNetRef.invokeMethodAsync("BeginPaste");
+
+                for (let start = 0; start < value.length;) {
+                    let end = Math.min(value.length, start + size);
+
+                    // Never cut a surrogate pair in two: a lone half is not text a message can carry.
+                    if (end < value.length) {
+                        const last = value.charCodeAt(end - 1);
+
+                        if (last >= 0xD800 && last <= 0xDBFF) {
+                            end++;
+                        }
+                    }
+
+                    await dotNetRef.invokeMethodAsync("PasteChunk", value.substring(start, end));
+                    start = end;
+                }
+
+                return value.length;
+            }
+            catch {
+                return 0;
+            }
         }
     };
 

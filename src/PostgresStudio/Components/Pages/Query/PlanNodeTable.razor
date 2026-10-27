@@ -1,0 +1,230 @@
+@using System.Globalization
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services.Query
+
+@*
+    X3 (issue #28): every node of the plan as a row, sortable by clicking a header. The rows are PlanTable's - the same numbers the
+    Markdown export prints - and a node's buffers and I/O are its own, less the nodes below it, because Postgres prints them
+    cumulatively and "which node read the most" is a question about the node, not about its subtree.
+
+    The table sits in a labelled scroll region (D25). Selecting a row selects the node for the whole page - the parent owns the
+    one selected-node state, and the tree draws it too. Nothing here is a link: under the studio-rooted <base href> a fragment link
+    navigates to the studio's front page. Every class is ms-plan-, in studio.css's 0.9-A section.
+*@
+
+@if (plan is not null)
+{
+    <TableScroll Label="Plan nodes">
+        <table class="ms-table ms-plan-table">
+            <thead>
+                <tr>
+                    @HeaderCell(PlanTableColumn.Plan, "Node", "The plan's own order: the root first, each node before its children.", false)
+                    @HeaderCell(PlanTableColumn.Self, PlanTable.SelfHeading(plan), plan.Timed ? "The node's own time: its total less the nodes below it." : "The node's own estimated cost: its total less the nodes below it.", true)
+                    @HeaderCell(PlanTableColumn.Rows, "Rows", "Rows the node returned, per loop.", true)
+                    @HeaderCell(PlanTableColumn.Estimated, "Estimated", "Rows the planner expected, per loop.", true)
+                    @HeaderCell(PlanTableColumn.Misestimate, "Misestimate", "How far the estimate was off: the larger over the smaller, per loop.", true)
+                    @HeaderCell(PlanTableColumn.Loops, "Loops", "How many times the node ran.", true)
+                    @HeaderCell(PlanTableColumn.SharedHit, "Shared hit", "Shared blocks the node itself found in the cache.", true)
+                    @HeaderCell(PlanTableColumn.SharedRead, "Shared read", "Shared blocks the node itself read from outside the cache.", true)
+                    @HeaderCell(PlanTableColumn.TempRead, "Temp read", "Temporary-file blocks the node itself read.", true)
+                    @HeaderCell(PlanTableColumn.TempWritten, "Temp written", "Temporary-file blocks the node itself wrote.", true)
+                    @HeaderCell(PlanTableColumn.Io, "I/O time", "Time the node itself spent reading and writing blocks, measured only under track_io_timing.", true)
+                    @if (heat != PlanHeat.None)
+                    {
+                        <th scope="col" class="ms-plan-table-heat-head">@PlanAnalysis.Label(heat, plan)</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (PlanTableRow row in shown)
+                {
+                    PlanNode node = row.Node;
+                    PlanHeatCell? cell = heatCells.GetValueOrDefault(node.Id);
+                    bool selected = SelectedId == node.Id;
+                    bool onPath = Critical && critical.Contains(node.Id);
+
+                    <tr class="ms-plan-row @(selected ? "ms-plan-row-selected" : null) @(onPath ? "ms-plan-critical" : null) @(node.NeverExecuted ? "ms-plan-node-idle" : null)"
+                        aria-current="@(selected ? "true" : null)"
+                        @onclick="() => SelectAsync(node.Id)"
+                        @key="node.Id">
+                        <th scope="row" class="ms-plan-table-node" style="--ms-plan-depth: @Math.Min(node.Depth, 12).ToString(CultureInfo.InvariantCulture)">
+                            <button type="button"
+                                    class="ms-plan-pick"
+                                    aria-pressed="@(selected ? "true" : "false")"
+                                    aria-label="@("Select " + node.Description)"
+                                    @onclick="() => SelectAsync(node.Id)"
+                                    @onclick:stopPropagation="true">
+                                <span class="ms-plan-table-id">@node.Id.ToString(CultureInfo.InvariantCulture)</span>
+                                <span class="ms-plan-node-type">@node.Label</span>
+                                @if (node.Target is { } target)
+                                {
+                                    <span class="ms-plan-node-target">@target</span>
+                                }
+                            </button>
+                            @if (onPath)
+                            {
+                                <span class="ms-chip ms-plan-chip ms-plan-critical-flag" title="On the critical path: the chain of nodes that carries most of the plan's time">critical</span>
+                            }
+                            @if (flags.TryGetValue(node.Id, out List<string>? codes))
+                            {
+                                @foreach (string flagged in codes)
+                                {
+                                    string current = flagged;
+                                    <span class="ms-chip ms-chip-warning ms-plan-chip ms-plan-node-flag" @key="current">@current</span>
+                                }
+                            }
+                        </th>
+                        <td class="ms-plan-num">@PlanTable.SelfText(plan, row)</td>
+                        <td class="ms-plan-num">@PlanTable.RowsText(node)</td>
+                        <td class="ms-plan-num">@PlanTable.CountText(node.PlanRows)</td>
+                        <td class="ms-plan-num" title="@MisestimateTitle(node)">@PlanTable.RatioText(node)</td>
+                        <td class="ms-plan-num">@PlanTable.CountText(node.ActualLoops)</td>
+                        <td class="ms-plan-num">@PlanTable.BlocksText(row, PlanTableColumn.SharedHit)</td>
+                        <td class="ms-plan-num">@PlanTable.BlocksText(row, PlanTableColumn.SharedRead)</td>
+                        <td class="ms-plan-num">@PlanTable.BlocksText(row, PlanTableColumn.TempRead)</td>
+                        <td class="ms-plan-num">@PlanTable.BlocksText(row, PlanTableColumn.TempWritten)</td>
+                        <td class="ms-plan-num">@PlanTable.IoText(row)</td>
+                        @if (heat != PlanHeat.None)
+                        {
+                            <td class="ms-plan-num ms-plan-table-heat">
+                                @if (cell is not null)
+                                {
+                                    <span class="ms-plan-heat-chip ms-plan-heat-@cell.Level.ToString(CultureInfo.InvariantCulture)">@cell.Text</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </TableScroll>
+
+    @if (hidden > 0)
+    {
+        <p class="ms-plan-caption ms-plan-table-more">
+            @hidden.ToString("N0", CultureInfo.InvariantCulture) more @(hidden == 1 ? "node is" : "nodes are") not listed: sorted by @SortName(), these are the first @MaxRows.ToString("N0", CultureInfo.InvariantCulture).
+        </p>
+    }
+}
+
+@code {
+    /// <summary>The most rows the table draws; a larger plan says how many more there are, and sorting brings the ones that matter forward.</summary>
+    internal const int MaxRows = 500;
+
+    private QueryPlan? plan;
+    private IReadOnlyList<PlanTableRow> shown = [];
+    private int hidden;
+    private IReadOnlyDictionary<int, PlanHeatCell> heatCells = new Dictionary<int, PlanHeatCell>();
+    private HashSet<int> critical = [];
+    private Dictionary<int, List<string>> flags = [];
+    private PlanHeat heat;
+    private PlanTableColumn sort = PlanTableColumn.Plan;
+    private bool descending;
+    private object? builtFor;
+    private string? builtHeat;
+
+    /// <summary>The plan, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type).</summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    /// <summary>The node selected on the page, or <see langword="null" />.</summary>
+    [Parameter]
+    public int? SelectedId { get; set; }
+
+    /// <summary>Raised with a node's id when a row, or the button in it, is clicked.</summary>
+    [Parameter]
+    public EventCallback<int> OnSelect { get; set; }
+
+    /// <summary>Whether the critical path is marked.</summary>
+    [Parameter]
+    public bool Critical { get; set; }
+
+    /// <summary>The heat, by its select value (<c>self-time</c>, <c>misestimate</c>, <c>buffers-read</c>, <c>temp-io</c>); anything else is none.</summary>
+    [Parameter]
+    public string? Heat { get; set; }
+
+    /// <summary>The insight codes flagged on each node, by node id, as the tree flags them.</summary>
+    [Parameter]
+    public object? Flags { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        flags = Flags as Dictionary<int, List<string>> ?? [];
+
+        if (!ReferenceEquals(Plan, builtFor) || !string.Equals(Heat, builtHeat, StringComparison.Ordinal))
+        {
+            builtFor = Plan;
+            builtHeat = Heat;
+            plan = Plan as QueryPlan;
+            heat = PlanAnalysis.ParseHeat(Heat);
+            critical = plan is null ? [] : [.. PlanAnalysis.CriticalPath(plan)];
+            heatCells = plan is null ? new Dictionary<int, PlanHeatCell>() : PlanAnalysis.HeatMap(plan, heat);
+            Rebuild();
+        }
+    }
+
+    private RenderFragment HeaderCell(PlanTableColumn column, string name, string title, bool numeric) => __builder =>
+    {
+        <th scope="col" class="@(numeric ? "ms-plan-num" : null)" aria-sort="@AriaSort(column)" title="@title">
+            <button type="button" class="ms-plan-sort" @onclick="() => SortByAsync(column)">@name</button>
+        </th>
+    };
+
+    private string AriaSort(PlanTableColumn column) =>
+        sort != column ? "none" : descending ? "descending" : "ascending";
+
+    private Task SortByAsync(PlanTableColumn column)
+    {
+        if (sort == column)
+        {
+            descending = !descending;
+        }
+        else
+        {
+            // A first click puts the most at the top for a number and the plan's own order top-down for the node column.
+            sort = column;
+            descending = column != PlanTableColumn.Plan;
+        }
+
+        Rebuild();
+        return Task.CompletedTask;
+    }
+
+    private void Rebuild()
+    {
+        if (plan is null)
+        {
+            shown = [];
+            hidden = 0;
+            return;
+        }
+
+        IReadOnlyList<PlanTableRow> rows = PlanTable.Rows(plan, sort, descending);
+        shown = rows.Count > MaxRows ? [.. rows.Take(MaxRows)] : rows;
+        hidden = rows.Count - shown.Count;
+    }
+
+    private Task SelectAsync(int id) => OnSelect.InvokeAsync(id);
+
+    private string SortName() => (sort switch
+    {
+        PlanTableColumn.Self => plan is { Timed: false } ? "self cost" : "self time",
+        PlanTableColumn.Rows => "rows",
+        PlanTableColumn.Estimated => "estimated rows",
+        PlanTableColumn.Misestimate => "misestimate",
+        PlanTableColumn.Loops => "loops",
+        PlanTableColumn.SharedHit => "shared hit",
+        PlanTableColumn.SharedRead => "shared read",
+        PlanTableColumn.TempRead => "temp read",
+        PlanTableColumn.TempWritten => "temp written",
+        PlanTableColumn.Io => "I/O time",
+        _ => "plan order",
+    }) + (descending ? ", largest first" : ", smallest first");
+
+    private static string? MisestimateTitle(PlanNode node) => node.Underestimated switch
+    {
+        true => "The node returned more rows than the planner expected.",
+        false => "The node returned fewer rows than the planner expected.",
+        _ => null,
+    };
+}

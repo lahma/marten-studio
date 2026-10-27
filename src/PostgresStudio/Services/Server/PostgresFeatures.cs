@@ -155,6 +155,18 @@ internal enum PostgresFeature
     /// </summary>
     TransactionTimeout,
 
+    /// <summary>
+    /// <c>EXPLAIN (MEMORY)</c>: the memory planning used, in bytes. The PostgreSQL 17 release notes ("Add EXPLAIN option MEMORY"),
+    /// and the matrix's own <c>explain (memory)</c>; 0.9's Plan page offers the option only where it is accepted.
+    /// </summary>
+    ExplainMemory,
+
+    /// <summary>
+    /// <c>EXPLAIN (ANALYZE, SERIALIZE)</c>: the cost of turning the result into what a client receives. The PostgreSQL 17 release
+    /// notes ("Add EXPLAIN option SERIALIZE"), and the matrix's own <c>explain (analyze, serialize)</c>.
+    /// </summary>
+    ExplainSerialize,
+
     // ---- 18 -----------------------------------------------------------------------------------------------------------
 
     /// <summary><c>pg_class.relallfrozen</c>, which the insert trigger of autovacuum scales by. B0 §6, §7.</summary>
@@ -329,6 +341,8 @@ internal static class PostgresFeatures
         new(PostgresFeature.MaintainRole, 170000),
         new(PostgresFeature.ExplainGenerationObject, 170000),
         new(PostgresFeature.TransactionTimeout, 170000),
+        new(PostgresFeature.ExplainMemory, 170000),
+        new(PostgresFeature.ExplainSerialize, 170000),
 
         // 18
         new(PostgresFeature.RelAllFrozen, 180000),

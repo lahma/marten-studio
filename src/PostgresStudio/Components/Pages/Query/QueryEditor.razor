@@ -30,8 +30,9 @@
             <button type="button"
                     class="ms-btn ms-btn-sm ms-btn-primary ms-query-run"
                     disabled="@Disabled"
+                    title="@RunTitle"
                     @onclick="RunClickAsync">
-                Run
+                @RunLabel
             </button>
             @if (OnExplain.HasDelegate)
             {
@@ -53,13 +54,24 @@
                     Explain analyze
                 </button>
             }
-            <button type="button" class="ms-btn ms-btn-sm" disabled="@Disabled" @onclick="SaveClickAsync">Save…</button>
+            @if (ShowSave)
+            {
+                <button type="button" class="ms-btn ms-btn-sm" disabled="@Disabled" @onclick="SaveClickAsync">Save…</button>
+            }
         }
 
         <span class="ms-query-editor-hint">
-            <kbd class="ms-query-kbd">Ctrl</kbd>+<kbd class="ms-query-kbd">Enter</kbd> runs,
-            <kbd class="ms-query-kbd">Esc</kbd> cancels,
-            <kbd class="ms-query-kbd">Ctrl</kbd>+<kbd class="ms-query-kbd">S</kbd> saves.
+            @if (ShowSave)
+            {
+                <kbd class="ms-query-kbd">Ctrl</kbd><text>+</text><kbd class="ms-query-kbd">Enter</kbd><text> runs,</text>
+                <kbd class="ms-query-kbd">Esc</kbd><text> cancels,</text>
+                <kbd class="ms-query-kbd">Ctrl</kbd><text>+</text><kbd class="ms-query-kbd">S</kbd><text> saves.</text>
+            }
+            else
+            {
+                <kbd class="ms-query-kbd">Ctrl</kbd><text>+</text><kbd class="ms-query-kbd">Enter</kbd><text> plans,</text>
+                <kbd class="ms-query-kbd">Esc</kbd><text> cancels.</text>
+            }
         </span>
     </div>
 
@@ -148,6 +160,18 @@
     /// <summary>Whether Run is available at all - false while the page has nothing to run against.</summary>
     [Parameter]
     public bool Disabled { get; set; }
+
+    /// <summary>The primary button's text: <c>Run</c> for the console, the mode's name for the Plan page (X3).</summary>
+    [Parameter]
+    public string RunLabel { get; set; } = "Run";
+
+    /// <summary>The primary button's tooltip, or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public string? RunTitle { get; set; }
+
+    /// <summary>Whether Save and its Ctrl+S chord are offered: the console's saved queries are, the Plan page has none (X3).</summary>
+    [Parameter]
+    public bool ShowSave { get; set; } = true;
 
     /// <summary>The accessible name of the textarea.</summary>
     [Parameter]

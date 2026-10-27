@@ -10,6 +10,9 @@ using PostgresStudio.Services.Aurora;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Maintenance;
+using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Query;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -115,17 +118,24 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         string route = page switch
         {
             PostgresStudioPage.Health => HealthLinks.Route,
-            PostgresStudioPage.Sessions or PostgresStudioPage.Blocking => SessionLinks.Route,
+            PostgresStudioPage.Sessions or PostgresStudioPage.Blocking or PostgresStudioPage.Holders => SessionLinks.Route,
             PostgresStudioPage.Statements => StatementLinks.Route,
             PostgresStudioPage.Maintenance => MaintenanceLinks.Route,
             PostgresStudioPage.Storage => StorageLinks.Route,
             PostgresStudioPage.Server => ServerLinks.Route,
+            PostgresStudioPage.Plan => PlanLinks.Route,
+            PostgresStudioPage.Replication => ReplicationLinks.Route,
+            PostgresStudioPage.Overview => OverviewLinks.Route,
             _ => throw new ArgumentOutOfRangeException(nameof(page)),
         };
 
-        IReadOnlyList<KeyValuePair<string, string?>> query = page == PostgresStudioPage.Blocking
-            ? [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.BlockingView)]
-            : [];
+        // The Sessions page's two other tabs are named in its query string (D9), the same parameter with its own value.
+        IReadOnlyList<KeyValuePair<string, string?>> query = page switch
+        {
+            PostgresStudioPage.Blocking => [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.BlockingView)],
+            PostgresStudioPage.Holders => [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.HoldersView)],
+            _ => [],
+        };
 
         return HealthLinks.Relative(descriptor.SourceQueryParameter, route, new StudioScope(database.Source, database.Database, null), query);
     }

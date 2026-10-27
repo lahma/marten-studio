@@ -309,6 +309,10 @@ namespace PostgresStudio
         Maintenance = 4,
         Storage = 5,
         Server = 6,
+        Plan = 7,
+        Holders = 8,
+        Replication = 9,
+        Overview = 10,
     }
     public sealed record PostgresStudioResource : System.IEquatable<PostgresStudio.PostgresStudioResource>
     {

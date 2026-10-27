@@ -134,6 +134,18 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
         return Task.FromResult(Next ?? new SqlConsoleResult([], [], false, 500, TimeSpan.Zero, [], null, null));
     }
 
+    /// <summary>Every plan the Plan page asked for (X3), with the scope.</summary>
+    public List<(StudioScope Scope, PlanRunRequest Request)> Plans { get; } = [];
+
+    /// <summary>What the next plan returns, or <see langword="null" /> for a refusal that says the fake was not told what to answer.</summary>
+    public PlanRunResult? NextPlan { get; set; }
+
+    public Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default)
+    {
+        Plans.Add((scope, request));
+        return Task.FromResult(NextPlan ?? PlanRunResult.Refused(new SqlRejection("Fake", "The fake console was not told what to answer.", null, -1), 0));
+    }
+
     /// <summary>Every what-if asked (X2), with the statement it was for.</summary>
     public List<(string Statement, HypotheticalIndex Index)> WhatIfs { get; } = [];
 

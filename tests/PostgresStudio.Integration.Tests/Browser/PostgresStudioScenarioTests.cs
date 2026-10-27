@@ -148,6 +148,69 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
     }
 
     [BrowserFact]
+    public async Task The_Plan_page_plans_a_statement_draws_it_two_ways_and_takes_a_pasted_plan_past_the_circuits_message_limit()
+    {
+        await RunAsync("plan-analyzer", "admin", async studio =>
+        {
+            IPage page = studio.Page;
+
+            // A link reopens the page with the editor filled, the mode and the options set - and runs nothing.
+            await studio.GoAsync(fixture.Host.StudioUrl("plan?store=tenants&db=tenant_b&mode=analyze&options=buffers,timing,verbose&sql="
+                + Uri.EscapeDataString("select c.name from public.customers c order by c.name")));
+
+            ILocator editor = page.Locator("#ms-plan-sql");
+            await editor.WaitForAsync();
+            (await editor.InputValueAsync()).Should().Be("select c.name from public.customers c order by c.name");
+            (await page.Locator(".ms-query-run").InnerTextAsync()).Trim().Should().Be("Explain analyze");
+            (await page.Locator("#ms-plan-option-verbose").IsCheckedAsync()).Should().BeTrue();
+            (await page.Locator(".ms-plan-tree").CountAsync()).Should().Be(0, "a link never runs a statement");
+
+            // A run draws the plan: the summary strip, the tree, the insights.
+            await page.Locator(".ms-query-run").ClickAsync();
+            await page.Locator(".ms-plan-tree").WaitForAsync();
+            await page.Locator(".ms-plan-strip").WaitForAsync();
+            (await page.Locator(".ms-plan-strip-item", new PageLocatorOptions { HasTextString = "Execution time" }).Locator("dd").InnerTextAsync()).Trim().Should().NotBeEmpty();
+            (await page.Locator(".ms-query-editor-ok").InnerTextAsync()).Should().Contain("Ran under EXPLAIN ANALYZE");
+
+            // The same plan as a table, sorted by a header, with a node selected in it and the tree following.
+            await page.Locator(".ms-plan-view-table").ClickAsync();
+            await page.Locator(".ms-plan-table").WaitForAsync();
+            await page.Locator(".ms-plan-sort", new PageLocatorOptions { HasTextString = "Self time" }).ClickAsync();
+            await page.Locator("th[aria-sort='descending']").WaitForAsync();
+            (await page.Locator("th[aria-sort='descending']").CountAsync()).Should().Be(1);
+            await page.Locator(".ms-plan-row .ms-plan-pick").Last.ClickAsync();
+            await page.Locator(".ms-plan-node-detail").WaitForAsync();
+            await page.Locator(".ms-plan-view-tree").ClickAsync();
+            await page.Locator(".ms-plan-node-selected").WaitForAsync();
+            (await page.Locator(".ms-plan-node-selected").CountAsync()).Should().Be(1, "one selected node, shared by the table and the tree");
+
+            await page.Locator(".ms-plan-heat-select").SelectOptionAsync("self-time");
+            await page.Locator(".ms-plan-heat-line").First.WaitForAsync();
+            await page.Locator(".ms-plan-critical-input").CheckAsync();
+            await page.Locator(".ms-plan-critical-flag").First.WaitForAsync();
+            (await page.Locator(".ms-plan-critical-flag").CountAsync()).Should().BePositive();
+
+            await studio.AssertNoSidewaysScrollAsync("a drawn plan");
+
+            // A pasted plan of a hundred and fifty nodes, far past the 32 KB a circuit message carries: it goes over in chunks.
+            string children = string.Join(",", Enumerable.Range(0, 150).Select(static i =>
+                "{\"Node Type\": \"Seq Scan\", \"Parent Relationship\": \"Member\", \"Relation Name\": \"t" + i.ToString(CultureInfo.InvariantCulture)
+                + "\", \"Alias\": \"t" + i.ToString(CultureInfo.InvariantCulture) + "\", \"Startup Cost\": 0.0, \"Total Cost\": " + (i + 1).ToString(CultureInfo.InvariantCulture)
+                + ", \"Plan Rows\": 10, \"Plan Width\": 4, \"Filter\": \"(" + new string('x', 300) + " = 1)\"}"));
+            string pasted = "[{\"Plan\": {\"Node Type\": \"Append\", \"Startup Cost\": 0.0, \"Total Cost\": 12345.0, \"Plan Rows\": 1500, \"Plan Width\": 4, \"Plans\": [" + children + "]}}]";
+
+            pasted.Length.Should().BeGreaterThan(64 * 1024, "past what one circuit message carries by default");
+
+            await page.Locator("#ms-plan-paste").FillAsync(pasted);
+            await page.Locator(".ms-plan-paste-draw").ClickAsync();
+            await page.Locator(".ms-plan-caption", new PageLocatorOptions { HasTextString = "A pasted plan" }).WaitForAsync();
+            (await page.Locator(".ms-plan-summary").First.InnerTextAsync()).Should().Contain("151 nodes");
+
+            studio.AssertClean("planning a statement and pasting a plan");
+        });
+    }
+
+    [BrowserFact]
     public async Task Health_reports_what_it_checked_on_a_tenant_database()
     {
         await RunAsync("health", "admin", async studio =>
@@ -204,6 +267,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         ("relationships", ".ms-graph-toolbar, .ms-schema-note, .ms-alert"),
         ("health", "table.ms-health-check-table tbody tr"),
         ("query", "#ms-query-sql"),
+        ("plan", "#ms-plan-sql"),
         ("activity", "h1.ms-page-title"),
     ];
 
