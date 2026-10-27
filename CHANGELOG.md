@@ -21,6 +21,9 @@
   - a `Wal` section (`pg_stat_wal`'s records, full-page images, bytes and reset time);
   - the settings section's `DataChecksums`, `ChecksumFailures` and `LastChecksumFailure`;
   - each largest table's `AllVisibleRatio`.
+  - the server's WAL writes and fsyncs, with their times when `track_wal_io_timing` is on (`Writes`, `Syncs`,
+    `WriteTimeMs`, `SyncTimeMs`). They come from `pg_stat_wal` up to 17 and from `pg_stat_io`'s normal WAL rows from 18,
+    so they mean the same on every release, and Replication shows them too.
   - All are additions; `schemaVersion` stays 1.
 - `PostgresStudioPage` gains `Plan`, `Holders`, `Replication` and `Overview`, and `GetStudioPath` answers each (#30).
 - Three timing-sensitive live tests fixed at their causes (#27):
