@@ -21,6 +21,7 @@ heading is the anchor the page's "About" link opens:
 | Replication and WAL | `R` | [`health/replication.md`](health/replication.md) |
 | Server | `S` | [`health/server.md`](health/server.md) |
 | Configuration | `K` | [`health/configuration.md`](health/configuration.md) |
+| Plan insights (not health checks) | `P` | [`health/plans.md`](health/plans.md) |
 
 ## What a finding is
 

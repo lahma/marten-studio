@@ -63,7 +63,8 @@ src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the source provid
                                          and host database sources, settings, descriptor, the Overview's server read, and
                                          the seams' plain-Postgres implementations (declarations, tables, remedies, locks, links)
 tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
-tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests
+tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view
+                                         and the console's Explain buttons
 tests/PostgresStudio.Tests/Conventions/  The assembly fence: no Marten family in the assembly, the restore or the output folder
 tests/PostgresStudio.Tests/Endpoints/    An API-only host with one NpgsqlDataSource; the two registration guards
 tests/PostgresStudio.Tests/Sources/      The source provider over DI descriptors and host database sources
@@ -77,13 +78,15 @@ tests/PostgresStudio.Integration.Tests/Database/  Live Postgres: first navigatio
                                          audit, Sessions, the pool panel at both Npgsql majors, the sample's tenant databases
 tests/PostgresStudio.Integration.Tests/Health/  Live Postgres: the table checks fire and stay quiet over the
                                          whole-database table source, and the export over a host source past its budget
-tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console example runs
+tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console example runs, and the Explain buttons on
+                                         14 and 18; the what-if on a hypopg server of its own (postgres:17.11 +
+                                         postgresql-17-hypopg)
 tests/PostgresStudio.Integration.Tests/Sources/  Live Postgres: discovery, and isolation between a host source's
                                          databases through every cache
 src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
-                                         Postgres identifier becomes SQL text (hard rule 4)
+                                         Postgres identifier becomes SQL text (hard rule 4); hypopg's calls (X2)
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
-                                         other (hard rule 4)
+                                         other (hard rule 4); Marten's own DDL for a what-if (X2)
 src/PostgresStudio/Components/Layout/    Shell chrome: layout, nav, scope selector, capability chip, the
                                          preferences popover (theme and time zone, behind the gear)
 src/PostgresStudio/Components/Pages/     The shared routed pages; each @page must be rooted at /postgres
@@ -101,7 +104,8 @@ src/PostgresStudio/Services/Json/        Flat model, path expressions, pretty pr
                                          round-trip differ, C# record generator
 src/MartenStudio/Services/Query/         Search grammar, index advisor, the document list request, LINQ mode
 src/PostgresStudio/Services/Query/       The SQL console service, export, saved queries, error text, index
-                                         verdicts and search chips
+                                         verdicts and search chips; the plan reader and the plan insights (X1); the
+                                         what-if engine and its hypothetical indexes (X2)
 tests/MartenStudio.Tests/Json/           Unit and bUnit tests for the JSON toolkit
 tests/MartenStudio.Tests/Sql/            SQL builders, guard theory, grammar, advisor - no database
 tests/MartenStudio.Integration.Tests/Sql/ Live Postgres: read-only session, builders, catalog, estimator
@@ -135,9 +139,10 @@ tests/MartenStudio.Integration.Tests/Schema/  Live Postgres: drift, migration pr
 src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
 src/MartenStudio/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
 src/PostgresStudio/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
-                                         examples and the SQL console panel
+                                         examples, the SQL console panel and the plan view, and the What if? panel
 tests/MartenStudio.Tests/Query/            Composer, guard, export, saved queries, the page - no database
-tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console
+tests/MartenStudio.Integration.Tests/Query/  Live Postgres: Marten where-clause mode and the SQL console; LINQ's and
+                                         Documents' what-if on a hypopg server
 samples/MartenStudio.SampleDomain/Generation/  The demo data generator: size presets, the generator,
                                          truncation, the word lists and the run marker
 samples/MartenStudio.Sample/Generation/   The demo-data panel: hosted job, endpoints, progress, daemon lag; and the
@@ -176,7 +181,8 @@ tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, g
                                          check and docs conventions - no database
 tests/MartenStudio.Integration.Tests/Health/  Live Postgres: each check fires and stays quiet, the no-DDL /
                                          no-lock sweep helper, and the fires/quiet attribute convention
-docs/health/                             One file per health area, one "## <code> <title>" anchor per check
+docs/health/                             One file per health area, one "## <code> <title>" anchor per check; plans.md for
+                                         the plan insights (P)
 tests/MartenStudio.Integration.Tests/Tenancy/  Live Postgres: first navigation per tenancy shape changes nothing,
                                          and the enumerations that still apply a lookup table
 src/PostgresStudio/Services/Server/       The server facts every W5 packet uses: the PostgreSQL version gates
@@ -223,12 +229,17 @@ tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the 
                                          failover, the not-applicable checks, C03's remedy and the spoof-proof markers
 src/PostgresStudio/Services/Statements/   The Statements page (W5-Q1): its facts (the statement sweep's own read and
                                          history), the per-visitor view behind the activity gate, the plain classifier
-src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group
+                                         and the drill-in's planner
+src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group,
+                                         and one statement's drill-in
 tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the view's ranking and groups, the gate, the
-                                         classifier, the cost meter's connection tracker, and the page - no database
+                                         classifier, the cost meter's connection tracker, and the page; the plan reader
+                                         and insights over ExplainFixtures.json (PROBE's 108 plans), and the drill-in
+                                         - no database
 tests/MartenStudio.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
 tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
-                                         matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes
+                                         matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes, and
+                                         the drill-in's plan on 14, 16 and 18
 tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
                                          sequence headroom and the lint statements' D27 shape - no database
 src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
