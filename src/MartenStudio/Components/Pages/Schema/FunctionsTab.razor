@@ -18,8 +18,9 @@
     A body is read when its row is opened, one routine at a time, through the database browser's
     definition read (IDatabaseObjectService.GetDefinitionAsync) - which is where the gate is enforced and
     audited. Marten's own routines in the store's schemas are shown to everybody, as they always were; a
-    body Marten does not own is the application's code, and needs what the browser needs:
-    Capabilities.BrowseDatabase, the write policy, and a schema BrowsableSchemas admits. The list says in
+    body Marten does not own is the application's code, and needs what the browser's definitions need:
+    Capabilities.ViewDefinitions (for a schema BrowsableSchemas names exactly) or Capabilities.BrowseDatabase
+    (for any schema it admits), the write policy, and the schema listed there. The list says in
     advance which bodies this visitor will be refused, and why, so nothing is offered that the service
     would turn down. An aggregate has no body Postgres will print, so it is listed and never asked for.
 

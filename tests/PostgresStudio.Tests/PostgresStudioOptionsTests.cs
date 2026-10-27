@@ -56,13 +56,34 @@ public class PostgresStudioOptionsTests
     }
 
     [Fact]
-    public void All_turns_on_the_three_reads()
+    public void All_turns_on_the_four_reads()
     {
         PostgresStudioCapabilities all = PostgresStudioCapabilities.All();
 
         all.RunSql.Should().BeTrue();
         all.BrowseDatabase.Should().BeTrue();
+        all.ViewDefinitions.Should().BeTrue();
         all.ViewDatabaseActivity.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Every_capability_is_off_until_the_host_says_otherwise()
+    {
+        PostgresStudioCapabilities none = new();
+
+        none.RunSql.Should().BeFalse();
+        none.BrowseDatabase.Should().BeFalse();
+        none.ViewDefinitions.Should().BeFalse("a definition is read only when a host says so, or when it enables BrowseDatabase, which implies it");
+        none.ViewDatabaseActivity.Should().BeFalse();
+
+        foreach (StudioCapability capability in PostgresStudioSettings.Offered)
+        {
+            PostgresStudioSettings.IsConfigured(none, capability).Should().BeFalse(capability.ToString());
+        }
+
+        PostgresStudioSettings.IsConfigured(new PostgresStudioCapabilities { ViewDefinitions = true }, StudioCapability.ViewDefinitions).Should().BeTrue();
+        PostgresStudioSettings.IsConfigured(new PostgresStudioCapabilities { ViewDefinitions = true }, StudioCapability.BrowseDatabase)
+            .Should().BeFalse("ViewDefinitions does not imply the rows: BrowseDatabase implies ViewDefinitions, never the other way");
     }
 
     [Fact]
@@ -230,7 +251,7 @@ public class PostgresStudioOptionsTests
     }
 
     [Fact]
-    public void The_settings_speak_PostgresStudios_names_and_offer_three_capabilities()
+    public void The_settings_speak_PostgresStudios_names_and_offer_four_capabilities()
     {
         PostgresStudioOptions options = new() { SourceAuthorizationPolicy = "src", WriteAuthorizationPolicy = "write" };
         IStudioSettings settings = PostgresStudioSettings.Of(options);
@@ -242,7 +263,9 @@ public class PostgresStudioOptionsTests
         settings.OptionName(settings.MaxInlineValueBytesMember).Should().Be("PostgresStudioOptions.MaxInlineValueBytes");
         settings.ScopePolicy.Should().Be("src");
         settings.WritePolicy.Should().Be("write");
-        settings.Capabilities.Should().Equal(StudioCapability.RunSql, StudioCapability.BrowseDatabase, StudioCapability.ViewDatabaseActivity);
+        settings.Capabilities.Should().Equal(
+            StudioCapability.RunSql, StudioCapability.BrowseDatabase, StudioCapability.ViewDefinitions, StudioCapability.ViewDatabaseActivity);
+        settings.CapabilityOption(StudioCapability.ViewDefinitions).Should().Be("PostgresStudioOptions.Capabilities.ViewDefinitions");
         settings.IsDocumentTypeVisible.Should().BeNull();
         settings.TrimmedPath.Should().Be("/postgres");
         settings.HasCustomPath.Should().BeFalse();

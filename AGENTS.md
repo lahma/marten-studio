@@ -72,7 +72,7 @@ anything; read *this* file before writing anything.
    studio's folder included, comparing names as C# does (a leading `@` removed, Unicode escapes decoded,
    formatting characters removed).
 5. **Every mutating operation, and every read authorized like a write, is capability-gated in the service layer,
-   and audited.** (PostgresStudio has only the latter: `RunSql`, `BrowseDatabase` and `ViewDatabaseActivity`.)
+   and audited.** (PostgresStudio has only the latter: `RunSql`, `BrowseDatabase`, `ViewDefinitions` and `ViewDatabaseActivity`.)
    Hiding a button is
    a UI convenience; the refusal has to live where the operation does, because a Blazor circuit is a
    long-lived object a client can drive. `StudioCapabilityGuard.Require(…)` → scope resolution (with
@@ -246,8 +246,8 @@ is the same whichever Marten built it.
 read-only browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and
 every disabled control names the exact property a host would have to set. This is Hangfire's
 GHSA-7rq6-7gv8-c37h applied to the write axis: the dashboard that is dangerous by default is the one
-someone maps without reading the docs. `PostgresStudioCapabilities` has three, all reads authorized like writes
-(`BrowseDatabase`, `ViewDatabaseActivity`, `RunSql`), on the same terms.
+someone maps without reading the docs. `PostgresStudioCapabilities` has four, all reads authorized like writes
+(`BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity`, `RunSql`), on the same terms.
 
 **D5 — Three authorization layers, plus two process-wide switches.** `AuthorizationPolicy` decides who
 gets in; `StoreAuthorizationPolicy` decides which store, database and tenant, resource-based and enforced
@@ -442,7 +442,11 @@ It lists the database's other objects by kind, gated like `RunSql`, whose power 
 `USAGE` on but Postgres' own and extensions'). The store's *own* schemas' structure (names, columns, keys, indexes,
 trigger names, estimates) needs neither, as the Schema screen shows it; everything else, every non-Marten definition and
 every row needs both, plus the write policy asked **with `TenantId = null`**, as nothing filters a non-Marten table by
-tenant. Marten's document and event tables and `mt_` objects are never read raw (the browser links to Documents and
+tenant. `Capabilities.ViewDefinitions` (issue #22) is the definitions' second way in, authorized the same way with its own
+name: a visitor it admits reads the definitions and the structure of the schemas `BrowsableSchemas` names *exactly*, never a
+row, never a schema only `"*"` admits and never a Marten-owned object outside the store's schemas; `BrowseDatabase` implies
+it, and only `DatabaseAccess.ObjectGateAsync`, the object browser's gate, asks about it. Marten's document and event
+tables and `mt_` objects are never read raw (the browser links to Documents and
 Events, where tenancy, soft delete and the serializer apply), but the rows of flat-table projections and
 `ExtendedSchemaObjects`, Marten-managed *relational* data, are browsable. A hidden document type
 (`IsDocumentTypeVisible`) is absent from every list with its indexes, keys, triggers and partitions, and a view over its
@@ -514,9 +518,10 @@ on the first navigation, can be the first caller: a known limit, not a per-poll 
 details: decision-notes.md, D27.
 **D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),
 `BrowsableSchemas` playing "the store's own schemas": the schemas it names exactly are the source's own, their structure
-shown to anyone the source policy admits, their rows and definitions needing `BrowseDatabase` and the write policy
-(asked with no tenant, as a Postgres Studio scope has none). A schema only `"*"` admits needs both for its structure
-too, `"*"` being a statement about the database, not the configuration; a system schema is never browsable. Naming
+shown to anyone the source policy admits, their rows needing `BrowseDatabase` and their definitions `ViewDefinitions` or
+`BrowseDatabase`, each with the write policy (asked with no tenant, as a Postgres Studio scope has none). A schema only
+`"*"` admits needs `BrowseDatabase` for its structure and definitions too, `"*"` being a statement about the database, not
+the configuration; a system schema is never browsable. Naming
 nothing means `public`, applied after every configuration, so naming schemas replaces it. With no declarations only the
 `mt_` prefix names an object Marten's, failing closed: its rows are never read, nor a view over it, its definition shows
 only with `BrowseDatabase`, and the database page says once that it holds a Marten store and points to Marten Studio. A

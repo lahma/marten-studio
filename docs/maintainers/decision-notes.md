@@ -310,6 +310,23 @@ and the database page says once that the database holds a Marten store and point
 cannot honour another application's `IsDocumentTypeVisible`, so a Marten database a host would hide types in belongs in
 Marten Studio, where that delegate applies.
 
+**`ViewDefinitions` (issue #22, 0.8).** `BrowseDatabase` covered two things, rows and definitions, and Host B of issue #8
+wanted the second without the first: a view's query, a trigger function or a function body is schema the application's own
+migrations wrote, and exactly what Statements or a health finding points at, while its rows may be credentials or personal
+data the studio cannot filter. So definitions have a second way in. `ViewDefinitions` admits the definitions - and, in
+Marten Studio, the structure - of the schemas `BrowsableSchemas` names *exactly*; `"*"` never reaches it, because "every
+schema the role can use" is a statement about the database, and a definition can carry a literal. `BrowseDatabase` implies
+it, so no existing host moves: `DatabaseAccess.RequireDefinitionAsync` asks the write policy about `BrowseDatabase` first
+and only then about `ViewDefinitions`, and records a refusal under the first that is on (`ReadCapability`), so a host that
+never enabled the new one sees the same Activity entries. Three choices worth keeping: (1) the widened gate is
+`DatabaseAccess.ObjectGateAsync`'s alone, read by the object browser and the Schema screen's Functions tab - Health,
+Storage, Maintenance, Sessions and the LINQ page's masks read `GateAsync`'s, where only `BrowseDatabase` opens anything, so
+the new capability adds no name or number to any other screen; (2) a Marten-owned object outside the store's own schemas
+stays `BrowseDatabase`'s (today's rule, which already said an `mt_` definition shows only with it), and the store's own
+Marten definitions stay the Schema screen's, free; (3) a sequence's value, which already sat in the definitions' half of the
+gate (`DefinitionAccess`), moves with the rest - reading a value can say how many rows a table has had, and a host that
+minds should leave `ViewDefinitions` off.
+
 ## D29 — The health advisor
 
 The name of the role the studio reads as (`SqlConsoleRole`, or the store's own login where none is set) is

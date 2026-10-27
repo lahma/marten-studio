@@ -11,7 +11,8 @@ namespace PostgresStudio.Services.Postgres;
 /// <para>
 /// <b>What a plain data source is.</b> One database, registered by the application; its own schemas are the ones
 /// <c>PostgresStudioOptions.BrowsableSchemas</c> names exactly, whose structure is shown to anyone the source policy
-/// admits, and every row and definition needs <c>BrowseDatabase</c> and the write policy (D27, design PS10). Nothing in
+/// admits, and every row needs <c>BrowseDatabase</c>, and every definition <c>ViewDefinitions</c> or <c>BrowseDatabase</c>,
+/// each with the write policy (D27, design PS10). Nothing in
 /// it is anybody's store, except what the <c>mt_</c> rule calls Marten's - whose rows are never read here, in either
 /// studio, and which <see cref="StudioText.MartenStoreNotice" /> points at Marten Studio for.
 /// </para>
@@ -42,8 +43,18 @@ internal static class PostgresStudioText
             "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.BrowseDatabase off with every "
             + "other capability.",
         BrowseCapabilityDenial =
-            "The rows and definitions of every object here, and the schemas PostgresStudioOptions.BrowsableSchemas admits only "
+            "The rows of every object here, and everything in the schemas PostgresStudioOptions.BrowsableSchemas admits only "
             + "through \"*\", need PostgresStudioOptions.Capabilities.BrowseDatabase.",
+        DefinitionReadOnlyDenial =
+            "PostgresStudioOptions.ReadOnly is true, which turns PostgresStudioOptions.Capabilities.ViewDefinitions and "
+            + "PostgresStudioOptions.Capabilities.BrowseDatabase off with every other capability.",
+        DefinitionCapabilityDenial =
+            "The definitions of the objects here need PostgresStudioOptions.Capabilities.ViewDefinitions, for the schemas "
+            + "PostgresStudioOptions.BrowsableSchemas names exactly, or PostgresStudioOptions.Capabilities.BrowseDatabase.",
+        DefinitionWritePolicyDenialHead =
+            "Your account may not read definitions here. The write policy (PostgresStudioOptions.WriteAuthorizationPolicy, "
+            + "or SourceAuthorizationPolicy when no write policy is set) refused ",
+        DefinitionWritePolicyDenialTail = " for this data source and database.",
         BrowseWritePolicyDenial =
             "Your account may not browse the database here. The write policy (PostgresStudioOptions.WriteAuthorizationPolicy, "
             + "or SourceAuthorizationPolicy when no write policy is set) refused BrowseDatabase for this data source and database.",

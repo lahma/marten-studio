@@ -403,6 +403,50 @@ internal sealed class DatabaseAccess
     }
 
     /// <summary>
+    /// The same question for <c>ViewDefinitions</c>, the second way into a definition: the capability, then the store
+    /// policy, then the write policy with <c>ViewDefinitions</c> named - against the database as a whole, with no tenant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The store policy does not depend on the capability, so <paramref name="browse" />'s answer settles it when it was
+    /// asked (a refusal by it is this one's, and a pass is too); only a <c>BrowseDatabase</c> that is off leaves it unasked.
+    /// A capability that is off asks nobody, as <see cref="EvaluatePoliciesAsync" />'s does, so a host that never enabled
+    /// <c>ViewDefinitions</c> sees no new policy question.
+    /// </para>
+    /// </remarks>
+    /// <param name="scope">The scope, in the registered names (<see cref="StudioSourceResolver.Named" />).</param>
+    /// <param name="browse"><see cref="EvaluatePoliciesAsync" />'s answer for the same scope.</param>
+    /// <param name="cancellationToken">Cancels the policy's evaluation.</param>
+    public async Task<DatabasePolicyAnswer> EvaluateDefinitionPoliciesAsync(
+        StudioScope scope,
+        DatabasePolicyAnswer browse,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(browse);
+
+        if (!capabilities.IsEnabled(StudioCapability.ViewDefinitions))
+        {
+            return new DatabasePolicyAnswer(false, null, DatabaseRefusal.None);
+        }
+
+        StudioScope tenantless = scope with { TenantId = null };
+
+        bool storeRefused = browse.Authorized == false && browse.Refusal == DatabaseRefusal.StorePolicy;
+        bool storeAsked = browse.Authorized is not null;
+
+        if (storeRefused
+            || (!storeAsked && !await authorization.IsAuthorizedAsync(tenantless, capability: null, cancellationToken).ConfigureAwait(false)))
+        {
+            return new DatabasePolicyAnswer(true, false, DatabaseRefusal.StorePolicy);
+        }
+
+        return await authorization.IsAuthorizedAsync(tenantless, StudioCapability.ViewDefinitions, cancellationToken).ConfigureAwait(false)
+            ? new DatabasePolicyAnswer(true, true, DatabaseRefusal.None)
+            : new DatabasePolicyAnswer(true, false, DatabaseRefusal.WritePolicy);
+    }
+
+    /// <summary>
     /// Whether this visitor passes D29's Database gate for the database <paramref name="resolved" /> names: the store policy,
     /// asked about the database as a whole - no tenant - by the registered key and the database's own identity. What a name
     /// only that gate shows (the role the studio reads as, say) is shown behind.
@@ -424,10 +468,33 @@ internal sealed class DatabaseAccess
     /// registered source's policies (<see cref="IDatabaseDeclarationsSource.OtherSourcesAsync" />), and the
     /// database's live schema list, which <c>"*"</c> and the withheld count need.
     /// </summary>
-    public async Task<DatabaseGateRead> GateAsync(
+    public Task<DatabaseGateRead> GateAsync(
         StudioScope scope,
         ResolvedSource resolved,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        ReadGateAsync(scope, resolved, withDefinitions: false, cancellationToken);
+
+    /// <summary>
+    /// <see cref="GateAsync" />, widened to the definitions' second way in: the gate the object browser and the Schema
+    /// screen's Functions tab read through, which also asks the policies about <c>ViewDefinitions</c>.
+    /// </summary>
+    /// <remarks>
+    /// Every other reader of the gate - the health advisor, Storage, Maintenance, Sessions, the LINQ page's masks - takes
+    /// <see cref="GateAsync" />'s, in which only <c>BrowseDatabase</c> opens anything: <c>ViewDefinitions</c> shows a
+    /// definition, and the structure of the schemas <c>BrowsableSchemas</c> names exactly, in the browser, and no number or
+    /// name on another screen. With <c>ViewDefinitions</c> off the two gates are the same value.
+    /// </remarks>
+    public Task<DatabaseGateRead> ObjectGateAsync(
+        StudioScope scope,
+        ResolvedSource resolved,
+        CancellationToken cancellationToken = default) =>
+        ReadGateAsync(scope, resolved, withDefinitions: true, cancellationToken);
+
+    private async Task<DatabaseGateRead> ReadGateAsync(
+        StudioScope scope,
+        ResolvedSource resolved,
+        bool withDefinitions,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(resolved);
@@ -446,9 +513,12 @@ internal sealed class DatabaseAccess
         // database's own identity - never the visitor's spelling of either (D29, H1): the enforcement behind every read
         // this gate opens asks by those names (the resolver's re-ask), so a gate asked by the spelling could open what the
         // enforcement then refuses, and show the structure of schemas behind it in the meantime.
-        DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(
-                StudioSourceResolver.Named(scope, resolved.Source, resolved.Target), cancellationToken)
-            .ConfigureAwait(false);
+        StudioScope named = StudioSourceResolver.Named(scope, resolved.Source, resolved.Target);
+        DatabasePolicyAnswer answer = await EvaluatePoliciesAsync(named, cancellationToken).ConfigureAwait(false);
+
+        DatabasePolicyAnswer? definitions = withDefinitions
+            ? await EvaluateDefinitionPoliciesAsync(named, answer, cancellationToken).ConfigureAwait(false)
+            : null;
 
         IReadOnlyDictionary<string, DatabaseStoreAccess> others = await declarations
             .OtherSourcesAsync(resolved, declared.Classifier, answer.CapabilityEnabled, cancellationToken)
@@ -470,7 +540,8 @@ internal sealed class DatabaseAccess
                 answer.Refusal == DatabaseRefusal.StorePolicy ? DatabaseRefusal.StorePolicy : DatabaseRefusal.WritePolicy,
                 resolved.Source.Key,
                 others,
-                settings.Text),
+                settings.Text,
+                definitions),
             DatabaseRefusal.None,
             null);
     }
@@ -548,6 +619,127 @@ internal sealed class DatabaseAccess
             audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.BrowseDatabase, tenantless);
             return new DatabaseBrowseGrant(null, DatabaseRefusal.Unavailable, exception.Message);
         }
+    }
+
+    /// <summary>
+    /// The capability an audit entry for a refused object-browser read is recorded under: the first way in that is on -
+    /// <c>BrowseDatabase</c>, for every host that has not enabled <c>ViewDefinitions</c> alone - and <c>BrowseDatabase</c>
+    /// when neither is, as every such refusal always was.
+    /// </summary>
+    public StudioCapability ReadCapability =>
+        !capabilities.IsEnabled(StudioCapability.BrowseDatabase) && capabilities.IsEnabled(StudioCapability.ViewDefinitions)
+            ? StudioCapability.ViewDefinitions
+            : StudioCapability.BrowseDatabase;
+
+    /// <summary>
+    /// The enforcement in front of every read of an object's definition, and of the structure around it in a schema
+    /// outside the store's own: the capability, then the scope with no tenant and the capability named. Either of two
+    /// capabilities admits it - <c>BrowseDatabase</c>, which implies the other, and <c>ViewDefinitions</c> - and which
+    /// one decided is the capability the scope was resolved with. Audited on refusal; never throws for a refusal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>In <c>RequireBrowseAsync</c>'s order, once per capability.</b> The capability is checked first - before anybody is
+    /// asked who is asking - and a studio with neither on refuses as it always did, under <c>BrowseDatabase</c>, naming both
+    /// ways in. The store policy is asked once, of the database as a whole; then the write policy is asked with each
+    /// capability that is on, <c>BrowseDatabase</c> first, and the scope is resolved - which asks it again, as the one place
+    /// a scope is looked up - under the first it said yes to. Refused by every one, the entry is recorded once, under the
+    /// first capability that was on: <c>BrowseDatabase</c> for every host that has not heard of <c>ViewDefinitions</c>, so
+    /// nothing in the Activity screen or the log moves for it.
+    /// </para>
+    /// <para>
+    /// A pass says nothing about <em>which schemas</em>: <c>ViewDefinitions</c> admits the exactly named ones, and the gate
+    /// (<see cref="ObjectGateAsync" />) draws that line, after this one has let the read go as far as the catalog.
+    /// </para>
+    /// </remarks>
+    /// <param name="scope">The visitor's scope. Its tenant is dropped.</param>
+    /// <param name="action">What the audit ring calls the read.</param>
+    /// <param name="target">What it was aimed at.</param>
+    /// <param name="cancellationToken">Cancels the resolution.</param>
+    public async Task<DatabaseBrowseGrant> RequireDefinitionAsync(
+        StudioScope scope,
+        string action,
+        string target,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        bool browseOn = capabilities.IsEnabled(StudioCapability.BrowseDatabase);
+        bool definitionsOn = capabilities.IsEnabled(StudioCapability.ViewDefinitions);
+
+        // 1. The capability, before anybody is asked who is asking.
+        if (!browseOn && !definitionsOn)
+        {
+            try
+            {
+                capabilities.Require(StudioCapability.BrowseDatabase);
+            }
+            catch (StudioCapabilityDeniedException denied)
+            {
+                audit.RecordCapabilityDenied(denied, action, target);
+
+                bool readOnly = denied.Reason == CapabilityDenialReason.ReadOnly;
+
+                return new DatabaseBrowseGrant(
+                    null,
+                    readOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff,
+                    readOnly ? settings.Text.DefinitionReadOnlyDenial : settings.Text.DefinitionCapabilityDenial);
+            }
+        }
+
+        StudioCapability[] candidates =
+        [
+            .. new[] { StudioCapability.BrowseDatabase, StudioCapability.ViewDefinitions }
+                .Where(x => x == StudioCapability.BrowseDatabase ? browseOn : definitionsOn),
+        ];
+
+        // What a refusal is recorded under: the first way in that is on - BrowseDatabase, where it is.
+        StudioCapability recorded = ReadCapability;
+
+        // 2. The store policy, of the database as a whole - it does not depend on the capability - and then the write
+        //    policy with each capability that is on, one at a time.
+        StudioScope tenantless = scope with { TenantId = null };
+
+        if (!await authorization.IsAuthorizedAsync(tenantless, capability: null, cancellationToken).ConfigureAwait(false))
+        {
+            audit.RecordScopeDenied(tenantless, StorePolicyName(settings), action, target, recorded);
+            return new DatabaseBrowseGrant(null, DatabaseRefusal.StorePolicy, settings.Text.BrowseStorePolicyDenial);
+        }
+
+        foreach (StudioCapability capability in candidates)
+        {
+            if (!await authorization.IsAuthorizedAsync(tenantless, capability, cancellationToken).ConfigureAwait(false))
+            {
+                continue;
+            }
+
+            // 3. The scope, resolved with no tenant and the capability named; a policy that changes its mind between the two
+            //    asks is a refusal of that capability.
+            try
+            {
+                ResolvedSource resolved = await resolver
+                    .ResolveAsync(tenantless, capability.ToString(), cancellationToken)
+                    .ConfigureAwait(false);
+
+                return new DatabaseBrowseGrant(resolved, DatabaseRefusal.None, null);
+            }
+            catch (StudioNotAuthorizedException)
+            {
+                continue;
+            }
+            catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+            {
+                audit.Record(action, target, succeeded: false, exception.Message, recorded, tenantless);
+                return new DatabaseBrowseGrant(null, DatabaseRefusal.Unavailable, exception.Message);
+            }
+        }
+
+        audit.RecordScopeDenied(tenantless, WritePolicyName(settings), action, target, recorded);
+
+        return new DatabaseBrowseGrant(
+            null,
+            DatabaseRefusal.WritePolicy,
+            settings.Text.DefinitionWritePolicyDenialFor(DatabaseGate.DefinitionCapabilityNames(browseOn, definitionsOn)));
     }
 
     /// <summary>

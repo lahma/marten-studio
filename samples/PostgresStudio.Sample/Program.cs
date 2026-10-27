@@ -63,8 +63,9 @@ builder.Services.AddPostgresStudio(options =>
     options.AuthorizationPolicy = SamplePolicies.Studio;
     options.WriteAuthorizationPolicy = SamplePolicies.StudioCapability;
 
-    // All three are off until the host says otherwise: reading rows and definitions, other sessions' statements, and
-    // the SQL console. `All()` is the one-line, greppable opt-in; `ReadOnly` overrides it whatever it says.
+    // All four are off until the host says otherwise: reading rows and definitions, reading definitions alone, other
+    // sessions' statements, and the SQL console. `All()` is the one-line, greppable opt-in; `ReadOnly` overrides it
+    // whatever it says.
     options.Capabilities = PostgresStudioCapabilities.All();
 
     // `public` is browsable only while nothing names a schema: a list replaces that default rather than adding to it, so

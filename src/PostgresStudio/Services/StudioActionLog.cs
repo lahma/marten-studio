@@ -210,13 +210,26 @@ internal sealed class StudioActionLog
 
             if (ReadBeyondTheStore(entry) is { } capability)
             {
-                if (!capabilities.IsEnabled(capability))
+                // The read an entry names is the visitor's to see if it, or a capability that implies it
+                // (BrowseDatabase implies ViewDefinitions), is on for the process and the write policy passes them.
+                bool mayRead = false;
+
+                foreach (StudioCapability candidate in (StudioCapability[]) [capability, .. StudioCapabilityGuard.ImpliedBy(capability)])
                 {
-                    continue;
+                    if (!capabilities.IsEnabled(candidate))
+                    {
+                        continue;
+                    }
+
+                    if (string.IsNullOrWhiteSpace(authorization.PolicyFor(candidate.ToString()))
+                        || await AskAsync(scope, candidate.ToString()).ConfigureAwait(false))
+                    {
+                        mayRead = true;
+                        break;
+                    }
                 }
 
-                if (!string.IsNullOrWhiteSpace(authorization.PolicyFor(capability.ToString()))
-                    && !await AskAsync(scope, capability.ToString()).ConfigureAwait(false))
+                if (!mayRead)
                 {
                     continue;
                 }

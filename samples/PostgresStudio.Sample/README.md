@@ -37,6 +37,8 @@ Sign in at `/login` as `admin`, `ops` or `viewer` - the password is the user nam
 | `ops` | yes | yes | yes | no |
 | `viewer` | yes | no | no | no |
 
-All three capabilities are on (`PostgresStudioCapabilities.All()`); the write policy, `PostgresStudioCapability`, is
-asked about each one by name against a `PostgresStudioResource` and answers from the user's scopes. The seeding is
+All the capabilities are on (`PostgresStudioCapabilities.All()`); the write policy, `PostgresStudioCapability`, is
+asked about each one by name against a `PostgresStudioResource` and answers from the user's scopes - `BrowseDatabase`,
+`ViewDatabaseActivity` and `RunSql` each have a scope of their own, and `ViewDefinitions`, which the demo's users hold
+no scope for, is refused: they read definitions through `BrowseDatabase`, which implies it. The seeding is
 idempotent: a second start against the same server writes nothing.

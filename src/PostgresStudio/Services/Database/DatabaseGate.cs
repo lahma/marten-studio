@@ -28,6 +28,14 @@ namespace PostgresStudio.Services.Database;
 /// Marten's own definitions in the store's schemas stay visible, as the Schema screen shows them.
 /// </description></item>
 /// <item><description>
+/// <b>Definitions have a second way in.</b> <c>ViewDefinitions</c>, with the write policy asked about it, shows the
+/// definitions - and the structure - of the schemas <c>BrowsableSchemas</c> names <em>exactly</em>, without the rows;
+/// <c>BrowseDatabase</c> keeps the rows and implies it. A schema only <c>"*"</c> admits, and Marten's own
+/// objects outside the store's schemas, still need <c>BrowseDatabase</c>. The gate built with the definitions' answer
+/// (<see cref="DatabaseAccess.ObjectGateAsync" />) is the browser's; every other screen reads the one without it,
+/// where nothing but <c>BrowseDatabase</c> opens anything.
+/// </description></item>
+/// <item><description>
 /// Rows of a Marten document or event table, or of Marten's infrastructure, are <b>never</b> read here;
 /// a foreign table's rows never - nor those of a partitioned table with a foreign partition, a table with
 /// a foreign inheritance child, or a view that reads any of them; a view reading Marten's own tables, or
@@ -54,6 +62,9 @@ internal sealed class DatabaseGate
 {
     private readonly HashSet<string> storeSchemas;
     private readonly HashSet<string> browsable;
+    private readonly HashSet<string> definitionSchemas;
+    private readonly DatabaseRefusal definitionsClosedBy;
+    private readonly string? definitionsClosedDenial;
     private readonly HashSet<string> withheld;
     private readonly HashSet<string> extensionSchemas;
     private readonly bool readableWithheld;
@@ -89,6 +100,12 @@ internal sealed class DatabaseGate
     /// builder, always hands the settings' over; <see langword="null" /> is MartenStudio's, for a test that builds a gate
     /// by hand.
     /// </param>
+    /// <param name="definitions">
+    /// The answer for <c>ViewDefinitions</c>, the second way in to a definition: on and not <c>ReadOnly</c>, and both
+    /// policies' yes (<see cref="DatabaseAccess.EvaluateDefinitionPoliciesAsync" />). <see langword="null" /> is
+    /// "not asked", which is the gate every screen but the object browser reads: there, <c>BrowseDatabase</c> alone opens a
+    /// definition, as it always did.
+    /// </param>
     public DatabaseGate(
         IReadOnlyList<string> storeSchemas,
         IReadOnlyList<CatalogSchema> liveSchemas,
@@ -101,7 +118,8 @@ internal sealed class DatabaseGate
         DatabaseRefusal policyRefusal = DatabaseRefusal.WritePolicy,
         string? storeKey = null,
         IReadOnlyDictionary<string, DatabaseStoreAccess>? otherStores = null,
-        StudioText? text = null)
+        StudioText? text = null,
+        DatabasePolicyAnswer? definitions = null)
     {
         ArgumentNullException.ThrowIfNull(storeSchemas);
         ArgumentNullException.ThrowIfNull(liveSchemas);
@@ -132,13 +150,31 @@ internal sealed class DatabaseGate
             ? new HashSet<string>(BrowsableSchemaMatcher.Match(configuredEntries, liveSchemas), StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
 
+        // The second way in to a definition. BrowseDatabase implies it, so an open browse gate leaves nothing for it to
+        // decide: its schemas are the browsable ones. Otherwise ViewDefinitions, when it is on and both policies pass the
+        // visitor, admits the schemas BrowsableSchemas names exactly - never the ones only "*" admits.
+        bool browseOpen = closedBy == DatabaseRefusal.None;
+        bool definitionsPass = !readOnly && definitions is { CapabilityEnabled: true, Authorized: true };
+
+        (definitionsClosedBy, definitionsClosedDenial) = browseOpen || definitionsPass
+            ? (DatabaseRefusal.None, null)
+            : DefinitionsClosure(text, readOnly, capabilityEnabled, authorized, policyRefusal, definitions);
+
+        definitionSchemas = browseOpen
+            ? browsable
+            : definitionsPass
+                ? new HashSet<string>(
+                    BrowsableSchemaMatcher.Match(configuredEntries.Where(static x => x != BrowsableSchemaMatcher.Everything), liveSchemas),
+                    StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+
         HashSet<string> live = new(liveSchemas.Select(static x => x.Name), StringComparer.Ordinal);
 
         // The store's own schemas first, in declaration order, and only those that exist; then what
-        // BrowsableSchemas admits, alphabetically. A declared schema Marten has not created yet has nothing
-        // in it to show.
+        // BrowsableSchemas admits - to the rows and definitions, or to the definitions alone - alphabetically. A declared
+        // schema Marten has not created yet has nothing in it to show.
         List<string> visible = [.. storeSchemas.Where(live.Contains).Distinct(StringComparer.Ordinal)];
-        visible.AddRange(browsable.Where(x => !this.storeSchemas.Contains(x)).Order(StringComparer.Ordinal));
+        visible.AddRange(definitionSchemas.Where(x => !this.storeSchemas.Contains(x)).Order(StringComparer.Ordinal));
         VisibleSchemas = visible;
 
         HashSet<string> shown = new(visible, StringComparer.Ordinal);
@@ -162,6 +198,16 @@ internal sealed class DatabaseGate
             ? closedDenial
             : configuredEntries.Count == 0 ? text.BrowseEmptyListDenial : null;
 
+        // What the definitions half says, beside the rows' (which is stateRefusal and stateDenial): when a way in is open
+        // its schemas, or that none is listed; when neither is, the sentence that names both.
+        DatabaseRefusal definitionsStateRefusal = definitionsClosedBy != DatabaseRefusal.None
+            ? definitionsClosedBy
+            : configuredEntries.Count == 0 ? DatabaseRefusal.SchemaNotBrowsable : DatabaseRefusal.None;
+
+        string? definitionsStateDenial = definitionsClosedBy != DatabaseRefusal.None
+            ? definitionsClosedDenial
+            : configuredEntries.Count == 0 ? text.BrowseEmptyListDenial : null;
+
         State = new DatabaseAccessState(
             capabilityEnabled && !readOnly,
             readOnly,
@@ -171,8 +217,62 @@ internal sealed class DatabaseGate
             [.. browsable.Order(StringComparer.Ordinal)],
             WithheldSchemaCount,
             stateRefusal,
-            stateDenial);
+            stateDenial)
+        {
+            DefinitionSchemas = [.. definitionSchemas.Order(StringComparer.Ordinal)],
+            DefinitionRefusal = definitionsStateRefusal,
+            DefinitionDenial = definitionsStateDenial,
+        };
     }
+
+    /// <summary>
+    /// Why neither way into a definition is open, and the sentence that names both - the one a host would act on.
+    /// </summary>
+    /// <remarks>
+    /// <c>ReadOnly</c> turns both off. Both off says what each would admit. A policy's refusal is the store policy's when
+    /// either capability that is on was refused by it (it is asked about the database as a whole, whichever capability is
+    /// named), and otherwise the write policy's, naming each capability it was asked about and refused - a capability
+    /// that is off was never asked.
+    /// </remarks>
+    private static (DatabaseRefusal Refusal, string Denial) DefinitionsClosure(
+        StudioText text,
+        bool readOnly,
+        bool browseEnabled,
+        bool? browseAuthorized,
+        DatabaseRefusal browseRefusal,
+        DatabasePolicyAnswer? definitions)
+    {
+        if (readOnly)
+        {
+            return (DatabaseRefusal.ReadOnly, text.DefinitionReadOnlyDenial);
+        }
+
+        bool definitionsEnabled = definitions is { CapabilityEnabled: true };
+
+        if (!browseEnabled && !definitionsEnabled)
+        {
+            return (DatabaseRefusal.CapabilityOff, text.DefinitionCapabilityDenial);
+        }
+
+        if ((browseEnabled && browseAuthorized != true && browseRefusal == DatabaseRefusal.StorePolicy)
+            || (definitionsEnabled && definitions!.Authorized != true && definitions.Refusal == DatabaseRefusal.StorePolicy))
+        {
+            return (DatabaseRefusal.StorePolicy, text.BrowseStorePolicyDenial);
+        }
+
+        return (DatabaseRefusal.WritePolicy, text.DefinitionWritePolicyDenialFor(DefinitionCapabilityNames(browseEnabled, definitionsEnabled)));
+    }
+
+    /// <summary>
+    /// The capabilities a write policy was asked about and refused, as a sentence names them: only those that are on,
+    /// <c>ViewDefinitions</c> first.
+    /// </summary>
+    internal static string DefinitionCapabilityNames(bool browseDatabase, bool viewDefinitions) =>
+        browseDatabase && viewDefinitions
+            ? nameof(StudioCapability.ViewDefinitions) + " and " + nameof(StudioCapability.BrowseDatabase)
+            : viewDefinitions
+                ? nameof(StudioCapability.ViewDefinitions)
+                : nameof(StudioCapability.BrowseDatabase);
 
     /// <summary>What <c>ReadOnly</c> says in MartenStudio (<see cref="StudioText.BrowseReadOnlyDenial" />).</summary>
     public const string ReadOnlyDenial =
@@ -201,6 +301,32 @@ internal sealed class DatabaseGate
     public const string StorePolicyDenial =
         "Your account may not browse the database here. The store policy (MartenStudioOptions." +
         "StoreAuthorizationPolicy) refused this store and database as a whole, with no tenant selected.";
+
+    /// <summary>
+    /// What <c>ReadOnly</c> says about a definition in MartenStudio (<see cref="StudioText.DefinitionReadOnlyDenial" />): it
+    /// turns both ways in off.
+    /// </summary>
+    public const string DefinitionReadOnlyDenial =
+        "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDefinitions and " +
+        "MartenStudioOptions.Capabilities.BrowseDatabase off with every other capability.";
+
+    /// <summary>
+    /// What both ways into a definition being off says in MartenStudio (<see cref="StudioText.DefinitionCapabilityDenial" />).
+    /// </summary>
+    public const string DefinitionCapabilityDenial =
+        "The definitions of objects Marten does not own need MartenStudioOptions.Capabilities.ViewDefinitions, for the " +
+        "schemas MartenStudioOptions.BrowsableSchemas names exactly, or MartenStudioOptions.Capabilities.BrowseDatabase.";
+
+    /// <summary>
+    /// What opens MartenStudio's write-policy refusal of a definition; the names of the capabilities the policy refused
+    /// follow (<see cref="StudioText.DefinitionWritePolicyDenialFor" />).
+    /// </summary>
+    public const string DefinitionWritePolicyDenialHead =
+        "Your account may not read definitions here. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, or " +
+        "StoreAuthorizationPolicy when no write policy is set) refused ";
+
+    /// <summary>What closes it in MartenStudio.</summary>
+    public const string DefinitionWritePolicyDenialTail = " for this store and database as a whole, with no tenant selected.";
 
     /// <summary>What a view that reaches into a withheld schema says.</summary>
     public const string WithheldDependencyDenial = "It reads from a schema you cannot see.";
@@ -297,8 +423,12 @@ internal sealed class DatabaseGate
     /// <summary>Whether the store declares <paramref name="schema" />.</summary>
     public bool IsStoreSchema(string schema) => storeSchemas.Contains(schema);
 
-    /// <summary>Whether this visitor may see <paramref name="schema" />'s structure.</summary>
-    public bool CanSeeStructure(string schema) => IsStoreSchema(schema) || (IsOpen && browsable.Contains(schema));
+    /// <summary>
+    /// Whether this visitor may see <paramref name="schema" />'s structure: the store's own, and the ones the way into
+    /// it that is open admits - <c>BrowsableSchemas</c>' for <c>BrowseDatabase</c>, the exactly named ones for
+    /// <c>ViewDefinitions</c> alone.
+    /// </summary>
+    public bool CanSeeStructure(string schema) => IsStoreSchema(schema) || definitionSchemas.Contains(schema);
 
     /// <summary>
     /// Whether <paramref name="schema" /> is one this visitor is not told about: not a system schema, and
@@ -468,17 +598,54 @@ internal sealed class DatabaseGate
 
     /// <summary>Whether this visitor may read the definition of an object in <paramref name="schema" />.</summary>
     /// <remarks>
+    /// <para>
     /// Marten's own objects in the store's own schemas are what the Schema screen already shows; anything
-    /// else is the host's code, and reading it is a <c>BrowseDatabase</c> read. The exemption needs a registered
+    /// else is the host's code, and reading it is a <c>BrowseDatabase</c> read - or a <c>ViewDefinitions</c> one, in a schema
+    /// <c>BrowsableSchemas</c> names exactly. The exemption needs a registered
     /// store (<see cref="ExemptsMartensOwnDefinitions" />): a studio over plain data sources has no Schema screen, and an
     /// object only named like Marten's is gated like every other definition there.
+    /// </para>
+    /// <para>
+    /// <b>What <c>ViewDefinitions</c> does not open.</b> A definition in a schema only <c>"*"</c> admits, and an object
+    /// Marten owns that is not the store's own (the exemption above), both stay <c>BrowseDatabase</c> reads, and each says
+    /// so. Rows are never a definition: <see cref="DataAccess" /> is <c>BrowseDatabase</c>'s alone.
+    /// </para>
     /// </remarks>
     public DatabaseRowAccess DefinitionAccess(string schema, DatabaseObjectOwnership ownership)
     {
         ArgumentNullException.ThrowIfNull(ownership);
 
-        return ExemptsMartensOwnDefinitions && IsStoreSchema(schema) && ownership.IsMarten ? DatabaseRowAccess.Granted : DataAccess(schema);
+        if (ExemptsMartensOwnDefinitions && IsStoreSchema(schema) && ownership.IsMarten)
+        {
+            return DatabaseRowAccess.Granted;
+        }
+
+        if (IsOpen)
+        {
+            return DataAccess(schema);
+        }
+
+        if (definitionsClosedBy != DatabaseRefusal.None)
+        {
+            return DatabaseRowAccess.Refused(definitionsClosedBy, definitionsClosedDenial!);
+        }
+
+        // Open by ViewDefinitions alone.
+        if (ownership.IsMarten)
+        {
+            return DatabaseRowAccess.Refused(DatabaseRefusal.MartenOwned, MartenDefinitionDenial(text));
+        }
+
+        return definitionSchemas.Contains(schema)
+            ? DatabaseRowAccess.Granted
+            : DatabaseRowAccess.Refused(DatabaseRefusal.SchemaNotBrowsable, DefinitionSchemaDenial(schema, configuredEntries, text));
     }
+
+    /// <summary>
+    /// Whether this visitor may read a definition in some schema: either way in is open. <see cref="IsOpen" /> is
+    /// <c>BrowseDatabase</c>'s, which implies it; the definitions alone are <c>ViewDefinitions</c>'.
+    /// </summary>
+    public bool DefinitionsOpen => IsOpen || definitionsClosedBy == DatabaseRefusal.None;
 
     /// <summary>
     /// Whether Marten's own definitions in the source's own schemas are structure, free without the capability: only
@@ -773,6 +940,36 @@ internal sealed class DatabaseGate
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// What a schema <c>ViewDefinitions</c> alone does not admit says about a definition in it: one only <c>"*"</c> admits
+    /// needs <c>BrowseDatabase</c>; any other is the entry list's refusal (<see cref="SchemaDenial" />).
+    /// </summary>
+    /// <remarks>
+    /// Said the same way whether or not the schema exists, as <see cref="SchemaDenial" /> is.
+    /// </remarks>
+    internal static string DefinitionSchemaDenial(string schema, IReadOnlyList<string> configuredEntries, StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(configuredEntries);
+        ArgumentNullException.ThrowIfNull(text);
+
+        return !BrowsableSchemaMatcher.IsSystemSchema(schema)
+            && BrowsableSchemaMatcher.IncludesEverything(configuredEntries)
+            && !BrowsableSchemaMatcher.IsNamed(configuredEntries, schema)
+                ? "Schema '" + schema + "' is admitted only through \"*\" in " + text.OptionName("BrowsableSchemas") + ", so its " +
+                  "definitions need " + text.OptionName("Capabilities.BrowseDatabase") + ": " +
+                  text.OptionName("Capabilities.ViewDefinitions") + " covers only the schemas that list names exactly."
+                : SchemaDenial(schema, configuredEntries, text);
+    }
+
+    /// <summary>What a definition of an object Marten owns says to a visitor <c>ViewDefinitions</c> alone admits.</summary>
+    internal static string MartenDefinitionDenial(StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return "The definitions of Marten's own objects here need " + text.OptionName("Capabilities.BrowseDatabase") + ": " +
+               text.OptionName("Capabilities.ViewDefinitions") + " covers the host's own objects only.";
     }
 
     /// <summary>What a schema outside <c>BrowsableSchemas</c> says.</summary>

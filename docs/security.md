@@ -8,7 +8,7 @@ design is about making every one of those powers something you turned on deliber
 place where the operation happens, and recorded whether it succeeded or not.
 
 Postgres Studio, the core Marten Studio is built on since 0.5, runs the same way against the `NpgsqlDataSource`s an
-application registered. It has no mutating operation at all: its three capabilities are reads authorized like writes.
+application registered. It has no mutating operation at all: its four capabilities are reads authorized like writes.
 Everything below holds for both studios unless a section says otherwise; [Postgres Studio](#postgres-studio) says what
 differs.
 
@@ -62,8 +62,8 @@ write, so a single handler can be as coarse or as fine as you want.
 
 `TenantId = null` means every tenant at once, so a handler must require an explicit all-tenants claim for
 it rather than let it through. Anything that is not tenant-scoped is asked that way whatever tenant the
-visitor has selected: `BrowseDatabase` is always authorized against `TenantId = null` (with
-`Capability = "BrowseDatabase"`), because no tenant filters a Quartz or legacy table, and a handler that
+visitor has selected: `BrowseDatabase` and `ViewDefinitions` are always authorized against `TenantId = null` (with
+`Capability = "BrowseDatabase"` or `"ViewDefinitions"`), because no tenant filters a Quartz or legacy table, and a handler that
 confines people to their own tenant therefore refuses them the database browser — which is the point.
 `RunSql`, the dead-letter rewind, the progression corrections, rebuilds and a schema apply are asked the
 same way, because each of them reaches every tenant in the database (the operations are narrowed to the
@@ -118,19 +118,19 @@ application is being built.
 
 ## The capability model
 
-Thirteen flags on `MartenStudioCapabilities`, every one `false` by default:
+Fourteen flags on `MartenStudioCapabilities`, every one `false` by default:
 
 `EditDocuments`, `DeleteDocuments`, `ArchiveStreams`, `ManageDeadLetters`, `ControlDaemon`,
-`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`,
+`RebuildProjections`, `CorrectProgression`, `ApplySchemaChanges`, `RunSql`, `BrowseDatabase`, `ViewDefinitions`,
 `ViewDatabaseActivity`, `CompactStreams`, `RunLinqQueries`.
 
-Four of them are reads rather than writes — `RunSql` and `BrowseDatabase` read beyond what Marten declares,
-`ViewDatabaseActivity` reads other sessions and their statements, and `RunLinqQueries` evaluates an
+Five of them are reads rather than writes — `RunSql`, `BrowseDatabase` and `ViewDefinitions` read beyond what Marten
+declares, `ViewDatabaseActivity` reads other sessions and their statements, and `RunLinqQueries` evaluates an
 expression somebody typed — and they are treated as writes for authorization, because they are the dangerous
 reads. `CompactStreams` is a write that deletes events: what it does is in [`compaction.md`](compaction.md).
 
 `MartenStudioCapabilities.All()` is the one-line, greppable opt-in. `MartenStudioOptions.ReadOnly`
-overrides all thirteen whatever they say.
+overrides all fourteen whatever they say.
 
 This is Hangfire's [GHSA-7rq6-7gv8-c37h](https://github.com/advisories/GHSA-7rq6-7gv8-c37h) applied to
 the write axis: the dashboard that is dangerous by default is the one somebody maps without reading the
@@ -151,6 +151,28 @@ refusal you cannot investigate.
 Every disabled control in the UI names the property that would enable it
 (`MartenStudioOptions.Capabilities.EditDocuments`), because "not permitted" with nothing to act on is
 the failure mode of every feature-flagged admin UI.
+
+### `ViewDefinitions`
+
+`BrowseDatabase` covers two different things: the rows of tables and views, and the definitions of views, functions,
+triggers, sequences and types. A host can have good reasons to refuse the first and want the second - the studio has no
+row-level filtering, some tables hold credentials or personal data, and a view's query, a trigger function or a function
+body is schema the application's own migrations wrote, which is what you need to read when Statements or a Health
+finding points at one. `ViewDefinitions` is the second alone: off by default, included in `All()`, off under `ReadOnly`,
+and authorized as a write - the write policy asked with `Capability = "ViewDefinitions"` and `TenantId = null`.
+
+- **Exactly named schemas only.** It reads the definitions - and, in Marten Studio, the structure - of the schemas
+  `BrowsableSchemas` names exactly. A schema only `"*"` admits, which is a statement about the database rather than this
+  configuration, still needs `BrowseDatabase` for its definitions, as does an object Marten owns outside the store's own
+  schemas. The `‹withheld›` masking of every other schema's name inside a definition is unchanged.
+- **Never a row.** The rows of a table and of a view are `BrowseDatabase`'s alone, and refused naming it.
+- **`BrowseDatabase` implies it.** A visitor `BrowseDatabase` admits reads definitions exactly as before, whether or not
+  `ViewDefinitions` is on; the write policy is asked about `BrowseDatabase` first, and only when it refuses (or the
+  capability is off) about `ViewDefinitions`. A definition can carry a literal - a function body with a constant in it -
+  which is why this is a capability of its own rather than part of structure.
+- **Refused and audited in the service.** The capability is checked, then the store policy, then the write policy; the
+  refusal is an Activity entry under `BrowseDatabase` when that is on and under `ViewDefinitions` when it is not, shown
+  to a visitor who may read definitions either way.
 
 ### `ViewDatabaseActivity`
 
@@ -407,12 +429,13 @@ Postgres Studio has the same three layers, the same switches and the same startu
   never a connection string. It has **no tenant**, and nothing in Postgres Studio filters a table by tenant: a visitor
   who may read a table's rows reads all of them. It is a different type from `MartenStoreResource` on purpose, so a
   handler written for one is never handed the other.
-- **Three capabilities, all reads.** `BrowseDatabase`, `ViewDatabaseActivity` and `RunSql`, off by default, in `All()`,
-  off under `ReadOnly`, and each asked of the write policy with its name. There is nothing to edit, delete, rebuild or
-  apply.
+- **Four capabilities, all reads.** `BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity` and `RunSql`, off by
+  default, in `All()`, off under `ReadOnly`, and each asked of the write policy with its name. There is nothing to edit,
+  delete, rebuild or apply.
 - **The schemas it browses.** `BrowsableSchemas` plays the store's own schemas: the schemas it names exactly - `public`
-  when it names none - have their structure shown to anyone the source policy admits, and their rows and definitions
-  need `BrowseDatabase` and the write policy. A schema only `"*"` admits needs both for its structure too. As in Marten
+  when it names none - have their structure shown to anyone the source policy admits, their definitions need
+  `ViewDefinitions` or `BrowseDatabase`, and their rows `BrowseDatabase`, each with the write policy. A schema only `"*"`
+  admits needs `BrowseDatabase` for its structure and definitions too. As in Marten
   Studio, it limits what the screens show, not what the console can read; `SqlConsoleRole` is the boundary.
 - **Marten's tables.** Postgres Studio knows no store's declarations, so the `mt_` prefix is the only thing that names
   an object Marten's, and it fails closed: such an object's rows are never read, nor a view over one, and its
@@ -705,7 +728,7 @@ A checklist for a deployment that is not a demo:
     served under `{Path}/_content/PostgresStudio/`; a policy that names the old `_content/MartenStudio/` must follow.
 
 In Postgres Studio, item 3 is `SourceAuthorizationPolicy`, item 8 does not apply, and the capabilities of item 5 are
-its three reads.
+its four reads.
 
 ## Audit events
 

@@ -335,7 +335,7 @@ application that never set the option exactly as it was.
 
 ## Capabilities
 
-Thirteen booleans, **all `false` by default** and all turned on by `MartenStudioCapabilities.All()`. A freshly
+Fourteen booleans, **all `false` by default** and all turned on by `MartenStudioCapabilities.All()`. A freshly
 mapped studio is a read-only browser of Marten's own data.
 
 | Capability | What it allows |
@@ -349,7 +349,8 @@ mapped studio is a read-only browser of Marten's own data.
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
 | `RunSql` | Run read-only SQL from the Query page's console, and its Explain analyze. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN`, the subquery lift and What if? under a console or Mode A plan |
-| `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null` |
+| `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Implies `ViewDefinitions` |
+| `ViewDefinitions` | Read the definitions alone - a view's or materialized view's query, a function's or procedure's body, a trigger's definition, a sequence's value, a type's description - of the non-Marten objects in the schemas `BrowsableSchemas` names *exactly*, and see those schemas' structure; never a row, and never a schema only `"*"` admits. For a host that keeps rows off the screen and still wants the SQL its own migrations wrote. A read, authorized like `BrowseDatabase` as a write (the write policy asked with this name, always with `TenantId = null`). Off by default, in `All()` |
 | `ViewDatabaseActivity` | See who and what is using the database: other sessions' process ids, roles, client addresses, application names and statements, on the Health page, on Database › Sessions and in the Projections screen's high-water Explain, and run the health advisor's statement checks over `pg_stat_statements`. Without it the counts, ages and states are still shown. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Off by default, in `All()` |
 | `CompactStreams` | Compact an event stream from Stream detail: Marten's own `CompactStreamAsync<T>` replaces its events up to a version with a snapshot of its aggregate, and the folded events are deleted. Authorized for the scope as selected, tenant included - and, on an event store that is not conjoined, for the database as a whole when the stream also holds an event another tenant's session appended. Off by default, in `All()` — see [`docs/compaction.md`](docs/compaction.md) |
 | `RunLinqQueries` | Run LINQ mode on the Query page (Marten 9.48+): a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
@@ -403,7 +404,7 @@ fails the host with a message that names the option.
 | `IncludeAncillaryStores` | `true` | Whether stores registered with `AddMartenStore<T>()` appear beside the default `IDocumentStore`. |
 | `KnownTenantIds` | empty | Tenant ids to offer in the selector. When non-empty, discovery is skipped. |
 | `DiscoverTenantIds` | `true` | When `KnownTenantIds` is empty, whether to discover tenants from Marten's descriptors and then from a bounded query. |
-| `BrowsableSchemas` | empty | Schemas beyond the store's own that the database browser may show, and whose non-Marten rows and definitions it may read (with `Capabilities.BrowseDatabase`). Exact schema names, or `"*"` for every schema the studio's role has `USAGE` on except Postgres' own and extensions'. It limits what the screens show, not what `RunSql` can read — `SqlConsoleRole` is the real boundary. |
+| `BrowsableSchemas` | empty | Schemas beyond the store's own that the database browser may show, and whose non-Marten rows and definitions it may read (with `Capabilities.BrowseDatabase`; with `Capabilities.ViewDefinitions`, the schemas named exactly, their definitions alone). Exact schema names, or `"*"` for every schema the studio's role has `USAGE` on except Postgres' own and extensions'. It limits what the screens show, not what `RunSql` can read — `SqlConsoleRole` is the real boundary. |
 
 > **`RebuildShardTimeout` is not a nicety.** A rebuild tears the projection's tables down *before* the
 > timeout starts applying to the replay, so a rebuild that exceeds it stops with the tables already

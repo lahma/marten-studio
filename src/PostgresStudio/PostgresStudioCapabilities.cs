@@ -18,12 +18,27 @@ public sealed class PostgresStudioCapabilities
 
     /// <summary>
     /// Read the rows and the definitions (view SQL, function bodies, trigger definitions) of the database objects in
-    /// the schemas <see cref="PostgresStudioOptions.BrowsableSchemas" /> names. Their structure is visible without it.
-    /// It is a read treated as a write for authorization: <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" />
-    /// is asked, against the database as a whole, and <see cref="PostgresStudioOptions.ReadOnly" /> turns it off with
-    /// everything else. A Marten table (<c>mt_</c>) is never read this way.
+    /// the schemas <see cref="PostgresStudioOptions.BrowsableSchemas" /> admits, and see the structure of a schema only
+    /// <c>"*"</c> admits. The structure of the schemas it names exactly is visible without it. It implies
+    /// <see cref="ViewDefinitions" />: a visitor it admits reads definitions exactly as before. It is a read treated as
+    /// a write for authorization: <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" /> is asked, against the
+    /// database as a whole, and <see cref="PostgresStudioOptions.ReadOnly" /> turns it off with everything else. A
+    /// Marten table (<c>mt_</c>) is never read this way.
     /// </summary>
     public bool BrowseDatabase { get; set; }
+
+    /// <summary>
+    /// Read the definitions of the database objects - a view's or materialized view's query, a function's or procedure's
+    /// body, a trigger's definition, a sequence's value and a type's description - in the schemas
+    /// <see cref="PostgresStudioOptions.BrowsableSchemas" /> names <em>exactly</em>, and nothing else: no rows (those need
+    /// <see cref="BrowseDatabase" />), and no definition in a schema only <c>"*"</c> admits. A definition is schema the
+    /// application's own migrations wrote, but it can carry a literal - a function body with a constant in it - which is
+    /// why it is a switch of its own rather than part of structure. A read treated as a write for authorization, like
+    /// <see cref="BrowseDatabase" />: <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" /> is asked with this
+    /// capability's name, against the database as a whole, and <see cref="PostgresStudioOptions.ReadOnly" /> turns it off
+    /// with everything else. <see cref="BrowseDatabase" /> implies it.
+    /// </summary>
+    public bool ViewDefinitions { get; set; }
 
     /// <summary>
     /// See who and what is using the database: the process ids, roles, client addresses and application names of
@@ -38,6 +53,7 @@ public sealed class PostgresStudioCapabilities
     {
         RunSql = true,
         BrowseDatabase = true,
+        ViewDefinitions = true,
         ViewDatabaseActivity = true,
     };
 }

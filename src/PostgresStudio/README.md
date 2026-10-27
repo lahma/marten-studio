@@ -73,8 +73,9 @@ builder.Services.AddPostgresStudio(options =>
     options.AuthorizationPolicy = SamplePolicies.Studio;
     options.WriteAuthorizationPolicy = SamplePolicies.StudioCapability;
 
-    // All three are off until the host says otherwise: reading rows and definitions, other sessions' statements, and
-    // the SQL console. `All()` is the one-line, greppable opt-in; `ReadOnly` overrides it whatever it says.
+    // All four are off until the host says otherwise: reading rows and definitions, reading definitions alone, other
+    // sessions' statements, and the SQL console. `All()` is the one-line, greppable opt-in; `ReadOnly` overrides it
+    // whatever it says.
     options.Capabilities = PostgresStudioCapabilities.All();
 
     // `public` is browsable only while nothing names a schema: a list replaces that default rather than adding to it, so
@@ -157,19 +158,20 @@ not.
 
 ## Capabilities
 
-Three, **all `false` by default**, all turned on by `PostgresStudioCapabilities.All()`. Each is a read, authorized like
+Four, **all `false` by default**, all turned on by `PostgresStudioCapabilities.All()`. Each is a read, authorized like
 a write.
 
 | Capability | What it allows |
 |---|---|
-| `BrowseDatabase` | The rows and definitions of tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` admits |
+| `BrowseDatabase` | The rows of tables and views, and the definitions of views, functions, triggers, sequences and types, in the schemas `BrowsableSchemas` admits. Implies `ViewDefinitions` |
+| `ViewDefinitions` | The definitions alone - a view's query, a function's body, a trigger's definition, a sequence's value, a type's description - in the schemas `BrowsableSchemas` names exactly: never a row, never a schema only `"*"` admits |
 | `ViewDatabaseActivity` | Other sessions' process ids, roles, client addresses, application names and statements, on Database › Sessions, the Health page and Operations › Statements |
 | `RunSql` | Read-only SQL from the Query page's console, its Explain analyze, and What if? under a console plan |
 
 **The database browser's gate.** The schemas `BrowsableSchemas` names exactly - `public` when nothing names any - are
 the data source's own: their structure (tables, columns, keys, indexes, estimates) is shown to anyone the source policy
-admits. Their rows and definitions, and everything in a schema only `"*"` admits, need `BrowseDatabase` and the write
-policy. A name in a schema the visitor may not see is masked as `‹withheld›` wherever Postgres prints it. A Marten table
+admits. Their definitions need `ViewDefinitions` or `BrowseDatabase`, their rows `BrowseDatabase`, and everything in a
+schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in a schema the visitor may not see is masked as `‹withheld›` wherever Postgres prints it. A Marten table
 (`mt_`) is listed as Marten's and its rows are never read.
 
 ## Options
@@ -180,7 +182,7 @@ policy. A name in a schema the visitor may not see is masked as `‹withheld›`
 | `Title` | `Postgres Studio` | Browser tab and sidebar heading. |
 | `AuthorizationPolicy`, `SourceAuthorizationPolicy`, `WriteAuthorizationPolicy` | `null` | The three layers above. |
 | `ReadOnly` | `false` | Every capability off. |
-| `Capabilities` | all off | `BrowseDatabase`, `ViewDatabaseActivity`, `RunSql`. |
+| `Capabilities` | all off | `BrowseDatabase`, `ViewDefinitions`, `ViewDatabaseActivity`, `RunSql`. |
 | `BrowsableSchemas` | `public` | Exact schema names, or `"*"`. A list that names schemas replaces the default. |
 | `IncludeDefaultDataSource` | `true` | List the unkeyed `NpgsqlDataSource` as `default`. |
 | `SqlConsoleRole` | `null` | A role the console, the database browser and the health advisor's reads (bar its statement checks, which read `pg_stat_statements` as the data source's own role) switch to with `SET LOCAL ROLE`: the one real narrowing. |
@@ -239,7 +241,7 @@ studio never serves a result. See
 
 ## Security model and limits
 
-- **Nothing that reads beyond structure is on by default.** Three capabilities, all `false`, plus `ReadOnly`.
+- **Nothing that reads beyond structure is on by default.** Four capabilities, all `false`, plus `ReadOnly`.
 - **Refusals live in the service layer** and are audited, success and failure alike, to a 500-entry in-memory ring and
   to your `ILogger` under event ids 9200-9299, 9300-9329 and 9400-9519.
 - **The SQL console's real guard is the transaction, not the parser**, and the only true narrowing is `SqlConsoleRole`.

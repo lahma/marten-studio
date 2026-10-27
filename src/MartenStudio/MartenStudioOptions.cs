@@ -221,8 +221,9 @@ public sealed class MartenStudioOptions
     /// <summary>
     /// The Postgres schemas beyond the store's own whose objects the database browser may show, and whose
     /// non-Marten rows and definitions it may read, once <see cref="MartenStudioCapabilities.BrowseDatabase"/>
-    /// is on. Empty by default. Each entry is an exact schema name, compared case-sensitively as Postgres
-    /// stores it, or <c>"*"</c>.
+    /// is on - or, for the schemas an entry names exactly, their structure and definitions alone, once
+    /// <see cref="MartenStudioCapabilities.ViewDefinitions"/> is. Empty by default. Each entry is an exact schema
+    /// name, compared case-sensitively as Postgres stores it, or <c>"*"</c>.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -234,7 +235,9 @@ public sealed class MartenStudioOptions
     /// <para>
     /// The store's own schemas show their structure without the capability, as the Schema screen always
     /// has; the rows and definitions of the non-Marten objects in them follow this list like any other
-    /// schema's.
+    /// schema's. <c>"*"</c> never admits a definition to <see cref="MartenStudioCapabilities.ViewDefinitions"/>:
+    /// only a schema named by exact name is read for its definitions without
+    /// <see cref="MartenStudioCapabilities.BrowseDatabase"/>.
     /// </para>
     /// <para>
     /// <b>This limits what the screens show, not what can be read.</b> The SQL console reads whatever the

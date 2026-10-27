@@ -455,9 +455,17 @@
                 DatabasePresentation.CountOf(category, scope.Sum(x => x.CountOf(category)))));
     }
 
-    private static string WithheldReason(DatabaseAccessState access) => access.Refusal switch
+    /// <remarks>
+    /// In a studio whose own schemas are a store's, <c>ViewDefinitions</c> is the second way to see a schema
+    /// <c>BrowsableSchemas</c> names exactly - its structure and its definitions - so with neither on, both are named. In
+    /// one over plain data sources an exactly named schema is the source's own and never withheld, so
+    /// <c>BrowseDatabase</c> is the only way left in.
+    /// </remarks>
+    private string WithheldReason(DatabaseAccessState access) => access.Refusal switch
     {
         DatabaseRefusal.ReadOnly => "the studio is read-only",
+        DatabaseRefusal.CapabilityOff when Settings.Text.Product == StudioProduct.MartenStudio && !access.DefinitionsOpen =>
+            "they need Capabilities.BrowseDatabase, or Capabilities.ViewDefinitions for the schemas BrowsableSchemas names",
         DatabaseRefusal.CapabilityOff => "they need Capabilities.BrowseDatabase",
         DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "your account may not browse them",
         DatabaseRefusal.SchemaNotBrowsable => "BrowsableSchemas is empty",

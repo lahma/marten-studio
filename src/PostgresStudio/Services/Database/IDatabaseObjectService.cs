@@ -64,8 +64,11 @@ internal interface IDatabaseObjectService
     /// </summary>
     /// <remarks>
     /// Marten's own objects in the store's own schemas need no capability, as on the Schema screen.
-    /// Anything else is a <c>BrowseDatabase</c> read: the capability, the write policy for the database
-    /// with no tenant, and a schema <c>BrowsableSchemas</c> admits - refused and audited in that order.
+    /// Anything else is a read of either of two capabilities: <c>BrowseDatabase</c> for a schema
+    /// <c>BrowsableSchemas</c> admits, or <c>ViewDefinitions</c> - which <c>BrowseDatabase</c> implies - for one it names
+    /// exactly (never an object Marten owns, which stays <c>BrowseDatabase</c>'s). Whichever it is: the capability, the
+    /// write policy for the database with no tenant asked with that capability's name, and the schema - refused and
+    /// audited in that order.
     /// </remarks>
     Task<DatabaseObjectDefinition> GetDefinitionAsync(
         StudioScope scope,
@@ -79,9 +82,9 @@ internal interface IDatabaseObjectService
     /// </summary>
     /// <remarks>
     /// Gated like a definition: Marten's own sequences (by name) in the store's own schemas need no
-    /// capability; anybody else's value is a <c>BrowseDatabase</c> read - the capability, both policies for
-    /// the database with no tenant, and a schema <c>BrowsableSchemas</c> admits - refused and audited in
-    /// that order, before anything is locked. A list's <see cref="DatabaseSequenceSummary.CanReadValue" />
+    /// capability; anybody else's value is a <c>BrowseDatabase</c> read - or a <c>ViewDefinitions</c> one, in a schema
+    /// <c>BrowsableSchemas</c> names exactly - the capability, both policies for the database with no tenant, and the
+    /// schema - refused and audited in that order, before anything is locked. A list's <see cref="DatabaseSequenceSummary.CanReadValue" />
     /// answers exactly this question, and its <see cref="DatabaseSequenceSummary.LastValue" /> is always
     /// <see langword="null" />. A per-tenant event sequence, or one a hidden type's column owns, is not there.
     /// </remarks>

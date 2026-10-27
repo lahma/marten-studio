@@ -87,6 +87,32 @@ internal sealed class StudioText
     /// <summary>What an empty <c>BrowsableSchemas</c> says.</summary>
     public required string BrowseEmptyListDenial { get; init; }
 
+    /// <summary>
+    /// What <c>ReadOnly</c> says about a definition: it turns both ways in - <c>ViewDefinitions</c> and
+    /// <c>BrowseDatabase</c> - off.
+    /// </summary>
+    public required string DefinitionReadOnlyDenial { get; init; }
+
+    /// <summary>What it says of a definition when both <c>ViewDefinitions</c> and <c>BrowseDatabase</c> are off.</summary>
+    public required string DefinitionCapabilityDenial { get; init; }
+
+    /// <summary>
+    /// What the write policy's refusal of a definition says, before the names of the capabilities it refused
+    /// (<see cref="DefinitionWritePolicyDenialFor" />).
+    /// </summary>
+    public required string DefinitionWritePolicyDenialHead { get; init; }
+
+    /// <summary>What closes the sentence <see cref="DefinitionWritePolicyDenialHead" /> opens.</summary>
+    public required string DefinitionWritePolicyDenialTail { get; init; }
+
+    /// <summary>
+    /// What the write policy's refusal of a definition says: <paramref name="capabilities" /> is the capability, or both,
+    /// the policy was asked about and refused - never one that is off, which nobody asked.
+    /// </summary>
+    /// <param name="capabilities">The names, as <c>ViewDefinitions</c>, <c>BrowseDatabase</c> or <c>ViewDefinitions and BrowseDatabase</c>.</param>
+    public string DefinitionWritePolicyDenialFor(string capabilities) =>
+        DefinitionWritePolicyDenialHead + capabilities + DefinitionWritePolicyDenialTail;
+
     /// <summary>What a view reading one of Marten's own tables says about its rows.</summary>
     public required string MartenDependencyDenial { get; init; }
 
@@ -469,6 +495,10 @@ internal sealed class StudioText
         BrowseWritePolicyDenial = DatabaseGate.WritePolicyDenial,
         BrowseStorePolicyDenial = DatabaseGate.StorePolicyDenial,
         BrowseEmptyListDenial = DatabaseGate.EmptyListDenial,
+        DefinitionReadOnlyDenial = DatabaseGate.DefinitionReadOnlyDenial,
+        DefinitionCapabilityDenial = DatabaseGate.DefinitionCapabilityDenial,
+        DefinitionWritePolicyDenialHead = DatabaseGate.DefinitionWritePolicyDenialHead,
+        DefinitionWritePolicyDenialTail = DatabaseGate.DefinitionWritePolicyDenialTail,
         MartenDependencyDenial = DatabaseGate.MartenDependencyDenial,
         NoSelectPrivilege = "The store's Postgres role has no SELECT privilege on it.",
         OwnSchemaFlag = "M",

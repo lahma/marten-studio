@@ -51,8 +51,9 @@ public class MartenStudioOptionsTest
         options.BrowsableSchemas.Should().BeEmpty();
         options.DiscoverTenantIds.Should().BeTrue();
 
-        // D4: every capability is off until the host says otherwise - the three 0.4 added included.
-        StudioCapabilityGuard.All.Should().HaveCount(13);
+        // D4: every capability is off until the host says otherwise - the three 0.4 added, and 0.8's ViewDefinitions, included.
+        StudioCapabilityGuard.All.Should().HaveCount(14);
+        options.Capabilities.ViewDefinitions.Should().BeFalse();
         options.Capabilities.ViewDatabaseActivity.Should().BeFalse();
         options.Capabilities.CompactStreams.Should().BeFalse();
         options.Capabilities.RunLinqQueries.Should().BeFalse();

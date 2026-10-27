@@ -19,7 +19,7 @@ namespace PostgresStudio.Services.Postgres;
 /// gate's (<see cref="DatabaseGate" />), which shows only those that exist. <c>"*"</c> admits every other schema the
 /// reading role has <c>USAGE</c> on - which is a statement about the database, not the configuration, so it can make no
 /// schema the source's own: those schemas' structure, like every row and every definition, needs
-/// <c>BrowseDatabase</c> and the write policy (D27, design PS10).
+/// <c>BrowseDatabase</c> and the write policy, or for a definition <c>ViewDefinitions</c> (D27, design PS10).
 /// </para>
 /// <para>
 /// <b>Marten's tables stay Marten's.</b> The classifier is empty, and its <c>mt_</c> rule still applies: any
