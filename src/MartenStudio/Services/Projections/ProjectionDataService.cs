@@ -155,10 +155,15 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         DaemonStatus daemon = await DescribeDaemonAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-        IReadOnlyList<ShardProgress> progress = MergeProgress(resolved, stored);
+        List<ShardProgress> merged = MergeProgress(resolved, stored);
+
+        // The orphans are not shards: their lag only grows, so they are carried apart and never sort to the top (M4).
+        IReadOnlyList<ShardProgress> progress = [.. merged.Where(static x => x.IsRegistered)];
 
         (IReadOnlyDictionary<string, ShardTrend> trends, HealthHistoryView history) =
             await TrendsAsync(resolved, daemon, progress, cancellationToken).ConfigureAwait(false);
+
+        OrphanedProgression orphans = await OrphansAsync(resolved, merged, cancellationToken).ConfigureAwait(false);
 
         return new ProjectionsView(
             stored.Projections, progress, daemon, stored.HighWaterMark, stored.ReadAt, stored.HasEventStore,
@@ -168,7 +173,79 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             HealthHistory = history,
             TenantPartitionedEvents = resolved.Store.Options.Events.UseTenantPartitionedEvents,
             DatabaseAutoCreate = Read<string?>(() => resolved.Database.AutoCreate.ToString(), null),
+            Orphans = orphans,
         };
+    }
+
+    /// <summary>
+    /// The orphaned progression rows among <paramref name="merged" />, counted for everyone the scope admits and named only
+    /// for a visitor the store policy allows for the database as a whole (M4).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The database's, not a tenant's.</b> A row is the database's bookkeeping - a projection's history, named by the
+    /// projection - so its name is read at the gate the advisor's database-wide numbers are read at
+    /// (<see cref="HealthGate.Database" />): the store policy with <c>TenantId = null</c>, which the resolver has already
+    /// asked when the scope names no tenant. A visitor short of it is told how many there are and why it is not told more.
+    /// Under <c>UseTenantPartitionedEvents</c> a tenant-scoped read sees only that tenant's rows, as every row here.
+    /// </para>
+    /// <para>
+    /// <b>Read-only, in 0.6.</b> Removing a row is the host's decision, and the studio writes no DML of its own (D6). Marten
+    /// removes one by its exact name - registered or not - with <c>IEventDatabase.DeleteProjectionProgressByShardNameAsync</c>
+    /// (marten#4785, public at <c>V9.39.0</c> and <c>v9.54.2</c>), while <c>IEventStore.DeleteProjectionProgressAsync</c>
+    /// looks the name up among the registered projections and throws <see cref="ArgumentOutOfRangeException" /> for any
+    /// other. Each row it may name carries that call, for the host's own code, and the statement, for its migrations, built
+    /// in <c>MigrationSqlText</c> - except a row the daemon may still read.
+    /// </para>
+    /// </remarks>
+    private async Task<OrphanedProgression> OrphansAsync(
+        ResolvedScope resolved,
+        IReadOnlyList<ShardProgress> merged,
+        CancellationToken cancellationToken)
+    {
+        List<ShardProgress> orphans = [.. merged.Where(static x => !x.IsRegistered && x.Classification is null or { Kind: ProgressionRowKind.Orphan })];
+
+        if (orphans.Count == 0)
+        {
+            return OrphanedProgression.None;
+        }
+
+        bool wholeDatabase = resolved.Scope.TenantId is null
+            || await authorization.IsAuthorizedAsync(
+                    new StudioScope(resolved.Registration.Key, resolved.Database.Id.Identity, null), capability: null, cancellationToken)
+                .ConfigureAwait(false);
+
+        if (!wholeDatabase)
+        {
+            return new OrphanedProgression(orphans.Count, [], OrphanWording.NamesWithheld);
+        }
+
+        string schema = EventSchemaOf(resolved);
+
+        return new OrphanedProgression(
+            orphans.Count,
+            [
+                .. orphans
+                    .OrderBy(static x => x.ShardName, StringComparer.Ordinal)
+                    .Select(x =>
+                    {
+                        ProgressionRowClass row = x.Classification
+                            ?? new ProgressionRowClass(ProgressionRowKind.Orphan, Reason: OrphanReason.NoSuchProjection);
+
+                        return new OrphanedProgressionRow(
+                            x.ShardName,
+                            x.Sequence,
+                            x.LastProgress,
+                            row.Reason ?? OrphanReason.NoSuchProjection,
+                            OrphanWording.Explain(x.ShardName, row),
+                            row.TenantId,
+                            row.ReadByDaemon,
+                            row.ReadByDaemon
+                                ? null
+                                : MigrationSqlText.DeleteRowWhereEquals(schema, ProjectionProgressQueries.ProgressionTable, "name", x.ShardName),
+                            row.ReadByDaemon ? null : OrphanWording.MartenCall(x.ShardName));
+                    }),
+            ]);
     }
 
     /// <inheritdoc />
@@ -323,7 +400,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         return AgentControlAsync(
             scope, "StartAgent", shardName,
-            (daemon, resolved, token) => StartAgentCheckedAsync(daemon, resolved, shardName, token),
+            (daemon, hosting, resolved, token) => StartAgentCheckedAsync(daemon, hosting, resolved, shardName, token),
             cancellationToken);
     }
 
@@ -334,9 +411,16 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         return AgentControlAsync(
             scope, "StopAgent", shardName,
-            // StopAgentAsync takes the exception that stopped it rather than a token: null means "asked to".
-            async (daemon, _, _) =>
+            async (daemon, hosting, _, _) =>
             {
+                // JasperFx's StopAgentAsync does nothing for a shard this daemon runs no agent for - after a pause, every
+                // shard; under HotCold, every shard another node leads - so that is refused as the no-op it is (M7).
+                if (!RunsAgent(daemon, shardName))
+                {
+                    return DaemonTopologyWording.NothingToStop(shardName, hosting.Leadership?.IsHotCold == true);
+                }
+
+                // StopAgentAsync takes the exception that stopped it rather than a token: null means "asked to".
                 await daemon.StopAgentAsync(shardName, null).ConfigureAwait(false);
                 return null;
             },
@@ -591,12 +675,21 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     // Reading
     // ------------------------------------------------------------------------------------------------
 
-    private async Task<StoredProjections> ReadStoredAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    /// <summary>
+    /// The projections screen's static model: every projection <c>Projections()</c> lists, with its shards and a composite's
+    /// members, and every subscription only the daemon's <c>AllShards()</c> lists - by name. Configuration only.
+    /// </summary>
+    /// <remarks>
+    /// A subscription registered with <c>Events.Subscribe(...)</c> is in <c>AllShards()</c> and not in <c>Projections()</c>
+    /// (<c>EventGraph</c> at <c>V9.39.0</c> and <c>v9.54.2</c>): it runs, and its progression rows are its own, so it is
+    /// listed too (M4) - never as an orphan, as 0.5's "Unregistered shards" drew it.
+    /// </remarks>
+    internal static List<ProjectionInfo> RegisteredProjectionsOf(IDocumentStore store)
     {
-        IReadOnlyList<ISubscriptionSource> sources = resolved.Store.Options.Events.Projections();
+        ArgumentNullException.ThrowIfNull(store);
 
         List<ProjectionInfo> projections = [];
-        foreach (ISubscriptionSource source in sources)
+        foreach (ISubscriptionSource source in store.Options.Events.Projections())
         {
             projections.Add(new ProjectionInfo(
                 source.Name,
@@ -610,7 +703,24 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             });
         }
 
+        HashSet<string> listed = new(projections.Select(static x => x.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (string member in projections.SelectMany(static x => x.MemberShardNames))
+        {
+            if (ShardName.TryParse(member, out ShardName? parsed) && parsed is not null)
+            {
+                listed.Add(parsed.Name);
+            }
+        }
+
+        projections.AddRange(ProgressionRowClassifier.SubscriptionsOf(store, listed));
         projections.Sort(static (left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+
+        return projections;
+    }
+
+    private async Task<StoredProjections> ReadStoredAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        List<ProjectionInfo> projections = RegisteredProjectionsOf(resolved.Store);
 
         // One read connection for both numbers, on the database the scope resolved - never
         // IMartenDatabase.AllProjectionProgress or FetchHighestEventSequenceNumber, which migrate before
@@ -807,7 +917,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             stored.Progress,
             liveState.Latest(resolved.Registration.Key, resolved.Database.Id.Identity),
             stored.HighWaterMark,
-            stored.Rows);
+            stored.Rows,
+            ProgressionRowClassifier.For(resolved.Store, stored.Projections));
 
     /// <summary>
     /// The shard rows the page draws, from three sources - each projection's own shards, a composite's members, and the
@@ -826,13 +937,21 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// projection is the agent that row belongs to, so its claim is settled before any composite is looked at - which a
     /// single pass in name order would get wrong whenever the composite sorts first.
     /// </para>
+    /// <para>
+    /// <b>Then each tenant's rows, under <c>UseTenantPartitionedEvents</c></b> (M4, <paramref name="classifier" />): the
+    /// daemon runs one agent per shard and tenant there, and each writes <c>{Name}:{ShardKey}:{tenant}</c>. They are the
+    /// shard's, drawn under its projection with their tenant - and a shard that has tenant rows and no store-global row of
+    /// its own is not drawn a second time as "never started": its agents are the tenants'. Whatever is left is an orphan,
+    /// carried with its <see cref="ShardProgress.Classification" /> and <see cref="ShardProgress.IsRegistered" /> off.
+    /// </para>
     /// </remarks>
     internal static List<ShardProgress> MergeProgress(
         IReadOnlyList<ProjectionInfo> projections,
         IReadOnlyList<ShardState> stored,
         IReadOnlyDictionary<string, ShardState> live,
         long highWaterMark,
-        IReadOnlyDictionary<string, ProgressionRow>? rows)
+        IReadOnlyDictionary<string, ProgressionRow>? rows,
+        ProgressionRowClassifier? classifier = null)
     {
         ArgumentNullException.ThrowIfNull(projections);
         ArgumentNullException.ThrowIfNull(stored);
@@ -844,6 +963,25 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             if (row.ShardName is { Length: > 0 } name && !IsBookkeepingRow(name))
             {
                 byShard[name] = row;
+            }
+        }
+
+        // What each row is, by the store's configuration - once, before anything is drawn, so a shard can tell it has
+        // tenants of its own.
+        Dictionary<string, ProgressionRowClass> classes = new(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> withTenantRows = new(StringComparer.OrdinalIgnoreCase);
+
+        if (classifier is not null)
+        {
+            foreach (string name in byShard.Keys)
+            {
+                ProgressionRowClass row = classifier.Classify(name);
+                classes[name] = row;
+
+                if (row.Kind == ProgressionRowKind.TenantShard && ShardName.TryParse(name, out ShardName? parsed) && parsed is not null)
+                {
+                    withTenantRows.Add(ShardName.Compose(parsed.Name, parsed.ShardKey, null, parsed.Version).Identity);
+                }
             }
         }
 
@@ -859,6 +997,14 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         {
             foreach (string shardName in projection.ShardNames)
             {
+                // Under per-tenant partitioning a shard whose tenants have rows, and which has none of its own, runs as
+                // its tenants' agents: those rows are drawn below, and a "never started" row beside them would say the
+                // opposite of what is happening.
+                if (!byShard.ContainsKey(shardName) && withTenantRows.Contains(shardName))
+                {
+                    continue;
+                }
+
                 if (!rendered.Add(shardName))
                 {
                     continue;
@@ -885,15 +1031,35 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             }
         }
 
+        // Pass three: each tenant's rows of a registered shard or member, under per-tenant partitioning - the shard's own,
+        // drawn under the projection that runs it, with the tenant they are for.
+        foreach (KeyValuePair<string, ShardState> row in byShard)
+        {
+            if (classes.GetValueOrDefault(row.Key) is { Kind: ProgressionRowKind.TenantShard, Projection: { } owner } tenantRow
+                && rendered.Add(row.Key))
+            {
+                ShardProgress built = Build(row.Key, owner, row.Value, live.GetValueOrDefault(row.Key), highWaterMark, isRegistered: true, rows?.GetValueOrDefault(row.Key));
+
+                // A row read from the table carries no tenant (ShardState's string constructor sets none): the name does.
+                progress.Add(built with
+                {
+                    TenantId = built.TenantId ?? tenantRow.TenantId,
+                    IsCompositeMember = tenantRow.OfCompositeMember,
+                    Classification = tenantRow,
+                });
+            }
+        }
+
         // Rows the database has that the configuration does not: a projection that was removed from the
-        // host's registration still has progress, and hiding it would hide the reason a table is stale.
-        // They are marked rather than mixed in, so the page can render them under their own heading
-        // instead of inventing a projection row for a projection this store no longer has.
+        // host's registration still has progress, and hiding it would hide the reason something reads it as
+        // stale. They are marked rather than mixed in, so the view can carry them as orphans (M4) instead of
+        // inventing a projection row for a projection this store no longer has.
         foreach (KeyValuePair<string, ShardState> orphan in byShard)
         {
             if (rendered.Add(orphan.Key))
             {
-                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), highWaterMark, isRegistered: false, rows?.GetValueOrDefault(orphan.Key)));
+                progress.Add(Build(orphan.Key, ProjectionNameOf(orphan.Key), orphan.Value, live.GetValueOrDefault(orphan.Key), highWaterMark, isRegistered: false, rows?.GetValueOrDefault(orphan.Key))
+                    with { Classification = classes.GetValueOrDefault(orphan.Key) });
             }
         }
 
@@ -1004,7 +1170,37 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             databases,
             agentPauseMilliseconds,
             RebuildingProjectionsOf(daemon, resolved.Store),
-            StopAndDrainMillisecondsOf(resolved.Store));
+            StopAndDrainMillisecondsOf(resolved.Store))
+        {
+            Coordination = hosting.Coordination,
+            Distribution = hosting.Leadership?.Distribution ?? DaemonDistribution.Unknown,
+            Leadership = LeadershipOf(hosting, resolved.Store),
+        };
+    }
+
+    /// <summary>
+    /// Under HotCold, whether this node holds the leadership lock of each registered async shard, by store-global identity
+    /// (M7) - asked of the coordinator's distributor in memory (<see cref="DaemonLeadership" />); empty under any other
+    /// coordination, and for a shard it could not tell.
+    /// </summary>
+    private static Dictionary<string, bool> LeadershipOf(DaemonHosting hosting, IDocumentStore store)
+    {
+        Dictionary<string, bool> leads = new(StringComparer.OrdinalIgnoreCase);
+
+        if (hosting.Leadership is not { IsHotCold: true } leadership)
+        {
+            return leads;
+        }
+
+        foreach (ShardName shard in MartenStudio.Services.Health.Checks.DaemonCheckConfiguration.AsyncShardsOf(store))
+        {
+            if (leadership.Leads(shard) is { } led)
+            {
+                leads[shard.Identity] = led;
+            }
+        }
+
+        return leads;
     }
 
     /// <summary>
@@ -1212,7 +1408,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         StudioScope scope,
         string action,
         string target,
-        Func<IProjectionDaemon, ResolvedScope, CancellationToken, Task<string?>> operation,
+        Func<IProjectionDaemon, DaemonHosting, ResolvedScope, CancellationToken, Task<string?>> operation,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -1248,7 +1444,10 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                 throw new StudioDaemonNotHostedException(hosting.Explanation);
             }
 
-            if (controlState.Find(resolved.Registration.Key) is null)
+            // The leadership loop is what undoes a single agent's start or stop, so it is what the pause is for. A coordinator
+            // with no loop - MartenDaemonModeIsSolo()'s ExplicitProjectionCoordinator - starts and stops nothing on its own,
+            // and its Start and Stop mean what they say without one (M7).
+            if (hosting.Coordination != DaemonCoordination.Explicit && controlState.Find(resolved.Registration.Key) is null)
             {
                 string reason = DaemonControlMessages.AgentControlNeedsPause(
                     LeadershipPollingTimeOf(resolved.Store),
@@ -1265,7 +1464,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             // A control the daemon did not do is refused, not done: audited as such, with the daemon's reason, and shown
             // as a hint rather than a success toast. From JasperFx 2.86 a start during a rebuild returned quietly and was
             // audited here as a success - StartAgentCheckedAsync is what reads whether anything started.
-            if (await operation(daemon, resolved, cancellationToken).ConfigureAwait(false) is { } refusal)
+            if (await operation(daemon, hosting, resolved, cancellationToken).ConfigureAwait(false) is { } refusal)
             {
                 audit.Record(action, target, false, refusal, capability, scope);
                 cache.InvalidatePrefix(CachePrefix(scope));

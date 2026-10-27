@@ -364,6 +364,7 @@ internal sealed partial class ProjectionDataService
     /// <returns>The refusal, in words a page can show, or <see langword="null" /> when every shard started.</returns>
     private async Task<string?> StartAgentCheckedAsync(
         IProjectionDaemon daemon,
+        DaemonHosting hosting,
         ResolvedScope resolved,
         string shardName,
         CancellationToken cancellationToken)
@@ -391,7 +392,7 @@ internal sealed partial class ProjectionDataService
 
         foreach (ShardName target in targets)
         {
-            if (await StartOneAsync(daemon, storeKey, databaseId, target, cancellationToken).ConfigureAwait(false) is { } refusal)
+            if (await StartOneAsync(daemon, hosting, storeKey, databaseId, target, cancellationToken).ConfigureAwait(false) is { } refusal)
             {
                 refusals.Add(refusal);
             }
@@ -402,11 +403,26 @@ internal sealed partial class ProjectionDataService
 
     private async Task<string?> StartOneAsync(
         IProjectionDaemon daemon,
+        DaemonHosting hosting,
         string storeKey,
         string databaseId,
         ShardName target,
         CancellationToken cancellationToken)
     {
+        // M7: a start the daemon would make a no-op of - its agent is running already, and JasperFx's start is idempotent -
+        // is said so rather than audited as a start. Not recorded for D05: nothing is wrong with the shard.
+        if (RunsAgentNow(daemon, target.Identity))
+        {
+            return DaemonTopologyWording.AlreadyRunning(target.Identity);
+        }
+
+        // M7: under HotCold a shard runs on the node that holds its lock. A studio pause keeps this node's locks, so a lock
+        // it does not hold is another node's, or nobody's - and an agent started here would run beside that node's.
+        if (hosting.Leadership is { IsHotCold: true } leadership && leadership.Leads(target) == false)
+        {
+            return DaemonTopologyWording.LedElsewhere(target.Identity);
+        }
+
         if (operations.RunningFor(storeKey, databaseId).FirstOrDefault(x =>
                 string.Equals(x.Kind, "Rebuild", StringComparison.Ordinal)
                 && string.Equals(x.Target, target.Name, StringComparison.OrdinalIgnoreCase)) is { } rebuild)
@@ -451,6 +467,15 @@ internal sealed partial class ProjectionDataService
         controlState.ClearStartRefusal(storeKey, databaseId, target.Identity);
         return null;
     }
+
+    /// <summary>Whether <paramref name="daemon" /> has an agent for <paramref name="shardName" /> - running, paused or stopping.</summary>
+    internal static bool RunsAgent(IProjectionDaemon daemon, string shardName) =>
+        Read(() => daemon.CurrentAgents().Any(x => string.Equals(x.Name.Identity, shardName, StringComparison.OrdinalIgnoreCase)), false);
+
+    /// <summary>Whether <paramref name="daemon" /> has a running agent for <paramref name="shardName" />, which a start leaves as it is.</summary>
+    internal static bool RunsAgentNow(IProjectionDaemon daemon, string shardName) =>
+        Read(() => daemon.CurrentAgents().Any(x =>
+            string.Equals(x.Name.Identity, shardName, StringComparison.OrdinalIgnoreCase) && x.Status == AgentStatus.Running), false);
 
     private string RefuseStart(string storeKey, string databaseId, ShardName target, string? reason, bool? transient, string message)
     {

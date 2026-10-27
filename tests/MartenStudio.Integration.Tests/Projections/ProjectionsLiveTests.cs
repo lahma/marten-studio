@@ -288,8 +288,8 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
     /// <para>
     /// A fourth row, <c>RetiredProjection:All</c>, is the control and is what makes the rest
     /// non-vacuous: it is written the same way, at the same sequence, and it <em>does</em> arrive - as an
-    /// unregistered shard, and as the worst lag on the screen. Without it "no bookkeeping row appeared"
-    /// would also pass on a read path that had stopped seeing progression rows at all.
+    /// orphaned progression row (M4), which is never a lag on the screen either. Without it "no bookkeeping
+    /// row appeared" would also pass on a read path that had stopped seeing progression rows at all.
     /// </para>
     /// <para>
     /// Everything is written at sequence 1 because the failure this is about is a sort: the table is
@@ -321,9 +321,9 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
                     ProjectionsView view = await Fixture.UseAsync(
                         service => service.GetProjectionsAsync(Fixture.Scope, Token));
 
-                    return view.UnregisteredShards.Any(x => x.ShardName == control);
+                    return view.Orphans.Rows.Any(x => x.Name == control);
                 },
-                $"the control row {control} to arrive as an unregistered shard",
+                $"the control row {control} to arrive as an orphaned progression row",
                 cancellationToken: Token);
 
             // And no bookkeeping row ever does - held across the snapshot cache's whole time-to-live
@@ -336,7 +336,7 @@ public class ProjectionsLiveTests(PostgresFixture postgres) : ProjectionsTestBas
 
                     return bookkeeping.All(row =>
                         view.Progress.All(x => x.ShardName != row)
-                        && view.UnregisteredShards.All(x => x.ShardName != row)
+                        && view.Orphans.Rows.All(x => x.Name != row)
                         && view.Projections.All(x => x.Name != row));
                 },
                 "Marten's bookkeeping rows staying out of the projections table",

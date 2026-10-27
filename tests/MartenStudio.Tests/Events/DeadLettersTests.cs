@@ -5,6 +5,7 @@ using JasperFx.Events.Projections;
 using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
 using PostgresStudio.Services;
 
@@ -303,6 +304,40 @@ public class DeadLettersTests
 
         rewind.HasAttribute("disabled").Should().BeTrue();
         rewind.GetAttribute("title").Should().Contain("runs Inline");
+    }
+
+    /// <summary>
+    /// M7: under HotCold the daemon's rewind restarts the subscription's agents on the node it is asked of, so a node that
+    /// does not hold the projection's leadership lock would start them beside the node that does. Disabled, and saying so.
+    /// </summary>
+    [Fact]
+    public async Task Rewinding_is_disabled_under_HotCold_on_a_node_another_leads_the_projection_from()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.ProjectionData.WithCoordination(
+            DaemonCoordination.LeadershipLoop,
+            DaemonDistribution.PerShard,
+            new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["OrderSummary:All"] = false });
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+
+        AngleSharp.Dom.IElement rewind = RewindButton(page);
+
+        rewind.HasAttribute("disabled").Should().BeTrue();
+        rewind.GetAttribute("title").Should().Be(DaemonTopologyWording.RewindLedElsewhere("OrderSummary"));
+    }
+
+    /// <summary>M7: a rewind restarts the agents at once even while the studio's pause holds, and its dialog says so.</summary>
+    [Fact]
+    public async Task Rewinding_while_the_studio_pause_holds_says_the_agents_start_now()
+    {
+        using StudioComponentContext context = await RewindableAsync();
+        context.ProjectionData.WithStudioPause();
+
+        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
+        await RewindButton(page).ClickAsync(new());
+
+        page.Find(".ms-confirm-dialog").TextContent.Should().Contain(DaemonTopologyWording.RewindWhilePaused.Trim());
     }
 
     [Fact]

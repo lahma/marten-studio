@@ -185,20 +185,74 @@ public class TenantPartitionedEventsLiveTests(PostgresFixture postgres) : IAsync
     /// </summary>
     /// <remarks>
     /// Through <see cref="IProjectionDataService" />, so the scope resolution and the tenant filter are
-    /// the product's own. The rows arrive under <c>UnregisteredShards</c> rather than <c>Progress</c>,
-    /// and that is correct rather than incidental: the shard identities the view has rows for come from
-    /// the store's projection registration, which is store-global (<c>DailySales:All</c>), so a
-    /// <c>DailySales:All:{tenant}</c> row is a progression row the configuration does not name. The
-    /// studio draws those in their own section instead of inventing a projection for them.
+    /// the product's own. Under per-tenant partitioning the daemon runs one agent per shard and tenant, and
+    /// each writes <c>DailySales:All:{tenant}</c>: a tenant's row of a registered shard, drawn under
+    /// <c>DailySales</c> with its tenant (M4). 0.5 drew them as "Unregistered shards", because the
+    /// registration names only the store-global <c>DailySales:All</c>.
     /// </remarks>
     [PostgresFact]
     public async Task A_tenant_scoped_read_sees_only_that_tenants_progression_rows()
     {
-        IReadOnlyList<string> acme = await UnregisteredShardsAsync(Acme);
-        IReadOnlyList<string> corp = await UnregisteredShardsAsync(AcmeCorp);
+        IReadOnlyList<string> acme = await TenantRowsAsync(Acme);
+        IReadOnlyList<string> corp = await TenantRowsAsync(AcmeCorp);
 
         acme.Should().Equal($"DailySales:All:{Acme}");
         corp.Should().Equal($"DailySales:All:{AcmeCorp}");
+    }
+
+    /// <summary>
+    /// M4: a per-tenant store shows no orphaned progression row - each tenant's row of a registered shard is that
+    /// shard's - and a row nothing registers, a tenant's included, is still one.
+    /// </summary>
+    /// <remarks>
+    /// The orphan is the control: written the same way, for a tenant, and named by no registration, it arrives - so
+    /// "no orphan" is not a read that sees no rows. It is counted for a scope pinned to its tenant and to nobody else's.
+    /// </remarks>
+    [PostgresFact]
+    public async Task Each_tenants_row_of_a_registered_shard_is_that_shards_and_no_orphan()
+    {
+        ProjectionsView all = await ViewAsync(null);
+
+        all.Orphans.Count.Should().Be(0, "every tenant's row here is a registered shard's");
+        all.Progress.Where(static x => x.ProjectionName == "DailySales").Select(static x => x.ShardName).Should().BeEquivalentTo(
+            ["DailySales:All", $"DailySales:All:{Acme}", $"DailySales:All:{AcmeCorp}", $"DailySales:All:{AcmeXCorp}"]);
+
+        foreach ((string tenant, _) in Seeded)
+        {
+            ShardProgress row = all.Progress.Should().ContainSingle(x => x.ShardName == "DailySales:All:" + tenant).Subject;
+            row.IsRegistered.Should().BeTrue();
+            row.TenantId.Should().Be(tenant, "the row's tenant, read from its name");
+            row.Classification!.Kind.Should().Be(ProgressionRowKind.TenantShard);
+        }
+
+        await WriteProgressionRowAsync($"RetiredProjection:All:{Acme}", 5);
+
+        try
+        {
+            // Waited on, not read once: the stored read is shared through the snapshot cache for its time-to-live.
+            ProjectionsView? after = null;
+            await ProjectionsFixture.WaitForAsync(
+                async () => (after = await ViewAsync(null)).Orphans.Count == 1,
+                "the control row to arrive as an orphan",
+                cancellationToken: Token);
+
+            OrphanedProgressionRow orphan = after!.Orphans.Rows.Should().ContainSingle().Subject;
+            orphan.Name.Should().Be($"RetiredProjection:All:{Acme}");
+            orphan.TenantId.Should().Be(Acme);
+            orphan.Reason.Should().Be(OrphanReason.NoSuchProjection);
+            after.Progress.Should().NotContain(x => x.ShardName == orphan.Name, "an orphan is never a shard's row");
+
+            await ProjectionsFixture.WaitForAsync(
+                async () => (await ViewAsync(Acme)).Orphans.Count == 1,
+                "acme's scope to read acme's orphan",
+                cancellationToken: Token);
+
+            (await ViewAsync(AcmeCorp)).Orphans.Count.Should().Be(0, "acme_corp's scope reads none of acme's rows");
+        }
+        finally
+        {
+            await DeleteProgressionRowAsync($"RetiredProjection:All:{Acme}");
+        }
     }
 
     /// <summary>
@@ -238,16 +292,34 @@ public class TenantPartitionedEventsLiveTests(PostgresFixture postgres) : IAsync
         ]);
     }
 
-    /// <summary>The unregistered shard names one tenant's scope reports, in order.</summary>
-    private async Task<IReadOnlyList<string>> UnregisteredShardsAsync(string tenantId)
+    /// <summary>The tenants' shard rows one tenant's scope reports, in order.</summary>
+    private async Task<IReadOnlyList<string>> TenantRowsAsync(string tenantId)
+    {
+        ProjectionsView view = await ViewAsync(tenantId);
+
+        return [.. view.Progress.Where(static x => x.TenantId is not null).Select(static x => x.ShardName).Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The projections view for this store's one database, optionally pinned to a tenant.</summary>
+    private async Task<ProjectionsView> ViewAsync(string? tenantId)
     {
         await using AsyncServiceScope scope = Provider.CreateAsyncScope();
 
         var service = scope.ServiceProvider.GetRequiredService<IProjectionDataService>();
 
-        ProjectionsView view = await service.GetProjectionsAsync(ScopeFor(tenantId), Token);
+        return await service.GetProjectionsAsync(ScopeFor(tenantId), Token);
+    }
 
-        return [.. view.UnregisteredShards.Select(x => x.ShardName).Order(StringComparer.Ordinal)];
+    private async Task DeleteProgressionRowAsync(string name)
+    {
+        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+
+        await using var command = new NpgsqlCommand(
+            $"""delete from "{eventSchema}"."mt_event_progression" where name = @name""", connection);
+
+        command.Parameters.AddWithValue("name", name);
+
+        await command.ExecuteNonQueryAsync(Token);
     }
 
     /// <summary>The progression names the studio's own read returns for one tenant filter.</summary>

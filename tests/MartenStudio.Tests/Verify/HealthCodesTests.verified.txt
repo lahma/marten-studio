@@ -18,6 +18,7 @@ D06 | Daemon | - | projection | Marten | since 0.4 | current
 D07 | Daemon | - | - | Marten | since 0.4 | current
 D08 | Daemon | - | shard | Marten | since 0.4 | current
 D09 | Daemon | mark-ahead, shard-ahead, sequence-behind | `mark-ahead`: progression row; `shard-ahead`: shard; `sequence-behind`: sequence | Marten | since 0.5 | current
+D10 | Daemon | - | projection | Marten | since 0.6 | current
 E02 | Events | - | - | Marten | since 0.4 | current
 E03 | Events | - | stream | Marten | since 0.4 | current
 E04 | Events | - | - | Marten | since 0.4 | current

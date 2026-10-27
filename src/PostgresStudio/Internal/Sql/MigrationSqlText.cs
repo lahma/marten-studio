@@ -257,6 +257,29 @@ internal static partial class MigrationSqlText
         }
     }
 
+    // ---- M4 -----------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>DELETE FROM schema.table WHERE column = 'value';</c> - one row by a text key, for the host's own migrations - or
+    /// <see langword="null" /> when a name cannot be printed honestly, or the value cannot be written as a literal that
+    /// reads on screen as what it is (<see cref="SqlLiteralText.IsPrintableText" />, <see cref="SqlLiteralText.Literal" />).
+    /// </summary>
+    /// <remarks>
+    /// Data, never schema, and never run by the studio: the value is the studio's own read of a row, printed as a literal
+    /// because a migration has nowhere to put a parameter.
+    /// </remarks>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="column">The key column.</param>
+    /// <param name="value">The row's key.</param>
+    public static string? DeleteRowWhereEquals(string schema, string table, string column, string value) =>
+        IsQuotable(column)
+        && SqlLiteralText.IsPrintableText(value)
+        && SqlLiteralText.Literal(value) is { } literal
+        && Qualified(schema, table) is { } qualified
+            ? "DELETE FROM " + qualified + " WHERE " + SqlIdentifier.Quote(column) + " = " + literal + ";"
+            : null;
+
     /// <summary>Whether <paramref name="parameter" /> has a storage parameter's shape: lower-case letters and underscores.</summary>
     public static bool IsParameterName(string? parameter) => parameter is { Length: > 0 } && ParameterName().IsMatch(parameter);
 

@@ -257,6 +257,7 @@
                           HighWaterAge="@HighWaterAgeText"
                           HighWaterMark="view.HighWaterMark"
                           Explanation="@view.Daemon.Explanation"
+                          Topology="@DaemonTopologyWording.Describe(view.Daemon)"
                           IsPausedByStudio="view.Daemon.IsPausedByStudio"
                           PausedByUser="@view.Daemon.PausedByStudio?.User"
                           PausedAtText="@PausedAtText"
@@ -414,7 +415,9 @@
                                            IsRebuilding="IsRebuilding(projection.Name)"
                                            RebuildingBy="@RebuildingBy(projection.Name)">
                                 <Actions>
-                                    @if (!Capabilities.ReadOnly && !ExternallyManaged)
+                                    @* A subscription registered with Events.Subscribe(...) has no projection to rebuild: the
+                                       service refuses one by name, so it is not offered. *@
+                                    @if (!Capabilities.ReadOnly && !ExternallyManaged && !projection.IsSubscription)
                                     {
                                         <button type="button"
                                                 class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
@@ -446,6 +449,13 @@
                                         {
                                             <span class="ms-badge ms-shard-composite-member"
                                                   title="@($"A member of the composite projection {shard.ProjectionName}: its agent advances this row in its own batch")">member</span>
+                                        }
+                                        @* M7: under HotCold a shard runs on whichever node holds its leadership lock - said per row,
+                                           because it decides what Start and Stop on this row can do from here. *@
+                                        @if (view.Daemon.IsHotCold && !shard.IsCompositeMember && view.Daemon.LeadsHere(shard.ShardName) is { } leads)
+                                        {
+                                            <span class="@(leads ? "ms-badge ms-shard-node ms-shard-node-here" : "ms-badge ms-shard-node ms-shard-node-elsewhere")"
+                                                  title="@(leads ? "This node holds this shard's HotCold leadership lock, so it is the node that runs it." : "Another node holds this shard's HotCold leadership lock, or none does yet: this node does not run it.")">@(leads ? "this node" : "another node")</span>
                                         }
                                     </td>
                                     <td class="ms-table-cell" colspan="3">
@@ -508,15 +518,15 @@
                                                hint on the card - says exactly what would make it work. *@
                                             <button type="button"
                                                     class="ms-btn ms-btn-sm ms-shard-start"
-                                                    disabled="@(!AgentControlEnabled || IsRebuilding(shard.ProjectionName))"
+                                                    disabled="@(!AgentControlEnabled || IsRebuilding(shard.ProjectionName) || StartNoOp(shard) is not null)"
                                                     title="@StartTitle(shard)"
                                                     @onclick="() => StartAgentAsync(shard.ShardName)">
                                                 Start
                                             </button>
                                             <button type="button"
                                                     class="ms-btn ms-btn-sm ms-shard-stop"
-                                                    disabled="@(!AgentControlEnabled)"
-                                                    title="@(AgentControlTitle is { Length: > 0 } refused ? refused : DrainSentence)"
+                                                    disabled="@(!AgentControlEnabled || StopNoOp(shard) is not null)"
+                                                    title="@StopTitle(shard)"
                                                     @onclick="() => StopAgentAsync(shard.ShardName)">
                                                 Stop
                                             </button>
@@ -539,57 +549,82 @@
             </p>
         }
 
-        @if (view.UnregisteredShards.Count > 0)
+        @if (view.Orphans.Count > 0)
         {
-            @* Progression rows nothing in this store's StoreOptions claims. Hiding them would hide the
-               reason a table nobody writes to any more is still there, and the reason a shard name in
-               the logs is in no table on this page. *@
-            <section class="ms-unregistered-shards" aria-labelledby="ms-unregistered-shards-title">
-                <h2 class="ms-section-title" id="ms-unregistered-shards-title">Unregistered shards</h2>
-                <p class="ms-muted ms-unregistered-shards-note">
-                    These shards have rows in <code>mt_event_progression</code> and no projection in this
-                    store's <code>StoreOptions</code> claims them - a projection that was removed, renamed
-                    or given a new version. Nothing advances them, and they cannot be started or rebuilt
-                    from here.
-                </p>
+            @* M4: progression rows nothing this store registers advances - 0.5's "Unregistered shards", less the rows that
+               were never orphans (a subscription's, and each tenant's row of a registered shard), which are drawn under
+               their projection above. Counted for everyone the scope admits, named only for a visitor the store policy
+               allows for the whole database. Read-only: Marten has no call that removes one, and the studio writes no DML
+               (D6) - the statements are text for the host's own migrations. *@
+            <section class="ms-orphaned-progression" aria-labelledby="ms-orphaned-progression-title">
+                <h2 class="ms-section-title" id="ms-orphaned-progression-title">@OrphanWording.Heading</h2>
+                <p class="ms-orphaned-progression-count"><strong>@OrphanWording.Count(view.Orphans.Count)</strong></p>
+                <p class="ms-muted ms-orphaned-progression-note">@OrphanWording.HandOver</p>
 
-                <TableScroll Label="Unregistered shards table">
-                    <table class="ms-table ms-unregistered-shards-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Shard</th>
-                                <th scope="col">Sequence</th>
-                                <th scope="col">Lag</th>
-                                <th scope="col">Last advanced</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (ShardProgress shard in view.UnregisteredShards)
-                            {
-                                <tr class="ms-table-row ms-unregistered-shard-row"
-                                    @key="shard.ShardName"
-                                    data-unregistered-shard="@shard.ShardName">
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @shard.ShardName
-                                        @if (shard.TenantId is { Length: > 0 })
-                                        {
-                                            <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
-                                        }
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
-                                        @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
-                                    </td>
+                @if (!view.Orphans.NamesShown)
+                {
+                    <p class="ms-muted ms-orphaned-progression-withheld" role="status">@view.Orphans.Withheld</p>
+                }
+                else
+                {
+                    <TableScroll Label="Orphaned progression rows table">
+                        <table class="ms-table ms-orphaned-progression-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Row</th>
+                                    <th scope="col">Position</th>
+                                    <th scope="col" title="mt_event_progression.last_updated, in the database server's time">Last written</th>
+                                    <th scope="col">Why nothing advances it</th>
                                 </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (OrphanedProgressionRow orphan in view.Orphans.Rows)
+                                {
+                                    <tr class="ms-table-row ms-orphaned-progression-row"
+                                        @key="orphan.Name"
+                                        data-orphaned-row="@orphan.Name">
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @orphan.Name
+                                            @if (orphan.TenantId is { Length: > 0 })
+                                            {
+                                                <span class="ms-badge ms-shard-tenant">@orphan.TenantId</span>
+                                            }
+                                            @if (orphan.ReadByDaemon)
+                                            {
+                                                <span class="ms-badge ms-chip-warning ms-orphan-read" title="The daemon reads this row each time the registered version starts">read by the daemon</span>
+                                            }
+                                        </td>
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @orphan.Sequence.ToString("N0", CultureInfo.InvariantCulture)
+                                        </td>
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @(orphan.LastUpdated is { } updated ? State.FormatInSelectedTimeZone(updated) : "not recorded")
+                                        </td>
+                                        <td class="ms-table-cell ms-orphaned-progression-reason">@orphan.Explanation</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+
+                    @if (view.Orphans.RemovalStatements.Count > 0 || view.Orphans.RemovalCalls.Count > 0)
+                    {
+                        <details class="ms-orphaned-progression-sql">
+                            <summary>@OrphanWording.SqlHeading</summary>
+                            @if (view.Orphans.RemovalCalls.Count > 0)
+                            {
+                                <p class="ms-muted">@OrphanWording.CallLead</p>
+                                <pre class="ms-orphaned-progression-statements ms-orphaned-progression-calls"><code>@string.Join("\n", view.Orphans.RemovalCalls)</code></pre>
                             }
-                        </tbody>
-                    </table>
-                </TableScroll>
+                            @if (view.Orphans.RemovalStatements.Count > 0)
+                            {
+                                <p class="ms-muted">@OrphanWording.SqlLead</p>
+                                <pre class="ms-orphaned-progression-statements ms-orphaned-progression-sql-statements"><code>@string.Join("\n", view.Orphans.RemovalStatements)</code></pre>
+                            }
+                            <p class="ms-muted">@OrphanWording.SqlNote</p>
+                        </details>
+                    }
+                }
             </section>
         }
     }
@@ -990,7 +1025,10 @@
         : view?.Daemon.IsRebuildingHere(projectionName) == true ? "on this daemon, by something other than Marten Studio"
         : null;
 
-    /// <summary>The hover text of a shard's Start: the controls' own refusal first, then a rebuild of its projection.</summary>
+    /// <summary>
+    /// The hover text of a shard's Start: the controls' own refusal first, then a rebuild of its projection, then what the
+    /// daemon topology makes of it here (M7).
+    /// </summary>
     private string StartTitle(ShardProgress shard)
     {
         if (AgentControlTitle is { Length: > 0 } refused)
@@ -1003,8 +1041,30 @@
             return $"{shard.ProjectionName} is being rebuilt {RebuildingBy(shard.ProjectionName)}. A continuous agent started now would run beside the replay; start it once the rebuild has finished.";
         }
 
+        if (StartNoOp(shard) is { } topology)
+        {
+            return topology;
+        }
+
         return DaemonLightUp.CanTellRebuilding ? string.Empty : StartBlindToRebuilds;
     }
+
+    /// <summary>The hover text of a shard's Stop: the controls' own refusal, then a stop that would stop nothing here, then the drain.</summary>
+    private string StopTitle(ShardProgress shard) =>
+        AgentControlTitle is { Length: > 0 } refused ? refused
+        : StopNoOp(shard) is { } topology ? topology
+        : DrainSentence;
+
+    /// <summary>
+    /// M7: why a Start would do nothing here or is refused - the agent runs here already, or under HotCold another node leads
+    /// the shard - once the controls are offered at all; the service refuses the same regardless (hard rule 5).
+    /// </summary>
+    private string? StartNoOp(ShardProgress shard) =>
+        AgentControlEnabled && view is not null ? DaemonTopologyWording.StartRefusal(view.Daemon, shard.ShardName) : null;
+
+    /// <summary>M7: why a Stop would do nothing here - no agent of this node runs the shard - once the controls are offered.</summary>
+    private string? StopNoOp(ShardProgress shard) =>
+        AgentControlEnabled && view is not null ? DaemonTopologyWording.StopRefusal(view.Daemon, shard.ShardName) : null;
 
     /// <summary>
     /// What Start says on a Marten whose daemon cannot tell anybody it is rebuilding (below 9.50, JasperFx 2.86): a
@@ -1603,9 +1663,10 @@
     /// The progress rows belonging to one projection, worst first.
     /// </summary>
     /// <remarks>
-    /// Only the rows a registered shard name claims. A progression row whose shard this projection no
-    /// longer runs - a version bump that changed the shard keys, say - belongs under "Unregistered
-    /// shards", not under a projection that would never advance it.
+    /// Only the rows a registered shard claims - its own, a composite's members' and, under per-tenant
+    /// partitioning, each tenant's. A progression row whose shard this projection no longer runs - a
+    /// version bump that changed the shard keys, say - is an orphan (M4), not a row of a projection that
+    /// would never advance it.
     /// </remarks>
     private IEnumerable<ShardProgress> ShardsOf(ProjectionInfo projection)
     {

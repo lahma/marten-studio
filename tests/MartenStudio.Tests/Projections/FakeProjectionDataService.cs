@@ -148,18 +148,45 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         return this;
     }
 
+    /// <summary>The orphaned progression rows the view carries (M4).</summary>
+    public OrphanedProgression Orphans { get; set; } = OrphanedProgression.None;
+
     /// <summary>
-    /// Adds a progression row no registered projection claims - a projection that was removed or renamed.
+    /// Adds a progression row nothing this store registers advances - a projection that was removed or renamed - with the
+    /// statement that removes it, as the service builds one.
     /// </summary>
-    public FakeProjectionDataService WithUnregisteredShard(string shardName, long sequence = 10)
+    public FakeProjectionDataService WithOrphan(
+        string name,
+        long sequence = 10,
+        OrphanReason reason = OrphanReason.NoSuchProjection,
+        bool readByDaemon = false,
+        string? tenantId = null)
     {
-        int separator = shardName.IndexOf(':', StringComparison.Ordinal);
-        string projectionName = separator > 0 ? shardName[..separator] : shardName;
+        ProgressionRowClass row = new(ProgressionRowKind.Orphan, Reason: reason, TenantId: tenantId, ReadByDaemon: readByDaemon);
 
-        progress.Add(new ShardProgress(
-            shardName, projectionName, sequence, HighWaterMark, null, null, null,
-            DateTimeOffset.UnixEpoch, null, null, true, false, IsRegistered: false));
+        Orphans = new OrphanedProgression(
+            Orphans.Count + 1,
+            [
+                .. Orphans.Rows,
+                new OrphanedProgressionRow(
+                    name,
+                    sequence,
+                    DateTimeOffset.UnixEpoch,
+                    reason,
+                    OrphanWording.Explain(name, row),
+                    tenantId,
+                    readByDaemon,
+                    readByDaemon ? null : PostgresStudio.Internal.Sql.MigrationSqlText.DeleteRowWhereEquals("events", "mt_event_progression", "name", name),
+                    readByDaemon ? null : OrphanWording.MartenCall(name)),
+            ]);
 
+        return this;
+    }
+
+    /// <summary>Says the visitor is not shown the orphans' names, only how many there are.</summary>
+    public FakeProjectionDataService WithOrphanNamesWithheld()
+    {
+        Orphans = new OrphanedProgression(Orphans.Count, [], OrphanWording.NamesWithheld);
         return this;
     }
 
@@ -200,6 +227,32 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
             Agents = [],
             PausedByStudio = new StudioDaemonPause(
                 "default", user, at ?? DateTimeOffset.UnixEpoch, "localhost.marten", null)
+        };
+
+        return this;
+    }
+
+    /// <summary>
+    /// Says the daemon here has an agent for <paramref name="shardName" /> in <paramref name="status" /> - one started by
+    /// hand during a pause, or one an error paused (M7: what Stop has to stop, and what Start would leave as it is).
+    /// </summary>
+    public FakeProjectionDataService WithAgentHere(string shardName, string status = "Running")
+    {
+        Daemon = Daemon with { Agents = [.. Daemon.Agents, new DaemonAgentInfo(shardName, status, 0, HighWaterMark)] };
+        return this;
+    }
+
+    /// <summary>Says which coordinator runs the daemon here, and how it divides the shards (M7).</summary>
+    public FakeProjectionDataService WithCoordination(
+        DaemonCoordination coordination,
+        DaemonDistribution distribution = DaemonDistribution.Unknown,
+        IReadOnlyDictionary<string, bool>? leadership = null)
+    {
+        Daemon = Daemon with
+        {
+            Coordination = coordination,
+            Distribution = distribution,
+            Leadership = leadership ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase),
         };
 
         return this;
@@ -279,6 +332,7 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
                 HealthHistory = HealthHistory,
                 TenantPartitionedEvents = TenantPartitionedEvents,
                 DatabaseAutoCreate = DatabaseAutoCreate,
+                Orphans = Orphans,
             });
     }
 

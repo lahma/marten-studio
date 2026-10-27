@@ -1844,6 +1844,15 @@ internal sealed partial class EventDataService : IEventDataService
                     throw new StudioDaemonNotHostedException(hosting.Explanation);
                 }
 
+                // M7: the daemon's RewindSubscriptionAsync restarts every agent of the subscription in the daemon it is asked
+                // of, whether or not that daemon ran them (JasperFxAsyncDaemon at V2.74.0 and V2.95.1). Under HotCold a node
+                // that does not hold a shard's leadership lock would start it beside the node that does - the rule the tenant
+                // rewind below already holds - so it is refused here, and from the node that leads it is made.
+                if (!hosting.LeadsEveryShardOf(resolved.Store, projectionName))
+                {
+                    throw new InvalidOperationException(DaemonTopologyWording.RewindLedElsewhere(projectionName));
+                }
+
                 string user = await authorization.UserNameAsync().ConfigureAwait(false);
                 logger.DaemonControlRequested(
                     user,

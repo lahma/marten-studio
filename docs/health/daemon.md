@@ -18,12 +18,13 @@ A rate, a "for the whole window" and how long a committed event has waited behin
 own samples, which exist only while somebody has the Health page or the Overview open; before two samples a minute
 apart exist, the checks that need them say they are watching and report nothing.
 
-A finding that names a projection - D03, D04, D05, D06 and D09 - carries the document types that projection writes, so a
-projection of a type `IsDocumentTypeVisible` hides is never named, in a finding or in a check's status line.
+A finding that names a projection - D03, D04, D05, D06 and D09, and D10 for a projection the store still registers -
+carries the document types that projection writes, so a projection of a type `IsDocumentTypeVisible` hides is never
+named, in a finding or in a check's status line.
 
 A store with `Events.UseTenantPartitionedEvents` keeps a high-water mark per tenant and no durable record of when
-one was pinned: D01-D04 and D09 say "not checked" there rather than read store-global rows nothing maintains. D05
-and D06 still apply.
+one was pinned: D01-D04 and D09 say "not checked" there rather than read store-global rows nothing maintains. D05,
+D06 and D10 still apply.
 
 ## D01 High-water mark pinned behind a gap
 
@@ -455,3 +456,56 @@ D03, D05, D07 and D08 are: without one, nothing waits on a progression row. `seq
 with events, because an append fails either way. A shard whose projection writes a document type `IsDocumentTypeVisible`
 hides is never named. Like D01-D04, a store with `Events.UseTenantPartitionedEvents` is not checked, because every
 tenant draws from a sequence of its own there.
+
+## D10 Orphaned progression rows
+
+**Info.** Marten Studio only. Rows of `mt_event_progression` that nothing this store registers advances: each was
+written by a projection that has since been renamed, removed or given a new version, or by a subscription that was
+removed. One finding per projection a row names - its name, and above version 1 its version (`Trips:V2`) - so a rename
+is one finding however many shards or tenants it left rows for.
+
+What counts as registered, read at `V9.39.0` and `v9.54.2` with JasperFx `V2.74.0` and `V2.95.1`:
+
+- every shard of the daemon's own list, `ProjectionOptions.AllShards()` - the async projections' and every
+  subscription's, one registered with `Events.Subscribe(...)` included, which `Projections()` does not list;
+- a composite projection's members, which the composite's agent advances in its own batch;
+- under `Events.UseTenantPartitionedEvents`, each tenant's row of those (`{Name}:{ShardKey}:{tenant}`), because the
+  coordinator runs one agent per shard and tenant there. On any other store the daemon runs the store-global agent only,
+  and a tenant's row is left over from when the flag was on;
+- Marten's own bookkeeping rows (`HighWaterMark`, `HighWaterMark:{tenant}`, `HighWaterAllocationFence`,
+  `HighWaterStuckGap`), which are never shards.
+
+Each finding says why nothing advances its rows: no projection or subscription of that name is registered; the
+projection is registered at another version; it is registered and no longer runs that shard; it is registered inline or
+live; or the row is a tenant's on a store that does not number its events per tenant. A tenant's row is counted and never
+named.
+
+A row like this is bookkeeping nothing advances any more. It shows as a shard that never moves in any tool that lists
+every row, and a projection registered again under the same name and version resumes from its position rather than
+replaying from the first event. **One kind is still read:** a lower version's row of a projection whose registered
+version sets `GateSideEffectsBehindPriorVersion`. The daemon reads the highest prior version's row each time the new
+version starts, and suppresses side effects for events up to its position. Removing it before the new version has passed
+that position raises side effects again for events the prior version already handled.
+
+There is no `StoreOptions` line, and the studio removes nothing: whether to remove a row is the host's decision. Marten
+removes one by its exact name, whether or not a projection of that name is registered, with
+`IEventDatabase.DeleteProjectionProgressByShardNameAsync` (marten#4785, jasperfx#473; public at `V9.39.0` and `v9.54.2`,
+and it first ensures the event store's storage, as every write to it does). `IEventStore.DeleteProjectionProgressAsync`,
+which takes a projection's name, looks it up among the registered projections and throws `ArgumentOutOfRangeException`
+for any other, so it cannot. The finding's remedy is that call, for each row the daemon does not read; a tenant's row is
+said in words. The projections screen lists the rows under **Orphaned progression rows** - counted for everyone the scope
+admits, named for a visitor the store policy allows for the database as a whole - with Marten's call and the equivalent
+statement for each, under "For your own migrations - the studio never runs this":
+
+```csharp
+await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("TripsBeforeRename:All");
+```
+
+```sql
+DELETE FROM "public"."mt_event_progression" WHERE "name" = 'TripsBeforeRename:All';
+```
+
+The read leaves out, by name, the rows that are certainly registered, so a store with thousands of tenants' rows stays
+one short read; it returns at most 1,000 rows, and the finding says so when it stopped there. A finding about a projection
+this store still registers carries the document types it writes, so one that writes a type `IsDocumentTypeVisible` hides
+is never named; the name of a projection that is no longer registered is shown as the row spells it.

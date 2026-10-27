@@ -82,6 +82,13 @@ poll stops them (at most one `LeadershipPollingTime` after they started). A tena
 with a `:` in it is never rewound: its agents' identity does not read back as its own, and the daemon would stop
 them before Marten refused the rewind.
 
+The database-wide rewind has the same shape under HotCold: the daemon's `RewindSubscriptionAsync` restarts every agent
+of the subscription in the daemon it is asked of, whether or not that daemon ran them (JasperFx 2.74 and 2.95). So it is
+refused on a node that does not hold the leadership lock of every one of the projection's shards - asked of the
+coordinator's own distributor, in memory - and made from the node that leads it; a Start of a shard another node leads
+is refused the same way. Marten Studio's pause keeps a node's locks, so a lock it does not hold while paused is another
+node's, or nobody's.
+
 `BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
 reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,
 since every console statement and every browser read runs under `SET LOCAL ROLE` to it.

@@ -511,7 +511,17 @@
         mayManage
         && (!PerTenantSequences || (RewindsOneTenant && RunsTenantAgent(row)))
         && projections is { Daemon.IsHostedHere: true }
-        && FindProjection(row.ProjectionName) is { IsAsync: true };
+        && FindProjection(row.ProjectionName) is { IsAsync: true, IsSubscription: false }
+        && (PerTenantSequences || !LedElsewhere(row.ProjectionName));
+
+    /// <summary>
+    /// M7: whether, under HotCold, another node leads any of the projection's shards - where a store-global rewind here would
+    /// restart its agents beside that node's, and the service refuses it (<see cref="DaemonTopologyWording.RewindLedElsewhere" />).
+    /// </summary>
+    private bool LedElsewhere(string projectionName) =>
+        projections is { Daemon: { IsHotCold: true } daemon }
+        && FindProjection(projectionName) is { } projection
+        && projection.ShardNames.Any(shard => daemon.LeadsHere(shard) == false);
 
     private bool RunsTenantAgent(DeadLetterRow row) =>
         projections is { Daemon.IsHostedHere: true } view
@@ -561,6 +571,12 @@
                 + "there is no progression to rewind.";
         }
 
+        if (projection.IsSubscription)
+        {
+            return $"'{projectionName}' is a subscription registered with Events.Subscribe(...), which Marten Studio does "
+                + "not rewind: the store's projection list does not name it, and the rewind is checked against that list.";
+        }
+
         if (PerTenantSequences)
         {
             if (!TenantRewind.IsAddressable(row.TenantId))
@@ -573,8 +589,19 @@
                 : StreamCompactionRules.RewindNeedsTenantAgentHere(projectionName, row.TenantId);
         }
 
+        if (LedElsewhere(projectionName))
+        {
+            return DaemonTopologyWording.RewindLedElsewhere(projectionName);
+        }
+
         return "Rewinds the subscription so the daemon re-applies this event and everything after it";
     }
+
+    /// <summary>
+    /// M7: what the confirm dialog adds while Marten Studio's pause is in effect - the rewind restarts the projection's agents
+    /// on this node at once, pause or not (JasperFx's <c>RewindSubscriptionAsync</c> starts them itself).
+    /// </summary>
+    private string PausedNote => projections is { Daemon.IsPausedByStudio: true } ? DaemonTopologyWording.RewindWhilePaused : string.Empty;
 
     /// <summary>The floor the rewind would write: one below the dead letter's own sequence.</summary>
     private long RewindFloor => pendingRewind is { } row
@@ -646,13 +673,13 @@
             $"The daemon stops tenant {pendingRewind?.TenantId}'s agents of '{pendingRewind?.ProjectionName}', moves "
             + "that tenant's progression of every one of its shards back and starts them again from there, so the event "
             + "it failed on is re-applied along with everything after it in that tenant - and in no other. If the "
-            + "projection still throws, the same failure comes back as a new dead letter.",
+            + "projection still throws, the same failure comes back as a new dead letter." + PausedNote,
         DialogKind.Rewind =>
             $"The daemon stops every agent of '{pendingRewind?.ProjectionName}' in this database, moves the "
             + "progression of every one of its shards back and starts them again from there, so the event it "
             + "failed on is re-applied along with everything after it - for every tenant in this database, "
             + "not only the one on screen. If the projection still throws, the same failure comes back as a "
-            + "new dead letter.",
+            + "new dead letter." + PausedNote,
         _ => string.Empty,
     };
 

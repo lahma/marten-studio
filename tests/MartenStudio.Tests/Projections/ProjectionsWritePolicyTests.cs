@@ -155,7 +155,9 @@ public class ProjectionsWritePolicyTests
         // The studio's own pause is in effect, which is what makes the per-agent Start and Stop
         // meaningful: with the coordinator running they are disabled for a reason that has nothing to do
         // with the visitor, and the "allowed" half of every pair below would prove nothing.
-        context.ProjectionData.WithProjection("DailySales").WithStudioPause();
+        // And the shard's agent is here, paused by an error: so a Start would start it and a Stop would stop it (M7) -
+        // with no agent, Stop is a no-op the page disables for that reason, not the visitor's.
+        context.ProjectionData.WithProjection("DailySales").WithStudioPause().WithAgentHere("DailySales:All", "Paused");
 
         await context.ReadyAsync();
         return context;
