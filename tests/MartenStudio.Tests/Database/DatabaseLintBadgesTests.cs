@@ -44,6 +44,44 @@ public class DatabaseLintBadgesTests
     }
 
     [Fact]
+    public void An_index_shows_its_estimated_size_scans_and_last_scan_and_one_not_ready_says_so()
+    {
+        using var context = DatabasePageData.Context();
+        DatabaseObjectDetail detail = FakeDatabaseObjects.Detail("quartz", "qrtz_triggers");
+        context.DatabaseObjects.Detail = detail with
+        {
+            Indexes =
+            [
+                detail.Indexes[0] with
+                {
+                    SizeBytes = 16384,
+                    Scans = 1234,
+                    LastScan = new DateTimeOffset(2026, 10, 26, 9, 30, 0, TimeSpan.Zero),
+                    TuplesRead = 5,
+                    TuplesFetched = 3,
+                },
+                detail.Indexes[1] with { SizeBytes = null, Scans = null, LastScan = null, TuplesRead = null, TuplesFetched = null, IsReady = false },
+            ],
+        };
+
+        var page = DatabasePageData.RenderObject(context, "quartz", "qrtz_triggers", "keys");
+
+        var rows = page.FindAll(".ms-db-indexes tbody tr");
+        var first = rows[0].QuerySelectorAll("td");
+        first[2].TextContent.Trim().Should().StartWith("~");
+        first[3].TextContent.Trim().Should().Be("1,234");
+        first[3].GetAttribute("title").Should().Be("5 index entries read, 3 table rows fetched");
+        first[4].TextContent.Trim().Should().Be("2026-10-26 09:30 UTC");
+
+        var second = rows[1].QuerySelectorAll("td");
+        second[2].TextContent.Trim().Should().Be("—");
+        second[3].TextContent.Trim().Should().Be("—");
+        second[4].TextContent.Trim().Should().Be("—");
+        rows[1].TextContent.Should().Contain("not ready");
+        rows[0].TextContent.Should().NotContain("not ready");
+    }
+
+    [Fact]
     public void A_covered_key_and_one_whose_coverage_was_not_read_wear_no_badge()
     {
         using var context = DatabasePageData.Context();

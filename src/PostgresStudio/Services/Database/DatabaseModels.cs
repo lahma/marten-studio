@@ -733,6 +733,12 @@ internal sealed record DatabaseConstraintInfo(string Name, DatabaseConstraintKin
 /// <param name="KeyColumns">Its key columns, <see langword="null" /> for an expression; never an <c>INCLUDE</c> column.</param>
 /// <param name="AccessMethod">Its access method: <c>btree</c>, <c>gin</c>, <c>hnsw</c>...</param>
 /// <param name="Vector">For a pgvector HNSW or IVFFlat index, its operator classes and build parameters; otherwise <see langword="null" />.</param>
+/// <param name="SizeBytes">An estimate: <c>relpages</c> times the block size.</param>
+/// <param name="Scans">The index's scan count, <c>idx_scan</c>.</param>
+/// <param name="LastScan">When it was last scanned, from PostgreSQL 16.</param>
+/// <param name="TuplesRead">Index entries read, <c>idx_tup_read</c>.</param>
+/// <param name="TuplesFetched">Table rows fetched, <c>idx_tup_fetch</c>.</param>
+/// <param name="IsReady">Whether it takes writes (<c>indisready</c>).</param>
 internal sealed record DatabaseIndexInfo(
     string Name,
     string Definition,
@@ -742,7 +748,13 @@ internal sealed record DatabaseIndexInfo(
     bool IsPartial,
     IReadOnlyList<string?> KeyColumns,
     string AccessMethod = "btree",
-    PgVectorIndex? Vector = null);
+    PgVectorIndex? Vector = null,
+    long? SizeBytes = null,
+    long? Scans = null,
+    DateTimeOffset? LastScan = null,
+    long? TuplesRead = null,
+    long? TuplesFetched = null,
+    bool IsReady = true);
 
 /// <summary>One foreign key, seen from one end.</summary>
 /// <param name="Name">The constraint name.</param>
