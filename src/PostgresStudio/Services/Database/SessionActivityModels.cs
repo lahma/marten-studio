@@ -18,11 +18,14 @@ internal static class SessionLinks
     /// <summary>The Blocking tab's value of <see cref="ViewParameter" /> (X3).</summary>
     public const string BlockingView = "blocking";
 
+    /// <summary>The Holders tab's value of <see cref="ViewParameter" />: who holds the whole server's connections (issue #20).</summary>
+    public const string HoldersView = "holders";
+
     /// <summary>The page, with the scope carried (D9) under the studio's own source parameter.</summary>
     /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio's descriptor: its source parameter.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" />.</param>
-    /// <param name="view">The tab - <see cref="BlockingView" /> - or <see langword="null" /> for the sessions themselves.</param>
+    /// <param name="view">The tab - <see cref="BlockingView" /> or <see cref="HoldersView" /> - or <see langword="null" /> for the sessions themselves.</param>
     public static string ToSessions(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, string? view = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -239,6 +242,13 @@ internal sealed record SessionSnapshot(
     /// and from a reader that did not read it.
     /// </summary>
     public IReadOnlyList<LockStatisticsRow>? LockStatistics { get; init; }
+
+    /// <summary>
+    /// The whole server's client sessions by database, application, role and client address (issue #20) - the one part of this
+    /// snapshot that is not about this database - read in the same snapshot, or <see langword="null" /> from a reader that did
+    /// not read it (a test's).
+    /// </summary>
+    public SessionServerHolders? Holders { get; init; }
 }
 
 /// <summary>One row of PostgreSQL 19's <c>pg_stat_lock</c>: the whole server's counters for one lock type, since their reset.</summary>
@@ -439,6 +449,13 @@ internal sealed record SessionActivitySummary
     /// <summary>Whether this visitor may see the details, and what it would take.</summary>
     public SessionDetailsAccess Details { get; init; } = new(false, false, null, DatabaseRefusal.CapabilityOff, null);
 
+    /// <summary>
+    /// Sessions › Holders' counts (issue #20): the whole server's connections per database the source policy lets this visitor
+    /// be told the name of, and every other database together - naming no application, role or address - or <see langword="null" />
+    /// when they were not read.
+    /// </summary>
+    public SessionHoldersSummary? Holders { get; init; }
+
     /// <summary>What was run, for Show SQL.</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
 
@@ -532,6 +549,13 @@ internal sealed record SessionActivityDetails
 
     /// <summary>How many applications there are, past the read's cap included.</summary>
     public long ApplicationCount { get; init; }
+
+    /// <summary>
+    /// Sessions › Holders' groups (issue #20): the whole server's client sessions by database, application, role and client
+    /// address, every database by name - other databases' applications, roles and addresses as much as this one's, so behind the
+    /// same gate.
+    /// </summary>
+    public SessionHoldersDetails Holders { get; init; } = SessionHoldersDetails.None;
 
     /// <summary>
     /// Whether the statements are withheld outright, because the visitor's withheld schemas could not be read.

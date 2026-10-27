@@ -25,6 +25,22 @@ internal static class ConnectionThresholds
     /// <summary>C03: …and at least this share is Critical.</summary>
     public const double ServerUsedCritical = 0.95;
 
+    /// <summary>
+    /// C13: idle connections are judged only while the server's client connections are at or above this share of what an
+    /// ordinary role may open - C03's own Warning line (<see cref="ServerUsedWarning" />). Below it, ten idle connections are a
+    /// warm pool.
+    /// </summary>
+    public const double IdleHoardUsage = ServerUsedWarning;
+
+    /// <summary>
+    /// C13: an application is a hoarder when it holds idle at least one in this many of the client connections the server
+    /// allows - a tenth, <see cref="IdleHoardShare" />. An integer, so the boundary is exact: <c>idle * 10 &gt;= limit</c>.
+    /// </summary>
+    public const int IdleHoardDivisor = 10;
+
+    /// <summary>C13: the share of the client limit an application holds idle that makes it a hoarder (<c>1 / <see cref="IdleHoardDivisor" /></c>).</summary>
+    public const double IdleHoardShare = 1.0 / IdleHoardDivisor;
+
     /// <summary>C04: idle in a transaction this long is a Warning…</summary>
     public static readonly TimeSpan IdleInTransactionWarning = TimeSpan.FromMinutes(1);
 
@@ -268,6 +284,12 @@ internal static class SessionEvidence
 
     /// <summary>The finding's link to Database › Sessions, where the sessions it counts are listed for the visitor.</summary>
     public static HealthLink SessionsLink { get; } = new("Open Database › Sessions", SessionLinks.Route);
+
+    /// <summary>The link of C13 and C14: Database › Sessions, on its Holders tab, where the whole server's connections are grouped.</summary>
+    public static HealthLink HoldersLink { get; } = new(
+        "Open Database › Sessions › Holders",
+        SessionLinks.Route,
+        [new KeyValuePair<string, string?>(SessionLinks.ViewParameter, SessionLinks.HoldersView)]);
 
     /// <summary>
     /// The sentence that points at the page with the statement text: findings never carry it, because what a

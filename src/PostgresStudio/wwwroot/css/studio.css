@@ -13022,3 +13022,67 @@ a.ms-schema-health-mark:focus-visible {
         min-width: 24ch;
     }
 }
+
+/* ==========================================================================
+   0.8-B. Database > Sessions > Holders: who holds the whole server's connections (issue #20)
+
+   Appended in D26 order, after UI-0.6.1. Every selector is this section's own (ms-holders-); the tables are the Sessions
+   page's (ms-sessions-table, in a TableScroll, D25) and the budget line is its ms-sessions-budget, so nothing here
+   re-declares an earlier rule. Notes use the secondary text colour, not the muted one: UX-6 measured the muted grey below
+   4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-holders-lead,
+.ms-holders-note,
+.ms-holders-gated {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-holders-subheading {
+    margin: var(--ms-space-md) 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-holders-table th[scope="row"],
+.ms-holders-table td {
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-holders-table td:not(:first-child) {
+    white-space: nowrap;
+}
+
+.ms-holders-name {
+    text-align: left;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-holders-tag {
+    margin-left: var(--ms-space-sm);
+    padding: 1px 6px;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-normal);
+}
+
+.ms-holders-others th,
+.ms-holders-others td {
+    border-top: 2px solid var(--ms-color-border);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-holders-groups td:nth-child(n + 5) {
+    text-align: right;
+}
+
+@media (max-width: 640px) {
+    .ms-holders-tag {
+        display: inline-block;
+        margin-left: 0;
+    }
+}

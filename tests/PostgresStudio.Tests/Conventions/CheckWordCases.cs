@@ -180,7 +180,7 @@ internal static class CheckWordCases
         History((held, [(sweptSeries, 1), (conditionSeries, 1)]), (TimeSpan.Zero, [(sweptSeries, 1), (conditionSeries, 1)]));
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Connections: C01, C03-C08, C11, C12.
+    // Connections: C01, C03-C08, C11-C14.
 
     private static IEnumerable<CheckWordCase> Connections()
     {
@@ -292,6 +292,31 @@ internal static class CheckWordCases
         yield return Case<BlockingChainCheck>("a wait behind a head idle in its transaction", Chain(Head("idle in transaction"), TimeSpan.FromSeconds(40)));
         yield return Case<BlockingChainCheck>("a chain six minutes old behind a long statement, others hidden", Chain(Head("active"), TimeSpan.FromMinutes(6), hidden: true));
         yield return Case<BlockingChainCheck>("a chain three minutes old behind a VACUUM", Chain(Head("active", vacuum: true), TimeSpan.FromMinutes(3)));
+
+        // C13 and C14 (issue #20) - who holds the whole server's connections: idle ones hoarded near the limit, and ones that set
+        // no application name.
+        SessionHolderGroup Holder(string database, string application, long idle, string role = "app_user", string? client = "10.1.2.3", long unknown = 0, bool hidden = false) =>
+            new(database, application, role, client, hidden, idle + unknown, 0, idle, 0, unknown, TimeSpan.FromMinutes(3), null);
+        ConnectionHolderFacts Holders(long used, bool allVisible, params SessionHolderGroup[] groups)
+        {
+            ServerConnectionLimits limits = new(used, 0, 103, 3, 0, 170000);
+            return new ConnectionHolderFacts(At, limits, new SessionServerHolders(allVisible, 103, 3, 0, 170000, used, groups.Length, groups));
+        }
+
+        yield return Case<IdleConnectionsHoardedCheck>("room on the server", Holders(40, true, Holder("app", "billing-api", 30)));
+        yield return Case<IdleConnectionsHoardedCheck>("nobody holds a tenth idle", Holders(90, true, Holder("app", "billing-api", 8), Holder("app", "reports", 4)));
+        yield return Case<IdleConnectionsHoardedCheck>(
+            "one application holds a tenth idle across two databases",
+            Holders(90, true, Holder("app", "billing-api", 7), Holder("audit", "billing-api", 5, role: "auditor", client: null), Holder("app", "reports", 2)));
+        yield return Case<IdleConnectionsHoardedCheck>(
+            "two hoarders, other roles' sessions not readable",
+            Holders(96, false, Holder("app", "billing-api", 14), Holder("app", string.Empty, 11, client: "10.1.2.4"), Holder("app", "psql", 0, role: "other", client: null, unknown: 6, hidden: true)));
+
+        yield return Case<UnattributedConnectionsCheck>("every connection is named", Holders(10, true, Holder("app", "billing-api", 6), Holder("app", "reports", 4)));
+        yield return Case<UnattributedConnectionsCheck>("one connection with no name", Holders(3, true, Holder("app", string.Empty, 1)));
+        yield return Case<UnattributedConnectionsCheck>(
+            "unnamed connections in two databases, one role unreadable",
+            Holders(60, false, Holder("app", string.Empty, 12), Holder("audit", string.Empty, 9, role: "auditor", client: null), Holder("app", string.Empty, 0, role: "other", client: null, unknown: 3, hidden: true)));
 
         // C07 - a forgotten prepared transaction.
         yield return Case<PreparedTransactionCheck>("none prepared", new PreparedTransactionFacts(At, 10, []));

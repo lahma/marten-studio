@@ -45,6 +45,8 @@ public class HealthLiveTestConventionTests
         ["T25"] = "a 75 MiB primary key with 39 rows in 40 deleted and vacuumed - Health/IndexLintLiveTests",
         ["T26"] = "an int4 identity restarted at 1,500,000,000 - Health/IndexLintLiveTests",
         ["C12"] = "a head idle in its transaction holding ACCESS EXCLUSIVE with two waiters, and a running head's chain - Database/BlockingLiveTests",
+        ["C13"] = "an application's idle pool on a server with max_connections lowered, in two databases, and the same pool below the line - Database/ConnectionHoldersLiveTests",
+        ["C14"] = "connections with no application name in two databases, and every connection named - Database/ConnectionHoldersLiveTests",
     };
 
     [Fact]

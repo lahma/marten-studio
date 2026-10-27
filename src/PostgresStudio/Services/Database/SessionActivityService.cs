@@ -52,6 +52,14 @@ namespace PostgresStudio.Services.Database;
 /// own is its <see cref="ISessionLockLabeler" />'s to say.
 /// </para>
 /// <para>
+/// <b>The whole server's connections</b> (issue #20, Sessions › Holders) are the one part of the snapshot that is not about this
+/// database, so they are shown in two grains. The summary names a database only when this visitor's source policy admits it
+/// (<see cref="SessionHolderNames" />: the studio's own database, and a registered source's database the policy lets them see) and
+/// counts the rest together as "other databases"; the details, behind <c>ViewDatabaseActivity</c> and the write policy asked
+/// about this database, name every database and every application, role and client address - the same gate as this database's
+/// own, and the audited one.
+/// </para>
+/// <para>
 /// Scoped: the ledger is this circuit's. The snapshot is the process's (<see cref="SessionActivitySnapshots" />).
 /// </para>
 /// </remarks>
@@ -100,6 +108,7 @@ internal sealed class SessionActivityService : ISessionActivityService
     private readonly SessionPoolObserver pools;
     private readonly DatabaseAccess access;
     private readonly ISessionLockLabeler labeler;
+    private readonly SessionHolderNames holderNames;
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<SessionActivityService> logger;
     private readonly TableRowAuditLedger ledger = new();
@@ -114,6 +123,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         SessionPoolObserver pools,
         DatabaseAccess access,
         ISessionLockLabeler labeler,
+        SessionHolderNames holderNames,
         StudioLogThrottle throttle,
         ILogger<SessionActivityService> logger)
     {
@@ -126,6 +136,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         this.pools = pools;
         this.access = access;
         this.labeler = labeler;
+        this.holderNames = holderNames;
         this.throttle = throttle;
         this.logger = logger;
     }
@@ -176,6 +187,12 @@ internal sealed class SessionActivityService : ISessionActivityService
         }
 
         SessionLockLabels labels = labeler.For(resolved, Classifier(resolved));
+
+        // Issue #20: the whole server's connections, named by this visitor's source policy - a database they are not admitted
+        // to is counted, never named, unless the details gate passes (which names every database, in the details).
+        SessionHoldersSummary? holders = snapshot.Holders is { } served
+            ? await HoldersSummaryAsync(served, resolved, cancellationToken).ConfigureAwait(false)
+            : null;
 
         List<string> caveats = [];
 
@@ -235,12 +252,26 @@ internal sealed class SessionActivityService : ISessionActivityService
             Connections = snapshot.Connections?.Database,
             Budget = snapshot.Connections?.ToBudget(),
             ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
+            Holders = holders,
             Caveats = caveats,
             Blocking = CountsOf(snapshot.Blocking),
             LockStatistics = snapshot.LockStatistics,
             Details = details,
             Statements = snapshot.Statements,
         };
+    }
+
+    /// <summary>
+    /// Sessions › Holders' counts for a visitor short of the details (issue #20): the databases their source policy admits them
+    /// to - the studio's connection's own always - by name, the rest of the server's together.
+    /// </summary>
+    private async Task<SessionHoldersSummary> HoldersSummaryAsync(SessionServerHolders holders, ResolvedSource resolved, CancellationToken cancellationToken)
+    {
+        IReadOnlySet<string> admitted = await holderNames
+            .AdmittedAsync(resolved, holders.Groups.Where(static x => !x.ThisDatabase).Select(static x => x.Database), cancellationToken)
+            .ConfigureAwait(false);
+
+        return SessionHolders.Summarize(holders, admitted);
     }
 
     /// <summary>Sessions › Blocking's numbers (X3): how many chains, how many sessions they hold up, for how long - naming nobody.</summary>
@@ -452,6 +483,7 @@ internal sealed class SessionActivityService : ISessionActivityService
             Blocking = TreeOf(snapshot.Blocking, labels, withheld),
             Applications = snapshot.Connections?.Applications ?? [],
             ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
+            Holders = snapshot.Holders is { } served ? SessionHolders.Detail(served) : SessionHoldersDetails.None,
             StatementsWithheld = withheld is null,
         };
 
@@ -589,7 +621,8 @@ internal sealed class SessionActivityService : ISessionActivityService
             DetailsTarget,
             succeeded: true,
             "Session details read: " + SessionText.Count(details.Sessions.Count, "session") + ", "
-            + SessionText.Count(details.Locks.Count, "lock") + ", " + SessionText.Count(details.Prepared.Count, "prepared transaction") + ".",
+            + SessionText.Count(details.Locks.Count, "lock") + ", " + SessionText.Count(details.Prepared.Count, "prepared transaction") + ", "
+            + SessionText.Count(details.Holders.Groups.Count, "group") + " of the server's connections.",
             StudioCapability.ViewDatabaseActivity,
             whole);
 

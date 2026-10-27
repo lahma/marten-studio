@@ -231,6 +231,14 @@ hypopg and draws both plans side by side; it creates nothing, and needs hypopg i
 studio never runs either - and on PostgreSQL 19 the server's lock waits from `pg_stat_lock`. C12 names the head of a
 chain that sits idle in its transaction or has kept others waiting for minutes.
 
+**Holders.** `max_connections` is the server's, and the database that uses it up is often not the one open here. Database ›
+Sessions › Holders (`?view=holders`) groups the whole server's client sessions by database, application, role and client
+address - sessions, active, idle and idle in a transaction, the oldest idle and idle-in-transaction age - against the budget C03
+judges. Anybody the source policy passes sees the counts per database, a database named only where the policy admits them to it
+and the rest together as "Other databases"; the applications, roles and addresses, and every database's name, need
+`ViewDatabaseActivity`. C13 names the application that holds a tenth of the server's client limit idle while the server is 80%
+used, and C14 the connections that set no `Application Name` (Info), both behind that capability.
+
 ## The diagnostics API
 
 `IPostgresDiagnostics`, registered by `AddPostgresStudio()`, gives your own code what the studio reads: the databases it

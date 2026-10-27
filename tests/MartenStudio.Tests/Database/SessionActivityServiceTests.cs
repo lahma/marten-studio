@@ -80,6 +80,58 @@ public class SessionActivityServiceTests
         harness.Reader.Reads.Should().Be(1, "one snapshot serves both halves");
     }
 
+    /// <summary>
+    /// Issue #20: the whole server's connections are in the snapshot, and what a visitor is shown of them is decided per piece -
+    /// the summary names this database and counts every other together; the details, behind the gate, name every database and
+    /// every group.
+    /// </summary>
+    [Fact]
+    public async Task The_whole_servers_connections_are_counts_in_the_summary_and_names_only_in_the_details()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+        harness.Reader.Snapshot = harness.Reader.Snapshot with
+        {
+            Holders = new SessionServerHolders(
+                true,
+                100,
+                3,
+                0,
+                170000,
+                41,
+                2,
+                [
+                    new SessionHolderGroup("app", "billing-api", "app_user", "10.1.2.3", false, 10, 2, 8, 0, 0, TimeSpan.FromMinutes(2), null, ThisDatabase: true),
+                    new SessionHolderGroup("analytics", "etl-sentinel", "etl", "10.9.9.9", false, 30, 0, 30, 0, 0, TimeSpan.FromMinutes(20), null),
+                ]),
+        };
+
+        SessionActivitySummary summary = await harness.Service.GetSummaryAsync(Scope, Token);
+
+        summary.Holders.Should().NotBeNull();
+        summary.Holders!.ServerConnections.Should().Be(41);
+        summary.Holders.Available.Should().Be(97);
+        summary.Holders.Databases.Select(static x => x.Database).Should().Equal("app");
+        summary.Holders.Others.Should().Be(new SessionHolderCounts(null, false, 30, 0, 30, 0, 0, TimeSpan.FromMinutes(20), null));
+        System.Text.Json.JsonSerializer.Serialize(summary).Should().NotContain("etl-sentinel").And.NotContain("analytics").And.NotContain("10.9.9.9");
+
+        SessionActivityDetails details = await harness.Service.GetDetailsAsync(Scope, Token);
+
+        details.Holders.Groups.Select(static x => (x.Database, x.Application, x.Role, x.ClientAddress)).Should().Equal(
+            ("app", "billing-api", "app_user", "10.1.2.3"), ("analytics", "etl-sentinel", "etl", "10.9.9.9"));
+        details.Holders.Databases.Select(static x => x.Database).Should().Equal("analytics", "app");
+        harness.Reader.Reads.Should().Be(1, "one snapshot serves the summary, the details and the holders");
+        harness.Ring.Should().ContainSingle().Which.Message.Should().Contain("2 groups of the server's connections").And.NotContain("etl-sentinel");
+    }
+
+    [Fact]
+    public async Task A_reader_that_did_not_read_the_holders_leaves_them_out_of_both_halves()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+
+        (await harness.Service.GetSummaryAsync(Scope, Token)).Holders.Should().BeNull();
+        (await harness.Service.GetDetailsAsync(Scope, Token)).Holders.Should().Be(SessionHoldersDetails.None);
+    }
+
     [Fact]
     public async Task The_summary_needs_the_store_policy_for_the_database_as_a_whole()
     {

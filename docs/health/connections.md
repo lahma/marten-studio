@@ -2,11 +2,12 @@
 
 These checks look at who is connected to the store's database and what they hold: this process's connection
 pool (C01, C09), the server's connection budget (C02, C03), sessions and statements that hold things back (C04,
-C05, C06, C07), the session at the head of a blocking chain (C12), the database's own counters (C08), whether a
+C05, C06, C07), the session at the head of a blocking chain (C12), who holds the whole server's connections (C13, C14),
+the database's own counters (C08), whether a
 transaction-mode pooler stands between the HotCold daemon and its lock (C10), and how much of what the database reads its
 shared buffers hold (C11). Back to the [index](../health.md).
 
-**Studios.** C01, C03 to C08, C11 and C12 read Postgres alone and run in both studios, with the data source in place of
+**Studios.** C01, C03 to C08, C11 and C12 to C14 read Postgres alone and run in both studios, with the data source in place of
 the store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
 Studio. The list of every code and its studios is [codes.md](codes.md).
 
@@ -21,9 +22,17 @@ tab.
 
 Every read is bounded to **this database** (`datname = current_database()`), to client sessions, and away from
 the studio's own session, and runs in the studio's read-only transaction under `statement_timeout` and
-`lock_timeout`, as `SqlConsoleRole` when one is set, on the primary of a multi-host data source. One number is the whole server's: C03 counts every client
-connection on the server, because `max_connections` is the server's and every database spends it - and it
-counts them, nothing more.
+`lock_timeout`, as `SqlConsoleRole` when one is set, on the primary of a multi-host data source. Two reads are the
+whole server's, because `max_connections` is the server's and every database spends it: C03 counts every client
+connection on the server - and counts them, nothing more - and, since 0.8, one more statement groups them by
+database, application, role and client address (the **holders** read, below).
+
+**The holders read is once per sweep** (0.8, issue #20): one statement, `HealthConnectionQueries.ServerHolders`, one scan of
+`pg_stat_activity` that groups every client session on the server by database, application, role and client address - with
+each group's active, idle and idle-in-transaction counts and the oldest idle and idle-in-transaction age - and lists at most
+the 1,000 largest groups, with how many there are. C13 and C14 both judge it, from the sweep's memo, so a sweep makes it
+once; Database › Sessions › Holders reads the same statement in its own snapshot. It names other databases' applications,
+roles and addresses, which is why both checks are activity checks (below).
 
 No statement names a table. Statement text is never put into a finding (see below).
 
@@ -46,7 +55,9 @@ Who the sessions are - **process ids, roles, client addresses, application names
 the Sessions page, **statements** - needs `Capabilities.ViewDatabaseActivity` (off by
 default, in `All()`, off under `ReadOnly`) **and** the write policy, asked with
 `Capability = "ViewDatabaseActivity"` and `TenantId = null`. Without it a visitor reads "withheld" in place of
-each of those, with what it would take.
+each of those, with what it would take. **C12, C13 and C14 are activity checks as a whole**: every one of their findings
+names sessions, so a visitor short of the gate is told "findings not shown to you" - counted, never described - and the
+diagnostics API returns them only with `IncludeActivity`.
 
 **Statement text is never part of a finding.** Another application's statement carries its literals and its
 schemas, and what a visitor may read of it depends on which schemas they may see - which a finding, shared by
@@ -535,6 +546,74 @@ In Marten Studio, mind the HotCold daemon's leadership: with its lock transactio
 leader's idle stretch ends the leadership too (K08). For `long-chain`, the remedy is the head's two statements, as a repair
 to run by hand.
 
+## C13 Idle connections hoarded near the limit
+
+**Warning** while the server's client connections are at or above 80% of what an ordinary role may open - C03's own Warning
+line, the same number - and one application holds at least **a tenth** of that limit idle.
+
+A pool keeps a connection open and idle until its idle lifetime ends: five minutes by default in Npgsql
+(`Connection Idle Lifetime=300`), and only down to `Minimum Pool Size`. So after a burst one container's pool can sit on a
+large share of what the server allows while the others - and a person with `psql` - are refused with "sorry, too many
+clients already". Ten idle connections on a server with room are just a warm pool, which is why C13 says nothing below C03's
+line; above it, it says which application holds them.
+
+- **An application is every session with one `application_name`, summed across every database it connects to, every role it
+  uses and every address it connects from** - a pool per tenant database is one application. A session with no application
+  name is an application of its own, "(no application name)": the unnamed pool is as likely a hoarder as any, and C14 says it
+  cannot be told apart.
+- **Idle is the state `idle`.** A session idle inside a transaction is C04's. A session whose state the studio's role may not
+  read - another role's, when the role is not a member of `pg_read_all_stats` - is counted as neither, and the finding says so:
+  what it counts is a lower bound.
+- **The line is exact**: the application's idle sessions times ten are at least the client limit, in integers - 10 idle of a
+  limit of 100, 10 of 97, 3 of 30.
+
+One finding names every hoarder - the most idle first, five at most - each with its idle and total sessions, its share of the
+client limit, the databases it is idle in and the role and address it connects from, as evidence behind the activity gate.
+
+**An activity check** (`ViewDatabaseActivity`). It names applications, roles, addresses and databases of other people's
+sessions, so a visitor short of the gate is told "findings not shown to you", and the diagnostics API returns it only with
+`IncludeActivity`.
+
+What to change: the holder's connection string, or the server's own timeout. Npgsql's `Connection Idle Lifetime` shortens how
+long an idle pooled connection is kept (its pruning runs every `Connection Pruning Interval`, ten seconds), and
+`Maximum Pool Size` caps one process's pool - every container's pool counts against the server. The server's backstop is
+`idle_session_timeout` (PostgreSQL 14 and later), for the holder's role or database, which ends a session idle that long
+whatever its pool thinks: set it above the pool's own idle lifetime. The studio never ends a session and changes none of these.
+
+```
+# In the holder's connection string:
+Connection Idle Lifetime=60
+```
+
+Runs in both studios, from the sweep's holders read and C03's own read of the connection budget.
+
+## C14 Connections with no application name
+
+**Info** when any client connection on the server sets no `application_name`.
+
+Every other connection finding - how full the server is (C03), which sessions sit idle in a transaction (C04), which application
+holds idle connections (C13) - can say whose connections they are, and ask whoever owns them to change something. A connection
+with no application name is nobody's: whatever is wrong with it, nothing says whom to ask. It names the largest few holders
+as `role@address/database (count)` - a Unix socket as `local socket` - the three things that tell one unnamed pool from
+another, and the remedy is one connection-string option, `Application Name`, set per container and pool.
+
+It counts every client session of the whole server whose application name is empty, every database included, the studio's own
+reading session aside. The studio's other reads share the host's data source and so its application name: on a host that sets
+none they are counted under it, as on the rest of Database › Sessions. Every role may read every session's application name, so
+this is not narrowed by a role without `pg_read_all_stats`.
+
+**An activity check** (`ViewDatabaseActivity`), like C13: the roles, addresses and databases it names are other people's
+sessions.
+
+```
+Application Name=billing-api/orders
+```
+
+Name it by the container and the pool, `{host}/{pool}`, so one row of Database › Sessions › Holders is one pool of one
+container. The name is visible to every role on the server and in its logs, so it carries nothing secret.
+
+Runs in both studios, from the sweep's holders read.
+
 ## Database › Sessions
 
 `/marten/database/sessions`, linked from the Database rail: this database's sessions with their state, age, wait
@@ -563,3 +642,46 @@ button - text for whoever may run them, as C12 hands them over; the studio never
 On PostgreSQL 19 the tab also shows `pg_stat_lock`: for the whole server since its counters were last reset, how many lock
 requests of each type had to wait, for how long in all, and how often a backend's fast-path lock slots were full. The
 section is absent below 19, where the view does not exist.
+
+### Holders
+
+The page's third tab (`?view=holders`, which C13's and C14's links open; 0.8, issue #20): **who holds the server's connections**,
+across every database on it - `max_connections` is the server's, and the database that exhausts it is often not the one open
+here. Every client session on the server, grouped by database, application, role and client address, each group with its
+sessions, how many are active, idle and idle in a transaction (aborted ones included), how many have a state the studio's role
+may not read, and the oldest idle and idle-in-transaction age. Above the tables, the budget C03 judges: the server's client
+sessions against what an ordinary role may open, `max_connections` less `superuser_reserved_connections` and, from PostgreSQL
+16, `reserved_connections`. The studio's own reading session is counted in that number and not listed.
+
+It is read in the Sessions snapshot, at `HealthInterval` or on Refresh behind the snapshot's ten-second floor and never on a
+poll, with one statement (`HealthConnectionQueries.ServerHolders`, shown under "Show SQL for the server's connections by
+holder"): one scan of `pg_stat_activity`, no relation named, no lock-taking function. At most the 1,000 largest groups are
+listed, and the page says how many there are when that is fewer; the budget counts every session either way.
+
+Two audiences, as the rest of the page:
+
+| Shown | To | Why |
+|---|---|---|
+| The server's sessions **per database**, by state and oldest idle - **this database always, and any other database a registered source holds on this server and the source policy admits the visitor to by name** | Anybody the source policy passes for this database as a whole | Counts, ages and states are the database's, as everywhere on this page |
+| Every **other** database's sessions, **together** as "Other databases", with no name | The same visitors | A database the policy refuses, or one nothing registered with the studio reaches, is counted, never named |
+| Every database **by name**, and every group's **application, role and client address** | `ViewDatabaseActivity` and the write policy, asked about this database as a whole (`TenantId = null`) | Other people's sessions, behind the gate the page's other details have, audited with them (event 9245) |
+
+**Which policy check names a database.** For a visitor short of the gate, a database of the server is named when it is the one
+the studio is connected to - the scope the visitor's whole-database gate already passed - or when a database held by a registered
+source has that Postgres name, on that server (host and port, as C02 keys them), and the source policy admits it: asked about the
+source's registered key and the database's own identity (D29, D30), with no tenant and no capability. It is never the visitor's
+spelling, and it is not the picker's list: a source whose databases are a set that can change while the process runs
+(`DynamicMultiple` - a host-provided source of tenant databases, a Marten tenancy that builds its databases) is **not
+enumerated** to decide it (D27: for a Marten tenancy that is not read-only), so its databases are counted unnamed. A source that
+will not build or list, or a policy that throws, leaves that database unnamed. The cost is that a visitor without the gate sees
+"Other databases" where a dynamic source's databases are; the gate names them all.
+
+**The gate names databases the write policy was not asked about.** A visitor past `ViewDatabaseActivity` for *this* database is
+named every database of the server and its sessions' applications, roles and addresses: the write policy is asked about this
+database, not about each other one, because "who is using the server" is the one power the capability grants - the same reason
+C03's count, C13 and C14 are the whole server's. Grant `ViewDatabaseActivity` to the people you would let see every database's
+connections, which is also what psql's `pg_stat_activity` gives a member of `pg_read_all_stats`.
+
+**Not checked.** A role that is not a member of `pg_read_all_stats` reads other roles' sessions with no state, no timings and no
+client address: they are counted, in "State not visible", their client shown as "not readable", and the page says which grant
+would show them - the totals count every session. A visitor sees no more than the role does.

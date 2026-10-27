@@ -365,6 +365,28 @@ remedy may be migration SQL, shown "for your own migrations - the studio never r
 `MigrationSqlText`, which quotes every name and gives no statement for a name it cannot; a Marten table's remedy is
 never DDL - a `StoreOptions` line in Marten Studio, nothing in Postgres Studio.
 
+**The whole server's connections by holder** (0.8, issue #20; Database › Sessions › Holders, C13 and C14) is the one read
+of the Sessions snapshot and of a sweep that is not about this database, so what a visitor is shown of it is decided per
+piece. The statement is `HealthConnectionQueries.ServerHolders`: one scan of `pg_stat_activity`, every client session of the
+server (`ClientSession`, a role-hidden one included, as C03 counts) grouped by database, application, role and client
+address - a hidden session its own group, with no address and an unknown state - the studio's own reading session out of the
+groups and in the total, at most 1,000 groups with how many there are. **Per database, the source policy decides whether a
+visitor short of `ViewDatabaseActivity` is told a database's name**: this database always (the whole-database gate has passed);
+another only when a database a registered source holds has its Postgres name on this server (`DatabasePoolSettings.ServerKey`,
+as C02 keys one) and the source policy, asked by the source's registered key and the database's own identity with no tenant and
+no capability, admits it (`SessionHolderNames`). A source whose cardinality is `DynamicMultiple` is **never enumerated** to
+decide it - a host-provided source's databases, a Marten tenancy that builds its - because D27's known limit makes that call
+not read-only (`TenancyEnumerationCallTests` holds the one site); its databases, and every database no source registers, are
+counted together as "Other databases". Fail closed: a source that will not build or list, or a policy that throws, names
+nothing. **`ViewDatabaseActivity` names every database and every group's application, role and address, asking the write policy
+about this database alone**, not each other one - the capability is the server's "who is using it" power, C03's count is the
+whole server's and C13 and C14 name other databases' applications under the same gate. C13 waits for C03's own Warning line
+(client connections at or above 80% of `max_connections` less both reservations - at, not above, as the issue says; C03 is quiet at
+exactly 80%) and then names an application - every session of one `application_name`, summed across databases, roles and
+addresses; an unnamed one is an application of its own - that holds idle at least a tenth of that budget (`idle * 10 >= budget`,
+exact in integers); C14, Info, names the largest unnamed holders as `role@address/database (count)`. Both are `Activity` checks and
+read the sweep's one `connections.holders` read beside C03's `connections.server`.
+
 **The statistics window** (`StatisticsWindow`) is the one answer to "since when have these counters counted". It is the
 later of `pg_stat_database.stats_reset` and the earlier of the two shared views' `stats_reset` (`pg_stat_bgwriter` up
 to 16 or `pg_stat_checkpointer` from 17, and `pg_stat_archiver`): `max(database, min(shared, archiver))`. So a
