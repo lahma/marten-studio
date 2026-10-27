@@ -68,9 +68,35 @@
     </ul>
 </nav>
 
+<p class="ms-rail-credit">
+    @Settings.Title @StudioVersion ·
+    <a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a> ·
+    by <a href="https://github.com/lahma/marten-studio" target="_blank" rel="noopener noreferrer">Marko Lahma</a>
+</p>
+
 @code
 {
     private const string ComingSoon = "Coming in a later release";
+
+    /// <summary>The core assembly's version, cut at the first <c>+</c>: both packages share one version (D30).</summary>
+    private static readonly string StudioVersion = ReadVersion();
+
+    private static string ReadVersion()
+    {
+        System.Reflection.Assembly assembly = typeof(NavMenu).Assembly;
+        string? informational = assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+
+        if (!string.IsNullOrWhiteSpace(informational))
+        {
+            int plus = informational.IndexOf('+', StringComparison.Ordinal);
+            return plus < 0 ? informational : informational[..plus];
+        }
+
+        return assembly.GetName().Version?.ToString(3) ?? string.Empty;
+    }
 
     /// <summary>
     /// Whether an entry is drawn: every one whose descriptor has no condition, and otherwise what the condition says -

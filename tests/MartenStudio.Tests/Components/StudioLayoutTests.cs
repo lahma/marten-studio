@@ -89,6 +89,20 @@ public class StudioLayoutTests
     }
 
     [Fact]
+    public void The_rail_ends_with_the_product_its_licence_and_its_author()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        var layout = RenderLayout(context);
+
+        var credit = layout.Find(".ms-rail-credit");
+        credit.TextContent.Should().Contain("Marten Studio").And.Contain("MIT licensed").And.Contain("Marko Lahma");
+        credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
+            "https://github.com/lahma/marten-studio/blob/main/LICENSE");
+    }
+
+    [Fact]
     public void A_spinner_stands_in_while_the_policy_has_not_answered()
     {
         using var context = new StudioComponentContext().WithPolicy("default");
