@@ -103,6 +103,92 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
     }
 
     /// <summary>
+    /// M5: the newest-first orders are the studio's own list read with another <c>order by</c> - no Marten call, so nothing
+    /// to ensure - on empty schemas and on a deployed one alike.
+    /// </summary>
+    [PostgresFact]
+    public async Task Ordering_newest_first_creates_nothing()
+    {
+        await using Host host = await StartAsync(nameof(Ordering_newest_first_creates_nothing));
+
+        foreach (string key in NewestFirstKeys)
+        {
+            await host.DocumentsAsync(x => x.ListAsync(Scope, "numbered", Newest(key)));
+        }
+
+        (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty, "an ordered read of a table that is not there creates it no more than an unordered one");
+
+        await host.ApplyAsync();
+        await host.WriteAsync();
+        SchemaObjects before = await host.ReadObjectsAsync();
+
+        DocumentPage page = await host.DocumentsAsync(x => x.ListAsync(Scope, "numbered", Newest("meta:LastModified")));
+
+        page.SortKey.Should().Be("meta:LastModified");
+        page.Direction.Should().Be(PostgresStudio.Services.Query.SortDirection.Descending);
+        page.Sql.Should().Contain("desc nulls last", "the same order Marten 9.52's metadata ordering asks for");
+
+        (await host.ReadObjectsAsync()).Should().Be(before, "ordering a deployed table newest first creates nothing");
+    }
+
+    /// <summary>
+    /// M5: Marten's own preview of a save (9.53+) opens no session and no connection - here on schemas with nothing in them,
+    /// where a preview that ensured the type's storage would leave its table behind, and then through the studio's edit
+    /// preview on a deployed table. Below 9.53 the answer is the line naming the Marten it needs, and nothing is created
+    /// either.
+    /// </summary>
+    [PostgresFact]
+    public async Task Martens_own_edit_preview_creates_nothing()
+    {
+        await using Host host = await StartAsync(
+            nameof(Martens_own_edit_preview_creates_nothing),
+            static options => options.Capabilities.EditDocuments = true);
+
+        IDocumentStore store = host.Services.GetRequiredService<IDocumentStore>();
+        bool available = MartenStudio.Services.Configuration.RuntimeFeature.DocumentEditPreview.IsAvailable(
+            MartenStudio.Services.Configuration.MartenRuntime.Current);
+
+        const string json = """{"Id":1,"Name":"one"}""";
+        string roundTrip = store.Options.Serializer().ToJson(new NumberedThing { Id = 1, Name = "one" });
+        MartenPreviewCheck direct = await MartenEditPreview.CheckAsync(
+            store, typeof(NumberedThing), "1", json, roundTrip, TestContext.Current.CancellationToken);
+
+        direct.Verdict.Should().Be(available ? MartenPreviewVerdict.Agrees : MartenPreviewVerdict.Unavailable, direct.Reason);
+        (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty, "Marten's preview resolves the type in memory and reads nothing");
+
+        await host.ApplyAsync();
+        await host.WriteAsync();
+        SchemaObjects before = await host.ReadObjectsAsync();
+
+        DocumentPage page = await host.DocumentsAsync(x => x.ListAsync(Scope, "numbered", new DocumentListRequest()));
+        string id = page.Rows[0].Id;
+
+        WritePreview preview = await host.WritesAsync(x => x.PreviewAsync(
+            Scope, "numbered", id, "{\"Id\":" + id + ",\"Name\":\"renamed\"}", TestContext.Current.CancellationToken));
+
+        preview.Status.Should().Be(WritePreviewStatus.Ready, preview.Reason);
+        preview.MartenCheck.Should().NotBeNull();
+        preview.MartenCheck!.Verdict.Should().Be(
+            available ? MartenPreviewVerdict.Agrees : MartenPreviewVerdict.Unavailable,
+            preview.MartenCheck.Reason);
+
+        if (!available)
+        {
+            preview.MartenCheck.Reason.Should().Contain("needs Marten 9.53+", "below 9.53 the line says which Marten it needs");
+        }
+
+        (await host.ReadObjectsAsync()).Should().Be(before, "previewing an edit, Marten's half included, creates nothing");
+    }
+
+    private static readonly string[] NewestFirstKeys = ["meta:LastModified", "meta:CreatedAt", "meta:Revision"];
+
+    private static DocumentListRequest Newest(string key) => new()
+    {
+        SortKey = key,
+        Direction = PostgresStudio.Services.Query.SortDirection.Descending,
+    };
+
+    /// <summary>
     /// The anti-vacuity theory: the danger the two tests above measure is real on this Marten.
     /// </summary>
     /// <remarks>
@@ -160,7 +246,7 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
             "Marten's own read still writes DDL on this setup - if it no longer does, the first test above proves nothing");
     }
 
-    private async Task<Host> StartAsync(string name)
+    private async Task<Host> StartAsync(string name, Action<MartenStudioOptions>? studio = null)
     {
         string schema = "p2n_" + name.ToLowerInvariant()[..Math.Min(name.Length, 40)];
 
@@ -188,7 +274,11 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
             options.Schema.For<NumberedThing>();
         });
 
-        services.AddMartenStudio(options => options.AuthorizationPolicy = null);
+        services.AddMartenStudio(options =>
+        {
+            options.AuthorizationPolicy = null;
+            studio?.Invoke(options);
+        });
 
         return new Host(services.BuildServiceProvider(), fixture.ConnectionString, schema);
     }
@@ -239,6 +329,12 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
         {
             await using AsyncServiceScope scope = provider.CreateAsyncScope();
             return await action(scope.ServiceProvider.GetRequiredService<IDocumentDataService>());
+        }
+
+        internal async Task<T> WritesAsync<T>(Func<IDocumentWriteService, Task<T>> action)
+        {
+            await using AsyncServiceScope scope = provider.CreateAsyncScope();
+            return await action(scope.ServiceProvider.GetRequiredService<IDocumentWriteService>());
         }
 
         /// <summary>What the host's own deployment would have done, which is not the studio's business.</summary>

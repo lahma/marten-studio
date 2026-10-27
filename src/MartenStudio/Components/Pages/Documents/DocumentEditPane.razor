@@ -20,7 +20,8 @@
       * Every save is previewed first (D7). `PreviewAsync` deserializes the edit into the document's CLR
         type and serializes it back, and the difference between those two is what the save would silently
         cost. When it costs nothing the save goes straight through; when it costs something the dialog
-        opens and the save waits for somebody to have read it.
+        opens and the save waits for somebody to have read it. From Marten 9.53 the same holds when
+        Marten's own preview of the save disagrees with the round trip or refuses the edit.
 
       * The version travels with the edit. `PreviewAsync` reports the row's `mt_version`/revision as it
         was when the editor opened, and `SaveAsync` is given it back as `expectedToken`. A row somebody
@@ -151,8 +152,10 @@
 
     /// <summary>
     /// The save path, which is the preview path with a commit on the end. A save whose round trip drops
-    /// nothing never sees the dialog; one that drops something opens it and stops, and the acknowledgement
-    /// is remembered against the exact text it was given for - so editing after acknowledging asks again.
+    /// nothing, and that Marten's own preview (9.53+) agrees with, never sees the dialog; one that drops
+    /// something, or that Marten's preview disagrees with or refuses, opens it and stops, and the
+    /// acknowledgement is remembered against the exact text it was given for - so editing after acknowledging
+    /// asks again.
     /// </summary>
     private async Task SaveAsync(string edited)
     {
@@ -163,7 +166,9 @@
             return;
         }
 
-        if (built.HasDrops && !string.Equals(acknowledgedJson, edited, StringComparison.Ordinal))
+        bool needsReading = built.HasDrops || built.MartenCheck is { IsDisagreement: true };
+
+        if (needsReading && !string.Equals(acknowledgedJson, edited, StringComparison.Ordinal))
         {
             dialogOpen = true;
             return;

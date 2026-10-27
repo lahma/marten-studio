@@ -320,6 +320,12 @@ internal sealed record WritePreview
     /// </remarks>
     public string? AuditReason { get; init; }
 
+    /// <summary>
+    /// Marten's own preview of the same save (9.53+), beside the round trip: <see langword="null" /> unless the preview
+    /// is <see cref="WritePreviewStatus.Ready" />, and advisory - a disagreement is shown, never a refusal.
+    /// </summary>
+    public MartenPreviewCheck? MartenCheck { get; init; }
+
     /// <summary>Whether saving this edit would drop something.</summary>
     public bool HasDrops => !RoundTripDiff.Dropped.IsDefaultOrEmpty;
 
