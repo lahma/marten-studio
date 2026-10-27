@@ -627,6 +627,20 @@ internal sealed record ProjectionsView(
     /// <summary>The advisor's samples as this visitor may read them, for the rebuild dialog's estimate.</summary>
     public HealthHistoryView HealthHistory { get; init; } = HealthHistoryView.Empty;
 
+    private static readonly IReadOnlyDictionary<string, ShardLagHistory> NoLagHistories =
+        new Dictionary<string, ShardLagHistory>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Each registered shard's history from this screen's own samples (<see cref="ProjectionLagHistory" />): its lag chart,
+    /// its arrow and a running rebuild's estimate - for the shards this visitor's read returned that have samples, and
+    /// for no other. The arrow here wins over <see cref="Trends" />, which the screen falls back to while its own samples
+    /// are too few to say anything.
+    /// </summary>
+    public IReadOnlyDictionary<string, ShardLagHistory> LagHistories { get; init; } = NoLagHistories;
+
+    /// <summary>The studio's own thresholds that apply to this store's shards, or <see langword="null" /> when not read.</summary>
+    public ProjectionThresholds? Thresholds { get; init; }
+
     /// <summary>
     /// <c>Events.UseTenantPartitionedEvents</c>: each tenant numbers its events and keeps its own high-water mark, which
     /// is what the Advance high water mark dialog has to say from Marten 9.52 (<see cref="HighWaterAdvanceWording" />).

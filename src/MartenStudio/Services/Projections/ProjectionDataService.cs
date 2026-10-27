@@ -95,6 +95,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     private readonly DatabaseReachAuthorization reach;
     private readonly DatabaseAccess databaseAccess;
     private readonly HealthHistory healthHistory;
+    private readonly ProjectionLagHistory lagHistory;
 
     public ProjectionDataService(
         StudioScopeResolver resolver,
@@ -111,10 +112,12 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         StudioLogThrottle throttle,
         ILogger<ProjectionDataService> logger,
         DatabaseAccess databaseAccess,
-        HealthHistory healthHistory)
+        HealthHistory healthHistory,
+        ProjectionLagHistory lagHistory)
     {
         this.databaseAccess = databaseAccess;
         this.healthHistory = healthHistory;
+        this.lagHistory = lagHistory;
         this.resolver = resolver;
         this.authorization = authorization;
         this.capabilities = capabilities;
@@ -145,7 +148,14 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     }
 
     /// <summary>The projections view of a scope that has resolved.</summary>
-    private async Task<ProjectionsView> ViewAsync(StudioScope scope, ResolvedScope resolved, CancellationToken cancellationToken)
+    /// <param name="scope">The scope as asked for.</param>
+    /// <param name="resolved">The scope as it resolved.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <param name="withLagHistories">
+    /// Whether to judge every shard's own samples for the chart - which the projections screen draws and the Overview's
+    /// summary does not. The samples are recorded either way, by the snapshot read.
+    /// </param>
+    private async Task<ProjectionsView> ViewAsync(StudioScope scope, ResolvedScope resolved, CancellationToken cancellationToken, bool withLagHistories = true)
     {
         // The database read is shared; the daemon and the tracker are in-process and are read fresh, so a
         // start or a stop shows on the next render rather than a second later.
@@ -166,6 +176,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         {
             Trends = trends,
             HealthHistory = history,
+            LagHistories = withLagHistories ? LagHistoriesOf(resolved, daemon, progress) : ProjectionsView.Empty.LagHistories,
+            Thresholds = withLagHistories ? ThresholdsOf(resolved.Store) : null,
             TenantPartitionedEvents = resolved.Store.Options.Events.UseTenantPartitionedEvents,
             DatabaseAutoCreate = Read<string?>(() => resolved.Database.AutoCreate.ToString(), null),
         };
@@ -181,7 +193,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             ArgumentNullException.ThrowIfNull(scope);
 
             resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-            ProjectionsView view = await ViewAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            ProjectionsView view = await ViewAsync(scope, resolved, cancellationToken, withLagHistories: false).ConfigureAwait(false);
 
             ShardProgress? worst = view.Progress.Count > 0 ? view.Progress[0] : null;
 
@@ -649,14 +661,90 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             byName.TryAdd(row.Name, row);
         }
 
+        DateTimeOffset readAt = DateTimeOffset.UtcNow;
+
+        // The screen's own samples (ProjectionLagHistory), from this read - which the snapshot cache shares between every
+        // circuit and runs once per time-to-live - and from no read of their own: the shards a registered async
+        // projection claims, at the position the database records, against the high water this read saw.
+        if (highWaterMark is { } mark)
+        {
+            HashSet<string> charted = new(
+                projections.Where(static x => x.IsAsync).SelectMany(static x => x.ShardNames.Concat(x.MemberShardNames)),
+                StringComparer.OrdinalIgnoreCase);
+
+            lagHistory.Append(
+                resolved.Registration.Key,
+                resolved.Database.Id.Identity,
+                readAt,
+                mark,
+                keptRows.Where(x => charted.Contains(x.Name)).Select(static x => (x.Name, x.Sequence)),
+                lagHistory.SpacingFor(options.Value.RefreshInterval));
+        }
+
         return new StoredProjections(
             projections,
             states,
             highWaterMark ?? 0,
             highWaterMark is not null || rows.TableExists,
-            DateTimeOffset.UtcNow,
+            readAt,
             byName);
     }
+
+    /// <summary>
+    /// Each registered shard's history from the screen's own samples (<see cref="ProjectionLagHistory" />), judged with what
+    /// is known here of the daemon: whether its projection is being rebuilt (and since when, if Marten Studio started it),
+    /// Marten Studio's own pause, and its agent's status here. Memory only - never a read.
+    /// </summary>
+    private Dictionary<string, ShardLagHistory> LagHistoriesOf(ResolvedScope resolved, DaemonStatus daemon, IReadOnlyList<ShardProgress> progress)
+    {
+        Dictionary<string, ShardLagHistory> histories = new(StringComparer.OrdinalIgnoreCase);
+
+        string storeKey = resolved.Registration.Key;
+        string databaseId = resolved.Database.Id.Identity;
+        TimeSpan spacing = lagHistory.SpacingFor(options.Value.RefreshInterval);
+        IReadOnlyList<StudioOperation> running = operations.RunningFor(storeKey, databaseId);
+
+        foreach (ShardProgress shard in progress)
+        {
+            if (!shard.IsRegistered || !shard.HasProgressRow)
+            {
+                continue;
+            }
+
+            IReadOnlyList<LagPoint> points = lagHistory.Read(storeKey, databaseId, shard.ShardName);
+
+            if (points.Count == 0)
+            {
+                continue;
+            }
+
+            StudioOperation? rebuild = running.FirstOrDefault(x =>
+                string.Equals(x.Kind, "Rebuild", StringComparison.Ordinal)
+                && string.Equals(x.Target, shard.ProjectionName, StringComparison.OrdinalIgnoreCase));
+
+            ShardLagContext context = new(
+                spacing,
+                Rebuilding: rebuild is not null || daemon.IsRebuildingHere(shard.ProjectionName),
+                RebuildStartedAt: rebuild?.StartedAt,
+                PausedByStudio: daemon.IsPausedByStudio,
+                AgentStatusHere: daemon.IsHostedHere
+                    ? daemon.Agents.FirstOrDefault(x => string.Equals(x.ShardName, shard.ShardName, StringComparison.OrdinalIgnoreCase))?.Status
+                    : null,
+                WarningThreshold: shard.WarningThreshold,
+                CriticalThreshold: shard.CriticalThreshold);
+
+            histories[shard.ShardName] = ShardLagHistory.Build(shard.ShardName, points, context);
+        }
+
+        return histories;
+    }
+
+    /// <summary>The studio's own thresholds that apply to this store's shards, read off its settings.</summary>
+    private ProjectionThresholds ThresholdsOf(IDocumentStore store) =>
+        new(
+            Read(() => store.Options.Events.Daemon.SlowPollingTime, TimeSpan.FromSeconds(1)),
+            options.Value.EffectiveHealthInterval,
+            lagHistory.SpacingFor(options.Value.RefreshInterval));
 
     /// <summary>The event store's schema, which is where all three of these objects live.</summary>
     private static string EventSchemaOf(ResolvedScope resolved) => resolved.Store.Options.Events.DatabaseSchemaName;

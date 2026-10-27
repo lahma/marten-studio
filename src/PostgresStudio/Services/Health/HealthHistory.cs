@@ -220,7 +220,7 @@ internal sealed record HealthHistoryView(IReadOnlyList<HealthSample> Samples, Da
 /// </para>
 /// <para>
 /// <b>What it costs.</b> A sample holds one number per series its checks write: a few per check, one per async
-/// shard or projection for the daemon checks and up to three more per failed or paused shard for D05, and one per
+/// shard or projection for the daemon checks and up to four more per shard D05 saw failed or paused, and one per
 /// replication slot on the server for R01 - every slot,
 /// another database's included, at most <c>HealthServerQueries.MaxSlots</c> (200), most WAL first. So a database's
 /// ring is <see cref="Capacity" /> times that many numbers and their series names: tens of kilobytes for an

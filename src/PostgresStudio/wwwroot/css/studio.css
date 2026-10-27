@@ -11802,3 +11802,123 @@ a.ms-schema-health-mark:focus-visible {
         padding: var(--ms-space-md) var(--ms-space-md);
     }
 }
+
+/* ==========================================================================
+   M2. The projections screen's lag chart, and the thresholds that apply
+
+   0.6's lag history packet: each shard row's chart of its position against the high water, drawn from the screen's own
+   samples, with its caption - the chart's text equivalent - and the "Thresholds that apply" disclosure under the table.
+   Appended after W5-API in D26 order; every selector is this packet's own (ms-lag-chart-, ms-shard-history-cell,
+   ms-projection-thresholds), so nothing here re-declares an earlier rule, and the caption's arrow keeps HEALTH-2's
+   ms-shard-trend colours. Text uses the secondary colour, not the muted one (UX-6 measured the muted grey below 4.5:1 on
+   the surface), and the stall is marked with a warning-coloured rule beside the text rather than by colouring the text:
+   the warning yellow is below 4.5:1 too. The chart's width is fixed; the table's own scroll region is where it scrolls at a
+   narrow width (D25).
+   ========================================================================== */
+
+.ms-shard-history-cell {
+    min-width: 168px;
+    vertical-align: top;
+}
+
+.ms-lag-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    max-width: 22rem;
+    margin: 0;
+}
+
+.ms-lag-chart-svg {
+    display: block;
+    flex: none;
+    width: 160px;
+    height: 40px;
+    border-bottom: 1px solid var(--ms-color-border);
+    overflow: visible;
+}
+
+.ms-lag-chart-svg polyline {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+
+.ms-lag-chart-high-water {
+    stroke: var(--ms-color-text-secondary);
+    stroke-width: 1.5;
+}
+
+.ms-lag-chart-position {
+    stroke: var(--ms-color-primary);
+    stroke-width: 2;
+}
+
+.ms-lag-chart-stalled {
+    stroke: var(--ms-color-warning);
+    stroke-width: 3;
+}
+
+.ms-lag-chart-threshold {
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+}
+
+.ms-lag-chart-warning {
+    stroke: var(--ms-color-warning);
+}
+
+.ms-lag-chart-critical {
+    stroke: var(--ms-color-danger);
+}
+
+.ms-lag-chart-caption {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.ms-lag-chart-caption .ms-shard-trend {
+    margin: 0 var(--ms-space-xs) 0 0;
+}
+
+.ms-lag-chart-stall,
+.ms-lag-chart-rebuild {
+    padding-left: var(--ms-space-xs);
+    color: var(--ms-color-text);
+}
+
+.ms-lag-chart-is-stalled .ms-lag-chart-stall {
+    border-left: 3px solid var(--ms-color-warning);
+}
+
+.ms-lag-chart-rebuilding .ms-lag-chart-rebuild {
+    border-left: 3px solid var(--ms-color-primary);
+}
+
+.ms-projection-thresholds {
+    max-width: 80ch;
+    margin-top: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-projection-thresholds > summary {
+    cursor: pointer;
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-projection-thresholds-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: var(--ms-space-sm) 0 0;
+    padding-left: var(--ms-space-lg);
+}

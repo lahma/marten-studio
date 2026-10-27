@@ -19,7 +19,8 @@ internal sealed record ProjectionFallingBehindFacts(DaemonCheckConfiguration Con
 /// <para>
 /// <b>Tier 0, over the history.</b> D01 records the sequence's handed-out ceiling and D03 every shard's position, in
 /// the same sweep; this judges the lag between them over the last ten minutes of samples (<see cref="ProjectionTrend" />,
-/// which the projections screen draws its arrow and ETA from as well). It reads nothing itself, so it costs nothing.
+/// which the projections screen falls back to for its arrow and ETA until its own samples - <c>ProjectionLagHistory</c> -
+/// say something). It reads nothing itself, so it costs nothing.
 /// </para>
 /// <para>
 /// <b>What fires.</b> The latest lag is past the shard's warning threshold and grew at each of the last two steps between

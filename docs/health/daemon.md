@@ -170,19 +170,34 @@ Tier 0: it runs no statement, and judges the sequence, the mark and the shard po
 same sweep, with what this process knows of the daemon. A burst of appends lands in one step, however large, and a
 shard that keeps up drains it by the next, so a single burst is never a finding - it takes three samples, over at
 least a minute, to say "falling behind". A lag that is high and draining is not a finding either - it is "draining
-at N ev/s, caught up in ~T", which the check's status row says and the projections screen draws as its arrow and ETA.
+at N ev/s, caught up in ~T", which the check's status row says. The projections screen draws an arrow and an ETA of its
+own, from its own samples (below); it falls back to this check's arithmetic only while it has too few of them.
 
 **Only a shard that runs, moves, and is slower than its arrivals.** A lag grows for reasons that have nothing to do
-with speed, and each is somebody else's, so D04 - and the projections screen's arrow - say nothing of a shard while
-Marten Studio's coordinator pause is recorded (every lag grows, by design), while its projection is known to be
-rebuilt (the position starts again from zero), while its agent here is paused or stopped (D05), when it has not moved
-while the advisor watched (stalled, D03, or not run, D02), or when the high-water mark has not moved (held behind a
-gap, D01). The status line says which.
+with speed, and each is somebody else's, so D04 says nothing of a shard while Marten Studio's coordinator pause is
+recorded (every lag grows, by design), while its projection is known to be rebuilt (the position starts again from
+zero), while its agent here is paused or stopped (D05), when it has not moved while the advisor watched (stalled, D03,
+or not run, D02), or when the high-water mark has not moved (held behind a gap, D01). The status line says which. The
+projections screen's own arrow is withheld for the pause and the agent alone: a stall is coloured and said on its
+chart, and a rebuild's catching up is what its estimate is for.
 
 Thresholds: the projections screen's - 1,000 events behind for the warning, 100,000 for critical - unless a
 progression row's own `warning_behind_threshold` or `critical_behind_threshold` is set. A threshold a host writes
 itself is honoured; Marten writes none (#5173, at `V9.39.0` and `V9.50.2`: it creates the two columns and leaves them
 empty) and the studio offers no way to set one. The finding's evidence says which threshold it used.
+
+**The projections screen's own lag history** (0.6). Each shard row has a small chart of its position against the high
+water, drawn from samples the screen keeps itself: one each time the projections screen or the Overview reads the
+database (the read every page already shares, once a `RefreshInterval` however many are open - never a read of its own),
+at most every 5 s or `RefreshInterval` if that is longer, 120 per shard - ten minutes at the defaults - in memory, for at
+most 200 shards a database and the 64 databases the advisor keeps state for. Its arrow fits a line to the lag of the
+last 8 samples and calls it falling behind or catching up only when the line moves more than twice what the samples
+scatter about it, so a shard that commits a page at a time is steady, not "falling behind" every other sample. A stall -
+the position still while the high water rose, for three samples - is coloured and said, not withheld. While a rebuild
+runs, the estimate is the events left over the rate measured from the rebuild's own samples in the last five minutes,
+said with that window, and "not enough samples yet" until three of them show progress. The thresholds above are drawn
+as lines once the lag comes within half of one, and the screen lists every threshold of the studio's own that applies to
+a shard - these, D01's, D03's and D05's - under the table.
 
 ## D05 Shard failed or paused
 
@@ -204,10 +219,12 @@ running at exactly that position (where a restart resumes) - or at 0, before its
 it, as do later pauses no further on. The shard's next committed progress past that position ends it - any later
 check that saw its position beyond it, so a shard that failed once and got past the event is quiet from its next page
 and a rewind below it is not reported - and so does a stretch with no check that saw it fail, or still standing where
-it failed: ten minutes, or three `HealthInterval`s where that is longer (three hours at an hourly interval). A store
-that partitions its events by tenant, where D03 records no positions, renews the memory only by its failures, and
-progress never ends it there: a shard that recovered and is then restarted for another reason is reported again until
-the memory runs out - a known limit of 0.4. Two
+it failed: ten minutes, or three `HealthInterval`s where that is longer (three hours at an hourly interval). For each
+shard it remembers failing, D05 also records where the daemon in this process has that shard's agent - a position series
+of its own - and reads it beside D03's, so a store that partitions its events by tenant, where D03 records no positions,
+ends a failure the shard got past too: a shard that recovered and is then restarted for another reason is not reported
+again (0.4 and 0.5 reported it until the memory ran out). A studio beside a daemon in another process has no agent to ask,
+and there only the failures renew the memory. Two
 moments it cannot see: the first check after somebody opens a page, if it lands between a restart and the next
 failure, and - for a studio beside a daemon in another process,
 which has only the row - every check that lands there. The memory is the advisor's own, kept only while a page is

@@ -189,6 +189,7 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
     /// another host made - a studio beside a daemon in another process, as far as either can tell.
     /// </param>
     /// <param name="denyWrites">Whether the studio's write policy refuses every visitor - the activity gate's third refusal.</param>
+    /// <param name="services">Registrations after the studio's own - a replacement for one of its singletons, say.</param>
     public static async Task<DaemonHealthHost> StartAsync(
         PostgresFixture postgres,
         string schema,
@@ -199,7 +200,8 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
         Action<MartenStudioOptions>? studio = null,
         IHealthStatementObserver? observer = null,
         bool fresh = true,
-        bool denyWrites = false)
+        bool denyWrites = false,
+        Action<IServiceCollection>? services = null)
     {
         CancellationToken token = TestContext.Current.CancellationToken;
 
@@ -256,6 +258,8 @@ internal sealed class DaemonHealthHost : IAsyncDisposable
         {
             builder.Services.AddSingleton<IAuthorizationService, DenyingWrites>();
         }
+
+        services?.Invoke(builder.Services);
 
         IHost host = builder.Build();
         IDocumentStore built = host.Services.GetRequiredService<IDocumentStore>();
