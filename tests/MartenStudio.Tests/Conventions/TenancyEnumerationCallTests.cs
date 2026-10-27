@@ -87,6 +87,12 @@ public class TenancyEnumerationCallTests
             + "never FindOrCreateDatabase, which would create the database a URL named"),
         new("src/PostgresStudio/Services/StudioScopeCatalog.cs", "DatabasesAsync", 2,
             "names, for the database picker; and the instance tenant discovery reads, for the header"),
+        // Issue #20: Sessions > Holders names a database of the server only where a registered source holds it and the policy
+        // admits it.
+        new("src/PostgresStudio/Services/Database/SessionHolderNames.cs", "DatabasesAsync", 1,
+            "names, matched to the Postgres names of the databases the server has sessions in, to decide which one the source "
+            + "policy lets a visitor be told: asked only of a source whose cardinality is Single or StaticMultiple - a "
+            + "DynamicMultiple source is never enumerated - and only when a database other than the page's own has sessions"),
         new("src/MartenStudio/Services/StoreInfoService.cs", "AllDatabases", 1,
             "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),
         new("src/MartenStudio/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,

@@ -108,6 +108,7 @@ public class StudioRegistrationTests
         (typeof(SessionPoolObserver), ServiceLifetime.Singleton, How.Type, typeof(SessionPoolObserver)),
         (typeof(ISessionActivityReader), ServiceLifetime.Singleton, How.Type, typeof(SessionActivityReader)),
         (typeof(SessionActivitySnapshots), ServiceLifetime.Singleton, How.Type, typeof(SessionActivitySnapshots)),
+        (typeof(SessionHolderNames), ServiceLifetime.Scoped, How.Type, typeof(SessionHolderNames)),
         (typeof(ISessionActivityService), ServiceLifetime.Scoped, How.Type, typeof(SessionActivityService)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),

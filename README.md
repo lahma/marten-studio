@@ -450,7 +450,12 @@ store's own table it belongs to, counts sessions by application beside the serve
 cancel or terminate button. Its **Blocking** tab (`?view=blocking`) draws who holds up whom as trees - each chain's
 head, then every session waiting on it - with the head's `pg_terminate_backend` (and `pg_cancel_backend`, when it runs
 a statement) as text to copy for whoever may run it, which the studio never runs; on PostgreSQL 19 it also shows the
-server's lock waits from `pg_stat_lock`. The Health page's **Snapshot** menu views, copies or downloads what your
+server's lock waits from `pg_stat_lock`. Its **Holders** tab (`?view=holders`) groups the whole server's client sessions - every
+database on it, not only this one - by database, application, role and client address, against the connection budget C03
+judges: the counts per database for anybody the store policy passes (a database named only where that policy admits them to
+it, the rest together as "Other databases"), the applications, roles and addresses, and every database's name, behind the
+activity gate. C13 (an application holding a tenth of the client limit idle while the server is 80% used) and C14 (connections
+that set no `Application Name`, Info) are the checks over it. The Health page's **Snapshot** menu views, copies or downloads what your
 pages show of the database as JSON, built from your own view of each page.
 
 **Statements** (Operations, `/marten/statements`) — where the database's time goes, statement by statement, grouped

@@ -23,8 +23,10 @@ namespace PostgresStudio.Internal.Sql;
 /// <c>datname = current_database()</c>, to client backends, and away from the studio's own backend
 /// (<c>pg_backend_pid()</c>). The one exception is <see cref="ServerConnections" />, which counts the client
 /// backends of the whole server - only a count, and the only number <c>max_connections</c> can be compared
-/// with, because every database on the server spends the same budget. <see cref="LockTable" /> reads a blocker
-/// in another database by process id, and names nothing about it.
+/// with, because every database on the server spends the same budget - and, from 0.8, <see cref="ServerHolders" />, which
+/// groups those backends by database, application, role and client address (issue #20): the one read that names other
+/// databases' sessions, so only the Sessions reader and the activity checks C13 and C14 call it.
+/// <see cref="LockTable" /> reads a blocker in another database by process id, and names nothing about it.
 /// </para>
 /// <para>
 /// <b>The lock table once per sweep</b> (X3, H3's half). A regular sweep reads <c>pg_locks</c> in one statement,
@@ -93,6 +95,9 @@ internal static class HealthConnectionQueries
 
     /// <summary>The most prepared transactions one read lists.</summary>
     public const int MaxPrepared = 100;
+
+    /// <summary>The most groups of the server's sessions one read lists (<see cref="ServerHolders" />); the read says how many there are.</summary>
+    public const int MaxHolderGroups = 1_000;
 
     /// <summary>
     /// A row of <c>pg_stat_activity a</c> that is a client session: a client backend, or a row whose
@@ -570,6 +575,83 @@ internal static class HealthConnectionQueries
         "  left join owners o on o.locked = h.relation\n" +
         " order by h.granted, h.pid, h.locktype",
         [Integer("limit", MaxLocks)]);
+
+    /// <summary>
+    /// Database › Sessions › Holders and C13 and C14 (issue #20): every client session of the <b>whole server</b>, grouped by
+    /// database, application, role and client address, with each group's state counts and the oldest idle and
+    /// idle-in-transaction age - one statement, with the server's connection settings in front.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one read that is not this database's.</b> <c>max_connections</c> is the server's and every database spends it,
+    /// so "who holds the server's connections" cannot be asked of one database; this and <see cref="ServerConnections" />
+    /// are the only statements here that are not bounded to <c>current_database()</c>. It names databases, applications,
+    /// roles and client addresses of other people's sessions, so what a visitor is shown of it is decided per piece after
+    /// it is read (<c>SessionActivityService</c>, D29) and a health check that judges it is an <c>Activity</c> check.
+    /// </para>
+    /// <para>
+    /// <b>The same sessions C03 counts</b> (<see cref="ClientSession" />, the studio's own reading backend aside, as on the
+    /// rest of the page): a role without <c>pg_read_all_stats</c> reads another role's row with its database, role and
+    /// application name but without its backend type, state, timings and client address (B0 G9, measured), so such a
+    /// session is a group of its own - <c>hidden</c>, its client not readable - and its state is counted as unknown, never
+    /// as idle. <c>server_connections</c> counts every client session on the server, the studio's own included, as C03's
+    /// number does; the rows add up to that less one.
+    /// </para>
+    /// <para>
+    /// <b>Bounded in SQL.</b> At most <see cref="MaxHolderGroups" /> groups, the most sessions first, with how many there
+    /// are, so a cap is said rather than hidden. The totals are exact whatever the cap. Reads one process array scan
+    /// (<c>sessions</c> is referenced twice, so it is materialized once), locks nothing, calls no lock-taking function, and
+    /// names no relation.
+    /// </para>
+    /// </remarks>
+    public static HealthQuery ServerHolders() => new(
+        "with visibility as (\n" +
+        "  select pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') as can_read_all_stats,\n" +
+        "         current_setting('max_connections')::int4 as max_connections,\n" +
+        "         current_setting('superuser_reserved_connections')::int4 as superuser_reserved,\n" +
+        "         coalesce(nullif(current_setting('reserved_connections', true), ''), '0')::int4 as reserved,\n" +
+        "         current_setting('server_version_num')::int4 as server_version\n" +
+        "),\n" +
+        "sessions as (\n" +
+        "  select coalesce(a.datname, '')::text as database,\n" +
+        "         coalesce(a.application_name, '')::text as application,\n" +
+        "         coalesce(a.usename, '')::text as role,\n" +
+        "         host(a.client_addr) as client,\n" +
+        "         a.backend_type is null as hidden,\n" +
+        "         a.pid = pg_backend_pid() as own,\n" +
+        "         a.state, a.state_change\n" +
+        "    from pg_stat_activity a\n" +
+        "   where " + ClientSession + "\n" +
+        "),\n" +
+        "grouped as (\n" +
+        "  select s.database, s.application, s.role, s.client, s.hidden,\n" +
+        "         count(*) as total,\n" +
+        "         count(*) filter (where s.state = 'active') as active,\n" +
+        "         count(*) filter (where s.state = 'idle') as idle,\n" +
+        "         count(*) filter (where s.state in ('idle in transaction', 'idle in transaction (aborted)')) as idle_in_transaction,\n" +
+        "         count(*) filter (where s.state is null) as state_unknown,\n" +
+        "         extract(epoch from (now() - min(s.state_change) filter (where s.state = 'idle')))::float8 as oldest_idle_seconds,\n" +
+        "         extract(epoch from (now() - min(s.state_change) filter (where s.state in ('idle in transaction', 'idle in transaction (aborted)'))))::float8\n" +
+        "           as oldest_idle_in_transaction_seconds\n" +
+        "    from sessions s\n" +
+        "   where not s.own\n" +
+        "   group by s.database, s.application, s.role, s.client, s.hidden\n" +
+        "),\n" +
+        "ranked as (\n" +
+        "  select g.*,\n" +
+        "         count(*) over () as groups,\n" +
+        "         row_number() over (order by g.total desc, g.database, g.application, g.role, g.client, g.hidden) as rank\n" +
+        "    from grouped g\n" +
+        ")\n" +
+        "select v.can_read_all_stats, v.max_connections, v.superuser_reserved, v.reserved, v.server_version,\n" +
+        "       (select count(*) from sessions) as server_connections,\n" +
+        "       r.groups, r.database, r.application, r.role, r.client, r.hidden, r.total, r.active, r.idle,\n" +
+        "       r.idle_in_transaction, r.state_unknown, r.oldest_idle_seconds, r.oldest_idle_in_transaction_seconds,\n" +
+        "       r.database = current_database() as this_database\n" +
+        "  from visibility v\n" +
+        "  left join ranked r on r.rank <= @limit\n" +
+        " order by r.rank",
+        [Integer("limit", MaxHolderGroups)]);
 
     private static NpgsqlParameter Seconds(string name, TimeSpan value) =>
         new(name, NpgsqlDbType.Double) { Value = Math.Max(value.TotalSeconds, 0d) };

@@ -109,6 +109,32 @@ internal static class MatrixReads
                 throw new InvalidOperationException("pg_stat_lock was read on server_version_num " + blocking.ServerVersion + ", below 19, where it does not exist.");
             }
         }),
+        // ---- Issue #20: Sessions › Holders' read of the whole server's connections by holder, on every version and every role - a
+        // role without pg_read_all_stats reads other roles' sessions without a state, which are groups of their own ------------
+        new("sessions: server holders", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            SessionServerHolders holders = snapshot.Holders ?? throw new InvalidOperationException("The sessions snapshot read no holders.");
+
+            if (holders.ServerConnections < 1 || holders.MaxConnections < 1 || holders.Limits.Available < 1)
+            {
+                throw new InvalidOperationException(
+                    "The holders read answered no budget: " + holders.ServerConnections + " sessions of max_connections " + holders.MaxConnections + ".");
+            }
+
+            // Every session but the studio's own is a group, so the groups add up to the server's count less its one.
+            if (!holders.Truncated && holders.Groups.Sum(static y => y.Total) != holders.ServerConnections - 1)
+            {
+                throw new InvalidOperationException(
+                    "The holders' groups hold " + holders.Groups.Sum(static y => y.Total) + " sessions of the server's " + holders.ServerConnections + ".");
+            }
+
+            // A role that reads every state has none whose state is unknown.
+            if (holders.CanReadAllStats && holders.Groups.Any(static y => y.StateUnknown > 0))
+            {
+                throw new InvalidOperationException("A role in pg_read_all_stats was told a session's state is unknown.");
+            }
+        }),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
 

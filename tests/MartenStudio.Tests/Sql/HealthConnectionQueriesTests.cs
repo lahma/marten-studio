@@ -19,7 +19,7 @@ public class HealthConnectionQueriesTests
     public static TheoryData<string> Every => new()
     {
         "ServerConnections", "IdleInTransaction", "LongRunningStatements", "LockTable", "LockStatistics",
-        "PreparedTransactions", "DatabaseCounters", "SessionSnapshot", "LockSnapshot",
+        "PreparedTransactions", "DatabaseCounters", "SessionSnapshot", "LockSnapshot", "ServerHolders",
     };
 
     /// <summary>One statement by name - the theories pass names, because the query type is internal.</summary>
@@ -34,6 +34,7 @@ public class HealthConnectionQueriesTests
         "DatabaseCounters" => HealthConnectionQueries.DatabaseCounters(),
         "SessionSnapshot" => HealthConnectionQueries.SessionSnapshot(),
         "LockSnapshot" => HealthConnectionQueries.LockSnapshot(),
+        "ServerHolders" => HealthConnectionQueries.ServerHolders(),
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "No such statement."),
     };
 
@@ -96,6 +97,73 @@ public class HealthConnectionQueriesTests
         {
             sql.Should().NotContain("pg_blocking_pids", "it takes the lock manager's state exclusively for a moment, so nobody else calls it");
         }
+    }
+
+    /// <summary>The select list of the holders read, in the order <c>SessionActivityReader.MapHolder</c> reads its ordinals.</summary>
+    private static readonly string[] HolderColumns =
+    [
+        "can_read_all_stats", "max_connections", "superuser_reserved", "reserved", "server_version", "server_connections",
+        "groups", "database", "application", "role", "client", "hidden", "total", "active", "idle",
+        "idle_in_transaction", "state_unknown", "oldest_idle_seconds", "oldest_idle_in_transaction_seconds", "this_database",
+    ];
+
+    /// <summary>
+    /// Issue #20: the holders read is the whole server's - the one session read that is not bounded to this database - in one
+    /// scan of <c>pg_stat_activity</c> (the sessions CTE is read twice, materialized once), bounded in SQL by one bound limit, over
+    /// the same client sessions C03 counts, with the studio's own backend left out of the groups and counted in the total.
+    /// </summary>
+    [Fact]
+    public void The_holders_read_is_the_whole_servers_in_one_bounded_scan_over_the_sessions_C03_counts()
+    {
+        HealthQuery query = HealthConnectionQueries.ServerHolders();
+        string sql = query.Sql;
+
+        Regex.Count(sql, @"from\s+pg_stat_activity\b").Should().Be(1, "one scan of the process array, however often the CTE is referred to");
+        sql.Should().NotContain("a.datname = current_database()", "it is not bounded to this database: it says which database each session is in")
+            .And.Contain("r.database = current_database() as this_database", "and names this one only to mark the studio's own");
+        Regex.Count(sql, @"current_database\(\)").Should().Be(1);
+        sql.Should().Contain("where " + HealthConnectionQueries.ClientSession, "the sessions C03 counts, a hidden one included");
+        sql.Should().Contain("a.pid = pg_backend_pid() as own").And.Contain("where not s.own", "the studio's own reading session is not a group");
+        sql.Should().Contain("(select count(*) from sessions) as server_connections", "and is counted in the total C03 judges");
+
+        query.Parameters.Should().ContainSingle().Which.Value.Should().Be(HealthConnectionQueries.MaxHolderGroups);
+        sql.Should().Contain("left join ranked r on r.rank <= @limit");
+        HealthConnectionQueries.MaxHolderGroups.Should().Be(1_000);
+
+        sql.Should().Contain("group by s.database, s.application, s.role, s.client, s.hidden");
+        sql.Should().Contain("s.state in ('idle in transaction', 'idle in transaction (aborted)')", "aborted ones count as idle in a transaction");
+        sql.Should().Contain("min(s.state_change) filter (where s.state = 'idle')").And.Contain("count(*) filter (where s.state is null) as state_unknown");
+        sql.Should().Contain("host(a.client_addr) as client", "an address without its mask");
+        sql.Should().Contain("a.backend_type is null as hidden", "a session the role may not see into is a group of its own");
+    }
+
+    [Fact]
+    public void The_holders_read_calls_no_function_that_takes_a_lock_and_selects_its_columns_in_the_order_the_reader_reads_them()
+    {
+        string sql = HealthConnectionQueries.ServerHolders().Sql;
+
+        sql.Should().NotContain("pg_blocking_pids").And.NotContain("pg_locks").And.NotContain("pg_partition_")
+            .And.NotContain("pg_sequence_last_value").And.NotContain("::regclass").And.NotContain("pg_get_");
+        sql.Should().Contain("current_setting('reserved_connections', true)", "reserved_connections is 16+; an older server answers null, not 42703");
+
+        // The outer select list, one column per line item: its names are the ordinals MapHolder reads.
+        int start = sql.LastIndexOf("select v.can_read_all_stats", StringComparison.Ordinal);
+        int end = sql.IndexOf("  from visibility v", start, StringComparison.Ordinal);
+        start.Should().BePositive();
+        end.Should().BeGreaterThan(start);
+
+        string[] columns =
+        [
+            .. sql[(start + "select ".Length)..end]
+                .Replace("(select count(*) from sessions)", "count_sessions", StringComparison.Ordinal)
+                .Replace("r.database = current_database()", "this", StringComparison.Ordinal)
+                .Split(',')
+                .Select(static x => x.Trim())
+                .Select(static x => x.Contains(" as ", StringComparison.Ordinal) ? x[(x.LastIndexOf(" as ", StringComparison.Ordinal) + 4)..] : x[(x.LastIndexOf('.') + 1)..])
+                .Select(static x => x.Trim()),
+        ];
+
+        columns.Should().Equal(HolderColumns);
     }
 
     [Fact]

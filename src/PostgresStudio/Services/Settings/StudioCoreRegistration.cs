@@ -174,6 +174,7 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton<SessionPoolObserver>();
         services.TryAddSingleton<ISessionActivityReader, SessionActivityReader>();
         services.TryAddSingleton<SessionActivitySnapshots>();
+        services.TryAddScoped<SessionHolderNames>();
         services.TryAddScoped<ISessionActivityService, SessionActivityService>();
 
         // The SQL console. Scoped like every data service, and registered once under both names: the interface forwards to

@@ -147,6 +147,39 @@ public class ActivityViewsOffThePollPathTests
             "connections by application are the sessions snapshot's fourth statement, behind its ten-second floor, and nothing else's");
     }
 
+    /// <summary>
+    /// Issue #20: the one statement that groups the whole server's sessions - other databases' applications, roles and addresses -
+    /// is called by the Sessions reader, as the snapshot's sixth statement behind its ten-second floor, and by the sweep's one
+    /// shared read, which only the two activity checks C13 and C14 ask for: nothing else, so nothing reads it on a poll.
+    /// </summary>
+    [Fact]
+    public void The_holders_read_is_called_only_by_the_sessions_reader_and_the_sweeps_one_shared_read()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != Builder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("HealthConnectionQueries.ServerHolders(", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().BeEquivalentTo(
+            ["src/PostgresStudio/Services/Database/SessionActivityReader.cs", "src/PostgresStudio/Services/Health/Checks/ServerConnectionHolders.cs"],
+            "the holders are the Sessions snapshot's and the sweep's one shared read - which C13 and C14 alone ask for");
+
+        List<string> askers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != "src/PostgresStudio/Services/Health/Checks/ServerConnectionHolders.cs")
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("ServerConnectionHolders.", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        askers.Should().BeEquivalentTo(
+            ["src/PostgresStudio/Services/Health/Checks/IdleConnectionsHoardedCheck.cs", "src/PostgresStudio/Services/Health/Checks/UnattributedConnectionsCheck.cs"],
+            "only the two activity checks take the shared holders read");
+    }
+
     [Fact]
     public void The_aurora_builders_session_read_is_called_only_by_the_aurora_facts_session_read()
     {
@@ -380,7 +413,7 @@ public class ActivityViewsOffThePollPathTests
 
         // C10 (H10) reads no activity view - only pg_backend_pid(), twice - and runs in the same regular sweep; nor does C11
         // (W5-CAP), which reads pg_stat_database and the shared statistics views through the statistics window.
-        checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11", "C12");
+        checks.Select(static x => x.Info.Code).Should().Equal("C01", "C02", "C03", "C04", "C05", "C06", "C07", "C08", "C09", "C10", "C11", "C12", "C13", "C14");
         checks.Should().OnlyContain(x => regular.Contains(x.Info.Tier), "a regular sweep is cached for HealthInterval, never RefreshInterval");
     }
 

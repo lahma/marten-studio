@@ -233,6 +233,17 @@ chain is shown with its `select pg_terminate_backend(<pid>);` - and `pg_cancel_b
 to copy for whoever may run it: there is no button that runs either, and nothing in either package executes them. C12,
 which names the heads of chains in its findings, is an activity check.
 
+Database › Sessions › Holders (0.8) groups the **whole server's** client sessions - every database on it - so it is the one
+read of the page that is not about this database, and what a visitor is shown is decided per piece. The per-database counts,
+ages and states are shown to anybody the store or source policy passes for this database as a whole, and a database is named
+in them only when it is the one the studio is connected to or a registered source's database that policy admits (asked
+about the source's registered key and the database's own identity, with no tenant and no capability, and never by enumerating
+a source whose databases can change while the process runs - D27); every other database's sessions are counted together as
+"Other databases", with no name. Every database's name, and every group's application, role and client address, need
+`ViewDatabaseActivity` and the write policy asked about **this** database - not about each other one: the capability is the
+"who is using the server" power, so grant it to the people you would let read every database's connections. C13 and C14 are
+activity checks, for the same reason.
+
 Which names stay at the database-wide gate, and why: the name of the role the studio reads as (`SqlConsoleRole`, or
 the store's or data source's own login where none is set) and the login the data source connects as are
 configuration, not somebody else's session, so a "not checked" row names the role and the grant it lacks, and S04,

@@ -181,8 +181,10 @@ read that is authorized like a write, because each reads beyond structure:
   keeps its rows off the screen and still wants the SQL its own migrations wrote. Never a row, never a sequence's current
   value (data: it says how many rows a table has had), and never a schema only `"*"` admits.
 - **`ViewDatabaseActivity`** - other sessions' process ids, roles, client addresses, application names and statements,
-  on Database › Sessions, the Health page and Operations › Statements. Without it the counts, ages and states are still
-  shown.
+  on Database › Sessions, the Health page and Operations › Statements, and the names of the other databases on the server
+  and who holds their connections (Sessions › Holders). Without it the counts, ages and states are still shown - the
+  server's connections per database, named only where the source policy admits the visitor to that database, and the rest
+  together as "Other databases".
 - **`RunSql`** - the Query page's read-only SQL console.
 
 Every disabled control names the property that would enable it (`PostgresStudioOptions.Capabilities.RunSql`), and the
@@ -231,7 +233,7 @@ honour another application's visibility rules.
 | Data | Overview | The server, the health glance, the largest tables, connections by state, recent studio activity | Source policy |
 | Data | Query | The SQL console | `RunSql` and the write policy |
 | Database | Tables | The database browser (above) | Structure: source policy; definitions: `ViewDefinitions` or `BrowseDatabase`; rows: `BrowseDatabase` |
-| Database | Sessions | Sessions, locks and prepared transactions, sessions by application against the connection budget | Counts: source policy; who: `ViewDatabaseActivity` |
+| Database | Sessions | Sessions, locks and prepared transactions, sessions by application against the connection budget; **Blocking** (who holds up whom) and **Holders** (who holds the whole server's connections, by database, application, role and client address, against that budget) | Counts: source policy - a database's name too only where the policy admits it, other databases together; who and every name: `ViewDatabaseActivity` |
 | Database | Relationships | The foreign keys as a diagram and a table, drawn on the server | Source policy; far ends per the browser's gate |
 | Operations | Health | The health advisor (below) | Per finding (below) |
 | Operations | Statements | The top statements by execution time, grouped by verb and table | `ViewDatabaseActivity` and the write policy |

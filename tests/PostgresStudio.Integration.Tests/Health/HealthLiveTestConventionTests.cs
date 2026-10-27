@@ -43,7 +43,7 @@ public class HealthLiveTestConventionTests
         "T15", "T19", "T20", "T25", "T26",
         "R02", "R03", "R04",
         "S04", "S05", "S06", "S07", "S08", "S09", "S10", "K05", "K06", "K07",
-        "C12",
+        "C12", "C13", "C14",
     ];
 
     /// <summary>Every other shipped check, and why its live proof is the Marten suite's.</summary>

@@ -114,9 +114,9 @@ names, other sessions' process ids and roles, and findings about one tenant. On 
 - the `Statements` section is `null`, and `Withheld["statements"]` says why;
 - `Connections.ByApplication` is empty - the database's totals and the server's budget are always there - and
   `Withheld["connections.byApplication"]` says why;
-- a finding of a check that reads other programs' statements (T02, T22, T23 - `PostgresCheck.RequiresActivity`) and a
-  finding about one tenant are counted in `FindingsWithheld` and never described, and such a check's `Outcome` is
-  `Withheld`;
+- a finding of a check that reads other programs' statements (T02, T22, T23 - `PostgresCheck.RequiresActivity`) or names
+  other sessions' blockers, applications, roles and addresses (C12, C13, C14) and a finding about one tenant are counted in
+  `FindingsWithheld` and never described, and such a check's `Outcome` is `Withheld`;
 - a piece of evidence about another session keeps its label and reads
   `withheld - Activity-grade: call with IncludeActivity = true`.
 

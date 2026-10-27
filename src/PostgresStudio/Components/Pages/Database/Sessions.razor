@@ -31,9 +31,10 @@
     No cancel and no terminate buttons (plan §9): the studio never ends another session. While the page is open
     it holds a lease on the in-process pool observer, which is what shows this process's own pool.
 
-    Two tabs (X3), named in the query string (?view=blocking, D9) so a link - C12's - reopens the same one: the sessions,
-    locks and prepared transactions, and Blocking's trees (SessionsBlocking). Both are drawn from the same reads; switching
-    reads nothing.
+    Three tabs (X3, issue #20), named in the query string (?view=blocking, ?view=holders, D9) so a link - C12's, C13's - reopens
+    the same one: the sessions, locks and prepared transactions, Blocking's trees (SessionsBlocking) and Holders (SessionsHolders),
+    who holds the whole server's connections rather than this database's. All are drawn from the same reads; switching reads
+    nothing.
 *@
 
 <PageTitle>Sessions</PageTitle>
@@ -142,9 +143,9 @@
         }
 
         <nav class="ms-tabs ms-sessions-tabs" aria-label="Sections of Sessions">
-            <a class="@(BlockingTab ? "ms-tab" : "ms-tab ms-tab-active")"
+            <a class="@(BlockingTab || HoldersTab ? "ms-tab" : "ms-tab ms-tab-active")"
                href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)"
-               aria-current="@(BlockingTab ? null : "page")">
+               aria-current="@(BlockingTab || HoldersTab ? null : "page")">
                 Sessions
             </a>
             <a class="@(BlockingTab ? "ms-tab ms-tab-active" : "ms-tab")"
@@ -156,11 +157,20 @@
                     <span class="ms-tab-count">@SessionText.Number(summary.Blocking.Chains + summary.Blocking.Unrooted)</span>
                 }
             </a>
+            <a class="@(HoldersTab ? "ms-tab ms-tab-active" : "ms-tab")"
+               href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope, SessionLinks.HoldersView)"
+               aria-current="@(HoldersTab ? "page" : null)">
+                Holders
+            </a>
         </nav>
 
         @if (BlockingTab)
         {
             <SessionsBlocking SummaryModel="summary" DetailsModel="details" ShowDetails="ShowDetails" />
+        }
+        else if (HoldersTab)
+        {
+            <SessionsHolders SummaryModel="summary" DetailsModel="details" ShowDetails="ShowDetails" />
         }
         else
         {
@@ -453,7 +463,7 @@
         @if (summary.MeasuredAt is { } measured)
         {
             <p class="ms-sessions-measured">
-                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), for this database only.
+                Read @State.FormatInSelectedTimeZone(measured) (<TimeAgo Timestamp="measured" />), @(HoldersTab ? "for the whole server" : "for this database only").
             </p>
         }
     }
@@ -479,12 +489,15 @@
     /// <summary>Whether the details are on screen: the gate open and the service's answer a grant.</summary>
     private bool ShowDetails => summary?.Details.IsOpen == true && details is { Refusal: DatabaseRefusal.None };
 
-    /// <summary>The tab the address names (<c>?view=blocking</c>, D9); anything else is the sessions themselves.</summary>
+    /// <summary>The tab the address names (<c>?view=blocking</c> or <c>?view=holders</c>, D9); anything else is the sessions themselves.</summary>
     [SupplyParameterFromQuery(Name = SessionLinks.ViewParameter)]
     public string? View { get; set; }
 
     /// <summary>Whether Blocking is the tab on screen.</summary>
     private bool BlockingTab => string.Equals(View, SessionLinks.BlockingView, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether Holders is the tab on screen: who holds the whole server's connections (issue #20).</summary>
+    private bool HoldersTab => string.Equals(View, SessionLinks.HoldersView, StringComparison.OrdinalIgnoreCase);
 
     private string DatabaseHref => DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope);
 

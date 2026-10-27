@@ -20,8 +20,9 @@ internal interface ISessionActivityReader
 
 /// <summary>
 /// The real reader: the statements from <see cref="HealthConnectionQueries" /> - the sessions, the locks, the prepared
-/// transactions, the lock table's blocking graph and, on PostgreSQL 19, <c>pg_stat_lock</c> - and the connections by
-/// application, on one connection, each in the health advisor's read-only transaction.
+/// transactions, the lock table's blocking graph and, on PostgreSQL 19, <c>pg_stat_lock</c> - the connections by
+/// application and the whole server's connections by holder (issue #20), on one connection, each in the health advisor's
+/// read-only transaction.
 /// </summary>
 /// <remarks>
 /// It runs through the advisor's own <see cref="HealthSqlRunner" /> rather than a session of its own, so the
@@ -71,6 +72,11 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             .QueryAsync(ConnectionsByApplicationQueries.Read(), MapApplication, cancellationToken)
             .ConfigureAwait(false);
 
+        // Issue #20: the whole server's connections by holder - the one read of this snapshot that is not about this database.
+        IReadOnlyList<HolderRow> holders = await sql
+            .QueryAsync(HealthConnectionQueries.ServerHolders(), MapHolder, cancellationToken)
+            .ConfigureAwait(false);
+
         // X3: Blocking's tree - the waiting sessions and who blocks them, from the same one read of the lock table a sweep makes.
         LockTableRead blocking = LockTableRead.Fold(
             await sql.QueryAsync(HealthConnectionQueries.LockTable(), LockTableRead.Map, cancellationToken).ConfigureAwait(false),
@@ -93,6 +99,7 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             Labelled(sql.Statements))
         {
             Connections = Connections(applications),
+            Holders = Holders(holders),
             Blocking = blocking,
             LockStatistics = statistics,
         };
@@ -109,6 +116,7 @@ internal sealed class SessionActivityReader : ISessionActivityReader
         [HealthConnectionQueries.LockSnapshot().Sql] = "the locks",
         [HealthConnectionQueries.PreparedTransactions().Sql] = "prepared transactions",
         [ConnectionsByApplicationQueries.Read().Sql] = "connections by application",
+        [HealthConnectionQueries.ServerHolders().Sql] = "the server's connections by holder",
         [HealthConnectionQueries.LockTable().Sql] = "who blocks whom",
         [HealthConnectionQueries.LockStatistics().Sql] = "lock waits by type",
     };
@@ -199,6 +207,66 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             total,
             [.. rows.Where(static x => !x.IsTotal && x.Counts is not null).Select(static x => x.Counts!)],
             first.ApplicationCount);
+    }
+
+    /// <summary>One row of <see cref="HealthConnectionQueries.ServerHolders" />: the connection settings, and a group of sessions.</summary>
+    internal sealed record HolderRow(
+        bool CanReadAllStats,
+        int MaxConnections,
+        int SuperuserReserved,
+        int Reserved,
+        int ServerVersion,
+        long ServerConnections,
+        long GroupCount,
+        SessionHolderGroup? Group);
+
+    /// <summary>One row of <see cref="HealthConnectionQueries.ServerHolders" />.</summary>
+    internal static HolderRow MapHolder(NpgsqlDataReader reader) => new(
+        reader.GetBoolean(0),
+        reader.GetInt32(1),
+        reader.GetInt32(2),
+        reader.GetInt32(3),
+        reader.GetInt32(4),
+        reader.GetInt64(5),
+        reader.IsDBNull(6) ? 0 : reader.GetInt64(6),
+        reader.IsDBNull(7)
+            ? null
+            : new SessionHolderGroup(
+                SessionReads.Text(reader, 7) ?? string.Empty,
+                SessionReads.Text(reader, 8) ?? string.Empty,
+                SessionReads.Text(reader, 9) ?? string.Empty,
+                SessionReads.Text(reader, 10),
+                !reader.IsDBNull(11) && reader.GetBoolean(11),
+                reader.GetInt64(12),
+                reader.GetInt64(13),
+                reader.GetInt64(14),
+                reader.GetInt64(15),
+                reader.GetInt64(16),
+                SessionReads.Seconds(reader, 17),
+                SessionReads.Seconds(reader, 18),
+                !reader.IsDBNull(19) && reader.GetBoolean(19)));
+
+    /// <summary>The rows as one reading, or <see langword="null" /> when the statement answered nothing at all.</summary>
+    internal static SessionServerHolders? Holders(IReadOnlyList<HolderRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        HolderRow first = rows[0];
+
+        return new SessionServerHolders(
+            first.CanReadAllStats,
+            first.MaxConnections,
+            first.SuperuserReserved,
+            first.Reserved,
+            first.ServerVersion,
+            first.ServerConnections,
+            first.GroupCount,
+            [.. rows.Where(static x => x.Group is not null).Select(static x => x.Group!)]);
     }
 
     /// <summary>The most bytes one character takes in any server encoding Postgres supports (UTF-8's four).</summary>
