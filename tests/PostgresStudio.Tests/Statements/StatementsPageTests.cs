@@ -256,6 +256,10 @@ public class StatementsPageTests
         (PostgresStudioComponentContext context, FakeStatements service) = await ContextAsync(
             Shown(ThreeStatements()), Planned, "postgres/statements?queryid=1");
         await using PostgresStudioComponentContext owned = context;
+
+        // Both intervals: the page polls at EffectiveHealthInterval, the longer of the two, and RefreshInterval's five-second
+        // default put the second poll on the ten-second wait's own deadline.
+        context.Options.RefreshInterval = TimeSpan.FromMilliseconds(20);
         context.Options.HealthInterval = TimeSpan.FromMilliseconds(20);
 
         var page = context.Render<StatementsPage>();

@@ -175,7 +175,7 @@ public class StreamStepperTests
 
         IRenderedComponent<StreamStepper> page = Render(context, "&agg=" + Aggregate + "&v=1");
 
-        await page.Find("#ms-stepper-path").ChangeAsync(new() { Value = "Balance" });
+        await page.Find("#ms-stepper-path").InputAsync(new() { Value = "Balance" });
         await page.FindAll(".ms-stepper-search button").Single().ClickAsync(new());
 
         context.EventData.SearchRequests.Should().Equal([Aggregate + "@1:Balance"]);
@@ -191,11 +191,35 @@ public class StreamStepperTests
 
         IRenderedComponent<StreamStepper> page = Render(context, "&agg=" + Aggregate + "&v=1");
 
-        await page.Find("#ms-stepper-path").ChangeAsync(new() { Value = "Owner" });
+        await page.Find("#ms-stepper-path").InputAsync(new() { Value = "Owner" });
         await page.FindAll(".ms-stepper-search button").Single().ClickAsync(new());
 
         page.Find(".ms-stepper-search-result").TextContent.Should()
             .Contain("No event after version 1 changed $.Owner").And.Contain("version 3");
+    }
+
+    /// <summary>
+    /// 0.6's UI sweep: the path bound on change, so "Find next change" stayed disabled until the field lost focus. It binds on
+    /// input now - the button is enabled while the path is typed, and disabled again once it is cleared - and nothing is
+    /// searched until it is clicked.
+    /// </summary>
+    [Fact]
+    public async Task Find_next_change_is_enabled_while_the_path_is_typed_not_only_once_the_field_loses_focus()
+    {
+        using StudioComponentContext context = await ArrangedAsync();
+
+        IRenderedComponent<StreamStepper> page = Render(context, "&agg=" + Aggregate + "&v=1");
+        AngleSharp.Dom.IElement Button() => page.FindAll(".ms-stepper-search button").Single();
+
+        Button().HasAttribute("disabled").Should().BeTrue("there is no path to look for yet");
+
+        await page.Find("#ms-stepper-path").InputAsync(new() { Value = "Bal" });
+        page.WaitForAssertion(() => Button().HasAttribute("disabled").Should().BeFalse("a keystroke is enough; no change event has fired"));
+
+        await page.Find("#ms-stepper-path").InputAsync(new() { Value = string.Empty });
+        Button().HasAttribute("disabled").Should().BeTrue();
+
+        context.EventData.SearchRequests.Should().BeEmpty("typing searches nothing");
     }
 
     [Theory]

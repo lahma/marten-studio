@@ -12435,9 +12435,12 @@ a.ms-schema-health-mark:focus-visible {
 
    0.6's plan view packet (X1 and X1b). Appended to studio.css in D26 order; every selector is this packet's own (ms-plan-),
    so nothing here re-declares an earlier rule. The tree sits in a TableScroll region (D25) at its natural width and scrolls
-   sideways rather than squeezing a deep plan's labels; each node is at most a phone's width, so a shallow plan fits one. A
-   node's bar is its share of the plan's time, or of its cost. Notes use the secondary text colour, not the muted one: UX-6
-   measured the muted grey below 4.5:1 on the surface.
+   sideways rather than squeezing a deep plan's labels; each node is at most as wide as the plan itself less the tree's
+   padding (the plan is a container, and 100cqi its width), so a one-node plan fits on a phone and only a deeper one scrolls.
+   0.6's UI sweep measured the first bound, 85vw, at 390 px: a viewport unit knows nothing of the icon rail and the cards
+   round the plan, so the root node ran 88 px past a 252 px region (UI-FIX, edited in place). A node's bar is its share of
+   the plan's time, or of its cost. Notes use the secondary text colour, not the muted one: UX-6 measured the muted grey
+   below 4.5:1 on the surface.
    ========================================================================== */
 
 .ms-plan {
@@ -12445,6 +12448,7 @@ a.ms-schema-health-mark:focus-visible {
     flex-direction: column;
     gap: var(--ms-space-sm);
     min-width: 0;
+    container-type: inline-size;
 }
 
 .ms-plan-summary {
@@ -12502,7 +12506,7 @@ a.ms-schema-health-mark:focus-visible {
 }
 
 .ms-plan-node {
-    max-width: min(72ch, 85vw);
+    max-width: min(72ch, 100cqi - 2 * var(--ms-space-sm));
     padding: var(--ms-space-sm) var(--ms-space-md);
     border: 1px solid var(--ms-color-border);
     border-radius: var(--ms-radius-md);
@@ -12955,4 +12959,46 @@ a.ms-schema-health-mark:focus-visible {
 
 .ms-daemon-topology {
     max-width: 80ch;
+}
+
+/* ==========================================================================
+   UI-0.6. What 0.6's UI sweep found at 390 px and in the dark theme
+
+   Appended in D26 order, after M47. Each rule fixes one measured defect, and StylesheetTests.UiSweep pins it; the plan
+   node's width, the fifth, is an in-place edit of X1's own rule (PlanStylesheetTests) rather than an override here.
+
+   - A link nothing else colours takes the link token. The studio had no default for an anchor: every context that wanted
+     one wrote its own rule, and those that did not (the Overview's lists, a finding's "About" link, the notes that link to
+     Health or Maintenance, the breadcrumbs) drew in the browser's own #0000ee - fine on white, unreadable on the dark
+     surface. The rule is wrapped in :where(), so it weighs nothing: any rule that names the link - a class, a context, a
+     state - still wins, and only a link that was in the browser's colour changes. It is scoped to .ms-studio, so a host's
+     own page is untouched.
+   - The breadcrumbs take the database browser's breadcrumb style (.ms-db-breadcrumb): the link token, underlined only on
+     hover. Document detail keeps its own class; Database > Sessions now uses the browser's.
+   - The query editor's toolbar wraps. "Ctrl+Enter runs, Esc cancels, Ctrl+S saves" sat on the buttons' line with nowhere
+     to go, and at 390 px ran 93 px past the editor card - and past .ms-content, which then scrolled sideways (403 > 334).
+     It now takes a line of its own when the buttons leave no room.
+   - Time travel's version slider gives way. A flex item's automatic minimum width is, for a range input, its default
+     width, so the stepper row could not shrink and its Next button ran 25 px past the card at 390 px.
+   ========================================================================== */
+
+:where(.ms-studio a) {
+    color: var(--ms-color-primary);
+}
+
+.ms-breadcrumb a {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.ms-query-editor-toolbar {
+    flex-wrap: wrap;
+}
+
+.ms-time-travel-stepper > input[type="range"] {
+    min-width: 0;
 }

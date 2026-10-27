@@ -1,7 +1,9 @@
 using Bunit;
 
 using PostgresStudio.Components.Pages.Database;
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Health;
 using MartenStudio.Tests.Components;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -258,6 +260,54 @@ public class SessionsBlockingPageTests
         {
             await older.DisposeAsync();
             olderPools.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 0.6's UI sweep: the empty Blocking tab ended in five disclosures that all said "Show SQL", and its way back to the
+    /// database browser was a bare link the dark theme drew in the browser's own blue. Each now says what it reads, and the
+    /// way back is the browser's own breadcrumb.
+    /// </summary>
+    [Fact]
+    public async Task In_the_empty_state_each_Show_SQL_says_what_it_reads_and_the_way_back_is_the_browsers_breadcrumb()
+    {
+        SessionActivitySummary summary = FakeSessionActivityService.SummaryWith(Open) with
+        {
+            Blocking = SessionBlockingCounts.None,
+            Statements = SessionActivityReader.Labelled(
+            [
+                new HealthStatement(HealthConnectionQueries.SessionSnapshot().Sql, []),
+                new HealthStatement(HealthConnectionQueries.LockSnapshot().Sql, []),
+                new HealthStatement(HealthConnectionQueries.PreparedTransactions().Sql, []),
+                new HealthStatement(ConnectionsByApplicationQueries.Read().Sql, []),
+                new HealthStatement(HealthConnectionQueries.LockTable().Sql, ["@limit"]),
+            ]),
+        };
+
+        (StudioComponentContext context, FakeSessionActivityService _, SessionPoolObserver pools) = await ReadyAsync(summary);
+
+        try
+        {
+            context.Navigate("marten/database/sessions?view=blocking");
+            var page = context.Render<Sessions>();
+            page.WaitForAssertion(() => page.FindAll(".ms-blocking-none").Should().ContainSingle());
+
+            page.FindAll(".ms-sql-disclosure > summary").Select(static x => x.TextContent).Should().Equal(
+                "Show SQL for the sessions",
+                "Show SQL for the locks",
+                "Show SQL for prepared transactions",
+                "Show SQL for connections by application",
+                "Show SQL for who blocks whom");
+
+            var breadcrumb = page.Find("nav.ms-db-breadcrumb.ms-sessions-back");
+            breadcrumb.GetAttribute("aria-label").Should().Be("Breadcrumb");
+            breadcrumb.QuerySelector("a")!.TextContent.Should().Be("Database");
+            breadcrumb.TextContent.Should().Contain("Sessions");
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            pools.Dispose();
         }
     }
 

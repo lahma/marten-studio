@@ -39,7 +39,12 @@
 <PageTitle>Sessions</PageTitle>
 
 <div class="ms-page ms-sessions">
-    <p class="ms-sessions-back"><a href="@DatabaseHref">Database</a> <span aria-hidden="true">›</span> Sessions</p>
+    @* The database browser's own breadcrumb (ms-db-breadcrumb): the link token, in both themes (0.6's UI sweep). *@
+    <nav class="ms-db-breadcrumb ms-sessions-back" aria-label="Breadcrumb">
+        <a href="@DatabaseHref">Database</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>Sessions</span>
+    </nav>
 
     <div class="ms-page-header">
         <h1 class="ms-page-title">Sessions</h1>
@@ -441,7 +446,8 @@
 
         @foreach (HealthStatement statement in summary.Statements)
         {
-            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+            @* One read per statement, so each says what it reads ("Show SQL for the sessions"), on both tabs. *@
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" Reads="@statement.Label" />
         }
 
         @if (summary.MeasuredAt is { } measured)

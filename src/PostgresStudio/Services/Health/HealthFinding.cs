@@ -48,7 +48,15 @@ internal sealed record HealthStatementText(string Text, bool Truncated);
 /// <summary>One statement a check ran, for "Show SQL" (D14): the text and its parameter names, never values.</summary>
 /// <param name="Sql">The statement, exactly as it was sent.</param>
 /// <param name="ParameterNames">Its parameters as the statement spells them (<c>@schemas</c>).</param>
-internal sealed record HealthStatement(string Sql, IReadOnlyList<string> ParameterNames);
+internal sealed record HealthStatement(string Sql, IReadOnlyList<string> ParameterNames)
+{
+    /// <summary>
+    /// What the statement reads, in words ("the sessions"), for a page that shows several: its "Show SQL" then says
+    /// "Show SQL for the sessions" rather than repeating "Show SQL" once per statement. <see langword="null" /> where nobody
+    /// named it.
+    /// </summary>
+    public string? Label { get; init; }
+}
 
 /// <summary>What kind of change a remedy is: which rule its text is held to, and how the page heads it.</summary>
 /// <remarks>

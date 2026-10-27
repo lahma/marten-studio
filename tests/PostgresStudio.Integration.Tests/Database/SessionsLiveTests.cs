@@ -111,6 +111,10 @@ public class SessionsLiveTests(PostgresFixture postgres)
         summary.Refusal.Should().Be(DatabaseRefusal.None, summary.Reason);
         summary.SessionCount.Should().Be(1, "the application's one session, and not the studio's own read");
 
+        // 0.6's UI sweep: the page draws a "Show SQL" per statement, and each says what it reads - every one a real read runs.
+        summary.Statements.Should().NotBeEmpty();
+        summary.Statements.Select(static x => x.Label).Should().NotContainNulls("every statement the snapshot ran is named").And.OnlyHaveUniqueItems();
+
         SessionActivityDetails details = await sessions.GetDetailsAsync(Scope, Token);
         details.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, details.Reason);
         details.Reason.Should().Contain("ViewDatabaseActivity");
