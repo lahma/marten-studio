@@ -76,6 +76,11 @@ namespace MartenStudio.Services.Documents;
 /// database's <c>where mt_version = ?</c> guard runs too and the two checks have to agree.
 /// </para>
 /// <para>
+/// <b>An edit keeps its document's id.</b> Marten writes a document under the id in the instance, so an edit whose JSON
+/// carries another id would write another document while the version check passed on this one; the preview and the save
+/// refuse it (<see cref="IdChange" />).
+/// </para>
+/// <para>
 /// <b>Nothing is saved silently lossy</b> (D7). Every save runs the round trip first and refuses when it
 /// would drop properties unless the caller says it has seen them, and a save that drops properties
 /// anyway is logged as event 9211 with the paths.
@@ -201,7 +206,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                     { Error: not null } => WritePreview.Refused(
                         alias, id, load.Error, editedJson: editedJson, documentTypeName: writeTarget.TypeName),
                     { Row: null } => WritePreview.NotFound(alias, id, writeTarget.TypeName),
-                    _ => PreviewRow(writeTarget, alias, id, editedJson, load.Row!, resolved),
+                    _ => await PreviewRowAsync(writeTarget, alias, id, editedJson, load.Row!, resolved, cancellationToken)
+                        .ConfigureAwait(false),
                 };
             }
         }
@@ -400,6 +406,10 @@ internal sealed class DocumentWriteService : IDocumentWriteService
     /// <param name="editedJson">The document as it was edited.</param>
     /// <param name="currentToken">The version the row carries.</param>
     /// <param name="hasConcurrencyColumn">Whether the table has a version column to guard the save with.</param>
+    /// <param name="identity">
+    /// The document's own id, which the edit has to keep (<see cref="IdChange" />); <see langword="null" /> checks
+    /// nothing, which only a test that is about something else passes.
+    /// </param>
     internal static PreviewResult BuildPreview(
         string alias,
         string id,
@@ -408,7 +418,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         string storedJson,
         string editedJson,
         DocumentConcurrencyToken currentToken,
-        bool hasConcurrencyColumn)
+        bool hasConcurrencyColumn,
+        DocumentIdentity? identity = null)
     {
         ArgumentNullException.ThrowIfNull(documentType);
         ArgumentNullException.ThrowIfNull(serializer);
@@ -441,6 +452,21 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                     documentTypeName: documentType.Name,
                     currentToken: currentToken,
                     auditReason: typeAudit),
+                null);
+        }
+
+        if (identity is not null && IdChange(serializer, documentType, identity, storedJson, document) is { } idChange)
+        {
+            return new PreviewResult(
+                WritePreview.Refused(
+                    alias,
+                    id,
+                    idChange,
+                    editedJson: editedJson,
+                    storedJson: storedJson,
+                    documentTypeName: documentType.Name,
+                    currentToken: currentToken,
+                    auditReason: IdChangedAuditReason),
                 null);
         }
 
@@ -495,10 +521,186 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             document);
     }
 
+    /// <summary>What the audit records for an edit refused because it changes the id: no id, because the new one was typed.</summary>
+    internal const string IdChangedAuditReason = "The edit changes the document's id, so it was refused.";
+
+    /// <summary>
+    /// Why an edit may not be saved because it carries another id than the document's own, or <see langword="null" />
+    /// when it keeps the id (or when there is nothing to tell it by).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it is refused.</b> Marten writes a document under the id <em>in the instance</em>, and every write here
+    /// (<c>StoreObjects</c>, <c>UpdateExpectedVersion</c>, <c>UpdateRevision</c>) hands it the edited one. The version
+    /// check is on the row that was opened, so an edit that changed <c>Id</c> on a type without Marten's own optimistic
+    /// concurrency passed it and overwrote the document with the new id - or created one - while the document on screen
+    /// stayed as it was (proved live at the floor by <c>DocumentIdChangeLiveTests</c> before this check; Marten 9.53's own
+    /// <c>PreviewDocumentJsonAsync</c> refuses the same edit). Moving a document to another id is a delete and an insert,
+    /// which the studio does not offer.
+    /// </para>
+    /// <para>
+    /// <b>Compared as values of the id member's own type</b>, never as text: the row's id column, converted the way the
+    /// typed writes convert it (<see cref="TypedIds" />), against the edited instance's id member, so a Guid in another
+    /// case or a strong-typed id compares as what it is. Where the studio cannot build the member's type from the column
+    /// (an F# union id) the stored document's own id stands in for it, read through the same serializer; where that cannot
+    /// be read either, nothing is refused, as before.
+    /// </para>
+    /// </remarks>
+    internal static string? IdChange(
+        ISerializer serializer,
+        Type documentType,
+        DocumentIdentity identity,
+        string storedJson,
+        object edited)
+    {
+        ArgumentNullException.ThrowIfNull(serializer);
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(edited);
+
+        object? own = identity.ColumnId;
+
+        if (own is null)
+        {
+            if (!TryDeserialize(serializer, documentType, storedJson, out var stored, out _, out _)
+                || !TryReadMember(identity.IdMember, stored, out own))
+            {
+                return null;
+            }
+        }
+
+        if (!TryReadMember(identity.IdMember, edited, out var editedId) || SameId(serializer, own, editedId))
+        {
+            return null;
+        }
+
+        string from = IdText(serializer, own);
+        string to = IdText(serializer, editedId);
+
+        return $"The edit changes the document's id from '{from}' to '{to}'. Saving it would write the document under " +
+               $"'{to}' - overwriting the document with that id, or creating one - and leave '{from}' as it is. Change " +
+               "the id back: the studio does not move a document to another id.";
+    }
+
+    /// <summary>The document's own id, as <see cref="IdChange" /> compares an edit with it.</summary>
+    private static DocumentIdentity IdentityOf(WriteTarget target, string id)
+    {
+        IdParseResult parsed = DocumentQueryBuilder.ParseId(target.Table.IdColumnType, id);
+
+        object? column = parsed is { Success: true, Value: { } value } && TypedIds.TryConvert(target.IdMemberType, value, out var typed)
+            ? typed
+            : null;
+
+        return new DocumentIdentity(target.IdMember, column);
+    }
+
+    private static bool TryReadMember(MemberInfo member, object instance, out object? value)
+    {
+        try
+        {
+            value = member switch
+            {
+                PropertyInfo property => property.GetValue(instance),
+                FieldInfo field => field.GetValue(instance),
+                _ => throw new NotSupportedException(member.MemberType.ToString()),
+            };
+
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            value = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Two ids are the same when they are equal, or - for an id type that does not say so itself - when the store's
+    /// serializer writes them the same.
+    /// </summary>
+    private static bool SameId(ISerializer serializer, object? left, object? right)
+    {
+        if (Equals(left, right))
+        {
+            return true;
+        }
+
+        if (left is null || right is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(serializer.ToJson(left), serializer.ToJson(right), StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>An id as the refusal prints it: its own text where it has one, its JSON otherwise.</summary>
+    private static string IdText(ISerializer serializer, object? value)
+    {
+        string text;
+
+        try
+        {
+            text = value switch
+            {
+                null => "(none)",
+                string s => s,
+                IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture),
+                _ => serializer.ToJson(value),
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            text = value!.GetType().Name;
+        }
+
+        return WriteAuditText.Sanitize(text, WriteAuditText.MaxTokenLength);
+    }
+
+    /// <summary>The document's own id, which an edit has to keep (<see cref="IdChange" />).</summary>
+    /// <param name="IdMember">The member Marten treats as the type's identity.</param>
+    /// <param name="ColumnId">
+    /// The row's id column as a value of the member's own type, or <see langword="null" /> where the studio cannot build
+    /// one - then the stored document's own id stands in for it.
+    /// </param>
+    internal sealed record DocumentIdentity(MemberInfo IdMember, object? ColumnId);
+
     /// <summary>A preview and, when it is ready, the instance the round trip produced.</summary>
     /// <param name="Preview">What the save would do.</param>
     /// <param name="Document">The deserialized document, or <see langword="null" /> when the preview is not ready.</param>
     internal readonly record struct PreviewResult(WritePreview Preview, object? Document);
+
+    /// <summary>
+    /// Builds the preview for a row that is there, once its concrete type is settled, and lays Marten's own preview of
+    /// the same save beside a ready one (<see cref="MartenEditPreview" />: 9.53+, no connection, nothing written).
+    /// </summary>
+    private static async Task<WritePreview> PreviewRowAsync(
+        WriteTarget writeTarget,
+        string alias,
+        string id,
+        string editedJson,
+        DocumentRow row,
+        ResolvedScope resolved,
+        CancellationToken cancellationToken)
+    {
+        WritePreview preview = PreviewRow(writeTarget, alias, id, editedJson, row, resolved, out Type? documentType);
+
+        if (preview.Status != WritePreviewStatus.Ready || documentType is null || preview.RoundTrippedJson is not { } roundTrip)
+        {
+            return preview;
+        }
+
+        MartenPreviewCheck check = await MartenEditPreview
+            .CheckAsync(resolved.Store, documentType, id, editedJson, roundTrip, cancellationToken)
+            .ConfigureAwait(false);
+
+        return preview with { MartenCheck = check };
+    }
 
     /// <summary>Builds the preview for a row that is there, once its concrete type is settled.</summary>
     private static WritePreview PreviewRow(
@@ -507,8 +709,11 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         string id,
         string editedJson,
         DocumentRow row,
-        ResolvedScope resolved)
+        ResolvedScope resolved,
+        out Type? documentType)
     {
+        documentType = null;
+
         var runtime = ResolveRuntimeType(writeTarget, row.DocType);
 
         if (runtime.Type is null)
@@ -524,6 +729,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                 currentToken: row.Token);
         }
 
+        documentType = runtime.Type;
+
         return BuildPreview(
             alias,
             id,
@@ -532,7 +739,8 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             row.Json,
             editedJson,
             row.Token,
-            HasConcurrencyColumn(writeTarget.Table)).Preview;
+            HasConcurrencyColumn(writeTarget.Table),
+            IdentityOf(writeTarget, id)).Preview;
     }
 
     private async Task<WriteResult> SaveCoreAsync(
@@ -592,13 +800,16 @@ internal sealed class DocumentWriteService : IDocumentWriteService
                 load.Row.Json,
                 editedJson,
                 load.Row.Token,
-                HasConcurrencyColumn(writeTarget.Table));
+                HasConcurrencyColumn(writeTarget.Table),
+                IdentityOf(writeTarget, id));
 
             preview = built.Preview;
 
             if (built.Document is null)
             {
-                return WriteResult.Refused(preview.Reason ?? "The edit could not be saved.", preview);
+                // The preview's audit wording, where it has one: an id the edit changed to, or a converter's message,
+                // stays on the screen and out of the log (WritePreview.AuditReason).
+                return WriteResult.Refused(preview.Reason ?? "The edit could not be saved.", preview, preview.AuditReason);
             }
 
             document = built.Document;

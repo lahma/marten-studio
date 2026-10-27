@@ -117,6 +117,12 @@ public class StorageEnsuringCallTests
         "AdvanceHighWaterMarkToLatestAsync", "PreviewHighWaterAdvanceAsync",
         "FetchProjectionFloorAsync", "TrySetProjectionFloorAsync", "SetProjectionFloorAsync",
         "QueryEventData", "QueryStreamStatesForAllTenants",
+
+        // M5, read at v9.52.0, v9.53.0 and v9.54.2 (JasperFx V2.95.1): the diagnostics writer's writes - each opens an
+        // unpinned LightweightSession(tenantId) and saves through it, so each ensures its type's storage, and none is pinned
+        // to the database in scope (hard rule 15) - and the reader's AggregateDocumentJsonAsync, which reaches
+        // FetchStreamAsync. The studio calls none of them; PreviewDocumentJsonAsync, which it does call, opens nothing.
+        "SaveDocumentJsonAsync", "DeleteDocumentAsync", "UndeleteDocumentAsync", "AggregateDocumentJsonAsync",
     ];
 
     /// <summary>
@@ -539,7 +545,10 @@ public class StorageEnsuringCallTests
     /// from <c>CommitSkipAsync</c> - the same commit as the listed site, reached only from the two capability-gated,
     /// audited skips, which <see cref="The_reflected_tenant_skip_is_reached_only_from_the_skips_one_commit" /> and
     /// <see cref="The_skips_one_commit_is_reached_only_from_the_two_skips" /> pin - and its declaration is
-    /// looked up by name in <c>RuntimeFeature.TenantSkipMethod</c>, a string this scanner blanks.</description></item>
+    /// looked up by name in <c>RuntimeFeature.TenantSkipMethod</c>, a string this scanner blanks. <c>MartenEditPreview</c>
+    /// reaches Marten 9.53's <c>PreviewDocumentJsonAsync</c> the same way (<c>RuntimeFeature.EditPreviewMethod</c>), and is
+    /// not on the list because it ensures nothing: read at v9.53.0 and v9.54.2, it opens no session and no connection - which
+    /// <c>MartenEditPreviewTests</c> holds against a store whose host does not resolve.</description></item>
     /// <item><description>A call inside an <b>interpolation hole</b> is blanked with its string by the source layer; the
     /// compiled layer still sees it.</description></item>
     /// <item><description>A member named in an <b>expression tree</b> is an <c>ldtoken</c>, not a call, and is not counted:

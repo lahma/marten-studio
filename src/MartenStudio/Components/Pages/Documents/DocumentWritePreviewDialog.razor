@@ -10,6 +10,10 @@
     type has no member for is gone. The two are shown as separate, separately titled sections because
     conflating them is how an edit that quietly eats a legacy property looks like an edit that changed
     one field.
+
+    From Marten 9.53 a third, smaller section lays Marten's own preview of the save (PreviewDocumentJsonAsync)
+    beside the round trip and says when the two disagree, or when Marten would refuse the edit. Below 9.53 it
+    is one line naming the Marten it needs. It is advisory: the save is still the studio's.
 *@
 
 @if (IsOpen && Preview is { } preview)
@@ -37,6 +41,42 @@
                           AddedTitle="Added"
                           EmptyText="You have not changed anything: this would rewrite the document as it already is." />
             </section>
+
+            @if (preview.MartenCheck is { } check)
+            {
+                <section class="ms-write-preview-section ms-write-preview-marten" data-verdict="@check.Verdict">
+                    <h4 class="ms-write-preview-title">What Marten's own preview keeps</h4>
+                    @switch (check.Verdict)
+                    {
+                        case MartenPreviewVerdict.Agrees:
+                            <p class="ms-muted">Marten's own preview of this save keeps exactly what the round trip above keeps.</p>
+                            break;
+
+                        case MartenPreviewVerdict.Disagrees:
+                            <p class="ms-alert ms-alert-warning" role="note">
+                                Marten's own preview of this save keeps something different from the round trip above.
+                                The save is the studio's round trip; read both before saving.
+                            </p>
+                            <JsonDiff Before="@preview.RoundTrippedJson"
+                                      After="@check.MartenJson"
+                                      RemovedTitle="Only the round trip keeps"
+                                      ChangedTitle="Kept differently"
+                                      AddedTitle="Only Marten keeps"
+                                      EmptyText="The two agree." />
+                            break;
+
+                        case MartenPreviewVerdict.Refused:
+                            <p class="ms-alert ms-alert-warning" role="note">
+                                Marten's own preview refused this edit, as its own save of it would: @check.Reason
+                            </p>
+                            break;
+
+                        default:
+                            <p class="ms-muted">@check.Reason</p>
+                            break;
+                    }
+                </section>
+            }
 
             @if (preview.Reason is { Length: > 0 } caveat)
             {
@@ -93,7 +133,7 @@
         }
     }
 
-    private string ConfirmClass => Preview is { HasDrops: true }
+    private string ConfirmClass => Preview is { HasDrops: true } or { MartenCheck.IsDisagreement: true }
         ? "ms-button ms-button-danger"
         : "ms-button ms-button-primary";
 }

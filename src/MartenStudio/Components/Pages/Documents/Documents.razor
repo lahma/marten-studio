@@ -391,6 +391,9 @@
                                  SelectedModel="list.Columns"
                                  SuggestionsModel="list.JsonSuggestions"
                                  QueryHref="@QueryHref()"
+                                 SortKey="@list.SortKey"
+                                 SortDescending="@(list.Direction == SortDirection.Descending)"
+                                 OnOrderChanged="OrderChangedAsync"
                                  OnSearch="SearchAsync"
                                  OnDeletedChanged="DeletedChangedAsync"
                                  OnPageSizeChanged="PageSizeChangedAsync"
@@ -656,6 +659,44 @@
 
         cursorHistory.Clear();
         Navigate(sort: columnKey, dir: DocumentLinks.DirectionToken(direction), cursor: null, cursorSet: true, pageNumber: 1);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// One of the toolbar's ready-made orders (<see cref="DocumentOrderPresets" />): its sort and direction, from the
+    /// first page - and its column added to the grid when it is not on it, so a list put in newest-modified order shows
+    /// the times it is in order of. The grid's column preference is left as it was: this is one view, not a choice of
+    /// columns.
+    /// </summary>
+    private Task OrderChangedAsync(string value)
+    {
+        DocumentOrderPreset? preset = DocumentOrderPresets.For(list.AvailableColumns)
+            .FirstOrDefault(x => string.Equals(x.Value, value, StringComparison.Ordinal));
+
+        if (preset is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        string? cols = null;
+        bool colsSet = false;
+
+        if (!list.Columns.Any(x => string.Equals(x.Key, preset.SortKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            cols = DocumentLinks.FormatColumns([.. list.Columns.Select(static x => x.Key), preset.SortKey]);
+            colsSet = true;
+        }
+
+        cursorHistory.Clear();
+        Navigate(
+            sort: preset.SortKey,
+            dir: DocumentLinks.DirectionToken(preset.Direction),
+            cursor: null,
+            cursorSet: true,
+            pageNumber: 1,
+            cols: cols,
+            colsSet: colsSet);
+
         return Task.CompletedTask;
     }
 

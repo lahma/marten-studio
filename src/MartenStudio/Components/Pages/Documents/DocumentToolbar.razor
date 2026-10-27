@@ -3,7 +3,8 @@
 
 @*
     The row above the table: the search box and its grammar hint, the include-deleted tri-state (only where
-    there is anything to include), the page size, the paging mode and the column chooser.
+    there is anything to include), the ready-made orders (only where the table has a last-modified, created or
+    revision column to put newest first), the page size, the paging mode and the column chooser.
 
     The tri-state is deliberately three states and not a checkbox. "Live only", "live and deleted" and
     "deleted only" are three different questions, and a collection where rows exist but are hidden is
@@ -87,6 +88,29 @@
                         @DeletedLabel(option)
                     </button>
                 }
+            </div>
+        }
+
+        @if (OrderPresets is { Count: > 1 } presets)
+        {
+            <div class="ms-header-control">
+                <label class="ms-header-control-label" for="ms-doc-order">Order</label>
+                <select id="ms-doc-order"
+                        class="ms-select"
+                        value="@(CurrentPreset?.Value ?? string.Empty)"
+                        title="Newest first by a metadata column, or a column header's own order"
+                        @onchange="OrderChangedAsync">
+                    @if (CurrentPreset is null)
+                    {
+                        <option value="" disabled selected>By a column header</option>
+                    }
+                    @foreach (DocumentOrderPreset preset in presets)
+                    {
+                        <option value="@preset.Value"
+                                selected="@(preset == CurrentPreset)"
+                                @key="preset.Value">@preset.Label</option>
+                    }
+                </select>
             </div>
         }
 
@@ -185,6 +209,18 @@
     [Parameter]
     public string QueryHref { get; set; } = "#";
 
+    /// <summary>The key the list is sorted by now, as the page read it back.</summary>
+    [Parameter]
+    public string? SortKey { get; set; }
+
+    /// <summary>Whether the list is sorted descending now.</summary>
+    [Parameter]
+    public bool SortDescending { get; set; } = true;
+
+    /// <summary>Puts the list in one of the ready-made orders, by the preset's value.</summary>
+    [Parameter]
+    public EventCallback<string> OnOrderChanged { get; set; }
+
     /// <summary>Submits a new search.</summary>
     [Parameter]
     public EventCallback<string?> OnSearch { get; set; }
@@ -217,6 +253,19 @@
     }
 
     private DeletedFilter DeletedFilterValue => DocumentComponentModel.Deleted(Deleted);
+
+    /// <summary>
+    /// The ready-made orders this collection's table can answer (<see cref="DocumentOrderPresets" />). The control is
+    /// drawn only when there is one beyond the default: a table with no last-modified, created or revision column has
+    /// nothing to put newest first.
+    /// </summary>
+    private IReadOnlyList<DocumentOrderPreset> OrderPresets =>
+        DocumentOrderPresets.For(DocumentComponentModel.ReadList<DocumentColumnHeader>(AvailableModel));
+
+    private DocumentOrderPreset? CurrentPreset => DocumentOrderPresets.Current(
+        OrderPresets,
+        SortKey,
+        SortDescending ? PostgresStudio.Services.Query.SortDirection.Descending : PostgresStudio.Services.Query.SortDirection.Ascending);
 
     private string Placeholder => $"Search {Alias} — id:… · field = value · @> {{\"k\":\"v\"}} · is:deleted";
 
@@ -274,6 +323,14 @@
         await OnDeletedChanged.InvokeAsync(DocumentLinks.DeletedToken(filter));
 
     private async Task PagingChangedAsync(bool offset) => await OnPagingChanged.InvokeAsync(offset);
+
+    private async Task OrderChangedAsync(ChangeEventArgs args)
+    {
+        if (args.Value?.ToString() is { Length: > 0 } value)
+        {
+            await OnOrderChanged.InvokeAsync(value);
+        }
+    }
 
     private async Task PageSizeChangedAsync(ChangeEventArgs args)
     {
