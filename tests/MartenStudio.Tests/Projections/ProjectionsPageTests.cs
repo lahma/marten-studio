@@ -5,6 +5,7 @@ using Bunit;
 using JasperFx.Events.Projections;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
 
 using Page = MartenStudio.Components.Pages.Projections.Projections;
@@ -511,34 +512,89 @@ public class ProjectionsPageTests
     }
 
     // --------------------------------------------------------------------------------------------
-    // Unregistered shards
+    // Orphaned progression rows (M4) - 0.5's "Unregistered shards"
     // --------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// F2: a progression row nothing claims is the reason a stale table is still there. It gets its own
-    /// section rather than being invented into a projection row or dropped on the floor.
+    /// F2 and M4: a progression row nothing registers advances gets its own section, with why, and the hand-over -
+    /// what it is, and that removing it is the host's decision - rather than being invented into a projection row.
     /// </summary>
     [Fact]
-    public async Task Progression_rows_no_projection_claims_are_rendered_under_their_own_heading()
+    public async Task Orphaned_progression_rows_are_counted_named_and_handed_over_under_their_own_heading()
     {
         await using var context = new StudioComponentContext();
         context.ProjectionData
             .WithProjection("DailySales")
-            .WithUnregisteredShard("RetiredProjection:All", sequence: 17);
+            .WithOrphan("RetiredProjection:All", sequence: 17);
 
         await context.ReadyAsync();
 
         var page = context.Render<Page>();
 
-        page.Find(".ms-unregistered-shards").TextContent.Should().Contain("mt_event_progression");
-        page.Find("[data-unregistered-shard='RetiredProjection:All']").TextContent.Should().Contain("17");
+        var section = page.Find(".ms-orphaned-progression");
+        section.QuerySelector("h2")!.TextContent.Should().Be("Orphaned progression rows");
+        section.QuerySelector(".ms-orphaned-progression-count")!.TextContent.Should().Be("1 orphaned progression row");
+        section.QuerySelector(".ms-orphaned-progression-note")!.TextContent.Should().Be(OrphanWording.HandOver);
+
+        var row = page.Find("[data-orphaned-row='RetiredProjection:All']");
+        row.TextContent.Should().Contain("17");
+        row.QuerySelector(".ms-orphaned-progression-reason")!.TextContent
+            .Should().Be("No projection or subscription named RetiredProjection is registered: it was renamed or removed.");
+
+        // Marten's own removal by name and the equivalent statement are text for the host, under the advisor's own heading -
+        // never a button.
+        page.Find(".ms-orphaned-progression-sql summary").TextContent.Should().Be("For your own migrations - the studio never runs this");
+        page.Find(".ms-orphaned-progression-calls").TextContent
+            .Should().Be("""await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("RetiredProjection:All");""");
+        page.Find(".ms-orphaned-progression-sql-statements").TextContent
+            .Should().Be("""DELETE FROM "events"."mt_event_progression" WHERE "name" = 'RetiredProjection:All';""");
+        section.QuerySelectorAll("button").Should().BeEmpty("M4 is read-only: nothing on this section writes");
 
         // And it is not smuggled into the projections table as a shard of something that is registered.
         page.FindAll("[data-shard='RetiredProjection:All']").Should().BeEmpty();
     }
 
+    /// <summary>A visitor the store policy refuses the whole database is told how many, and why not which.</summary>
     [Fact]
-    public async Task With_nothing_unregistered_the_section_is_absent()
+    public async Task Orphans_are_counted_and_not_named_for_a_visitor_short_of_the_whole_database()
+    {
+        await using var context = new StudioComponentContext();
+        context.ProjectionData
+            .WithProjection("DailySales")
+            .WithOrphan("RetiredProjection:All")
+            .WithOrphan("OtherRetired:All")
+            .WithOrphanNamesWithheld();
+
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find(".ms-orphaned-progression-count").TextContent.Should().Be("2 orphaned progression rows");
+        page.Find(".ms-orphaned-progression-withheld").TextContent.Should().Be(OrphanWording.NamesWithheld);
+        page.FindAll(".ms-orphaned-progression-row").Should().BeEmpty();
+        page.FindAll(".ms-orphaned-progression-sql").Should().BeEmpty();
+        page.Markup.Should().NotContain("RetiredProjection");
+    }
+
+    /// <summary>A row the daemon may still read is named, marked, and offered no statement.</summary>
+    [Fact]
+    public async Task A_prior_version_row_the_daemon_still_reads_is_offered_no_statement()
+    {
+        await using var context = new StudioComponentContext();
+        context.ProjectionData
+            .WithProjection("DailySales")
+            .WithOrphan("DailySales:All", reason: OrphanReason.OtherVersion, readByDaemon: true);
+
+        await context.ReadyAsync();
+
+        var page = context.Render<Page>();
+
+        page.Find("[data-orphaned-row='DailySales:All'] .ms-orphan-read").TextContent.Should().Be("read by the daemon");
+        page.FindAll(".ms-orphaned-progression-sql").Should().BeEmpty("the only row is one the daemon still reads");
+    }
+
+    [Fact]
+    public async Task With_no_orphan_the_section_is_absent()
     {
         await using var context = new StudioComponentContext();
         context.ProjectionData.WithProjection("DailySales");
@@ -546,7 +602,7 @@ public class ProjectionsPageTests
 
         var page = context.Render<Page>();
 
-        page.FindAll(".ms-unregistered-shards").Should().BeEmpty();
+        page.FindAll(".ms-orphaned-progression").Should().BeEmpty();
     }
 
     // --------------------------------------------------------------------------------------------

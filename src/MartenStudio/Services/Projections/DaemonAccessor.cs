@@ -55,6 +55,39 @@ internal sealed record DaemonHosting(
         daemon = Daemon!;
         return State == DaemonHostingState.Hosted && Daemon is not null;
     }
+
+    /// <summary>
+    /// Which coordinator runs the daemon here (M7) - <see cref="DaemonCoordination.None" /> for any answer but
+    /// <see cref="DaemonHostingState.Hosted" />.
+    /// </summary>
+    public DaemonCoordination Coordination { get; init; }
+
+    /// <summary>
+    /// Which shards this node's coordinator leads in the resolved database, where it has a leadership loop and a
+    /// distributor; <see langword="null" /> otherwise.
+    /// </summary>
+    public DaemonLeadership? Leadership { get; init; }
+
+    /// <summary>
+    /// Whether, under HotCold, this node holds the leadership lock of every shard of <paramref name="projection" /> - so
+    /// that an operation that restarts its agents here does not start them beside another node's. <see langword="true" />
+    /// wherever no such lock exists (Solo, no loop) or it cannot be told, which leaves the refusal to what is known.
+    /// </summary>
+    /// <param name="store">The store, for its shard list.</param>
+    /// <param name="projection">The projection or subscription.</param>
+    public bool LeadsEveryShardOf(IDocumentStore store, string projection)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        if (Leadership is not { IsHotCold: true } leadership)
+        {
+            return true;
+        }
+
+        return MartenStudio.Services.Health.Checks.DaemonCheckConfiguration.AsyncShardsOf(store)
+            .Where(x => string.Equals(x.Name, projection, StringComparison.OrdinalIgnoreCase))
+            .All(x => leadership.Leads(x) != false);
+    }
 }
 
 /// <summary>
@@ -340,7 +373,11 @@ internal sealed class DaemonAccessor
 
             return daemon is null
                 ? DaemonHosting.ExternallyManaged()
-                : DaemonHosting.Hosted(daemon, [.. databases.Select(static x => x.Id.Identity)]);
+                : DaemonHosting.Hosted(daemon, [.. databases.Select(static x => x.Id.Identity)]) with
+                {
+                    Coordination = CoordinationOf(coordinator),
+                    Leadership = DaemonLeadership.For(coordinator, scope.Store, scope.Database),
+                };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -519,6 +556,22 @@ internal sealed class DaemonAccessor
         return await MatchInSetAsync(coordinator, database, identifier, cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidOperationException(NoDaemonForDatabaseMessage);
     }
+
+    /// <summary>
+    /// Which kind of coordinator <paramref name="coordinator" /> is (M7): one with a leadership loop - Marten's
+    /// <c>ProjectionCoordinator</c>, a host's subclass of it, any <c>ProjectionCoordinatorBase</c> - Marten's
+    /// <c>ExplicitProjectionCoordinator</c> (or a subclass), which has none, or another.
+    /// </summary>
+    /// <remarks>
+    /// By the loop the type runs, not by its assembly as <see cref="IsMartensOwn" /> decides which lookup to ask: a host's
+    /// subclass of Marten's coordinator still runs Marten's loop over Marten's distributor.
+    /// </remarks>
+    internal static DaemonCoordination CoordinationOf(MartenCoordinator coordinator) => coordinator switch
+    {
+        Marten.Events.Daemon.Coordination.ExplicitProjectionCoordinator => DaemonCoordination.Explicit,
+        ProjectionCoordinatorBase => DaemonCoordination.LeadershipLoop,
+        _ => DaemonCoordination.Other,
+    };
 
     /// <summary>
     /// Whether <paramref name="coordinator" /> is one Marten itself ships: <c>ProjectionCoordinator</c>

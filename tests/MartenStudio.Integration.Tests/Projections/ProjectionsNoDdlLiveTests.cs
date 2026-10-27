@@ -78,7 +78,7 @@ public class ProjectionsNoDdlLiveTests(PostgresFixture fixture)
         // One row per registered async shard, as always - and every one of them saying "never started"
         // rather than "processed nothing", which are different facts and are drawn differently.
         first.Progress.Should().ContainSingle().Which.HasProgressRow.Should().BeFalse();
-        first.UnregisteredShards.Should().BeEmpty("there are no progression rows at all to be left over");
+        first.Orphans.Count.Should().Be(0, "there are no progression rows at all to be left over");
 
         second.HasEventStore.Should().BeFalse();
 
@@ -250,7 +250,8 @@ public class ProjectionsNoDdlLiveTests(PostgresFixture fixture)
         ProjectionsView view = await host.ProjectionsAsync(x => x.GetProjectionsAsync(Scope));
 
         view.Progress.Should().NotContain(x => x.ShardName.StartsWith("HighWater", StringComparison.Ordinal));
-        view.UnregisteredShards.Should().ContainSingle(x => x.ShardName == "Orphan:All");
+        view.Orphans.Count.Should().Be(1, "the bookkeeping rows are never orphans either");
+        view.Orphans.Rows.Should().ContainSingle(x => x.Name == "Orphan:All");
     }
 
     private Task<EmptySchemaStudio> StartAsync(string name, AutoCreate autoCreate = AutoCreate.CreateOrUpdate) =>

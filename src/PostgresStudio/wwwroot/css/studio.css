@@ -12902,3 +12902,57 @@ a.ms-schema-health-mark:focus-visible {
         grid-template-columns: minmax(0, 1fr);
     }
 }
+
+/* ==========================================================================
+   M47. Orphaned progression rows (M4), and the daemon topology (M7)
+
+   0.6's M4 and M7 packet, appended in D26 order. Every selector is this packet's own (ms-orphaned-progression-,
+   ms-orphan-read, ms-shard-node, ms-daemon-topology), so nothing here re-declares an earlier rule. Notes use the
+   secondary text colour, as W5-API's do: UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-orphaned-progression {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-orphaned-progression-note,
+.ms-orphaned-progression-withheld {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-orphaned-progression-reason {
+    min-width: 24ch;
+    max-width: 60ch;
+    white-space: normal;
+}
+
+.ms-orphaned-progression-sql {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-orphaned-progression-sql summary {
+    cursor: pointer;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-orphaned-progression-statements {
+    margin: var(--ms-space-xs) 0 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-shard-node-elsewhere {
+    color: var(--ms-color-text-secondary);
+    border-style: dashed;
+}
+
+.ms-daemon-topology {
+    max-width: 80ch;
+}

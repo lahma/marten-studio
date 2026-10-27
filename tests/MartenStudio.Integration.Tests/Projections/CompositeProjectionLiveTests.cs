@@ -96,8 +96,11 @@ public class CompositeProjectionLiveTests(PostgresFixture postgres)
         view.Projections.SelectMany(static x => x.ShardNames).Should().NotIntersectWith(
             Members, "CompositeProjection.ShardNames() returns [Name:All] alone, at JasperFx 2.74.0 and 2.95.1");
 
-        view.UnregisteredShards.Select(static x => x.ShardName).Should().NotIntersectWith(
+        view.Orphans.Rows.Select(static x => x.Name).Should().NotIntersectWith(
             Members, "a composite advances its members in its own batch: they are registered, through it");
+
+        // M4: a composite store shows no orphaned progression row at all - its own shard and its members' are its rows.
+        view.Orphans.Count.Should().Be(0, "every row a composite and its members write is registered");
 
         foreach (string member in Members)
         {

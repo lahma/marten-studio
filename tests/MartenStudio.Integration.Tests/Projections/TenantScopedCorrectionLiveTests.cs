@@ -171,6 +171,33 @@ public class TenantScopedCorrectionLiveTests(PostgresFixture postgres) : IAsyncL
             highest, "Marten rewrote every progression row of the database, not only acme's");
     }
 
+    /// <summary>
+    /// M4: an orphaned progression row is the database's bookkeeping, named by a projection - so a tenant scope is told how
+    /// many there are, and is shown their names only with the database as a whole allowed.
+    /// </summary>
+    [PostgresFact]
+    public async Task Orphaned_rows_are_counted_for_a_tenant_scope_and_named_only_with_the_whole_database_allowed()
+    {
+        await WriteProgressionAsync("RetiredProjection:All", 3);
+
+        await using (Studio refused = await BuildStudioAsync(allowWholeDatabase: false))
+        {
+            ProjectionsView view = await refused.Service.GetProjectionsAsync(refused.ScopeFor(Acme), Token);
+
+            view.Orphans.Count.Should().Be(1, "how many there are is the scope's to know");
+            view.Orphans.NamesShown.Should().BeFalse();
+            view.Orphans.Rows.Should().BeEmpty();
+            view.Orphans.Withheld.Should().Be(OrphanWording.NamesWithheld);
+        }
+
+        await using (Studio allowed = await BuildStudioAsync(allowWholeDatabase: true))
+        {
+            ProjectionsView view = await allowed.Service.GetProjectionsAsync(allowed.ScopeFor(Acme), Token);
+
+            view.Orphans.Rows.Should().ContainSingle(static x => x.Name == "RetiredProjection:All");
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------
     // The studio under test, and the database read around it
     // ------------------------------------------------------------------------------------------------

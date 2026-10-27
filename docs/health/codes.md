@@ -49,6 +49,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [D07](daemon.md#d07-gaps-were-skipped) | Gaps were skipped | Daemon | - | - | Marten | 0.4 | - |
 | [D08](daemon.md#d08-rebuilt-elsewhere-or-stopped-half-way) | Rebuilt elsewhere, or stopped half-way | Daemon | - | shard | Marten | 0.4 | - |
 | [D09](daemon.md#d09-event-sequence-and-daemon-progression-disagree) | Event sequence and daemon progression disagree | Daemon | `mark-ahead`, `shard-ahead`, `sequence-behind` | `mark-ahead`: progression row; `shard-ahead`: shard; `sequence-behind`: sequence | Marten | 0.5 | - |
+| [D10](daemon.md#d10-orphaned-progression-rows) | Orphaned progression rows | Daemon | - | projection | Marten | 0.6 | - |
 | [E02](events.md#e02-tombstones) | Tombstones | Events | - | - | Marten | 0.4 | - |
 | [E03](events.md#e03-hot-stream) | Hot stream | Events | - | stream | Marten | 0.4 | - |
 | [E04](events.md#e04-large-event-payloads) | Large event payloads | Events | - | - | Marten | 0.4 | - |

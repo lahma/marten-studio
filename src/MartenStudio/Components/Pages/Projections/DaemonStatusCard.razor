@@ -22,6 +22,15 @@
             <span class="ms-kv-key">Hosting</span>
             <span class="ms-kv-value ms-daemon-hosting">@HostingText</span>
         </div>
+        @if (Topology is { Length: > 0 })
+        {
+            @* M7: which agents this node runs, and under what mode - what decides whether a Start, a Stop or a Rewind
+               here does anything. *@
+            <div class="ms-kv-row">
+                <span class="ms-kv-key">This node</span>
+                <span class="ms-kv-value ms-daemon-topology">@Topology</span>
+            </div>
+        }
         @if (IsHostedHere)
         {
             <div class="ms-kv-row">
@@ -121,6 +130,13 @@
     /// <summary>Plain words about the state, shown when the daemon is not hosted here.</summary>
     [Parameter]
     public string Explanation { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What this node runs, under what coordination (M7: <c>DaemonTopologyWording.Describe</c>), or <see langword="null" />
+    /// where <see cref="Explanation" /> already says it.
+    /// </summary>
+    [Parameter]
+    public string? Topology { get; set; }
 
     /// <summary>
     /// Whether Marten Studio itself paused this store's projection coordinator.
