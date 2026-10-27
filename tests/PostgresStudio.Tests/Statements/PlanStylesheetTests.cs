@@ -67,7 +67,12 @@ public partial class PlanStylesheetTests
         string section = Section();
 
         section.Should().Contain(".ms-plan-tree {\n    min-width: max-content;", "a deep plan scrolls sideways in its region (D25) rather than squeezing");
-        section.Should().Contain("max-width: min(72ch, 85vw);");
+
+        // 0.6's UI sweep measured 85vw at 390 px: a viewport unit knows nothing of the icon rail and the cards round the plan,
+        // and the root node ran 88 px past a 252 px region. The bound is the plan's own width, less the tree's padding.
+        section.Should().Contain("    container-type: inline-size;\n", "the plan is the container the node's bound is measured against");
+        section.Should().Contain("max-width: min(72ch, 100cqi - 2 * var(--ms-space-sm));");
+        section.Should().NotContain("vw)", "a node's bound is the plan's width, never the viewport's");
 
         int phone = section.IndexOf("@media (max-width: 640px)", StringComparison.Ordinal);
         phone.Should().BePositive();

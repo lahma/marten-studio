@@ -139,7 +139,7 @@
                        type="text"
                        placeholder="total, items[0].sku, $.status"
                        value="@pathText"
-                       @onchange="OnPathChanged" />
+                       @oninput="OnPathChanged" />
                 <button type="button"
                         class="ms-button"
                         disabled="@(searching || string.IsNullOrWhiteSpace(pathText) || window is null)"
@@ -814,6 +814,8 @@
 
     private void OnVersionTextChanged(ChangeEventArgs args) => versionText = args.Value?.ToString();
 
+    // On input, not change: "Find next change" is enabled while the path is typed, not only once the field loses focus (0.6's
+    // UI sweep). The event carries the field's value, so a render that lands mid-word does not write an older one back.
     private void OnPathChanged(ChangeEventArgs args) => pathText = args.Value?.ToString();
 
     private Task JumpAsync()

@@ -27,9 +27,11 @@
   </PropertyGroup>
 
   <!-- CHANGELOG.md is the version authority: the Fallout build parses its top section and
-       overrides VersionPrefix on the command line. The value below is only the local fallback. -->
+       overrides VersionPrefix on the command line. The value below is only the local fallback - what a plain `dotnet run`
+       builds with, and so the tag its health docs links point at - and VersionFallbackTests holds it to CHANGELOG.md's top
+       version. -->
   <PropertyGroup>
-    <VersionPrefix>0.4.0</VersionPrefix>
+    <VersionPrefix>0.6.0</VersionPrefix>
   </PropertyGroup>
 
   <PropertyGroup>

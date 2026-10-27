@@ -90,12 +90,35 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             [.. locks.Select(static x => x.Row)],
             prepared.Count > 0 ? prepared[0].MaxPrepared : 0,
             [.. prepared.Where(static x => x.Row is not null).Select(static x => x.Row!)],
-            sql.Statements)
+            Labelled(sql.Statements))
         {
             Connections = Connections(applications),
             Blocking = blocking,
             LockStatistics = statistics,
         };
+    }
+
+    /// <summary>
+    /// What each statement of the snapshot reads, in words, keyed by the text its builder writes: the Sessions page draws a
+    /// "Show SQL" per statement, on both tabs, and five that all said "Show SQL" told nobody which was which (0.6's UI sweep).
+    /// A statement not listed here keeps no label, and its disclosure says "Show SQL" as before.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [HealthConnectionQueries.SessionSnapshot().Sql] = "the sessions",
+        [HealthConnectionQueries.LockSnapshot().Sql] = "the locks",
+        [HealthConnectionQueries.PreparedTransactions().Sql] = "prepared transactions",
+        [ConnectionsByApplicationQueries.Read().Sql] = "connections by application",
+        [HealthConnectionQueries.LockTable().Sql] = "who blocks whom",
+        [HealthConnectionQueries.LockStatistics().Sql] = "lock waits by type",
+    };
+
+    /// <summary>The statements the snapshot ran, each named by what it reads where <see cref="Labels" /> knows it.</summary>
+    internal static IReadOnlyList<HealthStatement> Labelled(IReadOnlyList<HealthStatement> statements)
+    {
+        ArgumentNullException.ThrowIfNull(statements);
+
+        return [.. statements.Select(static x => x.Label is null && Labels.TryGetValue(x.Sql, out string? label) ? x with { Label = label } : x)];
     }
 
     /// <summary>
