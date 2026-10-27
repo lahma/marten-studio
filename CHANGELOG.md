@@ -150,6 +150,16 @@ preview of a document save lights up where the host's Marten has it.
 - The health advisor pins `DateStyle` to ISO for its own read-only transactions, beside `search_path`, so a time
   range is judged whatever `DateStyle` the server, the database or the role sets. The pin changes only how dates are
   printed to the advisor.
+- At 390 px the query editor's keyboard hint takes a line of its own instead of running past the editor and making
+  the page scroll sideways, and a plan's node is at most as wide as the plan, so a one-node plan fits its scroll region
+  on a phone (both studios). Time travel's version slider gives way on a narrow card, so its Next button stays inside.
+- In the dark theme, links the stylesheet gave no colour of their own - the breadcrumbs on document detail and
+  Database › Sessions, the Overview's health and activity lists, a finding's "About" link, and notes that link to
+  Health or Maintenance - drew in the browser's default blue. Every link in the studio now takes the link colour, and
+  Database › Sessions uses the database browser's breadcrumb.
+- Each "Show SQL" on Database › Sessions says what it reads ("Show SQL for the sessions", "Show SQL for who blocks
+  whom"), where five said only "Show SQL".
+- Marten Studio's projection stepper enables "Find next change" as the path is typed, not once the field loses focus.
 - The latest-tested Marten is 9.54.2 (0.5.0 was tested at 9.54.1); the package still depends on Marten 9.39.0 or
   later, and PostgresStudio on Npgsql 8.0.3 or later.
 - The test projects take bUnit 2.13.3; nothing that ships references it.

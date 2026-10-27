@@ -429,7 +429,9 @@ source order: keep that when touching those selectors, as a rule added *before* 
 nothing. `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured, `StylesheetTests.DatabasePolish`
 `UX-6`, `StylesheetTests.FinalPolish` `UX-7` and `StylesheetTests.QueryRefusal` `UX-8`; from 0.5.0 each section's own
 stylesheet test reads it out of `studio.css` by its header. 0.6.0 appended `M1`, `X3`, `M3` (tested in
-`DeadLetterGroupsTests`), `M2`, `X1`, `X2` and `M47`, in that order. Earlier releases' sections: decision-notes.md, D26.
+`DeadLetterGroupsTests`), `M2`, `X1`, `X2`, `M47` and `UI-0.6` (tested in
+`StylesheetTests.UiSweep`), in that order. `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
+no specificity, so any rule that names a link wins over it. Earlier releases' sections: decision-notes.md, D26.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
 It lists the database's other objects by kind, gated like `RunSql`, whose power it is: `Capabilities.BrowseDatabase`
@@ -832,7 +834,9 @@ Do not "update" it.
 `CHANGELOG.md` is the **version authority**: its top section is parsed in `OnBuildInitialized` and passed
 to every compile, test and pack as `-p:Version=`. The file is never mutated by the build, and its first
 line must parse as a version header (`# 0.1.0`) — **do not add a `# Changelog` title**, it would abort the
-build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plain `dotnet build`.
+build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plain `dotnet build`, and `VersionFallbackTests`
+holds it to the CHANGELOG's top version (without a prerelease suffix): a new CHANGELOG section moves it in the same
+pull request.
 
 **The Marten version is `Directory.Packages.props`'s, and the build only chooses between two.**
 `MartenStudioMartenFloor` (what the package depends on) and `MartenStudioMartenLatest` (the newest 9.x CI
