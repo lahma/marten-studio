@@ -69,6 +69,16 @@ and, apart from them, notes that remove nothing: an index built without `CONCURR
 at once, is not counted as a drop - and the typed string travels to the service rather than being re-supplied by the
 page.
 
+**The stepper folds with the invoker and nothing else (M1, 0.6).** Time travel and the stepper fold through
+`IAggregateFolder.FoldAsync`, Marten's `AggregatorFor<T>().BuildAsync`. The stepper hands it one event and the state
+before it wherever `AggregateStepShapes` reads the dispatch as per-event (generated Create/Apply/ShouldDelete,
+`Evolve`/`EvolveAsync`). It folds from the stream's first event, up to `AggregateWalk.FromTheStartLimit`, for a
+`DetermineAction(Async)` override, a `DeleteEvent<T>()` event, or an aggregator it has not read. No studio code calls
+`DetermineActionAsync`, `Evolve` or JasperFx's `ISteppableAggregation` itself, and `AggregateSteppingTests` holds every
+step to Marten's single fold at both Marten ends. Known limit: an `Apply` reading the version member or an
+`ApplyMetadata`-set member sees, step by step, the value after the previous event (Marten's single fold sets those once
+at the end).
+
 ## Hard rule 15
 
 An unpinned session on a multi-database store reads the store's default rather than the database the scope selector
@@ -97,6 +107,34 @@ PostgresStudio's, which MartenStudio references, and PostgresStudio - having no 
 a conditional central row, and is never above the Npgsql Marten's floor resolves (`NpgsqlVersionTests`); MartenStudio's
 nuspec still lists the assets pack, written there by `CentralPackageTransitivePinningEnabled` rather than by a
 reference of its own.
+
+## D6 — Reads are raw parameterised SQL, writes go through a Marten session
+
+(There is no `mt_upsert_*` function to call anyway: Marten 9.35 installs none, and the upsert is inline SQL in the
+generated write path — verified against a live schema by P7, 2026-09-14.)
+
+## D7 — Document edit shows a round-trip diff before saving
+
+The id check (M5, 0.6) was proved live at the floor before it was fixed: a save whose JSON carried another id, on a type
+without Marten's optimistic concurrency, passed the version check on the open document and overwrote the document
+with the new id. What M5 read of Marten 9.52 and 9.53's document members, and left alone: `UndeleteDocumentAsync`
+opens an unpinned `LightweightSession(tenantId)` and re-stores the row through its CLR type, so undelete stays the
+studio's own, under `DeleteDocuments`; the metadata ordering picks its database by tenant and pages with an offset and
+an exact `count(*)`, so the Order control is the studio's own keyset read; `QueryEventData<T>` runs LINQ, which ensures
+storage, its tenant form opens an unpinned `QuerySession(tenantId)`, and its null form calls `Events.AddEventType<T>()`
+on the host's store. Nothing in `IDocumentStoreDiagnostics` could replace a studio read: each member is unpinned, runs
+outside `ReadOnlySqlSession`, counts with `count(*)` or reads through `FetchStreamAsync`.
+
+## D10 — No SignalR hub in v1
+
+Dead letters are grouped in C# over a bounded read, and a group's members found again in SQL (M3, 0.6). Measured on
+10,000 dead letters (PostgreSQL 17, M3's report): an aggregate that fingerprints every message in SQL - ten nested
+`regexp_replace` passes a row - spent about 950 ms of the database's CPU per read, nearly all of it in those passes,
+where reading the five fields and each letter's event type (`DeadLetterGroupQueries.BuildGroupRows`, an index probe per
+letter) and fingerprinting in C# took about 180 ms end to end. `DeadLetterEvent` stores no event type, so each letter's
+event is looked up in `mt_events`; the daemon writes `ApplyEventException`'s "Failure to apply event #N Id(guid)" as the
+message, so its fingerprint is near-constant and the exception and event types are what tell causes apart; a
+deserialization letter carries no `TenantId`.
 
 ## D22 — `blazor.web.js` reaches the host through a `PackageReference`
 
@@ -143,6 +181,29 @@ any of its code runs. `NoJsInitializerTests` is the regression, on both halves: 
 and a shell that still asks for the script it replaced it with. Measured in 0.3.0: a studio navigation resets the
 `<html>` element's attributes even though the window survives, so state the script keeps there (the keyboard-or-pointer
 input modality behind the heading's focus ring) lives in JS and is re-applied by an observer.
+
+## D25 — Every data table sits in its own labelled scroll region
+
+The cost was that a table wider than the content column was simply cut off with no cue and no way to reach the columns
+on the right — measured in the 0.2.0 UX pass at 1 691 px of table in a 1 200 px column on Event types, and every table
+on a phone.
+
+## D26 — The stylesheet's UX sections are appended in cascade order
+
+The 0.2.0 pass landed five parallel packets in one file. Each put its new rules in a titled section at the end
+(`UX-2`, `UX-3`, `UX-1`, `UX-4`, `UX-5`, in that order) and edited an existing rule in place only where its report
+says so; several sections deliberately re-declare an earlier selector (`.ms-event-card`, `.ms-projection-note`,
+`.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order. Keep that when touching those
+selectors: a rule added *before* the section that overrides it is a rule that does nothing, and `StylesheetTests`
+(plus its `.Shell` part) pins the ones that were measured. 0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5`, `UX-6` and
+`UX-7` in that order under the same rule; `UX-6` re-declares a few earlier selectors on purpose (the notices'
+contrast, the heading's focus ring) and `StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish`
+pins `UX-7`. 0.4.0 appended `HEALTH-1`, `HEALTH-2`, `HEALTH-4`, `HEALTH-3`, `EVENTS-4`, `QUERY-LINQ`, `PGV` and `UX-8`
+in that order, under the same rule; `StylesheetTests.QueryRefusal` pins `UX-8`. In 0.5 the file moved whole, to
+PostgresStudio's `wwwroot/css/studio.css`, with its section order unchanged, and it holds both studios' rules; a
+Marten-only sheet, if one is ever needed, is linked *after* it. 0.5.0 appended the wave-5 sections W5-CAP, W5-R2,
+W5-S2, W5-V1, W5-Q1, W5-AUR, W5-B1 and W5-API in that order under the same rule; each section's own stylesheet test
+reads it out of `studio.css` by its header.
 
 ## D27 — The database browser
 
@@ -216,6 +277,11 @@ it is authorized as `(store, database, tenant)` - and made only for an agent the
 agent's own names, because the overload starts the tenant's agents wherever it is asked. On such a store the
 store-global rewind is never made, and Skip event is the tenant overload of `MarkEventsAsSkipped` (#5698), asked about
 the tenant as before. Below either, both stay refused (SEC1-fix4).
+
+Orphaned progression rows (M47, 0.6) are listed and never removed. Marten does have a removal by name,
+`DeleteProjectionProgressByShardNameAsync` (present at 9.39 already, marten#4785), but it ensures the event storage
+first, so it may only ever be a capability-gated write; a Remove button built on it is left to a later release, and
+0.6 shows the call, and the equivalent SQL, as text for the host.
 
 Enumerating a dynamic tenancy's databases is not read-only, at any Marten through 9.54.1: `AllDatabases()`,
 `Tenancy.DescribeDatabasesAsync()` and 9.50.1's `IEventStore.TryDescribeDatabasesAsync()` all run
