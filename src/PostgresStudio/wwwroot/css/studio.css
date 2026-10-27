@@ -13002,3 +13002,23 @@ a.ms-schema-health-mark:focus-visible {
 .ms-time-travel-stepper > input[type="range"] {
     min-width: 0;
 }
+
+/* ==========================================================================
+   UI-0.6.1. Sessions: a statement cell is at most six lines tall (issue #19)
+
+   In a narrow window the statement column shrank to its minimum width and
+   every row grew as tall as its statement divided by that width. The cell
+   keeps its 24ch floor at every width, and the statement scrolls inside a
+   six-line box instead of stretching the row.
+   ========================================================================== */
+
+.ms-sessions-statement code {
+    max-height: calc(6 * 1.5em);
+    overflow-y: auto;
+}
+
+@media (max-width: 640px) {
+    .ms-sessions-statement {
+        min-width: 24ch;
+    }
+}

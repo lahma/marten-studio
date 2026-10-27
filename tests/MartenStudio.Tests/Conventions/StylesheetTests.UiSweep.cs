@@ -92,6 +92,27 @@ public partial class StylesheetTests
         Declaration(".ms-time-travel-stepper > input[type=\"range\"]", "min-width", UiSweepSection()).Should().Be("0");
     }
 
+    /// <summary>
+    /// Issue #19: a Sessions statement is at most six lines tall and scrolls inside that box, and the cell keeps its 24ch
+    /// floor in a narrow window, so no row grows as tall as its statement divided by a shrunken column.
+    /// </summary>
+    [Fact]
+    public void UI_0_6_1_clamps_the_sessions_statement()
+    {
+        string css = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "wwwroot", "css", "studio.css"));
+        const string header = "UI-0.6.1. Sessions";
+
+        int start = css.IndexOf(header, StringComparison.Ordinal);
+        start.Should().BeGreaterThanOrEqualTo(0, "the section is there");
+        start.Should().BeGreaterThan(css.IndexOf(UiSweepHeader, StringComparison.Ordinal),
+            "D26: a section is appended, after UI-0.6, so it wins by source order");
+
+        string section = css[start..];
+        section.Should().Contain("max-height: calc(6 * 1.5em);");
+        section.Should().Contain("overflow-y: auto;");
+        section.Should().Contain("min-width: 24ch;");
+    }
+
     [GeneratedRegex("#[0-9a-fA-F]{3,8}\\b", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 1000)]
     private static partial Regex UiSweepHexColour();
 }

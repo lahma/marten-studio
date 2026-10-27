@@ -171,7 +171,9 @@ internal sealed class RelationshipReads
 
     /// <summary>
     /// The schemas the shared read spans: the source's own, and - when <c>BrowseDatabase</c> is on for the process at
-    /// all - every schema <c>BrowsableSchemas</c> admits. The same for every visitor.
+    /// all - every schema <c>BrowsableSchemas</c> admits. In Postgres Studio the schemas it names exactly are the
+    /// source's own (D27 in PostgresStudio), so they join whatever <c>BrowseDatabase</c> says; only <c>"*"</c> waits for
+    /// it (issue #18). The same for every visitor.
     /// </summary>
     private async Task<string[]> SchemaSetAsync(
         ResolvedSource resolved,
@@ -182,14 +184,23 @@ internal sealed class RelationshipReads
 
         IReadOnlyList<string> browsable = settings.BrowsableSchemas;
 
-        if (capabilities.IsEnabled(StudioCapability.BrowseDatabase) && browsable.Count > 0)
+        bool browse = capabilities.IsEnabled(StudioCapability.BrowseDatabase);
+
+        // Postgres Studio's exactly-named schemas are structure, shown under the source policy alone.
+        IReadOnlyList<string> entries = browse
+            ? browsable
+            : Product == StudioProduct.PostgresStudio
+                ? [.. browsable.Where(static x => x != BrowsableSchemaMatcher.Everything)]
+                : [];
+
+        if (entries.Count > 0)
         {
             try
             {
                 IReadOnlyList<CatalogSchema> live = await catalog.SchemasAsync(resolved.Target, cancellationToken)
                     .ConfigureAwait(false);
 
-                set.UnionWith(BrowsableSchemaMatcher.Match(browsable, live));
+                set.UnionWith(BrowsableSchemaMatcher.Match(entries, live));
             }
             catch (Exception exception) when (DatabaseAccess.IsCatalogFailure(exception))
             {
