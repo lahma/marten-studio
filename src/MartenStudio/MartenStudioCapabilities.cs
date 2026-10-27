@@ -2,9 +2,9 @@ namespace MartenStudio;
 
 /// <summary>
 /// The operations Marten Studio is allowed to perform beyond browsing the store: the mutating ones, and
-/// the reads that are authorized like writes - the two that reach past the store's own documents and
-/// events (<see cref="RunSql"/> and <see cref="BrowseDatabase"/>), the one that names other sessions
-/// (<see cref="ViewDatabaseActivity"/>) and the one that evaluates a typed expression
+/// the reads that are authorized like writes - the three that reach past the store's own documents and
+/// events (<see cref="RunSql"/>, <see cref="BrowseDatabase"/> and <see cref="ViewDefinitions"/>), the one that
+/// names other sessions (<see cref="ViewDatabaseActivity"/>) and the one that evaluates a typed expression
 /// (<see cref="RunLinqQueries"/>). Every property defaults to <see langword="false"/>: a freshly mapped
 /// studio is a read-only browser of the store until the host enables what it needs, one switch at a
 /// time, or calls <see cref="All"/>. <see cref="MartenStudioOptions.ReadOnly"/> overrides every property
@@ -50,9 +50,24 @@ public sealed class MartenStudioCapabilities
     /// treated as a write for authorization: <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is
     /// asked, against the database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/>
     /// turns it off with everything else. Rows of Marten's own document and event tables are never read
-    /// this way; they are browsed where tenancy, soft delete and the serializer apply.
+    /// this way; they are browsed where tenancy, soft delete and the serializer apply. It implies
+    /// <see cref="ViewDefinitions"/>: a visitor it admits reads definitions exactly as before.
     /// </summary>
     public bool BrowseDatabase { get; set; }
+
+    /// <summary>
+    /// Read the definitions (a view's or materialized view's query, a function's or procedure's body, a trigger's
+    /// definition, a sequence's value, a type's description) of the database objects Marten does not own, and see the
+    /// structure of the schemas <see cref="MartenStudioOptions.BrowsableSchemas"/> names <em>exactly</em> - and nothing
+    /// else: no rows (those need <see cref="BrowseDatabase"/>), and no definition in a schema only <c>"*"</c> admits.
+    /// A definition is schema the application's own migrations wrote, but it can carry a literal - a function body
+    /// with a constant in it - which is why it is a switch of its own rather than part of structure. Like
+    /// <see cref="BrowseDatabase"/> it is a read treated as a write for authorization:
+    /// <see cref="MartenStudioOptions.WriteAuthorizationPolicy"/> is asked with this capability's name, against the
+    /// database as a whole with no tenant, and <see cref="MartenStudioOptions.ReadOnly"/> turns it off with everything
+    /// else. <see cref="BrowseDatabase"/> implies it.
+    /// </summary>
+    public bool ViewDefinitions { get; set; }
 
     /// <summary>
     /// See who and what is using the store's database: the process ids, roles, client addresses and
@@ -97,6 +112,7 @@ public sealed class MartenStudioCapabilities
         ApplySchemaChanges = true,
         RunSql = true,
         BrowseDatabase = true,
+        ViewDefinitions = true,
         ViewDatabaseActivity = true,
         CompactStreams = true,
         RunLinqQueries = true,

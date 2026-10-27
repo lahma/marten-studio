@@ -273,12 +273,59 @@ internal sealed record DatabaseAccessState(
     DatabaseRefusal Refusal,
     string? Denial)
 {
+    private readonly IReadOnlyList<string>? definitionSchemas;
+    private readonly DatabaseRefusal? definitionRefusal;
+    private readonly string? definitionDenial;
+    private readonly bool definitionDenialSet;
+
     /// <summary>
     /// Whether this visitor can see anything past the store's own structure: the capability is on, the
     /// policy said yes, and <c>BrowsableSchemas</c> names something. <see cref="Refusal" /> says which of
     /// the three is missing when it is not.
     /// </summary>
+    /// <remarks>
+    /// This is <c>BrowseDatabase</c>'s gate: rows, and everything in a schema only <c>"*"</c> admits. The definitions have
+    /// a second way in, <c>ViewDefinitions</c>, and <see cref="DefinitionsOpen" /> is the answer for those.
+    /// </remarks>
     public bool IsOpen => Refusal == DatabaseRefusal.None;
+
+    /// <summary>
+    /// The schemas whose definitions - and structure - this visitor may read: <see cref="BrowsableSchemas" /> when
+    /// <c>BrowseDatabase</c> is open, the schemas <c>BrowsableSchemas</c> names exactly when only <c>ViewDefinitions</c>
+    /// is, and empty while neither is. Without a <c>ViewDefinitions</c> answer it is <see cref="BrowsableSchemas" />.
+    /// </summary>
+    public IReadOnlyList<string> DefinitionSchemas
+    {
+        get => definitionSchemas ?? BrowsableSchemas;
+        init => definitionSchemas = value;
+    }
+
+    /// <summary>
+    /// The gate that is shut for a definition, or <see cref="DatabaseRefusal.None" />: neither <c>ViewDefinitions</c> nor
+    /// <c>BrowseDatabase</c> is open. Without a <c>ViewDefinitions</c> answer it is <see cref="Refusal" />.
+    /// </summary>
+    public DatabaseRefusal DefinitionRefusal
+    {
+        get => definitionRefusal ?? Refusal;
+        init => definitionRefusal = value;
+    }
+
+    /// <summary>The sentence naming <see cref="DefinitionRefusal" />, which names both ways in. Without one, <see cref="Denial" />.</summary>
+    public string? DefinitionDenial
+    {
+        get => definitionDenialSet ? definitionDenial : Denial;
+        init
+        {
+            definitionDenial = value;
+            definitionDenialSet = true;
+        }
+    }
+
+    /// <summary>
+    /// Whether this visitor can read a definition somewhere: <c>BrowseDatabase</c> or <c>ViewDefinitions</c> is open, and
+    /// <c>BrowsableSchemas</c> names something. <see cref="DefinitionRefusal" /> says which is missing when it is not.
+    /// </summary>
+    public bool DefinitionsOpen => DefinitionRefusal == DatabaseRefusal.None;
 
     /// <summary>Nothing known yet: the state before a read, or after one failed.</summary>
     public static DatabaseAccessState Unknown { get; } =

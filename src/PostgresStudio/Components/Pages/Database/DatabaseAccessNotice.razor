@@ -18,8 +18,38 @@
 {
     <div class="ms-alert ms-alert-info ms-capability-disabled ms-db-access" role="note" data-refusal="@access.Refusal">
         <div class="ms-alert-content">
+            @if (access.DefinitionsOpen)
+            {
+                @* The second way in: ViewDefinitions admits the definitions, and the structure around them, of the
+                   schemas BrowsableSchemas names exactly; the rows are BrowseDatabase's, and it is not open. *@
+                <p class="ms-db-access-title">@DefinitionsOnlyHeadline(access.Refusal)</p>
+                @if (access.Refusal is DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy)
+                {
+                    <p class="ms-muted">@denial</p>
+                }
+                else
+                {
+                    <p class="ms-muted">
+                        Rows, and everything in a schema <code>@Settings.OptionName("BrowsableSchemas")</code> admits only through
+                        "*"@(WithheldPhrase(access)), need <code>@Settings.OptionName("Capabilities.BrowseDatabase")</code>.
+                    </p>
+                }
+                <p class="ms-muted">
+                    The structure and the definitions of views, functions, triggers, sequences and types in the schemas
+                    <code>@Settings.OptionName("BrowsableSchemas")</code> names exactly are shown
+                    (<code>Capabilities.ViewDefinitions</code>).
+                </p>
+            }
+            else
+            {
             <p class="ms-db-access-title">@(Settings.Text.Product == StudioProduct.MartenStudio ? Headline(access.Refusal) : SourceHeadline(access.Refusal))</p>
             <p class="ms-muted">@denial</p>
+            @if ((access.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly) && access.DefinitionDenial is { Length: > 0 } definitions && definitions != denial)
+            {
+                @* Said in the studio's own words (the sentence above, which MartenStudio pins, names BrowseDatabase alone):
+                   what a definition needs is either of two capabilities. *@
+                <p class="ms-muted">@definitions</p>
+            }
             @if (Settings.Text.Product != StudioProduct.MartenStudio)
             {
                 @* A studio over plain data sources: its own schemas are the ones BrowsableSchemas names exactly, and
@@ -31,9 +61,10 @@
                         case DatabaseRefusal.ReadOnly:
                             <text>
                                 What is shown is the structure of the schemas <code>@Settings.OptionName("BrowsableSchemas")</code>
-                                names. With <code>Capabilities.BrowseDatabase</code> on, this screen would also show the
-                                schemas it admits through "*"@(WithheldPhrase(access)), the definitions of views,
-                                functions and triggers, and the rows of tables.
+                                names. With <code>Capabilities.ViewDefinitions</code> on, this screen would also show the
+                                definitions of views, functions and triggers in them; with
+                                <code>Capabilities.BrowseDatabase</code> on, also the rows of tables and the schemas it admits
+                                through "*"@(WithheldPhrase(access)).
                             </text>
                             break;
 
@@ -55,10 +86,11 @@
                     case DatabaseRefusal.ReadOnly:
                         <text>
                             What is shown is the structure of this store's own schemas, as the Schema screen
-                            shows it. With <code>Capabilities.BrowseDatabase</code> on, this screen would also
-                            show the other schemas <code>@Settings.OptionName("BrowsableSchemas")</code>
-                            admits@(WithheldPhrase(access)), the definitions of views, functions and triggers
-                            Marten does not own, and the rows of tables it does not own.
+                            shows it. With <code>Capabilities.ViewDefinitions</code> on, this screen would also
+                            show the definitions of views, functions and triggers Marten does not own, and the
+                            structure of the schemas <code>@Settings.OptionName("BrowsableSchemas")</code> names exactly;
+                            with <code>Capabilities.BrowseDatabase</code> on, also the rows of tables it does not own
+                            and the other schemas it admits@(WithheldPhrase(access)).
                         </text>
                         break;
 
@@ -79,6 +111,7 @@
                         break;
                 }
             </p>
+            }
             }
         </div>
     </div>
@@ -108,6 +141,13 @@
         DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Your account may not browse rows and definitions here.",
         DatabaseRefusal.SchemaNotBrowsable => "No schema is browsable yet.",
         _ => "The database browser shows only the structure of the browsable schemas.",
+    };
+
+    /// <summary>The headline of a visitor who may read definitions but not rows: <c>ViewDefinitions</c> is open, <c>BrowseDatabase</c> is not.</summary>
+    private static string DefinitionsOnlyHeadline(DatabaseRefusal refusal) => refusal switch
+    {
+        DatabaseRefusal.WritePolicy or DatabaseRefusal.StorePolicy => "Definitions are shown; your account may not browse rows here.",
+        _ => "Definitions are shown; browsing rows is not enabled.",
     };
 
     /// <summary>How many schemas are withheld, as an aside - a count, never their names.</summary>

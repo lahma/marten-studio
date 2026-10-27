@@ -120,8 +120,9 @@ public sealed class PostgresStudioOptions
 
     /// <summary>
     /// The Postgres schemas the database browser shows. Their structure - tables, columns, keys, indexes - is visible to
-    /// anyone the source policy admits; their rows and definitions need <see cref="PostgresStudioCapabilities.BrowseDatabase" />
-    /// and the write policy. Each entry is an exact schema name, compared case-sensitively as Postgres stores it, or
+    /// anyone the source policy admits; their definitions need <see cref="PostgresStudioCapabilities.ViewDefinitions" /> or
+    /// <see cref="PostgresStudioCapabilities.BrowseDatabase" />, and their rows <see cref="PostgresStudioCapabilities.BrowseDatabase" />,
+    /// each with the write policy. Each entry is an exact schema name, compared case-sensitively as Postgres stores it, or
     /// <c>"*"</c>. When nothing names any schema it is <c>public</c>.
     /// </summary>
     /// <remarks>
@@ -140,7 +141,8 @@ public sealed class PostgresStudioOptions
     /// structure is shown to anyone the source policy admits. A schema <c>"*"</c> alone admits is shown - structure, rows
     /// and definitions - only with <see cref="PostgresStudioCapabilities.BrowseDatabase" /> and the write policy, because
     /// <c>"*"</c> is a statement about the database rather than this configuration, and what it admits changes as the
-    /// database does. An exact entry naming a schema an extension owns (<c>cron</c>, TimescaleDB's) is honoured like any
+    /// database does. <see cref="PostgresStudioCapabilities.ViewDefinitions" /> covers the schemas named exactly and never
+    /// one only <c>"*"</c> admits. An exact entry naming a schema an extension owns (<c>cron</c>, TimescaleDB's) is honoured like any
     /// other, which is how a host that wants such a schema browses it: <c>"*"</c> never admits one.
     /// </para>
     /// <para>

@@ -171,11 +171,15 @@ option is exactly the application it was.
 
 ## Capabilities
 
-Three, all `false` by default, all turned on by `PostgresStudioCapabilities.All()`, all off under `ReadOnly`. Each is a
+Four, all `false` by default, all turned on by `PostgresStudioCapabilities.All()`, all off under `ReadOnly`. Each is a
 read that is authorized like a write, because each reads beyond structure:
 
-- **`BrowseDatabase`** - the rows and definitions of the database browser's tables, views, functions, triggers, sequences
-  and types.
+- **`BrowseDatabase`** - the rows of the database browser's tables and views, and every definition in every schema
+  `BrowsableSchemas` admits. It implies `ViewDefinitions`.
+- **`ViewDefinitions`** - the definitions alone (a view's or materialized view's query, a function's or procedure's body,
+  a trigger's definition, a sequence's value, a type's description) in the schemas `BrowsableSchemas` names **exactly**:
+  for a host that keeps its rows off the screen and still wants the SQL its own migrations wrote. Never a row, and never
+  a schema only `"*"` admits.
 - **`ViewDatabaseActivity`** - other sessions' process ids, roles, client addresses, application names and statements,
   on Database › Sessions, the Health page and Operations › Statements. Without it the counts, ages and states are still
   shown.
@@ -194,14 +198,14 @@ follows foreign keys both ways.
 `BrowsableSchemas` decides which schemas it shows:
 
 - The schemas it names **exactly** are the data source's own. Their **structure** - names, columns, keys, indexes,
-  trigger names, estimates - is shown to anyone the source policy admits. Their **rows and definitions** need
-  `BrowseDatabase` and the write policy.
+  trigger names, estimates - is shown to anyone the source policy admits. Their **definitions** need `ViewDefinitions` or
+  `BrowseDatabase`, and their **rows** `BrowseDatabase`, each with the write policy asked with the capability's name.
 - With nothing named, the list is `public`. The default is applied after every configuration, code and
   `appsettings.json` alike, so a list that names schemas **replaces** it: to keep `public` beside `legacy`, name both.
 - `"*"` admits every schema the reading role has `USAGE` on, except the system schemas and the schemas an extension
-  owns. A schema only `"*"` admits is shown - structure included - only with `BrowseDatabase` and the write policy,
-  because `"*"` is a statement about the database rather than the configuration. Only an exact entry admits a schema
-  an extension owns, and a system schema is never browsable.
+  owns. A schema only `"*"` admits is shown - structure and definitions included - only with `BrowseDatabase` and the
+  write policy, because `"*"` is a statement about the database rather than the configuration: `ViewDefinitions` never
+  reaches it. Only an exact entry admits a schema an extension owns, and a system schema is never browsable.
 - A schema the visitor may not see is masked as `‹withheld›` wherever Postgres prints its name - in types, defaults,
   CHECK and index definitions, view, routine and trigger definitions and comments - and a view that reaches into one is
   refused its rows.
@@ -216,7 +220,7 @@ and so do the browser's row reads: `SqlConsoleRole` is the real boundary for bot
 
 **A Marten table in a plain database.** Postgres Studio has no Marten, so it knows no store's declarations: anything
 named like Marten's own (`mt_`) is listed as Marten's, its rows are never read, nor a view over one, and its definition
-is shown only with `BrowseDatabase`. The database page says once that the database holds a Marten store, and points to
+is shown only with `BrowseDatabase`, which `ViewDefinitions` does not stand in for. The database page says once that the database holds a Marten store, and points to
 Marten Studio, where that store's tenancy, soft deletes and `IsDocumentTypeVisible` apply - Postgres Studio cannot
 honour another application's visibility rules.
 
@@ -226,7 +230,7 @@ honour another application's visibility rules.
 |---|---|---|---|
 | Data | Overview | The server, the health glance, the largest tables, connections by state, recent studio activity | Source policy |
 | Data | Query | The SQL console | `RunSql` and the write policy |
-| Database | Tables | The database browser (above) | Structure: source policy; rows and definitions: `BrowseDatabase` |
+| Database | Tables | The database browser (above) | Structure: source policy; definitions: `ViewDefinitions` or `BrowseDatabase`; rows: `BrowseDatabase` |
 | Database | Sessions | Sessions, locks and prepared transactions, sessions by application against the connection budget | Counts: source policy; who: `ViewDatabaseActivity` |
 | Database | Relationships | The foreign keys as a diagram and a table, drawn on the server | Source policy; far ends per the browser's gate |
 | Operations | Health | The health advisor (below) | Per finding (below) |

@@ -113,11 +113,11 @@ public class OptionsParityTests
     }
 
     [Fact]
-    public void Both_capabilities_classes_name_the_three_shared_reads_alike()
+    public void Both_capabilities_classes_name_the_four_shared_reads_alike()
     {
         string[] postgres = [.. Public(typeof(PostgresStudioCapabilities)).Select(static x => x.Name)];
 
-        postgres.Should().Equal("BrowseDatabase", "RunSql", "ViewDatabaseActivity");
+        postgres.Should().Equal("BrowseDatabase", "RunSql", "ViewDatabaseActivity", "ViewDefinitions");
         Public(typeof(MartenStudioCapabilities)).Select(static x => x.Name).Should().Contain(postgres);
     }
 

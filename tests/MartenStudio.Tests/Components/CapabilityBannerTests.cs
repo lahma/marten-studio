@@ -15,27 +15,27 @@ namespace MartenStudio.Tests.Components;
 public class CapabilityBannerTests
 {
     [Fact]
-    public void A_fresh_studio_reads_as_none_of_thirteen()
+    public void A_fresh_studio_reads_as_none_of_fourteen()
     {
         using var context = new StudioComponentContext();
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.Find(".ms-chip").TextContent.Trim().Should().Be("0 / 13 capabilities");
+        banner.Find(".ms-chip").TextContent.Trim().Should().Be("0 / 14 capabilities");
     }
 
     [Fact]
-    public void All_reads_as_thirteen_of_thirteen()
+    public void All_reads_as_fourteen_of_fourteen()
     {
         using var context = new StudioComponentContext().WithAllCapabilities();
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.Find(".ms-chip").TextContent.Trim().Should().Be("13 / 13 capabilities");
+        banner.Find(".ms-chip").TextContent.Trim().Should().Be("14 / 14 capabilities");
     }
 
     /// <summary>
-    /// The master switch is its own chip rather than "0 / 13": a read-only studio is a deliberate state,
+    /// The master switch is its own chip rather than "0 / 14": a read-only studio is a deliberate state,
     /// not ten switches that happen to be off.
     /// </summary>
     [Fact]
@@ -74,7 +74,7 @@ public class CapabilityBannerTests
         IElement lead = banner.Find("#ms-capability-popover > p");
         lead.ClassList.Should().Contain("ms-popover-lead", "it comes first, before either list");
         lead.TextContent.Trim().Should().Be("What this studio allows. Your account's policies decide what you may do.");
-        banner.Find(".ms-chip").TextContent.Trim().Should().Be("13 / 13 capabilities", "the count itself is unchanged");
+        banner.Find(".ms-chip").TextContent.Trim().Should().Be("14 / 14 capabilities", "the count itself is unchanged");
     }
 
     [Fact]
@@ -85,7 +85,7 @@ public class CapabilityBannerTests
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.FindAll(".ms-capability").Should().HaveCount(13);
+        banner.FindAll(".ms-capability").Should().HaveCount(14);
         banner.TextOfAll(".ms-capability-option").Should().Equal(
             StudioCapabilityGuard.ReadsBeyondTheStore.Concat(StudioCapabilityGuard.Mutating)
                 .Select(x => "MartenStudioOptions.Capabilities." + x));
@@ -96,7 +96,7 @@ public class CapabilityBannerTests
         edit.ClassList.Should().Contain("ms-capability-on");
         edit.QuerySelector(".ms-capability-state")!.TextContent.Trim().Should().Be("on");
 
-        banner.FindAll(".ms-capability-off").Should().HaveCount(12);
+        banner.FindAll(".ms-capability-off").Should().HaveCount(13);
     }
 
     /// <summary>
@@ -119,13 +119,15 @@ public class CapabilityBannerTests
             .Should().Equal(
                 nameof(StudioCapability.RunSql),
                 nameof(StudioCapability.BrowseDatabase),
+                nameof(StudioCapability.ViewDefinitions),
                 nameof(StudioCapability.ViewDatabaseActivity),
                 nameof(StudioCapability.RunLinqQueries));
 
         groups[1].QuerySelectorAll(".ms-capability-name").Select(static x => x.TextContent.Trim())
             .Should().HaveCount(9).And.Contain(nameof(StudioCapability.CompactStreams))
             .And.NotContain(nameof(StudioCapability.RunSql))
-            .And.NotContain(nameof(StudioCapability.BrowseDatabase));
+            .And.NotContain(nameof(StudioCapability.BrowseDatabase))
+            .And.NotContain(nameof(StudioCapability.ViewDefinitions));
     }
 
     /// <summary>The popover is the platform's, not a menu library's (AGENTS.md hard rule 3).</summary>

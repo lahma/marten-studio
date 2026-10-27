@@ -225,15 +225,16 @@ public class CorePageSmokeTests
     }
 
     [Fact]
-    public async Task The_capability_chip_offers_three_reads_and_no_mutating_operation()
+    public async Task The_capability_chip_offers_four_reads_and_no_mutating_operation()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
 
         var banner = context.Render<CapabilityBanner>();
 
-        banner.Find("button.ms-chip").TextContent.Trim().Should().Be("0 / 3 capabilities");
+        banner.Find("button.ms-chip").TextContent.Trim().Should().Be("0 / 4 capabilities");
         banner.FindAll(".ms-popover-title").Select(static x => x.TextContent).Should().Equal("Reads authorized like writes");
-        banner.FindAll(".ms-capability-name").Select(static x => x.TextContent).Should().Equal("RunSql", "BrowseDatabase", "ViewDatabaseActivity");
+        banner.FindAll(".ms-capability-name").Select(static x => x.TextContent)
+            .Should().Equal("RunSql", "BrowseDatabase", "ViewDefinitions", "ViewDatabaseActivity");
         banner.FindAll(".ms-capability-option").Select(static x => x.TextContent)
             .Should().OnlyContain(static x => x.StartsWith("PostgresStudioOptions.Capabilities.", StringComparison.Ordinal));
         banner.Markup.Should().Contain("PostgresStudioCapabilities.All()").And.NotContain("Marten");

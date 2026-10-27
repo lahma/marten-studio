@@ -216,6 +216,60 @@ public class ActivityTests
     }
 
     /// <summary>
+    /// Issue #22: an entry recorded under <c>ViewDefinitions</c> names the schema and object somebody asked a definition of,
+    /// so it is shown to a visitor who may read definitions - <c>ViewDefinitions</c> on and its policy's yes, or
+    /// <c>BrowseDatabase</c> on and its policy's yes, which implies it - and to nobody else. One recorded under
+    /// <c>BrowseDatabase</c> stays <c>BrowseDatabase</c>'s: <c>ViewDefinitions</c> does not imply the rows.
+    /// </summary>
+    [Theory]
+    [InlineData("ViewDefinitions", true, false, true, true, true)]
+    [InlineData("ViewDefinitions", false, true, true, true, true)]
+    [InlineData("ViewDefinitions", false, false, true, true, false)]
+    [InlineData("ViewDefinitions", true, false, false, true, false)]
+    [InlineData("ViewDefinitions", false, true, true, false, false)]
+    [InlineData("ViewDefinitions", true, true, false, true, true)]
+    [InlineData("BrowseDatabase", true, false, true, true, false)]
+    [InlineData("BrowseDatabase", false, true, true, true, true)]
+    public void A_definition_read_is_listed_for_a_visitor_either_way_in_admits_and_the_rows_only_for_BrowseDatabase(
+        string recordedUnder,
+        bool viewDefinitions,
+        bool browseDatabase,
+        bool viewDefinitionsPolicyAllows,
+        bool browseDatabasePolicyAllows,
+        bool listed)
+    {
+        using var context = new StudioComponentContext();
+        context.Options.StoreAuthorizationPolicy = StudioComponentContext.StorePolicyName;
+        context.Options.WriteAuthorizationPolicy = "MartenStudioWrite";
+        context.Options.Capabilities.ViewDefinitions = viewDefinitions;
+        context.Options.Capabilities.BrowseDatabase = browseDatabase;
+
+        context.AuthenticationState.SignIn("ops");
+        context.ActionLog.Record(
+            "Read database definition", "legacy.job_summary", succeeded: false, "refused", Enum.Parse<StudioCapability>(recordedUnder),
+            new StudioScope("default", "localhost.marten", null));
+
+        context.AuthenticationState.SignIn("viewer");
+        context.AuthorizationService.Allow(resource => resource.Capability switch
+        {
+            nameof(StudioCapability.ViewDefinitions) => viewDefinitionsPolicyAllows,
+            nameof(StudioCapability.BrowseDatabase) => browseDatabasePolicyAllows,
+            _ => true,
+        });
+
+        var cells = context.Render<Activity>().TextOfAll("tbody tr td");
+
+        if (listed)
+        {
+            cells.Should().Contain("legacy.job_summary");
+        }
+        else
+        {
+            cells.Should().NotContain("legacy.job_summary");
+        }
+    }
+
+    /// <summary>
     /// The Overview's recent activity is the same filter over the same ring (<see cref="StudioActionLog.GetVisibleAsync" />):
     /// a visitor the write policy refuses the browser does not see an operator's reads there either.
     /// </summary>

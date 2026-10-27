@@ -645,7 +645,8 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// <see cref="FunctionInfo.DefinitionAvailable" /> is the same gate's answer asked in advance -
     /// <see cref="DatabaseGate.DefinitionAccess" /> over the browser's classification - so the tab never
     /// offers a body the service would refuse: Marten's own in the store's own schemas to everybody, the
-    /// rest only past <c>Capabilities.BrowseDatabase</c>, the write policy and <c>BrowsableSchemas</c>, and
+    /// rest only past <c>Capabilities.ViewDefinitions</c> (for a schema <c>BrowsableSchemas</c> names exactly) or
+    /// <c>Capabilities.BrowseDatabase</c>, the write policy and <c>BrowsableSchemas</c>, and
     /// an aggregate's never. A gate that cannot be read withholds every body, with the reason.
     /// </para>
     /// <para>
@@ -1483,7 +1484,9 @@ internal sealed class SchemaDataService : ISchemaDataService
     {
         try
         {
-            DatabaseGateRead read = await databaseAccess.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            // The browser's own gate, with ViewDefinitions' answer in it: the tab offers a body exactly when
+            // IDatabaseObjectService.GetDefinitionAsync, which it asks on a click, would give it.
+            DatabaseGateRead read = await databaseAccess.ObjectGateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
 
             return read.Succeeded
                 ? (read.Gate, null)

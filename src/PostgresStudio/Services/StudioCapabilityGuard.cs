@@ -8,8 +8,9 @@ namespace PostgresStudio.Services;
 /// map the members it offers onto a public flag of the same name (<see cref="IStudioSettings.IsConfigured" />).
 /// </summary>
 /// <remarks>
-/// New members go at the end: the numeric values are not persisted anywhere, but the declaration order is
-/// the order the capability chip lists them in.
+/// New members go at the end: the numeric values are not persisted anywhere (the audit ring and every log event
+/// carry the member's name), and the chip lists them in <see cref="StudioCapabilityGuard.ReadsBeyondTheStore" />'s
+/// and <see cref="StudioCapabilityGuard.Mutating" />'s order, not this one's.
 /// </remarks>
 internal enum StudioCapability
 {
@@ -50,7 +51,14 @@ internal enum StudioCapability
     CompactStreams,
 
     /// <summary>Run LINQ queries from the Query page (D28).</summary>
-    RunLinqQueries
+    RunLinqQueries,
+
+    /// <summary>
+    /// Read the definitions - a view's query, a routine's body, a trigger's definition, a sequence's value, a type's
+    /// description - of the objects in the schemas <c>BrowsableSchemas</c> names exactly, without the rows
+    /// (<see cref="BrowseDatabase" /> keeps those, and implies this).
+    /// </summary>
+    ViewDefinitions
 }
 
 /// <summary>Why a capability was refused.</summary>
@@ -155,9 +163,9 @@ internal sealed class StudioCapabilityGuard
     /// narrower switch than the one they set.
     /// </para>
     /// <para>
-    /// Two of them read beyond the store's own documents and events (the console, the database browser),
-    /// one names other sessions and their statements (<c>ViewDatabaseActivity</c>), and one evaluates a typed
-    /// expression in this process (<c>RunLinqQueries</c>). What they share is the rule
+    /// Three of them read beyond the store's own documents and events (the console, the database browser, and the
+    /// browser's definitions alone), one names other sessions and their statements (<c>ViewDatabaseActivity</c>), and
+    /// one evaluates a typed expression in this process (<c>RunLinqQueries</c>). What they share is the rule
     /// <c>StudioActionLog.GetVisibleAsync</c> applies to an audit entry recorded under one of them: it names
     /// what was read, so it is shown only to a visitor who may make the same read.
     /// </para>
@@ -166,9 +174,21 @@ internal sealed class StudioCapabilityGuard
     [
         StudioCapability.RunSql,
         StudioCapability.BrowseDatabase,
+        StudioCapability.ViewDefinitions,
         StudioCapability.ViewDatabaseActivity,
         StudioCapability.RunLinqQueries,
     ];
+
+    /// <summary>
+    /// The capabilities that imply <paramref name="capability" />: a visitor one of them admits may make the read
+    /// <paramref name="capability" /> names, so an audit entry recorded under it is theirs to see.
+    /// </summary>
+    /// <remarks>
+    /// <c>BrowseDatabase</c> implies <c>ViewDefinitions</c>: the rows and every definition of every schema
+    /// <c>BrowsableSchemas</c> admits are a superset of the definitions of the schemas it names exactly.
+    /// </remarks>
+    public static IReadOnlyList<StudioCapability> ImpliedBy(StudioCapability capability) =>
+        capability == StudioCapability.ViewDefinitions ? [StudioCapability.BrowseDatabase] : [];
 
     /// <summary>
     /// Every capability that changes something - <see cref="All" /> without

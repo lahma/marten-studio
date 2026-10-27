@@ -29,7 +29,7 @@ namespace MartenStudio.Services.Schema;
 /// </param>
 /// <param name="DefinitionAvailable">
 /// Whether this visitor may read its body: Marten's own in the store's own schemas always; anything else
-/// only past <c>Capabilities.BrowseDatabase</c>, the write policy and <c>BrowsableSchemas</c>; an
+/// only past <c>Capabilities.ViewDefinitions</c> or <c>Capabilities.BrowseDatabase</c>, the write policy and <c>BrowsableSchemas</c>; an
 /// aggregate never, because Postgres prints no body for one.
 /// </param>
 /// <param name="DefinitionRefusal">Why not, naming what would change it - or <see langword="null" />.</param>

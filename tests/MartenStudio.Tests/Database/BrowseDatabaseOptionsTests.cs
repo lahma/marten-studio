@@ -105,16 +105,30 @@ public class BrowseDatabaseOptionsTests
     public void The_reads_beyond_the_store_and_the_mutating_operations_partition_every_capability()
     {
         // 0.4: ViewDatabaseActivity and RunLinqQueries are reads authorized like writes too; CompactStreams is a write.
+        // 0.8: so is ViewDefinitions, the browser's second way into a definition - listed beside the one that implies it.
         StudioCapabilityGuard.ReadsBeyondTheStore.Should().Equal(
             StudioCapability.RunSql,
             StudioCapability.BrowseDatabase,
+            StudioCapability.ViewDefinitions,
             StudioCapability.ViewDatabaseActivity,
             StudioCapability.RunLinqQueries);
         StudioCapabilityGuard.Mutating.Should().NotContain(StudioCapabilityGuard.ReadsBeyondTheStore);
         StudioCapabilityGuard.Mutating.Should().Contain(StudioCapability.CompactStreams);
         StudioCapabilityGuard.Mutating.Concat(StudioCapabilityGuard.ReadsBeyondTheStore)
             .Should().BeEquivalentTo(StudioCapabilityGuard.All);
-        StudioCapabilityGuard.All.Should().HaveCount(13);
+        StudioCapabilityGuard.All.Should().HaveCount(14);
+        StudioCapabilityGuard.All[^1].Should().Be(StudioCapability.ViewDefinitions, "new members go at the end of the enum");
+    }
+
+    [Fact]
+    public void BrowseDatabase_implies_ViewDefinitions_and_nothing_implies_the_rows()
+    {
+        StudioCapabilityGuard.ImpliedBy(StudioCapability.ViewDefinitions).Should().Equal(StudioCapability.BrowseDatabase);
+
+        foreach (StudioCapability capability in StudioCapabilityGuard.All.Where(static x => x != StudioCapability.ViewDefinitions))
+        {
+            StudioCapabilityGuard.ImpliedBy(capability).Should().BeEmpty(capability + " is implied by nothing");
+        }
     }
 
     [Fact]

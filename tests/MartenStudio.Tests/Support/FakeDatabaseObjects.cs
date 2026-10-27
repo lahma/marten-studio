@@ -1,4 +1,5 @@
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Support;
 
@@ -73,7 +74,23 @@ internal static class FakeDatabaseObjects
                 DatabaseRefusal.StorePolicy => DatabaseGate.StorePolicyDenial,
                 DatabaseRefusal.SchemaNotBrowsable => DatabaseGate.EmptyListDenial,
                 _ => "The database browser is unavailable.",
-            });
+            })
+        {
+            // The definitions half of the gate, as the real gate words it for a host that has not enabled ViewDefinitions:
+            // the same refusal as the rows', in the sentence that names both ways in.
+            DefinitionSchemas = open ? [Legacy, Quartz] : [],
+            DefinitionRefusal = refusal,
+            DefinitionDenial = refusal switch
+            {
+                DatabaseRefusal.None => null,
+                DatabaseRefusal.ReadOnly => DatabaseGate.DefinitionReadOnlyDenial,
+                DatabaseRefusal.CapabilityOff => DatabaseGate.DefinitionCapabilityDenial,
+                DatabaseRefusal.WritePolicy => StudioText.Marten.DefinitionWritePolicyDenialFor("BrowseDatabase"),
+                DatabaseRefusal.StorePolicy => DatabaseGate.StorePolicyDenial,
+                DatabaseRefusal.SchemaNotBrowsable => DatabaseGate.EmptyListDenial,
+                _ => "The database browser is unavailable.",
+            },
+        };
     }
 
     /// <summary>The overview: the store's two schemas, and the two browsable ones when the gate is open.</summary>

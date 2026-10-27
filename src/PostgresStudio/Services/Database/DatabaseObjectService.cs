@@ -16,7 +16,7 @@ namespace PostgresStudio.Services.Database;
 /// policy for the visitor's own scope, audited when it refuses, then the
 /// registration and its declarations, which is how the service knows whether the schema asked about is one
 /// of the store's own - and nothing about the database or the tenant is asked yet. A request that needs
-/// <c>BrowseDatabase</c> then goes through <see cref="DatabaseAccess.RequireBrowseAsync" /> - the capability,
+/// a capability then goes through <see cref="DatabaseAccess.RequireDefinitionAsync" /> - the capability,
 /// then the two policies for the database as a whole, then the scope resolved <em>with no tenant</em> - and
 /// the schema against the studio's <c>BrowsableSchemas</c> option, settled from the options alone
 /// wherever it can be, all before the database is asked anything about that schema. Every one of those
@@ -25,10 +25,19 @@ namespace PostgresStudio.Services.Database;
 /// discovery, which can query the database.
 /// </para>
 /// <para>
+/// <b>Two capabilities open this half, and the gate says which schemas each does.</b> <c>BrowseDatabase</c> admits every
+/// schema <c>BrowsableSchemas</c> admits; <c>ViewDefinitions</c>, which <c>BrowseDatabase</c> implies, admits the ones it
+/// names exactly, and no row of any. <see cref="DatabaseAccess.RequireDefinitionAsync" /> lets a read go as far as the
+/// catalog when either passes; <see cref="DatabaseGate" />, read through <see cref="DatabaseAccess.ObjectGateAsync" />,
+/// draws the line by schema, owner and kind. Rows are another gate - <see cref="DatabaseAccess.RequireRowAccessAsync" />,
+/// <c>BrowseDatabase</c>'s alone.
+/// </para>
+/// <para>
 /// <b>Structure of the store's own schemas needs nothing</b>: it is what the Schema screen has always
 /// shown. Neither does a definition of Marten's own objects there, nor the value of Marten's own
 /// sequences. Everything else in <see cref="GetDefinitionAsync" /> and <see cref="GetSequenceValueAsync" /> is
-/// a <c>BrowseDatabase</c> read.
+/// a <c>BrowseDatabase</c> read, or, for the host's own objects in a schema <c>BrowsableSchemas</c> names exactly, a
+/// <c>ViewDefinitions</c> one.
 /// </para>
 /// <para>
 /// <b>Nothing is thrown at a page</b> but cancellation: refusals, unreadable configurations and failed
@@ -78,7 +87,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.ObjectGateAsync(scope, resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseBrowserOverview.Unavailable(gateRead.Reason ?? "The database browser is unavailable.", gateRead.Refusal);
@@ -137,7 +146,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.ObjectGateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseObjectList.Refused(clamped, gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
@@ -148,7 +157,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             if (clamped.Schema is { } schema && !gate.CanSeeStructure(schema))
             {
                 string reason = "There is no schema '" + schema + "' among the schemas this studio shows you.";
-                audit.Record(DatabaseAccess.ListAction, schema, succeeded: false, reason, StudioCapability.BrowseDatabase, scope with { TenantId = null });
+                audit.Record(DatabaseAccess.ListAction, schema, succeeded: false, reason, access.ReadCapability, scope with { TenantId = null });
 
                 return DatabaseObjectList.Refused(clamped, DatabaseRefusal.NotFound, reason, gate.State);
             }
@@ -203,7 +212,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.ObjectGateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseObjectDetail.Unavailable(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
@@ -214,7 +223,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             if (!gate.CanSeeStructure(schema))
             {
                 string reason = DatabaseObjectAssembler.NotFound(schema, name);
-                audit.Record(DatabaseAccess.ObjectAction, target, succeeded: false, reason, StudioCapability.BrowseDatabase, scope with { TenantId = null });
+                audit.Record(DatabaseAccess.ObjectAction, target, succeeded: false, reason, access.ReadCapability, scope with { TenantId = null });
 
                 return DatabaseObjectDetail.Unavailable(DatabaseRefusal.NotFound, reason, gate.State);
             }
@@ -293,7 +302,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.ObjectGateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return DatabaseObjectDefinition.Unavailable(reference, gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.");
@@ -304,7 +313,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             if (!gate.CanSeeStructure(schema))
             {
                 string reason = DatabaseObjectAssembler.NotFound(schema, name);
-                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, reason, StudioCapability.BrowseDatabase, tenantless);
+                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, reason, access.ReadCapability, tenantless);
 
                 return DatabaseObjectDefinition.Unavailable(reference, DatabaseRefusal.NotFound, reason);
             }
@@ -313,8 +322,9 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             if (!allowed.Allowed)
             {
                 // The store's own schema, somebody else's object, and a BrowsableSchemas that does not admit
-                // the schema: the capability and the policy said yes, the list did not.
-                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, allowed.Reason, StudioCapability.BrowseDatabase, tenantless);
+                // the schema - or, for a visitor ViewDefinitions alone admits, one only "*" does, or an object Marten
+                // owns: the capability and the policy said yes, the list did not.
+                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, allowed.Reason, access.ReadCapability, tenantless);
 
                 return DatabaseObjectDefinition.Unavailable(reference, allowed.Refusal, allowed.Reason ?? "Refused.");
             }
@@ -324,7 +334,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
             if (definition.Refusal is DatabaseRefusal.HiddenDependency or DatabaseRefusal.WithheldDependency)
             {
-                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, definition.Reason, StudioCapability.BrowseDatabase, tenantless);
+                audit.Record(DatabaseAccess.DefinitionAction, target, succeeded: false, definition.Reason, access.ReadCapability, tenantless);
             }
 
             return definition;
@@ -391,7 +401,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             if (audited)
             {
-                audit.Record(SequenceValueAction, target, succeeded: false, reason, StudioCapability.BrowseDatabase, tenantless);
+                audit.Record(SequenceValueAction, target, succeeded: false, reason, access.ReadCapability, tenantless);
             }
 
             return DatabaseSequenceValue.Unavailable(reference, refusal, reason);
@@ -401,7 +411,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         try
         {
-            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
+            DatabaseGateRead gateRead = await access.ObjectGateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return Refuse(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.", audited: false);
@@ -768,7 +778,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         string target,
         CancellationToken cancellationToken)
     {
-        DatabaseBrowseGrant grant = await access.RequireBrowseAsync(scope, action, target, cancellationToken)
+        DatabaseBrowseGrant grant = await access.RequireDefinitionAsync(scope, action, target, cancellationToken)
             .ConfigureAwait(false);
 
         if (!grant.Allowed)
@@ -783,7 +793,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
             {
                 string reason = DatabaseGate.SchemaDenial(schema, entries, settings.Text);
-                audit.Record(action, target, succeeded: false, reason, StudioCapability.BrowseDatabase, scope with { TenantId = null });
+                audit.Record(action, target, succeeded: false, reason, access.ReadCapability, scope with { TenantId = null });
 
                 return Route.Refused(DatabaseRefusal.SchemaNotBrowsable, reason);
             }

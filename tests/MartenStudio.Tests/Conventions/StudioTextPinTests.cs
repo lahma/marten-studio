@@ -1,6 +1,7 @@
 using MartenStudio.Services;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Export;
@@ -72,6 +73,38 @@ public class StudioTextPinTests
             "Schema 'secret' is not one MartenStudioOptions.BrowsableSchemas admits (it must be listed by exact name, or \"*\" must "
             + "be listed and the studio's role must have USAGE on it).");
         DatabaseGate.SchemaDenial("secret", [], Marten).Should().Be(Marten.BrowseEmptyListDenial);
+    }
+
+    /// <summary>
+    /// 0.8's additions, issue #22: the sentences a refused definition is told, which name both ways in - <c>ViewDefinitions</c>
+    /// and <c>BrowseDatabase</c> - where 0.4's rows' sentences above name the second alone. New, so they are pinned too: a
+    /// host reads exactly these.
+    /// </summary>
+    [Fact]
+    public void The_definitions_sentences_name_both_ways_in()
+    {
+        Marten.DefinitionReadOnlyDenial.Should().Be(
+            "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDefinitions and "
+            + "MartenStudioOptions.Capabilities.BrowseDatabase off with every other capability.");
+        Marten.DefinitionCapabilityDenial.Should().Be(
+            "The definitions of objects Marten does not own need MartenStudioOptions.Capabilities.ViewDefinitions, for the schemas "
+            + "MartenStudioOptions.BrowsableSchemas names exactly, or MartenStudioOptions.Capabilities.BrowseDatabase.");
+        Marten.DefinitionWritePolicyDenialFor("ViewDefinitions and BrowseDatabase").Should().Be(
+            "Your account may not read definitions here. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, or "
+            + "StoreAuthorizationPolicy when no write policy is set) refused ViewDefinitions and BrowseDatabase for this store and "
+            + "database as a whole, with no tenant selected.");
+
+        DatabaseGate.DefinitionSchemaDenial("legacy", ["quartz", "*"], Marten).Should().Be(
+            "Schema 'legacy' is admitted only through \"*\" in MartenStudioOptions.BrowsableSchemas, so its definitions need "
+            + "MartenStudioOptions.Capabilities.BrowseDatabase: MartenStudioOptions.Capabilities.ViewDefinitions covers only the "
+            + "schemas that list names exactly.");
+        DatabaseGate.DefinitionSchemaDenial("legacy", ["quartz"], Marten).Should().Be(DatabaseGate.SchemaDenial("legacy", ["quartz"], Marten),
+            "a schema no entry admits is the entry list's refusal, whichever way in");
+        DatabaseGate.MartenDefinitionDenial(Marten).Should().Be(
+            "The definitions of Marten's own objects here need MartenStudioOptions.Capabilities.BrowseDatabase: "
+            + "MartenStudioOptions.Capabilities.ViewDefinitions covers the host's own objects only.");
+
+        WritePolicyRefusal.For(StudioCapability.ViewDefinitions).Should().Be("Your account may not read this database's object definitions here.");
     }
 
     [Fact]

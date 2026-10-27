@@ -258,6 +258,7 @@ namespace PostgresStudio
         public bool BrowseDatabase { get; set; }
         public bool RunSql { get; set; }
         public bool ViewDatabaseActivity { get; set; }
+        public bool ViewDefinitions { get; set; }
         public static PostgresStudio.PostgresStudioCapabilities All() { }
     }
     public static class PostgresStudioEndpointRouteBuilderExtensions

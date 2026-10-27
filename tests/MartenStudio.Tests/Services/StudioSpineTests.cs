@@ -58,7 +58,7 @@ public class StudioSpineTests
     }
 
     [Fact]
-    public void The_settings_map_every_capability_and_offer_all_thirteen()
+    public void The_settings_map_every_capability_and_offer_all_fourteen()
     {
         MartenStudioOptions options = new() { Capabilities = new MartenStudioCapabilities { BrowseDatabase = true } };
         MartenStudioSettings settings = MartenSpine.Settings(options);

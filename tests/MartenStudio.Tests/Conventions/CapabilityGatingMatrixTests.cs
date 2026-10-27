@@ -141,6 +141,14 @@ public class CapabilityGatingMatrixTests
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.BrowseDatabase),
         new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetSequenceValueAsync), StudioCapability.BrowseDatabase),
 
+        // 0.8, issue #22: a definition has a second way in. ViewDefinitions admits it for the schemas BrowsableSchemas names
+        // exactly, BrowseDatabase implies it, and neither opens the other's rows. The same two members, so the same three
+        // refusals - with both capabilities off, in ReadOnly, and from the write policy - are asserted for the second way too:
+        // the audited capability is BrowseDatabase's whenever that is on (DatabaseAccess.ReadCapability), so nothing here moves
+        // for a host that has not heard of ViewDefinitions, and the live suites assert ViewDefinitions' own entries.
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetDefinitionAsync), StudioCapability.ViewDefinitions),
+        new(typeof(IDatabaseObjectService), nameof(IDatabaseObjectService.GetSequenceValueAsync), StudioCapability.ViewDefinitions),
+
         // DB-3: every row read is behind DatabaseAccess.RequireRowAccessAsync, refused as a value.
         new(typeof(ITableRowService), nameof(ITableRowService.ListRowsAsync), StudioCapability.BrowseDatabase),
         new(typeof(ITableRowService), nameof(ITableRowService.GetRowAsync), StudioCapability.BrowseDatabase),

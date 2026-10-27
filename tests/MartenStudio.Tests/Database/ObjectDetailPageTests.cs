@@ -289,7 +289,8 @@ public class ObjectDetailPageTests
         (DatabaseAccessState access, DatabaseRowAccess rows, string expected) = why == nameof(DatabaseRefusal.CapabilityOff)
             ? (FakeDatabaseObjects.Access(DatabaseRefusal.CapabilityOff),
                 DatabaseRowAccess.Refused(DatabaseRefusal.CapabilityOff, DatabaseGate.CapabilityDenial),
-                DatabaseGate.CapabilityDenial)
+                // The query is a definition, so what the tab says is the definitions' sentence, which names both ways in.
+                DatabaseGate.DefinitionCapabilityDenial)
             : (FakeDatabaseObjects.Access(),
                 DatabaseRowAccess.Refused(DatabaseRefusal.HiddenDependency, DatabaseGate.HiddenDependencyDenial),
                 DatabaseGate.HiddenDependencyDenial);
@@ -332,7 +333,7 @@ public class ObjectDetailPageTests
 
         var page = DatabasePageData.RenderObject(context, FakeDatabaseObjects.StoreSchema, "order_totals", "definition");
 
-        page.Find(".ms-db-definition-tab .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.CapabilityDenial);
+        page.Find(".ms-db-definition-tab .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.DefinitionCapabilityDenial);
         real.DefinitionsAsked.Should().Be(0);
         real.Logs.Entries.Should().NotContain(static x => x.Level >= LogLevel.Warning);
         real.Ring.GetLatest().Should().BeEmpty();
@@ -365,8 +366,9 @@ public class ObjectDetailPageTests
 
         await page.Find(".ms-db-triggers .ms-db-expander").ClickAsync(new MouseEventArgs());
 
-        page.Find(".ms-db-triggers .ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.WritePolicyDenial,
-            "the grid is handed the detail's own gate, which names the policy that said no");
+        page.Find(".ms-db-triggers .ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(
+            StudioText.Marten.DefinitionWritePolicyDenialFor("BrowseDatabase"),
+            "the grid is handed the detail's own gate, which names the policy that said no, and the one capability it asked about");
         context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
     }
 

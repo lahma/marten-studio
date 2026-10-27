@@ -72,7 +72,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
     public bool ReadOnly => Value.ReadOnly;
 
     /// <inheritdoc />
-    /// <remarks>Every member: MartenStudio offers all thirteen.</remarks>
+    /// <remarks>Every member: MartenStudio offers all fourteen.</remarks>
     public IReadOnlyList<StudioCapability> Capabilities => StudioCapabilityGuard.All;
 
     /// <inheritdoc />
@@ -144,6 +144,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
             StudioCapability.ViewDatabaseActivity => capabilities.ViewDatabaseActivity,
             StudioCapability.CompactStreams => capabilities.CompactStreams,
             StudioCapability.RunLinqQueries => capabilities.RunLinqQueries,
+            StudioCapability.ViewDefinitions => capabilities.ViewDefinitions,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(capability),
                 capability,

@@ -12,7 +12,7 @@ namespace PostgresStudio.Components.Pages.Database;
 /// <b>Asking anyway was the bug.</b> Routines, triggers and views carry <c>DefinitionAvailable</c>, the
 /// gate's answer given in advance. A grid that ignored it and fetched on every click turned an ordinary
 /// click on a function in the store's own schema, with the gate shut, into a refused
-/// <c>BrowseDatabase</c> read: an audit entry and a 9202 or 9203 security Warning, for a control the page
+/// <c>BrowseDatabase</c> (or <c>ViewDefinitions</c>) read: an audit entry and a 9202 or 9203 security Warning, for a control the page
 /// itself offered. Those events are for a client driving a control that was never drawn (plan §6a), so the
 /// page must not produce them - it draws the sentence here instead, and the Schema screen's Functions tab
 /// does the same.
@@ -75,16 +75,25 @@ internal static class DatabaseDefinitionWithheld
             return TriggerFunctionWithheld;
         }
 
-        // The gate itself, when it is shut: the sentence names the option or the policy.
-        if (access is { IsOpen: false, Denial: { Length: > 0 } denial })
+        // The gate itself, when neither way in to a definition is open: the sentence names the options and the policy.
+        if (access is { DefinitionsOpen: false, DefinitionDenial: { Length: > 0 } denial })
         {
             return denial;
         }
 
-        // Open, but not for this schema - the store's own, say, with BrowsableSchemas not listing it.
-        if (access is not null && !access.BrowsableSchemas.Contains(item.Schema, StringComparer.Ordinal))
+        // Open, but not for this schema - the store's own, say, with BrowsableSchemas not listing it, or one only "*" admits
+        // to a visitor ViewDefinitions alone lets in.
+        if (access is not null && !access.DefinitionSchemas.Contains(item.Schema, StringComparer.Ordinal))
         {
-            return DatabaseGate.SchemaDenial(item.Schema, [.. settings.BrowsableSchemas], settings.Text);
+            return access.IsOpen
+                ? DatabaseGate.SchemaDenial(item.Schema, [.. settings.BrowsableSchemas], settings.Text)
+                : DatabaseGate.DefinitionSchemaDenial(item.Schema, [.. settings.BrowsableSchemas], settings.Text);
+        }
+
+        // Open for the schema, and still no: an object Marten owns, which ViewDefinitions alone does not open.
+        if (access is { IsOpen: false } && item.Ownership.IsMarten)
+        {
+            return DatabaseGate.MartenDefinitionDenial(settings.Text);
         }
 
         // A view whose query would name what it reads: a hidden type's table, a withheld schema, a function.

@@ -13,11 +13,12 @@ namespace PostgresStudio.Services.Postgres;
 /// </remarks>
 internal sealed class PostgresStudioSettings : IStudioSettings
 {
-    /// <summary>The three capabilities PostgresStudio offers, in the chip's order.</summary>
+    /// <summary>The four capabilities PostgresStudio offers, in the chip's order.</summary>
     internal static IReadOnlyList<StudioCapability> Offered { get; } =
     [
         StudioCapability.RunSql,
         StudioCapability.BrowseDatabase,
+        StudioCapability.ViewDefinitions,
         StudioCapability.ViewDatabaseActivity,
     ];
 
@@ -75,7 +76,7 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public bool ReadOnly => Value.ReadOnly;
 
     /// <inheritdoc />
-    /// <remarks>The three reads authorized like writes; PostgresStudio has no mutating capability.</remarks>
+    /// <remarks>The four reads authorized like writes; PostgresStudio has no mutating capability.</remarks>
     public IReadOnlyList<StudioCapability> Capabilities => Offered;
 
     /// <inheritdoc />
@@ -140,6 +141,7 @@ internal sealed class PostgresStudioSettings : IStudioSettings
         {
             StudioCapability.RunSql => capabilities.RunSql,
             StudioCapability.BrowseDatabase => capabilities.BrowseDatabase,
+            StudioCapability.ViewDefinitions => capabilities.ViewDefinitions,
             StudioCapability.ViewDatabaseActivity => capabilities.ViewDatabaseActivity,
             _ => throw new ArgumentOutOfRangeException(
                 nameof(capability),

@@ -442,7 +442,9 @@ public class DatabaseObjectsPageTests
 
         await expander.ClickAsync(new MouseEventArgs());
 
-        page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(DatabaseGate.CapabilityDenial);
+        page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim().Should().Be(
+            DatabaseGate.DefinitionCapabilityDenial,
+            "a definition is refused in the sentence that names both ways in, not the rows' that names BrowseDatabase alone");
         page.FindAll(".ms-db-definition-row .ms-sql").Should().BeEmpty();
         Expander(page, "host_fn").GetAttribute("aria-expanded").Should().Be("true");
 
@@ -715,6 +717,103 @@ public class DatabaseObjectsPageTests
 
         page.Find(".ms-db-rail-withheld").TextContent.Should().Contain("3 other schemas").And.Contain("Capabilities.BrowseDatabase");
     }
+
+    /// <summary>
+    /// Issue #22: with neither <c>ViewDefinitions</c> nor <c>BrowseDatabase</c> on, the notice says what each would add,
+    /// and the sentence a definition is refused with names both.
+    /// </summary>
+    [Fact]
+    public void A_shut_gate_names_both_ways_into_a_definition()
+    {
+        using var context = DatabasePageData.Context();
+        context.DatabaseObjects.Overview = FakeDatabaseObjects.Overview(DatabaseRefusal.CapabilityOff);
+        context.DatabaseObjects.List = FakeDatabaseObjects.List(new DatabaseObjectQuery(DatabaseObjectCategory.Tables), DatabaseRefusal.CapabilityOff);
+
+        var page = DatabasePageData.RenderBrowser(context);
+
+        string notice = page.Find(".ms-db-access").TextContent;
+        notice.Should().Contain(DatabaseGate.CapabilityDenial, "the rows' sentence, which 0.4 pinned, is still the first line");
+        notice.Should().Contain(DatabaseGate.DefinitionCapabilityDenial, "and the definitions' own, which names both ways in, follows");
+        notice.Should().Contain("Capabilities.ViewDefinitions").And.Contain("Capabilities.BrowseDatabase");
+
+        page.Find(".ms-db-rail-withheld").TextContent.Should().Contain("Capabilities.ViewDefinitions")
+            .And.Contain("Capabilities.BrowseDatabase", "the schemas BrowsableSchemas names are the second way in's");
+    }
+
+    /// <summary>
+    /// With <c>ViewDefinitions</c> open and <c>BrowseDatabase</c> not, the notice says what is shown and what the rows need,
+    /// and not the rows' 0.4 sentence, which says definitions need <c>BrowseDatabase</c> too.
+    /// </summary>
+    [Fact]
+    public async Task With_only_ViewDefinitions_open_the_notice_says_definitions_are_shown_and_rows_need_BrowseDatabase()
+    {
+        using var context = DatabasePageData.Context();
+        DatabaseAccessState access = DefinitionsOnly(DatabaseRefusal.CapabilityOff);
+
+        context.DatabaseObjects.Overview = FakeDatabaseObjects.Overview(DatabaseRefusal.CapabilityOff) with { Access = access };
+        context.DatabaseObjects.List = FakeDatabaseObjects.List(new DatabaseObjectQuery(DatabaseObjectCategory.Functions), DatabaseRefusal.CapabilityOff) with
+        {
+            Access = access,
+        };
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=functions");
+
+        IElement notice = page.Find(".ms-db-access");
+        notice.GetAttribute("data-refusal").Should().Be(nameof(DatabaseRefusal.CapabilityOff), "the rows' gate is the one that is shut");
+        notice.QuerySelector(".ms-db-access-title")!.TextContent.Trim().Should().Be("Definitions are shown; browsing rows is not enabled.");
+        notice.TextContent.Should().Contain("Rows, and everything in a schema")
+            .And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase")
+            .And.Contain("Capabilities.ViewDefinitions")
+            .And.NotContain(DatabaseGate.CapabilityDenial, "that sentence says a definition needs BrowseDatabase, which is no longer true");
+
+        // A routine the list offers a body of is asked for, as the gate said it may be.
+        context.DatabaseObjects.List = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Functions,
+            [WithheldRoutine(FakeDatabaseObjects.Legacy, "recalculate") with { DefinitionAvailable = true }])
+            with { Access = access };
+
+        page = DatabasePageData.RenderBrowser(context, "kind=functions&schema=legacy");
+
+        IElement expander = Expander(page, "recalculate");
+        expander.GetAttribute("data-definition").Should().NotBe("withheld");
+        await expander.ClickAsync(new MouseEventArgs());
+
+        context.DatabaseObjects.DefinitionsAsked.Should().ContainSingle();
+    }
+
+    /// <summary>A definition the gate withholds from a visitor ViewDefinitions admits says what would admit it.</summary>
+    [Fact]
+    public async Task A_definition_in_a_schema_only_the_star_admits_says_it_needs_BrowseDatabase()
+    {
+        using var context = DatabasePageData.Context();
+        context.Options.BrowsableSchemas.Add(FakeDatabaseObjects.Quartz);
+        context.Options.BrowsableSchemas.Add("*");
+
+        DatabaseAccessState access = DefinitionsOnly(DatabaseRefusal.CapabilityOff) with { DefinitionSchemas = [FakeDatabaseObjects.Quartz] };
+
+        context.DatabaseObjects.List = DatabasePageData.ListOf(
+            DatabaseObjectCategory.Functions,
+            [WithheldRoutine(FakeDatabaseObjects.Legacy, "recalculate")])
+            with { Access = access };
+
+        var page = DatabasePageData.RenderBrowser(context, "kind=functions&schema=legacy");
+
+        await Expander(page, "recalculate").ClickAsync(new MouseEventArgs());
+
+        page.Find(".ms-db-definition-row .ms-db-refusal").TextContent.Trim()
+            .Should().Be(DatabaseGate.DefinitionSchemaDenial(FakeDatabaseObjects.Legacy, [FakeDatabaseObjects.Quartz, "*"], StudioText.Marten))
+            .And.Contain("only through \"*\"");
+        context.DatabaseObjects.DefinitionsAsked.Should().BeEmpty();
+    }
+
+    /// <summary>The gate as a visitor ViewDefinitions admits and BrowseDatabase does not: <paramref name="rows" /> is why the rows are shut.</summary>
+    private static DatabaseAccessState DefinitionsOnly(DatabaseRefusal rows) =>
+        FakeDatabaseObjects.Access(rows) with
+        {
+            DefinitionRefusal = DatabaseRefusal.None,
+            DefinitionDenial = null,
+            DefinitionSchemas = [FakeDatabaseObjects.Legacy, FakeDatabaseObjects.Quartz],
+        };
 
     [Fact]
     public void An_open_gate_draws_no_notice()
