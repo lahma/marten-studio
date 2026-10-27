@@ -196,6 +196,107 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
     }
 
     /// <summary>
+    /// X4's two reads on the oldest and newest supported releases, behind somebody's <c>ACCESS EXCLUSIVE</c> on every table
+    /// they read and on a partition of each partitioned one, under a 300 ms <c>lock_timeout</c>: T20's bounds parsed by the
+    /// studio from each release's own text - a <c>bigint</c> range written bare and quoted, where its rows stop, and a
+    /// <c>timestamptz</c> range read by a session in Helsinki, whose offsets differ either side of October's clock change - and
+    /// T18's tenant shares, from a table's partitions and from <c>pg_stats</c>.
+    /// </summary>
+    [PostgresTheory]
+    [InlineData(14)]
+    [InlineData(18)]
+    public async Task X4s_partition_and_skew_reads_parse_each_releases_text_and_return_behind_a_held_lock(int major)
+    {
+        MatrixServer server = await matrix.ServerAsync(major);
+        server.SkipIfUnavailable();
+
+        string database = await server.CreateDatabaseAsync("x4_reads", Token);
+        await server.ExecuteAsync(
+            "alter database x4_reads set timezone = 'Europe/Helsinki'; "
+            + "set role app; "
+            + "create table public.ledger (id bigint not null) partition by range (id); "
+            + "create table public.ledger_p0 partition of public.ledger for values from (-1000) to (0); "
+            + "create table public.ledger_p1 partition of public.ledger for values from (0) to (1000); "
+            + "create table public.ledger_p2 partition of public.ledger for values from (1000) to (2000); "
+            + "insert into public.ledger select g from pg_catalog.generate_series(-500, 500) g; "
+            + "create table public.events (at timestamptz not null) partition by range (at); "
+            + "create table public.events_2026_10 partition of public.events for values from ('2026-10-01 00:00+03') to ('2026-11-01 00:00+02'); "
+            + "create table public.events_default partition of public.events default; "
+            + "create table public.tenants (tenant_id text not null, id int not null) partition by list (tenant_id); "
+            + "create table public.tenants_acme partition of public.tenants for values in ('acme'); "
+            + "create table public.tenants_globex partition of public.tenants for values in ('globex'); "
+            + "insert into public.tenants select case when g % 10 = 0 then 'globex' else 'acme' end, g from pg_catalog.generate_series(1, 1000) g; "
+            + "create table public.shared (tenant_id text not null, id int not null); "
+            + "insert into public.shared select case when g % 4 = 0 then 'globex' else 'acme' end, g from pg_catalog.generate_series(1, 2000) g; "
+            + "analyze public.ledger; analyze public.tenants; analyze public.shared;",
+            database,
+            Token);
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
+        HealthTableTarget[] tables = [new("public", "ledger"), new("public", "events"), new("public", "tenants"), new("public", "shared")];
+
+        await using NpgsqlConnection holder = await server.OpenAsync(MatrixRole.Superuser, database, Token);
+        await using NpgsqlTransaction holding = await holder.BeginTransactionAsync(Token);
+        await using (NpgsqlCommand lockThem = new(
+            "lock table public.ledger, public.ledger_p1, public.events, public.events_2026_10, public.tenants, public.tenants_acme, public.shared in access exclusive mode",
+            holder,
+            holding))
+        {
+            await lockThem.ExecuteNonQueryAsync(Token);
+        }
+
+        List<HealthPartitionedTableRow> partitions = [];
+        List<HealthColumnSkewRow> skews = [];
+
+        (await host.RunAsync(Read(PartitionQueries.Partitions(tables), PartitionQueries.ReadPartitionedTable, partitions), LockTimeout))
+            .Should().BeNull("the partition read deparses bounds with no relation and counts rows from the catalog (D27)");
+        (await host.RunAsync(Read(ColumnSkewQueries.Skew(tables, "tenant_id"), ColumnSkewQueries.ReadSkew, skews), LockTimeout))
+            .Should().BeNull("the skew read takes pg_stats and the catalog, never the tables");
+
+        await holding.RollbackAsync(Token);
+
+        static double Epoch(int year, int month, int day, int hour) => new DateTimeOffset(year, month, day, hour, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds() / 1000d;
+
+        HealthPartitionedTableRow ledger = partitions.Single(static x => x.Table == "ledger");
+        ledger.Should().BeEquivalentTo(
+            new { KeyType = "bigint", NewestLower = 1_000d, NewestUpper = 2_000d, PopulatedUpper = 1_000d, EmptyAbove = 1, UnreadBounds = 0, BoundedPartitions = 3 },
+            static o => o.ExcludingMissingMembers(),
+            "'-1000' quoted and 1000 bare, as {0} writes them; the rows stop in [0, 1000)", major);
+
+        HealthPartitionedTableRow events = partitions.Single(static x => x.Table == "events");
+        events.TimeZone.Should().Be("Europe/Helsinki");
+        events.DateStyle.Should().StartWith("ISO");
+        events.HasDefault.Should().BeTrue();
+        events.NewestLower.Should().Be(Epoch(2026, 9, 30, 21), "'2026-10-01 00:00:00+03' is Helsinki's summer offset");
+        events.NewestUpper.Should().Be(Epoch(2026, 10, 31, 22), "'2026-11-01 00:00:00+02' its winter one");
+
+        HealthColumnSkewRow tenants = skews.Single(static x => x.Table == "tenants");
+        tenants.ByPartition.Should().BeTrue();
+        tenants.Values.Should().Be(2);
+        PartitionBoundText.SingleListValue(tenants.TopValues[0]).Should().Be("acme", "the largest partition's bound, read with no relation");
+        tenants.TopRows[0].Should().Be(900);
+
+        HealthColumnSkewRow shared = skews.Single(static x => x.Table == "shared");
+        shared.ByPartition.Should().BeFalse();
+        shared.ReadableLeaves.Should().Be(1, "app owns the table, so pg_stats shows it the column");
+        shared.TopValues[0].Should().Be("acme");
+        (shared.TopRows[0] / shared.RowsCounted).Should().BeApproximately(0.75, 0.01, "1,500 of 2,000 rows, every one of them in ANALYZE's sample");
+    }
+
+    /// <summary>A matrix read that runs <paramref name="query" /> and keeps every row it maps.</summary>
+    private static MatrixRead Read<T>(HealthQuery query, Func<NpgsqlDataReader, T> map, List<T> into) => new(query.Sql, true, async (x, t) =>
+    {
+        await using NpgsqlCommand command = new(query.Sql, x.Connection, x.Transaction) { CommandTimeout = x.Timeout };
+        command.Parameters.AddRange(query.Parameters.Select(static p => p.Clone()).ToArray());
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(t);
+
+        while (await reader.ReadAsync(t))
+        {
+            into.Add(map(reader));
+        }
+    });
+
+    /// <summary>
     /// The database browser's one sequence value read, by a role without the privilege to read the value: answered at once
     /// behind somebody's lock on the sequence, because the privilege is asked before <c>pg_sequence_last_value</c> - which on
     /// 18 is what keeps its lock away - while the owner's read waits for it (W5-B1 review F4).

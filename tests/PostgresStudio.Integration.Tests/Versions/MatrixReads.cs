@@ -183,6 +183,18 @@ internal static class MatrixReads
             IReadOnlyList<HealthPartitionedTableRow> tables = await QueryAsync(x, PartitionQueries.Partitions(LintTargets), PartitionQueries.ReadPartitionedTable, t);
             Owned(x, tables.FirstOrDefault(static y => y.Table == "r" && y.NewestUpper is not null && y.HasDefault), "store.r's bounds and its default partition");
         }),
+
+        // ---- X4: T18's column skew - store.l is list-partitioned on tenant_id, so it is read by its partitions, whose two
+        // bounds are deparsed with no relation; store.r's tenant_id is read through pg_stats, which the setup never analysed.
+        new("lints: column skew", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthColumnSkewRow> tables = await QueryAsync(x, ColumnSkewQueries.Skew(LintTargets, "tenant_id"), ColumnSkewQueries.ReadSkew, t);
+            Owned(
+                x,
+                tables.FirstOrDefault(static y => y is { Table: "l", ByPartition: true, Values: 2, TopValues.Count: 2 }
+                    && y.TopValues.All(static v => PartitionBoundText.SingleListValue(v) is "a" or "b")),
+                "store.l's two tenant partitions, read by their bounds");
+        }),
     ];
 
     /// <summary>The fixture's tables the lint reads are asked about (W5-B1): a range and a list partitioning, and a key.</summary>

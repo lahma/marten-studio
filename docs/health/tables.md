@@ -9,7 +9,7 @@ statistics views (`pg_class`, `pg_index`, `pg_inherits`, `pg_depend`, `pg_stats`
 
 **Studios.** T01 to T08, T12 to T16, T19, T20 and T23 to T26 read Postgres alone and run in both studios: in Marten
 Studio over the store's tables and the tables beside them, in Postgres Studio over every table of the schemas
-`BrowsableSchemas` admits. T09, T10, T11, T17 and T22 read what a Marten store declares, and run only in Marten Studio.
+`BrowsableSchemas` admits. T09, T10, T11, T17, T18 and T22 read what a Marten store declares, and run only in Marten Studio.
 The list of every code and its studios is [codes.md](codes.md).
 
 What every check here has in common:
@@ -895,6 +895,41 @@ process has not loaded yet"). A hidden type the process knows is declared and ne
 declarations are compared, read with no connection; when one cannot be read, the check says it cannot tell and counts
 nothing.
 
+## T18 Tenant skew
+
+**Info.** Studios: Marten Studio. Gate: Database, and - because a finding names its tenant - the activity gate and that
+tenant's store policy. One tenant holds more than half of a conjoined table's rows, in a table of 100,000 rows or more with 5
+tenants or more: a conjoined document type's table, and `mt_events` and `mt_streams` when the event store is conjoined. With
+fewer tenants, one being large is the shape of the data.
+
+Every tenant's rows share the table, its indexes, its statistics and its vacuum. When one tenant holds most of them, its growth
+sets the table's size and vacuum cost for everybody, and the planner's estimates for every tenant come from one set of column
+statistics that mostly describes the large tenant's rows - so a small tenant's query can be planned for the large one's
+numbers. The evidence names the tenant, its share of the rows, how many tenants there are and the next largest one's share.
+
+Two shapes, read in one statement that locks nothing it lists:
+
+- **A table Marten does not partition by tenant** is judged by `pg_stats`: the most common values of `tenant_id` and their
+  frequencies, weighted over the table's leaves by their estimated rows, as of the last `ANALYZE`. `pg_stats` shows a column
+  only to a role that may `SELECT` it, never to `pg_monitor`, so where the role the reads run as (`SqlConsoleRole`, or the
+  store's own login) may not, the check says which grant it needs - "not checked", when that is every table there is to
+  judge.
+- **A table Marten partitions by tenant** (`MultiTenantedWithPartitioning(...)`,
+  `PartitionMultiTenantedDocumentsUsingMartenManagement(...)`) is judged by each tenant partition's estimated rows, which the
+  catalog gives any role, with the `DEFAULT` partition's rows in the whole. It is one table to the check: its thousands of
+  partitions are summed in the statement, and only the largest one's bound - `FOR VALUES IN ('acme')`, read through
+  `pg_get_expr(relpartbound, 0)` - comes back, never a partition's name, because the names are the tenant list (D27). A
+  partition that holds several tenants is no one tenant's skew.
+
+**Named only past the gates.** The finding names its tenant, so it is shown only through the activity gate
+(`ViewDatabaseActivity`) to a visitor the store policy lets see that tenant, and counted as "not shown to you" for everybody
+else; the diagnostics API returns it only with `IncludeActivity`. The check's row note gives the largest share and never a
+name. The remedy is in words, never a line that changes anything by itself: partition the table by tenant, or give the tenant a
+database of its own (`MultiTenantedDatabases(...)`) - for the event store, a database of its own or
+`Events.UseTenantPartitionedEvents`, which is a change to how the daemon tracks every tenant, not a setting to flip.
+Partitioning an existing table is a changed partition scheme, which Marten's apply carries out by copying the whole table out
+and back: `AutoCreate.CreateOrUpdate` is not additive.
+
 ## T19 Partitions against the lock table
 
 **Info** (variant `per-transaction`) or **Warning** (variant `capacity`). Studios: both. For each partitioned table:
@@ -922,7 +957,8 @@ catalog, never by locking anything.
 ## T20 Range partitions running out
 
 **Critical** or **Warning**. Studios: both. For a table partitioned by range on one `date`, `timestamp` or `timestamptz`
-column, judged by the newest partition's upper bound against now and the newest partition's own width:
+column, judged by the newest partition's upper bound against now and the newest partition's own width - and, on one
+`smallint`, `integer` or `bigint` column, against where its rows stop:
 
 - `running-out` - **Critical** when there is no `DEFAULT` partition and the bound has passed or is within one width of
   now: inserts for the next period then fail ("no partition of relation found for row"). **Warning** when it is ahead by
@@ -931,23 +967,38 @@ column, judged by the newest partition's upper bound against now and the newest 
   Marten provisions its periods ahead and always gives it a `DEFAULT` partition, and the recommended `periodsAhead: 1`
   leaves the newest bound more than one width ahead whenever the roll-forward has run - so a finding means the
   roll-forward has fallen behind.
+- `running-out`, on an integer key (0.6) - **Warning** when the rows reach the newest partition, or leave at most one empty
+  partition above them: within two partition-widths of the newest bound, the time rule's line. Never Critical, with a
+  `DEFAULT` partition or without: an integer key has no clock, so how soon the rows get there is the application's pace,
+  which the catalog does not show - an id a sequence hands out gets there for certain, a code or a bucket number perhaps
+  never. Where the rows stop is each partition's estimate (`reltuples`, or `n_live_tup` where higher, its sub-partitions'
+  summed), so the judgement is by partition, never by value - no row is read - and a partition whose rows the statistics
+  have not counted yet reads as empty.
 - `default-partition-rows` - **Warning** when the `DEFAULT` partition holds rows (`reltuples`, or `n_live_tup` where
   higher): rows no range took, read whole by every query for them, and blocking the creation of the range they belong to
-  until they are moved out. A range on an integer key is judged on this alone.
+  until they are moved out.
 
 Read without a lock: the hierarchy through `pg_inherits` (never `pg_partition_tree`), the key from
-`pg_partitioned_table`, and each bound through `pg_get_expr(relpartbound, 0)`. `pg_get_expr(relpartbound, relid)` opens
-the partition and queues behind a migration's `ACCESS EXCLUSIVE`, and `pg_get_partkeydef` behind one on the parent; with
-no relation, a bound - which holds no column reference - is deparsed without opening anything (measured on 14.24 and
-18.6, 2026-10-26). A `timestamp` key is read as UTC; a `timestamptz` range's month boundaries are looked for in the
-session's `TimeZone` (read with the bounds, lock-free), so a range cut at local midnights is still months - and where that
-zone is one the studio's host does not know, the caveat says the months were looked for in UTC. The remedy is the next
-period's `CREATE TABLE ... PARTITION OF ... FOR VALUES FROM (...) TO (...)` for the host's own table - a calendar month (or
-several) where the newest partition spans whole months - and, when the newest bound passed more than a period ago, it
-says to create each period up to now as well. For a Marten document table on `ByRollingRange(...)` it is `await
-store.Advanced.RollPartitionsForwardAsync(CancellationToken.None)` on a cadence shorter than one period (present at
-9.39.0 and 9.54.1); on `ByExternallyManagedRangePartitions()` the same `CREATE TABLE`, since Marten's apply neither creates
-nor drops those partitions; a static `ByRange()` is a configuration line the finding describes.
+`pg_partitioned_table`, the `DEFAULT` partition from its `partdefid`, and each bound through `pg_get_expr(relpartbound, 0)`
+- a range's own partitions only, never a tenant list's. `pg_get_expr(relpartbound, relid)` opens the partition and queues
+behind a migration's `ACCESS EXCLUSIVE`, and `pg_get_partkeydef` behind one on the parent; with no relation, a bound - which
+holds no column reference - is deparsed without opening anything (measured on 14.24 and 18.6, 2026-10-26). The bound text is
+Postgres' own output of each constant, and the studio parses it (0.6): integers bare or quoted as Postgres writes them,
+`MINVALUE`, `MAXVALUE` and `'infinity'`, and a time bound only under an ISO `DateStyle` - Postgres' default - since under
+`SQL`, `Postgres` or `German` a `timestamptz` bound carries a zone abbreviation rather than an offset. A time range written in
+another `DateStyle` is not judged, and the row says so; a date before the common era is not read. A `timestamp` key is read
+as UTC; a `timestamptz` range's month boundaries are looked for in the session's `TimeZone` (read with the bounds,
+lock-free), so a range cut at local midnights is still months - and where that zone is one the studio's host does not know,
+the caveat says the months were looked for in UTC. The remedy is the next period's `CREATE TABLE ... PARTITION OF ... FOR
+VALUES FROM (...) TO (...)` for the host's own table - a calendar month (or several) where the newest partition spans whole
+months, the newest one's width on an integer key, and none past what the key's type holds - and, when the newest bound
+passed more than a period ago, it says to create each period up to now as well. For a Marten document table on
+`ByRollingRange(...)` it is `await store.Advanced.RollPartitionsForwardAsync(CancellationToken.None)` on a cadence shorter
+than one period (present at 9.39.0 and 9.54.2); on `ByExternallyManagedRangePartitions()` the same `CREATE TABLE`, since
+Marten's apply neither creates nor drops those partitions; on a static `ByRange()` the line its declaration takes, `.AddRange("p20261201",
+new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero))` - the
+bounds as the values Weasel's `AddRange<T>` formats, `3000L` on a `bigint` key - which an apply turns into the partition.
+A static `ByRange()` always has a `DEFAULT` partition (Weasel writes one), so a Marten table's ranges never reject a row.
 
 ## T25 Bloated index
 
