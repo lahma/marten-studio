@@ -37,6 +37,19 @@ public class CorePageSmokeTests
     }
 
     [Fact]
+    public async Task The_rail_ends_with_the_product_its_licence_and_its_author()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+
+        var rail = context.Render<NavMenu>();
+
+        var credit = rail.Find(".ms-rail-credit");
+        credit.TextContent.Should().Contain("Postgres Studio").And.Contain("MIT licensed").And.Contain("Marko Lahma");
+        credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
+            "https://github.com/lahma/marten-studio/blob/main/LICENSE");
+    }
+
+    [Fact]
     public async Task The_overview_reads_once_interactive_and_shows_the_server_the_tables_and_the_connections()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();

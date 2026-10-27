@@ -1,3 +1,26 @@
+# 0.8.0
+
+0.8 answers the two requests left open after 0.7: definitions can be shown without rows, and Database › Sessions says
+who holds the whole server's connections, with two health checks built on it.
+
+- `ViewDefinitions`, a new capability in both studios (#22): the definitions (a view's or materialized view's query, a
+  function's or procedure's body, a trigger's definition, a type's description) in the schemas `BrowsableSchemas` names
+  exactly, without their rows. It is authorized like the other capability reads: the capability, then the write policy
+  asked with its name about the database as a whole. `BrowseDatabase` keeps rows and implies it, so `All()` and existing
+  hosts are unchanged; schemas only `"*"` admits, a sequence's current value and every row still need `BrowseDatabase`.
+  In Marten Studio it also shows the structure of the exactly-named schemas outside the store's own in the database
+  browser, as a definition is reached through it. Public API: one property on `PostgresStudioCapabilities` and on
+  `MartenStudioCapabilities`.
+- Database › Sessions › Holders (`?view=holders`, #20): the whole server's client connections grouped by database,
+  application, role and client address, with active, idle and idle-in-transaction counts and the oldest idle ages,
+  against C03's client budget. Counts are shown under the source policy; another database is named only where the
+  source policy admits the visitor to it, the rest counted together as "Other databases"; application, role and address
+  need `ViewDatabaseActivity`.
+- Two connection checks over it, in both studios: C13, idle connections hoarded near the limit (Warning, while usage is
+  at or above C03's Warning line and one application holds a tenth of the client limit idle), and C14, connections with
+  no application name (Info). Both are Activity checks.
+- The side rail ends with the studio's name, its version, its licence and its author.
+
 # 0.7.0
 
 0.7 adds two things hosts asked for after 0.6: each index's size and use on its table's Keys & indexes tab, and links

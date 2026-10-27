@@ -13086,3 +13086,21 @@ a.ms-schema-health-mark:focus-visible {
         margin-left: 0;
     }
 }
+
+/* ==========================================================================
+   UI-0.8. The rail's credit line
+
+   The product, its version, its licence and its author, muted at the foot
+   of the rail, so a screenshot says which release a host runs.
+   ========================================================================== */
+
+.ms-rail-credit {
+    margin: var(--ms-space-md) 0 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-muted);
+}
+
+.ms-rail-credit a {
+    color: inherit;
+    text-decoration: underline;
+}
