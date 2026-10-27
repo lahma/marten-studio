@@ -89,6 +89,13 @@
         </p>
     }
 
+    @* SEC-FIX: a group's letters are found among the newest letters the grouped view groups, and when there are more than
+       that the list says so in the grouped view's own sentence - empty or not. *@
+    @if (!loading && page is { LettersCut: true })
+    {
+        <p class="ms-dl-groups-note ms-dl-groups-cut">@DeadLetterGroupText.LettersCut</p>
+    }
+
     @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
     {
         <CapabilityDisabled Capability="@nameof(StudioCapability.ManageDeadLetters)" Action="Managing dead letters" />

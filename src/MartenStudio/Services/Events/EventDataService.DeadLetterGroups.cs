@@ -21,7 +21,12 @@ namespace MartenStudio.Services.Events;
 /// measured, that costs the database a fifth of fingerprinting in SQL. It is shared across circuits for one refresh
 /// interval (<see cref="DeadLetterGroupCache" />), and what a visitor is shown of it - which tenants are named - is decided
 /// after the cache, per visitor. A group's own letters - the list's filter, the dialog's count, the skip - are found again
-/// in SQL, by the same rule (<see cref="DeadLetterGroupQueries.AppendGroupPredicates" />).
+/// in SQL, by the same rule (<see cref="DeadLetterGroupQueries.AppendGroupPredicates" />). The list's are found among the
+/// same newest letters the view groups (<see cref="DeadLetterGroupCache.LettersGrouped" />, SEC-FIX), because its
+/// <c>?group=</c> can be written by hand and the fingerprint is ten <c>regexp_replace</c> passes a letter. The count and the
+/// skip read all of a group's letters, under the command timeout: the page asks them only for a group its own read returned
+/// (the key is held by the circuit, never sent by the browser), and only where <c>ManageDeadLetters</c> is on - the skip is
+/// refused without it in this service as well.
 /// </para>
 /// <para>
 /// <b>The bulk skip is single Skip's path with a longer array.</b> Marten's <c>MarkEventsAsSkipped</c> takes an array of
@@ -301,7 +306,7 @@ internal sealed partial class EventDataService
             KeysFor(resolved),
             events,
             resolved.TenantId,
-            DeadLetterGroupLimits.MaxLettersGrouped + 1);
+            groups.LettersGrouped + 1);
         command.Connection = connection;
         command.CommandTimeout = CommandTimeoutSeconds;
 
@@ -327,7 +332,7 @@ internal sealed partial class EventDataService
 
         return DeadLetterGrouping.Group(
             rows,
-            DeadLetterGroupLimits.MaxLettersGrouped,
+            groups.LettersGrouped,
             DeadLetterGroupLimits.MaxGroups,
             readAt,
             recordsSkips: events?.Table.HasIsSkipped == true);
@@ -370,6 +375,25 @@ internal sealed partial class EventDataService
         {
             Groups = [.. read.Groups.Select(group => group with { TenantNames = [.. group.TenantNames.Where(visible.Contains)] })],
         };
+    }
+
+    /// <summary>
+    /// How many letters the scope holds, counted no further than <paramref name="window" /> and one: more than the window means
+    /// the list opened on a group found its letters among the newest only (SEC-FIX).
+    /// </summary>
+    private async Task<long> CountLettersUpToAsync(
+        DocumentTableInfo deadLetters,
+        DeadLetterJsonKeys keys,
+        string? tenantId,
+        int window,
+        NpgsqlConnection connection,
+        CancellationToken token)
+    {
+        await using NpgsqlCommand command = DeadLetterGroupQueries.BuildLetterWindowCount(deadLetters, keys, tenantId, window);
+        command.Connection = connection;
+        command.CommandTimeout = CommandTimeoutSeconds;
+
+        return await command.ExecuteScalarAsync(token).ConfigureAwait(false) is long letters ? letters : 0;
     }
 
     /// <summary>One group's events not skipped yet, in this scope, lowest first, one past the cap.</summary>

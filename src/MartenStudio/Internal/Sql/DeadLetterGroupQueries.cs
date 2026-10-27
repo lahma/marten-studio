@@ -146,6 +146,57 @@ internal static class DeadLetterGroupQueries
         }
     }
 
+    /// <summary>
+    /// How many letters the scope holds, counted no further than <paramref name="window" /> and one - no order, no body, no
+    /// fingerprint - so the list opened on a group can say when its letters are only those among the newest
+    /// <paramref name="window" />, as the grouped view's counts are (SEC-FIX).
+    /// </summary>
+    /// <param name="table">The dead-letter table, settled against the catalog.</param>
+    /// <param name="keys">The JSON keys under the store's casing.</param>
+    /// <param name="tenantId">The scope's tenant, or <see langword="null" /> for every tenant.</param>
+    /// <param name="window">The window: never more than <see cref="DeadLetterGroupLimits.MaxLettersGrouped" />, whatever is asked.</param>
+    /// <param name="commandTimeout">A bound, when the caller sets one.</param>
+    /// <remarks>One column, <c>letters</c> (bigint): more than the window means the window cut.</remarks>
+    public static NpgsqlCommand BuildLetterWindowCount(
+        DocumentTableInfo table,
+        DeadLetterJsonKeys keys,
+        string? tenantId,
+        int window,
+        TimeSpan? commandTimeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(keys);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var sql = new StringBuilder();
+            sql.Append("select count(*) as letters\n");
+            sql.Append("from (select 1\n");
+            sql.Append("      from ").Append(table.QualifiedName).Append(" as " + Alias + "\n");
+            sql.Append("      where ").Append(Tenant(command, keys, tenantId)).Append('\n');
+
+            if (DeadLetterQueries.LiveRows(table, Alias) is { } live)
+            {
+                sql.Append("        and ").Append(live).Append('\n');
+            }
+
+            sql.Append("      limit ").Append(Ensure(
+                command, "limit", NpgsqlDbType.Integer, Math.Clamp(window, 1, DeadLetterGroupLimits.MaxLettersGrouped) + 1)).Append(") as w");
+
+            command.CommandText = sql.ToString();
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>How many of one group's events are not skipped yet, and how many are.</summary>
     /// <param name="table">The dead-letter table, settled against the catalog.</param>
     /// <param name="keys">The JSON keys under the store's casing.</param>

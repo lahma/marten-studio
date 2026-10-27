@@ -92,6 +92,13 @@ internal sealed record DeadLetterPageQuery
     /// </summary>
     public DeadLetterEventSource? Events { get; init; }
 
+    /// <summary>
+    /// With <see cref="Group" />: how many of the scope's newest letters the group's letters are found among - the grouped
+    /// view's own bound, so the list shows the letters the group counts and fingerprints no more (SEC-FIX). Never more than
+    /// <see cref="DeadLetterGroupLimits.MaxLettersGrouped" />, whatever is asked.
+    /// </summary>
+    public int GroupWindow { get; init; } = DeadLetterGroupLimits.MaxLettersGrouped;
+
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
 
@@ -228,9 +235,18 @@ internal static class DeadLetterQueries
     /// <param name="query">The filters and the page.</param>
     /// <param name="commandTimeout">A bound on how long the read may take, when the caller sets one.</param>
     /// <remarks>
+    /// <para>
     /// Every filter is a nullable parameter, so one statement - and one plan - serves every combination, the same
     /// rule as <see cref="EventQueryBuilder" />. No value and no key is ever interpolated: the table name and the
     /// soft-delete column are the only identifiers, and both go through <see cref="SqlIdentifier" />.
+    /// </para>
+    /// <para>
+    /// <b>A group's letters are found in a window</b> (SEC-FIX): with <see cref="DeadLetterPageQuery.Group" />, the table is
+    /// read as the scope's newest <see cref="DeadLetterPageQuery.GroupWindow" /> live letters - the grouped view's own read,
+    /// newest first - and the group's predicates, the fingerprint's <c>regexp_replace</c> chain among them, run over those
+    /// only. Without the window a <c>?group=</c> written by hand ran the chain over every letter whose exact parts it matched.
+    /// Whether the window cut is <see cref="DeadLetterGroupQueries.BuildLetterWindowCount" />'s.
+    /// </para>
     /// </remarks>
     public static NpgsqlCommand BuildPage(
         DocumentTableInfo table,
@@ -247,20 +263,52 @@ internal static class DeadLetterQueries
         try
         {
             string data = Column(DocumentTableInfo.DataColumn);
+            string id = Column(DocumentTableInfo.IdColumn);
+
+            // Bound here, once: a group's window below and the clauses after it name the same values.
+            string tenant = "(" + Nullable(command, "tenant", query.TenantId) + " is null or "
+                + data + " ->> " + Key(command, "tenant_key", keys.TenantId) + " = @tenant)";
+            string newestFirst = "(" + data + " ->> " + Key(command, "timestamp_key", keys.Timestamp) + ")::timestamptz desc, " + id + " desc";
+            string? live = LiveRows(table, Alias);
+
             var sql = new StringBuilder();
 
-            sql.Append("select ").Append(Column(DocumentTableInfo.IdColumn)).Append(", ").Append(data).Append('\n');
-            sql.Append("from ").Append(table.QualifiedName).Append(" as " + Alias + "\n");
+            sql.Append("select ").Append(id).Append(", ").Append(data).Append('\n');
+
+            if (query.Group is null)
+            {
+                sql.Append("from ").Append(table.QualifiedName).Append(" as " + Alias + "\n");
+            }
+            else
+            {
+                // SEC-FIX: a group's letters are looked for only among the scope's newest letters the grouped view groups,
+                // newest first as it reads them - so the list shows the letters the group counts, and the fingerprint's
+                // regexp_replace chain below runs over that many at most, whatever ?group= a visitor writes by hand. The
+                // window holds live letters only, and its rows carry no mt_deleted, so the soft-delete filter is applied here.
+                sql.Append("from (select ").Append(id).Append(", ").Append(data).Append('\n');
+                sql.Append("      from ").Append(table.QualifiedName).Append(" as " + Alias + "\n");
+                sql.Append("      where ").Append(tenant).Append('\n');
+
+                if (live is not null)
+                {
+                    sql.Append("        and ").Append(live).Append('\n');
+                    live = null;
+                }
+
+                sql.Append("      order by ").Append(newestFirst).Append('\n');
+                sql.Append("      limit ")
+                    .Append(Value(command, "group_window", NpgsqlDbType.Integer, Math.Clamp(query.GroupWindow, 1, DeadLetterGroupLimits.MaxLettersGrouped)))
+                    .Append(") as " + Alias + "\n");
+            }
 
             // A group's letters: each letter's event looked up for its type, kept whether or not it is found (a group
-            // whose event is gone has no type). The lookup reads @tenant and @tenant_key, which the clauses below bind.
+            // whose event is gone has no type). The lookup reads @tenant and @tenant_key, bound above.
             if (query is { Group: not null, Events: { } events })
             {
                 sql.Append(DeadLetterGroupQueries.EventLookup(command, keys, events, inner: false));
             }
 
-            sql.Append("where (").Append(Nullable(command, "tenant", query.TenantId)).Append(" is null or ")
-                .Append(data).Append(" ->> ").Append(Key(command, "tenant_key", keys.TenantId)).Append(" = @tenant)\n");
+            sql.Append("where ").Append(tenant).Append('\n');
 
             sql.Append("  and (").Append(Nullable(command, "projection", query.ProjectionName)).Append(" is null or ")
                 .Append(data).Append(" ->> ").Append(Key(command, "projection_key", keys.ProjectionName)).Append(" = @projection)\n");
@@ -280,7 +328,7 @@ internal static class DeadLetterQueries
                 .Append(DeadLetterGroupQueries.Ensure(command, "sequence_key", NpgsqlDbType.Text, keys.EventSequence))
                 .Append(" = any(@sequences))\n");
 
-            if (LiveRows(table, Alias) is { } live)
+            if (live is not null)
             {
                 sql.Append("  and ").Append(live).Append('\n');
             }
@@ -290,8 +338,7 @@ internal static class DeadLetterQueries
                 DeadLetterGroupQueries.AppendGroupPredicates(sql, command, keys, group, eventLookedUp: query.Events is not null);
             }
 
-            sql.Append("order by (").Append(data).Append(" ->> ").Append(Key(command, "timestamp_key", keys.Timestamp))
-                .Append(")::timestamptz desc, ").Append(Column(DocumentTableInfo.IdColumn)).Append(" desc\n");
+            sql.Append("order by ").Append(newestFirst).Append('\n');
 
             sql.Append("limit ").Append(Value(command, "limit", NpgsqlDbType.Integer, Math.Clamp(query.Limit, 1, MaxLimit)));
             sql.Append(" offset ").Append(Value(command, "offset", NpgsqlDbType.Integer, Math.Max(0, query.Offset)));

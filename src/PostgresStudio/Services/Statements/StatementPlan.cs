@@ -111,7 +111,10 @@ internal sealed record StatementPlanRead
 /// <c>QueryTimeout</c>, at most the sweep's own bound) and <c>lock_timeout</c>: the role's effective path is read, every
 /// schema the visitor may not see is taken off it, the rest is set for the transaction, and only then is the text prepared and
 /// explained. So a name the text reaches only through a withheld schema fails to resolve - no plan, and the sentence says why -
-/// and every name the plan prints from such a schema carries its schema, for the mask (<see cref="StatementPlanQueries" />).
+/// and every name the plan prints from such a schema carries its schema, for the mask (<see cref="StatementPlanQueries" />). A
+/// text that names a withheld schema itself is never prepared (<see cref="StatementsService.TextNamesWithheld" />): its
+/// qualified name would resolve, and the plan would expand that schema's view, or inline its SQL function, over tables the
+/// visitor may see.
 /// </para>
 /// <para>
 /// <b>Nothing left behind.</b> The batch deallocates what it prepared. A batch that stops short - refused, cancelled, cut off -
@@ -178,6 +181,12 @@ internal sealed class StatementPlanReader
         ArgumentNullException.ThrowIfNull(index);
         ArgumentNullException.ThrowIfNull(vet);
 
+        // As ReadAsync: never a prepare of a text that names a schema the visitor may not see.
+        if (StatementsService.TextNamesWithheld(text, withheld) is { } named)
+        {
+            return (null, named);
+        }
+
         if (StatementPlanQueries.GenericPlan(text, truncated) is not { } batch)
         {
             return (null, Health.Checks.ExpensiveStatementsCheck.RefusalText(HealthStatementQueries.Refusal(text, truncated)));
@@ -242,6 +251,13 @@ internal sealed class StatementPlanReader
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(text);
         ArgumentNullException.ThrowIfNull(withheld);
+
+        // The service refuses it first; here because this is where a text is prepared, so no caller can reach a prepare of a
+        // text that names a withheld schema. Nothing ran, so there is nothing to show.
+        if (StatementsService.TextNamesWithheld(text, withheld) is { } named)
+        {
+            return new StatementPlanRead { NotPlanned = named };
+        }
 
         int parameters = HealthStatementQueries.HighestParameter(text);
         IReadOnlyList<HealthStatement> shown =

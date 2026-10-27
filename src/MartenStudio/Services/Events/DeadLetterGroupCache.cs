@@ -26,6 +26,8 @@ internal sealed class DeadLetterGroupCache
 {
     private readonly StudioSnapshotCache cache;
 
+    private readonly int lettersGrouped = DeadLetterGroupLimits.MaxLettersGrouped;
+
     public DeadLetterGroupCache(IOptions<MartenStudioOptions> options)
         : this(TimeProvider.System, options.Value.RefreshInterval)
     {
@@ -33,6 +35,17 @@ internal sealed class DeadLetterGroupCache
 
     internal DeadLetterGroupCache(TimeProvider timeProvider, TimeSpan timeToLive) =>
         cache = new StudioSnapshotCache(timeProvider, timeToLive > StudioSnapshotCache.DefaultTimeToLive ? timeToLive : StudioSnapshotCache.DefaultTimeToLive);
+
+    /// <summary>
+    /// The most letters one read groups, newest first - and the window the list opened on a group finds that group's letters
+    /// in, so the list shows the letters the group counts and never fingerprints more (SEC-FIX).
+    /// <see cref="DeadLetterGroupLimits.MaxLettersGrouped" /> in a host; a test sets fewer, and never more.
+    /// </summary>
+    internal int LettersGrouped
+    {
+        get => lettersGrouped;
+        init => lettersGrouped = Math.Clamp(value, 1, DeadLetterGroupLimits.MaxLettersGrouped);
+    }
 
     /// <summary>The groups of <paramref name="resolved" />'s scope, read by <paramref name="read" /> at most once per interval.</summary>
     public Task<DeadLetterGroupList> GetAsync(

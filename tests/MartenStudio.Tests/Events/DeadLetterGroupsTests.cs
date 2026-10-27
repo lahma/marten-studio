@@ -141,6 +141,37 @@ public class DeadLetterGroupsTests
         page.Find(".ms-dl-group-filter").TextContent.Should().Contain("Back to the groups").And.Contain("Every dead letter");
     }
 
+    /// <summary>
+    /// SEC-FIX: a group's letters are found among the newest letters the grouped view groups; when the scope holds more, the
+    /// list says so in the grouped view's own sentence - with letters listed or none.
+    /// </summary>
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    public async Task The_list_opened_on_a_group_whose_window_cut_says_so_in_the_grouped_views_sentence(int letters)
+    {
+        using StudioComponentContext context = await ContextAsync();
+        DeadLetterGroupKey key = FakeEventDataService.Group().Key;
+        context.EventData.DeadLetters = new DeadLetterPage(
+            [.. Enumerable.Range(0, letters).Select(static _ => FakeEventDataService.DeadLetter(Guid.NewGuid()))], false) { LettersCut = true };
+
+        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters?group=" + key.Encode());
+
+        page.Find(".ms-dl-groups-cut").TextContent.Should().Be(DeadLetterGroupText.LettersCut);
+        DeadLetterGroupText.LettersCut.Should().Contain("a group opened in the list shows its letters among them");
+    }
+
+    [Fact]
+    public async Task The_list_opened_on_a_group_whose_window_did_not_cut_says_nothing_of_it()
+    {
+        using StudioComponentContext context = await ContextAsync();
+        context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(Guid.NewGuid())], false);
+
+        IRenderedComponent<DeadLetters> page = Render(context, "marten/events/dead-letters?group=" + FakeEventDataService.Group().Key.Encode());
+
+        page.FindAll(".ms-dl-groups-cut").Should().BeEmpty();
+    }
+
     [Fact]
     public async Task A_group_link_the_page_cannot_read_lists_every_dead_letter_and_says_so()
     {

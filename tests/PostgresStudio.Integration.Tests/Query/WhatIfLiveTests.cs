@@ -283,6 +283,70 @@ public class WhatIfLiveTests(HypopgServer server) : IClassFixture<HypopgServer>
         recorder.Made.Should().ContainSingle("the forged index was refused before hypopg was asked");
     }
 
+    /// <summary>
+    /// SEC-FIX: the drill-in's what-if plans the statement twice, so a text that names a schema the visitor may not see is
+    /// refused before hypopg is asked - the plans of <c>hr.v_vip</c> are made of its definition over <c>public.orders</c>. A
+    /// visitor whose browser gate admits <c>hr</c> compares the same index and sees the view's condition in both plans.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_drill_in_imagines_nothing_for_a_text_that_names_a_schema_the_visitor_may_not_see()
+    {
+        (string database, string app) = await SeedAsync("secfix_whatif");
+        await StatementsLive.ExecuteAsync(app,
+            "create table public.orders (id int primary key, note text, customer int, tier text); "
+            + "insert into public.orders select g, 'n' || g, g % 1000, case when g % 5 = 0 then 'vip' else 'std' end "
+            + "from pg_catalog.generate_series(1, 20000) g; "
+            + "analyze public.orders; "
+            + "create schema hr; "
+            + "create view hr.v_vip as select o.id, o.note, o.customer from public.orders o where o.tier = 'vip'");
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), v.note from hr.v_vip v where v.customer = @id", 25);
+
+        static long QueryIdOf(StatementsView view) =>
+            view.Rows.Single(static x => x.Text?.Contains("v_vip", StringComparison.Ordinal) == true).QueryId;
+
+        // A visitor who may see hr: the plan suggests an index, and the what-if compares it - over the view's own condition.
+        Recorder admittedRecorder = new();
+        HypotheticalIndex index;
+
+        await using (StudioHost admitted = Host(database, admittedRecorder, static o =>
+        {
+            o.BrowsableSchemas.Add("public");
+            o.BrowsableSchemas.Add("hr");
+        }))
+        {
+            await using StudioCircuit circuit = admitted.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+            long queryId = QueryIdOf(await statements.GetAsync(Scope, Token));
+
+            StatementPlanView plan = await statements.PlanAsync(Scope, queryId, Token);
+            plan.NoPlan.Should().BeNull();
+            index = HypotheticalIndexCandidates.FromPlan(plan.Plan!).Should().NotBeEmpty().And.Subject.First();
+
+            WhatIfResult compared = await statements.WhatIfAsync(Scope, queryId, index, Token);
+            compared.Reason.Should().BeNull();
+            compared.Before!.Nodes.Should().Contain(static x => x.Filter != null && x.Filter.Contains("'vip'::text", StringComparison.Ordinal),
+                "the plan is made of the view's definition");
+        }
+
+        // A visitor who may not: the same statement and the same index, refused before anything is planned or imagined.
+        Recorder withheldRecorder = new();
+
+        await using (StudioHost withheld = Host(database, withheldRecorder))
+        {
+            await using StudioCircuit circuit = withheld.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+            long queryId = QueryIdOf(await statements.GetAsync(Scope, Token));
+
+            WhatIfResult refused = await statements.WhatIfAsync(Scope, queryId, index, Token);
+
+            refused.Reason.Should().Be(StatementsService.NamesWithheldSchema);
+            refused.Before.Should().BeNull();
+            refused.After.Should().BeNull();
+            withheldRecorder.Made.Should().BeEmpty("hypopg was never asked");
+            withheldRecorder.Cleanups.Should().BeEmpty("no what-if session was opened at all");
+        }
+    }
+
     /// <summary>Records what the engine did, by backend; and fails a what-if after hypopg made its index, when asked to.</summary>
     private sealed class Recorder : IHypotheticalIndexObserver
     {

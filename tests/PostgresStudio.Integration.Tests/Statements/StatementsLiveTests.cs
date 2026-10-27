@@ -131,7 +131,10 @@ internal static class StatementsLive
         ExecuteAsync(connectionString, "create table public.orders (id int primary key, note text); insert into public.orders select g, 'n' || g from pg_catalog.generate_series(1, 50) g");
 
     /// <summary>A Postgres Studio host over <paramref name="connectionString" />, with the activity gate open.</summary>
-    public static StudioHost Host(string connectionString, IHealthStatementObserver? observer = null) =>
+    /// <param name="connectionString">The application's database.</param>
+    /// <param name="observer">The sweep probe, when a test watches the statements.</param>
+    /// <param name="studio">Anything else the test sets on the options - the schemas it may browse, say.</param>
+    public static StudioHost Host(string connectionString, IHealthStatementObserver? observer = null, Action<PostgresStudioOptions>? studio = null) =>
         StudioHost.Create(
             services =>
             {
@@ -142,7 +145,11 @@ internal static class StatementsLive
                     services.AddSingleton(observer);
                 }
             },
-            static options => options.Capabilities = PostgresStudioCapabilities.All());
+            options =>
+            {
+                options.Capabilities = PostgresStudioCapabilities.All();
+                studio?.Invoke(options);
+            });
 
     /// <summary>The page's view for the host's one database, through a circuit of its own.</summary>
     public static async Task<StatementsView> ReadAsync(StudioHost host)

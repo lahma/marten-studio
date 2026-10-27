@@ -50,12 +50,16 @@ internal static class DeadLetterGroupText
         "This store numbers events per tenant (UseTenantPartitionedEvents), so a skip is one tenant's, and this group's "
         + "letters name " + Tenants(tenants) + ": choose a tenant in the header to skip the group's events in that tenant.";
 
-    /// <summary>What the view says when there were more letters than one read groups.</summary>
+    /// <summary>
+    /// What the grouped view says when there were more letters than one read groups - and the list opened on a group, whose
+    /// letters are found among the same newest ones (SEC-FIX).
+    /// </summary>
     public static readonly string LettersCut =
         "There are more than " + DeadLetterGroupLimits.MaxLettersGrouped.ToString("N0", CultureInfo.InvariantCulture)
-        + " dead letters here: these are the groups of the newest "
+        + " dead letters here: the groups are those of the newest "
         + DeadLetterGroupLimits.MaxLettersGrouped.ToString("N0", CultureInfo.InvariantCulture)
-        + ", and their counts are counts of those. Opening a group, and skipping one, reads all of its letters.";
+        + ", their counts are counts of those, and a group opened in the list shows its letters among them. Skipping a group "
+        + "reads all of its letters.";
 
     /// <summary>What a group larger than one action says.</summary>
     public static string CapNote(long notSkipped) =>

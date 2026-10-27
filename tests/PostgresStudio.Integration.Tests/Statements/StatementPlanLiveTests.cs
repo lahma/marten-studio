@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Npgsql;
 
 using PostgresStudio.Integration.Tests.Health;
@@ -138,8 +136,14 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
         }
     }
 
+    /// <summary>
+    /// A view the visitor may see that reads a withheld schema's table plans as a scan of that table, and is not shown; a text
+    /// that calls a <c>plpgsql</c> function in the withheld schema by its qualified name is not planned at all (SEC-FIX) - before
+    /// 0.6.0's fix it was planned and shown masked, which a function's default arguments make a definition leak too (see
+    /// <see cref="A_qualified_name_in_a_withheld_schema_is_not_planned_for_a_visitor_who_may_not_see_it_and_is_for_one_who_may" />).
+    /// </summary>
     [PostgresFact]
-    public async Task A_plan_that_reads_a_withheld_schema_is_not_shown_and_one_that_only_calls_into_one_is_shown_masked()
+    public async Task A_plan_that_reads_a_withheld_schema_is_not_shown_and_a_text_that_calls_into_one_is_not_planned()
     {
         (MatrixServer leg, string database, string app) = await SeedAsync(matrix, 18, "x1_withheld");
 
@@ -168,10 +172,94 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
         StatementRowView calling = Row(view, "scaled");
         calling.Text.Should().Contain(WithheldNames.Token + ".scaled(", "the text itself is masked");
 
-        StatementPlanView masked = await statements.PlanAsync(StatementsLive.Scope, calling.QueryId, Token);
-        masked.NoPlan.Should().BeNull();
-        string filter = masked.Plan!.Nodes.Single(static x => x.RelationName == "orders").Filter!;
-        filter.Should().Contain(WithheldNames.Token + ".scaled(").And.NotContain("hr.", "every name the plan prints is masked as the text is");
-        JsonSerializer.Serialize(masked.Plan.Nodes.Select(static x => x.Description)).Should().NotContain("hr.");
+        StatementPlanView named = await statements.PlanAsync(StatementsLive.Scope, calling.QueryId, Token);
+        named.Plan.Should().BeNull();
+        named.NoPlan.Should().Be(StatementsService.NamesWithheldSchema, "its text names hr, so it is not prepared");
+        named.Statement!.Text.Should().Contain(WithheldNames.Token + ".scaled(", "the statement itself is still shown, masked");
+
+        host.Ring.GetLatest().Where(static x => x.Action == StatementsService.PlanAction).Should().ContainSingle(
+            "the view's plan was planned and not shown, and audited; the text that names hr was never planned");
+    }
+
+    /// <summary>
+    /// SEC-FIX: a schema-qualified reference to a withheld schema's view, or to its <c>LANGUAGE sql</c> function, resolves
+    /// whatever the <c>search_path</c> is, and the planner expands the view and inlines the function into nodes over tables the
+    /// visitor may see - with <c>VERBOSE</c> printing their conditions and constants. So for a visitor who may not see
+    /// <c>hr</c> none of these is planned (nor is a <c>plpgsql</c> call, whose plan prints the function's default argument);
+    /// for one whose browser gate admits <c>hr</c> each is planned, and the plan shows exactly what the other visitor's would
+    /// have shown.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_qualified_name_in_a_withheld_schema_is_not_planned_for_a_visitor_who_may_not_see_it_and_is_for_one_who_may()
+    {
+        (_, _, string app) = await SeedAsync(matrix, 18, "secfix_named");
+
+        await StatementsLive.ExecuteAsync(app,
+            "alter table public.orders add column tier text; "
+            + "update public.orders set tier = case when id % 5 = 0 then 'vip' else 'std' end; "
+            + "create schema hr; "
+            + "create view hr.v_vip as select o.id, o.note from public.orders o where o.tier = 'vip'; "
+            + "create function hr.is_gold(t text) returns boolean language sql immutable as $$ select t = 'gold' $$; "
+            + "create function hr.graded(i int, floor int default 7) returns int language plpgsql immutable as $$ begin return greatest(i, floor); end $$");
+
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), v.note from hr.v_vip v where v.id = @id", 20);
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), o.note from public.orders o where o.id = @id and hr.is_gold(o.tier)", 20);
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), o.note from public.orders o where hr.graded(o.id) = @id", 20);
+
+        // What each plan carries of the definition behind the name, for a visitor who may see it.
+        (string Marker, string Definition)[] cases =
+        [
+            ("v_vip", "'vip'::text"),
+            ("is_gold", "'gold'::text"),
+            ("graded", "graded(o.id, 7)"),
+        ];
+
+        // hr withheld - Postgres Studio's default BrowsableSchemas is public alone.
+        await using (StudioHost withheld = StatementsLive.Host(app))
+        {
+            await using StudioCircuit circuit = withheld.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+
+            StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
+            view.State.Should().Be(StatementsState.Read, StatementsLive.Describe(view));
+
+            foreach ((string marker, string definition) in cases)
+            {
+                StatementRowView row = Row(view, marker);
+                row.Text.Should().Contain(WithheldNames.Token + "." + marker, "the text names hr, masked");
+
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, row.QueryId, Token);
+
+                plan.Plan.Should().BeNull("a plan of {0} would show {1}", marker, definition);
+                plan.NoPlan.Should().Be(StatementsService.NamesWithheldSchema);
+            }
+
+            withheld.Ring.GetLatest().Should().NotContain(static x => x.Action == StatementsService.PlanAction, "nothing was prepared");
+        }
+
+        // hr admitted: named exactly in BrowsableSchemas, with BrowseDatabase on and no write policy.
+        await using (StudioHost admitted = StatementsLive.Host(app, studio: static o =>
+        {
+            o.BrowsableSchemas.Add("public");
+            o.BrowsableSchemas.Add("hr");
+        }))
+        {
+            await using StudioCircuit circuit = admitted.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+
+            StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
+
+            foreach ((string marker, string definition) in cases)
+            {
+                StatementRowView row = Row(view, marker);
+                row.Text.Should().Contain("hr." + marker, "nothing is withheld from this visitor");
+
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, row.QueryId, Token);
+
+                plan.NoPlan.Should().BeNull(marker);
+                string.Join("\n", plan.Plan!.Nodes.Select(static x => x.Filter + " " + x.IndexCondition))
+                    .Should().Contain(definition, "the plan of {0} carries the definition behind the name", marker);
+            }
+        }
     }
 }
