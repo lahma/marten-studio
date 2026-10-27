@@ -111,9 +111,16 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
         type.Found.Should().BeTrue(type.Reason);
         type.Type!.Labels.Should().Equal("gold", "silver");
 
+        // A sequence's current value is data - it says how many rows the table has had - so it is BrowseDatabase's alone.
         DatabaseSequenceValue sequence = await objects.GetSequenceValueAsync(Scope, "app", "accounts_id_seq", Token);
-        sequence.Found.Should().BeTrue(sequence.Reason);
-        sequence.LastValue.Should().Be(2, "a sequence's value is the definitions' half of the gate");
+        sequence.Found.Should().BeFalse();
+        sequence.LastValue.Should().BeNull();
+        sequence.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, sequence.Reason);
+        sequence.Reason.Should().Contain("BrowseDatabase");
+
+        DatabaseObjectList sequences = await objects.ListAsync(Scope, new DatabaseObjectQuery(DatabaseObjectCategory.Sequences, "app"), Token);
+        sequences.Items.OfType<DatabaseSequenceSummary>().Should().ContainSingle(static x => x.Name == "accounts_id_seq")
+            .Which.CanReadValue.Should().BeFalse("the list says so in advance, and still shows the sequence's own definition");
 
         // The lists say so in advance: a control drawn enabled is one whose call passes.
         DatabaseObjectList views = await objects.ListAsync(Scope, new DatabaseObjectQuery(DatabaseObjectCategory.Views, "app"), Token);
@@ -191,6 +198,10 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
         (await objects.GetDefinitionAsync(Scope, ArchiveView, Token)).Found.Should().BeTrue("\"*\" admits archive to BrowseDatabase");
         (await objects.GetDefinitionAsync(Scope, ArchiveFunction, Token)).Found.Should().BeTrue();
 
+        DatabaseSequenceValue sequence = await objects.GetSequenceValueAsync(Scope, "app", "accounts_id_seq", Token);
+        sequence.Found.Should().BeTrue(sequence.Reason);
+        sequence.LastValue.Should().Be(2, "BrowseDatabase reads a sequence's value, as it always did");
+
         TableRowPage rows = await circuit.Get<ITableRowService>().ListRowsAsync(Scope, "app", "accounts", new TableRowRequest(), Token);
         rows.State.Should().Be(TableRowPageState.Loaded, rows.Reason);
         rows.Rows.Should().HaveCount(2);
@@ -245,6 +256,10 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture database)
             TableRowPage rows = await viewer.Get<ITableRowService>().ListRowsAsync(Scope, "app", "accounts", new TableRowRequest(), Token);
             rows.Refusal.Should().Be(DatabaseRefusal.WritePolicy, rows.Reason);
             rows.Reason.Should().Contain("BrowseDatabase");
+
+            DatabaseSequenceValue value = await objects.GetSequenceValueAsync(Scope, "app", "accounts_id_seq", Token);
+            value.Refusal.Should().Be(DatabaseRefusal.WritePolicy, value.Reason);
+            value.Reason.Should().Contain("BrowseDatabase", "a sequence's value is data: the write policy is asked about BrowseDatabase");
         }
 
         await using (StudioCircuit admin = host.Circuit("admin"))

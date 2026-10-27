@@ -54,8 +54,8 @@ internal enum StudioCapability
     RunLinqQueries,
 
     /// <summary>
-    /// Read the definitions - a view's query, a routine's body, a trigger's definition, a sequence's value, a type's
-    /// description - of the objects in the schemas <c>BrowsableSchemas</c> names exactly, without the rows
+    /// Read the definitions - a view's query, a routine's body, a trigger's definition, a type's description - of the
+    /// objects in the schemas <c>BrowsableSchemas</c> names exactly, without the rows or a sequence's current value
     /// (<see cref="BrowseDatabase" /> keeps those, and implies this).
     /// </summary>
     ViewDefinitions

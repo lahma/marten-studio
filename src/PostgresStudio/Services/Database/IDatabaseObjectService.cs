@@ -82,9 +82,10 @@ internal interface IDatabaseObjectService
     /// </summary>
     /// <remarks>
     /// Gated like a definition: Marten's own sequences (by name) in the store's own schemas need no
-    /// capability; anybody else's value is a <c>BrowseDatabase</c> read - or a <c>ViewDefinitions</c> one, in a schema
-    /// <c>BrowsableSchemas</c> names exactly - the capability, both policies for the database with no tenant, and the
-    /// schema - refused and audited in that order, before anything is locked. A list's <see cref="DatabaseSequenceSummary.CanReadValue" />
+    /// capability; anybody else's value is a <c>BrowseDatabase</c> read - the capability, both policies for the database
+    /// with no tenant, and a schema <c>BrowsableSchemas</c> admits - refused and audited in that order, before anything is
+    /// locked. It is data (it says how many rows a table has had), not a definition, so <c>ViewDefinitions</c> does not
+    /// open it. A list's <see cref="DatabaseSequenceSummary.CanReadValue" />
     /// answers exactly this question, and its <see cref="DatabaseSequenceSummary.LastValue" /> is always
     /// <see langword="null" />. A per-tenant event sequence, or one a hidden type's column owns, is not there.
     /// </remarks>

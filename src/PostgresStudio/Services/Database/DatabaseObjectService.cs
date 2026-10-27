@@ -35,9 +35,10 @@ namespace PostgresStudio.Services.Database;
 /// <para>
 /// <b>Structure of the store's own schemas needs nothing</b>: it is what the Schema screen has always
 /// shown. Neither does a definition of Marten's own objects there, nor the value of Marten's own
-/// sequences. Everything else in <see cref="GetDefinitionAsync" /> and <see cref="GetSequenceValueAsync" /> is
-/// a <c>BrowseDatabase</c> read, or, for the host's own objects in a schema <c>BrowsableSchemas</c> names exactly, a
-/// <c>ViewDefinitions</c> one.
+/// sequences. Everything else in <see cref="GetDefinitionAsync" /> is a <c>BrowseDatabase</c> read, or, for the host's
+/// own objects in a schema <c>BrowsableSchemas</c> names exactly, a <c>ViewDefinitions</c> one. A sequence's current
+/// value (<see cref="GetSequenceValueAsync" />) is data, not a definition - it says how many rows a table has had - and is
+/// <c>BrowseDatabase</c>'s alone.
 /// </para>
 /// <para>
 /// <b>Nothing is thrown at a page</b> but cancellation: refusals, unreadable configurations and failed
@@ -372,8 +373,9 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 declared =>
                 {
                     // By name, as the list's CanReadValue decides it: Marten's own sequences in the store's own
-                    // schemas are the Schema screen's; anybody else's value is a BrowseDatabase read; and a
-                    // per-tenant event sequence - its name is a tenant id - is never listed or read.
+                    // schemas are the Schema screen's; anybody else's value is a BrowseDatabase read - data, not a
+                    // definition, so ViewDefinitions does not open it; and a per-tenant event sequence - its name
+                    // is a tenant id - is never listed or read.
                     byName = declared.Classifier!.ClassifySequence(schema, name, null, null);
 
                     return byName switch
@@ -387,7 +389,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 name,
                 SequenceValueAction,
                 target,
-                cancellationToken)
+                cancellationToken,
+                browseOnly: true)
             .ConfigureAwait(false);
 
         if (!route.Allowed || byName is null)
@@ -401,7 +404,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         {
             if (audited)
             {
-                audit.Record(SequenceValueAction, target, succeeded: false, reason, access.ReadCapability, tenantless);
+                audit.Record(SequenceValueAction, target, succeeded: false, reason, StudioCapability.BrowseDatabase, tenantless);
             }
 
             return DatabaseSequenceValue.Unavailable(reference, refusal, reason);
@@ -411,7 +414,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
 
         try
         {
-            DatabaseGateRead gateRead = await access.ObjectGateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
+            // BrowseDatabase's own gate: a value is data, so the exactly named schemas ViewDefinitions admits are not its.
+            DatabaseGateRead gateRead = await access.GateAsync(scope, route.Resolved, cancellationToken).ConfigureAwait(false);
             if (!gateRead.Succeeded)
             {
                 return Refuse(gateRead.Refusal, gateRead.Reason ?? "The database browser is unavailable.", audited: false);
@@ -436,7 +440,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 return Refuse(DatabaseRefusal.NotFound, DatabaseObjectAssembler.NotFound(schema, name), audited: false);
             }
 
-            DatabaseRowAccess allowed = gate.DefinitionAccess(sequence.Schema, DatabaseObjectAssembler.SequenceValueOwnership(gate, sequence));
+            DatabaseRowAccess allowed = gate.SequenceValueAccess(sequence.Schema, DatabaseObjectAssembler.SequenceValueOwnership(gate, sequence));
             if (!allowed.Allowed)
             {
                 return Refuse(allowed.Refusal, allowed.Reason ?? "Refused.", audited: true);
@@ -697,6 +701,10 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     /// <param name="action">What the audit ring calls the read.</param>
     /// <param name="target">What it was aimed at.</param>
     /// <param name="cancellationToken">Cancels the resolution.</param>
+    /// <param name="browseOnly">
+    /// Whether a read that is not the store's own structure is <c>BrowseDatabase</c>'s alone - a sequence's value, which is
+    /// data - rather than either way into a definition (<see cref="DatabaseAccess.RequireDefinitionAsync" />).
+    /// </param>
     private async Task<Route> RouteAsync(
         StudioScope scope,
         Func<DatabaseDeclarations, RouteKind> decide,
@@ -704,7 +712,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
         string? name,
         string action,
         string target,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool browseOnly = false)
     {
         // 1. The store, and its declarations - the store policy for the visitor's own scope, and no database.
         //    A store-policy refusal is audited there, under this read's action and target.
@@ -740,7 +749,7 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             // "not found" where every other name gets "capability off" says the name is a hidden type's.
             if (schema is not null && !IsStoreSchema(store.Declarations, schema))
             {
-                Route browse = await BrowseAsync(scope, schema, action, target, cancellationToken).ConfigureAwait(false);
+                Route browse = await BrowseAsync(scope, schema, action, target, browseOnly, cancellationToken).ConfigureAwait(false);
 
                 if (!browse.Allowed)
                 {
@@ -762,24 +771,27 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
                 : new Route(resolved, DatabaseRefusal.None, null);
         }
 
-        // 2b. A BrowseDatabase read.
-        return await BrowseAsync(scope, schema, action, target, cancellationToken).ConfigureAwait(false);
+        // 2b. A BrowseDatabase read - or, for all but a sequence's value, a ViewDefinitions one.
+        return await BrowseAsync(scope, schema, action, target, browseOnly, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// A <c>BrowseDatabase</c> read's route: the capability, the two policies and the tenant-less scope, then
+    /// A read's route past the store's own structure: the capability, the two policies and the tenant-less scope, then
     /// the schema against the entry list - before the database is asked anything, and never with the
-    /// visitor's tenant. Every refusal is audited.
+    /// visitor's tenant. Every refusal is audited. <paramref name="browseOnly" /> asks <c>BrowseDatabase</c> alone
+    /// (<see cref="DatabaseAccess.RequireBrowseAsync" />); otherwise either way into a definition passes it.
     /// </summary>
     private async Task<Route> BrowseAsync(
         StudioScope scope,
         string? schema,
         string action,
         string target,
+        bool browseOnly,
         CancellationToken cancellationToken)
     {
-        DatabaseBrowseGrant grant = await access.RequireDefinitionAsync(scope, action, target, cancellationToken)
-            .ConfigureAwait(false);
+        DatabaseBrowseGrant grant = browseOnly
+            ? await access.RequireBrowseAsync(scope, action, target, cancellationToken).ConfigureAwait(false)
+            : await access.RequireDefinitionAsync(scope, action, target, cancellationToken).ConfigureAwait(false);
 
         if (!grant.Allowed)
         {
@@ -793,7 +805,8 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
             if (!BrowsableSchemaMatcher.MightMatch(entries, schema))
             {
                 string reason = DatabaseGate.SchemaDenial(schema, entries, settings.Text);
-                audit.Record(action, target, succeeded: false, reason, access.ReadCapability, scope with { TenantId = null });
+                audit.Record(
+                    action, target, succeeded: false, reason, browseOnly ? StudioCapability.BrowseDatabase : access.ReadCapability, scope with { TenantId = null });
 
                 return Route.Refused(DatabaseRefusal.SchemaNotBrowsable, reason);
             }

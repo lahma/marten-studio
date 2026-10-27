@@ -30,7 +30,8 @@ namespace PostgresStudio.Services.Database;
 /// <item><description>
 /// <b>Definitions have a second way in.</b> <c>ViewDefinitions</c>, with the write policy asked about it, shows the
 /// definitions - and the structure - of the schemas <c>BrowsableSchemas</c> names <em>exactly</em>, without the rows;
-/// <c>BrowseDatabase</c> keeps the rows and implies it. A schema only <c>"*"</c> admits, and Marten's own
+/// <c>BrowseDatabase</c> keeps the rows and implies it. A sequence's current value is data and stays
+/// <c>BrowseDatabase</c>'s (<see cref="SequenceValueAccess" />). A schema only <c>"*"</c> admits, and Marten's own
 /// objects outside the store's schemas, still need <c>BrowseDatabase</c>. The gate built with the definitions' answer
 /// (<see cref="DatabaseAccess.ObjectGateAsync" />) is the browser's; every other screen reads the one without it,
 /// where nothing but <c>BrowseDatabase</c> opens anything.
@@ -639,6 +640,21 @@ internal sealed class DatabaseGate
         return definitionSchemas.Contains(schema)
             ? DatabaseRowAccess.Granted
             : DatabaseRowAccess.Refused(DatabaseRefusal.SchemaNotBrowsable, DefinitionSchemaDenial(schema, configuredEntries, text));
+    }
+
+    /// <summary>Whether this visitor may read the current value of a sequence in <paramref name="schema" />.</summary>
+    /// <remarks>
+    /// A sequence's value is data, not a definition: it says how many rows a table has had. So it is <c>BrowseDatabase</c>'s
+    /// alone - <see cref="DataAccess" />, in a schema <c>BrowsableSchemas</c> admits - except Marten's own sequences in the
+    /// store's own schemas, which the Schema screen shows (<see cref="ExemptsMartensOwnDefinitions" />). A sequence's
+    /// definition (its type, start, increment and range) is on its list row, and <c>ViewDefinitions</c> shows it as it shows
+    /// the structure around it.
+    /// </remarks>
+    public DatabaseRowAccess SequenceValueAccess(string schema, DatabaseObjectOwnership ownership)
+    {
+        ArgumentNullException.ThrowIfNull(ownership);
+
+        return ExemptsMartensOwnDefinitions && IsStoreSchema(schema) && ownership.IsMarten ? DatabaseRowAccess.Granted : DataAccess(schema);
     }
 
     /// <summary>

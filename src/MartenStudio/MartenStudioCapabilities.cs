@@ -57,9 +57,10 @@ public sealed class MartenStudioCapabilities
 
     /// <summary>
     /// Read the definitions (a view's or materialized view's query, a function's or procedure's body, a trigger's
-    /// definition, a sequence's value, a type's description) of the database objects Marten does not own, and see the
+    /// definition, a type's description) of the database objects Marten does not own, and see the
     /// structure of the schemas <see cref="MartenStudioOptions.BrowsableSchemas"/> names <em>exactly</em> - and nothing
-    /// else: no rows (those need <see cref="BrowseDatabase"/>), and no definition in a schema only <c>"*"</c> admits.
+    /// else: no rows and no sequence's current value (those are data, and need <see cref="BrowseDatabase"/>), and no
+    /// definition in a schema only <c>"*"</c> admits.
     /// A definition is schema the application's own migrations wrote, but it can carry a literal - a function body
     /// with a constant in it - which is why it is a switch of its own rather than part of structure. Like
     /// <see cref="BrowseDatabase"/> it is a read treated as a write for authorization:

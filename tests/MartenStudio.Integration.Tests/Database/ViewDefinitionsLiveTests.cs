@@ -93,8 +93,16 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         type.Found.Should().BeTrue(type.Reason);
         type.Type!.Labels.Should().Equal("pending", "shipped", "cancelled");
 
+        // A sequence's current value is data - it says how many rows a table has had - so it is BrowseDatabase's alone.
         DatabaseSequenceValue sequence = await host.ObjectsAsync(x => x.GetSequenceValueAsync(BrowserHost.Scope, fixture.LegacySchema, "standalone_numbers", Token));
-        sequence.Found.Should().BeTrue(sequence.Reason);
+        sequence.Found.Should().BeFalse();
+        sequence.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, sequence.Reason);
+        sequence.Reason.Should().Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+
+        DatabaseObjectList sequences = await host.ObjectsAsync(x => x.ListAsync(
+            BrowserHost.Scope, new DatabaseObjectQuery(DatabaseObjectCategory.Sequences, fixture.LegacySchema), Token));
+        sequences.Items.OfType<DatabaseSequenceSummary>().Single(static x => x.Name == "standalone_numbers").CanReadValue.Should().BeFalse(
+            "the list says so in advance");
 
         // The listing says so in advance: a control drawn enabled is one whose call passes, and the rows are refused.
         DatabaseObjectList views = await host.ObjectsAsync(x => x.ListAsync(
@@ -195,6 +203,8 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         (await host.ObjectsAsync(x => x.GetDefinitionAsync(BrowserHost.Scope, LegacyFunction, Token))).Found.Should().BeTrue();
         (await host.ObjectsAsync(x => x.GetDefinitionAsync(BrowserHost.Scope, QuartzView, Token))).Found.Should().BeTrue(
             "the Quartz schema is listed, so BrowseDatabase admits it");
+        (await host.ObjectsAsync(x => x.GetSequenceValueAsync(BrowserHost.Scope, fixture.LegacySchema, "standalone_numbers", Token))).Found.Should().BeTrue(
+            "BrowseDatabase reads a sequence's value, as it always did");
 
         DatabaseRowAccessResult rows = await host.AccessAsync(x =>
             x.RequireRowAccessAsync(BrowserHost.Scope, fixture.QuartzSchema, "qrtz_triggers", cancellationToken: Token));
@@ -258,6 +268,10 @@ public class ViewDefinitionsLiveTests(ViewDefinitionsLiveTests.Fixture fixture) 
         DatabaseRowAccessResult rows = await host.AccessAsync(x =>
             x.RequireRowAccessAsync(BrowserHost.Scope, fixture.LegacySchema, "orders", cancellationToken: Token));
         rows.Refusal.Should().Be(DatabaseRefusal.WritePolicy, rows.Reason);
+
+        DatabaseSequenceValue value = await host.ObjectsAsync(x => x.GetSequenceValueAsync(BrowserHost.Scope, fixture.LegacySchema, "standalone_numbers", Token));
+        value.Refusal.Should().Be(DatabaseRefusal.WritePolicy, value.Reason);
+        value.Reason.Should().Contain("BrowseDatabase", "a sequence's value is data: the write policy is asked about BrowseDatabase");
     }
 
     [PostgresFact]
