@@ -304,8 +304,11 @@ internal static class HealthTables
             return [];
         }
 
+        // Which tables a lock keeps autovacuum off, from the sweep's one read of the lock table (X3).
+        LockTableRead locks = await LockTableReads.SharedAsync(context).ConfigureAwait(false);
+
         IReadOnlyList<HealthTableRow> rows = await context.Sql
-            .QueryAsync(HealthTableQueries.Tables(Targets(set)), HealthTableQueries.ReadTable, cancellationToken)
+            .QueryAsync(HealthTableQueries.Tables(Targets(set), locks.StrongRelations), HealthTableQueries.ReadTable, cancellationToken)
             .ConfigureAwait(false);
 
         List<TableFacts> facts = new(rows.Count);
@@ -332,11 +335,12 @@ internal static class HealthTables
     /// that judges by indexes says how many were not (<see cref="LockedNote" />).
     /// </para>
     /// <para>
-    /// <b>The residual race, once.</b> A lock taken after the statement's <c>pg_locks</c> snapshot makes a deparse wait out
-    /// <c>lock_timeout</c> and the statement fail with <c>55P03</c>. The read is then asked once more, when the snapshot sees
-    /// the lock and leaves that table out (<see cref="RetryOnceBehindALockAsync{T}" />). A second <c>55P03</c> is not
-    /// guessed at - it may be a lock the snapshot cannot see, or one taken again in that instant - so it reaches the sweep,
-    /// which says the checks waited too long for a lock (Unavailable, TimedOut), as it would of any read.
+    /// <b>The residual race, once.</b> The tables locked are the sweep's one read of the lock table (X3), taken before this
+    /// statement. A lock taken after it makes a deparse wait out <c>lock_timeout</c> and the statement fail with
+    /// <c>55P03</c>. The lock table is then read once more, and the statement asked again with what it says - which sees the
+    /// lock and leaves that table out (<see cref="RetryOnceBehindALockAsync{T}" />). A second <c>55P03</c> is not guessed at -
+    /// it may be a lock the snapshot cannot see, or one taken again in that instant - so it reaches the sweep, which says the
+    /// checks waited too long for a lock (Unavailable, TimedOut), as it would of any read.
     /// </para>
     /// </remarks>
     private static async Task<HealthIndexRead> ReadIndexesAsync(
@@ -349,8 +353,20 @@ internal static class HealthTables
             return HealthIndexRead.Empty;
         }
 
+        LockTableRead shared = await LockTableReads.SharedAsync(context).ConfigureAwait(false);
+        bool again = false;
+
         IReadOnlyList<HealthIndexRow> rows = await RetryOnceBehindALockAsync(
-                token => context.Sql.QueryAsync(HealthTableQueries.Indexes(Targets(set)), HealthTableQueries.ReadIndex, token),
+                async token =>
+                {
+                    // The first try takes the sweep's read; the second, behind a lock taken since, reads the lock table afresh.
+                    LockTableRead locks = again ? await LockTableReads.ReadAsync(context, token).ConfigureAwait(false) : shared;
+                    again = true;
+
+                    return await context.Sql
+                        .QueryAsync(HealthTableQueries.Indexes(Targets(set), locks.ExclusiveRelations), HealthTableQueries.ReadIndex, token)
+                        .ConfigureAwait(false);
+                },
                 cancellationToken)
             .ConfigureAwait(false);
 

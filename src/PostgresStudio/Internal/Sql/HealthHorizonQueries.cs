@@ -229,8 +229,10 @@ internal sealed record HealthHorizonHolderRow
 /// document type's - is counted and never selected by name (D27).
 /// </para>
 /// <para>
-/// <b>Never on a poll, and fenced.</b> <see cref="Holders" /> reads <c>pg_stat_activity</c>, <c>pg_locks</c> and
-/// <c>pg_prepared_xacts</c>, which only <see cref="HealthConnectionQueries" /> and this builder may (the convention
+/// <b>Never on a poll, and fenced.</b> <see cref="Holders" /> reads <c>pg_stat_activity</c> and
+/// <c>pg_prepared_xacts</c> - and takes which sessions hold the daemon's leadership lock from the sweep's one read of
+/// <c>pg_locks</c> (<see cref="HealthConnectionQueries.LockTable" />, X3), as a parameter - which only
+/// <see cref="HealthConnectionQueries" /> and this builder may (the convention
 /// test <c>ActivityViewsOffThePollPathTests</c> names both), and it is called only by T14, in the regular sweep at
 /// <c>HealthInterval</c>. Its own read was needed rather than H3's because the horizon is a transaction id: H3's reads
 /// say whether a session has one, and this one how old it is. The session predicate is H3's own
@@ -380,10 +382,6 @@ internal static class HealthHorizonQueries
         order by t.schema_name, t.table_name
         """;
 
-    /// <summary>A granted advisory lock's 64-bit key, as <c>pg_try_advisory_lock(bigint)</c> spells it - H3's spelling.</summary>
-    private const string AdvisoryKey =
-        "case when l.locktype = 'advisory' and l.objsubid = 1 then ((l.classid::bigint << 32) | l.objid::bigint) end";
-
     /// <summary>
     /// A row of <c>pg_stat_activity a</c> that is a session holding the horizon: H3's client session
     /// (<see cref="HealthConnectionQueries.ClientSession" />), with a transaction id or a snapshot, and not running a lazy
@@ -487,8 +485,7 @@ internal static class HealthHorizonQueries
         "            a.pid, a.usename::text as usename, a.application_name::text as application_name,\n" +
         "            pg_catalog.host(a.client_addr) as client_addr, a.backend_start, a.state::text as state, null::text as gid,\n" +
         "            a.backend_xid is not null as has_xid, a.backend_type is null as hidden,\n" +
-        "            exists (select 1 from pg_catalog.pg_locks l where l.pid = a.pid and l.granted and l.locktype = 'advisory'\n" +
-        "                       and " + AdvisoryKey + " = any(@daemon_lock_ids)) as holds_daemon_lock,\n" +
+        "            a.pid = any(@daemon_lock_holders::int4[]) as holds_daemon_lock,\n" +
         "            pg_catalog.count(*) over () as total,\n" +
         "            " + SessionOwnXidAge + " as own_xid_age,\n" +
         "            a.backend_xid::text as own_xid, a.backend_xmin::text as xmin_raw\n" +
@@ -590,15 +587,18 @@ internal static class HealthHorizonQueries
     }
 
     /// <summary>The sessions, prepared transactions and standbys holding the horizon back (<see cref="HoldersSql" />).</summary>
-    /// <param name="daemonLockIds">The advisory keys the store's daemon negotiates leadership with.</param>
-    public static HealthQuery Holders(IReadOnlyCollection<long> daemonLockIds)
+    /// <param name="daemonLockHolders">
+    /// The sessions holding one of the advisory keys the store's daemon negotiates leadership with - from the sweep's one read of
+    /// the lock table (<see cref="HealthConnectionQueries.LockTable" />), so this statement reads no <c>pg_locks</c> of its own.
+    /// </param>
+    public static HealthQuery Holders(IReadOnlyCollection<int> daemonLockHolders)
     {
-        ArgumentNullException.ThrowIfNull(daemonLockIds);
+        ArgumentNullException.ThrowIfNull(daemonLockHolders);
 
         return new HealthQuery(
             HoldersSql,
             [
-                new NpgsqlParameter("daemon_lock_ids", NpgsqlDbType.Array | NpgsqlDbType.Bigint) { Value = daemonLockIds.ToArray() },
+                new NpgsqlParameter("daemon_lock_holders", NpgsqlDbType.Array | NpgsqlDbType.Integer) { Value = daemonLockHolders.ToArray() },
                 new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = MaxHolders },
             ]);
     }

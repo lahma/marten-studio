@@ -165,6 +165,44 @@ public class LinqQueryPanelTests
         panel.Find(".ms-query-linq-range").TextContent.Should().Contain("more follow");
     }
 
+    [Fact]
+    public async Task The_advices_Marten_index_is_offered_under_the_plan_and_a_what_if_asks_with_the_query()
+    {
+        PostgresStudio.Services.Query.HypotheticalIndex marten = new()
+        {
+            Key = "marten:Customer.Name",
+            Definition = "CREATE INDEX mt_doc_order_idx_customer_name ON public.mt_doc_order USING btree ((data -> 'Customer' ->> 'Name'));",
+            Caption = "The index Marten would create for options.Schema.For<Order>().Duplicate(x => x.Customer.Name);",
+            Origin = PostgresStudio.Services.Query.HypotheticalIndexOrigin.Marten,
+            Table = "mt_doc_order",
+        };
+
+        var linq = new FakeLinqQueryService().WithType("order");
+        linq.Result = new LinqQueryResult(
+            "order", [], HasMore: false, Offset: 0, PageSize: 3,
+            Sql: "select d.id, d.data from public.mt_doc_order as d where d.data -> 'Customer' ->> 'Name' = :p0",
+            Parameters: [new LinqParameterInfo(":p0", "Varchar")],
+            Duration: TimeSpan.FromMilliseconds(3),
+            Plan: new ExplainResult(null, "[{\"Plan\":{\"Node Type\":\"Seq Scan\",\"Relation Name\":\"mt_doc_order\",\"Alias\":\"d\",\"Total Cost\":10}}]", null, null),
+            Advice: new LinqIndexAdvice(IndexVerdictLevel.Red, [], []) { WhatIf = [marten] });
+
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        await panel.InvokeAsync(() => panel.Find(".ms-query-run").Click());
+        panel.Find("#ms-query-tab-plan").Click();
+
+        panel.Find(".ms-whatif-caption").TextContent.Should().Be(marten.Caption);
+        panel.Find(".ms-whatif-definition").TextContent.Should().Be(marten.Definition);
+        panel.Find(".ms-whatif-note").TextContent.Should().Contain("as Marten writes it");
+
+        await panel.InvokeAsync(() => panel.Find(".ms-whatif-run").Click());
+
+        panel.WaitForAssertion(() => panel.Find(".ms-whatif-reason").TextContent.Should().StartWith("hypopg is not installed"));
+        linq.WhatIfs.Should().ContainSingle().Which.Should().Match<(LinqQueryRequest Request, PostgresStudio.Services.Query.HypotheticalIndex Index)>(
+            x => x.Request.Alias == "order" && x.Request.Offset == 0 && ReferenceEquals(x.Index, marten));
+    }
+
     /// <summary>
     /// Both clicks are awaited. bUnit's <c>Click()</c> discards the dispatch task, and the dispatch runs inline only
     /// while the renderer's dispatcher is idle - so a click that lands while the dispatcher is busy is queued, and

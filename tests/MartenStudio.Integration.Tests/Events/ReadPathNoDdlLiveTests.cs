@@ -85,8 +85,11 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         AggregateSnapshot replay = await host.EventsAsync(
             x => x.AggregateAtVersionAsync(Scope, Guid.NewGuid().ToString(), typeof(LedgerSummary).FullName!, 0, Token));
         bool exists = await host.DocumentsAsync(x => x.StreamExistsAsync(Scope, Guid.NewGuid().ToString(), Token));
+        DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
 
         page.Should().BeSameAs(DeadLetterPage.Empty, "no table is an empty list, not a failure");
+        groups.Error.Should().BeNull("M3: no table is no groups, not a failure");
+        groups.Groups.Should().BeEmpty();
         count.Should().Be(0);
         replay.Error.Should().BeNull("no event store is a stream that does not exist, not a failure");
         replay.Found.Should().BeFalse();
@@ -119,9 +122,12 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         DeadLetterPage page = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery(), Token));
         ProjectionsView projections = await host.ProjectionsAsync(x => x.GetProjectionsAsync(Scope, Token));
         long? count = await host.EventsAsync(x => x.CountDeadLettersAsync(Scope, Token));
+        DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
 
         shape.EventTablesExist.Should().BeTrue("the event store is there - only the dead-letter table is not");
         page.Should().BeSameAs(DeadLetterPage.Empty, "no table is an empty list, not a failure");
+        groups.Error.Should().BeNull("M3's grouped view: no table is no groups");
+        groups.Groups.Should().BeEmpty();
         projections.HasEventStore.Should().BeTrue();
         count.Should().Be(0);
 
@@ -148,6 +154,17 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         DeadLetterPage first = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery { PageSize = 2 }, Token));
         DeadLetterPage second = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery { PageSize = 2, Offset = 2 }, Token));
         long? count = await host.EventsAsync(x => x.CountDeadLettersAsync(Scope, Token));
+
+        // M3: the grouped view, a group opened in the list, and the skip dialog's count - every read it adds.
+        DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
+        groups.Error.Should().BeNull();
+        groups.TotalLetters.Should().Be(3);
+        DeadLetterGroupKey key = groups.Groups[0].Key;
+        DeadLetterPage opened = await host.EventsAsync(x => x.ListDeadLettersAsync(Scope, new DeadLetterQuery { Group = key }, Token));
+        DeadLetterGroupSkipPlan plan = await host.EventsAsync(x => x.DescribeDeadLetterGroupSkipAsync(Scope, key, Token));
+        opened.Error.Should().BeNull();
+        opened.Rows.Should().HaveCount((int) groups.Groups[0].Letters);
+        plan.Should().NotBeNull();
 
         all.Error.Should().BeNull();
         all.Rows.Select(static x => x.ExceptionMessage).Should().Equal(["third", "second", "first"], "newest failure first");
@@ -199,6 +216,39 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
 
         missing.Found.Should().BeFalse();
         missing.Reason.Should().Be(AggregateMissingReason.StreamMissing);
+
+        (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse("to_regclass: no HiLo bookkeeping was created");
+        before.ShouldBeUnchangedIn(await host.SnapshotAsync());
+    }
+
+    /// <summary>
+    /// M1: the stepper folds a stream this process's store never read - one window, the search for the next change, and
+    /// the dead letters that name its events - with the studio's own SQL and Marten's own selector and aggregator, and
+    /// writes nothing. This store has an int-id type, so below Marten 9.50.3 one ensure would have created <c>mt_hilo</c>.
+    /// </summary>
+    [PostgresFact]
+    public async Task Stepping_a_stream_a_store_never_ensured_folds_it_and_creates_nothing()
+    {
+        await using Host host = await Host.StartAsync(fixture);
+        Guid stream = await host.SeedAsync(withDeadLetters: true);
+
+        ServerSnapshot before = await host.SnapshotAsync();
+        string type = typeof(LedgerSummary).FullName!;
+
+        StreamStepWindow window = await host.EventsAsync(x => x.StepAsync(Scope, stream.ToString(), type, 1, Token));
+        StepSearch search = await host.EventsAsync(x => x.FindNextChangeAsync(Scope, stream.ToString(), type, 1, "Balance", Token));
+        StreamStepWindow missing = await host.EventsAsync(x => x.StepAsync(Scope, Guid.NewGuid().ToString(), type, 1, Token));
+
+        window.Error.Should().BeNull();
+        window.Steps.Select(static x => x.Version).Should().Equal([1L, 2L, 3L]);
+        window.Steps[1].StateJson.Should().Contain("\"Balance\":10").And.Contain("\"Owner\":\"acme\"");
+        window.Steps[2].StateJson.Should().Contain("\"Balance\":25").And.Contain("\"Credits\":2");
+        window.Steps.Select(static x => x.DeadLetters.Count).Should().Equal(
+            [1, 1, 1], "the seeded dead letters name the stream's three events, one each, by sequence");
+        window.Steps[0].DeadLetters[0].ExceptionMessage.Should().Be("first");
+
+        search.FoundVersion.Should().Be(2);
+        missing.Missing.Should().Be(AggregateMissingReason.StreamMissing);
 
         (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse("to_regclass: no HiLo bookkeeping was created");
         before.ShouldBeUnchangedIn(await host.SnapshotAsync());

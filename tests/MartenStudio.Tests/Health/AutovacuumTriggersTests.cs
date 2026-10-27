@@ -84,18 +84,25 @@ public class AutovacuumTriggersTests
 
     /// <summary>
     /// The locks autovacuum gives way to (W5-V1 review, N1): a prepared transaction's, which have no process, and a request
-    /// still waiting - autovacuum takes its lock only if it can have it at once, so a queued ALTER keeps it away too.
+    /// still waiting - autovacuum takes its lock only if it can have it at once, so a queued ALTER keeps it away too. Since X3
+    /// they are the sweep's one read of the lock table, and the table read takes them as <c>@strong_locks</c>.
     /// </summary>
     [Fact]
     public void The_lock_read_counts_a_prepared_transactions_locks_and_a_queued_request()
     {
-        string sql = HealthTableQueries.TablesSql;
-        int start = sql.IndexOf("locks as (", StringComparison.Ordinal);
-        string locks = sql[start..sql.IndexOf("settings as (", start, StringComparison.Ordinal)];
+        string sql = HealthConnectionQueries.LockTableSql;
+        int start = sql.IndexOf("relations as (", StringComparison.Ordinal);
+        string locks = sql[start..sql.IndexOf("counted as (", start, StringComparison.Ordinal)];
 
-        locks.Should().Contain("l.pid is null", "a prepared transaction's locks have a null pid");
+        locks.Should().Contain("k.pid is null", "a prepared transaction's locks have a null pid");
         locks.Should().NotContain("granted", "a queued strong request keeps autovacuum's conditional lock away as a granted one does");
         locks.Should().Contain("'AccessExclusiveLock'").And.Contain("'ShareUpdateExclusiveLock'").And.NotContain("'AccessShareLock'");
+        locks.Should().Contain("k.pid not in (select m.pid from maintenance m)",
+            "a running VACUUM or ANALYZE is autovacuum's own kind, and does not keep it off a table");
+        sql.Should().Contain("select v.pid from pg_catalog.pg_stat_progress_vacuum v").And.Contain("select z.pid from pg_catalog.pg_stat_progress_analyze z");
+
+        string tables = HealthTableQueries.TablesSql;
+        tables.Should().Contain("from pg_catalog.unnest(@strong_locks::oid[]) as l(relid)").And.NotContain("pg_locks");
     }
 
     [Fact]

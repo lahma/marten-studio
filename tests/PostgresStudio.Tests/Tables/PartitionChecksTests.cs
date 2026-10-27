@@ -100,7 +100,7 @@ public class PartitionChecksTests
     }
 
     [Fact]
-    public void An_integer_key_is_judged_on_its_default_partition_alone_and_maxvalue_never_runs_out()
+    public void An_integer_key_with_no_rows_counted_is_judged_on_its_default_partition_alone_and_maxvalue_never_runs_out()
     {
         HealthPartitionedTableRow integers = Monthly(default, default) with
         {
@@ -112,12 +112,85 @@ public class PartitionChecksTests
         };
 
         Range(integers).Findings.Should().ContainSingle().Which.Variant.Should().Be("default-partition-rows");
-        Range(integers with { DefaultRows = 0 }).Findings.Should().BeEmpty();
+        Range(integers with { DefaultRows = 0 }).Findings.Should().BeEmpty("no partition holds rows by the catalog's count, so there is no data to judge against");
 
         Range(Monthly(new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero), new(2026, 10, 1, 0, 0, 0, TimeSpan.Zero)) with { UnboundedAbove = true })
             .Findings.Should().BeEmpty("a MAXVALUE partition takes every later row");
+        Range(integers with { DefaultRows = 0, PopulatedUpper = 2_000, UnboundedAbove = true })
+            .Findings.Should().BeEmpty("an integer range with a MAXVALUE partition never runs out either");
 
         Range(Monthly(default, default) with { Strategy = "l" }).Note.Should().Contain("partitioned by range");
+    }
+
+    // ---- T20 on an integer key, against where its rows stop (X4) --------------------------------------------------------
+
+    private static HealthPartitionedTableRow Numbered(double populatedUpper, int emptyAbove, bool hasDefault = false, string keyType = "integer") => new()
+    {
+        Schema = "app",
+        Table = "events",
+        Strategy = "r",
+        KeyColumns = 1,
+        KeyType = keyType,
+        Leaves = 4,
+        BoundedPartitions = 4,
+        NewestLower = 3_000_000,
+        NewestUpper = 4_000_000,
+        PopulatedUpper = populatedUpper,
+        EmptyAbove = emptyAbove,
+        HasDefault = hasDefault,
+    };
+
+    [Fact]
+    public void Rows_in_the_newest_integer_partition_or_one_empty_one_above_them_are_a_warning_never_critical()
+    {
+        HealthFinding inNewest = Range(Numbered(4_000_000, 0)).Findings.Single();
+        inNewest.Severity.Should().Be(HealthSeverity.Warning, "an integer key has no clock: how soon the rows get there is the application's pace");
+        inNewest.Variant.Should().Be("running-out");
+        inNewest.Title.Should().Be("The rows of app.events reach its newest range partition, which ends at 4,000,000");
+        inNewest.WhyItMatters.Should().Contain("no partition of relation found for row").And.Contain("has no clock");
+        inNewest.Evidence.Should().Contain(new HealthEvidence("Empty partitions above the rows", "0"))
+            .And.Contain(new HealthEvidence("Partition width", "1,000,000 (the newest partition's)"));
+        inNewest.Caveat.Should().Contain("never the highest value").And.Contain("No row was read");
+        inNewest.Remedy!.Code.Should().Be(
+            "CREATE TABLE \"app\".\"events_p4000000\" PARTITION OF \"app\".\"events\" FOR VALUES FROM (4000000) TO (5000000);",
+            "the next partition, the newest one's width on");
+        inNewest.Remedy.Explanation.Should().NotContain("each period up to now", "an integer key has no periods to catch up on");
+
+        HealthFinding oneLeft = Range(Numbered(3_000_000, 1, hasDefault: true)).Findings.Single();
+        oneLeft.Severity.Should().Be(HealthSeverity.Warning);
+        oneLeft.Title.Should().Be("One empty range partition is left above the rows of app.events, up to 4,000,000");
+        oneLeft.WhyItMatters.Should().Contain("land in the DEFAULT partition");
+
+        Range(Numbered(2_000_000, 2)).Findings.Should().BeEmpty("two empty partitions above the rows are two widths of room");
+    }
+
+    [Fact]
+    public void An_integer_partition_past_what_its_type_holds_gets_no_statement()
+    {
+        HealthPartitionedTableRow full = Numbered(2_147_483_000, 0) with { NewestLower = 2_000_000_000, NewestUpper = 2_147_483_000 };
+
+        RangePartitionsCheck.Next(full).Should().BeNull("an integer key cannot hold a partition from 2,147,483,000 to 2,294,966,000");
+        Range(full).Findings.Single().Remedy.Should().BeNull();
+        RangePartitionsCheck.Next(full with { KeyType = "bigint" })!.To.Should().Be(2_294_966_000);
+        MigrationSqlText.RangeBoundLiteral("bigint", 9_007_199_254_740_994d).Should().BeNull("past 2^53 a double holds no exact whole number");
+    }
+
+    [Fact]
+    public void A_time_range_written_in_a_DateStyle_other_than_ISO_is_said_to_be_unjudged()
+    {
+        HealthPartitionedTableRow styled = Monthly(default, default) with
+        {
+            NewestLower = null,
+            NewestUpper = null,
+            BoundedPartitions = 0,
+            UnreadBounds = 12,
+            DateStyle = "SQL, DMY",
+        };
+
+        HealthVerdict verdict = Range(styled);
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Be("1 table partitioned by range on a time column was not judged: its bounds are written in the session's "
+            + "DateStyle, SQL, DMY, and the studio reads time bounds only in ISO, Postgres' default.");
     }
 
     [Fact]

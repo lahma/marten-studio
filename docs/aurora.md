@@ -70,7 +70,7 @@ documentation:
 |---|---|---|---|
 | C01 | Connection pool saturated | applies | the process's own pool |
 | C03 | Server connection headroom | applies, reworded | `max_connections` follows the instance's memory, and on Serverless v2 the maximum ACU (A6) |
-| C04-C07 | Idle in transaction, long statements, lock waits, prepared transactions | apply | sessions and locks are Postgres' own |
+| C04-C07, C12 | Idle in transaction, long statements, lock waits, prepared transactions, the head of a blocking chain | apply | sessions and locks are Postgres' own; C12's `idle_in_transaction_session_timeout` is worded for the parameter group it lives in (A6) |
 | C08 | Deadlocks, rollbacks and temp spills | applies, reworded | temporary files use the instance's local storage (A6) |
 | C11 | Low cache hit ratio | applies, reworded | on Aurora Standard a miss is billed I/O (A5) |
 | R01 | Replication slot retaining WAL | applies | Aurora has logical slots; below `wal_level = logical` (`rds.logical_replication` off) it refuses `pg_current_wal_lsn()`, so the read asks for a WAL position only under logical WAL, and otherwise says no slot's retention is measured |

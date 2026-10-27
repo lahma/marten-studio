@@ -24,6 +24,15 @@ internal sealed record ReplayEventsQuery
     public long Version { get; init; }
 
     /// <summary>
+    /// Read only versions above this one; zero for none. The stepper's window starts here (M1), and its search for the next
+    /// change of a value.
+    /// </summary>
+    public long AfterVersion { get; init; }
+
+    /// <summary>The most events to read, or <see langword="null" /> for every one: the stepper's window is bounded (M1).</summary>
+    public int? Limit { get; init; }
+
+    /// <summary>
     /// The tenant to narrow to, or <see langword="null" /> for none: on a conjoined event store the session's, as Marten's
     /// <c>EventStatement</c> binds it; on any other whose <c>mt_events</c> carries <c>tenant_id</c>, the scope's - as the
     /// timeline narrows, and as Marten does not (the caller decides; SEC1 M1).
@@ -102,8 +111,10 @@ internal static partial class StreamReadQueries
     /// single-tenanted events is the scope's tenant, where Marten narrows nothing.
     /// </para>
     /// <para>
-    /// No row limit: the aggregate needs every event up to the version. The caller's command timeout is the bound,
-    /// as the session's <c>Timeout</c> was.
+    /// No row limit for the replay: the aggregate needs every event up to the version. The caller's command timeout is the
+    /// bound, as the session's <c>Timeout</c> was. The stepper (M1) reads a window instead - versions above
+    /// <see cref="ReplayEventsQuery.AfterVersion" />, at most <see cref="ReplayEventsQuery.Limit" /> of them - and streams
+    /// the events before it past its fold rather than holding them.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">A select field is not a plain column name the builder can quote.</exception>
@@ -156,6 +167,12 @@ internal static partial class StreamReadQueries
                     .Append(Add(command, "version", NpgsqlDbType.Bigint, query.Version)).Append('\n');
             }
 
+            if (query.AfterVersion != 0)
+            {
+                sql.Append("  and ").Append(Column(Alias, "version")).Append(" > ")
+                    .Append(Add(command, "after", NpgsqlDbType.Bigint, query.AfterVersion)).Append('\n');
+            }
+
             if (query.TenantId is { } tenant)
             {
                 sql.Append("  and ").Append(Column(Alias, "tenant_id")).Append(" = ")
@@ -163,6 +180,11 @@ internal static partial class StreamReadQueries
             }
 
             sql.Append("order by ").Append(Column(Alias, "seq_id"));
+
+            if (query.Limit is { } limit)
+            {
+                sql.Append("\nlimit ").Append(Add(command, "limit", NpgsqlDbType.Integer, Math.Max(1, limit)));
+            }
 
             command.CommandText = sql.ToString();
             return command;
@@ -299,7 +321,7 @@ internal static partial class StreamReadQueries
             yield return "is_skipped";
         }
 
-        if (query.Version != 0)
+        if (query.Version != 0 || query.AfterVersion != 0)
         {
             yield return "version";
         }

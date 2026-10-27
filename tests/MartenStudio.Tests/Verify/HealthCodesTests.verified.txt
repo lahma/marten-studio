@@ -9,6 +9,7 @@ C08 | Connections | deadlocks, rollbacks, temp-files | - | both | since 0.4 | cu
 C09 | Connections | - | - | Marten | since 0.4 | current
 C10 | Connections | - | - | Marten | since 0.4 | current
 C11 | Connections | - | - | both | since 0.5 | current
+C12 | Connections | idle-head, long-chain | - | both | since 0.6 | current
 D01 | Daemon | - | - | Marten | since 0.4 | current
 D02 | Daemon | no-daemon, lock-held-idle | - | Marten | since 0.4 | current
 D03 | Daemon | - | shard | Marten | since 0.4 | current
@@ -18,6 +19,7 @@ D06 | Daemon | - | projection | Marten | since 0.4 | current
 D07 | Daemon | - | - | Marten | since 0.4 | current
 D08 | Daemon | - | shard | Marten | since 0.4 | current
 D09 | Daemon | mark-ahead, shard-ahead, sequence-behind | `mark-ahead`: progression row; `shard-ahead`: shard; `sequence-behind`: sequence | Marten | since 0.5 | current
+D10 | Daemon | - | projection | Marten | since 0.6 | current
 E02 | Events | - | - | Marten | since 0.4 | current
 E03 | Events | - | stream | Marten | since 0.4 | current
 E04 | Events | - | - | Marten | since 0.4 | current
@@ -33,6 +35,14 @@ K05 | Configuration | - | - | both | since 0.5 | current
 K06 | Configuration | - | - | both | since 0.5 | current
 K07 | Configuration | - | - | both | since 0.5 | current
 K08 | Configuration | idle-in-transaction, transaction-timeout, idle-session | setting | Marten | since 0.5 | current
+P01 | Plans | - | plan node | both | since 0.6 | current
+P02 | Plans | - | plan node | both | since 0.6 | current
+P03 | Plans | - | plan node | both | since 0.6 | current
+P04 | Plans | - | plan node | both | since 0.6 | current
+P05 | Plans | - | plan node | both | since 0.6 | current
+P06 | Plans | - | plan node | both | since 0.6 | current
+P07 | Plans | - | plan node | both | since 0.6 | current
+P08 | Plans | - | plan node | both | since 0.6 | current
 R01 | Replication | near-limit, inactive, lost | - | both | since 0.4 | current
 R02 | Replication | failing, backlog | - | both | since 0.5 | current
 R03 | Replication | primary-view, standby-view, paused, aurora-reader | - | both | since 0.5 | current
@@ -64,6 +74,7 @@ T14 | Tables | - | - | both | since 0.4 | current
 T15 | Tables | uncovered, partly-covered | foreign key | both | since 0.5 | current
 T16 | Tables | - | - | both | since 0.5 | current
 T17 | Tables | - | - | Marten | since 0.5 | current
+T18 | Tables | - | table | Marten | since 0.6 | current
 T19 | Tables | per-transaction, capacity | table | both | since 0.5 | current
 T20 | Tables | running-out, default-partition-rows | table | both | since 0.5 | current
 T22 | Tables | - | table | Marten | since 0.4 | current

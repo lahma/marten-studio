@@ -451,6 +451,13 @@ internal sealed record DeadLetterPage(
 
     /// <summary>Whether the host hides <c>DeadLetterEvent</c>, so nothing was read (<see cref="Hidden" />).</summary>
     public bool IsHidden { get; init; }
+
+    /// <summary>
+    /// Whether the list was opened on a group and the scope holds more letters than the grouped view groups
+    /// (<see cref="DeadLetterGroupLimits.MaxLettersGrouped" />): the group's letters listed are those among the newest, as the
+    /// group's counts are, and the page says so with <see cref="DeadLetterGroupText.LettersCut" />.
+    /// </summary>
+    public bool LettersCut { get; init; }
 }
 
 /// <summary>What the dead-letter list is asking for.</summary>
@@ -464,6 +471,12 @@ internal sealed record DeadLetterQuery
 
     /// <summary>Only those whose exception type contains this.</summary>
     public string? ExceptionType { get; init; }
+
+    /// <summary>Only those about the event of this sequence - the stepper's link to a step's dead letters (M1).</summary>
+    public long? EventSequence { get; init; }
+
+    /// <summary>Only this group's (M3: a group opened from the grouped view), on top of the filters above.</summary>
+    public DeadLetterGroupKey? Group { get; init; }
 
     /// <summary>How many to skip.</summary>
     public int Offset { get; init; }
@@ -482,7 +495,14 @@ internal sealed record DeadLetterQuery
 /// Where it came from: a registered single-stream projection, or the manual picker over every document
 /// type the store knows.
 /// </param>
-internal sealed record AggregateTypeCandidate(Type Type, string Name, string FullName, AggregateCandidateSource Source);
+internal sealed record AggregateTypeCandidate(Type Type, string Name, string FullName, AggregateCandidateSource Source)
+{
+    /// <summary>
+    /// The name of the registered projection that folds it, for a <see cref="AggregateCandidateSource.SingleStreamProjection" />:
+    /// what a dead letter names, so its link can open the stepper on this aggregate (M1).
+    /// </summary>
+    public string? ProjectionName { get; init; }
+}
 
 /// <summary>Where an aggregate-type candidate came from.</summary>
 internal enum AggregateCandidateSource

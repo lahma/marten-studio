@@ -254,5 +254,12 @@ internal static class PostgresStudioText
         DatabaseGateReason = "needs the source policy to allow this data source and database",
         ExportSourceNoun = "data source",
         PickInTheHeader = "a database",
+        PlanIndexRemedy =
+            "An index whose leading column the filter compares lets Postgres read only the rows it keeps: add it in your own "
+            + "migrations, built CONCURRENTLY on a table in use.",
+        PlanPatternRemedy =
+            "A btree index can serve a pattern only by the fixed text it starts with, so one that starts with % or _ tests every "
+            + "row. A trigram index (the pg_trgm extension's GIN index, gin_trgm_ops) serves it, added in your own migrations - "
+            + "and so does searching for a prefix instead, or full-text search.",
     };
 }

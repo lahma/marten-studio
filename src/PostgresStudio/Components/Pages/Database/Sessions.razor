@@ -30,12 +30,21 @@
 
     No cancel and no terminate buttons (plan §9): the studio never ends another session. While the page is open
     it holds a lease on the in-process pool observer, which is what shows this process's own pool.
+
+    Two tabs (X3), named in the query string (?view=blocking, D9) so a link - C12's - reopens the same one: the sessions,
+    locks and prepared transactions, and Blocking's trees (SessionsBlocking). Both are drawn from the same reads; switching
+    reads nothing.
 *@
 
 <PageTitle>Sessions</PageTitle>
 
 <div class="ms-page ms-sessions">
-    <p class="ms-sessions-back"><a href="@DatabaseHref">Database</a> <span aria-hidden="true">›</span> Sessions</p>
+    @* The database browser's own breadcrumb (ms-db-breadcrumb): the link token, in both themes (0.6's UI sweep). *@
+    <nav class="ms-db-breadcrumb ms-sessions-back" aria-label="Breadcrumb">
+        <a href="@DatabaseHref">Database</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>Sessions</span>
+    </nav>
 
     <div class="ms-page-header">
         <h1 class="ms-page-title">Sessions</h1>
@@ -132,288 +141,313 @@
             </div>
         }
 
-        @if (summary.Connections is { } database)
-        {
-            @* Issue #8 G9: one aggregate over every session the role may see, never the capped list below. The database's
-               row and the server's budget are database-wide; an application's name is another program's, so the named rows
-               are the details' and are drawn only past the ViewDatabaseActivity gate. *@
-            <section class="ms-sessions-section ms-sessions-apps" aria-labelledby="ms-sessions-apps">
-                <h2 class="ms-sessions-heading" id="ms-sessions-apps">By application</h2>
-
-                @if (summary.Budget is { } budget)
+        <nav class="ms-tabs ms-sessions-tabs" aria-label="Sections of Sessions">
+            <a class="@(BlockingTab ? "ms-tab" : "ms-tab ms-tab-active")"
+               href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)"
+               aria-current="@(BlockingTab ? null : "page")">
+                Sessions
+            </a>
+            <a class="@(BlockingTab ? "ms-tab ms-tab-active" : "ms-tab")"
+               href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope, SessionLinks.BlockingView)"
+               aria-current="@(BlockingTab ? "page" : null)">
+                Blocking
+                @if (summary.Blocking.Chains + summary.Blocking.Unrooted > 0)
                 {
-                    <p class="ms-sessions-budget">
-                        @SessionText.Count(budget.ServerConnections, "client session") on the whole server, of
-                        <code>max_connections</code> @SessionText.Number(budget.MaxConnections), @SessionText.Number(budget.Reserved) of
-                        them reserved (<code>superuser_reserved_connections</code>, and <code>reserved_connections</code> from
-                        PostgreSQL 16).
-                    </p>
+                    <span class="ms-tab-count">@SessionText.Number(summary.Blocking.Chains + summary.Blocking.Unrooted)</span>
                 }
+            </a>
+        </nav>
 
-                <TableScroll Label="This database's sessions by application">
-                    <table class="ms-table ms-sessions-table ms-sessions-apps-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Application</th>
-                                <th scope="col">Sessions</th>
-                                <th scope="col">Active</th>
-                                <th scope="col">Idle</th>
-                                <th scope="col">Idle in transaction</th>
-                                <th scope="col">Waiting on a lock</th>
-                                <th scope="col">State not visible</th>
-                                <th scope="col">Oldest transaction</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @if (ShowDetails)
-                            {
-                                @foreach (SessionApplicationCounts application in details!.Applications)
+        @if (BlockingTab)
+        {
+            <SessionsBlocking SummaryModel="summary" DetailsModel="details" ShowDetails="ShowDetails" />
+        }
+        else
+        {
+            @if (summary.Connections is { } database)
+            {
+                @* Issue #8 G9: one aggregate over every session the role may see, never the capped list below. The database's
+                   row and the server's budget are database-wide; an application's name is another program's, so the named rows
+                   are the details' and are drawn only past the ViewDatabaseActivity gate. *@
+                <section class="ms-sessions-section ms-sessions-apps" aria-labelledby="ms-sessions-apps">
+                    <h2 class="ms-sessions-heading" id="ms-sessions-apps">By application</h2>
+
+                    @if (summary.Budget is { } budget)
+                    {
+                        <p class="ms-sessions-budget">
+                            @SessionText.Count(budget.ServerConnections, "client session") on the whole server, of
+                            <code>max_connections</code> @SessionText.Number(budget.MaxConnections), @SessionText.Number(budget.Reserved) of
+                            them reserved (<code>superuser_reserved_connections</code>, and <code>reserved_connections</code> from
+                            PostgreSQL 16).
+                        </p>
+                    }
+
+                    <TableScroll Label="This database's sessions by application">
+                        <table class="ms-table ms-sessions-table ms-sessions-apps-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Application</th>
+                                    <th scope="col">Sessions</th>
+                                    <th scope="col">Active</th>
+                                    <th scope="col">Idle</th>
+                                    <th scope="col">Idle in transaction</th>
+                                    <th scope="col">Waiting on a lock</th>
+                                    <th scope="col">State not visible</th>
+                                    <th scope="col">Oldest transaction</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (ShowDetails)
                                 {
-                                    <tr @key="@("app:" + application.Application)">
-                                        <td>@(string.IsNullOrEmpty(application.Application) ? "(none set)" : application.Application)</td>
-                                        @ApplicationCells(application)
+                                    @foreach (SessionApplicationCounts application in details!.Applications)
+                                    {
+                                        <tr @key="@("app:" + application.Application)">
+                                            <td>@(string.IsNullOrEmpty(application.Application) ? "(none set)" : application.Application)</td>
+                                            @ApplicationCells(application)
+                                        </tr>
+                                    }
+                                }
+                                <tr @key="@("total")" class="ms-sessions-apps-total">
+                                    <th scope="row">This database</th>
+                                    @ApplicationCells(database)
+                                </tr>
+                            </tbody>
+                        </table>
+                    </TableScroll>
+
+                    @if (!ShowDetails && summary.ApplicationCount > 0)
+                    {
+                        <p class="ms-muted ms-sessions-apps-note">
+                            @SessionText.Count(summary.ApplicationCount, "application") connected. Their names are details, shown with
+                            session details.
+                        </p>
+                    }
+                    else if (ShowDetails && details!.ApplicationCount > details.Applications.Count)
+                    {
+                        <p class="ms-sessions-caveat"><strong>How sure:</strong> Only the @SessionText.Number(details.Applications.Count) applications with the most sessions, of @SessionText.Number(details.ApplicationCount), are listed; the total counts them all.</p>
+                    }
+
+                    @if (summary.Budget is { AllSessionsVisible: false })
+                    {
+                        <p class="ms-sessions-caveat">
+                            <strong>How sure:</strong> the studio's Postgres role is not a member of pg_read_all_stats, so other roles'
+                            sessions are counted in "State not visible" and in no state; the totals count every session.
+                        </p>
+                    }
+                </section>
+            }
+
+            <section class="ms-sessions-section" aria-labelledby="ms-sessions-list">
+                <h2 class="ms-sessions-heading" id="ms-sessions-list">Sessions</h2>
+
+                @if (summary.Sessions.Count == 0)
+                {
+                    @* Counted whatever the role may read of them: a session it cannot see into is listed as "not readable". *@
+                    <p class="ms-muted">At this reading, no session but the studio's own was connected to this database.</p>
+                }
+                else if (ShowDetails)
+                {
+                    <TableScroll Label="Sessions of this database">
+                        <table class="ms-table ms-sessions-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">pid</th>
+                                    <th scope="col">Role</th>
+                                    <th scope="col">Application</th>
+                                    <th scope="col">Client</th>
+                                    <th scope="col">State</th>
+                                    <th scope="col">Transaction</th>
+                                    <th scope="col">In state</th>
+                                    <th scope="col">Waiting on</th>
+                                    <th scope="col">Blocked by</th>
+                                    <th scope="col">Statement</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (SessionDetailRow row in details!.Sessions)
+                                {
+                                    <tr @key="row.ProcessId">
+                                        <td class="ms-mono">@row.ProcessId</td>
+                                        <td>@(row.User ?? "–")</td>
+                                        <td>@(string.IsNullOrEmpty(row.Application) ? "–" : row.Application)</td>
+                                        <td class="ms-mono">@(row.ClientAddress ?? "local socket")</td>
+                                        <td>@(row.State ?? "not readable")</td>
+                                        <td>@Age(row.TransactionAge)</td>
+                                        <td>@Age(row.StateAge)</td>
+                                        <td>@Wait(row.WaitEventType, row.WaitEvent)</td>
+                                        <td class="ms-mono">@(row.BlockedBy.Count == 0 ? "–" : string.Join(", ", row.BlockedBy))</td>
+                                        <td class="ms-sessions-statement">
+                                            @if (row.Statement.Text is { Length: > 0 } text)
+                                            {
+                                                <code class="ms-mono">@text</code>
+                                            }
+                                            @if (row.Statement.Note is { Length: > 0 } note)
+                                            {
+                                                <span class="ms-sessions-statement-note">@note</span>
+                                            }
+                                        </td>
                                     </tr>
                                 }
-                            }
-                            <tr @key="@("total")" class="ms-sessions-apps-total">
-                                <th scope="row">This database</th>
-                                @ApplicationCells(database)
-                            </tr>
-                        </tbody>
-                    </table>
-                </TableScroll>
-
-                @if (!ShowDetails && summary.ApplicationCount > 0)
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+                else
                 {
-                    <p class="ms-muted ms-sessions-apps-note">
-                        @SessionText.Count(summary.ApplicationCount, "application") connected. Their names are details, shown with
-                        session details.
+                    <TableScroll Label="Sessions of this database">
+                        <table class="ms-table ms-sessions-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">State</th>
+                                    <th scope="col">Transaction</th>
+                                    <th scope="col">Since its last statement</th>
+                                    <th scope="col">In state</th>
+                                    <th scope="col">Waiting on</th>
+                                    <th scope="col">Blocked by</th>
+                                    <th scope="col">Has written</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < summary.Sessions.Count; i++)
+                                {
+                                    SessionSummaryRow row = summary.Sessions[i];
+                                    <tr @key="i">
+                                        <td>@(row.State ?? "not readable")</td>
+                                        <td>@Age(row.TransactionAge)</td>
+                                        <td>@Age(row.QueryAge)</td>
+                                        <td>@Age(row.StateAge)</td>
+                                        <td>@(row.WaitEventType ?? "–")</td>
+                                        <td>@(row.BlockedByCount == 0 ? "–" : SessionText.Count(row.BlockedByCount, "session"))</td>
+                                        <td>@(row.HasTransactionId ? "yes" : "no")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+            </section>
+
+            <section class="ms-sessions-section" aria-labelledby="ms-sessions-locks">
+                <h2 class="ms-sessions-heading" id="ms-sessions-locks">Locks</h2>
+
+                @if (summary.Locks.Count == 0)
+                {
+                    <p class="ms-muted">No session of this database holds or awaits a lock beyond its own transaction's.</p>
+                }
+                else if (ShowDetails)
+                {
+                    <TableScroll Label="Locks of this database's sessions">
+                        <table class="ms-table ms-sessions-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">pid</th>
+                                    <th scope="col">On</th>
+                                    <th scope="col">Relation</th>
+                                    <th scope="col">Mode</th>
+                                    <th scope="col">Held or awaited</th>
+                                    <th scope="col">Waited</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < details!.Locks.Count; i++)
+                                {
+                                    LockDetailRow row = details.Locks[i];
+                                    <tr @key="i" class="@(row.Granted ? null : "ms-sessions-awaited")">
+                                        <td class="ms-mono">@row.ProcessId</td>
+                                        <td>@row.Target</td>
+                                        <td class="ms-mono">@(row.Relation ?? "–")</td>
+                                        <td class="ms-mono">@row.Mode</td>
+                                        <td>@(row.Granted ? "held" : "awaited")</td>
+                                        <td>@Age(row.Waited)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+                else
+                {
+                    <TableScroll Label="Locks of this database's sessions">
+                        <table class="ms-table ms-sessions-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">On</th>
+                                    <th scope="col">Mode</th>
+                                    <th scope="col">Held or awaited</th>
+                                    <th scope="col">Count</th>
+                                    <th scope="col">Longest wait</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int i = 0; i < summary.Locks.Count; i++)
+                                {
+                                    LockSummaryRow row = summary.Locks[i];
+                                    <tr @key="i" class="@(row.Granted ? null : "ms-sessions-awaited")">
+                                        <td>@row.Target</td>
+                                        <td class="ms-mono">@row.Mode</td>
+                                        <td>@(row.Granted ? "held" : "awaited")</td>
+                                        <td>@SessionText.Number(row.Count)</td>
+                                        <td>@Age(row.LongestWait)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+            </section>
+
+            <section class="ms-sessions-section" aria-labelledby="ms-sessions-prepared">
+                <h2 class="ms-sessions-heading" id="ms-sessions-prepared">Prepared transactions</h2>
+
+                @if (summary.PreparedCount == 0)
+                {
+                    <p class="ms-muted">
+                        @(summary.MaxPreparedTransactions == 0
+                            ? "None: max_prepared_transactions is 0 on this server, so none can exist."
+                            : "None is waiting in this database.")
                     </p>
                 }
-                else if (ShowDetails && details!.ApplicationCount > details.Applications.Count)
+                else if (ShowDetails)
                 {
-                    <p class="ms-sessions-caveat"><strong>How sure:</strong> Only the @SessionText.Number(details.Applications.Count) applications with the most sessions, of @SessionText.Number(details.ApplicationCount), are listed; the total counts them all.</p>
+                    <TableScroll Label="Prepared transactions of this database">
+                        <table class="ms-table ms-sessions-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Global id</th>
+                                    <th scope="col">Owner</th>
+                                    <th scope="col">Prepared</th>
+                                    <th scope="col">Waiting for</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (PreparedDetailRow row in details!.Prepared)
+                                {
+                                    <tr @key="row.Gid">
+                                        <td class="ms-mono">@row.Gid</td>
+                                        <td>@row.Owner</td>
+                                        <td>@State.FormatInSelectedTimeZone(row.Prepared)</td>
+                                        <td>@SessionText.Duration(row.Age)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
                 }
-
-                @if (summary.Budget is { AllSessionsVisible: false })
+                else
                 {
-                    <p class="ms-sessions-caveat">
-                        <strong>How sure:</strong> the studio's Postgres role is not a member of pg_read_all_stats, so other roles'
-                        sessions are counted in "State not visible" and in no state; the totals count every session.
+                    <p>
+                        @SessionText.Count(summary.PreparedCount, "prepared transaction") waiting
+                        @(summary.OldestPrepared is { } prepared ? ", the oldest for " + SessionText.Duration(prepared) : string.Empty).
+                        Their global ids and owners are details.
                     </p>
                 }
             </section>
         }
 
-        <section class="ms-sessions-section" aria-labelledby="ms-sessions-list">
-            <h2 class="ms-sessions-heading" id="ms-sessions-list">Sessions</h2>
-
-            @if (summary.Sessions.Count == 0)
-            {
-                @* Counted whatever the role may read of them: a session it cannot see into is listed as "not readable". *@
-                <p class="ms-muted">At this reading, no session but the studio's own was connected to this database.</p>
-            }
-            else if (ShowDetails)
-            {
-                <TableScroll Label="Sessions of this database">
-                    <table class="ms-table ms-sessions-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">pid</th>
-                                <th scope="col">Role</th>
-                                <th scope="col">Application</th>
-                                <th scope="col">Client</th>
-                                <th scope="col">State</th>
-                                <th scope="col">Transaction</th>
-                                <th scope="col">In state</th>
-                                <th scope="col">Waiting on</th>
-                                <th scope="col">Blocked by</th>
-                                <th scope="col">Statement</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (SessionDetailRow row in details!.Sessions)
-                            {
-                                <tr @key="row.ProcessId">
-                                    <td class="ms-mono">@row.ProcessId</td>
-                                    <td>@(row.User ?? "–")</td>
-                                    <td>@(string.IsNullOrEmpty(row.Application) ? "–" : row.Application)</td>
-                                    <td class="ms-mono">@(row.ClientAddress ?? "local socket")</td>
-                                    <td>@(row.State ?? "not readable")</td>
-                                    <td>@Age(row.TransactionAge)</td>
-                                    <td>@Age(row.StateAge)</td>
-                                    <td>@Wait(row.WaitEventType, row.WaitEvent)</td>
-                                    <td class="ms-mono">@(row.BlockedBy.Count == 0 ? "–" : string.Join(", ", row.BlockedBy))</td>
-                                    <td class="ms-sessions-statement">
-                                        @if (row.Statement.Text is { Length: > 0 } text)
-                                        {
-                                            <code class="ms-mono">@text</code>
-                                        }
-                                        @if (row.Statement.Note is { Length: > 0 } note)
-                                        {
-                                            <span class="ms-sessions-statement-note">@note</span>
-                                        }
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </TableScroll>
-            }
-            else
-            {
-                <TableScroll Label="Sessions of this database">
-                    <table class="ms-table ms-sessions-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">State</th>
-                                <th scope="col">Transaction</th>
-                                <th scope="col">Since its last statement</th>
-                                <th scope="col">In state</th>
-                                <th scope="col">Waiting on</th>
-                                <th scope="col">Blocked by</th>
-                                <th scope="col">Has written</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @for (int i = 0; i < summary.Sessions.Count; i++)
-                            {
-                                SessionSummaryRow row = summary.Sessions[i];
-                                <tr @key="i">
-                                    <td>@(row.State ?? "not readable")</td>
-                                    <td>@Age(row.TransactionAge)</td>
-                                    <td>@Age(row.QueryAge)</td>
-                                    <td>@Age(row.StateAge)</td>
-                                    <td>@(row.WaitEventType ?? "–")</td>
-                                    <td>@(row.BlockedByCount == 0 ? "–" : SessionText.Count(row.BlockedByCount, "session"))</td>
-                                    <td>@(row.HasTransactionId ? "yes" : "no")</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </TableScroll>
-            }
-        </section>
-
-        <section class="ms-sessions-section" aria-labelledby="ms-sessions-locks">
-            <h2 class="ms-sessions-heading" id="ms-sessions-locks">Locks</h2>
-
-            @if (summary.Locks.Count == 0)
-            {
-                <p class="ms-muted">No session of this database holds or awaits a lock beyond its own transaction's.</p>
-            }
-            else if (ShowDetails)
-            {
-                <TableScroll Label="Locks of this database's sessions">
-                    <table class="ms-table ms-sessions-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">pid</th>
-                                <th scope="col">On</th>
-                                <th scope="col">Relation</th>
-                                <th scope="col">Mode</th>
-                                <th scope="col">Held or awaited</th>
-                                <th scope="col">Waited</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @for (int i = 0; i < details!.Locks.Count; i++)
-                            {
-                                LockDetailRow row = details.Locks[i];
-                                <tr @key="i" class="@(row.Granted ? null : "ms-sessions-awaited")">
-                                    <td class="ms-mono">@row.ProcessId</td>
-                                    <td>@row.Target</td>
-                                    <td class="ms-mono">@(row.Relation ?? "–")</td>
-                                    <td class="ms-mono">@row.Mode</td>
-                                    <td>@(row.Granted ? "held" : "awaited")</td>
-                                    <td>@Age(row.Waited)</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </TableScroll>
-            }
-            else
-            {
-                <TableScroll Label="Locks of this database's sessions">
-                    <table class="ms-table ms-sessions-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">On</th>
-                                <th scope="col">Mode</th>
-                                <th scope="col">Held or awaited</th>
-                                <th scope="col">Count</th>
-                                <th scope="col">Longest wait</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @for (int i = 0; i < summary.Locks.Count; i++)
-                            {
-                                LockSummaryRow row = summary.Locks[i];
-                                <tr @key="i" class="@(row.Granted ? null : "ms-sessions-awaited")">
-                                    <td>@row.Target</td>
-                                    <td class="ms-mono">@row.Mode</td>
-                                    <td>@(row.Granted ? "held" : "awaited")</td>
-                                    <td>@SessionText.Number(row.Count)</td>
-                                    <td>@Age(row.LongestWait)</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </TableScroll>
-            }
-        </section>
-
-        <section class="ms-sessions-section" aria-labelledby="ms-sessions-prepared">
-            <h2 class="ms-sessions-heading" id="ms-sessions-prepared">Prepared transactions</h2>
-
-            @if (summary.PreparedCount == 0)
-            {
-                <p class="ms-muted">
-                    @(summary.MaxPreparedTransactions == 0
-                        ? "None: max_prepared_transactions is 0 on this server, so none can exist."
-                        : "None is waiting in this database.")
-                </p>
-            }
-            else if (ShowDetails)
-            {
-                <TableScroll Label="Prepared transactions of this database">
-                    <table class="ms-table ms-sessions-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Global id</th>
-                                <th scope="col">Owner</th>
-                                <th scope="col">Prepared</th>
-                                <th scope="col">Waiting for</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (PreparedDetailRow row in details!.Prepared)
-                            {
-                                <tr @key="row.Gid">
-                                    <td class="ms-mono">@row.Gid</td>
-                                    <td>@row.Owner</td>
-                                    <td>@State.FormatInSelectedTimeZone(row.Prepared)</td>
-                                    <td>@SessionText.Duration(row.Age)</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </TableScroll>
-            }
-            else
-            {
-                <p>
-                    @SessionText.Count(summary.PreparedCount, "prepared transaction") waiting
-                    @(summary.OldestPrepared is { } prepared ? ", the oldest for " + SessionText.Duration(prepared) : string.Empty).
-                    Their global ids and owners are details.
-                </p>
-            }
-        </section>
-
         @foreach (HealthStatement statement in summary.Statements)
         {
-            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+            @* One read per statement, so each says what it reads ("Show SQL for the sessions"), on both tabs. *@
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" Reads="@statement.Label" />
         }
 
         @if (summary.MeasuredAt is { } measured)
@@ -444,6 +478,13 @@
 
     /// <summary>Whether the details are on screen: the gate open and the service's answer a grant.</summary>
     private bool ShowDetails => summary?.Details.IsOpen == true && details is { Refusal: DatabaseRefusal.None };
+
+    /// <summary>The tab the address names (<c>?view=blocking</c>, D9); anything else is the sessions themselves.</summary>
+    [SupplyParameterFromQuery(Name = SessionLinks.ViewParameter)]
+    public string? View { get; set; }
+
+    /// <summary>Whether Blocking is the tab on screen.</summary>
+    private bool BlockingTab => string.Equals(View, SessionLinks.BlockingView, StringComparison.OrdinalIgnoreCase);
 
     private string DatabaseHref => DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope);
 

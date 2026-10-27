@@ -7,8 +7,6 @@ using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using Npgsql;
-
 namespace PostgresStudio.Services.Health.Checks;
 
 /// <summary>One session waiting for a lock, as C06 read it.</summary>
@@ -102,32 +100,78 @@ internal sealed record LockWaitFacts(
 internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
 {
     /// <inheritdoc />
+    /// <remarks>
+    /// The waiters and their blockers are the sweep's one read of the lock table (X3, <see cref="LockTableReads" />): the
+    /// waiting sessions that have waited at least <see cref="ConnectionThresholds.CandidateFloor" />, the longest first and at
+    /// most <see cref="HealthConnectionQueries.MaxOffenders" /> of them, and the sessions blocking those.
+    /// </remarks>
     public override async Task<LockWaitFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         SessionLockLabels labels = context.Services.GetRequiredService<ISessionLockLabeler>().For(context.Source, Classifier(context));
+        LockTableRead locks = await LockTableReads.SharedAsync(context).ConfigureAwait(false);
 
-        IReadOnlyList<(SessionVisibility Visibility, LockWaiter? Waiter, long Total)> rows = await context.Sql
-            .QueryAsync(HealthConnectionQueries.LockWaits(ConnectionThresholds.CandidateFloor), reader => MapWaiter(reader, labels), cancellationToken)
-            .ConfigureAwait(false);
+        return FactsOf(locks, labels, context.Now);
+    }
 
-        List<LockWaiter> waiters = [.. rows.Where(static x => x.Waiter is not null).Select(static x => x.Waiter!)];
+    /// <summary>
+    /// C06's facts from a read of the lock table: the waiters past the candidate floor, the longest first and at most
+    /// <see cref="HealthConnectionQueries.MaxOffenders" />, each labelled, and the sessions blocking them.
+    /// </summary>
+    internal static LockWaitFacts FactsOf(LockTableRead locks, SessionLockLabels labels, DateTimeOffset readAt)
+    {
+        ArgumentNullException.ThrowIfNull(locks);
+        ArgumentNullException.ThrowIfNull(labels);
+
+        List<LockGraphNode> past =
+        [
+            .. locks.Waiting
+                .Where(static x => x.Wanted!.Waited >= ConnectionThresholds.CandidateFloor)
+                .OrderByDescending(static x => x.Wanted!.Waited)
+                .ThenBy(static x => x.ProcessId),
+        ];
+
+        List<LockWaiter> waiters =
+        [
+            .. past.Take(HealthConnectionQueries.MaxOffenders).Select(x => new LockWaiter(
+                x.ProcessId,
+                x.User,
+                x.Application,
+                x.ClientAddress,
+                x.Wanted!.Mode,
+                labels.Describe(x.Wanted.LockType, x.Wanted.Relation, x.Wanted.AdvisoryKey, x.Wanted.TupleRelation),
+                x.Wanted.ExactStart,
+                x.Wanted.Waited,
+                x.BlockedBy)),
+        ];
 
         HashSet<int> blocking = [.. waiters.SelectMany(static x => x.BlockedBy)];
 
-        IReadOnlyList<LockBlocker> blockers = blocking.Count == 0
-            ? []
-            : await context.Sql
-                .QueryAsync(HealthConnectionQueries.Blockers([.. blocking.Order()]), MapBlocker, cancellationToken)
-                .ConfigureAwait(false);
+        List<LockBlocker> blockers =
+        [
+            .. locks.Nodes
+                .Where(x => blocking.Contains(x.ProcessId) && x.Known)
+                .OrderBy(static x => x.ProcessId)
+                .Take(HealthConnectionQueries.MaxOffenders)
+                .Select(static x => new LockBlocker(
+                    x.ProcessId,
+                    x.SameDatabase,
+                    x.State,
+                    x.User,
+                    x.Application,
+                    x.ClientAddress,
+                    x.TransactionAge,
+                    x.HasTransactionId,
+                    x.WaitsForALock)
+                {
+                    Vacuum = x.Vacuum,
+                    Autovacuum = x.Autovacuum,
+                    PreventsWraparound = x.PreventsWraparound,
+                }),
+        ];
 
-        return new LockWaitFacts(
-            context.Now,
-            rows.Count > 0 ? rows[0].Visibility : SessionVisibility.Everything,
-            rows.Count > 0 ? rows[0].Total : 0,
-            waiters,
-            blockers);
+        return new LockWaitFacts(readAt, locks.Visibility, past.Count + Math.Max(0, locks.WaitingTotal - locks.Waiting.Count()), waiters, blockers);
     }
 
     /// <inheritdoc />
@@ -326,50 +370,4 @@ internal sealed class LockWaitCheck : HealthCheck<LockWaitFacts>
         DatabaseDeclarations declared = declarations.ReadUncached(context.Source);
         return declared.Succeeded ? declared.Classifier : null;
     }
-
-    private static (SessionVisibility Visibility, LockWaiter? Waiter, long Total) MapWaiter(NpgsqlDataReader reader, SessionLockLabels labels)
-    {
-        SessionVisibility visibility = SessionReads.Visibility(reader);
-
-        if (reader.IsDBNull(2))
-        {
-            return (visibility, null, 0);
-        }
-
-        LockTarget target = labels.Describe(
-            reader.GetString(3),
-            SessionReads.Locked(reader, 5),
-            SessionReads.Value<long>(reader, 9),
-            SessionReads.Locked(reader, 16));
-
-        return (
-            visibility,
-            new LockWaiter(
-                reader.GetInt32(2),
-                SessionReads.Text(reader, 12),
-                SessionReads.Text(reader, 13),
-                SessionReads.Text(reader, 14),
-                reader.GetString(4),
-                target,
-                !reader.IsDBNull(10) && reader.GetBoolean(10),
-                SessionReads.Seconds(reader, 11) ?? TimeSpan.Zero,
-                SessionReads.Pids(reader, 20)),
-            reader.GetInt64(21));
-    }
-
-    private static LockBlocker MapBlocker(NpgsqlDataReader reader) => new(
-        reader.GetInt32(0),
-        !reader.IsDBNull(1) && reader.GetBoolean(1),
-        SessionReads.Text(reader, 2),
-        SessionReads.Text(reader, 3),
-        SessionReads.Text(reader, 4),
-        SessionReads.Text(reader, 5),
-        SessionReads.Seconds(reader, 6),
-        !reader.IsDBNull(8) && reader.GetBoolean(8),
-        !reader.IsDBNull(9) && reader.GetBoolean(9))
-    {
-        Vacuum = !reader.IsDBNull(10) && reader.GetBoolean(10),
-        Autovacuum = string.Equals(SessionReads.Text(reader, 11), "autovacuum worker", StringComparison.Ordinal),
-        PreventsWraparound = !reader.IsDBNull(12) && reader.GetBoolean(12),
-    };
 }

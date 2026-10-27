@@ -169,6 +169,13 @@ internal sealed record ProjectionInfo(
     /// shards" that nothing advances - and they are not agents: nothing starts or stops one alone.
     /// </remarks>
     public IReadOnlyList<string> MemberShardNames { get; init; } = [];
+
+    /// <summary>
+    /// Whether this is a subscription registered with <c>Events.Subscribe(...)</c>, which <c>Projections()</c> does not
+    /// list and the daemon's own <c>AllShards()</c> does (<see cref="ProgressionRowClassifier.SubscriptionsOf" />). Its
+    /// shards are started and stopped like any other; it has no projection to rebuild, and the studio does not rewind it.
+    /// </summary>
+    public bool IsSubscription { get; init; }
 }
 
 /// <summary>How far behind a shard is, as the table colours it.</summary>
@@ -290,6 +297,12 @@ internal sealed record ShardProgress(
     /// the composite's own agent, with no agent of its own to start or stop.
     /// </summary>
     public bool IsCompositeMember { get; init; }
+
+    /// <summary>
+    /// What the store's configuration says the row is (<see cref="ProgressionRowClassifier" />), for a tenant's row and for
+    /// a row nothing registered claims - <see langword="null" /> for a projection's own shard, and where no classifier was asked.
+    /// </summary>
+    public ProgressionRowClass? Classification { get; init; }
 }
 
 /// <summary>Whether the async daemon is running in this process at all.</summary>
@@ -501,6 +514,59 @@ internal sealed record DaemonStatus(
     public bool IsRebuildingHere(string projection) =>
         (RebuildingProjections ?? []).Contains(projection, StringComparer.OrdinalIgnoreCase);
 
+    private static readonly IReadOnlyDictionary<string, bool> NoLeadership =
+        new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Which coordinator runs the daemon here (M7), or <see cref="DaemonCoordination.None" /> when none is hosted here.</summary>
+    public DaemonCoordination Coordination { get; init; }
+
+    /// <summary>How its leadership loop divides the shards between nodes, where it has one.</summary>
+    public DaemonDistribution Distribution { get; init; }
+
+    /// <summary>
+    /// For each registered async shard of this database, by store-global identity, whether this node holds the leadership
+    /// lock it runs under (<see cref="DaemonLeadership" />) - under HotCold only; empty otherwise, and where it could not be told.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> Leadership { get; init; } = NoLeadership;
+
+    /// <summary>Whether shards run on whichever node holds their lock: Marten's coordinator under HotCold.</summary>
+    public bool IsHotCold =>
+        Coordination == DaemonCoordination.LeadershipLoop && Distribution is DaemonDistribution.PerShard or DaemonDistribution.PerDatabase;
+
+    /// <summary>Whether the daemon here has an agent for <paramref name="shardName" />, in any status.</summary>
+    public bool RunsHere(string shardName) =>
+        Agents.Any(x => string.Equals(x.ShardName, shardName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Whether the daemon here has a running agent for <paramref name="shardName" />, which a Start would leave as it is.</summary>
+    public bool IsRunningHere(string shardName) =>
+        Agents.Any(x => string.Equals(x.ShardName, shardName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Status, "Running", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Whether this node holds the leadership lock <paramref name="shardName" /> runs under - always, under Solo; per lock,
+    /// under HotCold - or <see langword="null" /> where there is no such lock to hold or it could not be told.
+    /// </summary>
+    public bool? LeadsHere(string shardName)
+    {
+        if (Coordination != DaemonCoordination.LeadershipLoop)
+        {
+            return null;
+        }
+
+        if (Distribution == DaemonDistribution.Solo)
+        {
+            return true;
+        }
+
+        if (!IsHotCold || !ShardName.TryParse(shardName, out ShardName? shard) || shard is null)
+        {
+            return null;
+        }
+
+        string neutral = shard.TenantId is null ? shard.Identity : ShardName.Compose(shard.Name, shard.ShardKey, null, shard.Version).Identity;
+        return Leadership.TryGetValue(neutral, out bool leads) ? leads : null;
+    }
+
     /// <summary>How long a stopping shard may take to finish the page it is processing.</summary>
     public TimeSpan StopAndDrainTimeout => TimeSpan.FromMilliseconds(StopAndDrainMilliseconds);
 
@@ -553,8 +619,14 @@ internal sealed record DaemonStatus(
     /// <see cref="LeadershipPollingTime" /> - or within <see cref="AgentPauseTime" /> when any shard is
     /// paused - and the control would be a lie. The recorded pause alone is not enough for that promise,
     /// because the record says what the studio did and not what is true now.
+    /// <para>
+    /// <b>Except where there is no loop</b> (M7): <c>MartenDaemonModeIsSolo()</c>'s <c>ExplicitProjectionCoordinator</c>
+    /// starts an agent only when asked and never restarts one, so a Start or a Stop there means what it says without a
+    /// pause (<see cref="DaemonCoordination.Explicit" />).
+    /// </para>
     /// </remarks>
-    public bool CanControlAgents => IsHostedHere && IsPausedByStudio && !IsRunning;
+    public bool CanControlAgents =>
+        IsHostedHere && (Coordination == DaemonCoordination.Explicit || (IsPausedByStudio && !IsRunning));
 
     /// <summary>
     /// Why a per-agent start or stop is refused right now, or <see langword="null" /> when it is not.
@@ -566,6 +638,7 @@ internal sealed record DaemonStatus(
     public string? AgentControlRefusal => (IsHostedHere, IsPausedByStudio, IsRunning) switch
     {
         (false, _, _) => null,
+        _ when Coordination == DaemonCoordination.Explicit => null,
         (true, true, true) => DaemonControlMessages.PauseNoLongerInEffect(LeadershipPollingTime, AgentPauseTime),
         (true, false, _) => DaemonControlMessages.AgentControlNeedsPause(LeadershipPollingTime, AgentPauseTime),
         _ => null,
@@ -627,6 +700,20 @@ internal sealed record ProjectionsView(
     /// <summary>The advisor's samples as this visitor may read them, for the rebuild dialog's estimate.</summary>
     public HealthHistoryView HealthHistory { get; init; } = HealthHistoryView.Empty;
 
+    private static readonly IReadOnlyDictionary<string, ShardLagHistory> NoLagHistories =
+        new Dictionary<string, ShardLagHistory>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Each registered shard's history from this screen's own samples (<see cref="ProjectionLagHistory" />): its lag chart,
+    /// its arrow and a running rebuild's estimate - for the shards this visitor's read returned that have samples, and
+    /// for no other. The arrow here wins over <see cref="Trends" />, which the screen falls back to while its own samples
+    /// are too few to say anything.
+    /// </summary>
+    public IReadOnlyDictionary<string, ShardLagHistory> LagHistories { get; init; } = NoLagHistories;
+
+    /// <summary>The studio's own thresholds that apply to this store's shards, or <see langword="null" /> when not read.</summary>
+    public ProjectionThresholds? Thresholds { get; init; }
+
     /// <summary>
     /// <c>Events.UseTenantPartitionedEvents</c>: each tenant numbers its events and keeps its own high-water mark, which
     /// is what the Advance high water mark dialog has to say from Marten 9.52 (<see cref="HighWaterAdvanceWording" />).
@@ -664,15 +751,178 @@ internal sealed record ProjectionsView(
         && !Progress.Any(static x => x.HasProgressRow && x.Sequence > 0);
 
     /// <summary>
-    /// Progression rows no registered projection claims, worst first.
+    /// The progression rows nothing this store registers advances (M4) - counted for everyone the scope admits, named only
+    /// for a visitor the store policy allows for the database as a whole.
     /// </summary>
     /// <remarks>
-    /// A projection removed from <c>StoreOptions</c>, renamed, or bumped to a version whose shard names
-    /// differ leaves its rows in <c>mt_event_progression</c>. They are not noise: they are the reason a
-    /// table nothing writes to any more still exists, and the reason a shard name in a log does not
-    /// appear in the table above.
+    /// <para>
+    /// A projection removed from <c>StoreOptions</c>, renamed, or bumped to a version whose shard names differ, and a
+    /// subscription that was removed, leave their rows in <c>mt_event_progression</c>. They are not noise: they are the
+    /// reason a shard name in a log does not appear in the table above, and a projection registered again under the same
+    /// name and version resumes from them.
+    /// </para>
+    /// <para>
+    /// They replace 0.5's "Unregistered shards", which was every row no projection's <c>ShardNames()</c> listed - and so
+    /// also every row of a subscription registered with <c>Events.Subscribe(...)</c> and, under
+    /// <c>UseTenantPartitionedEvents</c>, every tenant's row of a registered shard. Those are registered, and are drawn
+    /// under their projection or subscription (<see cref="ProgressionRowClassifier" />). They are not in
+    /// <see cref="Progress" />, so an orphan's lag - which only grows - is never the worst lag on the screen or the Overview.
+    /// </para>
     /// </remarks>
-    public IReadOnlyList<ShardProgress> UnregisteredShards => [.. Progress.Where(static x => !x.IsRegistered)];
+    public OrphanedProgression Orphans { get; init; } = OrphanedProgression.None;
+}
+
+/// <summary>The orphaned progression rows of one database, as one visitor may see them.</summary>
+/// <param name="Count">How many there are - shown to everyone the scope admits.</param>
+/// <param name="Rows">The rows, oldest name first - empty when <paramref name="Withheld" /> is set.</param>
+/// <param name="Withheld">Why the names are not shown to this visitor, or <see langword="null" /> when they are.</param>
+internal sealed record OrphanedProgression(int Count, IReadOnlyList<OrphanedProgressionRow> Rows, string? Withheld = null)
+{
+    /// <summary>None at all.</summary>
+    public static OrphanedProgression None { get; } = new(0, []);
+
+    /// <summary>Whether this visitor is shown the rows' names.</summary>
+    public bool NamesShown => Withheld is null;
+
+    /// <summary>The statements that would remove the rows that may be removed - for the host's own migrations.</summary>
+    public IReadOnlyList<string> RemovalStatements => [.. Rows.Select(static x => x.RemovalSql).OfType<string>()];
+
+    /// <summary>Marten's own calls that would remove the same rows - for the host's own code.</summary>
+    public IReadOnlyList<string> RemovalCalls => [.. Rows.Select(static x => x.RemovalCall).OfType<string>()];
+}
+
+/// <summary>One progression row nothing this store registers advances.</summary>
+/// <param name="Name">The row's <c>name</c>.</param>
+/// <param name="Sequence">Its <c>last_seq_id</c>: how far it had got when something last advanced it.</param>
+/// <param name="LastUpdated">When it was last written (<c>last_updated</c>, server time), when the table has the column.</param>
+/// <param name="Reason">Why nothing advances it.</param>
+/// <param name="Explanation">The same, as a sentence for the page (<see cref="OrphanWording.Explain" />).</param>
+/// <param name="TenantId">The tenant its name carries, or <see langword="null" />.</param>
+/// <param name="ReadByDaemon">Whether the daemon may still read it (<see cref="ProgressionRowClass.ReadByDaemon" />).</param>
+/// <param name="RemovalSql">
+/// The statement that removes it, for the host's own migrations - <see langword="null" /> for a row the daemon may still
+/// read, and for a name or schema no statement can print honestly (<c>MigrationSqlText.DeleteRowWhereEquals</c>).
+/// </param>
+/// <param name="RemovalCall">
+/// Marten's own call that removes it, for the host's own code (<see cref="OrphanWording.MartenCall" />) - <see langword="null" />
+/// where <paramref name="RemovalSql" /> is.
+/// </param>
+internal sealed record OrphanedProgressionRow(
+    string Name,
+    long Sequence,
+    DateTimeOffset? LastUpdated,
+    OrphanReason Reason,
+    string Explanation,
+    string? TenantId,
+    bool ReadByDaemon,
+    string? RemovalSql,
+    string? RemovalCall = null);
+
+/// <summary>
+/// What the projections screen and D10 say about orphaned progression rows - pure text, so each sentence is a unit test.
+/// </summary>
+internal static class OrphanWording
+{
+    /// <summary>The section's heading.</summary>
+    public const string Heading = "Orphaned progression rows";
+
+    /// <summary>The hand-over: what the rows are, and that removing one is the host's decision.</summary>
+    /// <remarks>
+    /// Marten's removal by name is <c>IEventDatabase.DeleteProjectionProgressByShardNameAsync</c> (marten#4785,
+    /// jasperfx#473), public at <c>V9.39.0</c> and <c>v9.54.2</c>: it deletes the row whose name is the identity given,
+    /// whether or not a projection of that name is registered, after <c>EnsureStorageExistsAsync(typeof(IEvent))</c>.
+    /// <c>IEventStore.DeleteProjectionProgressAsync</c> looks a projection's name up among the registered ones and throws
+    /// <see cref="ArgumentOutOfRangeException" /> for any other, so it cannot.
+    /// </remarks>
+    public const string HandOver =
+        "These rows are in mt_event_progression, and nothing this store registers advances them: each was written by a "
+        + "projection that has since been renamed, removed or given a new version, or by a subscription that was removed. "
+        + "Whether to remove one is the host's decision, and Marten Studio never does. Marten's own "
+        + "IEventDatabase.DeleteProjectionProgressByShardNameAsync removes a row by its exact name, registered or not - "
+        + "DeleteProjectionProgressAsync, which looks a projection's name up among the registered ones, refuses one that is "
+        + "not. A projection registered again under the same name and version resumes from its row's position rather than "
+        + "replaying from the first event.";
+
+    /// <summary>What introduces Marten's calls in the hand-over block.</summary>
+    public const string CallLead = "From the host's own code, through Marten - database is this database's IMartenDatabase:";
+
+    /// <summary>What introduces the SQL in the hand-over block.</summary>
+    public const string SqlLead = "Or as SQL, in a migration:";
+
+    /// <summary>Why the names are not shown to a visitor the store policy refuses the database as a whole.</summary>
+    public const string NamesWithheld =
+        "Their names are shown only to a visitor the store policy allows for this database as a whole, with no tenant "
+        + "selected in the policy's resource: they are the database's, not one tenant's.";
+
+    /// <summary>The heading the removal statements are drawn under - the health advisor's own (<c>HealthRemedy.MigrationHeading</c>).</summary>
+    public const string SqlHeading = "For your own migrations - the studio never runs this";
+
+    /// <summary>What the removal statements do and do not do.</summary>
+    public const string SqlNote =
+        "Each removes one progression row in this database and nothing else: the documents and tables the projection wrote "
+        + "stay. Marten's call first ensures the event store's storage, as every write to it does. Run either once the "
+        + "rename or removal has shipped, in the database this page is about. A row the daemon may still read has neither here.";
+
+    /// <summary>
+    /// <c>await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("name");</c> - Marten's own removal of
+    /// one progression row by its exact name, as C# a person pastes into the host's code - or <see langword="null" /> for a
+    /// name that would not read on screen as what it is (a control, format or line-separator character).
+    /// </summary>
+    /// <param name="name">The row's name, as the table holds it.</param>
+    public static string? MartenCall(string name) =>
+        PostgresStudio.Internal.Sql.SqlLiteralText.IsPrintableText(name)
+            ? "await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync(\""
+              + name.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)
+              + "\");"
+            : null;
+
+    /// <summary>"1 row" or "3 rows".</summary>
+    public static string Count(int count) =>
+        count.ToString(CultureInfo.InvariantCulture) + (count == 1 ? " orphaned progression row" : " orphaned progression rows");
+
+    /// <summary>Why nothing advances one row, in a sentence.</summary>
+    /// <param name="name">The row's name.</param>
+    /// <param name="row">What the classifier said of it.</param>
+    public static string Explain(string name, ProgressionRowClass row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        string projection = row.Projection ?? ProjectionPart(name);
+
+        return row.Reason switch
+        {
+            OrphanReason.NoSuchProjection =>
+                "No projection or subscription named " + ProjectionPart(name) + " is registered: it was renamed or removed.",
+            OrphanReason.OtherVersion when row.RowVersion < row.RegisteredVersion =>
+                projection + " is registered at version " + Version(row.RegisteredVersion) + ", and this row is version "
+                + Version(row.RowVersion) + "'s, which nothing advances any more."
+                + (row.ReadByDaemon
+                    ? " Version " + Version(row.RegisteredVersion) + " gates its side effects behind the prior version "
+                      + "(GateSideEffectsBehindPriorVersion): the daemon reads this row each time that version starts, and "
+                      + "suppresses side effects for events up to its position, so it is not offered for removal."
+                    : string.Empty),
+            OrphanReason.OtherVersion =>
+                projection + " is registered at version " + Version(row.RegisteredVersion) + ", and this row is version "
+                + Version(row.RowVersion) + "'s - a later version this deployment does not run.",
+            OrphanReason.ShardNotRegistered =>
+                projection + " is registered, and no longer runs this shard.",
+            OrphanReason.NotAsync =>
+                projection + " is registered inline or live: the async daemon does not run it, so nothing advances this row.",
+            OrphanReason.TenantRowWithoutPartitioning =>
+                "One tenant's row of " + projection + ", and this store does not number its events per tenant "
+                + "(Events.UseTenantPartitionedEvents is off): its daemon runs the store-global agent only.",
+            _ => "Not a shard name Marten writes, so nothing this store registers claims it.",
+        };
+    }
+
+    /// <summary>A name's first segment - the projection or subscription it was written by.</summary>
+    private static string ProjectionPart(string name)
+    {
+        int separator = name.IndexOf(':', StringComparison.Ordinal);
+        return separator > 0 ? name[..separator] : name;
+    }
+
+    private static string Version(uint? version) => (version ?? 1).ToString(CultureInfo.InvariantCulture);
 }
 
 /// <summary>

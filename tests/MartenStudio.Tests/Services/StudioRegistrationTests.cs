@@ -149,6 +149,9 @@ public class StudioRegistrationTests
         (typeof(DocumentBrowserState), ServiceLifetime.Scoped, How.Type, typeof(DocumentBrowserState)),
         (typeof(IDocumentWriteService), ServiceLifetime.Scoped, How.Type, typeof(DocumentWriteService)),
         (typeof(IEventDataService), ServiceLifetime.Scoped, How.Type, typeof(EventDataService)),
+
+        // M3: the grouped dead-letter view's read, shared across circuits for one refresh interval - added in 0.6.
+        (typeof(DeadLetterGroupCache), ServiceLifetime.Singleton, How.Type, typeof(DeadLetterGroupCache)),
         (typeof(ISchemaDataService), ServiceLifetime.Scoped, How.Type, typeof(SchemaDataService)),
         (typeof(IConfigurationService), ServiceLifetime.Scoped, How.Type, typeof(ConfigurationService)),
         (typeof(IQueryService), ServiceLifetime.Scoped, How.Type, typeof(QueryService)),
@@ -179,13 +182,20 @@ public class StudioRegistrationTests
 
         // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
         (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
+        // 0.6 (X1): the Statements drill-in's planner, stateless and the process's.
+        (typeof(PostgresStudio.Services.Statements.StatementPlanReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementPlanReader)),
         (typeof(PostgresStudio.Services.Statements.IStatementsService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Statements.StatementsService)),
+        // 0.6 (X2): the what-if engine - hypopg's availability cached per database, every hypothetical index reset - the process's.
+        (typeof(PostgresStudio.Services.Query.HypotheticalIndexReader), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Query.HypotheticalIndexReader)),
 
         // W5-API: the Health page's Snapshot menu, the circuit's - built from the page services as the visitor.
         (typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),
+
+        // 0.6, M2: the projections screen's own samples - a singleton fed by the snapshot read, bounded per database.
+        (typeof(ProjectionLagHistory), ServiceLifetime.Singleton, How.Type, typeof(ProjectionLagHistory)),
         (typeof(DaemonAccessor), ServiceLifetime.Scoped, How.Type, typeof(DaemonAccessor)),
         (typeof(IProjectionDataService), ServiceLifetime.Scoped, How.Type, typeof(ProjectionDataService)),
 

@@ -123,9 +123,11 @@ public class DaemonControlPageTests
     [Fact]
     public async Task Per_agent_controls_are_enabled_while_the_studio_pause_is_in_effect()
     {
+        // An agent started by hand during the pause and since paused by an error: one Start would start and Stop would stop.
         FakeProjectionDataService data = new FakeProjectionDataService()
             .WithProjection("DailySales")
-            .WithStudioPause();
+            .WithStudioPause()
+            .WithAgentHere("DailySales:All", "Paused");
 
         await using StudioComponentContext context = await ReadyAsync(data);
 
@@ -138,6 +140,90 @@ public class DaemonControlPageTests
         page.Find(".ms-shard-stop").Click();
 
         page.WaitForAssertion(() => data.Calls.Should().Equal("StopAgent:DailySales:All"));
+    }
+
+    /// <summary>
+    /// M7: after the studio's pause no agent runs here, so Stop would stop nothing - disabled, and saying so - while Start,
+    /// which would start one, is offered. With the agent running, it is the other way round.
+    /// </summary>
+    [Fact]
+    public async Task While_paused_a_Stop_with_no_agent_here_and_a_Start_of_a_running_one_say_they_would_do_nothing()
+    {
+        FakeProjectionDataService paused = new FakeProjectionDataService().WithProjection("DailySales").WithStudioPause();
+
+        await using (StudioComponentContext context = await ReadyAsync(paused))
+        {
+            IRenderedComponent<Page> page = context.Render<Page>();
+
+            page.Find(".ms-shard-start").HasAttribute("disabled").Should().BeFalse();
+            page.Find(".ms-shard-stop").HasAttribute("disabled").Should().BeTrue();
+            page.Find(".ms-shard-stop").GetAttribute("title").Should().Be(DaemonTopologyWording.NothingToStop("DailySales:All", hotCold: false));
+        }
+
+        FakeProjectionDataService started = new FakeProjectionDataService().WithProjection("DailySales").WithStudioPause().WithAgentHere("DailySales:All");
+
+        await using (StudioComponentContext context = await ReadyAsync(started))
+        {
+            IRenderedComponent<Page> page = context.Render<Page>();
+
+            page.Find(".ms-shard-start").HasAttribute("disabled").Should().BeTrue();
+            page.Find(".ms-shard-start").GetAttribute("title").Should().Be(DaemonTopologyWording.AlreadyRunning("DailySales:All"));
+            page.Find(".ms-shard-stop").HasAttribute("disabled").Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// M7: under HotCold a node that does not lead a shard says so on the row, and refuses to start it beside the node that
+    /// does - with the studio's pause in effect, which is when Start is offered at all.
+    /// </summary>
+    [Fact]
+    public async Task Under_HotCold_a_shard_another_node_leads_is_marked_and_its_Start_is_refused()
+    {
+        FakeProjectionDataService data = new FakeProjectionDataService()
+            .WithProjection("DailySales")
+            .WithProjection("ShipmentTracker")
+            .WithStudioPause()
+            .WithCoordination(
+                DaemonCoordination.LeadershipLoop,
+                DaemonDistribution.PerShard,
+                new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase) { ["DailySales:All"] = false, ["ShipmentTracker:All"] = true });
+
+        data.Daemon = data.Daemon with { Mode = "HotCold" };
+
+        await using StudioComponentContext context = await ReadyAsync(data);
+
+        IRenderedComponent<Page> page = context.Render<Page>();
+
+        page.Find("[data-shard='DailySales:All'] .ms-shard-node").TextContent.Should().Be("another node");
+        page.Find("[data-shard='ShipmentTracker:All'] .ms-shard-node").TextContent.Should().Be("this node");
+
+        page.Find("[data-shard='DailySales:All'] .ms-shard-start").HasAttribute("disabled").Should().BeTrue();
+        page.Find("[data-shard='DailySales:All'] .ms-shard-start").GetAttribute("title").Should().Be(DaemonTopologyWording.LedElsewhere("DailySales:All"));
+        page.Find("[data-shard='ShipmentTracker:All'] .ms-shard-start").HasAttribute("disabled").Should().BeFalse();
+
+        page.Find(".ms-daemon-topology").TextContent.Should().Contain("HotCold").And.Contain("holds the lock for 1 of this database's 2 shards");
+    }
+
+    /// <summary>
+    /// M7: <c>MartenDaemonModeIsSolo()</c>'s coordinator has no leadership loop, so a Start or a Stop means what it says
+    /// without a pause - and the card says why.
+    /// </summary>
+    [Fact]
+    public async Task With_no_leadership_loop_Start_and_Stop_are_offered_without_a_pause()
+    {
+        FakeProjectionDataService data = new FakeProjectionDataService()
+            .WithProjection("DailySales")
+            .WithAgentHere("DailySales:All")
+            .WithCoordination(DaemonCoordination.Explicit);
+
+        await using StudioComponentContext context = await ReadyAsync(data);
+
+        IRenderedComponent<Page> page = context.Render<Page>();
+
+        page.FindAll(".ms-shard-control-hint").Should().BeEmpty("there is no loop to pause first");
+        page.Find(".ms-shard-stop").HasAttribute("disabled").Should().BeFalse();
+        page.Find(".ms-shard-start").HasAttribute("disabled").Should().BeTrue("its agent is running already");
+        page.Find(".ms-daemon-topology").TextContent.Should().StartWith("MartenDaemonModeIsSolo(): a coordinator with no leadership loop.");
     }
 
     /// <summary>

@@ -18,12 +18,13 @@ A rate, a "for the whole window" and how long a committed event has waited behin
 own samples, which exist only while somebody has the Health page or the Overview open; before two samples a minute
 apart exist, the checks that need them say they are watching and report nothing.
 
-A finding that names a projection - D03, D04, D05, D06 and D09 - carries the document types that projection writes, so a
-projection of a type `IsDocumentTypeVisible` hides is never named, in a finding or in a check's status line.
+A finding that names a projection - D03, D04, D05, D06 and D09, and D10 for a projection the store still registers -
+carries the document types that projection writes, so a projection of a type `IsDocumentTypeVisible` hides is never
+named, in a finding or in a check's status line.
 
 A store with `Events.UseTenantPartitionedEvents` keeps a high-water mark per tenant and no durable record of when
-one was pinned: D01-D04 and D09 say "not checked" there rather than read store-global rows nothing maintains. D05
-and D06 still apply.
+one was pinned: D01-D04 and D09 say "not checked" there rather than read store-global rows nothing maintains. D05,
+D06 and D10 still apply.
 
 ## D01 High-water mark pinned behind a gap
 
@@ -170,19 +171,34 @@ Tier 0: it runs no statement, and judges the sequence, the mark and the shard po
 same sweep, with what this process knows of the daemon. A burst of appends lands in one step, however large, and a
 shard that keeps up drains it by the next, so a single burst is never a finding - it takes three samples, over at
 least a minute, to say "falling behind". A lag that is high and draining is not a finding either - it is "draining
-at N ev/s, caught up in ~T", which the check's status row says and the projections screen draws as its arrow and ETA.
+at N ev/s, caught up in ~T", which the check's status row says. The projections screen draws an arrow and an ETA of its
+own, from its own samples (below); it falls back to this check's arithmetic only while it has too few of them.
 
 **Only a shard that runs, moves, and is slower than its arrivals.** A lag grows for reasons that have nothing to do
-with speed, and each is somebody else's, so D04 - and the projections screen's arrow - say nothing of a shard while
-Marten Studio's coordinator pause is recorded (every lag grows, by design), while its projection is known to be
-rebuilt (the position starts again from zero), while its agent here is paused or stopped (D05), when it has not moved
-while the advisor watched (stalled, D03, or not run, D02), or when the high-water mark has not moved (held behind a
-gap, D01). The status line says which.
+with speed, and each is somebody else's, so D04 says nothing of a shard while Marten Studio's coordinator pause is
+recorded (every lag grows, by design), while its projection is known to be rebuilt (the position starts again from
+zero), while its agent here is paused or stopped (D05), when it has not moved while the advisor watched (stalled, D03,
+or not run, D02), or when the high-water mark has not moved (held behind a gap, D01). The status line says which. The
+projections screen's own arrow is withheld for the pause and the agent alone: a stall is coloured and said on its
+chart, and a rebuild's catching up is what its estimate is for.
 
 Thresholds: the projections screen's - 1,000 events behind for the warning, 100,000 for critical - unless a
 progression row's own `warning_behind_threshold` or `critical_behind_threshold` is set. A threshold a host writes
 itself is honoured; Marten writes none (#5173, at `V9.39.0` and `V9.50.2`: it creates the two columns and leaves them
 empty) and the studio offers no way to set one. The finding's evidence says which threshold it used.
+
+**The projections screen's own lag history** (0.6). Each shard row has a small chart of its position against the high
+water, drawn from samples the screen keeps itself: one each time the projections screen or the Overview reads the
+database (the read every page already shares, once a `RefreshInterval` however many are open - never a read of its own),
+at most every 5 s or `RefreshInterval` if that is longer, 120 per shard - ten minutes at the defaults - in memory, for at
+most 200 shards a database and the 64 databases the advisor keeps state for. Its arrow fits a line to the lag of the
+last 8 samples and calls it falling behind or catching up only when the line moves more than twice what the samples
+scatter about it, so a shard that commits a page at a time is steady, not "falling behind" every other sample. A stall -
+the position still while the high water rose, for three samples - is coloured and said, not withheld. While a rebuild
+runs, the estimate is the events left over the rate measured from the rebuild's own samples in the last five minutes,
+said with that window, and "not enough samples yet" until three of them show progress. The thresholds above are drawn
+as lines once the lag comes within half of one, and the screen lists every threshold of the studio's own that applies to
+a shard - these, D01's, D03's and D05's - under the table.
 
 ## D05 Shard failed or paused
 
@@ -204,10 +220,12 @@ running at exactly that position (where a restart resumes) - or at 0, before its
 it, as do later pauses no further on. The shard's next committed progress past that position ends it - any later
 check that saw its position beyond it, so a shard that failed once and got past the event is quiet from its next page
 and a rewind below it is not reported - and so does a stretch with no check that saw it fail, or still standing where
-it failed: ten minutes, or three `HealthInterval`s where that is longer (three hours at an hourly interval). A store
-that partitions its events by tenant, where D03 records no positions, renews the memory only by its failures, and
-progress never ends it there: a shard that recovered and is then restarted for another reason is reported again until
-the memory runs out - a known limit of 0.4. Two
+it failed: ten minutes, or three `HealthInterval`s where that is longer (three hours at an hourly interval). For each
+shard it remembers failing, D05 also records where the daemon in this process has that shard's agent - a position series
+of its own - and reads it beside D03's, so a store that partitions its events by tenant, where D03 records no positions,
+ends a failure the shard got past too: a shard that recovered and is then restarted for another reason is not reported
+again (0.4 and 0.5 reported it until the memory ran out). A studio beside a daemon in another process has no agent to ask,
+and there only the failures renew the memory. Two
 moments it cannot see: the first check after somebody opens a page, if it lands between a restart and the next
 failure, and - for a studio beside a daemon in another process,
 which has only the row - every check that lands there. The memory is the advisor's own, kept only while a page is
@@ -455,3 +473,56 @@ D03, D05, D07 and D08 are: without one, nothing waits on a progression row. `seq
 with events, because an append fails either way. A shard whose projection writes a document type `IsDocumentTypeVisible`
 hides is never named. Like D01-D04, a store with `Events.UseTenantPartitionedEvents` is not checked, because every
 tenant draws from a sequence of its own there.
+
+## D10 Orphaned progression rows
+
+**Info.** Marten Studio only. Rows of `mt_event_progression` that nothing this store registers advances: each was
+written by a projection that has since been renamed, removed or given a new version, or by a subscription that was
+removed. One finding per projection a row names - its name, and above version 1 its version (`Trips:V2`) - so a rename
+is one finding however many shards or tenants it left rows for.
+
+What counts as registered, read at `V9.39.0` and `v9.54.2` with JasperFx `V2.74.0` and `V2.95.1`:
+
+- every shard of the daemon's own list, `ProjectionOptions.AllShards()` - the async projections' and every
+  subscription's, one registered with `Events.Subscribe(...)` included, which `Projections()` does not list;
+- a composite projection's members, which the composite's agent advances in its own batch;
+- under `Events.UseTenantPartitionedEvents`, each tenant's row of those (`{Name}:{ShardKey}:{tenant}`), because the
+  coordinator runs one agent per shard and tenant there. On any other store the daemon runs the store-global agent only,
+  and a tenant's row is left over from when the flag was on;
+- Marten's own bookkeeping rows (`HighWaterMark`, `HighWaterMark:{tenant}`, `HighWaterAllocationFence`,
+  `HighWaterStuckGap`), which are never shards.
+
+Each finding says why nothing advances its rows: no projection or subscription of that name is registered; the
+projection is registered at another version; it is registered and no longer runs that shard; it is registered inline or
+live; or the row is a tenant's on a store that does not number its events per tenant. A tenant's row is counted and never
+named.
+
+A row like this is bookkeeping nothing advances any more. It shows as a shard that never moves in any tool that lists
+every row, and a projection registered again under the same name and version resumes from its position rather than
+replaying from the first event. **One kind is still read:** a lower version's row of a projection whose registered
+version sets `GateSideEffectsBehindPriorVersion`. The daemon reads the highest prior version's row each time the new
+version starts, and suppresses side effects for events up to its position. Removing it before the new version has passed
+that position raises side effects again for events the prior version already handled.
+
+There is no `StoreOptions` line, and the studio removes nothing: whether to remove a row is the host's decision. Marten
+removes one by its exact name, whether or not a projection of that name is registered, with
+`IEventDatabase.DeleteProjectionProgressByShardNameAsync` (marten#4785, jasperfx#473; public at `V9.39.0` and `v9.54.2`,
+and it first ensures the event store's storage, as every write to it does). `IEventStore.DeleteProjectionProgressAsync`,
+which takes a projection's name, looks it up among the registered projections and throws `ArgumentOutOfRangeException`
+for any other, so it cannot. The finding's remedy is that call, for each row the daemon does not read; a tenant's row is
+said in words. The projections screen lists the rows under **Orphaned progression rows** - counted for everyone the scope
+admits, named for a visitor the store policy allows for the database as a whole - with Marten's call and the equivalent
+statement for each, under "For your own migrations - the studio never runs this":
+
+```csharp
+await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("TripsBeforeRename:All");
+```
+
+```sql
+DELETE FROM "public"."mt_event_progression" WHERE "name" = 'TripsBeforeRename:All';
+```
+
+The read leaves out, by name, the rows that are certainly registered, so a store with thousands of tenants' rows stays
+one short read; it returns at most 1,000 rows, and the finding says so when it stopped there. A finding about a projection
+this store still registers carries the document types it writes, so one that writes a type `IsDocumentTypeVisible` hides
+is never named; the name of a projection that is no longer registered is shown as the row spells it.

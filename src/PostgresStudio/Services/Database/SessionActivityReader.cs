@@ -19,8 +19,9 @@ internal interface ISessionActivityReader
 }
 
 /// <summary>
-/// The real reader: three statements from <see cref="HealthConnectionQueries" />, on one connection, each in the
-/// health advisor's read-only transaction.
+/// The real reader: the statements from <see cref="HealthConnectionQueries" /> - the sessions, the locks, the prepared
+/// transactions, the lock table's blocking graph and, on PostgreSQL 19, <c>pg_stat_lock</c> - and the connections by
+/// application, on one connection, each in the health advisor's read-only transaction.
 /// </summary>
 /// <remarks>
 /// It runs through the advisor's own <see cref="HealthSqlRunner" /> rather than a session of its own, so the
@@ -70,6 +71,16 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             .QueryAsync(ConnectionsByApplicationQueries.Read(), MapApplication, cancellationToken)
             .ConfigureAwait(false);
 
+        // X3: Blocking's tree - the waiting sessions and who blocks them, from the same one read of the lock table a sweep makes.
+        LockTableRead blocking = LockTableRead.Fold(
+            await sql.QueryAsync(HealthConnectionQueries.LockTable(), LockTableRead.Map, cancellationToken).ConfigureAwait(false),
+            readAt);
+
+        // PostgreSQL 19's per-lock-type counters, asked only of a server that has the view.
+        IReadOnlyList<LockStatisticsRow>? statistics = Server.PostgresFeatures.Has(Server.PostgresFeature.PgStatLock, blocking.ServerVersion)
+            ? await LockStatisticsAsync(sql, cancellationToken).ConfigureAwait(false)
+            : null;
+
         return new SessionSnapshot(
             readAt,
             sessions.Count > 0 ? sessions[0].Visibility : SessionVisibility.Everything,
@@ -79,11 +90,62 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             [.. locks.Select(static x => x.Row)],
             prepared.Count > 0 ? prepared[0].MaxPrepared : 0,
             [.. prepared.Where(static x => x.Row is not null).Select(static x => x.Row!)],
-            sql.Statements)
+            Labelled(sql.Statements))
         {
             Connections = Connections(applications),
+            Blocking = blocking,
+            LockStatistics = statistics,
         };
     }
+
+    /// <summary>
+    /// What each statement of the snapshot reads, in words, keyed by the text its builder writes: the Sessions page draws a
+    /// "Show SQL" per statement, on both tabs, and five that all said "Show SQL" told nobody which was which (0.6's UI sweep).
+    /// A statement not listed here keeps no label, and its disclosure says "Show SQL" as before.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        [HealthConnectionQueries.SessionSnapshot().Sql] = "the sessions",
+        [HealthConnectionQueries.LockSnapshot().Sql] = "the locks",
+        [HealthConnectionQueries.PreparedTransactions().Sql] = "prepared transactions",
+        [ConnectionsByApplicationQueries.Read().Sql] = "connections by application",
+        [HealthConnectionQueries.LockTable().Sql] = "who blocks whom",
+        [HealthConnectionQueries.LockStatistics().Sql] = "lock waits by type",
+    };
+
+    /// <summary>The statements the snapshot ran, each named by what it reads where <see cref="Labels" /> knows it.</summary>
+    internal static IReadOnlyList<HealthStatement> Labelled(IReadOnlyList<HealthStatement> statements)
+    {
+        ArgumentNullException.ThrowIfNull(statements);
+
+        return [.. statements.Select(static x => x.Label is null && Labels.TryGetValue(x.Sql, out string? label) ? x with { Label = label } : x)];
+    }
+
+    /// <summary>
+    /// <c>pg_stat_lock</c>, or <see langword="null" /> when the server refuses it for a reason that is the server's - a release
+    /// candidate whose view is not the one the gate expected, a platform that revokes it - so the section is absent rather than
+    /// the page failed. Anything else is the page's failure, as any statement's is.
+    /// </summary>
+    private static async Task<IReadOnlyList<LockStatisticsRow>?> LockStatisticsAsync(HealthSqlRunner sql, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await sql.QueryAsync(HealthConnectionQueries.LockStatistics(), MapLockStatistics, cancellationToken).ConfigureAwait(false);
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn
+                                                  or PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>One row of <see cref="HealthConnectionQueries.LockStatistics" />.</summary>
+    internal static LockStatisticsRow MapLockStatistics(NpgsqlDataReader reader) => new(
+        reader.GetString(0),
+        reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+        reader.IsDBNull(2) ? 0d : reader.GetDouble(2),
+        reader.IsDBNull(3) ? 0 : reader.GetInt64(3),
+        SessionReads.Value<DateTimeOffset>(reader, 4));
 
     /// <summary>One row of <see cref="ConnectionsByApplicationQueries.Read" />: the budget, and a total or an application.</summary>
     internal sealed record ApplicationRow(

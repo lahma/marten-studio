@@ -2,12 +2,12 @@
 
 These checks look at who is connected to the store's database and what they hold: this process's connection
 pool (C01, C09), the server's connection budget (C02, C03), sessions and statements that hold things back (C04,
-C05, C06, C07), the database's own counters (C08), whether a transaction-mode pooler stands between the
-HotCold daemon and its lock (C10), and how much of what the database reads its shared buffers hold (C11). Back to the
-[index](../health.md).
+C05, C06, C07), the session at the head of a blocking chain (C12), the database's own counters (C08), whether a
+transaction-mode pooler stands between the HotCold daemon and its lock (C10), and how much of what the database reads its
+shared buffers hold (C11). Back to the [index](../health.md).
 
-**Studios.** C01, C03 to C08 and C11 read Postgres alone and run in both studios, with the data source in place of the
-store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
+**Studios.** C01, C03 to C08, C11 and C12 read Postgres alone and run in both studios, with the data source in place of
+the store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
 Studio. The list of every code and its studios is [codes.md](codes.md).
 
 ## What these checks read, and when
@@ -26,6 +26,16 @@ connection on the server, because `max_connections` is the server's and every da
 counts them, nothing more.
 
 No statement names a table. Statement text is never put into a finding (see below).
+
+**The lock table is read once per sweep** (0.6). One statement reads `pg_locks` - a single scan of the lock manager's
+table, materialized for the rest of the statement - and answers every check that needs it: the relations under a strong
+or `ACCESS EXCLUSIVE` lock (the table checks' autovacuum triggers, and the index read that never deparses behind a
+migration), how many relation locks each session holds and which hold the daemon's leadership key (C04, T14), and every
+waiting session with the sessions blocking it (C06, C12). `pg_blocking_pids` is called in it for the sessions whose
+`wait_event_type` is `Lock`, and for nobody else. Before 0.6 a sweep read `pg_locks` seven times, in five statements. The
+one exception is the index read's second try: when a migration takes its lock after the sweep's read, and a deparse waits
+out `lock_timeout`, the index read reads the lock table once more before it asks again. Database › Sessions reads its own
+snapshot with the same statement, at the same floor as the rest of the page.
 
 ## Who sees what
 
@@ -481,9 +491,75 @@ cluster uses is not visible from SQL, so the finding says so from the host's cap
 `PostgresComputeCapacity.IoOptimized` when it is set, and names both when it is not
 ([the capacity source](../aurora.md#the-capacity-source)). The threshold is the same on every platform.
 
+## C12 Head of a blocking chain
+
+**Warning** when the session at the head of a blocking chain sits idle in its transaction while a session behind it has
+waited **ten seconds** (`idle-head`), or when a chain's oldest wait reaches **two minutes**, whatever its head is doing
+(`long-chain`); **Critical** for either once that wait reaches five minutes, C06's own Critical line.
+
+C04 says a session sits idle in a transaction and C06 that sessions wait for locks; neither says which session the others
+are waiting on, and that is the one somebody has to deal with. C12 draws the waiting sessions as chains: a **head** is a
+session that blocks somebody and waits for no lock itself, and below it every session waiting on it, however far down - a
+session that waits on two others counts in both chains. A head idle in its transaction will hold everybody up until the
+application that opened it commits or rolls back, which for a transaction a code path forgot is never, so it is raised
+after ten seconds; a head doing anything else - a long statement, a migration, a `VACUUM` (named as C06 names it, with
+C06's advice) - is raised once the chain has held somebody up for two minutes. A chain whose sessions wait on each other (a
+deadlock forming, which Postgres' detector ends after `deadlock_timeout`), or on a session the read did not list, has no
+head to name, and is not judged.
+
+Variants: `idle-head`, `long-chain` - at most one finding of each, covering every chain of that kind, so neither has a
+subject. Both studios run it, from the sweep's one read of the lock table (above); it reads nothing of its own.
+
+**An activity check** (`ViewDatabaseActivity`). Every finding names its heads - process id, role, application, client,
+when it connected, its state and how long, its transaction's age, the lock modes it holds and what its waiters want - and
+hands over, for each head, the statement that would end it:
+
+- `select pg_terminate_backend(<pid>);` ends the session and rolls its transaction back, releasing its locks. It is the
+  only way to end a session idle in its transaction short of the application: `pg_cancel_backend` does nothing to one.
+- `select pg_cancel_backend(<pid>);` cancels a running statement. Inside an explicit transaction that leaves the
+  transaction aborted, still holding its locks until the application rolls it back - which is when to terminate instead.
+
+Either needs a superuser, a member of the session's own role, or a member of `pg_signal_backend`, which cannot signal a
+superuser's session. **The studio never runs either** (there is no button, and nothing in either package executes them):
+they are text for whoever runs the database.
+
+What to change: for `idle-head`, the fix is in the application - end every transaction it begins, on every path - and the
+server's backstop is a timeout, set where the platform sets settings, or for the application's role or database alone:
+
+```
+# A server setting, not a StoreOptions one:
+idle_in_transaction_session_timeout = '5min'
+```
+
+In Marten Studio, mind the HotCold daemon's leadership: with its lock transaction-scoped, a timeout shorter than the
+leader's idle stretch ends the leadership too (K08). For `long-chain`, the remedy is the head's two statements, as a repair
+to run by hand.
+
 ## Database › Sessions
 
 `/marten/database/sessions`, linked from the Database rail: this database's sessions with their state, age, wait
 and what blocks them; the locks, labelled as above; and the prepared transactions. Counts are shown with the
 store policy; the details need `ViewDatabaseActivity`, and the page names that option where they would be.
 There is no cancel and no terminate button: the studio never ends another session.
+
+### Blocking
+
+The page's second tab (`?view=blocking`, which C12's link opens): who holds up whom, as trees. Each chain starts at its
+head, with every session waiting on it below, nested; a session that waits on two others is drawn under both, its own
+waiters once. Each session shows its process id, role, application, state and how long, its wait event, its transaction's
+age, how long it has waited, and the lock - the modes it holds on what its waiters want, or the mode it wants and what on.
+The counts - chains, sessions held up, the longest wait, heads idle in a transaction - are shown with the summary, to anybody
+the store policy passes; the trees are the details', behind the same gate and audited the same way.
+
+The relation a session waits for is labelled as above and, past the gate, named as the database browser would name it
+(AGENTS.md D27): qualified for a schema the visitor may see, `‹withheld›` - and no name - for one they may not, and not at all
+for a relation nobody is told about (a hidden document type's, another store's, or in Postgres Studio one only the `mt_`
+rule calls Marten's). Nothing is read from any relation: the tree is the lock table's and the catalog's, read without a
+`::regclass` cast, so an oid dropped since the read is simply not named.
+
+Each head gets its `pg_terminate_backend` statement, and `pg_cancel_backend` when it is running a statement, with a copy
+button - text for whoever may run them, as C12 hands them over; the studio never runs either.
+
+On PostgreSQL 19 the tab also shows `pg_stat_lock`: for the whole server since its counters were last reset, how many lock
+requests of each type had to wait, for how long in all, and how often a backend's fast-path lock slots were full. The
+section is absent below 19, where the view does not exist.

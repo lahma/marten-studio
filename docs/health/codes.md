@@ -39,6 +39,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [C09](connections.md#c09-async-shards-against-the-pool) | Async shards against the pool | Connections | - | - | Marten | 0.4 | - |
 | [C10](connections.md#c10-hotcold-daemon-behind-a-transaction-pooler-proven) | HotCold daemon behind a transaction pooler, proven | Connections | - | - | Marten | 0.4 | - |
 | [C11](connections.md#c11-low-cache-hit-ratio) | Low cache hit ratio | Connections | - | - | both | 0.5 | - |
+| [C12](connections.md#c12-head-of-a-blocking-chain) | Head of a blocking chain | Connections | `idle-head`, `long-chain` | - | both | 0.6 | - |
 | [D01](daemon.md#d01-high-water-mark-pinned-behind-a-gap) | High-water mark pinned behind a gap | Daemon | - | - | Marten | 0.4 | - |
 | [D02](daemon.md#d02-async-projections-behind-and-nothing-runs-the-daemon) | Async projections behind, and nothing runs the daemon | Daemon | `no-daemon`, `lock-held-idle` | - | Marten | 0.4 | - |
 | [D03](daemon.md#d03-shard-alive-but-not-moving) | Shard alive but not moving | Daemon | - | shard | Marten | 0.4 | - |
@@ -48,6 +49,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [D07](daemon.md#d07-gaps-were-skipped) | Gaps were skipped | Daemon | - | - | Marten | 0.4 | - |
 | [D08](daemon.md#d08-rebuilt-elsewhere-or-stopped-half-way) | Rebuilt elsewhere, or stopped half-way | Daemon | - | shard | Marten | 0.4 | - |
 | [D09](daemon.md#d09-event-sequence-and-daemon-progression-disagree) | Event sequence and daemon progression disagree | Daemon | `mark-ahead`, `shard-ahead`, `sequence-behind` | `mark-ahead`: progression row; `shard-ahead`: shard; `sequence-behind`: sequence | Marten | 0.5 | - |
+| [D10](daemon.md#d10-orphaned-progression-rows) | Orphaned progression rows | Daemon | - | projection | Marten | 0.6 | - |
 | [E02](events.md#e02-tombstones) | Tombstones | Events | - | - | Marten | 0.4 | - |
 | [E03](events.md#e03-hot-stream) | Hot stream | Events | - | stream | Marten | 0.4 | - |
 | [E04](events.md#e04-large-event-payloads) | Large event payloads | Events | - | - | Marten | 0.4 | - |
@@ -63,6 +65,14 @@ baseline, so editing or deleting a row is a reviewed change.
 | [K06](configuration.md#k06-database-browser-open-to-every-schema-without-a-narrowed-role) | Database browser open to every schema without a narrowed role | Configuration | - | - | both | 0.5 | - |
 | [K07](configuration.md#k07-studio-open-to-anonymous-visitors-with-a-capability-on) | Studio open to anonymous visitors with a capability on | Configuration | - | - | both | 0.5 | - |
 | [K08](configuration.md#k08-server-timeouts-end-the-daemons-leadership) | Server timeouts end the daemon's leadership | Configuration | `idle-in-transaction`, `transaction-timeout`, `idle-session` | setting | Marten | 0.5 | - |
+| [P01](plans.md#p01-row-estimate-off-tenfold-or-more) | Row estimate off tenfold or more | Plans | - | plan node | both | 0.6 | - |
+| [P02](plans.md#p02-sort-or-hash-spilled-to-disk) | Sort or hash spilled to disk | Plans | - | plan node | both | 0.6 | - |
+| [P03](plans.md#p03-lossy-bitmap-heap-scan) | Lossy bitmap heap scan | Plans | - | plan node | both | 0.6 | - |
+| [P04](plans.md#p04-sequential-scan-with-a-selective-filter) | Sequential scan with a selective filter | Plans | - | plan node | both | 0.6 | - |
+| [P05](plans.md#p05-nested-loop-over-a-large-outer-side) | Nested loop over a large outer side | Plans | - | plan node | both | 0.6 | - |
+| [P06](plans.md#p06-large-offset) | Large OFFSET | Plans | - | plan node | both | 0.6 | - |
+| [P07](plans.md#p07-leading-wildcard-like) | Leading-wildcard LIKE | Plans | - | plan node | both | 0.6 | - |
+| [P08](plans.md#p08-parallel-workers-short-of-the-plan) | Parallel workers short of the plan | Plans | - | plan node | both | 0.6 | - |
 | [R01](replication.md#r01-replication-slot-retaining-wal) | Replication slot retaining WAL | Replication | `near-limit`, `inactive`, `lost` | - | both | 0.4 | - |
 | [R02](replication.md#r02-wal-archiving-failing) | WAL archiving failing | Replication | `failing`, `backlog` | - | both | 0.5 | - |
 | [R03](replication.md#r03-standby-lag) | Standby lag | Replication | `primary-view`, `standby-view`, `paused`, `aurora-reader` | - | both | 0.5 | - |
@@ -94,6 +104,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [T15](tables.md#t15-foreign-key-without-a-covering-index) | Foreign key without a covering index | Tables | `uncovered`, `partly-covered` | foreign key | both | 0.5 | - |
 | [T16](tables.md#t16-autovacuum-workers-saturated) | Autovacuum workers saturated | Tables | - | - | both | 0.5 | - |
 | [T17](tables.md#t17-orphaned-document-tables) | Orphaned document tables | Tables | - | - | Marten | 0.5 | - |
+| [T18](tables.md#t18-tenant-skew) | Tenant skew | Tables | - | table | Marten | 0.6 | - |
 | [T19](tables.md#t19-partitions-against-the-lock-table) | Partitions against the lock table | Tables | `per-transaction`, `capacity` | table | both | 0.5 | - |
 | [T20](tables.md#t20-range-partitions-running-out) | Range partitions running out | Tables | `running-out`, `default-partition-rows` | table | both | 0.5 | - |
 | [T22](tables.md#t22-optimistic-concurrency-conflicts) | Optimistic-concurrency conflicts | Tables | - | table | Marten | 0.4 | - |

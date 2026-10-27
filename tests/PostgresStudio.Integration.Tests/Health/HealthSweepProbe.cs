@@ -35,7 +35,7 @@ internal sealed record HeldLock(string LockType, string Mode, string? Schema, st
 /// advisory lock, or calls a function that locks what it lists (D27) shows up there.
 /// </para>
 /// <para>
-/// <b>No DDL.</b> <see cref="SnapshotAsync" /> lists every relation, routine, type, trigger and constraint in
+/// <b>No DDL.</b> <see cref="SnapshotAsync(PostgresFixture, string[])" /> lists every relation, routine, type, trigger and constraint in
 /// a set of schemas - the test's own, never the whole database, because other test classes create objects in
 /// parallel - and a sweep must leave the snapshot exactly as it found it.
 /// </para>
@@ -117,8 +117,20 @@ internal sealed class HealthSweepProbe(Func<CancellationToken, Task<NpgsqlConnec
     /// Every object in <paramref name="schemas" />, by name and kind - read on a connection of the test's
     /// own, so nothing of the studio's is in the measurement.
     /// </summary>
-    public static async Task<IReadOnlySet<string>> SnapshotAsync(PostgresFixture postgres, params string[] schemas)
+    public static Task<IReadOnlySet<string>> SnapshotAsync(PostgresFixture postgres, params string[] schemas)
     {
+        ArgumentNullException.ThrowIfNull(postgres);
+        return SnapshotAsync(token => postgres.OpenAsync(token), schemas);
+    }
+
+    /// <summary>
+    /// Every object in <paramref name="schemas" /> of the database <paramref name="open" /> connects to - a database of the
+    /// test's own (X4) - by name and kind.
+    /// </summary>
+    public static async Task<IReadOnlySet<string>> SnapshotAsync(Func<CancellationToken, Task<NpgsqlConnection>> open, params string[] schemas)
+    {
+        ArgumentNullException.ThrowIfNull(open);
+
         const string Sql =
             "select 'schema:' || n.nspname from pg_catalog.pg_namespace n where n.nspname = any(@schemas) "
             + "union all select 'relation:' || n.nspname || '.' || c.relname || ':' || c.relkind::text from pg_catalog.pg_class c "
@@ -133,7 +145,7 @@ internal sealed class HealthSweepProbe(Func<CancellationToken, Task<NpgsqlConnec
             + "union all select 'constraint:' || n.nspname || '.' || o.conname from pg_catalog.pg_constraint o "
             + "join pg_catalog.pg_namespace n on n.oid = o.connamespace where n.nspname = any(@schemas)";
 
-        await using NpgsqlConnection connection = await postgres.OpenAsync(TestContext.Current.CancellationToken);
+        await using NpgsqlConnection connection = await open(TestContext.Current.CancellationToken);
         await using NpgsqlCommand command = new(Sql, connection);
         command.Parameters.AddWithValue("schemas", schemas);
 

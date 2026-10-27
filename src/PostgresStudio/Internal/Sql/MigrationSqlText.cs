@@ -152,6 +152,29 @@ internal static partial class MigrationSqlText
             : null;
     }
 
+    /// <summary>
+    /// <c>CREATE INDEX ON schema.table (a, b);</c> - the index a what-if imagines (X2), handed to hypopg and never run - or
+    /// <see langword="null" /> when a name cannot be printed honestly. With no schema the table is named alone, and resolves
+    /// through the transaction's <c>search_path</c> exactly as the statement it accompanies resolved it: a plan Postgres printed
+    /// without <c>VERBOSE</c> names no schema. Postgres (and hypopg) names the index.
+    /// </summary>
+    /// <param name="schema">The table's schema, when the plan printed it.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="columns">The columns, in index order.</param>
+    public static string? CreateIndex(string? schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (columns.Count == 0 || !columns.All(IsQuotable) || !IsQuotable(table))
+        {
+            return null;
+        }
+
+        string? target = schema is null ? SqlIdentifier.Quote(table) : Qualified(schema, table);
+
+        return target is null ? null : "CREATE INDEX ON " + target + " (" + string.Join(", ", columns.Select(SqlIdentifier.Quote)) + ");";
+    }
+
     /// <summary><c>ALTER TABLE schema.table ALTER COLUMN column TYPE bigint;</c> (T26), or <see langword="null" />.</summary>
     /// <param name="schema">The table's schema.</param>
     /// <param name="table">The table.</param>
@@ -220,7 +243,7 @@ internal static partial class MigrationSqlText
     /// A range bound as SQL spells it for <paramref name="keyType" />: <c>'2026-12-01'</c> for a <c>date</c>,
     /// <c>'2026-12-01 00:00:00'</c> for a <c>timestamp</c> (the value read as UTC), <c>'2026-12-01 00:00:00+00'</c> for a
     /// <c>timestamptz</c>, the whole number for an integer type - or <see langword="null" /> for any other type or a value
-    /// that is not finite or not whole.
+    /// that is not finite, not whole, or an integer past 2^53, which a double does not hold exactly.
     /// </summary>
     /// <param name="keyType">The key's type, as <c>format_type</c> spells it.</param>
     /// <param name="value">Unix seconds for a time key, the number for an integer one.</param>
@@ -234,7 +257,8 @@ internal static partial class MigrationSqlText
         switch (keyType)
         {
             case "smallint" or "integer" or "bigint":
-                return Math.Floor(value) == value && value is >= long.MinValue and <= long.MaxValue
+                // Past 2^53 a double holds no exact whole number, so a bound written from one could be off by a few (X4).
+                return Math.Floor(value) == value && Math.Abs(value) <= 9_007_199_254_740_992d
                     ? ((long) value).ToString(CultureInfo.InvariantCulture)
                     : null;
 
@@ -256,6 +280,29 @@ internal static partial class MigrationSqlText
                 return null;
         }
     }
+
+    // ---- M4 -----------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// <c>DELETE FROM schema.table WHERE column = 'value';</c> - one row by a text key, for the host's own migrations - or
+    /// <see langword="null" /> when a name cannot be printed honestly, or the value cannot be written as a literal that
+    /// reads on screen as what it is (<see cref="SqlLiteralText.IsPrintableText" />, <see cref="SqlLiteralText.Literal" />).
+    /// </summary>
+    /// <remarks>
+    /// Data, never schema, and never run by the studio: the value is the studio's own read of a row, printed as a literal
+    /// because a migration has nowhere to put a parameter.
+    /// </remarks>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="column">The key column.</param>
+    /// <param name="value">The row's key.</param>
+    public static string? DeleteRowWhereEquals(string schema, string table, string column, string value) =>
+        IsQuotable(column)
+        && SqlLiteralText.IsPrintableText(value)
+        && SqlLiteralText.Literal(value) is { } literal
+        && Qualified(schema, table) is { } qualified
+            ? "DELETE FROM " + qualified + " WHERE " + SqlIdentifier.Quote(column) + " = " + literal + ";"
+            : null;
 
     /// <summary>Whether <paramref name="parameter" /> has a storage parameter's shape: lower-case letters and underscores.</summary>
     public static bool IsParameterName(string? parameter) => parameter is { Length: > 0 } && ParameterName().IsMatch(parameter);

@@ -1,0 +1,131 @@
+@using MartenStudio.Services.Projections
+@* One shard's position against the high water over the projections screen's own samples: a small hand-drawn SVG chart
+   (hard rule 3), with its text equivalent beside it in the DOM.
+
+   Every parameter is a primitive or a list of strings, for ShardProgressBar's reason: the Razor compiler emits a public
+   component class, and a public [Parameter] cannot have an internal type. The page draws the figure with LagChart - pure,
+   and unit tested - and hands this the polylines' points and the sentences; nothing here computes anything.
+
+   It sits in the projections table, whose TableScroll is the region it scrolls in at a narrow width (D25). *@
+
+<figure class="@FigureClass" data-lag-chart="@ShardName">
+    <svg class="ms-lag-chart-svg" viewBox="@ViewBox" width="@LagChart.Width" height="@LagChart.Height"
+         role="img" aria-label="@Title" focusable="false" xmlns="http://www.w3.org/2000/svg">
+        <title>@Title</title>
+        <desc>@Description</desc>
+        @foreach (string line in Critical)
+        {
+            <polyline class="ms-lag-chart-threshold ms-lag-chart-critical" points="@line"><title>@CriticalTitle</title></polyline>
+        }
+        @foreach (string line in Warning)
+        {
+            <polyline class="ms-lag-chart-threshold ms-lag-chart-warning" points="@line"><title>@WarningTitle</title></polyline>
+        }
+        @foreach (string line in HighWater)
+        {
+            <polyline class="ms-lag-chart-high-water" points="@line"><title>The high water</title></polyline>
+        }
+        @foreach (string line in Position)
+        {
+            <polyline class="ms-lag-chart-position" points="@line"><title>The shard's position</title></polyline>
+        }
+        @foreach (string line in Stalled)
+        {
+            <polyline class="ms-lag-chart-stalled" points="@line"><title>Stalled: not moving while the high water rose</title></polyline>
+        }
+    </svg>
+    <figcaption class="ms-lag-chart-caption">
+        <span class="ms-lag-chart-summary">
+            @if (Arrow.Length > 0)
+            {
+                <span class="@("ms-shard-trend ms-shard-trend-" + Direction)" aria-hidden="true">@Arrow</span>
+            }
+            @Summary
+        </span>
+        @if (Stall is { Length: > 0 })
+        {
+            <span class="ms-lag-chart-stall">@Stall</span>
+        }
+        @if (Rebuild is { Length: > 0 })
+        {
+            <span class="ms-lag-chart-rebuild">@Rebuild</span>
+        }
+        @if (Thresholds is { Length: > 0 })
+        {
+            <span class="ms-lag-chart-thresholds">@Thresholds</span>
+        }
+    </figcaption>
+</figure>
+
+@code {
+    /// <summary>The shard, for the figure's data attribute.</summary>
+    [Parameter]
+    public string ShardName { get; set; } = string.Empty;
+
+    /// <summary>The SVG's title: what it shows, and over how long.</summary>
+    [Parameter]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>The SVG's description: the caption's sentences in one text.</summary>
+    [Parameter]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>The high water's polylines, one per run.</summary>
+    [Parameter]
+    public IReadOnlyList<string> HighWater { get; set; } = [];
+
+    /// <summary>The position's polylines, one per run.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Position { get; set; } = [];
+
+    /// <summary>The stalled steps, each a two-point polyline drawn over the position.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Stalled { get; set; } = [];
+
+    /// <summary>The warning threshold's polylines, or none while the lag has not come near it.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Warning { get; set; } = [];
+
+    /// <summary>The critical threshold's polylines, likewise.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Critical { get; set; } = [];
+
+    /// <summary>What the warning line is: its number and whose it is.</summary>
+    [Parameter]
+    public string WarningTitle { get; set; } = string.Empty;
+
+    /// <summary>What the critical line is.</summary>
+    [Parameter]
+    public string CriticalTitle { get; set; } = string.Empty;
+
+    /// <summary>The arrow, or the empty string for none.</summary>
+    [Parameter]
+    public string Arrow { get; set; } = string.Empty;
+
+    /// <summary>The direction as the arrow's class suffix: <c>growing</c>, <c>draining</c>, <c>steady</c>, <c>caughtup</c>.</summary>
+    [Parameter]
+    public string Direction { get; set; } = "unknown";
+
+    /// <summary>The caption's first line: the latest lag and the trend.</summary>
+    [Parameter]
+    public string Summary { get; set; } = string.Empty;
+
+    /// <summary>The stalled sentence, when the shard stands still at the end of its run.</summary>
+    [Parameter]
+    public string? Stall { get; set; }
+
+    /// <summary>A running rebuild's estimate, with its window - or why there is none yet.</summary>
+    [Parameter]
+    public string? Rebuild { get; set; }
+
+    /// <summary>The thresholds the host wrote into the shard's progression row, when it wrote any.</summary>
+    [Parameter]
+    public string? Thresholds { get; set; }
+
+    private string ViewBox => "0 0 " + LagChart.Width.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        + " " + LagChart.Height.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private string FigureClass => "ms-lag-chart"
+        + (Stall is { Length: > 0 } ? " ms-lag-chart-is-stalled" : string.Empty)
+        + (Rebuild is { Length: > 0 } ? " ms-lag-chart-rebuilding" : string.Empty);
+}

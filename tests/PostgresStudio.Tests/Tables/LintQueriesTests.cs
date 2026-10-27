@@ -16,12 +16,50 @@ public partial class LintQueriesTests
     [
         .. IndexLintQueries.ListStatements.Select((_, i) => "IndexLintQueries[" + i + "]"),
         .. PartitionQueries.ListStatements.Select((_, i) => "PartitionQueries[" + i + "]"),
+        .. ColumnSkewQueries.ListStatements.Select((_, i) => "ColumnSkewQueries[" + i + "]"),
     ];
 
     private static string Sql(string name)
     {
         int index = int.Parse(name[(name.IndexOf('[', StringComparison.Ordinal) + 1)..^1], System.Globalization.CultureInfo.InvariantCulture);
-        return name.StartsWith("IndexLint", StringComparison.Ordinal) ? IndexLintQueries.ListStatements[index] : PartitionQueries.ListStatements[index];
+
+        return name.StartsWith("IndexLint", StringComparison.Ordinal) ? IndexLintQueries.ListStatements[index]
+            : name.StartsWith("ColumnSkew", StringComparison.Ordinal) ? ColumnSkewQueries.ListStatements[index]
+            : PartitionQueries.ListStatements[index];
+    }
+
+    /// <summary>
+    /// INT-W1: the health runner's one preamble statement pins <c>search_path</c> as every catalog read does and <c>DateStyle</c>
+    /// to ISO beside it - the output style alone, local to the transaction, with no value from anybody - so T20 reads its bounds
+    /// on any server. The live half is <c>PartitionHeadroomLiveTests</c>, on a database whose sessions default to <c>SQL, DMY</c>.
+    /// </summary>
+    [Fact]
+    public void The_health_runner_pins_search_path_and_an_ISO_DateStyle_for_its_transaction_only()
+    {
+        HealthSessionQueries.PinSessionSql.Should().Contain("pg_catalog.set_config('search_path', 'pg_catalog', true)")
+            .And.Contain("pg_catalog.set_config('datestyle', 'ISO', true)")
+            .And.NotContain("@", "a session setting takes no value from anybody")
+            .And.NotContain("MDY").And.NotContain("DMY", "only the output style is set; the field order stays the session's");
+        PartitionBoundText.IsIsoDateStyle("ISO, DMY").Should().BeTrue("what a DMY session reads back under the pin");
+    }
+
+    [Fact]
+    public void X4s_reads_deparse_only_bounds_with_no_relation_and_leave_the_parsing_to_the_studio()
+    {
+        // The partition read returns the bound text and parses nothing in SQL (PartitionBoundText does), reads the session's
+        // DateStyle with it, and finds a DEFAULT partition by pg_partitioned_table.partdefid rather than by deparsing.
+        PartitionQueries.PartitionsSql.Should().Contain("pg_catalog.current_setting('DateStyle')").And.Contain("p.partdefid")
+            .And.NotContain("::timestamptz").And.NotContain("btrim").And.NotContain("pg_stat_all_tables");
+        PartitionQueries.PartitionsSql.Should().Contain("k.partstrat = 'r'", "only a range's own partitions are deparsed, never a tenant list's");
+        PartitionQueries.PartitionsSql.Should().Contain("pg_catalog.pg_stat_get_live_tuples(c.oid)", "where the rows stop, from a counter");
+
+        // T18's read: the column is a parameter, the statistics are the leaves' own, and pg_stats is asked only where the role
+        // may read the column - which comes back beside it.
+        ColumnSkewQueries.SkewSql.Should().Contain("a.attname = @column").And.Contain("s.attname = @column").And.Contain("not s.inherited")
+            .And.Contain("pg_catalog.has_column_privilege(lf.oid, a.attnum, 'SELECT')")
+            .And.Contain("pg_catalog.pg_get_expr(c.relpartbound, 0)")
+            .And.Contain("limit 2", "only the two largest values come back: a tenant partition's name is never listed");
+        ColumnSkewQueries.Skew([new HealthTableTarget("app", "orders")], "tenant_id").ParameterNames.Should().Equal("@schemas", "@tables", "@column");
     }
 
     [Theory]
@@ -98,7 +136,7 @@ public partial class LintQueriesTests
         "any", "all", "exists", "in", "coalesce", "greatest", "least", "case", "u", "ordinality", "select", "and", "or", "not",
         "when", "then", "else", "is", "on", "as", "filter", "from", "extract", "rows", "lateral", "union", "where", "join",
         "listed", "tree", "keys", "referenced", "leaves", "fed", "members", "keyed", "bounds", "valued", "read_back", "settings",
-        "judged", "sized", "candidates", "h", "x", "d", "b", "n", "m",
+        "judged", "sized", "candidates", "h", "x", "d", "b", "n", "m", "v",
     ];
 
     [GeneratedRegex(@"pg_(?:total_)?relation_size|pg_indexes_size|pg_table_size|pg_database_size|pg_partition_(?:tree|ancestors|root)|pg_sequence_last_value", RegexOptions.IgnoreCase)]

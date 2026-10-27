@@ -168,7 +168,10 @@ anything; read *this* file before writing anything.
     four members on `IMartenDatabase` (via `Weasel.Core.Migrations.IDatabase`) answer for the resolved database only,
     while `store.Storage`'s apply reaches *every* database a `DynamicMultiple` store knows. Enumerating a dynamic
     tenancy's databases is not read-only either (D27's known limit; `TenancyEnumerationCallTests` fences its call
-    sites).
+    sites). Time travel and the stepper fold only through `IAggregateFolder.FoldAsync`, Marten's
+    `AggregatorFor<T>().BuildAsync`; no studio code calls `DetermineActionAsync`, `Evolve` or `ISteppableAggregation`
+    itself, and `AggregateSteppingTests` holds every step to Marten's single fold at both Marten ends (M1; how each
+    shape is stepped: decision-notes.md, hard rule 14).
     **`AutoCreate.CreateOrUpdate` is not additive**: its `Update` delta (Weasel's `TableDelta.WriteUpdate`) drops
     undeclared indexes and extra columns, retypes changed columns, drops a changed primary key `CASCADE` and rebuilds a
     re-partitioned table; only `Invalid` is refused. No screen, comment or doc may say an apply leaves a hand-made index
@@ -211,7 +214,7 @@ anything; read *this* file before writing anything.
     startup. A page route belongs to one assembly of a studio, below that assembly's own compile-time root
     (`/postgres`, `/marten`), and the route table refuses a route two pages claim (`StudioRouteTableTests`).
 
-## Design decisions (D1–D31)
+## Design decisions (D1–D32)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the
 rationale is not.
@@ -262,15 +265,16 @@ built from `IDocumentType` metadata against `IMartenDatabase.CreateConnection(Co
 Writes are the opposite: `StoreObjects(IEnumerable<object>)` / `DeleteObjects(IEnumerable<object>)` (both
 verified non-generic) keep metadata columns, soft-delete semantics and tenancy exactly as Marten defines
 them. The studio never hand-writes document DML; writes go through the session — re-implementing Marten's
-write path is how a UI corrupts a store. (There is no `mt_upsert_*` function to call anyway: Marten 9.35
-installs none, and the upsert is inline SQL in the generated write path — verified against a live schema
-by P7, 2026-09-14.)
+write path is how a UI corrupts a store (and there is no upsert function to call: decision-notes.md, D6).
 
 **D7 — Document edit shows a round-trip diff before saving.** Marten has no untyped store API, so saving
 an edited document means deserializing into the CLR type and serializing it back: any property the type
 does not have is *gone*. The dialog lists dropped, changed and added properties before the save happens.
 Making the loss visible is the honest answer; silently dropping data is not, and refusing to edit at all
-would make the feature useless for the schemas that need it most.
+would make the feature useless for the schemas that need it most. An edit keeps its document's id: preview and save
+refuse a JSON id that differs from the row's. From Marten 9.53 (`RuntimeFeature.DocumentEditPreview`) the dialog lays
+Marten's own `PreviewDocumentJsonAsync` beside the round trip - no session, no connection - and holds a save it
+disputes.
 
 **D8 — Counts are `pg_class.reltuples` estimates by default, prefixed `~`.** An exact `count(*)` on a
 10-million-row collection is a sequential scan, and a dashboard that does one per collection per refresh is
@@ -285,7 +289,14 @@ URL for the same reason a document id does: a link someone pastes into a chat ha
 tabs, through a single-flight snapshot cache so that N circuits cost one query per interval rather than N.
 Where the daemon is hosted in this process, a lazy observer on `ShardStateTracker` gives sub-second
 projection state without any of that. The convention builder already carries an optional hub slot for v2;
-adding a hub now would add a host-visible endpoint for a feature that polling covers.
+adding a hub now would add a host-visible endpoint for a feature that polling covers. The projections screen keeps its
+own lag samples (`ProjectionLagHistory`), written only by its single-flight snapshot read: 120 per shard, 200 shards per
+database, databases bounded by `HealthDatabaseBound` (M2). Dead letters are grouped in the web process from one read
+per interval of the newest 20,000 letters' columns (`DeadLetterGroupQueries.BuildGroupRows`), and a group's letters are
+found again in SQL by the same rule (`DeadLetterFingerprint`) - the list's only among those same newest letters
+(`DeadLetterGroupCache.LettersGrouped`), the skip's count and the skip among all of a group's letters;
+`DeadLetterGroupsLiveTests` holds the two equal (M3;
+why: decision-notes.md, D10).
 
 **D11 — Sub-path mounting is ported from Quartz.Dashboard.** Compile-time routes are re-rooted at map time, from
 each assembly's own root (`/postgres` for PostgresStudio's pages, `/marten` for MartenStudio's), and `/_blazor`,
@@ -398,8 +409,7 @@ observer re-applies it. History: decision-notes.md, D24.
 **D25 — Every data table sits in its own labelled scroll region, and the shell never scrolls sideways.**
 `.ms-main` hides horizontal overflow on purpose, so the studio never grows a page-level scrollbar inside
 a host page; the cost was that a table wider than the content column was simply cut off with no cue and
-no way to reach the columns on the right — measured in the 0.2.0 UX pass at 1 691 px of table in a
-1 200 px column on Event types, and every table on a phone. So a `<table class="ms-table">` is always
+no way to reach the columns on the right (measured: decision-notes.md, D25). So a `<table class="ms-table">` is always
 inside `<TableScroll Label="…">` (`Components/Shared/TableScroll.razor`: `role="region"`, an accessible
 name, `tabindex="0"`, `overflow-x: auto`) or, for the documents list, its own `.ms-table-wrap` carrying
 the same three attributes. A document-wide observer in `js/studio.js` stamps
@@ -413,22 +423,18 @@ columns, a wrapped timestamp), fix the column first — the region is the floor,
 Relationships diagram and the database browser's tab rows use the same region and edge cue: the diagram is
 drawn at its natural size and scrolls sideways rather than shrinking until its labels are unreadable.
 
-**D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** The
-0.2.0 pass landed five parallel packets in one file. Each put its new rules in a titled section at the
-end (`UX-2`, `UX-3`, `UX-1`, `UX-4`, `UX-5`, in that order) and edited an existing rule in place only
-where its report says so; several sections deliberately re-declare an earlier selector (`.ms-event-card`,
-`.ms-projection-note`, `.ms-overview-list-stream`, `.ms-doc-detail-actions`) and win by source order.
-Keep that when touching those selectors: a rule added *before* the section that overrides it is a rule
-that does nothing, and `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured.
-0.3.0 appended `DB-4`, `DB-6`, `DB-7`, `DB-5`, `UX-6` and `UX-7` in that order under the same rule; `UX-6`
-re-declares a few earlier selectors on purpose (the notices' contrast, the heading's focus ring) and
-`StylesheetTests.DatabasePolish` pins them, as `StylesheetTests.FinalPolish` pins `UX-7`. 0.4.0 appended `HEALTH-1`,
-`HEALTH-2`, `HEALTH-4`, `HEALTH-3`, `EVENTS-4`, `QUERY-LINQ`, `PGV` and `UX-8` in that order, under the same rule;
-`StylesheetTests.QueryRefusal` pins `UX-8`. In 0.5 the file moved whole, to PostgresStudio's
-`wwwroot/css/studio.css`, with its section order unchanged, and it holds both studios' rules; a Marten-only sheet, if
-one is ever needed, is linked *after* it. 0.5.0 appended the wave-5 sections W5-CAP, W5-R2, W5-S2, W5-V1, W5-Q1,
-W5-AUR, W5-B1 and W5-API in that order under the same rule; each section's own stylesheet test reads it out of
-`studio.css` by its header.
+**D26 — The stylesheet's UX sections are appended in cascade order, and later wins on purpose.** Each packet
+puts its new rules in a titled section appended to PostgresStudio's `wwwroot/css/studio.css`, which holds both studios'
+rules (a Marten-only sheet, if one is ever needed, is linked *after* it), and edits an existing rule in place only
+where its report says so. Sections that re-declare an earlier selector (`.ms-event-card`, `.ms-projection-note`,
+`.ms-overview-list-stream`, `.ms-doc-detail-actions`, and `UX-6`'s notices' contrast and heading focus ring) win by
+source order: keep that when touching those selectors, as a rule added *before* the section that overrides it does
+nothing. `StylesheetTests` (plus its `.Shell` part) pins the ones that were measured, `StylesheetTests.DatabasePolish`
+`UX-6`, `StylesheetTests.FinalPolish` `UX-7` and `StylesheetTests.QueryRefusal` `UX-8`; from 0.5.0 each section's own
+stylesheet test reads it out of `studio.css` by its header. 0.6.0 appended `M1`, `X3`, `M3` (tested in
+`DeadLetterGroupsTests`), `M2`, `X1`, `X2`, `M47` and `UI-0.6` (tested in
+`StylesheetTests.UiSweep`), in that order. `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
+no specificity, so any rule that names a link wins over it. Earlier releases' sections: decision-notes.md, D26.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
 It lists the database's other objects by kind, gated like `RunSql`, whose power it is: `Capabilities.BrowseDatabase`
@@ -457,8 +463,10 @@ deparse function that opens what it describes, as its `AccessShareLock` queues b
 on 14 to 18: `pg_get_indexdef` in any form, `pg_get_expr` with a relation (a default's `adbin`, a partition's
 `relpartbound`: `pg_get_expr(relpartbound, <relid>)`), `pg_get_viewdef`, a table CHECK's `pg_get_constraintdef`,
 `pg_get_partkeydef`. Lists read partition bounds with `pg_get_expr(relpartbound, 0)`, which opens nothing
-(`LintMatrixLiveTests`). A list that must deparse reads `pg_locks` once and leaves a locked table's text out
-(`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its one relation, under `lock_timeout`.
+(`LintMatrixLiveTests`); T20 parses that text in C# (`PartitionBoundText`), in ISO `DateStyle`, which the health
+runner pins beside `search_path` (`HealthSessionQueries`). A list that must deparse takes the sweep's one `pg_locks`
+read (D29) and leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its
+one relation, under `lock_timeout`.
 Another store's key, alias and name in the "could not be built" notice show only to a visitor its store policy passes,
 its Marten-managed rows need its store and write policies, and other stores' databases are enumerated only when a store
 policy (or, while `BrowseDatabase` is on, a write policy) will be asked, never for a `DynamicMultiple` store. No rows
@@ -493,11 +501,17 @@ per-tenant overload touches only that tenant's agents and dead letters (#5700, j
 `(store, database, tenant)` and made only for an agent this process's daemon runs, with that agent's own names, as the
 overload starts the tenant's agents wherever it is asked. There the store-global rewind is never made, and Skip event is
 `MarkEventsAsSkipped`'s tenant overload (#5698), asked about the tenant; below either version both stay refused
-(SEC1-fix4). A tenant's database is found without asking a dynamic tenancy for a tenant it lacks
-(`DatabaseReach.FindTenantDatabaseAsync`). Enumerating a dynamic tenancy's databases (`AllDatabases()`,
-`Tenancy.DescribeDatabasesAsync()`, 9.50.1's `IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten
-through 9.54.2, and the studio, enumerating on the first navigation, can be the first caller: a known limit, not a
-per-poll cost. Measurements, history and details: decision-notes.md, D27.
+(SEC1-fix4). Skip this group (M3) is Skip event's path over one dead-letter group, at most 1,000 events an action: its
+checks in order, one statement proving every sequence in scope (`EventQueryBuilder.BuildSequencesInScope`), its
+commit (`CommitSkipAsync`, which `StorageEnsuringCallTests` holds to those two callers) and one audit entry naming the
+group and the count; under `UseTenantPartitionedEvents` it runs in one tenant, never a loop over several. The studio
+never removes an orphaned progression row (`ProgressionRowClassifier`, from `AllShards()`), and refuses Start and the
+store-global Rewind on a HotCold node whose distributor holds no lock (`DaemonLeadership`, M47). A tenant's database is
+found without asking a dynamic tenancy for a tenant it lacks (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating
+a dynamic tenancy's databases (`AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`, 9.50.1's
+`IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten through 9.54.2, and the studio, enumerating
+on the first navigation, can be the first caller: a known limit, not a per-poll cost. Measurements, history and
+details: decision-notes.md, D27.
 **D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),
 `BrowsableSchemas` playing "the store's own schemas": the schemas it names exactly are the source's own, their structure
 shown to anyone the source policy admits, their rows and definitions needing `BrowseDatabase` and the write policy
@@ -544,7 +558,8 @@ role-limit evidence and the quiet row); and an Aurora instance's identifier (`au
 `aurora-reader` evidence, the Replication page's Aurora replicas, the "Answered by" line, the Server page's Aurora
 section (instance waits included) and the capacity line need no `ViewDatabaseActivity`; a session's Aurora waits
 (`aurora_stat_backend_waits`) are `Activity`, read only through that gate and shown as counts and shares, never as a
-time. A finding about one tenant names it, so it also needs `Activity` and that tenant's store policy. A withheld
+time. A finding about one tenant names it, so it also needs `Activity` and that tenant's store policy: T18's, whose
+tenant partitions are summed in SQL and never listed (`ColumnSkewQueries`), is one. A withheld
 finding is counted, never described; a row below its check's gate reads "findings not shown to you" whether or not there
 are any; the badge and banners read only a scope the report would be shown to. A finding naming a table outside the
 store's schemas (`HealthFinding.GatedSchemas`, as for an `ExtendedSchemaObjects` table) also needs D27's gate for that
@@ -590,6 +605,11 @@ and T13's wraparound read, T14's result). The bloat measure runs as `SqlConsoleR
 bloat" with the table only. The triggers T07, T08 and the page judge by are computed in SQL
 (`HealthTableQueries.TablesSql`), mirrored in C# by `Autovacuum.Triggers` and held equal by `TriggerParityLiveTests`: no
 rule of thumb that ignores a table's storage parameters is used.
+**The lock table is read once per regular sweep** (X3): `HealthConnectionQueries.LockTable`, memoized as
+`connections.locks` (`LockTableReads`), feeds C04, C06, C12, T14 and, as `oid[]` parameters, the table and index
+reads; only the index read's `55P03` retry reads it again (`LockTableReadLiveTests` counts), and `HealthTableQueries`
+reads no activity view (`ActivityViewsOffThePollPathTests`, which no longer exempts it). C12 names a chain's head, so
+it is an Activity check; its terminate and cancel text is built in `SessionHandOver` and never run.
 **A check whose platform does what it judges** throws `HealthCheckNotApplicableException` with `ReplicationPlatform`'s
 sentence: listed as not applicable, never run, nothing logged (issue #8, A2), an expected state like a missing extension
 or privilege, never a Warning. The platform is recognised only from markers a role short of a superuser cannot plant.
@@ -680,6 +700,25 @@ and a cache hit waits behind nothing. Listing never enumerates a tenancy that bu
 ones (D27, hard rule 14). A host's database source must list without creating anything, and its names (D30's identities)
 survive a database moving server. Per-database state is kept for at most 64 databases, least recently used forgotten
 first (`HealthDatabaseBound`).
+
+**D32 — The studio draws every plan, plan insights judge it, and EXPLAIN ANALYZE is the console's alone.** The console's
+Explain buttons (and a typed `EXPLAIN (FORMAT JSON)`), Mode A and the Statements drill-in (`?queryid=`) all go through
+`QueryPlanReader` and `PlanView` (`ms-plan-`, in a D25 region). Insights are pure evaluators with stable `P` codes in
+`codes.md` (area Plans), in a registry of their own: never a health check, sweep, mute or diagnostics-API result.
+`EXPLAIN ANALYZE` runs only under `RunSql`, for a statement the guard accepts, in the read-only transaction. The
+drill-in plans a `pg_stat_statements` text as its generic plan by `prepare` + `force_generic_plan`, never
+`GENERIC_PLAN`, which Npgsql's extended protocol breaks. It runs as `SqlConsoleRole`, `VERBOSE`, under the visitor's
+`search_path` less withheld schemas, and never plans a write, a withheld text, or a text
+that names a withheld schema (`StatementsService.TextNamesWithheld`: one the visitor's mask changes, or a `U&"` name
+while anything is withheld; asked again by the reader before any `prepare`), because a qualified view or `LANGUAGE
+sql` function is expanded or inlined into visible tables and a `plpgsql` call prints its defaults. Known limit: a view
+or SQL function in a visible schema that reads a withheld one is expanded like any other. A plan reading a withheld
+schema is not
+shown; the rest is masked like the text, and each plan is audited by `queryid`. Console and Mode A plans are `RunSql`
+output, unmasked (D27). What if? (X2) imagines one index with hypopg behind the gate of the plan it accompanies, only
+one a builder writes (`MigrationSqlText`, or Marten's own `ToDDL`), re-derived on the server. Read-only; never
+`CREATE EXTENSION` or a real index; `hypopg_reset()` on the same connection, and a session whose reset fails ends
+itself, so no pooled backend keeps a hypothetical index.
 
 ## Package budget
 
@@ -798,7 +837,9 @@ Do not "update" it.
 `CHANGELOG.md` is the **version authority**: its top section is parsed in `OnBuildInitialized` and passed
 to every compile, test and pack as `-p:Version=`. The file is never mutated by the build, and its first
 line must parse as a version header (`# 0.1.0`) — **do not add a `# Changelog` title**, it would abort the
-build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plain `dotnet build`.
+build. `Directory.Build.props`'s `VersionPrefix` is only the fallback for a plain `dotnet build`, and `VersionFallbackTests`
+holds it to the CHANGELOG's top version (without a prerelease suffix): a new CHANGELOG section moves it in the same
+pull request.
 
 **The Marten version is `Directory.Packages.props`'s, and the build only chooses between two.**
 `MartenStudioMartenFloor` (what the package depends on) and `MartenStudioMartenLatest` (the newest 9.x CI
@@ -955,6 +996,9 @@ graph:
    states. `tests/PostgresStudio.Integration.Tests/` is this suite's Postgres Studio twin: the same rules (D19's gate,
    wait on the condition, `MARTENSTUDIO_PG_REUSE`), a container labelled
    `marten-studio.tests=PostgresStudio.Integration.Tests` so it never attaches to this suite's.
+   A live test whose assertion needs a `VACUUM` to remove rows works in a database of its own, as `IndexLintLiveTests`'
+   T25 test does: a snapshot or transaction id that any other session of the database holds keeps the rows dead but not
+   removable (from PostgreSQL 14, sessions of other databases do not count).
    Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19).

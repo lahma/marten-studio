@@ -145,6 +145,9 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<DocumentBrowserState>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();
         services.TryAddScoped<IEventDataService, EventDataService>();
+
+        // M3: the grouped dead-letter view's read, one per database and tenant per refresh interval across circuits.
+        services.TryAddSingleton<DeadLetterGroupCache>();
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();
@@ -160,6 +163,10 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddSingleton<StudioLiveState>();
         services.TryAddSingleton<StudioOperationTracker>();
         services.TryAddSingleton<DaemonControlState>();
+
+        // M2: the projections screen's own samples, fed by its single-flight snapshot read and shared by every circuit -
+        // bounded per shard, per database and, through HealthDatabaseBound, per process.
+        services.TryAddSingleton<ProjectionLagHistory>();
         services.TryAddScoped<DaemonAccessor>();
         services.TryAddScoped<IProjectionDataService, ProjectionDataService>();
 

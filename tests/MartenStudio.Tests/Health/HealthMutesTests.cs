@@ -79,6 +79,12 @@ public class HealthMutesTests
         }
     }
 
+    /// <summary>A mute key that carries what its finding's gate guards: E03's subject is <c>tenant/streamName</c>.</summary>
+    private const string RawKey = "default|tenants.acme_db|E03|acme/orders-4711";
+
+    /// <summary>A second mute key, muted beside <see cref="RawKey" />.</summary>
+    private const string OtherRawKey = "default|tenants.acme_db|K02";
+
     /// <summary>
     /// SEC2 L1, and wave 6: a mute key can carry what its finding's gate guards - E03's subject is <c>tenant/streamName</c> -
     /// and <c>localStorage</c> is readable by every script on the host's origin. The browser is handed keyed hashes and a
@@ -87,12 +93,12 @@ public class HealthMutesTests
     [Fact]
     public async Task No_raw_key_and_no_usable_hash_reaches_the_browser()
     {
-        const string Key = "default|tenants.acme_db|E03|acme/orders-4711";
+        const string Key = RawKey;
         HealthMuteKeys keys = new(new EphemeralDataProtectionProvider());
 
-        string written = await MutedAsync(keys, Key, "default|tenants.acme_db|K02");
+        string written = await MutedAsync(keys, Key, OtherRawKey);
 
-        written.Should().NotContain("acme").And.NotContain("orders-4711").And.NotContain("|").And.NotContain("E03");
+        ShouldHoldNoRawKey(written, Key, OtherRawKey);
 
         using JsonDocument stored = JsonDocument.Parse(written);
         string[] muted = [.. stored.RootElement.GetProperty("muted").EnumerateArray().Select(static x => x.GetString()!)];
@@ -109,6 +115,69 @@ public class HealthMutesTests
             "the browser keeps its key only as the host's Data Protection protected it");
         muted.Should().Contain(HealthMuteKeys.Hash(browserKey, Key), "and the hash is the HMAC under that key");
     }
+
+    /// <summary>
+    /// The raw-key check is not vacuous, and no longer flaky: a raw mute key, or any field of one, written as a hash entry,
+    /// as the key, as a field of its own or as a name, is caught; a protected key whose random base64 happens to spell a field
+    /// (one run's payload held <c>…ItE03EBL…</c>) is not.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"key":"AAAA","muted":["default|tenants.acme_db|E03|acme/orders-4711"]}""", false)]
+    [InlineData("""{"key":"default|tenants.acme_db|E03|acme/orders-4711","muted":[]}""", false)]
+    [InlineData("""{"key":"AAAA","muted":["acme/orders-4711"]}""", false)]
+    [InlineData("""{"key":"AAAA","muted":["E03"]}""", false)]
+    [InlineData("""{"key":"AAAA","muted":["acme"]}""", false)]
+    [InlineData("""{"key":"tenants.acme_db","muted":[]}""", false)]
+    [InlineData("""{"key":"AAAA","muted":[],"subject":"orders-4711"}""", false)]
+    [InlineData("""{"key":"AAAA","muted":[],"E03":"AAAA"}""", false)]
+    [InlineData("""{"key":"CfDJ8ItE03EBLacme+/orders4711w==","muted":["9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"]}""", true)]
+    public void The_raw_key_check_catches_a_raw_key_whole_or_by_field_and_not_a_base64_that_spells_one(string written, bool clean)
+    {
+        Action check = () => ShouldHoldNoRawKey(written, RawKey, OtherRawKey);
+
+        if (clean)
+        {
+            check.Should().NotThrow("a field spelled inside random base64 is chance, not a raw key");
+        }
+        else
+        {
+            check.Should().Throw<Exception>("a raw key, or a field of one, reached the browser");
+        }
+    }
+
+    /// <summary>
+    /// That nothing <paramref name="written" /> holds is a raw mute key or a field of one, checked as whole JSON values and
+    /// names - never as substrings of the protected key, which is random base64 and spells any short field now and then.
+    /// </summary>
+    private static void ShouldHoldNoRawKey(string written, params string[] rawKeys)
+    {
+        // '|' delimits a mute key's fields and is in no alphabet the browser is handed - lowercase hex, base64, JSON's own
+        // punctuation - so a whole key, anywhere in the text, is caught by the character alone.
+        written.Should().NotContain("|", "no whole mute key reaches the browser");
+
+        using JsonDocument stored = JsonDocument.Parse(written);
+        stored.RootElement.EnumerateObject().Select(static x => x.Name).Should().BeEquivalentTo(
+            ["key", "muted"], "the browser keeps a protected key and the hashes, and nothing else");
+
+        string[] fields =
+        [
+            .. rawKeys
+                .SelectMany(static x => x.Split('|').Prepend(x))
+                .SelectMany(static x => x.Split('/').Prepend(x))
+                .Distinct(StringComparer.Ordinal),
+        ];
+
+        Strings(stored.RootElement).Should().NotIntersectWith(fields, "no mute key, nor any field of one, is a value or a name the browser keeps");
+    }
+
+    /// <summary>Every property name and string value in <paramref name="element" />, materialised.</summary>
+    private static List<string> Strings(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => [.. element.EnumerateObject().SelectMany(static x => Strings(x.Value).Prepend(x.Name))],
+        JsonValueKind.Array => [.. element.EnumerateArray().SelectMany(Strings)],
+        JsonValueKind.String => [element.GetString()!],
+        _ => [],
+    };
 
     [Fact]
     public async Task The_same_key_gives_the_same_HMAC_within_a_process()

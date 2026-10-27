@@ -11802,3 +11802,1203 @@ a.ms-schema-health-mark:focus-visible {
         padding: var(--ms-space-md) var(--ms-space-md);
     }
 }
+
+/* ==========================================================================
+   M1. The projection stepper
+
+   0.6's M1: Events > a stream > Step through it event by event. Appended in D26 order; every selector is this packet's
+   own (ms-stepper-, and the four hooks it adds beside time travel and the dead letters: ms-time-travel-actions,
+   ms-time-travel-step, ms-dead-letter-step, ms-dead-letters-event), so nothing here re-declares an earlier rule. Notes use
+   the secondary text colour, not the muted one: UX-6 measured the muted grey below 4.5:1 on the surface. The step list is
+   a list, not a table, so D25's scroll region does not apply; it scrolls on its own axis, and on a phone it sits above
+   the step at a bounded height.
+   ========================================================================== */
+
+.ms-stepper-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--ms-space-md);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-stepper-note {
+    max-width: 80ch;
+    margin: var(--ms-space-sm) 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stepper-nav,
+.ms-stepper-search {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: var(--ms-space-sm) 0;
+}
+
+.ms-stepper-position {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    white-space: nowrap;
+}
+
+.ms-stepper-jump {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+}
+
+.ms-stepper-version {
+    width: 9ch;
+}
+
+.ms-stepper-path {
+    flex: 1 1 16rem;
+    min-width: 0;
+    max-width: 32rem;
+}
+
+.ms-stepper-panes {
+    display: grid;
+    grid-template-columns: minmax(12rem, 18rem) minmax(0, 1fr);
+    gap: var(--ms-space-lg);
+    align-items: start;
+    margin-top: var(--ms-space-md);
+}
+
+.ms-stepper-steps {
+    max-height: 70vh;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background-color: var(--ms-color-surface);
+}
+
+.ms-stepper-steps-item + .ms-stepper-steps-item {
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-stepper-step-link {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid transparent;
+    color: var(--ms-color-text);
+    text-decoration: none;
+}
+
+.ms-stepper-step-link:hover {
+    background-color: var(--ms-color-surface-hover);
+}
+
+.ms-stepper-step-link-selected {
+    border-left-color: var(--ms-color-primary);
+    background-color: var(--ms-color-surface-alt);
+}
+
+.ms-stepper-step-link-failed {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-stepper-step-version {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-stepper-step-type {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-stepper-step-meta {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-stepper-marker {
+    padding: 0 var(--ms-space-xs);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-sm);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-stepper-marker-failure {
+    border-color: var(--ms-color-danger);
+    background-color: var(--ms-color-danger-bg);
+}
+
+.ms-stepper-marker-dead {
+    border-color: var(--ms-color-warning);
+    background-color: var(--ms-color-warning-bg);
+}
+
+.ms-stepper-step {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-stepper-state,
+.ms-stepper-diff {
+    min-width: 0;
+}
+
+.ms-stepper-failure p {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-stepper-failure p + p {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-stepper-dead-letter-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-stepper-dead-letter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    overflow-wrap: anywhere;
+    border: 1px solid var(--ms-color-border);
+    border-left: 3px solid var(--ms-color-warning);
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-time-travel-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-dead-letter-step {
+    display: inline-block;
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-dead-letters-event a {
+    margin-left: var(--ms-space-xs);
+}
+
+@media (max-width: 900px) {
+    .ms-stepper-panes {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ms-stepper-steps {
+        max-height: 16rem;
+    }
+}
+
+/* ==========================================================================
+   X3. Database > Sessions > Blocking: who holds up whom, as trees
+
+   0.6's lock tree (X3). Appended after W5-API in D26 order; every selector is this packet's own (ms-blocking-, and
+   ms-sessions-tabs for the two tabs, which take .ms-tabs as they are), so nothing here re-declares an earlier rule. The tree
+   is nested lists rather than a table, so there is no TableScroll for it (D25 covers tables): each session is a row of
+   label/value pairs that wraps, and the nesting is a left rule that narrows on a phone. pg_stat_lock's table is an
+   .ms-table inside TableScroll. Notes use the secondary text colour, as UX-6 measured.
+   ========================================================================== */
+
+.ms-sessions-tabs {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-blocking-lead,
+.ms-blocking-note,
+.ms-blocking-gated {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-blocking-chains {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-md);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-blocking-chain {
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-warning);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-blocking-chain-unrooted {
+    border-left-color: var(--ms-color-border-strong);
+}
+
+.ms-blocking-chain-summary {
+    margin: 0 0 var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-tree,
+.ms-blocking-waiters {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-blocking-waiters {
+    margin-left: var(--ms-space-sm);
+    padding-left: var(--ms-space-md);
+    border-left: 2px solid var(--ms-color-border);
+}
+
+.ms-blocking-node {
+    margin: var(--ms-space-xs) 0;
+}
+
+.ms-blocking-session {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-blocking-head > .ms-blocking-session {
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-blocking-field {
+    display: flex;
+    gap: var(--ms-space-xs);
+    align-items: baseline;
+    min-width: 0;
+}
+
+.ms-blocking-field dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-blocking-field dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-blocking-pid dd {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-repeat {
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-blocking-handover {
+    margin-top: var(--ms-space-sm);
+    padding-top: var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-blocking-handover-title {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-handover-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-blocking-handover-line code {
+    overflow-wrap: anywhere;
+}
+
+.ms-blocking-handover-note {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-blocking-statistics {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-blocking-subheading {
+    margin: 0 0 var(--ms-space-xs);
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-blocking-statistics-table td + td {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+@media (max-width: 640px) {
+    .ms-blocking-chain {
+        padding: var(--ms-space-xs) var(--ms-space-sm);
+    }
+
+    .ms-blocking-waiters {
+        margin-left: var(--ms-space-xs);
+        padding-left: var(--ms-space-sm);
+    }
+}
+
+/* ==========================================================================
+   M3. Events > Dead letters, grouped by cause
+
+   0.6's dead-letter groups: the List / Grouped by cause switch (the shared ms-tabs, unchanged), the list's one-group
+   note, the grouped view's table and the bulk skip's dialog. Appended in D26 order; every selector is this packet's own
+   (ms-dl-views, ms-dl-group, ms-dl-groups), so nothing here re-declares an earlier rule. Notes use the secondary text
+   colour, not the muted one: UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-dl-views {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-dl-group-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: 0 0 var(--ms-space-md);
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-left: 3px solid var(--ms-color-border);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-group-filter-key {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-dl-groups-intro,
+.ms-dl-groups-note,
+.ms-dl-group-cap {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-groups-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin-bottom: var(--ms-space-sm);
+}
+
+.ms-dl-groups-summary {
+    font-weight: var(--ms-font-weight-medium);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-dl-groups-read {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-group-projection,
+.ms-dl-group-type,
+.ms-dl-group-exception {
+    display: block;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-dl-group-shard,
+.ms-dl-group-type-missing,
+.ms-dl-group-skipped,
+.ms-dl-group-tenants-unnamed {
+    display: block;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+/* The fingerprint is what the group is: it wraps inside its column rather than widening the table (D25). */
+.ms-dl-group-fingerprint {
+    display: block;
+    max-width: 48ch;
+    margin-top: var(--ms-space-xs);
+    overflow-wrap: anywhere;
+    white-space: normal;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-dl-group-sample {
+    max-width: 48ch;
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-dl-group-sample pre {
+    margin: var(--ms-space-xs) 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-dl-group-count {
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ms-dl-group-tenants {
+    max-width: 24ch;
+}
+
+.ms-dl-group-tenant-names {
+    display: block;
+    overflow-wrap: anywhere;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-dl-group-actions {
+    white-space: nowrap;
+}
+
+.ms-dl-group-actions .ms-dl-group-cap {
+    display: block;
+    max-width: 32ch;
+    margin-top: var(--ms-space-xs);
+    white-space: normal;
+}
+
+.ms-dl-group-plan-count {
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+@media (max-width: 640px) {
+    .ms-dl-group-fingerprint,
+    .ms-dl-group-sample {
+        max-width: 32ch;
+    }
+}
+
+/* ==========================================================================
+   M2. The projections screen's lag chart, and the thresholds that apply
+
+   0.6's lag history packet: each shard row's chart of its position against the high water, drawn from the screen's own
+   samples, with its caption - the chart's text equivalent - and the "Thresholds that apply" disclosure under the table.
+   Appended after W5-API in D26 order; every selector is this packet's own (ms-lag-chart-, ms-shard-history-cell,
+   ms-projection-thresholds), so nothing here re-declares an earlier rule, and the caption's arrow keeps HEALTH-2's
+   ms-shard-trend colours. Text uses the secondary colour, not the muted one (UX-6 measured the muted grey below 4.5:1 on
+   the surface), and the stall is marked with a warning-coloured rule beside the text rather than by colouring the text:
+   the warning yellow is below 4.5:1 too. The chart's width is fixed; the table's own scroll region is where it scrolls at a
+   narrow width (D25).
+   ========================================================================== */
+
+.ms-shard-history-cell {
+    min-width: 168px;
+    vertical-align: top;
+}
+
+.ms-lag-chart {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    max-width: 22rem;
+    margin: 0;
+}
+
+.ms-lag-chart-svg {
+    display: block;
+    flex: none;
+    width: 160px;
+    height: 40px;
+    border-bottom: 1px solid var(--ms-color-border);
+    overflow: visible;
+}
+
+.ms-lag-chart-svg polyline {
+    fill: none;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+}
+
+.ms-lag-chart-high-water {
+    stroke: var(--ms-color-text-secondary);
+    stroke-width: 1.5;
+}
+
+.ms-lag-chart-position {
+    stroke: var(--ms-color-primary);
+    stroke-width: 2;
+}
+
+.ms-lag-chart-stalled {
+    stroke: var(--ms-color-warning);
+    stroke-width: 3;
+}
+
+.ms-lag-chart-threshold {
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+}
+
+.ms-lag-chart-warning {
+    stroke: var(--ms-color-warning);
+}
+
+.ms-lag-chart-critical {
+    stroke: var(--ms-color-danger);
+}
+
+.ms-lag-chart-caption {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.ms-lag-chart-caption .ms-shard-trend {
+    margin: 0 var(--ms-space-xs) 0 0;
+}
+
+.ms-lag-chart-stall,
+.ms-lag-chart-rebuild {
+    padding-left: var(--ms-space-xs);
+    color: var(--ms-color-text);
+}
+
+.ms-lag-chart-is-stalled .ms-lag-chart-stall {
+    border-left: 3px solid var(--ms-color-warning);
+}
+
+.ms-lag-chart-rebuilding .ms-lag-chart-rebuild {
+    border-left: 3px solid var(--ms-color-primary);
+}
+
+.ms-projection-thresholds {
+    max-width: 80ch;
+    margin-top: var(--ms-space-sm);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-projection-thresholds > summary {
+    cursor: pointer;
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-projection-thresholds-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: var(--ms-space-sm) 0 0;
+    padding-left: var(--ms-space-lg);
+}
+
+/* ==========================================================================
+   X1. The plan view: a plan as a tree, its insights, and the Statements drill-in
+
+   0.6's plan view packet (X1 and X1b). Appended to studio.css in D26 order; every selector is this packet's own (ms-plan-),
+   so nothing here re-declares an earlier rule. The tree sits in a TableScroll region (D25) at its natural width and scrolls
+   sideways rather than squeezing a deep plan's labels; each node is at most as wide as the plan itself less the tree's
+   padding (the plan is a container, and 100cqi its width), so a one-node plan fits on a phone and only a deeper one scrolls.
+   0.6's UI sweep measured the first bound, 85vw, at 390 px: a viewport unit knows nothing of the icon rail and the cards
+   round the plan, so the root node ran 88 px past a 252 px region (UI-FIX, edited in place). A node's bar is its share of
+   the plan's time, or of its cost. Notes use the secondary text colour, not the muted one: UX-6 measured the muted grey
+   below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-plan {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    container-type: inline-size;
+}
+
+.ms-plan-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-summary-item:first-child {
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-caption,
+.ms-plan-legend,
+.ms-plan-not-judged,
+.ms-plan-unreadable,
+.ms-plan-insights-none {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-tree,
+.ms-plan-children,
+.ms-plan-triggers,
+.ms-plan-insight-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-plan-tree {
+    min-width: max-content;
+    padding: var(--ms-space-sm);
+}
+
+.ms-plan-children {
+    margin-left: var(--ms-space-md);
+    padding-left: var(--ms-space-md);
+    border-left: 1px solid var(--ms-color-border-strong);
+}
+
+.ms-plan-item {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-plan-tree > .ms-plan-item:first-child {
+    margin-top: 0;
+}
+
+.ms-plan-node {
+    max-width: min(72ch, 100cqi - 2 * var(--ms-space-sm));
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-node-idle {
+    border-style: dashed;
+}
+
+.ms-plan-node-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0;
+}
+
+.ms-plan-subplan {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ms-plan-node-type {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-node-target {
+    min-width: 0;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-chip {
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-share {
+    display: flex;
+    align-items: center;
+    gap: var(--ms-space-sm);
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-bar {
+    position: relative;
+    flex: 0 0 8rem;
+    height: 0.375rem;
+    overflow: hidden;
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-plan-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: var(--ms-plan-share, 0%);
+    background: var(--ms-color-primary);
+}
+
+.ms-plan-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-sm);
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-plan-details {
+    margin-top: var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-details > summary,
+.ms-plan-raw > summary {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    cursor: pointer;
+}
+
+.ms-plan-detail-list {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: var(--ms-space-xs) 0 0;
+}
+
+.ms-plan-detail {
+    display: contents;
+}
+
+.ms-plan-detail dt {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-plan-detail dd {
+    min-width: 0;
+    margin: 0;
+}
+
+.ms-plan-detail-value {
+    font-family: var(--ms-font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-trigger {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-insights {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-insights-title {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-plan-insight-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-insight {
+    max-width: 90ch;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-info);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-insight-warning {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-plan-insight-critical {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-plan-insight-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin: 0;
+}
+
+.ms-plan-insight-code {
+    font-family: var(--ms-font-mono);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-insight-title {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-insight-severity {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+    text-transform: uppercase;
+}
+
+.ms-plan-insight-message,
+.ms-plan-insight-remedy {
+    margin: var(--ms-space-xs) 0 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-insight-remedy {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-drill {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin-bottom: var(--ms-space-lg);
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-drill-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-drill-title {
+    margin: 0;
+    font-size: var(--ms-font-size-xl);
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-drill-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-drill-text {
+    margin: 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-drill-counts,
+.ms-plan-drill-none,
+.ms-plan-drill-measured {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-open {
+    margin-left: var(--ms-space-sm);
+}
+
+@media (max-width: 640px) {
+    .ms-plan-drill {
+        padding: var(--ms-space-sm);
+    }
+
+    .ms-plan-drill-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .ms-plan-children {
+        margin-left: var(--ms-space-xs);
+        padding-left: var(--ms-space-sm);
+    }
+
+    .ms-plan-bar {
+        flex-basis: 5rem;
+    }
+}
+
+/* ==========================================================================
+   X2. What if? A hypothetical index, and the plan now and under it
+
+   0.6's what-if packet (X2). Appended after X1 in D26 order; every selector is this packet's own (ms-whatif-), so nothing here
+   re-declares an earlier rule. The two plans sit side by side where there is room and stack where there is not; each side may
+   shrink below its content (min-width: 0), so a wide plan scrolls inside its own PlanView region (D25) and never widens the
+   page. A definition is code a person reads before trusting it, so it wraps anywhere rather than running off the edge.
+   ========================================================================== */
+
+.ms-whatif {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin-top: var(--ms-space-md);
+    padding-top: var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-whatif-title {
+    margin: 0;
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-whatif-lead,
+.ms-whatif-note,
+.ms-whatif-name,
+.ms-whatif-caveat {
+    max-width: 80ch;
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-whatif-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-whatif-candidate {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+    padding: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-whatif-candidate-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    flex: 1 1 20rem;
+}
+
+.ms-whatif-caption {
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-whatif-candidate-note {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-whatif-definition {
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.ms-whatif-run {
+    flex: 0 0 auto;
+}
+
+.ms-whatif-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-whatif-imagined,
+.ms-whatif-verdict {
+    margin: 0;
+}
+
+.ms-whatif-verdict {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-border-strong);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-whatif-used {
+    border-left-color: var(--ms-color-success);
+    background: var(--ms-color-success-bg);
+}
+
+.ms-whatif-unused {
+    border-left-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-whatif-compare {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--ms-space-md);
+    min-width: 0;
+}
+
+.ms-whatif-side {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-whatif-side-title {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+@media (max-width: 1100px) {
+    .ms-whatif-compare {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* ==========================================================================
+   M47. Orphaned progression rows (M4), and the daemon topology (M7)
+
+   0.6's M4 and M7 packet, appended in D26 order. Every selector is this packet's own (ms-orphaned-progression-,
+   ms-orphan-read, ms-shard-node, ms-daemon-topology), so nothing here re-declares an earlier rule. Notes use the
+   secondary text colour, as W5-API's do: UX-6 measured the muted grey below 4.5:1 on the surface.
+   ========================================================================== */
+
+.ms-orphaned-progression {
+    margin-top: var(--ms-space-lg);
+}
+
+.ms-orphaned-progression-note,
+.ms-orphaned-progression-withheld {
+    max-width: 80ch;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-orphaned-progression-reason {
+    min-width: 24ch;
+    max-width: 60ch;
+    white-space: normal;
+}
+
+.ms-orphaned-progression-sql {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-orphaned-progression-sql summary {
+    cursor: pointer;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-orphaned-progression-statements {
+    margin: var(--ms-space-xs) 0 0;
+    padding: var(--ms-space-sm);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ms-shard-node-elsewhere {
+    color: var(--ms-color-text-secondary);
+    border-style: dashed;
+}
+
+.ms-daemon-topology {
+    max-width: 80ch;
+}
+
+/* ==========================================================================
+   UI-0.6. What 0.6's UI sweep found at 390 px and in the dark theme
+
+   Appended in D26 order, after M47. Each rule fixes one measured defect, and StylesheetTests.UiSweep pins it; the plan
+   node's width, the fifth, is an in-place edit of X1's own rule (PlanStylesheetTests) rather than an override here.
+
+   - A link nothing else colours takes the link token. The studio had no default for an anchor: every context that wanted
+     one wrote its own rule, and those that did not (the Overview's lists, a finding's "About" link, the notes that link to
+     Health or Maintenance, the breadcrumbs) drew in the browser's own #0000ee - fine on white, unreadable on the dark
+     surface. The rule is wrapped in :where(), so it weighs nothing: any rule that names the link - a class, a context, a
+     state - still wins, and only a link that was in the browser's colour changes. It is scoped to .ms-studio, so a host's
+     own page is untouched.
+   - The breadcrumbs take the database browser's breadcrumb style (.ms-db-breadcrumb): the link token, underlined only on
+     hover. Document detail keeps its own class; Database > Sessions now uses the browser's.
+   - The query editor's toolbar wraps. "Ctrl+Enter runs, Esc cancels, Ctrl+S saves" sat on the buttons' line with nowhere
+     to go, and at 390 px ran 93 px past the editor card - and past .ms-content, which then scrolled sideways (403 > 334).
+     It now takes a line of its own when the buttons leave no room.
+   - Time travel's version slider gives way. A flex item's automatic minimum width is, for a range input, its default
+     width, so the stepper row could not shrink and its Next button ran 25 px past the card at 390 px.
+   ========================================================================== */
+
+:where(.ms-studio a) {
+    color: var(--ms-color-primary);
+}
+
+.ms-breadcrumb a {
+    color: var(--ms-color-primary);
+    text-decoration: none;
+}
+
+.ms-breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+.ms-query-editor-toolbar {
+    flex-wrap: wrap;
+}
+
+.ms-time-travel-stepper > input[type="range"] {
+    min-width: 0;
+}

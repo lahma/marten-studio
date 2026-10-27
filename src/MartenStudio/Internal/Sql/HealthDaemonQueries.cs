@@ -345,6 +345,47 @@ internal static class HealthDaemonQueries
         ]);
     }
 
+    /// <summary>
+    /// D10's read: the progression rows that are not a registered shard by name, nor - under per-tenant partitioning - a
+    /// tenant's row of one, at most <see cref="MaxShardRows" />, by name.
+    /// </summary>
+    /// <param name="eventSchema">The event store's schema. The progression table must exist.</param>
+    /// <param name="registered">Every registered shard's and composite member's store-global identity, and Marten's bookkeeping rows'.</param>
+    /// <param name="tenantPrefixes">
+    /// <c>{identity}:</c> for each of those whose tenants' rows are registered too - every one under
+    /// <c>UseTenantPartitionedEvents</c>, none otherwise.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The filter is a bound, not the decision: it leaves out the rows that are certainly registered, so a store with
+    /// thousands of tenants' rows stays one short read, and the classifier decides every row it returns
+    /// (<c>ProgressionRowClassifier</c>). Both lists are parameters; the prefix is compared as a value
+    /// (<c>left(name, length(prefix)) = prefix</c>), never as a <c>LIKE</c> pattern a <c>_</c> in a name would widen.
+    /// </para>
+    /// <para>Columns: <c>name</c>, <c>last_seq_id</c>, <c>last_updated</c>. One read of the progression table, by its primary key's order.</para>
+    /// </remarks>
+    public static HealthQuery OrphanCandidates(string eventSchema, IReadOnlyCollection<string> registered, IReadOnlyCollection<string> tenantPrefixes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventSchema);
+        ArgumentNullException.ThrowIfNull(registered);
+        ArgumentNullException.ThrowIfNull(tenantPrefixes);
+
+        string sql =
+            "select p.name, p.last_seq_id, p.last_updated\n"
+            + "from " + SqlIdentifier.Qualify(eventSchema, ProgressionTable) + " p\n"
+            + "where p.name <> all(@registered)\n"
+            + "  and not exists (select 1 from pg_catalog.unnest(@tenant_prefixes) as t(prefix)\n"
+            + "                  where pg_catalog.left(p.name, pg_catalog.length(t.prefix)) = t.prefix)\n"
+            + "order by p.name\n"
+            + "limit " + MaxShardRows.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        return new HealthQuery(sql,
+        [
+            new NpgsqlParameter("registered", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = registered.ToArray() },
+            new NpgsqlParameter("tenant_prefixes", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = tenantPrefixes.ToArray() },
+        ]);
+    }
+
     /// <summary>How many dead letters each projection has.</summary>
     /// <param name="deadLetterSchema">
     /// The dead-letter table's schema, as <c>DeadLetterQueries.TableFor</c> finds it - the event store's, where Marten

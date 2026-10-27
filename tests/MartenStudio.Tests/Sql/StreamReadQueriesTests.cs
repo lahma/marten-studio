@@ -85,6 +85,39 @@ public class StreamReadQueriesTests
     }
 
     /// <summary>
+    /// M1: the stepper's window is bounded at both ends - versions above where it starts, and at most a limit of them -
+    /// every bound a parameter, the order still Marten's.
+    /// </summary>
+    [Fact]
+    public void The_stepper_window_reads_above_a_version_and_no_more_than_its_limit()
+    {
+        ReplayEventsQuery query = Query(Guid.NewGuid()) with { AfterVersion = 40, Limit = 21 };
+
+        using NpgsqlCommand command = StreamReadQueries.BuildReplayEvents(Table, query);
+
+        command.CommandText.Should().Contain("  and e.\"version\" > @after\n");
+        command.CommandText.Should().EndWith("order by e.\"seq_id\"\nlimit @limit");
+        command.Parameters["after"].Value.Should().Be(40L);
+        command.Parameters["limit"].Value.Should().Be(21);
+        command.CommandText.Should().NotContain("40").And.NotContain("21");
+
+        EventTableInfo versionless = Table with { EventColumns = [.. Table.EventColumns.Where(static x => x != "version")] };
+        var plain = new ReplayEventsQuery { SelectFields = ["data", "type"], StreamId = Guid.NewGuid() };
+
+        StreamReadQueries.MissingColumns(versionless, plain).Should().BeEmpty("the premise: nothing else reads the version");
+        StreamReadQueries.MissingColumns(versionless, plain with { AfterVersion = 40 })
+            .Should().Equal(["version"], "the bound reads the version, so a table without it is refused before it is asked");
+    }
+
+    [Fact]
+    public void Without_a_window_the_replay_has_no_limit()
+    {
+        using NpgsqlCommand command = StreamReadQueries.BuildReplayEvents(Table, Query(Guid.NewGuid()) with { Version = 9 });
+
+        command.CommandText.Should().NotContain("limit").And.NotContain("@after");
+    }
+
+    /// <summary>
     /// <c>EventStatement</c> leaves the stream predicate out for an empty key, which reads the whole log. This never does.
     /// </summary>
     [Fact]

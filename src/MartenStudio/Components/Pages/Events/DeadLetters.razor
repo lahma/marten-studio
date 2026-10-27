@@ -40,6 +40,13 @@
     }
     else
     {
+    <DeadLetterViewBar Grouped="@IsGroupedView" Group="@Group" />
+    @if (IsGroupedView)
+    {
+        <DeadLetterGroups />
+    }
+    else
+    {
     <div class="ms-event-filters">
         <div class="ms-event-filter">
             <label class="ms-event-filter-label" for="ms-dl-projection">Projection</label>
@@ -71,6 +78,23 @@
                    @onchange="OnExceptionChangedAsync" />
         </div>
     </div>
+
+    @* M1: the stepper's link to one event's dead letters. A filter of its own rather than a field, because it is a
+       number a link carries, not something a visitor types. *@
+    @if (Sequence is { } sequence)
+    {
+        <p class="ms-stepper-note ms-dead-letters-event" role="status">
+            Only the dead letters of event #@sequence.ToString(CultureInfo.InvariantCulture).
+            <a href="@WithoutSequenceHref">Show every dead letter</a>
+        </p>
+    }
+
+    @* SEC-FIX: a group's letters are found among the newest letters the grouped view groups, and when there are more than
+       that the list says so in the grouped view's own sentence - empty or not. *@
+    @if (!loading && page is { LettersCut: true })
+    {
+        <p class="ms-dl-groups-note ms-dl-groups-cut">@DeadLetterGroupText.LettersCut</p>
+    }
 
     @if (!Capabilities.IsEnabled(StudioCapability.ManageDeadLetters))
     {
@@ -176,6 +200,12 @@
                                                            BinaryLength="offending.BinaryLength"
                                                            Json="@offending.Json"
                                                            Metadata="offending.Metadata" />
+
+                                                @* M1: the event in the stepper, folded into the aggregate this dead letter's
+                                                   projection builds when it is a single-stream one - the page picks it by
+                                                   the projection's name, and asks for a type when it is not. *@
+                                                <a class="ms-button ms-btn-sm ms-dead-letter-step"
+                                                   href="@StepHref(offending, row.ProjectionName)">Step to this event</a>
                                             }
                                         </div>
 
@@ -260,6 +290,7 @@
                 <a class="ms-button" href="@PageHref(OffsetValue + PageSize)">Next</a>
             }
         </nav>
+    }
     }
     }
 </div>
@@ -413,6 +444,10 @@
     [SupplyParameterFromQuery(Name = "exception")]
     public string? Exception { get; set; }
 
+    /// <summary>Only the dead letters of the event of this sequence - the stepper's link (M1).</summary>
+    [SupplyParameterFromQuery(Name = "seq")]
+    public long? Sequence { get; set; }
+
     /// <summary>How many to skip.</summary>
     [SupplyParameterFromQuery(Name = "offset")]
     public int? Offset { get; set; }
@@ -429,12 +464,24 @@
     [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
     public string? Tenant { get; set; }
 
+    /// <summary>Which view: <c>grouped</c> for the dead letters grouped by cause (M3), anything else for the list.</summary>
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? View { get; set; }
+
+    /// <summary>Only this group's dead letters (M3), as the grouped view's Open link encodes it.</summary>
+    [SupplyParameterFromQuery(Name = "group")]
+    public string? Group { get; set; }
+
+    private bool IsGroupedView => string.Equals(View, "grouped", StringComparison.Ordinal);
+
     private int OffsetValue => Math.Max(0, Offset ?? 0);
 
     private bool HasFilters =>
         !string.IsNullOrWhiteSpace(Projection)
         || !string.IsNullOrWhiteSpace(Shard)
-        || !string.IsNullOrWhiteSpace(Exception);
+        || !string.IsNullOrWhiteSpace(Exception)
+        || Sequence is not null
+        || !string.IsNullOrWhiteSpace(Group);
 
     private int DetailColumnSpan => 7;
 
@@ -511,7 +558,17 @@
         mayManage
         && (!PerTenantSequences || (RewindsOneTenant && RunsTenantAgent(row)))
         && projections is { Daemon.IsHostedHere: true }
-        && FindProjection(row.ProjectionName) is { IsAsync: true };
+        && FindProjection(row.ProjectionName) is { IsAsync: true, IsSubscription: false }
+        && (PerTenantSequences || !LedElsewhere(row.ProjectionName));
+
+    /// <summary>
+    /// M7: whether, under HotCold, another node leads any of the projection's shards - where a store-global rewind here would
+    /// restart its agents beside that node's, and the service refuses it (<see cref="DaemonTopologyWording.RewindLedElsewhere" />).
+    /// </summary>
+    private bool LedElsewhere(string projectionName) =>
+        projections is { Daemon: { IsHotCold: true } daemon }
+        && FindProjection(projectionName) is { } projection
+        && projection.ShardNames.Any(shard => daemon.LeadsHere(shard) == false);
 
     private bool RunsTenantAgent(DeadLetterRow row) =>
         projections is { Daemon.IsHostedHere: true } view
@@ -561,6 +618,12 @@
                 + "there is no progression to rewind.";
         }
 
+        if (projection.IsSubscription)
+        {
+            return $"'{projectionName}' is a subscription registered with Events.Subscribe(...), which Marten Studio does "
+                + "not rewind: the store's projection list does not name it, and the rewind is checked against that list.";
+        }
+
         if (PerTenantSequences)
         {
             if (!TenantRewind.IsAddressable(row.TenantId))
@@ -573,8 +636,19 @@
                 : StreamCompactionRules.RewindNeedsTenantAgentHere(projectionName, row.TenantId);
         }
 
+        if (LedElsewhere(projectionName))
+        {
+            return DaemonTopologyWording.RewindLedElsewhere(projectionName);
+        }
+
         return "Rewinds the subscription so the daemon re-applies this event and everything after it";
     }
+
+    /// <summary>
+    /// M7: what the confirm dialog adds while Marten Studio's pause is in effect - the rewind restarts the projection's agents
+    /// on this node at once, pause or not (JasperFx's <c>RewindSubscriptionAsync</c> starts them itself).
+    /// </summary>
+    private string PausedNote => projections is { Daemon.IsPausedByStudio: true } ? DaemonTopologyWording.RewindWhilePaused : string.Empty;
 
     /// <summary>The floor the rewind would write: one below the dead letter's own sequence.</summary>
     private long RewindFloor => pendingRewind is { } row
@@ -646,13 +720,13 @@
             $"The daemon stops tenant {pendingRewind?.TenantId}'s agents of '{pendingRewind?.ProjectionName}', moves "
             + "that tenant's progression of every one of its shards back and starts them again from there, so the event "
             + "it failed on is re-applied along with everything after it in that tenant - and in no other. If the "
-            + "projection still throws, the same failure comes back as a new dead letter.",
+            + "projection still throws, the same failure comes back as a new dead letter." + PausedNote,
         DialogKind.Rewind =>
             $"The daemon stops every agent of '{pendingRewind?.ProjectionName}' in this database, moves the "
             + "progression of every one of its shards back and starts them again from there, so the event it "
             + "failed on is re-applied along with everything after it - for every tenant in this database, "
             + "not only the one on screen. If the projection still throws, the same failure comes back as a "
-            + "new dead letter.",
+            + "new dead letter." + PausedNote,
         _ => string.Empty,
     };
 
@@ -745,6 +819,13 @@
             return;
         }
 
+        // The grouped view reads for itself (DeadLetterGroups); the list is not read under it.
+        if (IsGroupedView)
+        {
+            loading = false;
+            return;
+        }
+
         loading = true;
         expanded = null;
         offending = null;
@@ -783,6 +864,8 @@
                     ProjectionName = Projection,
                     ShardName = Shard,
                     ExceptionType = Exception,
+                    EventSequence = Sequence,
+                    Group = DeadLetterGroupKey.Decode(Group),
                     Offset = OffsetValue,
                     PageSize = PageSize,
                 }, token);
@@ -1055,8 +1138,33 @@
                 new("projection", Projection),
                 new("shard", Shard),
                 new("exception", Exception),
+                new("seq", EventLinks.Number(Sequence)),
+                new("group", Group),
                 new("offset", offset > 0 ? offset.ToString(CultureInfo.InvariantCulture) : null),
             ]);
+
+    /// <summary>The same filters without the event's, back to every dead letter they match.</summary>
+    private string WithoutSequenceHref =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.DeadLettersRoute,
+            State.ActiveScope,
+            [new("projection", Projection), new("shard", Shard), new("exception", Exception), new("group", Group)]);
+
+    /// <summary>
+    /// The offending event in the stepper (M1), in the scope its stream link uses: the event's own tenant when the scope
+    /// names none and the events are conjoined (SEC1-fix5), and the dead letter's projection for the page to pick the
+    /// aggregate type by.
+    /// </summary>
+    private string StepHref(EventRow offending, string projection) =>
+        EventLinks.ToStep(
+            Options.Value,
+            State.ActiveScope is { TenantId: null } all && shape is { EventsConjoined: true } && !string.IsNullOrEmpty(offending.TenantId)
+                ? all with { TenantId = offending.TenantId }
+                : State.ActiveScope,
+            offending.StreamId,
+            version: offending.Version,
+            projection: projection);
 
     /// <summary>
     /// The offending event's stream, in the event's own tenant when the scope names none and the event store is
@@ -1080,6 +1188,9 @@
             Projection,
             Shard,
             Exception,
+            EventLinks.Number(Sequence),
+            View,
+            Group,
             OffsetValue.ToString(CultureInfo.InvariantCulture));
 
     public async ValueTask DisposeAsync()

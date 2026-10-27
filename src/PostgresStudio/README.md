@@ -164,7 +164,7 @@ a write.
 |---|---|
 | `BrowseDatabase` | The rows and definitions of tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` admits |
 | `ViewDatabaseActivity` | Other sessions' process ids, roles, client addresses, application names and statements, on Database › Sessions, the Health page and Operations › Statements |
-| `RunSql` | Read-only SQL from the Query page's console |
+| `RunSql` | Read-only SQL from the Query page's console, its Explain analyze, and What if? under a console plan |
 
 **The database browser's gate.** The schemas `BrowsableSchemas` names exactly - `public` when nothing names any - are
 the data source's own: their structure (tables, columns, keys, indexes, estimates) is shown to anyone the source policy
@@ -210,7 +210,24 @@ catalog's page counts) and **Replication** (slots, standbys, the archiver, WAL, 
 The health advisor runs only while a Health page or the Overview is open, or the health check is probed, at most once
 per `HealthInterval` per database, in a read-only transaction, without DDL and without a lock beyond what a read takes.
 Its checks and their codes are listed in
-[`docs/health/codes.md`](https://github.com/lahma/marten-studio/blob/main/docs/health/codes.md).
+[`docs/health/codes.md`](https://github.com/lahma/marten-studio/blob/main/docs/health/codes.md). T20 says when a
+range-partitioned table is running out of partitions: a time range by its clock, a `smallint`, `integer` or `bigint`
+range by where its rows stop, from the partitions' estimated rows and without opening one.
+
+**Plans.** The console's **Explain** and **Explain analyze** buttons draw a plan as a tree - each node's type and what
+it reads, estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
+`EXPLAIN (FORMAT JSON)` you type. `EXPLAIN ANALYZE` runs only in the console, under `RunSql`, inside its read-only
+transaction, so a write its guard misses is refused by Postgres (`25006`). Under every plan, **plan insights** (P01-P08,
+[`docs/health/plans.md`](https://github.com/lahma/marten-studio/blob/main/docs/health/plans.md)) point at what is wrong
+with it. Operations › Statements opens one statement's drill-in (`?queryid=`): its text, its counters and its generic
+plan, planned as `SqlConsoleRole` behind the page's own gate, masked as the text is, and audited. Where a plan's
+sequential scan filters on plain columns, **What if?** plans the statement again with an index on them imagined by
+hypopg and draws both plans side by side; it creates nothing, and needs hypopg installed, which is your decision.
+
+**Blocking.** Database › Sessions › Blocking (`?view=blocking`) draws who holds up whom as trees, behind
+`ViewDatabaseActivity`, with a chain head's `pg_terminate_backend` (and `pg_cancel_backend`) as text to copy - the
+studio never runs either - and on PostgreSQL 19 the server's lock waits from `pg_stat_lock`. C12 names the head of a
+chain that sits idle in its transaction or has kept others waiting for minutes.
 
 ## The diagnostics API
 

@@ -5,6 +5,8 @@ using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
+using MartenStudio.Services.Documents;
+using MartenStudio.Services.Events;
 using MartenStudio.Services.Query;
 using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Support;
@@ -278,6 +280,106 @@ public class SqlConsoleReachTests
         sql.DatabaseId.Should().Be("db");
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // INT-W1: H1's rules on 0.6's new call sites - X2's what-if gates, M1's stepper refusal
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>An index the plan of a sequential scan would suggest, as a surface offers one.</summary>
+    private static readonly HypotheticalIndex Imagined = HypotheticalIndexCandidates.FromPlan(QueryPlanReader.Read(
+        """[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Schema":"public","Alias":"o","Filter":"(o.customer_id = 42)","Total Cost":10}}]""").Plan!)[0];
+
+    /// <summary>
+    /// INT-W1, H1 item 2 on X2's Mode A what-if: the answer that lifts the clause guard's nested-read rules is asked by the
+    /// registered key and the database's identity, as a run's is. Before, <c>?store=DEFAULT</c> and no <c>?db=</c> passed a
+    /// handler that refuses <c>RunSql</c> on <c>default</c>, and the what-if went on to the connection.
+    /// </summary>
+    [Fact]
+    public async Task The_Mode_A_what_ifs_RunSql_question_names_the_registered_key_and_the_databases_identity()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        harness.Policies.Allow(static resource =>
+            resource.Capability != nameof(StudioCapability.RunSql) || resource.StoreName != MartenStoreRegistry.DefaultStoreKey);
+
+        WhatIfResult result = await harness.Queries.WhatIfAsync(
+            new StudioScope("DEFAULT", string.Empty, null), new MartenQueryRequest(Harness.Alias, "where data ->> 'Subject' = 'x'"), Imagined, Token);
+
+        result.Refusal.Should().Be(PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy, result.Reason);
+        harness.Policies.Calls.Should().Contain(x => x.Resource.Capability == nameof(StudioCapability.RunSql)
+            && x.Resource.StoreName == MartenStoreRegistry.DefaultStoreKey && x.Resource.DatabaseIdentifier == harness.Database);
+    }
+
+    /// <summary>INT-W1, H1 item 1 on X2's Mode A what-if: an alias that names nothing is refused with the visitor's text escaped.</summary>
+    [Fact]
+    public async Task A_Mode_A_what_if_over_an_alias_that_names_nothing_is_refused_with_the_visitors_text_escaped()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        const string Hostile = "no\r\nsuch\u001b[2J";
+
+        WhatIfResult result = await harness.Queries.WhatIfAsync(harness.Scope(null), new MartenQueryRequest(Hostile, "where 1 = 1"), Imagined, Token);
+
+        result.Refusal.Should().Be(PostgresStudio.Services.Database.DatabaseRefusal.NotFound);
+        result.Reason.Should().Contain("'" + StudioLogValue.Cap(Hostile) + "'").And.NotContain("\r").And.NotContain("\u001b");
+    }
+
+    /// <summary>
+    /// INT-W1, H1 item 2 on X2's Documents what-if: the plan's gate - LINQ mode's - is asked again by the registered key and the
+    /// database's identity once the scope resolves, and the refusal audited against that resource. Before, a handler that
+    /// refuses <c>RunLinqQueries</c> on <c>default</c> was passed by <c>?store=DEFAULT</c>.
+    /// </summary>
+    [Fact]
+    public async Task The_Documents_what_ifs_plan_gate_names_the_registered_key_and_the_databases_identity()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        harness.Policies.Allow(static resource =>
+            resource.Capability != nameof(StudioCapability.RunLinqQueries) || resource.StoreName != MartenStoreRegistry.DefaultStoreKey);
+
+        WhatIfResult result = await harness.Documents.WhatIfAsync(
+            new StudioScope("DEFAULT", string.Empty, null), Harness.Alias, new DocumentListRequest(), Imagined, Token);
+
+        result.Refusal.Should().Be(PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy, result.Reason);
+        harness.Ring.GetLatest().Should().Contain(x => x.Action == DocumentDataService.WhatIfAction && !x.Succeeded
+            && x.StoreKey == MartenStoreRegistry.DefaultStoreKey && x.DatabaseId == harness.Database,
+            "the refusal is audited against the resource the policy refused");
+    }
+
+    /// <summary>
+    /// INT-W1, H1 item 2 on X2's LINQ what-if: the plan's question, for the database as a whole, is asked as LINQ mode's own
+    /// plan asks it - by the registered key and the database's identity. A run scoped to a tenant the policy passes reached the
+    /// plan's question; before, it was asked about <c>DEFAULT</c> and passed a handler that refuses the whole of <c>default</c>.
+    /// </summary>
+    [DynamicLinqFact]
+    public async Task The_LINQ_what_ifs_plan_question_names_the_registered_key_and_the_databases_identity()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        harness.Policies.Allow(static resource => !(resource.Capability == nameof(StudioCapability.RunLinqQueries)
+            && resource.StoreName == MartenStoreRegistry.DefaultStoreKey && resource.TenantId is null));
+
+        WhatIfResult result = await harness.Linq.WhatIfAsync(
+            new StudioScope("DEFAULT", string.Empty, Acme), new LinqQueryRequest(Harness.Alias, "Subject == \"x\""), Imagined, Token);
+
+        result.Refusal.Should().Be(PostgresStudio.Services.Database.DatabaseRefusal.WritePolicy, result.Reason);
+        result.Reason.Should().Be(LinqQueryService.PlanRefusedMessage, "the run passed for the tenant; the plan, for the whole database, did not");
+    }
+
+    /// <summary>
+    /// INT-W1, H1 item 1 on M1's stepper - and on time travel, whose refusal it repeats word for word: an aggregate type the
+    /// address names is the visitor's text, and reaches the refusal escaped and bounded.
+    /// </summary>
+    [Fact]
+    public async Task An_aggregate_type_the_address_names_reaches_the_stepper_and_time_travel_refusals_escaped()
+    {
+        await using Harness harness = await Harness.CreateAsync();
+        const string Hostile = "No.Such\r\nType\u001b[2J";
+
+        StreamStepWindow window = await harness.Events.StepAsync(harness.Scope(null), Guid.NewGuid().ToString(), Hostile, 1, Token);
+        AggregateSnapshot snapshot = await harness.Events.AggregateAtVersionAsync(harness.Scope(null), Guid.NewGuid().ToString(), Hostile, 0, Token);
+
+        foreach (string? message in new[] { window.Error?.Message, snapshot.Error?.Message })
+        {
+            message.Should().Be("'" + StudioLogValue.Cap(Hostile) + "' is not one of this store's aggregate types.");
+        }
+    }
+
     /// <summary>A studio over a conjoined store that is never connected to, with the policy in the test's hand.</summary>
     private sealed class Harness : IAsyncDisposable
     {
@@ -301,6 +403,12 @@ public class SqlConsoleReachTests
         public IQueryService Queries => scope.ServiceProvider.GetRequiredService<IQueryService>();
 
         public ISqlConsoleService Console => scope.ServiceProvider.GetRequiredService<ISqlConsoleService>();
+
+        public IDocumentDataService Documents => scope.ServiceProvider.GetRequiredService<IDocumentDataService>();
+
+        public ILinqQueryService Linq => scope.ServiceProvider.GetRequiredService<ILinqQueryService>();
+
+        public IEventDataService Events => scope.ServiceProvider.GetRequiredService<IEventDataService>();
 
         public StudioActionLogService Ring => provider.GetRequiredService<StudioActionLogService>();
 

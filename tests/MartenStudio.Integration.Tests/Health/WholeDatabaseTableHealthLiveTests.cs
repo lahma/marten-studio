@@ -584,7 +584,7 @@ public class WholeDatabaseTableHealthLiveTests(WholeDatabaseTablesFixture fixtur
 
         HealthSqlRunner sql = new(connection, new ReadOnlySqlOptions(), null);
         IReadOnlyList<HealthIndexRow> rows = await sql.QueryAsync(
-            HealthTableQueries.Indexes([new HealthTableTarget(schema, table)]), HealthTableQueries.ReadIndex, Token);
+            HealthTableQueries.Indexes([new HealthTableTarget(schema, table)], []), HealthTableQueries.ReadIndex, Token);
 
         return [.. IndexRedundancy.Find(rows, static _ => 1).Select(static x => x.Index.Name)];
     }

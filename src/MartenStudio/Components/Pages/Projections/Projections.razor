@@ -257,6 +257,7 @@
                           HighWaterAge="@HighWaterAgeText"
                           HighWaterMark="view.HighWaterMark"
                           Explanation="@view.Daemon.Explanation"
+                          Topology="@DaemonTopologyWording.Describe(view.Daemon)"
                           IsPausedByStudio="view.Daemon.IsPausedByStudio"
                           PausedByUser="@view.Daemon.PausedByStudio?.User"
                           PausedAtText="@PausedAtText"
@@ -414,7 +415,9 @@
                                            IsRebuilding="IsRebuilding(projection.Name)"
                                            RebuildingBy="@RebuildingBy(projection.Name)">
                                 <Actions>
-                                    @if (!Capabilities.ReadOnly && !ExternallyManaged)
+                                    @* A subscription registered with Events.Subscribe(...) has no projection to rebuild: the
+                                       service refuses one by name, so it is not offered. *@
+                                    @if (!Capabilities.ReadOnly && !ExternallyManaged && !projection.IsSubscription)
                                     {
                                         <button type="button"
                                                 class="ms-button ms-button-danger ms-btn-sm ms-projection-rebuild"
@@ -447,11 +450,39 @@
                                             <span class="ms-badge ms-shard-composite-member"
                                                   title="@($"A member of the composite projection {shard.ProjectionName}: its agent advances this row in its own batch")">member</span>
                                         }
+                                        @* M7: under HotCold a shard runs on whichever node holds its leadership lock - said per row,
+                                           because it decides what Start and Stop on this row can do from here. *@
+                                        @if (view.Daemon.IsHotCold && !shard.IsCompositeMember && view.Daemon.LeadsHere(shard.ShardName) is { } leads)
+                                        {
+                                            <span class="@(leads ? "ms-badge ms-shard-node ms-shard-node-here" : "ms-badge ms-shard-node ms-shard-node-elsewhere")"
+                                                  title="@(leads ? "This node holds this shard's HotCold leadership lock, so it is the node that runs it." : "Another node holds this shard's HotCold leadership lock, or none does yet: this node does not run it.")">@(leads ? "this node" : "another node")</span>
+                                        }
                                     </td>
-                                    <td class="ms-table-cell" colspan="3">
+                                    <td class="ms-table-cell ms-shard-history-cell" colspan="3">
                                         @if (!shard.HasProgressRow)
                                         {
                                             <span class="ms-muted">never started</span>
+                                        }
+                                        else if (HistoryOf(shard) is { Points.Count: > 0 } history)
+                                        {
+                                            LagChartFigure figure = LagChart.Draw(history);
+
+                                            <ShardLagChart ShardName="@shard.ShardName"
+                                                           Title="@history.Title()"
+                                                           Description="@history.Description()"
+                                                           HighWater="figure.HighWater"
+                                                           Position="figure.Position"
+                                                           Stalled="figure.Stalled"
+                                                           Warning="figure.Warning"
+                                                           Critical="figure.Critical"
+                                                           WarningTitle="@ThresholdTitle("Warning", history.EffectiveWarning, history.WarningThreshold is not null)"
+                                                           CriticalTitle="@ThresholdTitle("Critical", history.EffectiveCritical, history.CriticalThreshold is not null)"
+                                                           Arrow="@history.Arrow"
+                                                           Direction="@history.DirectionClass"
+                                                           Summary="@history.Summary()"
+                                                           Stall="@history.StallSentence()"
+                                                           Rebuild="@history.RebuildSentence()"
+                                                           Thresholds="@history.ThresholdSentence()" />
                                         }
                                     </td>
                                     <td class="ms-table-cell ms-shard-progress-cell">
@@ -463,7 +494,25 @@
                                     <td class="ms-table-cell ms-table-cell-mono ms-shard-lag ms-lag-@shard.Severity.ToString().ToLowerInvariant()"
                                         title="@LagTitle(shard)">
                                         @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
-                                        @if (TrendOf(shard) is { } trend && trend.Arrow.Length > 0)
+                                        @if (HistoryOf(shard) is { HasTrend: true } own)
+                                        {
+                                            @* This page's own samples, once they say anything - the arrow the chart beside it draws. *@
+                                            @if (own.Arrow.Length > 0)
+                                            {
+                                                <span class="@("ms-shard-trend ms-shard-trend-" + own.DirectionClass)"
+                                                      title="@own.Describe()"
+                                                      aria-label="@own.Describe()">@own.Arrow</span>
+                                            }
+                                            @if (own.Rebuild is { Remaining: { } left, Left: > 0 })
+                                            {
+                                                <span class="ms-shard-eta" title="@own.RebuildSentence()">~@DaemonCheckConfiguration.Format(left)</span>
+                                            }
+                                            else if (own is { WithheldBecause: null, Trend: { Direction: LagDirection.Draining, CaughtUpIn: { } caughtUp } })
+                                            {
+                                                <span class="ms-shard-eta" title="@own.Describe()">~@DaemonCheckConfiguration.Format(caughtUp)</span>
+                                            }
+                                        }
+                                        else if (TrendOf(shard) is { } trend && trend.Arrow.Length > 0)
                                         {
                                             <span class="@("ms-shard-trend ms-shard-trend-" + trend.Direction.ToString().ToLowerInvariant())"
                                                   title="@trend.Describe()"
@@ -508,15 +557,15 @@
                                                hint on the card - says exactly what would make it work. *@
                                             <button type="button"
                                                     class="ms-btn ms-btn-sm ms-shard-start"
-                                                    disabled="@(!AgentControlEnabled || IsRebuilding(shard.ProjectionName))"
+                                                    disabled="@(!AgentControlEnabled || IsRebuilding(shard.ProjectionName) || StartNoOp(shard) is not null)"
                                                     title="@StartTitle(shard)"
                                                     @onclick="() => StartAgentAsync(shard.ShardName)">
                                                 Start
                                             </button>
                                             <button type="button"
                                                     class="ms-btn ms-btn-sm ms-shard-stop"
-                                                    disabled="@(!AgentControlEnabled)"
-                                                    title="@(AgentControlTitle is { Length: > 0 } refused ? refused : DrainSentence)"
+                                                    disabled="@(!AgentControlEnabled || StopNoOp(shard) is not null)"
+                                                    title="@StopTitle(shard)"
                                                     @onclick="() => StopAgentAsync(shard.ShardName)">
                                                 Stop
                                             </button>
@@ -533,63 +582,142 @@
                 Lag is the high water mark minus the shard's own sequence. Amber above
                 @ProjectionLagThresholds.Amber.ToString("N0", CultureInfo.InvariantCulture) events, red above
                 @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture) - unless the shard's
-                progression row carries thresholds of its own, which Marten creates and does not write. The arrow and
-                the time to catch up come from the health advisor's samples, taken while the Health page or the
-                Overview is open; without them there is no arrow.
+                progression row carries thresholds of its own, which Marten creates and does not write. The chart, the
+                arrow and the time to catch up come from this page's own samples, kept each time this page or the
+                Overview reads the database; until there are enough of them, the arrow is the health advisor's, from
+                the samples it takes while the Health page or the Overview is open.
             </p>
+
+            @if (view.Thresholds is { } thresholds)
+            {
+                <details class="ms-projection-thresholds">
+                    <summary>Thresholds that apply</summary>
+                    <ul class="ms-projection-thresholds-list">
+                        <li>
+                            <strong>Lag colours and chart lines:</strong> amber above
+                            @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Amber) events behind, red above
+                            @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Red) - the studio's own - unless a
+                            shard's progression row carries <code>warning_behind_threshold</code> or
+                            <code>critical_behind_threshold</code>, which then win. Marten creates those two columns and
+                            writes neither. A line is drawn on a chart once the lag comes within half of it.
+                        </li>
+                        <li>
+                            <strong>D04, falling behind:</strong> past the warning threshold, and the lag grew at each of
+                            the last two steps between the health advisor's samples, watched for at least
+                            @DaemonCheckConfiguration.Format(DaemonThresholds.MinimumWatch) of the last
+                            @DaemonCheckConfiguration.Format(DaemonThresholds.TrendWindow).
+                        </li>
+                        <li>
+                            <strong>D03, alive but not moving:</strong> no progress for
+                            @DaemonCheckConfiguration.Format(thresholds.ShardQuiet) (the larger of
+                            @DaemonThresholds.ShardQuietPolls x <code>Projections.SlowPollingTime</code>, here
+                            @DaemonCheckConfiguration.Format(thresholds.SlowPollingTime), and
+                            @DaemonCheckConfiguration.Format(DaemonThresholds.ShardQuietFloor)) while the mark is ahead and
+                            the daemon is alive - or @DaemonThresholds.PageCalibrationMultiple x the shard's typical page,
+                            at most @DaemonCheckConfiguration.Format(thresholds.ShardQuietCeiling).
+                        </li>
+                        <li>
+                            <strong>D05, failed or paused:</strong> a restarted shard is reported until it moves past
+                            where it failed, or for @DaemonCheckConfiguration.Format(thresholds.RestartMemory) after a
+                            check last saw it there.
+                        </li>
+                        <li>
+                            <strong>D01, high water held behind a gap:</strong> a Warning after
+                            @DaemonCheckConfiguration.Format(DaemonThresholds.PinnedWarning), Critical after
+                            @DaemonCheckConfiguration.Format(DaemonThresholds.PinnedCritical).
+                        </li>
+                        <li>
+                            <strong>This page's chart:</strong> a sample at most every
+                            @DaemonCheckConfiguration.Format(thresholds.SampleSpacing), the last
+                            @ProjectionLagHistory.Capacity kept per shard
+                            (@DaemonCheckConfiguration.Format(thresholds.SampleWindow)), in memory. Stalled: the position
+                            did not move while the high water rose, over @ShardLagAnalysis.StallSamples samples. The arrow
+                            reads the last @ShardLagAnalysis.TrendSamples samples and needs
+                            @ShardLagAnalysis.MinimumTrendSamples. A rebuild's estimate is the events left over the rate
+                            measured from the last @DaemonCheckConfiguration.Format(ShardLagAnalysis.EtaWindow) of its own
+                            samples, once @ShardLagAnalysis.EtaProgressSamples of them show progress.
+                        </li>
+                    </ul>
+                </details>
+            }
         }
 
-        @if (view.UnregisteredShards.Count > 0)
+        @if (view.Orphans.Count > 0)
         {
-            @* Progression rows nothing in this store's StoreOptions claims. Hiding them would hide the
-               reason a table nobody writes to any more is still there, and the reason a shard name in
-               the logs is in no table on this page. *@
-            <section class="ms-unregistered-shards" aria-labelledby="ms-unregistered-shards-title">
-                <h2 class="ms-section-title" id="ms-unregistered-shards-title">Unregistered shards</h2>
-                <p class="ms-muted ms-unregistered-shards-note">
-                    These shards have rows in <code>mt_event_progression</code> and no projection in this
-                    store's <code>StoreOptions</code> claims them - a projection that was removed, renamed
-                    or given a new version. Nothing advances them, and they cannot be started or rebuilt
-                    from here.
-                </p>
+            @* M4: progression rows nothing this store registers advances - 0.5's "Unregistered shards", less the rows that
+               were never orphans (a subscription's, and each tenant's row of a registered shard), which are drawn under
+               their projection above. Counted for everyone the scope admits, named only for a visitor the store policy
+               allows for the whole database. Read-only: Marten has no call that removes one, and the studio writes no DML
+               (D6) - the statements are text for the host's own migrations. *@
+            <section class="ms-orphaned-progression" aria-labelledby="ms-orphaned-progression-title">
+                <h2 class="ms-section-title" id="ms-orphaned-progression-title">@OrphanWording.Heading</h2>
+                <p class="ms-orphaned-progression-count"><strong>@OrphanWording.Count(view.Orphans.Count)</strong></p>
+                <p class="ms-muted ms-orphaned-progression-note">@OrphanWording.HandOver</p>
 
-                <TableScroll Label="Unregistered shards table">
-                    <table class="ms-table ms-unregistered-shards-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">Shard</th>
-                                <th scope="col">Sequence</th>
-                                <th scope="col">Lag</th>
-                                <th scope="col">Last advanced</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (ShardProgress shard in view.UnregisteredShards)
-                            {
-                                <tr class="ms-table-row ms-unregistered-shard-row"
-                                    @key="shard.ShardName"
-                                    data-unregistered-shard="@shard.ShardName">
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @shard.ShardName
-                                        @if (shard.TenantId is { Length: > 0 })
-                                        {
-                                            <span class="ms-badge ms-shard-tenant">@shard.TenantId</span>
-                                        }
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @shard.Sequence.ToString("N0", CultureInfo.InvariantCulture)
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono ms-lag-@shard.Severity.ToString().ToLowerInvariant()">
-                                        @shard.Lag.ToString("N0", CultureInfo.InvariantCulture)
-                                    </td>
-                                    <td class="ms-table-cell ms-table-cell-mono">
-                                        @(shard.LastAdvanced is { } advanced ? State.FormatInSelectedTimeZone(advanced) : "never")
-                                    </td>
+                @if (!view.Orphans.NamesShown)
+                {
+                    <p class="ms-muted ms-orphaned-progression-withheld" role="status">@view.Orphans.Withheld</p>
+                }
+                else
+                {
+                    <TableScroll Label="Orphaned progression rows table">
+                        <table class="ms-table ms-orphaned-progression-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Row</th>
+                                    <th scope="col">Position</th>
+                                    <th scope="col" title="mt_event_progression.last_updated, in the database server's time">Last written</th>
+                                    <th scope="col">Why nothing advances it</th>
                                 </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (OrphanedProgressionRow orphan in view.Orphans.Rows)
+                                {
+                                    <tr class="ms-table-row ms-orphaned-progression-row"
+                                        @key="orphan.Name"
+                                        data-orphaned-row="@orphan.Name">
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @orphan.Name
+                                            @if (orphan.TenantId is { Length: > 0 })
+                                            {
+                                                <span class="ms-badge ms-shard-tenant">@orphan.TenantId</span>
+                                            }
+                                            @if (orphan.ReadByDaemon)
+                                            {
+                                                <span class="ms-badge ms-chip-warning ms-orphan-read" title="The daemon reads this row each time the registered version starts">read by the daemon</span>
+                                            }
+                                        </td>
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @orphan.Sequence.ToString("N0", CultureInfo.InvariantCulture)
+                                        </td>
+                                        <td class="ms-table-cell ms-table-cell-mono">
+                                            @(orphan.LastUpdated is { } updated ? State.FormatInSelectedTimeZone(updated) : "not recorded")
+                                        </td>
+                                        <td class="ms-table-cell ms-orphaned-progression-reason">@orphan.Explanation</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+
+                    @if (view.Orphans.RemovalStatements.Count > 0 || view.Orphans.RemovalCalls.Count > 0)
+                    {
+                        <details class="ms-orphaned-progression-sql">
+                            <summary>@OrphanWording.SqlHeading</summary>
+                            @if (view.Orphans.RemovalCalls.Count > 0)
+                            {
+                                <p class="ms-muted">@OrphanWording.CallLead</p>
+                                <pre class="ms-orphaned-progression-statements ms-orphaned-progression-calls"><code>@string.Join("\n", view.Orphans.RemovalCalls)</code></pre>
                             }
-                        </tbody>
-                    </table>
-                </TableScroll>
+                            @if (view.Orphans.RemovalStatements.Count > 0)
+                            {
+                                <p class="ms-muted">@OrphanWording.SqlLead</p>
+                                <pre class="ms-orphaned-progression-statements ms-orphaned-progression-sql-statements"><code>@string.Join("\n", view.Orphans.RemovalStatements)</code></pre>
+                            }
+                            <p class="ms-muted">@OrphanWording.SqlNote</p>
+                        </details>
+                    }
+                }
             </section>
         }
     }
@@ -990,7 +1118,10 @@
         : view?.Daemon.IsRebuildingHere(projectionName) == true ? "on this daemon, by something other than Marten Studio"
         : null;
 
-    /// <summary>The hover text of a shard's Start: the controls' own refusal first, then a rebuild of its projection.</summary>
+    /// <summary>
+    /// The hover text of a shard's Start: the controls' own refusal first, then a rebuild of its projection, then what the
+    /// daemon topology makes of it here (M7).
+    /// </summary>
     private string StartTitle(ShardProgress shard)
     {
         if (AgentControlTitle is { Length: > 0 } refused)
@@ -1003,8 +1134,30 @@
             return $"{shard.ProjectionName} is being rebuilt {RebuildingBy(shard.ProjectionName)}. A continuous agent started now would run beside the replay; start it once the rebuild has finished.";
         }
 
+        if (StartNoOp(shard) is { } topology)
+        {
+            return topology;
+        }
+
         return DaemonLightUp.CanTellRebuilding ? string.Empty : StartBlindToRebuilds;
     }
+
+    /// <summary>The hover text of a shard's Stop: the controls' own refusal, then a stop that would stop nothing here, then the drain.</summary>
+    private string StopTitle(ShardProgress shard) =>
+        AgentControlTitle is { Length: > 0 } refused ? refused
+        : StopNoOp(shard) is { } topology ? topology
+        : DrainSentence;
+
+    /// <summary>
+    /// M7: why a Start would do nothing here or is refused - the agent runs here already, or under HotCold another node leads
+    /// the shard - once the controls are offered at all; the service refuses the same regardless (hard rule 5).
+    /// </summary>
+    private string? StartNoOp(ShardProgress shard) =>
+        AgentControlEnabled && view is not null ? DaemonTopologyWording.StartRefusal(view.Daemon, shard.ShardName) : null;
+
+    /// <summary>M7: why a Stop would do nothing here - no agent of this node runs the shard - once the controls are offered.</summary>
+    private string? StopNoOp(ShardProgress shard) =>
+        AgentControlEnabled && view is not null ? DaemonTopologyWording.StopRefusal(view.Daemon, shard.ShardName) : null;
 
     /// <summary>
     /// What Start says on a Marten whose daemon cannot tell anybody it is rebuilding (below 9.50, JasperFx 2.86): a
@@ -1078,6 +1231,17 @@
     /// </summary>
     private ShardTrend? TrendOf(ShardProgress shard) => view?.Trends.GetValueOrDefault(shard.ShardName);
 
+    /// <summary>
+    /// A shard's history from this page's own samples (<see cref="ProjectionLagHistory" />) - its chart, and the arrow that
+    /// wins over the advisor's once it says anything.
+    /// </summary>
+    private ShardLagHistory? HistoryOf(ShardProgress shard) => view?.LagHistories.GetValueOrDefault(shard.ShardName);
+
+    /// <summary>A threshold line's title: its number, and whose it is.</summary>
+    private static string ThresholdTitle(string which, long threshold, bool fromRow) =>
+        which + " threshold: " + DaemonCheckConfiguration.Number(threshold) + " behind ("
+        + (fromRow ? "from its progression row" : "the studio's") + ")";
+
     /// <summary>The lag cell's hover text: which thresholds colour it, and the trend.</summary>
     private string LagTitle(ShardProgress shard)
     {
@@ -1087,7 +1251,10 @@
                 ? " (this shard's own thresholds, from its progression row)."
                 : " (the studio's defaults).");
 
-        return TrendOf(shard) is { } trend ? thresholds + " " + char.ToUpperInvariant(trend.Describe()[0]) + trend.Describe()[1..] + "." : thresholds;
+        string? trend = HistoryOf(shard) is { HasTrend: true } own ? own.Describe()
+            : TrendOf(shard)?.Describe();
+
+        return trend is { Length: > 0 } said ? thresholds + " " + char.ToUpperInvariant(said[0]) + said[1..] + "." : thresholds;
     }
 
     /// <summary>"12 s ago", from the row's last_updated in server time; the live tracker's time below it; or "never".</summary>
@@ -1603,9 +1770,10 @@
     /// The progress rows belonging to one projection, worst first.
     /// </summary>
     /// <remarks>
-    /// Only the rows a registered shard name claims. A progression row whose shard this projection no
-    /// longer runs - a version bump that changed the shard keys, say - belongs under "Unregistered
-    /// shards", not under a projection that would never advance it.
+    /// Only the rows a registered shard claims - its own, a composite's members' and, under per-tenant
+    /// partitioning, each tenant's. A progression row whose shard this projection no longer runs - a
+    /// version bump that changed the shard keys, say - is an orphan (M4), not a row of a projection that
+    /// would never advance it.
     /// </remarks>
     private IEnumerable<ShardProgress> ShardsOf(ProjectionInfo projection)
     {

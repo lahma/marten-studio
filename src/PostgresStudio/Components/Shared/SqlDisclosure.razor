@@ -5,12 +5,15 @@
     D14: there is no live SQL tail, and this is what answers the question people actually have - what did the
     studio just run against my database. The values stay out because a filter value is somebody's data, and
     the statement is something people paste into a ticket.
+
+    A page that shows several says what each one reads (Reads): five disclosures that all said "Show SQL" told nobody
+    which statement was which (0.6's UI sweep, on Database › Sessions).
 *@
 
 @if (Sql is { Length: > 0 })
 {
     <details class="@("ms-sql-disclosure" + (string.IsNullOrWhiteSpace(Class) ? string.Empty : " " + Class))">
-        <summary>@Summary</summary>
+        <summary>@(string.IsNullOrWhiteSpace(Reads) ? Summary : "Show SQL for " + Reads)</summary>
         <pre class="ms-code ms-code-sql"><code>@Sql</code></pre>
         @if (ParameterNames.Count > 0)
         {
@@ -28,9 +31,16 @@
     [Parameter]
     public IReadOnlyList<string> ParameterNames { get; set; } = [];
 
-    /// <summary>What the disclosure's summary says.</summary>
+    /// <summary>What the disclosure's summary says, unless <see cref="Reads" /> names the statement.</summary>
     [Parameter]
     public string Summary { get; set; } = "Show SQL";
+
+    /// <summary>
+    /// What the statement reads, in words ("the sessions"): the summary is then "Show SQL for the sessions". For a page that
+    /// shows more than one statement, so that each disclosure says which it is.
+    /// </summary>
+    [Parameter]
+    public string? Reads { get; set; }
 
     /// <summary>Extra classes for the disclosure.</summary>
     [Parameter]

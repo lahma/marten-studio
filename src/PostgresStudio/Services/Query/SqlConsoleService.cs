@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net.Sockets;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -55,6 +56,14 @@ internal sealed class SqlConsoleService : ISqlConsoleService
     internal const string SqlRefusedMessage =
         "Your account may not run SQL against this database as a whole, and the SQL console is not limited to one tenant.";
 
+    /// <summary>The reason an Explain button gives for a statement that is an <c>EXPLAIN</c> already.</summary>
+    internal const string AlreadyExplainReason = "AlreadyExplain";
+
+    /// <summary>What an Explain button says of a statement that is an <c>EXPLAIN</c> already.</summary>
+    internal const string AlreadyExplainMessage =
+        "This statement is an EXPLAIN already. Run sends it as it is - with FORMAT JSON among its options it is drawn as a "
+        + "plan - and the Explain buttons explain a statement that is not one.";
+
     private const string Unknown = "(unknown)";
 
     private readonly StudioSourceResolver resolver;
@@ -63,6 +72,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
     private readonly IStudioSettings settings;
     private readonly ILogger<SqlConsoleService> logger;
     private readonly AuthenticationStateProvider authenticationStateProvider;
+    private readonly HypotheticalIndexReader hypothetical;
 
     public SqlConsoleService(
         StudioSourceResolver resolver,
@@ -70,7 +80,8 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         StudioActionLog audit,
         IStudioSettings settings,
         ILogger<SqlConsoleService> logger,
-        AuthenticationStateProvider authenticationStateProvider)
+        AuthenticationStateProvider authenticationStateProvider,
+        HypotheticalIndexReader? hypothetical = null)
     {
         this.resolver = resolver;
         this.capabilities = capabilities;
@@ -78,7 +89,139 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         this.settings = settings;
         this.logger = logger;
         this.authenticationStateProvider = authenticationStateProvider;
+        this.hypothetical = hypothetical ?? new HypotheticalIndexReader(settings, Microsoft.Extensions.Logging.Abstractions.NullLogger<HypotheticalIndexReader>.Instance);
     }
+
+    /// <summary>What the audit ring calls a what-if from the console (X2): a <c>RunSql</c> run, recorded by capability and statement.</summary>
+    internal const string WhatIfAction = "RunSql what-if";
+
+    /// <inheritdoc />
+    public Task<WhatIfResult> WhatIfAsync(StudioScope scope, string statement, HypotheticalIndex index, CancellationToken cancellationToken = default) =>
+        WhatIfAsync(scope, statement, null, index, WhatIfAction, cancellationToken);
+
+    /// <summary>
+    /// X2: the console's gate, as <see cref="ExecuteAsync" /> asks it - the capability, the write policy for the database as a whole,
+    /// the statement guard - then the statement planned before and after one hypothetical index, in the read-only transaction
+    /// (<see cref="HypotheticalIndexReader" />). Every refusal is a value, and audited under <c>RunSql</c> with the statement's
+    /// target, as a console run is; the outcome names no index.
+    /// </summary>
+    /// <param name="scope">The scope; its tenant is ignored (<see cref="SqlScope" />).</param>
+    /// <param name="statement">The statement as typed, or as a studio screen composed it.</param>
+    /// <param name="bind">Binds a composed statement's values - Mode A's - so the plan is the one its read ran.</param>
+    /// <param name="index">The index to imagine. Only one the studio's builder writes is imagined: its definition is built again from its parts.</param>
+    /// <param name="action">What the audit ring calls it.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset after it.</param>
+    internal async Task<WhatIfResult> WhatIfAsync(
+        StudioScope scope,
+        string statement,
+        Action<NpgsqlCommand>? bind,
+        HypotheticalIndex index,
+        string action,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(index);
+
+        statement ??= string.Empty;
+        string sent = ExplainStatements.Wrap(statement, SqlExplain.Plan);
+        string target = Target(sent);
+        string user = UserName();
+
+        // 1. The capability, before anything is resolved.
+        try
+        {
+            capabilities.Require(StudioCapability.RunSql);
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            audit.RecordCapabilityDenied(denied, action, target);
+            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
+            return WhatIfResult.Refused(index, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff, denied.Message);
+        }
+
+        // 2. The write policy, for the database as a whole: nothing narrows a statement to a tenant.
+        StudioScope sqlScope = SqlScope(scope);
+        ResolvedSource resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(sqlScope, nameof(StudioCapability.RunSql), cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
+            return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, SqlRefusedMessage);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.RunSql, sqlScope);
+            return WhatIfResult.Refused(index, DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        // 3. The guard, over the statement as typed; and an index only the studio's builder wrote.
+        SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
+        string? refused = !guard.Allowed ? SqlRejection.FromGuard(guard).Message
+            : string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase) ? AlreadyExplainMessage
+            : !IsBuilt(index) ? NotBuiltMessage
+            : null;
+
+        if (refused is not null)
+        {
+            audit.Record(action, target, succeeded: false, refused, StudioCapability.RunSql, sqlScope);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
+            return WhatIfResult.NotCompared(index, refused);
+        }
+
+        int commandTimeout = (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
+        HypotheticalIndexPlanner planner = new(
+            (connection, transaction, token) => ExplainStatements.ReadPlanAsync(connection, transaction, sent, bind, commandTimeout, token));
+
+        WhatIfResult result;
+
+        try
+        {
+            HypotheticalIndexRead read = await hypothetical.ReadAsync(resolved.Target, index, planner, cancellationToken).ConfigureAwait(false);
+            result = WhatIfResult.From(index, read);
+        }
+        catch (OperationCanceledException)
+        {
+            audit.Record(action, target, succeeded: false, "cancelled", StudioCapability.RunSql, sqlScope);
+            throw;
+        }
+        catch (PostgresException exception)
+        {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (Exception exception) when (exception is NpgsqlException or SocketException or InvalidOperationException)
+        {
+            result = WhatIfResult.NotCompared(index, "Not compared: the what-if failed (" + exception.GetType().Name + ").");
+        }
+
+        bool compared = result.Before is not null;
+        audit.Record(action, target, succeeded: compared, result.Outcome(), StudioCapability.RunSql, sqlScope);
+
+        if (compared)
+        {
+            logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, 0, 0, sent);
+        }
+        else
+        {
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, result.Outcome(), sent);
+        }
+
+        return result;
+    }
+
+    /// <summary>What a what-if says of an index the studio's builder did not write.</summary>
+    internal const string NotBuiltMessage =
+        "Not compared: the studio imagines only an index its own builder writes from a plan's table and columns.";
+
+    /// <summary>Whether <paramref name="index" /> is one <see cref="MigrationSqlText.CreateIndex" /> writes, from its own parts.</summary>
+    internal static bool IsBuilt(HypotheticalIndex index) =>
+        index.Origin == HypotheticalIndexOrigin.Plan
+        && MigrationSqlText.CreateIndex(index.Schema, index.Table, index.Columns) is { } built
+        && string.Equals(built, index.Definition, StringComparison.Ordinal);
 
     /// <inheritdoc />
     public async Task<SqlConsoleResult> RunSqlAsync(
@@ -89,7 +232,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(request);
 
-        return await ExecuteAsync(scope, request.Statement, RunSqlAction, null, cancellationToken).ConfigureAwait(false);
+        return await ExecuteAsync(scope, request.Statement, RunSqlAction, null, request.Explain, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -144,13 +287,31 @@ internal sealed class SqlConsoleService : ISqlConsoleService
     /// <summary>
     /// The gate, and then the statement. Everything that reaches Postgres through the console path goes through here.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The guard reads what was typed; the console sends the plan statement.</b> The guard checks
+    /// <paramref name="statement" /> itself, so a refusal points at the editor's own characters; a statement that is an
+    /// <c>EXPLAIN</c> already is refused for an Explain button, and every other one the guard lets through is sent with
+    /// <see cref="ExplainStatements" />' prefix in front of it. The audit's target and event 9204 or 9205 carry the statement
+    /// as sent - what ran is what is recorded.
+    /// </para>
+    /// <para>
+    /// <b><c>EXPLAIN ANALYZE</c> is a <c>RunSql</c> run like any other (K1).</b> It runs the statement, which is why it is the
+    /// console's alone, behind the same capability, the same write policy and the same read-only transaction under the same
+    /// <c>statement_timeout</c>: a write the guard did not spot comes back as <c>25006</c> and changes nothing.
+    /// </para>
+    /// </remarks>
     /// <param name="scope">The scope the statement runs in; its tenant is ignored, never applied (<see cref="SqlScope" />).</param>
-    /// <param name="statement">The statement, exactly as it will be sent.</param>
+    /// <param name="statement">The statement as typed - and, unless <paramref name="explain" /> asks otherwise, exactly as sent.</param>
     /// <param name="action">What the audit ring calls it.</param>
     /// <param name="bind">
     /// Binds the statement's parameters, when it has any. The console itself never does - what somebody typed is sent
     /// verbatim - but a plan fetched for a statement a studio composed has to bind the very same values its read
     /// bound, or it would be planning a different statement.
+    /// </param>
+    /// <param name="explain">
+    /// As typed (<see cref="SqlExplain.None" />: every studio screen's own statement), planned, or planned and run - the
+    /// console's Explain buttons (X1).
     /// </param>
     /// <param name="cancellationToken">The token.</param>
     /// <exception cref="StudioCapabilityDeniedException"><c>RunSql</c> is off, or the studio is read-only. Nothing is sent.</exception>
@@ -160,11 +321,15 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         string statement,
         string action,
         Action<NpgsqlCommand>? bind,
+        SqlExplain explain,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
-        string target = Target(statement);
+        string sent = explain == SqlExplain.None || string.IsNullOrWhiteSpace(statement)
+            ? statement
+            : ExplainStatements.Wrap(statement, explain);
+        string target = Target(sent);
         string user = UserName();
 
         // 1. The capability. Refused before anything is resolved, and recorded either way.
@@ -175,7 +340,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         catch (StudioCapabilityDeniedException denied)
         {
             audit.RecordCapabilityDenied(denied, action, target);
-            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, statement);
+            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
             throw;
         }
 
@@ -196,24 +361,28 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         {
             audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
             logger.SqlRejected(
-                settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", statement);
+                settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
             throw;
         }
 
-        // 3. The advisory guard. Not the security boundary - the transaction below is - but it is what turns
-        //    "delete from …" into a sentence instead of a SQLSTATE.
+        // 3. The advisory guard, over the statement as typed. Not the security boundary - the transaction below is - but it
+        //    is what turns "delete from …" into a sentence instead of a SQLSTATE.
         SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
-        if (!guard.Allowed)
-        {
-            SqlRejection rejection = SqlRejection.FromGuard(guard);
+        SqlRejection? refused = !guard.Allowed
+            ? SqlRejection.FromGuard(guard)
+            : explain != SqlExplain.None && string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase)
+                ? new SqlRejection(AlreadyExplainReason, AlreadyExplainMessage, guard.Token, guard.Position)
+                : null;
 
+        if (refused is { } rejection)
+        {
             audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, sqlScope);
-            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, statement);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, sent);
 
             return SqlConsoleResult.Refused(rejection, settings.MaxSqlConsoleRows);
         }
 
-        return await RunAsync(resolved, sqlScope, statement, action, user, bind, cancellationToken).ConfigureAwait(false);
+        return await RunAsync(resolved, sqlScope, sent, action, user, bind, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<SqlConsoleResult> RunAsync(
@@ -282,7 +451,11 @@ internal sealed class SqlConsoleService : ISqlConsoleService
                 result.Duration,
                 notices,
                 result.Error,
-                null);
+                null)
+            {
+                PlanJson = result.Plan,
+                PlanUnavailable = result.PlanCharacters is { } characters ? QueryPlanReader.TooLarge(characters) : null,
+            };
         }
         catch (Exception exception) when (exception is (NpgsqlException and not PostgresException) or SocketException)
         {

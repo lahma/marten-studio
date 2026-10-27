@@ -35,4 +35,15 @@ internal interface ISqlConsoleService
     /// The write policy refused this scope for <c>RunSql</c>. Nothing is sent.
     /// </exception>
     Task<SqlConsoleResult> RunSqlAsync(StudioScope scope, SqlConsoleRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X2: the statement's plan now and under one hypothetical index hypopg imagines - behind the console's own gate
+    /// (<c>RunSql</c>, the write policy for the database as a whole, the statement guard), in its read-only transaction, and
+    /// audited as a <c>RunSql</c> run. Every refusal is a value; nothing is thrown but for cancellation.
+    /// </summary>
+    /// <param name="scope">The scope the console is pointed at; its tenant is ignored, never applied.</param>
+    /// <param name="statement">The statement as typed - the one the Explain buttons planned.</param>
+    /// <param name="index">The index to imagine: one the plan suggested (<see cref="HypotheticalIndexCandidates" />).</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset that follows it.</param>
+    Task<WhatIfResult> WhatIfAsync(StudioScope scope, string statement, HypotheticalIndex index, CancellationToken cancellationToken = default);
 }

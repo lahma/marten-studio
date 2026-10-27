@@ -1,3 +1,168 @@
+# 0.6.0
+
+0.6 makes the studio explain what it sees. A query plan is drawn as a tree, with insights that say what in it is
+wrong, and What if? shows whether an index the studio suggests would help before anybody builds it. Database ›
+Sessions draws who holds up whom, and the health advisor judges how much room a range-partitioned table has left. In
+Marten Studio a stream can be stepped through its projection one event at a time, each shard keeps a lag history,
+dead letters are grouped by cause and orphaned progression rows are listed; of what Marten 9.52 to 9.54 add, 9.53's own
+preview of a document save lights up where the host's Marten has it.
+
+- The SQL console has Explain and Explain analyze buttons, and draws a plan as a tree: each node's type and what it
+  reads, estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O, and PostgreSQL
+  18's Disabled, Index Searches, Storage and Maximum Storage where printed. An `EXPLAIN` typed with `FORMAT JSON` is
+  drawn the same way. `EXPLAIN ANALYZE` runs only here, under `RunSql`, for a statement the console's guard accepts,
+  inside its read-only transaction and statement timeout: a write the guard misses is refused by Postgres (`25006`)
+  and changes nothing, and every run and refusal is audited as a `RunSql` run.
+- Query's Marten where-clause plan is drawn as the same tree, and comes back whole: it used to be cut at the grid's
+  4 KB, which broke the JSON of any real plan.
+- Operations › Statements has a drill-in: a statement's Plan link (`?queryid=`, so the link reopens it) shows its
+  text, its counters and its generic plan, planned as `SqlConsoleRole` behind the page's own gate and audited by
+  `queryid`. A text withheld from you, one that names a
+  schema you may not see (a qualified view or SQL function would be expanded into the plan), a write, a locking read or
+  a cut text gets no plan and says why; a plan that
+  reads a schema you may not see is not shown, and every other plan is masked as the text is.
+- Plan insights under every plan, with stable codes P01-P08 in `docs/health/codes.md` (a new area, Plans) and their
+  docs in `docs/health/plans.md`: a row estimate off tenfold or more, a sort or hash spilled to disk, a lossy bitmap
+  heap scan, a sequential scan with a selective filter, a nested loop over a large outer side, a large `OFFSET`, a
+  leading-wildcard `LIKE`, and parallel workers short of the plan. On a plain plan, the five that need
+  `EXPLAIN ANALYZE` are listed as not judged.
+- Where the studio suggests an index, What if? can show whether it would help: with hypopg installed, it plans the
+  statement again with that one index imagined, and draws the plan now and the plan with the index side by side, with
+  both estimated costs and whether Postgres used the index. It is offered under the SQL console's Explain plans and
+  Query's Marten where-clause plan (`RunSql`), on the Statements drill-in (its own gate, as `SqlConsoleRole`, audited
+  by `queryid`), and beside LINQ mode's and the Documents list's index advice (`RunLinqQueries`), and T02 links a
+  statement to its drill-in. Under a plan it imagines an index on the columns a sequential scan's filter compares; for
+  a Marten statement, exactly the index Marten would create for the advisor's `StoreOptions` line, as Marten writes
+  it. Where hypopg is not installed, or the role the studio plans as may not use it, it says which, and that
+  installing it is the host's decision.
+- The what-if creates nothing: it runs in the read-only transaction under `statement_timeout` and `lock_timeout`,
+  never runs `CREATE EXTENSION`, and resets hypopg on the same connection before it goes back to the pool - again
+  after a failure or a cancellation - and a what-if whose reset fails ends its own session, so the backend never
+  returns to the pool.
+- Database › Sessions has a Blocking tab (`?view=blocking`): who holds up whom, drawn as trees - each chain's head,
+  then every session waiting on it, nested - with each session's process id, role, application, state, wait event,
+  transaction and wait ages, the lock mode it holds or wants, and the relation, masked as the database browser masks
+  it (`‹withheld›`, with no name, for a schema the visitor may not see). The counts are shown with the summary; the
+  trees are session details, behind `ViewDatabaseActivity` and the write policy, and audited as before.
+- A blocking chain's head is shown with `select pg_terminate_backend(<pid>);` - and `pg_cancel_backend`, when it runs
+  a statement - as text to copy for whoever may run it. The studio never runs either.
+- On PostgreSQL 19 the Blocking tab shows `pg_stat_lock`: for the whole server, how many lock requests of each type
+  waited, for how long, and how often fast-path slots were full. The section is absent below 19.
+- A regular health sweep reads `pg_locks` once, in one statement every check that needs it shares, where 0.5 read it
+  seven times in five statements. C06's Show SQL is now that statement.
+- T20 "Range partitions running out" now judges a range on a `smallint`, `integer` or `bigint` key by where its rows
+  stop: a Warning when they reach the newest partition or leave at most one empty partition above them, from each
+  partition's estimated rows; never Critical, since an integer key has no clock. It was judged on its DEFAULT
+  partition alone.
+- T20 reads its bounds as the text `pg_get_expr(relpartbound, 0)` returns and parses them itself, still opening no
+  partition.
+- T20's remedy for a Marten table on a static `ByRange()` is the `.AddRange("p20261201", ...)` line its declaration
+  takes; a next partition past what an integer key's type holds gets no statement.
+- Events › a stream › Step through it event by event: pick a single-stream projection or aggregate and step its stream
+  one event at a time. Each step shows the event (type, version, sequence, timestamp, body), the aggregate after it,
+  and a JSON diff against the aggregate before it. First, previous, next, last, jump to a version, and Find next
+  change of a JSON path (`total`, `items[0].sku`, `$.status`) within the next 5,000 events. The stream, aggregate
+  type, step and path are in the query string, so a pasted link reopens the same step.
+- The stepper folds with time travel's own fold, Marten's `AggregatorFor<T>().BuildAsync`, one event onto the state
+  before it. Each step is the aggregate Marten's single fold of the stream up to it produces, for `Create`/`Apply`,
+  `ShouldDelete`, `Evolve`, `EvolveAsync` and self-aggregating types at Marten 9.39.0 and 9.54.2. A projection that
+  overrides `DetermineAction`/`DetermineActionAsync`, an event registered with `DeleteEvent<T>()`, or an aggregator
+  the studio has not read is folded from the stream's first event for every step instead, for the first 2,000
+  events, and the page says so. An `Apply` that reads the version member, or a member `ApplyMetadata` sets, sees at
+  each step the value after the previous event: Marten's single fold sets those once, at the end.
+- Where applying an event throws, the stepper stops on that event and shows what the projection threw (Marten's
+  `ApplyEventException` wrapper taken off). No later step is folded.
+- Dead letters and the stepper link both ways: a step lists the dead letters that name its event and links to them
+  (Dead letters now filters by `?seq=`), and a dead letter's failing event opens in the stepper on its step, in the
+  aggregate its projection folds.
+- The stepper is bounded: 20 events per window, the events before it streamed past the fold and never held, every
+  call under `QueryTimeout`, and a timeout is a value with Retry. Events are read with the studio's own SQL, never
+  `FetchStreamAsync`/`AggregateStreamAsync`, so stepping creates and migrates nothing.
+- The stepper is gated as time travel is: reading the stream (the store policy), no capability, not audited. It runs
+  your projection's own `Create`/`Apply`/`ShouldDelete`/`Evolve` methods in process, as time travel always has
+  (`docs/security.md`).
+- Projections: each shard row draws a small hand-rolled SVG chart of its position against the high water, from
+  samples the screen keeps itself. The samples come from the read the page and the Overview already share, never a
+  read of their own: at most one every `RefreshInterval` (5 s minimum), 120 per shard, in memory. The chart has a
+  stalled colouring, a trend arrow (falling behind, catching up, steady, caught up) and a text equivalent beside it.
+- Projections: while a rebuild runs, its shard says when it should finish: the events left over the rate measured
+  from the rebuild's own samples in the last five minutes, with that window. Until three samples show progress it
+  says "not enough samples yet", and it gives no estimate once the position stops moving.
+- Projections: thresholds a host writes into `mt_event_progression`'s `warning_behind_threshold` and
+  `critical_behind_threshold` are drawn on the shard's chart and said beside it. A "Thresholds that apply" list names
+  the studio's own lag colours and D01, D03, D04 and D05's numbers for the store.
+- Health: D05 keeps a position series of its own, from the agents the daemon in this process runs, for each shard it
+  remembers failing. On a store that partitions its events by tenant, a shard that recovered and was then restarted
+  for an unrelated reason is no longer reported again.
+- Events › Dead letters has a Grouped by cause view (`?view=grouped`): dead letters grouped by projection and shard,
+  event type, exception type and message fingerprint - the message with its numbers, GUIDs, quoted strings,
+  timestamps and hex runs set aside - each group with its letters and events, how many are skipped, first and last
+  seen, its tenants (named only to a visitor whose store policy passes that tenant) and a sample message. Opening a
+  group lists its letters among the newest 20,000 in scope (`?group=`), with every per-letter action.
+- "Skip this group" marks a group's events skipped through Skip event's own path - `ManageDeadLetters`, the write
+  policy, the tenant proof of every sequence and `MarkEventsAsSkipped`, under `UseTenantPartitionedEvents` its tenant
+  overload from Marten 9.51 and refused below it as Skip event is - at most 1,000 events an action, lowest sequence
+  first, after typing the count, as one audited operation that names the group and the count.
+- The grouped view reads the columns of the newest 20,000 dead letters, never their bodies, once per refresh interval
+  across circuits, and groups them in the web process; a database with more says its groups are the newest letters'.
+- Skip event proves its sequence with a one-column read shared with the bulk skip; its refusals, audit entries and
+  outcome are unchanged.
+- Projections lists orphaned progression rows - rows of `mt_event_progression` that nothing the store registers
+  advances - each with why. They are counted for every visitor, named only with the whole database allowed, and
+  read-only: Marten's own `DeleteProjectionProgressByShardNameAsync` and the equivalent SQL are shown as text for the
+  host.
+- The daemon card says which agents this node runs, under Solo, HotCold, `MartenDaemonModeIsSolo()` or external
+  management, and Start, Stop and Rewind say when they would do nothing here.
+- Documents: an Order control puts a collection newest first by last modified, created or revision, where its table
+  has the column, over the studio's own keyset-paged read.
+- Documents: from Marten 9.53 the save dialog shows what Marten's own preview of the save (`PreviewDocumentJsonAsync`)
+  would keep beside the round trip, and holds a save Marten keeps differently or refuses. It opens no session and
+  creates nothing; below 9.53 the dialog names the Marten it needs.
+- New health check C12, Head of a blocking chain (Connections, both studios, behind `ViewDatabaseActivity`):
+  `idle-head` when the head of a chain sits idle in its transaction while a session behind it has waited 10 seconds,
+  `long-chain` when a chain's oldest wait reaches 2 minutes whatever its head does; Critical at 5 minutes. Its
+  findings name each head and hand over its statements; an `idle-head` finding's remedy is
+  `idle_in_transaction_session_timeout`, a `long-chain` finding's the head's statements as a repair to run by hand.
+- New health check T18, Tenant skew (Marten Studio, Info): one tenant holds more than half of a conjoined table of
+  100,000 rows or more with 5 tenants or more, from `pg_stats` or, for a table Marten partitions by tenant, its
+  partitions' estimated rows, never listing a partition. It names the tenant, so it is shown only past the activity
+  gate and that tenant's store policy (the diagnostics API: `IncludeActivity`); a `SqlConsoleRole` that may not read
+  `tenant_id` gets "not checked" naming the grant.
+- New health check D10, Orphaned progression rows (Marten Studio, Info), with Marten's removal by name as its remedy.
+- `docs/health/codes.md` gains C12, D10 and T18, and P01 to P08 in a new area, Plans. The plan insights are not health
+  checks: they are never swept, muted or returned by the diagnostics API. The studio runs 76 health checks, 31 of
+  them in Marten Studio only.
+- A document save whose JSON carries another id than the document's own is refused, in the preview and in the save,
+  with both ids named. Until now such a save passed the version check on the document that was open and wrote the
+  document under the new id - overwriting the document with that id, or creating one - on a type without Marten's
+  optimistic concurrency.
+- Projections no longer has "Unregistered shards". It also listed subscriptions registered with `Events.Subscribe`
+  and each tenant's row under `UseTenantPartitionedEvents`, which are now drawn under their own projection or
+  subscription; the rows nothing advances are the orphaned progression rows, and they no longer count towards the
+  worst lag.
+- Under HotCold, Start and the store-global Rewind are refused on a node that does not lead the shard, because another
+  node does; Start and Stop also refuse what would do nothing here (an agent already running, no agent here to stop).
+  Under `MartenDaemonModeIsSolo()`, which has no leadership loop, Start and Stop no longer need a pause.
+- The Overview's projection count includes the subscriptions registered with `Events.Subscribe`.
+- The Statements drill-in plans a statement on every supported major by `prepare` and `force_generic_plan`, as T02's
+  plans do, inside the read-only transaction and deallocating what it prepared. `EXPLAIN (GENERIC_PLAN)`, which
+  PostgreSQL 16 added, is never used: it does not work through Npgsql.
+- The health advisor pins `DateStyle` to ISO for its own read-only transactions, beside `search_path`, so a time
+  range is judged whatever `DateStyle` the server, the database or the role sets. The pin changes only how dates are
+  printed to the advisor.
+- At 390 px the query editor's keyboard hint takes a line of its own instead of running past the editor and making
+  the page scroll sideways, and a plan's node is at most as wide as the plan, so a one-node plan fits its scroll region
+  on a phone (both studios). Time travel's version slider gives way on a narrow card, so its Next button stays inside.
+- In the dark theme, links the stylesheet gave no colour of their own - the breadcrumbs on document detail and
+  Database › Sessions, the Overview's health and activity lists, a finding's "About" link, and notes that link to
+  Health or Maintenance - drew in the browser's default blue. Every link in the studio now takes the link colour, and
+  Database › Sessions uses the database browser's breadcrumb.
+- Each "Show SQL" on Database › Sessions says what it reads ("Show SQL for the sessions", "Show SQL for who blocks
+  whom"), where five said only "Show SQL".
+- Marten Studio's projection stepper enables "Find next change" as the path is typed, not once the field loses focus.
+- The test projects take bUnit 2.13.3; nothing that ships references it.
+- No package is added, and neither package's public API changes.
+
 # 0.5.1
 
 0.5.1 is a security and hardening patch: the leftovers of 0.5's two security reviews, and what a review of those fixes

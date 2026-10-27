@@ -112,6 +112,13 @@ internal interface IDocumentWriteService
     /// of delete, and a host that granted the ability to hide rows granted the ability to unhide them.
     /// </para>
     /// <para>
+    /// <b>Not Marten's <c>UndeleteDocumentAsync</c></b> (Marten 9.52, <c>IDocumentStoreDiagnosticsWriter</c>). That one
+    /// opens <c>LightweightSession(tenantId)</c>, which is not pinned to the database in scope (hard rule 15), and
+    /// deserializes the deleted row into its CLR type and stores it back before its <c>UndoDeleteWhere</c>, which
+    /// rewrites <c>data</c> and drops every property the type has no member for (D7) - the round trip this method
+    /// exists to avoid. It also needs 9.52, where this works from the floor.
+    /// </para>
+    /// <para>
     /// <b>An undelete does not rewrite the document.</b> It is Marten's
     /// <c>UndoDeleteWhere&lt;T&gt;(x =&gt; x.Id == id)</c>, which is an
     /// <c>update … set mt_deleted = false, mt_deleted_at = null</c> and never touches <c>data</c> — so

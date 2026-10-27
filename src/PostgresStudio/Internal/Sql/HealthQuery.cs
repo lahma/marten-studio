@@ -12,7 +12,8 @@ namespace PostgresStudio.Internal.Sql;
 /// a schema or table name goes through <see cref="SqlIdentifier" />, and a value is always one of
 /// <see cref="Parameters" />. The gatherer hands the result to <c>HealthCheckContext.Sql</c>, which runs it
 /// in <see cref="ReadOnlySqlSession" />'s read-only transaction with <c>search_path</c> pinned to
-/// <c>pg_catalog</c> - so every name Postgres deparses comes back qualified - and records it for "Show SQL".
+/// <c>pg_catalog</c> - so every name Postgres deparses comes back qualified - and <c>DateStyle</c> to ISO
+/// (<see cref="HealthSessionQueries" />), and records it for "Show SQL".
 /// </para>
 /// <para>
 /// <b>A catalog read, and nothing more.</b> A health statement reads <c>pg_catalog</c> and the statistics

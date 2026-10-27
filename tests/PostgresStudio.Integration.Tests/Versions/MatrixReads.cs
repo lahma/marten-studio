@@ -93,6 +93,22 @@ internal static class MatrixReads
         // ---- The Overview, Sessions and Relationships --------------------------------------------------------------
         new("overview: server and platform", true, static (x, t) => OverviewServerQueries.ReadPlatformAsync(x.Connection, x.Transaction, x.Timeout, t)),
         new("sessions: snapshot", true, static (x, t) => x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t)),
+
+        // ---- X3: Sessions › Blocking's lock table read, and PostgreSQL 19's pg_stat_lock, read on 19 and absent below --------
+        new("sessions: blocking and pg_stat_lock", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            LockTableRead blocking = snapshot.Blocking ?? throw new InvalidOperationException("The sessions snapshot read no lock table.");
+
+            if (PostgresFeatures.Has(PostgresFeature.PgStatLock, blocking.ServerVersion))
+            {
+                Found(snapshot.LockStatistics?.FirstOrDefault(static y => y.LockType == "relation"), "pg_stat_lock row for relation locks, on PostgreSQL 19");
+            }
+            else if (snapshot.LockStatistics is not null)
+            {
+                throw new InvalidOperationException("pg_stat_lock was read on server_version_num " + blocking.ServerVersion + ", below 19, where it does not exist.");
+            }
+        }),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
 
@@ -166,6 +182,18 @@ internal static class MatrixReads
             // store.r's bounds are deparsed with no relation, so its partition the matrix holds ACCESS EXCLUSIVE on is read too.
             IReadOnlyList<HealthPartitionedTableRow> tables = await QueryAsync(x, PartitionQueries.Partitions(LintTargets), PartitionQueries.ReadPartitionedTable, t);
             Owned(x, tables.FirstOrDefault(static y => y.Table == "r" && y.NewestUpper is not null && y.HasDefault), "store.r's bounds and its default partition");
+        }),
+
+        // ---- X4: T18's column skew - store.l is list-partitioned on tenant_id, so it is read by its partitions, whose two
+        // bounds are deparsed with no relation; store.r's tenant_id is read through pg_stats, which the setup never analysed.
+        new("lints: column skew", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthColumnSkewRow> tables = await QueryAsync(x, ColumnSkewQueries.Skew(LintTargets, "tenant_id"), ColumnSkewQueries.ReadSkew, t);
+            Owned(
+                x,
+                tables.FirstOrDefault(static y => y is { Table: "l", ByPartition: true, Values: 2, TopValues.Count: 2 }
+                    && y.TopValues.All(static v => PartitionBoundText.SingleListValue(v) is "a" or "b")),
+                "store.l's two tenant partitions, read by their bounds");
         }),
     ];
 

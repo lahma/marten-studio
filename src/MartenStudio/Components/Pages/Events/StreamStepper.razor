@@ -1,0 +1,924 @@
+@page "/marten/events/streams/step"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+@* M1, the projection stepper: one stream folded into one aggregate type an event at a time.
+
+   Everything a visitor can be looking at is in the query string (D9) - the stream, the aggregate type, the step and the
+   value the next-change search watches - so a pasted link reopens the same step. A window is twenty events; moving
+   inside it is a navigation and no read, and moving out of it reads the window that holds the new step. The fold is
+   time travel's (IAggregateFolder), and so is the gate: reading the stream. *@
+
+<PageTitle>Step through a stream</PageTitle>
+
+<div class="ms-page ms-stepper">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Step through a stream</h1>
+        @if (!string.IsNullOrWhiteSpace(Id))
+        {
+            <a class="ms-button" href="@StreamHref">Back to the stream</a>
+        }
+        <a class="ms-button" href="@StreamsHref">All streams</a>
+    </div>
+
+    @if (string.IsNullOrWhiteSpace(Id))
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No stream asked for</p>
+            <p class="ms-empty-description">
+                The stepper opens one stream, and the id travels in the query string (<code>?id=</code>).
+                Pick one from <a href="@StreamsHref">the stream list</a> and open its time travel.
+            </p>
+        </div>
+    }
+    else if (loading && stream is null)
+    {
+        <LoadingSpinner />
+    }
+    else if (stream?.Error is { } headerError)
+    {
+        <ErrorAlert Message="@headerError.Display" OnRetry="@(headerError.CanRetry ? EventCallback.Factory.Create(this, ReloadAsync) : default)" />
+    }
+    else if (stream is null || !stream.Exists)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No such stream</p>
+            <p class="ms-empty-description">
+                This store's event store holds no stream with id <code>@Id</code>
+                @(string.IsNullOrEmpty(State.ActiveScope?.TenantId) ? string.Empty : " for this tenant").
+            </p>
+        </div>
+    }
+    else
+    {
+        <div class="ms-stream-header">
+            <CopyBadge Value="@stream.Id" />
+            @if (!string.IsNullOrEmpty(stream.AggregateType))
+            {
+                <EventTypeChip Name="@stream.AggregateType" />
+            }
+            <span class="ms-event-flag">version @stream.Version.ToString(CultureInfo.InvariantCulture)</span>
+            @if (stream.IsArchived)
+            {
+                <span class="ms-event-flag ms-event-flag-archived">archived</span>
+            }
+            @if (!string.IsNullOrEmpty(stream.TenantId))
+            {
+                <span class="ms-event-flag">tenant @stream.TenantId</span>
+            }
+        </div>
+
+        <div class="ms-stepper-controls">
+            <div class="ms-form-group">
+                <label class="ms-form-label" for="ms-stepper-type">Aggregate type</label>
+                <select id="ms-stepper-type" class="ms-select" value="@SelectedAggregate" @onchange="OnTypeChangedAsync">
+                    <option value="">Pick an aggregate type</option>
+                    @foreach (AggregateTypeCandidate candidate in candidates)
+                    {
+                        <option value="@candidate.FullName" @key="candidate.FullName">@Label(candidate)</option>
+                    }
+                </select>
+            </div>
+        </div>
+
+        @if (ProjectionNote is { } projectionNote)
+        {
+            <p class="ms-stepper-note" role="note">@projectionNote</p>
+        }
+
+        @if (candidates.Count == 0)
+        {
+            <p class="ms-stepper-note">
+                This store registers no single-stream projection whose identity matches its streams, and it knows no
+                document type that could stand in for one. There is nothing to step this stream into.
+            </p>
+        }
+        else if (string.IsNullOrEmpty(SelectedAggregate))
+        {
+            <p class="ms-stepper-note">Pick the aggregate type to fold this stream into, and step through it one event at a time.</p>
+        }
+        else
+        {
+            <nav class="ms-stepper-nav" aria-label="Move between steps">
+                <button type="button" class="ms-button" disabled="@(!CanGoBack)" @onclick="() => GoAsync(1)">First</button>
+                <button type="button" class="ms-button" disabled="@(!CanGoBack)" @onclick="() => GoAsync(PreviousVersion)">Previous</button>
+                <span class="ms-stepper-position" aria-live="polite">
+                    @(Selected is { } at ? "version " + at.Version.ToString(CultureInfo.InvariantCulture) : "no step")
+                    of @stream.Version.ToString(CultureInfo.InvariantCulture)
+                </span>
+                <button type="button" class="ms-button" disabled="@(!CanGoForward)" @onclick="() => GoAsync(NextVersion)">Next</button>
+                <button type="button" class="ms-button" disabled="@(!CanGoForward)" @onclick="() => GoAsync(stream.Version)">Last</button>
+
+                <span class="ms-stepper-jump">
+                    <label class="ms-form-label" for="ms-stepper-version">Version</label>
+                    <input id="ms-stepper-version"
+                           class="ms-input ms-stepper-version"
+                           type="number"
+                           min="1"
+                           max="@stream.Version.ToString(CultureInfo.InvariantCulture)"
+                           value="@versionText"
+                           @onchange="OnVersionTextChanged" />
+                    <button type="button" class="ms-button" @onclick="JumpAsync">Go</button>
+                </span>
+            </nav>
+
+            <div class="ms-stepper-search">
+                <label class="ms-form-label" for="ms-stepper-path">Next change of</label>
+                <input id="ms-stepper-path"
+                       class="ms-input ms-stepper-path"
+                       type="text"
+                       placeholder="total, items[0].sku, $.status"
+                       value="@pathText"
+                       @oninput="OnPathChanged" />
+                <button type="button"
+                        class="ms-button"
+                        disabled="@(searching || string.IsNullOrWhiteSpace(pathText) || window is null)"
+                        @onclick="FindNextChangeAsync">
+                    @(searching ? "Searching..." : "Find next change")
+                </button>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(searchMessage))
+            {
+                <p class="ms-stepper-note ms-stepper-search-result" role="status">@searchMessage</p>
+            }
+
+            @if (windowLoading)
+            {
+                <LoadingSpinner />
+            }
+            else if (window?.Error is { } windowError)
+            {
+                <ErrorAlert Message="@windowError.Display" OnRetry="@(windowError.CanRetry ? EventCallback.Factory.Create(this, ReloadWindowAsync) : default)" />
+            }
+            else if (window?.Missing is { } missing)
+            {
+                <p class="ms-stepper-note ms-stepper-missing">@MissingText(missing)</p>
+            }
+            else if (window is not null)
+            {
+                @if (window.Mode == AggregateStepMode.FromTheStart && window.ModeReason is { } reason)
+                {
+                    <p class="ms-stepper-note ms-stepper-mode" role="note">@reason</p>
+                }
+
+                @if (FoldsOnlyTheTenant)
+                {
+                    <p class="ms-stepper-note" role="note">
+                        Folds only the events appended under this tenant, as the stream's timeline shows; Marten's own aggregate
+                        folds every event of the stream. Choose All tenants to step it as Marten folds it.
+                    </p>
+                }
+
+                @if (window.StoppedAt is { } stoppedAt && RequestedVersion > stoppedAt)
+                {
+                    <p class="ms-stepper-note ms-stepper-stopped" role="status">@StoppedText(stoppedAt)</p>
+                }
+
+                @if (window.Refusal is { } refusal)
+                {
+                    <div class="ms-alert ms-alert-warning ms-stepper-refusal" role="status">
+                        <p>@refusal</p>
+                        @if (window.RefusedAt is { } refusedAt)
+                        {
+                            <p class="ms-stepper-note">The step that could not be folded is version @refusedAt.ToString(CultureInfo.InvariantCulture).</p>
+                        }
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(window.DeadLetterNote))
+                {
+                    <p class="ms-stepper-note" role="status">@window.DeadLetterNote</p>
+                }
+
+                <div class="ms-stepper-panes">
+                    <ol class="ms-stepper-steps" aria-label="Events in this window">
+                        @foreach (AggregateStep item in window.Steps)
+                        {
+                            <li class="ms-stepper-steps-item" @key="(item.TenantId, item.Sequence)">
+                                <a class="@StepClass(item)"
+                                   href="@Href(item.Version)"
+                                   aria-current="@(ReferenceEquals(item, Selected) ? "step" : null)">
+                                    <span class="ms-stepper-step-version">v@(item.Version.ToString(CultureInfo.InvariantCulture))</span>
+                                    <span class="ms-stepper-step-type">@item.EventTypeName</span>
+                                    <span class="ms-stepper-step-meta">@StepSummary(item)</span>
+                                    @if (item.Failure is not null)
+                                    {
+                                        <span class="ms-stepper-marker ms-stepper-marker-failure">threw</span>
+                                    }
+                                    @if (item.DeadLetters.Count > 0)
+                                    {
+                                        <span class="ms-stepper-marker ms-stepper-marker-dead">dead letter</span>
+                                    }
+                                </a>
+                            </li>
+                        }
+                    </ol>
+
+                    <section class="ms-stepper-step" aria-label="The selected step">
+                        @if (Selected is { } step)
+                        {
+                            <EventCard Sequence="step.Sequence"
+                                       Version="step.Version"
+                                       EventType="@step.EventTypeName"
+                                       DotNetType="@step.DotNetTypeName"
+                                       Timestamp="step.Timestamp"
+                                       StreamId="@Id"
+                                       ShowStream="false"
+                                       Json="@step.EventJson"
+                                       Metadata="@Metadata(step)"
+                                       TypeHref="@TypeHref(step.EventTypeName)" />
+
+                            @if (step.Failure is { } failure)
+                            {
+                                <div class="ms-alert ms-alert-error ms-stepper-failure" role="alert">
+                                    <p>Applying this event threw <code>@failure.ExceptionType</code>: @failure.Message</p>
+                                    <p>
+                                        The stepper stops here. Marten's aggregate of this stream at this version, or any later one, is
+                                        this failure, so nothing after it is folded. The aggregate before it is shown below.
+                                    </p>
+                                </div>
+                            }
+
+                            @if (step.DeadLetters.Count > 0)
+                            {
+                                <div class="ms-stepper-dead-letters">
+                                    <h2 class="ms-section-title">Dead letters that name this event</h2>
+                                    <ul class="ms-stepper-dead-letter-list">
+                                        @foreach (StepDeadLetter letter in step.DeadLetters)
+                                        {
+                                            <li class="ms-stepper-dead-letter" @key="letter.Id">
+                                                <span>
+                                                    <code>@letter.ProjectionName</code> (shard <code>@letter.ShardName</code>) recorded
+                                                    <code>@letter.ExceptionType</code>: @letter.ExceptionMessage
+                                                </span>
+                                                <a class="ms-button ms-btn-sm" href="@DeadLettersHref(step)">Open in dead letters</a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+
+                            <h2 class="ms-section-title">@(step.Failure is null ? "The aggregate after this event" : "The aggregate before this event")</h2>
+                            @if (StateShown(step) is { } state)
+                            {
+                                <div class="ms-stepper-state">
+                                    <JsonView Json="@state"
+                                              Label="@($"{window.TypeName} at version {step.Version.ToString(CultureInfo.InvariantCulture)}")"
+                                              AutoExpandDepth="2"
+                                              ShowSearch="false"
+                                              DownloadFileName="@($"{window.TypeName}-v{step.Version.ToString(CultureInfo.InvariantCulture)}.json")" />
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="ms-stepper-note ms-stepper-no-aggregate">@NoAggregateText(step)</p>
+                            }
+
+                            @if (step.Failure is null)
+                            {
+                                <h2 class="ms-section-title">What this event changed</h2>
+                                <div class="ms-stepper-diff">
+                                    @if (Before(step) is { } before && step.StateJson is { } after)
+                                    {
+                                        <JsonDiff Before="@before"
+                                                  After="@after"
+                                                  EmptyText="This event changed nothing in the aggregate." />
+                                    }
+                                    else
+                                    {
+                                        <p class="ms-stepper-note">@ChangeText(step)</p>
+                                    }
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <p class="ms-stepper-note">This window has no step to show.</p>
+                        }
+                    </section>
+                </div>
+            }
+
+            <p class="ms-stepper-note">
+                Each step is the aggregate as Marten's own aggregator folds this stream's events up to it, serialized with this
+                store's own serializer. The events are read without creating or migrating any table, nothing is written and no
+                projection is run, but the projection's own <code>Create</code>, <code>Apply</code>, <code>ShouldDelete</code>
+                and <code>Evolve</code> methods run here, as they do for time travel - one that loads other documents does so
+                through the session it is handed, as your code wrote it.
+            </p>
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private StreamState? stream;
+    private EventStoreShape? shape;
+    private List<AggregateTypeCandidate> candidates = [];
+    private StreamStepWindow? window;
+    private bool loading = true;
+    private bool windowLoading;
+    private bool searching;
+    private string? searchMessage;
+
+    /// <summary>The step the search's answer is about: the one it led to, or the one it was asked from.</summary>
+    private long? searchVersion;
+
+    private string? versionText;
+    private string? pathText;
+
+    /// <summary>The scope and stream the header and the candidates were read for.</summary>
+    private string? loadedStream;
+
+    /// <summary>The scope, stream and aggregate type the steps on screen were read for.</summary>
+    private string? loadedWindow;
+
+    /// <summary>The version the window on screen was asked for.</summary>
+    private long? loadedVersion;
+
+    /// <summary>How many reads have started: a read a newer one overtook writes nothing of what it read.</summary>
+    private int loads;
+
+    /// <summary>The stream id. In the query string, not the route (D9).</summary>
+    [SupplyParameterFromQuery(Name = "id")]
+    public string? Id { get; set; }
+
+    /// <summary>The full name of the aggregate type being stepped into.</summary>
+    [SupplyParameterFromQuery(Name = "agg")]
+    public string? Aggregate { get; set; }
+
+    /// <summary>The step: the version of the event shown.</summary>
+    [SupplyParameterFromQuery(Name = "v")]
+    public long? Version { get; set; }
+
+    /// <summary>The value of the aggregate the next-change search watches.</summary>
+    [SupplyParameterFromQuery(Name = "path")]
+    public string? Path { get; set; }
+
+    /// <summary>A projection to pick the aggregate type by, when no type is named: what a dead letter's link carries.</summary>
+    [SupplyParameterFromQuery(Name = "projection")]
+    public string? Projection { get; set; }
+
+    /// <summary>The store this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.StoreKey)]
+    public string? Store { get; set; }
+
+    /// <summary>The database this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.DatabaseKey)]
+    public string? Database { get; set; }
+
+    /// <summary>The tenant this link is about.</summary>
+    [SupplyParameterFromQuery(Name = EventLinks.TenantKey)]
+    public string? Tenant { get; set; }
+
+    /// <summary>
+    /// The aggregate type stepped into: the one named, else the one the named projection folds - so a dead letter's link
+    /// opens on the aggregate whose projection recorded it.
+    /// </summary>
+    private string? SelectedAggregate =>
+        !string.IsNullOrWhiteSpace(Aggregate)
+            ? Aggregate
+            : string.IsNullOrWhiteSpace(Projection)
+                ? null
+                : candidates.FirstOrDefault(x => string.Equals(x.ProjectionName, Projection, StringComparison.Ordinal))?.FullName;
+
+    /// <summary>What the page says when a dead letter's projection is not an aggregate the stepper can fold.</summary>
+    private string? ProjectionNote =>
+        string.IsNullOrWhiteSpace(Aggregate) && !string.IsNullOrWhiteSpace(Projection) && candidates.Count > 0 && SelectedAggregate is null
+            ? $"The dead letter came from {Projection}, which is not a single-stream aggregate of this stream that the stepper "
+              + "can fold. Pick an aggregate type to step this stream into."
+            : null;
+
+    private long RequestedVersion => Math.Max(1, Version ?? 1);
+
+    /// <summary>The step shown: the last one at or before the version asked for, else the window's first.</summary>
+    private AggregateStep? Selected
+    {
+        get
+        {
+            if (window is null || window.Steps.Count == 0)
+            {
+                return null;
+            }
+
+            AggregateStep? selected = null;
+            foreach (AggregateStep step in window.Steps)
+            {
+                if (step.Version <= RequestedVersion)
+                {
+                    selected = step;
+                }
+            }
+
+            return selected ?? window.Steps[0];
+        }
+    }
+
+    private bool CanGoBack => Selected is { } step && window is not null && (IndexOf(step) > 0 || window.HasEarlier);
+
+    private long PreviousVersion
+    {
+        get
+        {
+            if (Selected is not { } step || window is null)
+            {
+                return 1;
+            }
+
+            int index = IndexOf(step);
+            return index > 0 ? window.Steps[index - 1].Version : Math.Max(1, step.Version - 1);
+        }
+    }
+
+    private bool CanGoForward =>
+        Selected is { } step
+        && step.Failure is null
+        && window is { Refusal: null }
+        && (IndexOf(step) < window.Steps.Count - 1 || window.HasMore);
+
+    private long NextVersion
+    {
+        get
+        {
+            if (Selected is not { } step || window is null)
+            {
+                return 1;
+            }
+
+            int index = IndexOf(step);
+            return index < window.Steps.Count - 1 ? window.Steps[index + 1].Version : step.Version + 1;
+        }
+    }
+
+    /// <summary>
+    /// Whether the fold is narrowed to the selected tenant's events where Marten's own aggregate is not: a tenant is
+    /// selected and the event store is not conjoined (SEC1-fix F2) - time travel's note, for the same read.
+    /// </summary>
+    private bool FoldsOnlyTheTenant =>
+        shape is { EventsConjoined: false, HasTenantId: true } && !string.IsNullOrEmpty(State.ActiveScope?.TenantId);
+
+    private string StreamsHref => EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope);
+
+    private string StreamHref =>
+        EventLinks.To(
+            Options.Value,
+            EventLinks.StreamDetailRoute,
+            State.ActiveScope,
+            [new("id", Id), new("v", EventLinks.Number(Selected?.Version)), new("agg", SelectedAggregate)]);
+
+    private string Href(long version) =>
+        EventLinks.ToStep(Options.Value, State.ActiveScope, Id ?? string.Empty, SelectedAggregate, version, path: Path);
+
+    private string TypeHref(string eventType) => EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);
+
+    /// <summary>
+    /// The dead letters of one event. Under per-tenant sequences a number names one event in each tenant, so with All
+    /// tenants selected the link is pinned to the event's own tenant, as the dead-letter screen's own stream link is.
+    /// </summary>
+    private string DeadLettersHref(AggregateStep step) =>
+        EventLinks.ToDeadLettersForEvent(
+            Options.Value,
+            State.ActiveScope is { TenantId: null } all && shape is { PerTenantSequences: true } && !string.IsNullOrEmpty(step.TenantId)
+                ? all with { TenantId = step.TenantId }
+                : State.ActiveScope,
+            step.Sequence);
+
+    private static string Label(AggregateTypeCandidate candidate) =>
+        candidate.Source == AggregateCandidateSource.SingleStreamProjection
+            ? candidate.Name + " (single-stream projection)"
+            : candidate.Name + " (try any type - may fail)";
+
+    private int IndexOf(AggregateStep step)
+    {
+        if (window is null)
+        {
+            return -1;
+        }
+
+        for (int index = 0; index < window.Steps.Count; index++)
+        {
+            if (ReferenceEquals(window.Steps[index], step))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private string StepClass(AggregateStep step) =>
+        "ms-stepper-step-link"
+        + (ReferenceEquals(step, Selected) ? " ms-stepper-step-link-selected" : string.Empty)
+        + (step.Failure is not null ? " ms-stepper-step-link-failed" : string.Empty);
+
+    private static string StepSummary(AggregateStep step) => step switch
+    {
+        { Failure: not null } => "the fold threw",
+        { Changes: 0 } => "no change",
+        { Changes: 1 } => "1 change",
+        { Changes: { } count } => count.ToString("N0", CultureInfo.InvariantCulture) + " changes",
+        { StateJson: null } => "no aggregate",
+        _ => "aggregate",
+    };
+
+    private static IReadOnlyDictionary<string, string?> Metadata(AggregateStep step) =>
+        string.IsNullOrEmpty(step.TenantId)
+            ? new Dictionary<string, string?>(StringComparer.Ordinal)
+            : new Dictionary<string, string?>(StringComparer.Ordinal) { ["tenant_id"] = step.TenantId };
+
+    /// <summary>The aggregate before a step: the step before it in the window, or the window's own before.</summary>
+    private string? Before(AggregateStep step)
+    {
+        int index = IndexOf(step);
+        return index > 0 ? window!.Steps[index - 1].StateJson : window?.StateBeforeJson;
+    }
+
+    /// <summary>What the step shows as the aggregate: after it, or before it when folding it threw.</summary>
+    private string? StateShown(AggregateStep step) => step.Failure is null ? step.StateJson : Before(step);
+
+    private string NoAggregateText(AggregateStep step) =>
+        step.Failure is not null
+            ? "There was no aggregate before this event."
+            : Before(step) is null
+                ? "There is no aggregate yet: Marten's aggregator has produced nothing from the events up to this one."
+                : "Marten's aggregator answers nothing after this event: the aggregate is deleted here.";
+
+    private string ChangeText(AggregateStep step) =>
+        (Before(step), step.StateJson) switch
+        {
+            (null, null) => "No aggregate before this event and none after it.",
+            (null, _) => "This event created the aggregate: there was none before it.",
+            _ => "This event deleted the aggregate: Marten's aggregator answers nothing after it.",
+        };
+
+    private string StoppedText(long stoppedAt) =>
+        $"You asked for version {RequestedVersion.ToString(CultureInfo.InvariantCulture)}. The fold stops at version "
+        + $"{stoppedAt.ToString(CultureInfo.InvariantCulture)}, where applying the event threw, so no later step can be shown.";
+
+    private string MissingText(AggregateMissingReason reason) => reason switch
+    {
+        AggregateMissingReason.StreamArchived =>
+            "This stream is archived, and Marten's stream read never returns archived events - so there is nothing to step "
+            + "through, whatever the aggregate does.",
+        AggregateMissingReason.StreamMissing =>
+            "There is no such stream in this scope any more - it may have been archived, or it may belong to another tenant.",
+        AggregateMissingReason.TenantRequired =>
+            "This event store is tenanted per event, and a fold always runs as exactly one tenant. Pick a tenant in the "
+            + "header and try again - \"All tenants\" reads no events at all.",
+        _ => "This stream gave the fold no events to step through.",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        await ApplyScopeFromQueryAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        versionText = Version?.ToString(CultureInfo.InvariantCulture);
+        pathText = Path;
+
+        // A search's answer is about the step it was asked from or led to; on any other step it is stale.
+        if (searchMessage is not null && Version != searchVersion)
+        {
+            searchMessage = null;
+        }
+
+        if (!string.Equals(loadedStream, StreamSignature(), StringComparison.Ordinal))
+        {
+            await LoadAsync();
+            return;
+        }
+
+        // Read again only for another stream or type, or a step the window on screen does not answer - and never twice for the
+        // same question, which is what a window that answered "nothing to step" would otherwise be on every render.
+        string signature = WindowSignature();
+        if (!string.Equals(loadedWindow, signature, StringComparison.Ordinal)
+            || (!InWindow(RequestedVersion) && loadedVersion != RequestedVersion))
+        {
+            await LoadWindowAsync();
+        }
+    }
+
+    private async Task ApplyScopeFromQueryAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Store) && string.IsNullOrWhiteSpace(Database) && string.IsNullOrWhiteSpace(Tenant))
+        {
+            return;
+        }
+
+        StudioScope? active = State.ActiveScope;
+        if (active is not null
+            && string.Equals(active.StoreKey, Store ?? active.StoreKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.DatabaseId, Database ?? active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(active.TenantId ?? string.Empty, Tenant ?? active.TenantId ?? string.Empty, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await State.SetScopeAsync(Store, Database, Tenant, pageCancellation.Token);
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task ReloadAsync() => LoadAsync();
+
+    private Task ReloadWindowAsync()
+    {
+        loadedWindow = null;
+        loadedVersion = null;
+        return LoadWindowAsync();
+    }
+
+    /// <summary>
+    /// The stream's header, the event store's shape and the aggregate types - then the window. Everything read for another
+    /// stream or scope is dropped first, so no control on screen acts on a stream it was not read for.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        int load = ++loads;
+        string requested = StreamSignature();
+
+        stream = null;
+        shape = null;
+        window = null;
+        searchMessage = null;
+        loadedStream = requested;
+        loadedWindow = null;
+        loadedVersion = null;
+
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Id))
+        {
+            loading = false;
+            return;
+        }
+
+        string id = Id;
+        loading = true;
+
+        try
+        {
+            CancellationToken token = pageCancellation.Token;
+
+            EventStoreShape readShape = await Events.DescribeAsync(scope, token);
+            StreamState read = await Events.GetStreamAsync(scope, id, token);
+            IReadOnlyList<AggregateTypeCandidate> offered = read.Exists
+                ? await Events.ListAggregateCandidatesAsync(scope, token)
+                : [];
+
+            if (load != loads)
+            {
+                return;
+            }
+
+            shape = readShape;
+            stream = read;
+            candidates = [.. offered];
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            if (load == loads)
+            {
+                stream = StreamState.Failed(id, new EventDataError(exception.Message, null, true));
+            }
+
+            return;
+        }
+        finally
+        {
+            if (load == loads)
+            {
+                loading = false;
+            }
+        }
+
+        await LoadWindowAsync();
+    }
+
+    /// <summary>The window that holds the step asked for, folded by the service.</summary>
+    private async Task LoadWindowAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || stream is not { Exists: true } || SelectedAggregate is not { } aggregate)
+        {
+            window = null;
+            loadedWindow = null;
+            loadedVersion = null;
+            return;
+        }
+
+        int load = ++loads;
+        string id = Id;
+        long version = RequestedVersion;
+
+        // The question, recorded as it is asked: a render while the answer is on its way asks it again otherwise.
+        loadedWindow = WindowSignature();
+        loadedVersion = version;
+        windowLoading = true;
+
+        try
+        {
+            StreamStepWindow read = await Events.StepAsync(scope, id, aggregate, version, pageCancellation.Token);
+
+            if (load != loads)
+            {
+                return;
+            }
+
+            window = read;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (load == loads)
+            {
+                window = StreamStepWindow.Failed(aggregate, version, new EventDataError(exception.Message, null, true));
+            }
+        }
+        finally
+        {
+            if (load == loads)
+            {
+                windowLoading = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a version is one the window on screen already answers, so moving to it reads nothing: inside it; after it,
+    /// when the fold stopped or refused in it or the stream ends with it; before it, when nothing comes before it.
+    /// </summary>
+    private bool InWindow(long version)
+    {
+        if (window is not { Steps.Count: > 0 } current || current.Error is not null)
+        {
+            return false;
+        }
+
+        long first = current.Steps[0].Version;
+        long last = current.Steps[^1].Version;
+
+        if (version >= first && version <= last)
+        {
+            return true;
+        }
+
+        return version > last
+            ? current.StoppedAt is not null || current.Refusal is not null || !current.HasMore
+            : !current.HasEarlier;
+    }
+
+    private Task OnTypeChangedAsync(ChangeEventArgs args)
+    {
+        string? aggregate = args.Value?.ToString();
+        Navigation.NavigateTo(EventLinks.ToStep(
+            Options.Value,
+            State.ActiveScope,
+            Id ?? string.Empty,
+            string.IsNullOrWhiteSpace(aggregate) ? null : aggregate,
+            Version,
+            path: Path));
+        return Task.CompletedTask;
+    }
+
+    private Task GoAsync(long version)
+    {
+        searchMessage = null;
+        Navigation.NavigateTo(Href(Math.Max(1, version)));
+        return Task.CompletedTask;
+    }
+
+    private void OnVersionTextChanged(ChangeEventArgs args) => versionText = args.Value?.ToString();
+
+    // On input, not change: "Find next change" is enabled while the path is typed, not only once the field loses focus (0.6's
+    // UI sweep). The event carries the field's value, so a render that lands mid-word does not write an older one back.
+    private void OnPathChanged(ChangeEventArgs args) => pathText = args.Value?.ToString();
+
+    private Task JumpAsync()
+    {
+        if (long.TryParse(versionText, NumberStyles.Integer, CultureInfo.InvariantCulture, out long version))
+        {
+            return GoAsync(Math.Clamp(version, 1, Math.Max(1, stream?.Version ?? 1)));
+        }
+
+        searchVersion = Version;
+        searchMessage = "Type the version of the event to step to.";
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Asks the service for the next event after this step that changed the watched value, and goes there.</summary>
+    private async Task FindNextChangeAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null || string.IsNullOrWhiteSpace(Id) || SelectedAggregate is not { } aggregate || string.IsNullOrWhiteSpace(pathText))
+        {
+            return;
+        }
+
+        searching = true;
+        searchMessage = null;
+
+        int load = loads;
+        string path = pathText.Trim();
+        long after = Selected?.Version ?? 0;
+
+        try
+        {
+            StepSearch search = await Events.FindNextChangeAsync(scope, Id, aggregate, after, path, pageCancellation.Token);
+
+            if (load != loads)
+            {
+                return;
+            }
+
+            if (search.FoundVersion is { } found)
+            {
+                // Said before the navigation, which re-renders the page with the step it found.
+                searchVersion = found;
+                searchMessage = search.FoundFailure
+                    ? $"Version {found.ToString(CultureInfo.InvariantCulture)}: applying it threw, and the stepper stops there."
+                    : $"Version {found.ToString(CultureInfo.InvariantCulture)} changed {search.Path}.";
+                Navigation.NavigateTo(EventLinks.ToStep(Options.Value, scope, Id, aggregate, found, path: path));
+                return;
+            }
+
+            searchVersion = Version;
+            searchMessage = search switch
+            {
+                { Error: { } error } => error.Display,
+                { Refusal: { } refusal } => refusal,
+                { ScannedThrough: { } through, ReachedLimit: true } =>
+                    $"No event from version {(after + 1).ToString(CultureInfo.InvariantCulture)} to "
+                    + $"{through.ToString(CultureInfo.InvariantCulture)} changed {search.Path}. The search looks at "
+                    + $"{EventDataService.StepSearchLimit.ToString("N0", CultureInfo.InvariantCulture)} events at a time: step to "
+                    + $"version {through.ToString(CultureInfo.InvariantCulture)} and search again to look further.",
+                { ScannedThrough: { } through } =>
+                    $"No event after version {after.ToString(CultureInfo.InvariantCulture)} changed {search.Path}, up to the "
+                    + $"stream's last event, version {through.ToString(CultureInfo.InvariantCulture)}.",
+                _ => $"There are no events after version {after.ToString(CultureInfo.InvariantCulture)}.",
+            };
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page: a failure that only flashes past is one nobody can act on (plan §4.8).
+            searchVersion = Version;
+            searchMessage = exception.Message;
+        }
+        finally
+        {
+            searching = false;
+        }
+    }
+
+    private string StreamSignature() =>
+        string.Join(
+            '\u001f',
+            State.ActiveScope?.StoreKey,
+            State.ActiveScope?.DatabaseId,
+            State.ActiveScope?.TenantId,
+            Id) + '\u001f';
+
+    /// <summary>
+    /// What a window was read for besides its versions: the stream and the aggregate type. Which versions it answers is
+    /// <see cref="InWindow" />'s, because the service may hand back another window than the one asked for - the one that
+    /// holds the event the fold stopped on, or the stream's last.
+    /// </summary>
+    private string WindowSignature() => StreamSignature() + SelectedAggregate;
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await pageCancellation.CancelAsync();
+        pageCancellation.Dispose();
+
+        GC.SuppressFinalize(this);
+    }
+}

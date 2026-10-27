@@ -13,12 +13,12 @@ namespace MartenStudio.Tests.Sql;
 public class HealthConnectionQueriesTests
 {
     /// <summary>The reads of one database's sessions.</summary>
-    public static TheoryData<string> SessionReads => new() { "IdleInTransaction", "LongRunningStatements", "LockWaits", "SessionSnapshot" };
+    public static TheoryData<string> SessionReads => new() { "IdleInTransaction", "LongRunningStatements", "LockTable", "SessionSnapshot" };
 
     /// <summary>Every statement the builder makes.</summary>
     public static TheoryData<string> Every => new()
     {
-        "ServerConnections", "IdleInTransaction", "LongRunningStatements", "LockWaits", "Blockers",
+        "ServerConnections", "IdleInTransaction", "LongRunningStatements", "LockTable", "LockStatistics",
         "PreparedTransactions", "DatabaseCounters", "SessionSnapshot", "LockSnapshot",
     };
 
@@ -26,10 +26,10 @@ public class HealthConnectionQueriesTests
     private static HealthQuery Query(string name) => name switch
     {
         "ServerConnections" => HealthConnectionQueries.ServerConnections(),
-        "IdleInTransaction" => HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1), [4444L, 123456L]),
+        "IdleInTransaction" => HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1), [12], new Dictionary<int, long> { [12] = 3 }),
         "LongRunningStatements" => HealthConnectionQueries.LongRunningStatements(TimeSpan.FromSeconds(1)),
-        "LockWaits" => HealthConnectionQueries.LockWaits(TimeSpan.FromSeconds(1)),
-        "Blockers" => HealthConnectionQueries.Blockers([12, 34]),
+        "LockTable" => HealthConnectionQueries.LockTable(),
+        "LockStatistics" => HealthConnectionQueries.LockStatistics(),
         "PreparedTransactions" => HealthConnectionQueries.PreparedTransactions(),
         "DatabaseCounters" => HealthConnectionQueries.DatabaseCounters(),
         "SessionSnapshot" => HealthConnectionQueries.SessionSnapshot(),
@@ -82,11 +82,12 @@ public class HealthConnectionQueriesTests
     public void pg_blocking_pids_is_asked_only_of_a_session_that_waits_for_a_lock()
     {
         HealthConnectionQueries.SessionSnapshot().Sql.Should().Contain("case when a.wait_event_type = 'Lock' then pg_blocking_pids(a.pid) end");
-        HealthConnectionQueries.LockWaits(TimeSpan.Zero).Sql.Should().Contain("a.wait_event_type = 'Lock'");
+        HealthConnectionQueries.LockTable().Sql.Should().Contain("a.wait_event_type = 'Lock'");
+        Regex.Count(HealthConnectionQueries.LockTable().Sql, @"pg_blocking_pids\(").Should().Be(1, "it is called in the waiting sessions' CTE alone");
 
         foreach (string sql in new[]
         {
-            HealthConnectionQueries.IdleInTransaction(TimeSpan.Zero, []).Sql,
+            HealthConnectionQueries.IdleInTransaction(TimeSpan.Zero, [], new Dictionary<int, long>()).Sql,
             HealthConnectionQueries.LongRunningStatements(TimeSpan.Zero).Sql,
             HealthConnectionQueries.ServerConnections().Sql,
             HealthConnectionQueries.LockSnapshot().Sql,
@@ -100,7 +101,7 @@ public class HealthConnectionQueriesTests
     [Fact]
     public void Columns_a_server_may_not_have_are_read_so_that_their_absence_is_null()
     {
-        HealthConnectionQueries.LockWaits(TimeSpan.Zero).Sql.Should().Contain("(to_jsonb(l) ->> 'waitstart')::timestamptz")
+        HealthConnectionQueries.LockTable().Sql.Should().Contain("(to_jsonb(l) ->> 'waitstart')::timestamptz")
             .And.NotContain("l.waitstart", "naming pg_locks.waitstart on PostgreSQL 13 is 42703, a failed check");
         HealthConnectionQueries.LockSnapshot().Sql.Should().NotContain("l.waitstart");
         HealthConnectionQueries.ServerConnections().Sql.Should().Contain("current_setting('reserved_connections', true)");
@@ -152,7 +153,7 @@ public class HealthConnectionQueriesTests
     /// partition's or a TOAST table's name carries a tenant id, a hidden type's alias or an oid.
     /// </summary>
     [Theory]
-    [InlineData("LockWaits")]
+    [InlineData("LockTable")]
     [InlineData("LockSnapshot")]
     public void A_lock_read_returns_the_owner_never_the_locked_relations_own_name(string name)
     {
@@ -173,9 +174,9 @@ public class HealthConnectionQueriesTests
     [Fact]
     public void A_blocker_in_another_database_is_named_by_nothing_but_its_process_id()
     {
-        string sql = HealthConnectionQueries.Blockers([1]).Sql;
+        string sql = HealthConnectionQueries.LockTable().Sql;
 
-        foreach (string column in new[] { "a.state end as state", "a.usename::text end as usename", "a.application_name end as application_name", "host(a.client_addr) end as client_addr" })
+        foreach (string column in new[] { "a.state end", "a.usename::text end", "a.application_name end", "host(a.client_addr) end", "a.backend_start end", "a.wait_event end" })
         {
             sql.Should().Contain("case when a.datname = current_database() then " + column);
         }
@@ -184,23 +185,57 @@ public class HealthConnectionQueriesTests
     [Fact]
     public void Every_call_builds_a_fresh_statement_with_fresh_parameters()
     {
-        HealthQuery first = HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1), [4444L]);
-        HealthQuery second = HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1), [4444L]);
+        HealthQuery first = HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1), [12], new Dictionary<int, long>());
+        HealthQuery second = HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1), [12], new Dictionary<int, long>());
 
         first.Should().NotBeSameAs(second);
         first.Parameters.Should().NotIntersectWith(second.Parameters, "an NpgsqlParameter belongs to one command");
     }
 
     [Fact]
-    public void The_idle_read_binds_the_floor_the_daemon_lock_ids_and_the_limit()
+    public void The_idle_read_binds_the_floor_the_lock_tables_answers_and_the_limit()
     {
-        HealthQuery query = HealthConnectionQueries.IdleInTransaction(TimeSpan.FromSeconds(1.5), [4444L, -7L]);
+        HealthQuery query = HealthConnectionQueries.IdleInTransaction(
+            TimeSpan.FromSeconds(1.5), [77, 12], new Dictionary<int, long> { [30] = 2, [12] = 5 });
 
-        query.ParameterNames.Should().Equal("@floor_seconds", "@daemon_lock_ids", "@limit");
+        query.ParameterNames.Should().Equal("@floor_seconds", "@daemon_lock_holders", "@relation_lock_pids", "@relation_lock_counts", "@limit");
         query.Parameters[0].Value.Should().Be(1.5);
-        query.Parameters[1].Value.Should().BeEquivalentTo(new[] { 4444L, -7L }, "the 64-bit key is matched whole, sign included");
-        query.Parameters[2].Value.Should().Be(HealthConnectionQueries.MaxOffenders);
-        query.Sql.Should().Contain("((l.classid::int8 << 32) | l.objid::int8) end = any(@daemon_lock_ids)");
+        query.Parameters[1].Value.Should().BeOfType<int[]>().Which.Should().Equal([77, 12], "the sessions the lock table read found holding the daemon's keys");
+        query.Parameters[2].Value.Should().BeOfType<int[]>().Which.Should().Equal([12, 30]);
+        query.Parameters[3].Value.Should().BeOfType<long[]>().Which.Should().Equal([5L, 2L], "each count beside its session");
+        query.Parameters[4].Value.Should().Be(HealthConnectionQueries.MaxOffenders);
+        query.Sql.Should().NotContain("pg_locks", "C04 takes the lock table from the sweep's one read of it (X3)");
+    }
+
+    /// <summary>
+    /// X3, H3's half: the lock table is read by one statement, which reads <c>pg_locks</c> once - a materialized CTE every other
+    /// part of the statement reads - and nothing else in the builder reads it, but Database › Sessions' own lock list.
+    /// </summary>
+    [Fact]
+    public void The_lock_table_is_read_once_in_one_statement()
+    {
+        string sql = HealthConnectionQueries.LockTable().Sql;
+
+        Regex.Count(sql, @"\bfrom\s+pg_locks\b").Should().Be(1, "pg_locks is one Function Scan in the plan");
+        sql.Should().StartWith("with recursive locks as materialized (", "every reader of the lock table reads the materialized snapshot");
+        sql.Replace("'pg_catalog.pg_class'::regclass", string.Empty, StringComparison.Ordinal).Should().NotContain("::regclass",
+            "an output cast of an oid dropped since the snapshot errors; owners are found by oid in the catalog, D27");
+
+        foreach (string reader in new[] { "IdleInTransaction", "LongRunningStatements", "SessionSnapshot", "PreparedTransactions", "ServerConnections" })
+        {
+            Query(reader).Sql.Should().NotContain("pg_locks", "{0} takes what it needs of the lock table as parameters, or needs none", reader);
+        }
+    }
+
+    /// <summary>PostgreSQL 19's <c>pg_stat_lock</c> is read whole and plain: per lock type, server-wide, nothing named.</summary>
+    [Fact]
+    public void The_lock_statistics_read_names_only_the_view()
+    {
+        HealthQuery query = HealthConnectionQueries.LockStatistics();
+
+        query.Sql.Should().Contain("from pg_catalog.pg_stat_lock s");
+        query.Sql.Should().Contain("s.locktype, s.waits, s.wait_time, s.fastpath_exceeded, s.stats_reset");
+        query.Parameters.Should().BeEmpty();
     }
 
     [Fact]

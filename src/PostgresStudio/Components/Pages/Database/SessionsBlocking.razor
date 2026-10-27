@@ -1,0 +1,292 @@
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Settings
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@inject StudioState State
+
+@*
+    Database › Sessions › Blocking (X3): who holds up whom, as trees - each chain's head, then the sessions waiting on it,
+    nested - from the Sessions snapshot's one read of the lock table (HealthConnectionQueries.LockTable), the same statement a
+    health sweep reads it with.
+
+    Gated exactly like the rest of the details: the counts are database-wide numbers and shown with the summary; the tree
+    names sessions - process ids, roles, applications, clients - so it is drawn only from SessionActivityDetails, which the
+    service gives only past ViewDatabaseActivity, the store or source policy and the write policy, and audits as it always has.
+
+    The head of a chain gets the two statements a person who may end another session would run. The studio never runs either
+    (K2): they are text, with a copy button, and nothing more. PostgreSQL 19's pg_stat_lock is a small section of its own,
+    absent below 19.
+*@
+
+<section class="ms-sessions-section ms-blocking" aria-labelledby="ms-blocking-heading">
+    <h2 class="ms-sessions-heading" id="ms-blocking-heading">Blocking</h2>
+
+    <p class="ms-blocking-lead">
+        Who is holding up whom: each chain starts at its head - a session that blocks others and waits for no lock itself - with
+        every session waiting on it below, nested. A session that waits on two others is drawn under both. The studio never
+        cancels or ends a session; a head's statements are here to hand to whoever may.
+    </p>
+
+    @if (Summary.Blocking is { Chains: 0, Unrooted: 0 })
+    {
+        <p class="ms-muted ms-blocking-none">At this reading, no session of this database was waiting for a lock another session held.</p>
+    }
+    else
+    {
+        <dl class="ms-sessions-stats ms-blocking-stats">
+            <div class="ms-sessions-stat">
+                <dt>Chains</dt>
+                <dd>@SessionText.Number(Summary.Blocking.Chains)</dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>Sessions held up</dt>
+                <dd class="ms-sessions-stat-alert">@SessionText.Number(Summary.Blocking.Held)</dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>Longest wait</dt>
+                <dd>@(Summary.Blocking.LongestWait is { } longest ? SessionText.Duration(longest) : "–")</dd>
+            </div>
+            <div class="ms-sessions-stat">
+                <dt>Heads idle in a transaction</dt>
+                <dd class="@(Summary.Blocking.IdleHeads > 0 ? "ms-sessions-stat-alert" : null)">@SessionText.Number(Summary.Blocking.IdleHeads)</dd>
+            </div>
+        </dl>
+
+        @if (ShowDetails)
+        {
+            <ol class="ms-blocking-chains">
+                @foreach (BlockingChainView chain in Details!.Blocking)
+                {
+                    <li class="@(chain.HeadWaits ? "ms-blocking-chain ms-blocking-chain-unrooted" : "ms-blocking-chain")" @key="chain.Head.ProcessId">
+                        <p class="ms-blocking-chain-summary">
+                            @if (chain.HeadWaits)
+                            {
+                                <span>No head: these sessions wait on each other, or on a session this read did not list. Postgres' deadlock
+                                    detector ends a cycle after <code>deadlock_timeout</code>.</span>
+                            }
+                            else
+                            {
+                                <span>Holds up @SessionText.Count(chain.Held, "session")@(chain.LongestWait is { } wait ? ", the longest waiting " + SessionText.Duration(wait) : string.Empty).</span>
+                            }
+                        </p>
+
+                        <ul class="ms-blocking-tree">
+                            @Branch(chain.Head, head: !chain.HeadWaits)
+                        </ul>
+
+                        @if (chain.Terminate is { } terminate)
+                        {
+                            <div class="ms-blocking-handover">
+                                <p class="ms-blocking-handover-title">To hand to whoever may end it - the studio never runs these</p>
+                                @if (chain.Cancel is { } cancel)
+                                {
+                                    <p class="ms-blocking-handover-line">
+                                        <code class="ms-mono">@cancel</code>
+                                        <CopyButton Value="@cancel" Label="@("Copy the statement that cancels pid " + chain.Head.ProcessId + "'s query")" />
+                                        <span class="ms-blocking-handover-note">cancels its running statement; inside a transaction that leaves the transaction aborted, holding its locks until the application rolls it back.</span>
+                                    </p>
+                                }
+                                <p class="ms-blocking-handover-line">
+                                    <code class="ms-mono">@terminate</code>
+                                    <CopyButton Value="@terminate" Label="@("Copy the statement that ends pid " + chain.Head.ProcessId + "'s session")" />
+                                    <span class="ms-blocking-handover-note">
+                                        @(chain.IdleHead
+                                            ? "ends the session and rolls its transaction back, releasing its locks - the only way to end a session idle in its transaction short of the application."
+                                            : "ends the session and rolls its transaction back, releasing its locks.")
+                                    </span>
+                                </p>
+                                <p class="ms-blocking-handover-note">
+                                    Either needs a superuser, a member of the session's own role, or a member of <code>pg_signal_backend</code>, which
+                                    cannot signal a superuser's session.
+                                </p>
+                            </div>
+                        }
+                    </li>
+                }
+            </ol>
+        }
+        else
+        {
+            <p class="ms-muted ms-blocking-gated">
+                Which sessions they are - process ids, roles, applications and the relations they wait for - is a session detail, shown
+                here when session details are.
+            </p>
+        }
+    }
+
+    @if (Summary.LockStatistics is { } statistics)
+    {
+        <section class="ms-blocking-statistics" aria-labelledby="ms-blocking-statistics">
+            <h3 class="ms-blocking-subheading" id="ms-blocking-statistics">Lock waits by type (PostgreSQL 19)</h3>
+            <p class="ms-blocking-note">
+                <code>pg_stat_lock</code>: for the whole server since its counters were last reset, how many lock requests of each type
+                had to wait, for how long in all, and how often a backend's fast-path slots were full.
+            </p>
+            <TableScroll Label="Lock waits by lock type">
+                <table class="ms-table ms-sessions-table ms-blocking-statistics-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Lock type</th>
+                            <th scope="col">Waits</th>
+                            <th scope="col">Time waited</th>
+                            <th scope="col">Fast path full</th>
+                            <th scope="col">Since</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (LockStatisticsRow row in statistics)
+                        {
+                            <tr @key="row.LockType">
+                                <td class="ms-mono">@row.LockType</td>
+                                <td>@SessionText.Number(row.Waits)</td>
+                                <td>@(row.Waits == 0 ? "–" : SessionText.Duration(TimeSpan.FromMilliseconds(row.WaitTimeMilliseconds)))</td>
+                                <td>@SessionText.Number(row.FastPathExceeded)</td>
+                                <td>@(row.StatsReset is { } reset ? State.FormatInSelectedTimeZone(reset) : "–")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        </section>
+    }
+</section>
+
+@code {
+    /// <summary>
+    /// The visitor's <c>SessionActivitySummary</c>: the counts, and PostgreSQL 19's counters. Typed <see cref="object" /> - see
+    /// <c>ComponentModel</c>.
+    /// </summary>
+    [Parameter]
+    [EditorRequired]
+    public object? SummaryModel { get; set; }
+
+    /// <summary>
+    /// The visitor's <c>SessionActivityDetails</c>, past the activity gate; <see langword="null" /> when they were not read. Typed
+    /// <see cref="object" /> - see <c>ComponentModel</c>.
+    /// </summary>
+    [Parameter]
+    public object? DetailsModel { get; set; }
+
+    private SessionActivitySummary Summary => (SessionActivitySummary) SummaryModel!;
+
+    private SessionActivityDetails? Details => DetailsModel as SessionActivityDetails;
+
+    /// <summary>Whether the details are on screen: the gate open and the service's answer a grant.</summary>
+    [Parameter]
+    public bool ShowDetails { get; set; }
+
+    /// <summary>One session and, nested below it, the sessions waiting on it.</summary>
+    private RenderFragment Branch(BlockingNodeView node, bool head) => __builder =>
+    {
+        <li class="@(head ? "ms-blocking-node ms-blocking-head" : "ms-blocking-node")" @key="node.ProcessId">
+            <dl class="ms-blocking-session">
+                <div class="ms-blocking-field ms-blocking-pid">
+                    <dt>pid</dt>
+                    <dd class="ms-mono">@node.ProcessId</dd>
+                </div>
+                @if (!node.Known)
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Session</dt>
+                        <dd>ended as this was read</dd>
+                    </div>
+                }
+                else if (!node.SameDatabase)
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Session</dt>
+                        <dd>in another database</dd>
+                    </div>
+                }
+                else
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Role</dt>
+                        <dd>@(node.User ?? "–")</dd>
+                    </div>
+                    <div class="ms-blocking-field">
+                        <dt>Application</dt>
+                        <dd>@(string.IsNullOrEmpty(node.Application) ? "–" : node.Application)</dd>
+                    </div>
+                    <div class="ms-blocking-field">
+                        <dt>State</dt>
+                        <dd>@(node.VacuumLabel is { } vacuum ? vacuum + ", " : string.Empty)@(node.State ?? "not readable")@(node.StateAge is { } inState && node.State is not null ? " for " + SessionText.Duration(inState) : string.Empty)</dd>
+                    </div>
+                }
+                @if (node.WaitEventType is { } waitType)
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Wait event</dt>
+                        <dd class="ms-mono">@(node.WaitEvent is { } waitEvent ? waitType + ": " + waitEvent : waitType)</dd>
+                    </div>
+                }
+                @if (node.TransactionAge is { } open)
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Transaction</dt>
+                        <dd>@SessionText.Duration(open)</dd>
+                    </div>
+                }
+                @if (node.Waited is { } waited)
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Waiting</dt>
+                        <dd>@SessionText.Duration(waited)@(node.ExactWait ? string.Empty : " at most")</dd>
+                    </div>
+                }
+                <div class="ms-blocking-field ms-blocking-lock">
+                    <dt>Lock</dt>
+                    <dd>@LockWords(node)</dd>
+                </div>
+                @if (node.Relation is { } relation)
+                {
+                    <div class="ms-blocking-field">
+                        <dt>Relation</dt>
+                        <dd class="ms-mono">@relation</dd>
+                    </div>
+                }
+            </dl>
+
+            @if (node.Repeat == BlockingRepeat.ShownElsewhere)
+            {
+                <p class="ms-blocking-repeat">It also waits on another session; the sessions waiting on it are drawn there.</p>
+            }
+            else if (node.Repeat == BlockingRepeat.Cycle)
+            {
+                <p class="ms-blocking-repeat">Already above in this chain: the sessions wait on each other.</p>
+            }
+            else if (node.Repeat == BlockingRepeat.TooDeep)
+            {
+                <p class="ms-blocking-repeat">The chain goes deeper than this page draws; the rest is drawn as a chain of its own.</p>
+            }
+
+            @if (node.Waiters.Count > 0)
+            {
+                <ul class="ms-blocking-waiters">
+                    @foreach (BlockingNodeView waiter in node.Waiters)
+                    {
+                        @Branch(waiter, head: false)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    /// <summary>"wants AccessExclusiveLock on a relation", "holds AccessExclusiveLock", or both, for one in the middle of a chain.</summary>
+    private static string LockWords(BlockingNodeView node)
+    {
+        List<string> parts = [];
+
+        if (node.HeldModes.Count > 0)
+        {
+            parts.Add("holds " + string.Join(" and ", node.HeldModes));
+        }
+
+        if (node.WantedMode is { } wanted)
+        {
+            parts.Add("wants " + wanted + " on " + (node.Target ?? "a lock"));
+        }
+
+        return parts.Count == 0 ? "ahead of them in the queue, or holding what they want under another lock" : string.Join("; ", parts);
+    }
+}

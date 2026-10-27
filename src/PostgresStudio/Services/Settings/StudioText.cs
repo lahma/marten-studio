@@ -439,6 +439,15 @@ internal sealed class StudioText
     public required string PickInTheHeader { get; init; }
 
     /// <summary>
+    /// Plan insight P04's remedy (X1b): where the index a selective sequential scan wants belongs - a store's options for a
+    /// Marten table, whose hand-made indexes the next <c>CreateOrUpdate</c> drops, and the host's own migrations otherwise.
+    /// </summary>
+    public required string PlanIndexRemedy { get; init; }
+
+    /// <summary>Plan insight P07's remedy (X1b): what serves a pattern with a leading wildcard, and where it is declared.</summary>
+    public required string PlanPatternRemedy { get; init; }
+
+    /// <summary>
     /// MartenStudio's wording, exactly as the shared code wrote it before it was shared. Every member is either one of
     /// the constants it used, or that literal moved here - but the six judged-table members of T12 and T13
     /// (<see cref="JudgedTables" /> to <see cref="UnjudgedOldest" />), reworded in 0.5 when MartenStudio's table checks
@@ -649,5 +658,15 @@ internal sealed class StudioText
         DatabaseGateReason = "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
         ExportSourceNoun = "store",
         PickInTheHeader = "a store and database",
+        PlanIndexRemedy =
+            "An index whose leading column the filter compares lets Postgres read only the rows it keeps. For a document table, "
+            + "declare it in the store's options - a computed index, or a duplicated field - because an index made by hand on a "
+            + "Marten table is dropped by the next CreateOrUpdate; the Query page's index advisor writes the line for a where "
+            + "clause. For any other table, add it in your own migrations, built CONCURRENTLY on a table in use.",
+        PlanPatternRemedy =
+            "A btree index can serve a pattern only by the fixed text it starts with, so one that starts with % or _ tests every "
+            + "row. A trigram index (the pg_trgm extension's GIN index, gin_trgm_ops) serves it - for a document table declared "
+            + "in the store's options, because an index made by hand on a Marten table is dropped by the next CreateOrUpdate - "
+            + "and so does searching for a prefix instead, or full-text search.",
     };
 }

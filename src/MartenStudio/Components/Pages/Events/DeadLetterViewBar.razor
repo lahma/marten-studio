@@ -1,0 +1,45 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services
+@using MartenStudio.Services.Events
+@using PostgresStudio.Services
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+
+@* M3: the dead-letter page's two views - the list and the groups - as links, so the view is in the query string (D9),
+   and, on the list, the group it was opened on with a way back. Its own component so the list page changes by a line. *@
+
+<nav class="ms-tabs ms-dl-views" aria-label="Dead-letter views">
+    <a class="@(Grouped ? "ms-tab" : "ms-tab ms-tab-active")" href="@ListHref" aria-current="@(Grouped ? null : "page")">List</a>
+    <a class="@(Grouped ? "ms-tab ms-tab-active" : "ms-tab")" href="@GroupedHref" aria-current="@(Grouped ? "page" : null)">Grouped by cause</a>
+</nav>
+
+@if (!Grouped && !string.IsNullOrWhiteSpace(Group))
+{
+    <div class="ms-dl-group-filter" role="note">
+        @if (DeadLetterGroupKey.Decode(Group) is { } key)
+        {
+            <span class="ms-dl-group-filter-label">One group:</span>
+            <code class="ms-dl-group-filter-key">@key.Describe()</code>
+        }
+        else
+        {
+            <span class="ms-dl-group-filter-label">This link names a group the page cannot read, so every dead letter is listed.</span>
+        }
+        <a class="ms-button ms-btn-sm" href="@GroupedHref">Back to the groups</a>
+        <a class="ms-button ms-btn-sm" href="@ListHref">Every dead letter</a>
+    </div>
+}
+
+@code {
+    /// <summary>Whether the grouped view is the one on screen.</summary>
+    [Parameter]
+    public bool Grouped { get; set; }
+
+    /// <summary>The list's <c>?group=</c> value, as the address carried it.</summary>
+    [Parameter]
+    public string? Group { get; set; }
+
+    private string ListHref => EventLinks.To(Options.Value, EventLinks.DeadLettersRoute, State.ActiveScope);
+
+    private string GroupedHref => EventLinks.To(Options.Value, EventLinks.DeadLettersRoute, State.ActiveScope, [new("view", "grouped")]);
+}

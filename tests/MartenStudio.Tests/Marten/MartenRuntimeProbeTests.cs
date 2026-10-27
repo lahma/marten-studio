@@ -154,6 +154,7 @@ public class MartenRuntimeProbeTests
                 nameof(RuntimeFeature.ProjectionStartFloors),
                 nameof(RuntimeFeature.SystemicDatabaseFailure),
                 nameof(RuntimeFeature.PerDatabaseHighWaterAdvance),
+                nameof(RuntimeFeature.DocumentEditPreview),
             ]);
         }
         else
@@ -209,6 +210,7 @@ public class MartenRuntimeProbeTests
         RuntimeFeature.ProjectionStartFloors.Requirement.Should().Be("Marten 9.52+");
         RuntimeFeature.SystemicDatabaseFailure.Requirement.Should().Be("Marten 9.52+", "JasperFx.Events 2.93 is first in Marten 9.52.0");
         RuntimeFeature.PerDatabaseHighWaterAdvance.Requirement.Should().Be("Marten 9.52+");
+        RuntimeFeature.DocumentEditPreview.Requirement.Should().Be("Marten 9.53+");
 
         RuntimeFeature.Short(new Version(2, 89, 0)).Should().Be("2.89");
         RuntimeFeature.Short(new Version(9, 50, 3)).Should().Be("9.50.3");
@@ -239,6 +241,34 @@ public class MartenRuntimeProbeTests
         RuntimeFeature.TransientFailureClassifier.IsAvailable(below).Should().BeFalse();
         RuntimeFeature.TransientFailureClassifier.IsAvailable(at).Should().BeTrue();
         RuntimeFeature.TenantEventSkipping.IsAvailable(at).Should().BeFalse("9.50.3 has no tenant overload of MarkEventsAsSkipped");
+    }
+
+    /// <summary>
+    /// The edit-preview probe's halves, read directly rather than through the probe's catch: below JasperFx 2.94 there is
+    /// no declaration to find (the floor's 2.74.0 has no writer interface at all), and from Marten 9.53.0 the declaration
+    /// is there and <c>DocumentStore</c> implements it - not the interface's default, which throws.
+    /// </summary>
+    [Fact]
+    public void The_edit_preview_probe_finds_Martens_own_implementation_exactly_from_9_53()
+    {
+        Version marten = MartenRuntime.Current.VersionOf(RuntimePackage.Marten)!;
+        Version jasperFx = MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx)!;
+        bool expected = marten >= new Version(9, 53, 0);
+
+        System.Reflection.MethodInfo? declared = RuntimeFeature.EditPreviewMethod();
+        (declared is not null).Should().Be(
+            jasperFx >= new Version(2, 94, 0),
+            "JasperFx {0}: PreviewDocumentJsonAsync is declared from 2.94.0", jasperFx);
+
+        if (declared is not null)
+        {
+            declared.ReturnType.Should().Be<Task<string>>();
+            declared.GetParameters().Select(static x => x.ParameterType.Name).Should().Equal("DocumentWriteRequest", "CancellationToken");
+        }
+
+        RuntimeFeature.DocumentEditPreview.Probe().Should().Be(expected, "Marten {0} implements the preview from 9.53.0", marten);
+        MartenStudio.Services.Documents.MartenEditPreview.IsAvailable.Should().Be(expected,
+            "the studio calls it exactly where the probe finds it, and the request record has its (type, id, json) constructor");
     }
 
     /// <summary>

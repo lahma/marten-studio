@@ -158,30 +158,11 @@ internal static partial class SessionQueryText
             return new SessionStatementText(null, NotReadableNote);
         }
 
-        if (screen.Withheld is not { } withheld)
-        {
-            return new SessionStatementText(null, SchemasUncheckedNote);
-        }
+        string? note = WithholdingNote(query, screen);
 
-        if (screen.Classifier is not { } classifier)
+        if (note is not null || screen.Withheld is not { } withheld)
         {
-            if (screen.HidesDocumentTypes)
-            {
-                return new SessionStatementText(null, UnclassifiedNote);
-            }
-        }
-        else if (classifier.MentionsHiddenTable(query))
-        {
-            return new SessionStatementText(null, HiddenTypeNote);
-        }
-        else if (classifier.MayHideDocumentTypes && NamesUndeclaredDocumentTable(query, classifier))
-        {
-            return new SessionStatementText(null, UndeclaredTableNote);
-        }
-
-        if (screen.RefusedStoreTables.Any(table => query.Contains(table, StringComparison.OrdinalIgnoreCase)))
-        {
-            return new SessionStatementText(null, RefusedStoreNote);
+            return new SessionStatementText(null, note ?? SchemasUncheckedNote);
         }
 
         string text = truncated ? DropOpenTail(query) : query;
@@ -196,6 +177,42 @@ internal static partial class SessionQueryText
         return truncated || capped
             ? new SessionStatementText(masked.TrimEnd() + Cut, "Cut: only the start of the statement is shown.")
             : new SessionStatementText(masked, null);
+    }
+
+    /// <summary>
+    /// Why <paramref name="text" /> is withheld from the visitor <paramref name="screen" /> describes - its schemas could not be
+    /// checked, the stores' declarations could not be read while types may be hidden, it names a hidden type's table, a document
+    /// table no store declares while types may be hidden, or a table of a store the visitor may not see - or
+    /// <see langword="null" /> when nothing withholds it and it may be shown masked. The statement's rules, and the Statements
+    /// drill-in's for a plan (X1), which applies them to every name the plan prints.
+    /// </summary>
+    internal static string? WithholdingNote(string text, StatementScreen screen)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(screen);
+
+        if (screen.Withheld is null)
+        {
+            return SchemasUncheckedNote;
+        }
+
+        if (screen.Classifier is not { } classifier)
+        {
+            if (screen.HidesDocumentTypes)
+            {
+                return UnclassifiedNote;
+            }
+        }
+        else if (classifier.MentionsHiddenTable(text))
+        {
+            return HiddenTypeNote;
+        }
+        else if (classifier.MayHideDocumentTypes && NamesUndeclaredDocumentTable(text, classifier))
+        {
+            return UndeclaredTableNote;
+        }
+
+        return screen.RefusedStoreTables.Any(table => text.Contains(table, StringComparison.OrdinalIgnoreCase)) ? RefusedStoreNote : null;
     }
 
     /// <summary>

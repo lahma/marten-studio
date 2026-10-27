@@ -343,16 +343,16 @@ mapped studio is a read-only browser of Marten's own data.
 | `EditDocuments` | Edit a document's JSON and save it through the store's own serializer and session |
 | `DeleteDocuments` | Delete, soft-delete and undelete documents, one at a time or a selection |
 | `ArchiveStreams` | Archive an event stream. On an event store that is not conjoined, a stream that also holds another tenant's events needs the write policy for the database as a whole |
-| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant). On a store with `Events.UseTenantPartitionedEvents`, below Marten 9.51 Skip event and Rewind subscription are refused, because Marten skips and rewinds by a number every tenant counts on its own; from 9.51 each acts on the dead letter's tenant alone and is asked for that tenant, and a rewind is offered only where the daemon in this process runs that tenant's agent |
+| `ManageDeadLetters` | Discard dead-letter records, mark events as skipped, and rewind a subscription to the event that failed (a rewind reaches every tenant in the database, so it is asked with `TenantId = null` unless the database holds only the selected tenant). On a store with `Events.UseTenantPartitionedEvents`, below Marten 9.51 Skip event and Rewind subscription are refused, because Marten skips and rewinds by a number every tenant counts on its own; from 9.51 each acts on the dead letter's tenant alone and is asked for that tenant, and a rewind is offered only where the daemon in this process runs that tenant's agent; and skip a whole dead-letter group's events, at most 1,000 an action after typing the count, through Skip event's own checks |
 | `ControlDaemon` | Pause and resume the async daemon hosted in this process, start and stop individual projection agents while it is paused, and restart the high-water agent |
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
-| `RunSql` | Run read-only SQL from the Query page's console. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN` and the subquery lift |
+| `RunSql` | Run read-only SQL from the Query page's console, and its Explain analyze. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN`, the subquery lift and What if? under a console or Mode A plan |
 | `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null` |
 | `ViewDatabaseActivity` | See who and what is using the database: other sessions' process ids, roles, client addresses, application names and statements, on the Health page, on Database › Sessions and in the Projections screen's high-water Explain, and run the health advisor's statement checks over `pg_stat_statements`. Without it the counts, ages and states are still shown. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Off by default, in `All()` |
 | `CompactStreams` | Compact an event stream from Stream detail: Marten's own `CompactStreamAsync<T>` replaces its events up to a version with a snapshot of its aggregate, and the folded events are deleted. Authorized for the scope as selected, tenant included - and, on an event store that is not conjoined, for the database as a whole when the stream also holds an event another tenant's session appended. Off by default, in `All()` — see [`docs/compaction.md`](docs/compaction.md) |
-| `RunLinqQueries` | Run LINQ mode on the Query page (Marten 9.48+): a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
+| `RunLinqQueries` | Run LINQ mode on the Query page (Marten 9.48+): a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
 
 ```csharp
 options.Capabilities = MartenStudioCapabilities.All();   // everything: the one-line, greppable opt-in
@@ -428,8 +428,13 @@ never runs this", and a recognised library's table is left out of the index-desi
 outside the store's own schemas is shown only to a visitor the database browser's gate admits to that schema, and the
 navigation badge never counts it. They are grouped by area: the daemon and the high-water mark (D),
 events (E), tables and indexes (T), connections and sessions (C), replication (R), the server (S) and the
-configuration (K). Each finding carries its evidence and when it was measured, Show SQL, a caveat such as
-"counters since `stats_reset` at 09:14", a link to its section of the docs, and "mute in this browser". A
+configuration (K). T20 says when a range-partitioned table is running out of partitions - a time range by its clock,
+a `smallint`, `integer` or `bigint` range by where its rows stop - with the remedy each kind of range takes (for a
+static Marten `ByRange()`, its `.AddRange(...)` line); T18 says when one tenant holds more than half of a large
+conjoined table, and names it only to a visitor past the activity gate and that tenant's store policy; C12 names the
+head of a blocking chain that sits idle in its transaction or has kept others waiting for minutes. Each finding
+carries its evidence and when it was measured, Show SQL, a caveat such as "counters since `stats_reset` at 09:14", a
+link to its section of the docs, and "mute in this browser". A
 sweep runs only while a Health page or the Overview is open, or when the [opt-in health
 check](#the-opt-in-health-check) is probed, at most once per `HealthInterval` per database however many
 tabs watch, in the studio's read-only transaction, without DDL and without a lock beyond what a read
@@ -441,11 +446,17 @@ finding appears, and findings also show where they belong: D01 and D02 as Projec
 on Schema › Indexes, E05 on Event types. **Database › Sessions** (`/marten/database/sessions`) lists this
 database's sessions, locks and prepared transactions under the same two gates, labels a lock by the
 store's own table it belongs to, counts sessions by application beside the server's connection budget, and has no
-cancel or terminate button. The Health page's **Snapshot** menu views, copies or downloads what your pages show of
-the database as JSON, built from your own view of each page.
+cancel or terminate button. Its **Blocking** tab (`?view=blocking`) draws who holds up whom as trees - each chain's
+head, then every session waiting on it - with the head's `pg_terminate_backend` (and `pg_cancel_backend`, when it runs
+a statement) as text to copy for whoever may run it, which the studio never runs; on PostgreSQL 19 it also shows the
+server's lock waits from `pg_stat_lock`. The Health page's **Snapshot** menu views, copies or downloads what your
+pages show of the database as JSON, built from your own view of each page.
 
 **Statements** (Operations, `/marten/statements`) — where the database's time goes, statement by statement, grouped
-by Marten operation and document type, behind `ViewDatabaseActivity`.
+by Marten operation and document type, behind `ViewDatabaseActivity`. A statement's **Plan** link (`?queryid=`) opens
+its drill-in: the text, the counters and its generic plan, planned as `SqlConsoleRole` with its plan insights and What
+if?, and audited. A write, a locking read, a cut text or one withheld from you gets no plan and says why, and a plan
+that reads a schema you may not see is not shown.
 
 **Maintenance** (Operations, `/marten/maintenance`) — what autovacuum will do next and why: each table against the
 triggers autovacuum itself uses, what is running now, the workers, the freeze forecast and the vacuum horizon, with an
@@ -484,7 +495,11 @@ in place and see a **round-trip diff** before saving: Marten has no untyped writ
 deserialized into the CLR type and serialized back, and any property the type does not have is *gone* —
 the dialog lists dropped, changed and added properties and refuses the save until you acknowledge the
 drops. Saves are optimistically concurrent (`UpdateExpectedVersion` / `UpdateRevision`); a row that
-moved comes back as a conflict with nothing written. With `DeleteDocuments` you get delete (soft where
+moved comes back as a conflict with nothing written. A save whose JSON carries another id than the document's own is
+refused, naming both, and from Marten 9.53 the dialog also shows what Marten's own preview of the save
+(`PreviewDocumentJsonAsync`) would keep, and holds a save Marten keeps differently or refuses. An **Order** control
+lists a collection newest first by last modified, created or revision, where its table has the column. With
+`DeleteDocuments` you get delete (soft where
 the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection.
 
 **Database** — everything else in the store's Postgres database, for a host that keeps a Quartz.NET job
@@ -546,13 +561,27 @@ shows the rows, the SQL Marten built, its plan (`EXPLAIN`, never `ANALYZE`) and 
 `StoreOptions` line that would declare the index. It builds Marten's statement without `ToCommand`, so it
 never creates a table, and it runs in the same read-only transaction as the console.
 
+The console's **Explain** and **Explain analyze** buttons draw a plan as a tree - each node's type and what it reads,
+estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
+`EXPLAIN (FORMAT JSON)` you type, and Mode A's plan. `EXPLAIN ANALYZE` runs only in the console, under `RunSql`, for a
+statement its guard accepts and inside its read-only transaction: a write the guard misses is refused by Postgres
+(`25006`) and changes nothing. Under every plan, **plan insights** with stable codes P01-P08
+([`docs/health/plans.md`](docs/health/plans.md)) point at a row estimate off tenfold, a sort or hash spilled to disk, a
+lossy bitmap heap scan, a selective sequential scan, a nested loop over a large outer side, a large `OFFSET`, a
+leading-wildcard `LIKE` and parallel workers short of the plan. Where the studio suggests an index - under a plan, or
+in LINQ mode's and the Documents list's index advice - **What if?** plans the statement again with that one index
+imagined by [hypopg](https://github.com/HypoPG/hypopg), and draws the plan now and the plan with the index side by side.
+It creates nothing, and needs hypopg installed in the database, which is your decision; the studio never installs it.
+
 **Events** — *Streams* lists and filters streams; *stream detail* draws the timeline with each event's
 JSON, headers and metadata, offers aggregate **time travel** (replayed on demand by Marten's own
 aggregator over the events up to a version, writing nothing and running no projection; the studio's own
 read of the events creates and migrates nothing, though an `Apply` method that loads data through the
-session it is handed is the host's code and reads as the host wrote it), and archives the stream with
-`ArchiveStreams`. With `CompactStreams` it **compacts** a long stream: Marten's own
-`CompactStreamAsync<T>`, on a session pinned to the stream's tenant and database, folds the events up to
+session it is handed is the host's code and reads as the host wrote it), and a **stepper** that folds the stream one
+event at a time with the same fold, showing each event, the aggregate after it and what it changed, where it threw,
+and the dead letters that name it; and it archives the stream with `ArchiveStreams`. With `CompactStreams` it
+**compacts** a long stream: Marten's own `CompactStreamAsync<T>`, on a session pinned to the stream's tenant and
+database, folds the events up to
 the version the dialog shows into one snapshot and deletes them, behind a typed confirmation that says so
 (see [`docs/compaction.md`](docs/compaction.md)). *Streams* also finds a stream by its aggregate's
 **natural key**, within the stream's own tenant. *Feed* is the global sequence, newest first, filtered by
@@ -563,7 +592,8 @@ table's key. *Dead letters* lists the daemon's failures with the exception, and 
 discards a record, marks the underlying event as skipped — only on a store that enabled event skipping,
 because it writes `mt_events.is_skipped` and a store without that column has no way to express the idea —
 or rewinds the projection's subscription to the event that failed, behind a typed confirmation that states
-what gets replayed, where the daemon is hosted in this process.
+what gets replayed, where the daemon is hosted in this process. A *Grouped by cause* view groups them by projection,
+event type, exception type and message fingerprint, and opens a group as the list.
 
 **Projections** — every registered projection with its shards, their state and progression against the
 high-water mark, refreshed from a lazy observer on `ShardStateTracker` where the daemon is hosted in
@@ -573,14 +603,20 @@ daemon, restart the high-water agent (`ControlDaemon`), rebuild a projection beh
 process-wide — it stops the coordinator's leadership runner and then every agent of every database this
 process hosts for that store — and it is the only stop that holds: with the coordinator running, it
 restarts any agent it finds missing within `LeadershipPollingTime`, so per-agent Start and Stop are
-offered only while the daemon is paused and are refused with that reason while it is not. A rebuild
+offered only while the daemon is paused (or, under `MartenDaemonModeIsSolo()`'s coordinator, which has no leadership
+loop, always), and each says when it would do nothing: an agent already running, no agent here to stop, or under
+HotCold a shard another node leads, which it refuses, as it refuses a Rewind from such a node. The card says which
+agents this node runs, and under what mode. Progression rows nothing registered advances are listed as orphaned
+progression rows, read-only, with Marten's own removal call for the host. A rebuild
 outlives the circuit that started it and is tracked by name. A composite projection's members, whose
 progression rows its own shard advances in one batch, are listed under it and offer no Start or Stop of their
 own. Where no daemon is hosted in this process,
 the page says so — that is a value, not an error, and the studio never starts a daemon of its own. Each
-shard also shows when it last progressed and a trend with an estimated catch-up, a rebuild in progress is a
-state on its row, Pause, Stop and Rebuild quote the store's `StopAndDrainTimeout`, and below Marten 9.50
-Start warns that a rebuild started outside the studio cannot be seen.
+shard also shows when it last progressed and a small chart of its position against the high water, drawn from the
+screen's own samples, with a stalled colouring, a trend arrow and an estimated catch-up — and, while it is rebuilt,
+when the rebuild should finish, measured from the rebuild's own samples; a rebuild in progress is a state on its row,
+Pause, Stop and Rebuild quote the store's `StopAndDrainTimeout`, and below Marten 9.50 Start warns that a rebuild
+started outside the studio cannot be seen.
 
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
 *Tables* shows each table's TOAST size, dead and HOT percentages, last autovacuum and storage parameters
@@ -796,6 +832,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   is spelled. Configure one if you enable the console. Without it, the console reads everything the
   store's own Postgres role can read — every table in the database, Marten's or not.
 - **Grant `RunSql` only to people you would give `psql` to.** That is the whole of it.
+- **`EXPLAIN ANALYZE` and What if? stay inside the console's transaction.** Explain analyze runs the statement, so it
+  runs only in the console, under `RunSql`, for a statement the guard accepts, and a write the guard misses is refused
+  by Postgres (`25006`). What if? needs hypopg, which the studio never installs; it imagines one index that a builder
+  wrote, in the read-only transaction, and resets hypopg on the same connection before the connection goes back to
+  the pool - a session whose reset fails ends itself, so no pooled connection keeps a hypothetical index.
 - **`ViewDatabaseActivity` shows other people's sessions.** `pg_stat_activity`, `pg_locks` and
   `pg_stat_statements` describe every session on the server, and a statement's text carries literals and
   other applications' names. Without the capability the advisor and Database › Sessions show counts, ages
@@ -932,7 +973,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   projection code, which from 9.52 pauses the shard at any setting and is never dead-lettered; and the
   Advance high water mark dialog says that the advance first ensures the event store's storage - with no tenant
   selected in every database of the store, each under its own `AutoCreate` - and, on a store that numbers events per
-  tenant, which tenants' marks it moves.
+  tenant, which tenants' marks it moves. The edit dialog shows Marten's own preview of a save from 9.53.
 - **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.54.2.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,

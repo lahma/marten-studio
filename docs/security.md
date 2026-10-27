@@ -80,7 +80,18 @@ the rewind - which takes no leadership lock - still restarts the tenant's agents
 new leader starts. This cannot be closed from the studio; the extra agents last until the node's next leadership
 poll stops them (at most one `LeadershipPollingTime` after they started). A tenant id
 with a `:` in it is never rewound: its agents' identity does not read back as its own, and the daemon would stop
-them before Marten refused the rewind.
+them before Marten refused the rewind. Skip this group (0.6), on the dead-letter page's grouped view, reaches no
+further than Skip event: it is Skip event's own path - `ManageDeadLetters`, the write policy, every sequence proved to
+be the scope's, and Marten's `MarkEventsAsSkipped` (its tenant overload under `UseTenantPartitionedEvents`, in one
+tenant, and refused below Marten 9.51 as Skip event is) - over at most 1,000 of one group's events, audited once with
+the group and the count.
+
+The database-wide rewind has the same shape under HotCold: the daemon's `RewindSubscriptionAsync` restarts every agent
+of the subscription in the daemon it is asked of, whether or not that daemon ran them (JasperFx 2.74 and 2.95). So it is
+refused on a node that does not hold the leadership lock of every one of the projection's shards - asked of the
+coordinator's own distributor, in memory - and made from the node that leads it; a Start of a shard another node leads
+is refused the same way. Marten Studio's pause keeps a node's locks, so a lock it does not hold while paused is another
+node's, or nobody's.
 
 `BrowsableSchemas` limits what the database browser's screens show, not what can be read: the SQL console
 reads whatever the connection's role can, in any schema. `SqlConsoleRole` is the real boundary for both,
@@ -190,6 +201,14 @@ any evidence behind the activity gate for a store and database is one Activity e
 of checks showing it changes; the sidebar's health badge shows no evidence and records nothing. A read that
 fails for a reason nobody chose is event 9246, throttled. The studio never cancels or terminates a session.
 
+Database › Sessions › Blocking (0.6) draws the same snapshot as trees, behind the same gate and audited with the rest of
+the details: its counts - chains, sessions held up, the longest wait, heads idle in a transaction - are the database's,
+and the trees, which name every session, are details. A relation a session waits for is named only past the gate, and
+masked as the database browser masks it: `‹withheld›`, with no name, for a schema the visitor may not see. The head of a
+chain is shown with its `select pg_terminate_backend(<pid>);` - and `pg_cancel_backend`, when it runs a statement - as text
+to copy for whoever may run it: there is no button that runs either, and nothing in either package executes them. C12,
+which names the heads of chains in its findings, is an activity check.
+
 Which names stay at the database-wide gate, and why: the name of the role the studio reads as (`SqlConsoleRole`, or
 the store's or data source's own login where none is set) and the login the data source connects as are
 configuration, not somebody else's session, so a "not checked" row names the role and the grant it lacks, and S04,
@@ -206,6 +225,19 @@ role.
 A text that still carries a string constant as written, or that is not a plain query or write, is never shown.
 Comments are masked, and schema names a visitor may not see are masked. A hidden document type's statements are
 grouped as "a hidden type" and never shown. The page's first read in a circuit is one Activity entry (event 9452).
+
+A statement's drill-in (`?queryid=`, 0.6) shows its text, its counters and its generic plan, behind the same gate. It
+plans the text `pg_stat_statements` recorded by `prepare` and `force_generic_plan`, with `VERBOSE`, as
+`SqlConsoleRole`, in the read-only transaction, under the visitor's `search_path` less the schemas withheld from them,
+and deallocates what it prepared. A text withheld from the visitor, one that names a schema the visitor may not see
+(wherever their masked
+text shows `‹withheld›`, or, while any schema is withheld, a `U&"…"` name the mask cannot read), a write, a locking read
+and a cut text are never planned, and no What if? is asked of them: a schema-qualified view or `LANGUAGE sql` function
+would be expanded or inlined into the tables it reads, and `VERBOSE` would print its definition. A view or SQL function
+in a visible schema that reads a withheld one is expanded like any other (a known limit, `docs/health/plans.md`). A plan
+that reads a schema the visitor may not see is not shown; every other plan is masked as the text is.
+Each plan is audited by `queryid` ("Plan database statement"), and so is each What if? there ("What-if database
+statement").
 
 ### Replication names
 
@@ -290,6 +322,23 @@ pass the console's `ReadOnlySqlGuard` as well.
 Every refusal, and the first run of each query in a circuit, is audited (events 9260 to 9262), and the
 predicate is in your logs from then on. **Grant `RunLinqQueries` to people you would trust with the store's
 data.**
+
+### Time travel and the stepper run your projection's code
+
+A stream's *time travel* (the aggregate at a version) and its *stepper* (the aggregate after each event, and
+what each event changed) fold the stream with Marten's own aggregator. That aggregator calls your
+projection's own `Create`, `Apply`, `ShouldDelete` and `Evolve` methods, in this process, on a session pinned
+to the scope's database and tenant. **Neither has a gate beyond reading the stream**: the store policy for the
+scope, as every read asks it. There is no capability for either, and nothing is audited, because neither
+writes anything, starts nothing and asks no daemon. A visitor who can open a stream can therefore make your
+`Apply` methods run against its events, as often as they click. What those methods do is yours: one that
+loads other documents through the session it is handed reads them as your code wrote it (and a Marten
+`LoadAsync` there may ensure that document type's storage, which the studio's own reads never do). The fold
+runs under `QueryTimeout`. An exception a method throws is shown on the page, its type and message: the
+stepper stops on that event and logs nothing, since a projection that fails on an event is what it is there to
+find; time travel reports it as a failed read (event 9217, throttled). The aggregate types offered are the
+store's own single-stream projections and the document types `IsDocumentTypeVisible` shows, and a type name is
+never looked up from what the browser sent.
 
 ### The opt-in health check
 
@@ -417,6 +466,26 @@ guard looks past the explain options and holds what follows to the same list.
 a read-only transaction`. Every statement the parser lets through and the database refuses is working as
 designed: `WITH x AS (DELETE … RETURNING *) SELECT * FROM x` is exactly that statement, and the
 integration tests assert it comes back as `25006` with the table unchanged.
+
+### Explain analyze and What if?
+
+The console's **Explain analyze** button (0.6), like a typed `EXPLAIN ANALYZE`, runs the statement: that is what
+`ANALYZE` means. So it runs only in the console, under `RunSql`, for a statement the guard accepts, inside the same
+read-only transaction and `statement_timeout`. A write the guard misses is refused by Postgres (`25006`) and changes
+nothing, and every run and refusal is audited as a `RunSql` run (9204, 9205). Mode A's plan, LINQ mode's and the
+Statements drill-in's are `EXPLAIN` without `ANALYZE`.
+
+**What if?** (0.6) plans a statement again with one index imagined by hypopg. The studio never runs
+`CREATE EXTENSION`: whether hypopg is installed is the host's decision, and without it, or when the role the studio
+plans as may not use it, the page says which. The index is only one a builder wrote - read off the plan's sequential
+scan, or Marten's own DDL for the advisor's `StoreOptions` line - and the service finds it again from the plan or the
+advice, never from text the page sent. It runs behind the gate of the plan it accompanies (`RunSql` under the console's
+and Mode A's plans, `RunLinqQueries` beside LINQ mode's and the Documents list's index advice, the Statements page's
+own gate on the drill-in), in the read-only transaction under `statement_timeout` and `lock_timeout`, and every
+what-if is audited. A hypothetical index lives in the backend that made it and survives a rollback there, so the
+studio calls `hypopg_reset()` on the same connection before the connection goes back to the pool, again after a
+failure or a cancellation, and a session whose reset fails ends itself: no pooled connection keeps a hypothetical
+index.
 
 ### The function denylist, and why it is not a guarantee
 
@@ -678,8 +747,9 @@ a statement out of the record.
 
 The Activity ring also records, under 9200 and 9201, the reads that reveal other people's details for the first time
 in a circuit - "Read replication names", "Read Aurora session waits", the Health page's first evidence behind the
-activity gate - and every "Measure bloat". A diagnostics API call is not audited (event 9250, at Debug, codes and
-counts only).
+activity gate - and every "Measure bloat", every Statements drill-in plan ("Plan database statement") and every What
+if? ("RunSql what-if", "ExplainQuery what-if", "LinqWhatIf", "DocumentsWhatIf" and "What-if database statement"). A
+diagnostics API call is not audited (event 9250, at Debug, codes and counts only).
 
 ## Reporting a vulnerability
 

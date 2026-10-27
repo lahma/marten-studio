@@ -112,6 +112,52 @@ internal interface IEventDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The stepper (M1): one window of a stream folded into one aggregate type event by event - each event with the
+    /// aggregate after it and the dead letters that name it - around a version.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A read, gated as time travel is: the store policy for the scope, and nothing more. It folds with the same fold
+    /// (<see cref="IAggregateFolder" />), so it runs the projection's own code exactly as time travel does, and reads the
+    /// events with the studio's own SQL, never <c>FetchStreamAsync</c> or <c>AggregateStreamAsync</c> (hard rule 14).
+    /// </para>
+    /// <para>
+    /// Bounded: the window is at most twenty events; the events before it are streamed past the fold and never held,
+    /// except for a projection that is folded from the start (<see cref="AggregateWalk.FromTheStartLimit" />). The whole
+    /// call runs under <see cref="MartenStudioOptions.QueryTimeout" />, and running past it is a value.
+    /// </para>
+    /// </remarks>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="streamId">The stream, as the page names it.</param>
+    /// <param name="aggregateTypeFullName">One of the store's aggregate types (<see cref="ListAggregateCandidatesAsync" />).</param>
+    /// <param name="version">The version the window is around; below one is the first.</param>
+    /// <param name="cancellationToken">Cancels the read and the fold.</param>
+    Task<StreamStepWindow> StepAsync(
+        StudioScope scope,
+        string streamId,
+        string aggregateTypeFullName,
+        long version,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The stepper's search: the first event after <paramref name="afterVersion" /> whose fold changed the value at
+    /// <paramref name="path" />, or threw - looking at no more than five thousand events.
+    /// </summary>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="streamId">The stream, as the page names it.</param>
+    /// <param name="aggregateTypeFullName">One of the store's aggregate types.</param>
+    /// <param name="afterVersion">The version to search after.</param>
+    /// <param name="path">A dotted path into the aggregate's JSON: <c>total</c>, <c>items[0].sku</c>, <c>$.status</c>.</param>
+    /// <param name="cancellationToken">Cancels the read and the fold.</param>
+    Task<StepSearch> FindNextChangeAsync(
+        StudioScope scope,
+        string streamId,
+        string aggregateTypeFullName,
+        long afterVersion,
+        string path,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// One page of dead letters - or, when <see cref="MartenStudioOptions.IsDocumentTypeVisible" /> hides
     /// <c>DeadLetterEvent</c> (or throws for it), <see cref="DeadLetterPage.Hidden" />, read from nothing.
     /// </summary>
@@ -229,6 +275,51 @@ internal interface IEventDataService
     /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope.</exception>
     /// <exception cref="InvalidOperationException">This store does not record skipped events.</exception>
     Task SkipEventAsync(StudioScope scope, long sequence, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The dead letters grouped by cause (M3): projection and shard, event type, exception type and message fingerprint,
+    /// each group with its counts, first and last seen, its tenants and a sample - or
+    /// <see cref="DeadLetterGroupList.Hidden" />, read from nothing, while the host hides <c>DeadLetterEvent</c>.
+    /// </summary>
+    /// <remarks>
+    /// One bounded read of the newest letters' columns, grouped in the web process and shared across circuits for one
+    /// refresh interval (D10). A group's tenants are counted
+    /// for everyone the scope admits and named only where this visitor's store policy passes that tenant (D29).
+    /// </remarks>
+    Task<DeadLetterGroupList> ListDeadLetterGroupsAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What "Skip this group" would do now: how many events it would mark skipped - at most
+    /// <see cref="DeadLetterGroupLimits.MaxEventsPerSkip" /> - and how many are left beyond that or already skipped, or the
+    /// sentence it would be refused with. A read: it changes nothing.
+    /// </summary>
+    Task<DeadLetterGroupSkipPlan> DescribeDeadLetterGroupSkipAsync(
+        StudioScope scope,
+        DeadLetterGroupKey group,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Marks the events of one dead-letter group skipped - the ones not skipped yet, lowest sequence first, at most
+    /// <see cref="DeadLetterGroupLimits.MaxEventsPerSkip" /> - through the path <see cref="SkipEventAsync" /> takes: the
+    /// same capability, write policy and tenant proof, the same Marten call, and the same refusals.
+    /// </summary>
+    /// <param name="scope">The store, database and tenant. On a store that numbers events per tenant it names one tenant.</param>
+    /// <param name="group">The group, as the grouped view read it.</param>
+    /// <param name="confirmation">
+    /// What the visitor typed: the number of events the dialog said this action skips. Checked here against the number
+    /// it would skip now, so a group that changed under the dialog is refused rather than skipped differently.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the checks; the skip itself, once started, runs to its end.</param>
+    /// <returns>How many events were marked skipped.</returns>
+    /// <remarks>One audited operation: one entry naming the group and the count, written whether it succeeds or not.</remarks>
+    /// <exception cref="StudioCapabilityDeniedException">The capability is not enabled.</exception>
+    /// <exception cref="StudioNotAuthorizedException">The write policy refused this scope, or an event is not in it.</exception>
+    /// <exception cref="InvalidOperationException">It is refused for one of single Skip's reasons, or the count changed.</exception>
+    Task<long> SkipDeadLetterGroupAsync(
+        StudioScope scope,
+        DeadLetterGroupKey group,
+        string confirmation,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rewinds one subscription so that the daemon re-applies <paramref name="eventSequence" /> and

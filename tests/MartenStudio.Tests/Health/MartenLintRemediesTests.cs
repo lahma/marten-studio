@@ -124,9 +124,15 @@ public class MartenLintRemediesTests
 
         fixedRanges.RangePartitionsManaged.Should().BeFalse("Marten creates exactly the ranges the configuration declares");
         HealthRemedy configured = Marten.ExtendRangePartitions(fixedRanges, NextMonth(hasDefault: false))!;
-        configured.Code.Should().StartWith("// opts.Schema.For<HealthReadingDoc>() partitions this table by fixed ranges (ByRange())")
-            .And.Contain(".AddRange(...)").And.Contain("ByRollingRange(...)");
+        configured.Kind.Should().Be(HealthRemedyKind.Configuration);
+        configured.Code.Should().Be(
+            "// opts.Schema.For<HealthReadingDoc>() declares this table's ranges with ByRange() in its PartitionOn(...): declare the\n"
+            + "// next one beside them, then apply the configuration.\n"
+            + ".AddRange(\"p20261101\", new DateTimeOffset(2026, 11, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero))",
+            "X4: the StoreOptions line itself, with the bounds as the values Weasel's AddRange<T> formats");
         configured.Code.Should().NotContain("CREATE TABLE", "an apply would drop a partition the configuration does not declare");
+        configured.Explanation.Should().Contain("creates " + fixedRanges.Table + "_p20261101").And.Contain("always has a DEFAULT partition")
+            .And.Contain("ByRollingRange(...)");
 
         MartenTable external = Document<HealthReadingDoc>(static o => o.Schema.For<HealthReadingDoc>()
             .PartitionOn(x => x.Timestamp, x => x.ByExternallyManagedRangePartitions()));
@@ -141,6 +147,28 @@ public class MartenLintRemediesTests
 
         Marten.ExtendRangePartitions(Document<HealthOrderDoc>(), NextMonth(hasDefault: false)).Should().BeNull("an unpartitioned document table has no range");
         Marten.ExtendRangePartitions(EventTable(), NextMonth(hasDefault: false)).Should().BeNull();
+    }
+
+    [Fact]
+    public void A_static_ranges_next_bound_is_the_clr_value_AddRange_takes_for_the_key_type()
+    {
+        // Each the value RangeBoundLiteral writes, as Weasel's FormatSqlValue<T> writes it back (Weasel 9.33.0 and 9.47.0):
+        // an integer as itself, a DateTime as '2026-12-01 00:00:00', a DateTimeOffset with its offset.
+        double december = new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+
+        MartenHealthRemedyProvider.ClrBound("integer", 3_000).Should().Be("3000");
+        MartenHealthRemedyProvider.ClrBound("smallint", -5).Should().Be("-5");
+        MartenHealthRemedyProvider.ClrBound("bigint", 3_000).Should().Be("3000L");
+        MartenHealthRemedyProvider.ClrBound("date", december).Should().Be("new DateTime(2026, 12, 1, 0, 0, 0)");
+        MartenHealthRemedyProvider.ClrBound("timestamp without time zone", december + 3_600).Should().Be("new DateTime(2026, 12, 1, 1, 0, 0)");
+        MartenHealthRemedyProvider.ClrBound("timestamp with time zone", december).Should().Be("new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero)");
+        MartenHealthRemedyProvider.ClrBound("text", 1).Should().BeNull("only time and integer bounds are written");
+        MartenHealthRemedyProvider.ClrBound("integer", 1.5).Should().BeNull();
+
+        MartenTable numbered = Document<HealthReadingDoc>(static o => o.Schema.For<HealthReadingDoc>()
+            .PartitionOn(x => x.Id, x => x.ByRange()));
+        Marten.ExtendRangePartitions(numbered, new RangePartitionNext("bigint", 2_000, 3_000, "p2000", HasDefault: true))!.Code
+            .Should().EndWith(".AddRange(\"p2000\", 2000L, 3000L)");
     }
 
     // ---- T25 and T26 ----------------------------------------------------------------------------------------------------
