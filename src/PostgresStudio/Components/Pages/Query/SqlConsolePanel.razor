@@ -14,6 +14,7 @@
 @inject ToastService Toasts
 @inject IJSRuntime JsRuntime
 @inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 
 @*
     The SQL console: arbitrary SQL against the whole database, so it is gated on RunSql, resolved with write-policy
@@ -79,6 +80,16 @@
             Explain plans the statement and draws the plan; Explain analyze runs it, in the same
             read-only transaction, and draws what it did.
         </p>
+
+        @if (!string.IsNullOrWhiteSpace(Current.Text) && Current.Text.Length <= PlanLinks.MaxUrlStatementLength)
+        {
+            @* X3: the plan analyzer is a page of its own; this carries the statement there. It only fills the editor. *@
+            <p class="ms-query-note ms-query-open-plan">
+                <a class="ms-btn ms-btn-sm ms-query-open-plan-link"
+                   href="@PlanLinks.ToPlan(Settings, Descriptor, State.ActiveScope, Current.Text)"
+                   title="Open this statement on the Plan page: its plan drawn as a tree and a table, with what to fix">Open in Plan</a>
+            </p>
+        }
 
         @if (Current.Result is { } result)
         {

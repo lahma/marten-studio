@@ -1,0 +1,153 @@
+@using System.Globalization
+@using System.Text
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Query
+@implements IAsyncDisposable
+@inject IJSRuntime JsRuntime
+
+@*
+    X3 (issue #28): a plan pasted in - the JSON of EXPLAIN (FORMAT JSON), from auto_explain, a log or another server - handed to
+    the page to draw. It reads nothing and runs nothing: the page parses it with QueryPlanReader and its own bounds.
+
+    The textarea is deliberately not bound. A Blazor Server circuit accepts 32 KB a message by default (HubOptions.
+    MaximumReceiveMessageSize), a plan of thirty nodes is more than that, and a change event carrying it would end the circuit - a
+    host's limit this studio must not raise (registering it changes nothing of the host's). So the text stays in the browser until
+    "Draw the plan" is clicked, and studio.js hands it over in chunks well under the limit (martenStudio.query.sendInChunks),
+    which land in BeginPaste and PasteChunk and are assembled here, up to the reader's own 4 MB.
+
+    Every class is ms-plan-, in studio.css's 0.9-A section.
+*@
+
+<section class="ms-plan-paste" aria-label="Paste a plan">
+    <label class="ms-plan-paste-label" for="@InputId">Paste a plan</label>
+    <textarea @ref="textArea"
+              id="@InputId"
+              class="ms-plan-paste-input ms-input ms-input-mono"
+              rows="@Rows"
+              spellcheck="false"
+              autocapitalize="off"
+              autocomplete="off"
+              autocorrect="off"
+              placeholder='[ { "Plan": { "Node Type": "Seq Scan", … } } ]'
+              aria-describedby="@(InputId + "-help")"></textarea>
+
+    <div class="ms-plan-paste-actions">
+        <button type="button" class="ms-btn ms-btn-sm ms-plan-paste-draw" disabled="@(Disabled || busy)" @onclick="DrawAsync">@(busy ? "Reading…" : "Draw the plan")</button>
+    </div>
+
+    <p id="@(InputId + "-help")" class="ms-muted ms-plan-paste-help">
+        The JSON of <code>EXPLAIN (FORMAT JSON)</code>, one plan or the array Postgres prints, from <code>auto_explain</code>, a log or another
+        server. It is drawn from the text alone: nothing is sent to the database and nothing is audited, so the database's own facts - its
+        statistics, indexes and settings - are not available for it. At most @QueryPlanReader.MaxNodes.ToString("N0", CultureInfo.InvariantCulture)
+        nodes, @QueryPlanReader.MaxDepth.ToString(CultureInfo.InvariantCulture) levels and @(QueryPlanReader.MaxCharacters / (1024 * 1024)) MB are read.
+    </p>
+
+    @if (error is not null)
+    {
+        <p class="ms-alert ms-alert-error ms-plan-paste-error" role="alert">@error</p>
+    }
+</section>
+
+@code {
+    /// <summary>The characters a chunk carries: a SignalR message is 32 KB by default, and a character is up to four bytes of it.</summary>
+    internal const int ChunkCharacters = 6_000;
+
+    private readonly StringBuilder received = new();
+    private ElementReference textArea;
+    private DotNetObjectReference<PlanPaste>? self;
+    private string? error;
+    private bool busy;
+
+    /// <summary>The textarea's element id, so a page and a test can find it.</summary>
+    [Parameter]
+    public string InputId { get; set; } = "ms-plan-paste";
+
+    /// <summary>How tall the textarea is.</summary>
+    [Parameter]
+    public int Rows { get; set; } = 6;
+
+    /// <summary>Whether drawing is unavailable.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>Raised with the whole text once it has arrived.</summary>
+    [Parameter]
+    public EventCallback<string> OnPasted { get; set; }
+
+    /// <summary>A chunked hand-over begins: whatever an earlier one left is dropped. Called by studio.js.</summary>
+    [JSInvokable]
+    public Task BeginPaste()
+    {
+        received.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>One chunk of the text, in order. Called by studio.js; the total is bounded here as well, whatever the script says.</summary>
+    [JSInvokable]
+    public Task PasteChunk(string chunk)
+    {
+        if (received.Length + (chunk?.Length ?? 0) <= QueryPlanReader.MaxCharacters + ChunkCharacters)
+        {
+            received.Append(chunk);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task DrawAsync()
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        busy = true;
+        error = null;
+        self ??= DotNetObjectReference.Create(this);
+
+        try
+        {
+            // The text goes through the browser's own helper, in chunks (see the remarks above); what it answers is the length it sent.
+            int length = await JsRuntime.InvokeAsync<int>(
+                "martenStudio.query.sendInChunks",
+                textArea,
+                self,
+                ChunkCharacters,
+                QueryPlanReader.MaxCharacters);
+
+            if (length == PastedTooLarge)
+            {
+                error = QueryPlanReader.TooLarge(QueryPlanReader.MaxCharacters + 1L) + " Paste a smaller plan, or the part of it that matters.";
+            }
+            else if (length <= 0 || received.Length == 0)
+            {
+                error = "There is nothing to draw: paste the JSON of an EXPLAIN (FORMAT JSON) first.";
+            }
+            else
+            {
+                string text = received.ToString();
+                received.Clear();
+                await OnPasted.InvokeAsync(text);
+            }
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            error = "The text did not reach the server: the browser's connection to it ended.";
+        }
+        finally
+        {
+            received.Clear();
+            busy = false;
+        }
+    }
+
+    /// <summary>What <c>sendInChunks</c> answers for text longer than the reader reads.</summary>
+    internal const int PastedTooLarge = -1;
+
+    public async ValueTask DisposeAsync()
+    {
+        self?.Dispose();
+        self = null;
+        await ValueTask.CompletedTask;
+    }
+}

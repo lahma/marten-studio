@@ -1,0 +1,71 @@
+@using System.Globalization
+@using PostgresStudio.Services.Query
+
+@*
+    X3 (issue #28): a plan's headline numbers in one strip, above the tree and the table - planning and execution time, JIT and its
+    share, the triggers, rows returned, buffers and the cache hit ratio, temp written and, when they were asked for, WAL, planning
+    memory and serialization. The arithmetic is PlanAnalysis.Summarize's, which the Markdown export prints too; this only draws it.
+
+    An item Postgres printed nothing for is drawn blank - a dash the stylesheet puts there, never a zero - because a plain EXPLAIN
+    has no execution time and "0 ms" would say it was fast. Every class is ms-plan-, in studio.css's 0.9-A section.
+*@
+
+@if (summary is not null && plan is not null)
+{
+    <section class="ms-plan-strip-wrap" aria-label="Plan summary">
+        <p class="ms-plan-summary">
+            <span class="ms-plan-summary-item">@(plan.Analyzed ? "EXPLAIN ANALYZE" : "EXPLAIN")</span>
+            <span class="ms-plan-summary-item">@NodeCount()</span>
+        </p>
+
+        <dl class="ms-plan-strip">
+            @foreach ((string label, string value) in summary.Items)
+            {
+                <div class="ms-plan-strip-item" @key="label">
+                    <dt>@label</dt>
+                    <dd>@value</dd>
+                </div>
+            }
+        </dl>
+
+        @if (plan.Settings.Count > 0)
+        {
+            <details class="ms-plan-settings">
+                <summary>@plan.Settings.Count.ToString(CultureInfo.InvariantCulture) planner @(plan.Settings.Count == 1 ? "setting differs" : "settings differ") from the server's defaults</summary>
+                <dl class="ms-plan-detail-list">
+                    @foreach (PlanProperty setting in plan.Settings)
+                    {
+                        <div class="ms-plan-detail" @key="setting.Key">
+                            <dt>@setting.Key</dt>
+                            <dd><code class="ms-plan-detail-value">@setting.Value</code></dd>
+                        </div>
+                    }
+                </dl>
+            </details>
+        }
+    </section>
+}
+
+@code {
+    private QueryPlan? plan;
+    private PlanSummary? summary;
+
+    /// <summary>The plan, a <c>QueryPlan</c> (<see cref="object" /> because the Razor SDK emits every component as public and a public parameter cannot have an internal type).</summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Plan, plan))
+        {
+            plan = Plan as QueryPlan;
+            summary = plan is null ? null : PlanAnalysis.Summarize(plan);
+        }
+    }
+
+    private string NodeCount()
+    {
+        string nodes = plan!.NodeCount.ToString("N0", CultureInfo.InvariantCulture) + (plan.NodeCount == 1 ? " node" : " nodes");
+        return plan.Truncated ? nodes + " read of a larger plan" : nodes;
+    }
+}

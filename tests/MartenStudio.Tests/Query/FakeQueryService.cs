@@ -162,6 +162,12 @@ internal sealed class FakeQueryService : IQueryService, ISqlConsoleService
         return Task.FromResult(AnswerWhatIf(index));
     }
 
+    /// <summary>What the console answers a plan from the Plan page (X3); a refusal that says so when a test says nothing.</summary>
+    public PlanRunResult? PlanResult { get; set; }
+
+    public Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default) =>
+        Task.FromResult(PlanResult ?? PlanRunResult.Refused(new SqlRejection("Fake", "The fake console was not told what to answer.", null, -1), 0));
+
     public Task<WhatIfResult> WhatIfAsync(StudioScope scope, MartenQueryRequest request, HypotheticalIndex index, CancellationToken cancellationToken = default)
     {
         MartenWhatIfs.Add((request, index));

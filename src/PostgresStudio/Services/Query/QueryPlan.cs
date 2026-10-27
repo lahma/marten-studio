@@ -29,6 +29,11 @@ internal sealed record PlanBuffers(
         || LocalDirtied > 0 || LocalWritten > 0 || TempRead > 0 || TempWritten > 0;
 }
 
+/// <summary>One key Postgres printed, and its value as text.</summary>
+/// <param name="Key">The key as printed; a key inside an object or an array is flattened to <c>Parent › Child</c>.</param>
+/// <param name="Value">Its value: a number as written, a list joined with commas.</param>
+internal sealed record PlanProperty(string Key, string Value);
+
 /// <summary>A trigger's time under <c>EXPLAIN ANALYZE</c>.</summary>
 /// <param name="Name">The trigger's name.</param>
 /// <param name="Relation">The table it fired on, when the plan names it.</param>
@@ -197,6 +202,33 @@ internal sealed class PlanNode
     /// <summary>A hash aggregate's disk use, in kB.</summary>
     public double? DiskUsageKb { get; init; }
 
+    /// <summary>
+    /// How many times an index-only scan visited the table because a row's page was not all-visible, over every loop: Postgres
+    /// prints the total, not a per-loop average.
+    /// </summary>
+    public double? HeapFetches { get; init; }
+
+    /// <summary>A <c>Memoize</c> node's lookups its cache answered.</summary>
+    public double? CacheHits { get; init; }
+
+    /// <summary>A <c>Memoize</c> node's lookups that ran its inner side.</summary>
+    public double? CacheMisses { get; init; }
+
+    /// <summary>A <c>Memoize</c> node's cached results thrown away to make room.</summary>
+    public double? CacheEvictions { get; init; }
+
+    /// <summary>A <c>Memoize</c> node's lookups whose result alone outgrew its cache.</summary>
+    public double? CacheOverflows { get; init; }
+
+    /// <summary>The write-ahead-log records this node produced (<c>WAL</c>), including the nodes below it.</summary>
+    public double? WalRecords { get; init; }
+
+    /// <summary>The full-page images this node wrote to the log (<c>WAL</c>).</summary>
+    public double? WalFpi { get; init; }
+
+    /// <summary>The bytes of write-ahead log this node produced (<c>WAL</c>).</summary>
+    public double? WalBytes { get; init; }
+
     /// <summary>The heap pages a bitmap heap scan kept exactly.</summary>
     public double? ExactHeapBlocks { get; init; }
 
@@ -232,6 +264,24 @@ internal sealed class PlanNode
 
     /// <summary>The nodes below it, outer first.</summary>
     public IReadOnlyList<PlanNode> Children { get; init; } = [];
+
+    /// <summary>
+    /// Every scalar key Postgres printed for this node, in the order it printed them, for the node detail - empty for a plan read
+    /// with a mask, which keeps only what it masks (<see cref="QueryPlanReader.Read" />).
+    /// </summary>
+    public IReadOnlyList<PlanProperty> Properties { get; init; } = [];
+
+    /// <summary>
+    /// How far the planner's row estimate was off, per loop: the larger over the smaller, the smaller held at one so that an
+    /// estimate of 1 against 90 is ×90 and a 0 is never a division by zero - the arithmetic of P01. <see langword="null" /> when
+    /// the plan was not analyzed or the node never ran.
+    /// </summary>
+    public double? MisestimateRatio => PlanRows is { } expected && ActualRows is { } actual && ActualLoops is > 0
+        ? Math.Max(expected, actual) / Math.Max(Math.Min(expected, actual), 1)
+        : null;
+
+    /// <summary>Whether the node returned more rows than the planner expected; <see langword="null" /> where <see cref="MisestimateRatio" /> is.</summary>
+    public bool? Underestimated => MisestimateRatio is null ? null : ActualRows > PlanRows;
 
     /// <summary>Its own cost: its total less its children's, never below zero.</summary>
     public double? ExclusiveCost { get; internal set; }
@@ -316,6 +366,27 @@ internal sealed record QueryPlan(PlanNode Root, int NodeCount, bool Truncated, i
 
     /// <summary>The time JIT took, in milliseconds, when it ran under <c>ANALYZE</c>.</summary>
     public double? JitMs { get; init; }
+
+    /// <summary>The planner settings that differ from the server's defaults, under <c>SETTINGS</c> - never read from a masked plan.</summary>
+    public IReadOnlyList<PlanProperty> Settings { get; init; } = [];
+
+    /// <summary>The statement's JIT block, flattened, for the detail - never read from a masked plan.</summary>
+    public IReadOnlyList<PlanProperty> JitProperties { get; init; } = [];
+
+    /// <summary>The memory planning used, in bytes, under <c>MEMORY</c> (PostgreSQL 17).</summary>
+    public double? PlanningMemoryBytes { get; init; }
+
+    /// <summary>The time turning the result into what a client receives took, in milliseconds, under <c>SERIALIZE</c> (PostgreSQL 17).</summary>
+    public double? SerializationMs { get; init; }
+
+    /// <summary>The data serializing the result produced, in kilobytes, under <c>SERIALIZE</c>.</summary>
+    public double? SerializationKb { get; init; }
+
+    /// <summary>The time every trigger that fired took, in milliseconds, or <see langword="null" /> when none was timed.</summary>
+    public double? TriggersMs => Triggers.Any(static x => x.TimeMs is not null) ? Triggers.Sum(static x => x.TimeMs ?? 0) : null;
+
+    /// <summary>The rows the statement returned, as the root node counts them, or <see langword="null" /> when it was not analyzed.</summary>
+    public double? RowsReturned => Root.ActualRows is { } rows && Root.ActualLoops is { } loops ? rows * loops : null;
 
     /// <summary>Whether the plan was analyzed: its root carries <c>Actual Loops</c>.</summary>
     public bool Analyzed => Root.ActualLoops is not null;

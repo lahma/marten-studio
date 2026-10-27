@@ -332,6 +332,44 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         string target = Target(sent);
         string user = UserName();
 
+        Admission admission = await AdmitAsync(scope, statement, action, target, sent, user, refuseExplain: explain != SqlExplain.None, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (admission.Refusal is { } rejection)
+        {
+            return SqlConsoleResult.Refused(rejection, settings.MaxSqlConsoleRows);
+        }
+
+        return await RunAsync(admission.Resolved, admission.Scope, sent, action, user, bind, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>What the gate let through: the resolved database, the scope it was asked about, and the guard's refusal if it gave one.</summary>
+    private readonly record struct Admission(ResolvedSource Resolved, StudioScope Scope, SqlRejection? Refusal);
+
+    /// <summary>
+    /// The gate, in the order that is the security property - the capability, the scope with the write policy, the advisory
+    /// guard - for everything that reaches Postgres through the console: a run (<see cref="ExecuteAsync" />) and the Plan page's
+    /// plans (<see cref="PlanAsync" />). A capability or scope refusal is thrown, audited and logged; the guard's is a value,
+    /// audited and logged too.
+    /// </summary>
+    /// <param name="scope">The scope the visitor is on; its tenant is ignored (<see cref="SqlScope" />).</param>
+    /// <param name="statement">The statement as typed, which the guard reads.</param>
+    /// <param name="action">What the audit ring calls it.</param>
+    /// <param name="target">The audit target: the statement as it would be sent, on one line.</param>
+    /// <param name="sent">The whole statement as it would be sent, for the log.</param>
+    /// <param name="user">The visitor, for the log.</param>
+    /// <param name="refuseExplain">Whether a statement that is an <c>EXPLAIN</c> already is refused: it is, for an Explain button.</param>
+    /// <param name="cancellationToken">The token.</param>
+    private async Task<Admission> AdmitAsync(
+        StudioScope scope,
+        string statement,
+        string action,
+        string target,
+        string sent,
+        string user,
+        bool refuseExplain,
+        CancellationToken cancellationToken)
+    {
         // 1. The capability. Refused before anything is resolved, and recorded either way.
         try
         {
@@ -370,7 +408,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
         SqlRejection? refused = !guard.Allowed
             ? SqlRejection.FromGuard(guard)
-            : explain != SqlExplain.None && string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase)
+            : refuseExplain && string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase)
                 ? new SqlRejection(AlreadyExplainReason, AlreadyExplainMessage, guard.Token, guard.Position)
                 : null;
 
@@ -378,11 +416,124 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         {
             audit.Record(action, target, succeeded: false, rejection.Message, StudioCapability.RunSql, sqlScope);
             logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, rejection.Reason, sent);
-
-            return SqlConsoleResult.Refused(rejection, settings.MaxSqlConsoleRows);
         }
 
-        return await RunAsync(resolved, sqlScope, sent, action, user, bind, cancellationToken).ConfigureAwait(false);
+        return new Admission(resolved, sqlScope, refused);
+    }
+
+    /// <inheritdoc />
+    public async Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+
+        string statement = request.Statement ?? string.Empty;
+        int placeholders = PlanStatements.Placeholders(statement);
+
+        // What would be sent, with the newest server's options - the version is not known until a connection is made, and a
+        // refusal before then is recorded as what was asked.
+        string sent = PlanStatements.Build(statement, request.Mode, request.Options, placeholders, int.MaxValue).Described;
+        string target = Target(sent);
+        string user = UserName();
+
+        // The console's gate, whole: the capability, the write policy for the database as a whole, and the guard over what was
+        // typed - which refuses a write in every mode, so a write is never analyzed (and the read-only transaction, which is
+        // what actually refuses one the guard misses, is the one every run below goes through).
+        Admission admission = await AdmitAsync(scope, statement, RunSqlAction, target, sent, user, refuseExplain: true, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (admission.Refusal is { } guarded)
+        {
+            return PlanRunResult.Refused(guarded, placeholders);
+        }
+
+        StudioScope sqlScope = admission.Scope;
+
+        if (PlanRequests.Refusal(request, placeholders) is { } refused)
+        {
+            audit.Record(RunSqlAction, target, succeeded: false, refused.Message, StudioCapability.RunSql, sqlScope);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused.Reason, sent);
+
+            return PlanRunResult.Refused(refused, placeholders);
+        }
+
+        List<string> notices = [];
+
+        void OnNotice(object? sender, NpgsqlNoticeEventArgs args)
+        {
+            // Synchronous by construction (hard rule 6).
+            if (notices.Count < 50)
+            {
+                notices.Add(args.Notice.Severity + ": " + args.Notice.MessageText);
+            }
+        }
+
+        var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
+        {
+            StatementTimeout = settings.QueryTimeout,
+            MaxRows = 1,
+            Role = settings.SqlConsoleRole,
+        });
+
+        int commandTimeout = (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
+
+        await using NpgsqlConnection connection = admission.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
+        connection.Notice += OnNotice;
+
+        try
+        {
+            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            PlanRunResult result = await PlanRunner
+                .RunAsync(
+                    connection,
+                    session,
+                    request,
+                    placeholders,
+                    commandTimeout,
+                    notices,
+                    exception => logger.LogDebug(exception, "A plan could not take its prepared statement back; that one session keeps it until it is next reset or planned on"),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (result.Error is { } error)
+            {
+                string reason = QuerySqlErrors.Summarize(error);
+
+                audit.Record(RunSqlAction, target, succeeded: false, reason, StudioCapability.RunSql, sqlScope);
+                logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, reason, sent);
+            }
+            else
+            {
+                audit.Record(RunSqlAction, target, succeeded: true, PlanRunner.Outcome(request.Mode, result.Duration), StudioCapability.RunSql, sqlScope);
+                logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, (long) result.Duration.TotalMilliseconds, 1, sent);
+            }
+
+            return result;
+        }
+        catch (Exception exception) when (exception is (NpgsqlException and not PostgresException) or SocketException)
+        {
+            // The connection itself, rather than the statement: nothing ran, and the page says so with the same shape it uses
+            // for a SQLSTATE.
+            audit.Record(RunSqlAction, target, succeeded: false, exception.Message, StudioCapability.RunSql, sqlScope);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, exception.Message, sent);
+
+            return new PlanRunResult
+            {
+                Error = new SqlError("08006", exception.Message, 0, null, null),
+                Notices = notices,
+                Placeholders = placeholders,
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            audit.Record(RunSqlAction, target, succeeded: false, "cancelled", StudioCapability.RunSql, sqlScope);
+            throw;
+        }
+        finally
+        {
+            connection.Notice -= OnNotice;
+        }
     }
 
     private async Task<SqlConsoleResult> RunAsync(

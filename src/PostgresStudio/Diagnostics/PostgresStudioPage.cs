@@ -25,4 +25,16 @@ public enum PostgresStudioPage
 
     /// <summary>The Server page.</summary>
     Server = 6,
+
+    /// <summary>Query › Plan, the plan analyzer.</summary>
+    Plan = 7,
+
+    /// <summary>Database › Sessions' holders view: who holds the whole server's connections (<c>?view=holders</c>).</summary>
+    Holders = 8,
+
+    /// <summary>The Replication page.</summary>
+    Replication = 9,
+
+    /// <summary>The Overview, the studio's landing page.</summary>
+    Overview = 10,
 }

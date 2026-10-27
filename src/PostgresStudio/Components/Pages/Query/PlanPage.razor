@@ -1,0 +1,709 @@
+@page "/postgres/plan"
+@using System.Globalization
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Query
+@using PostgresStudio.Services.Settings
+@using PostgresStudio.Services.Sources
+@implements IAsyncDisposable
+@inject ISqlConsoleService SqlConsole
+@inject StudioState State
+@inject StudioCapabilityGuard Capabilities
+@inject StudioAuthorization Authorization
+@inject ToastService Toasts
+@inject IStudioSettings Settings
+@inject NavigationManager Navigation
+
+@*
+    Query › Plan (X3, issue #28): write a statement, get its plan drawn every way PlanView draws one, and what to fix. The page is
+    the SQL console's, in its own place: behind RunSql and the write policy, resolved against the database as a whole, run in the
+    console's read-only transaction under its statement timeout, guarded and audited exactly as the console's Explain buttons are
+    (ISqlConsoleService.PlanAsync). With RunSql off the page shows the console's own disabled state, naming the property - a pasted
+    plan included, though pasting reads nothing: one gate for the page, as the console has one.
+
+    Three ways to plan: Explain (nothing runs), Explain analyze (the statement runs, in the read-only transaction, and rolls back),
+    and the Generic plan of a statement with $1, $2 placeholders. A statement with placeholders is planned for values the visitor
+    types - bound as parameters, never written into the statement - or, under Generic plan, for none. Options are offered only
+    where they apply: the ones that count what a statement does while it runs need Explain analyze, and MEMORY and SERIALIZE need
+    PostgreSQL 17 (the server says so after its first plan; the service leaves them out on an older one).
+
+    The statement, the mode and the options are in the address (D9), so a pasted link reopens the page with the editor filled. It
+    never runs: a run needs a click. The plan itself is never in the address, and nor are the values.
+
+    Nothing here is bound to the textarea of a pasted plan: it goes over in chunks (PlanPaste).
+*@
+
+<PageTitle>Plan</PageTitle>
+
+<div class="ms-page ms-plan-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Plan</h1>
+    </div>
+
+    <p class="ms-plan-page-lead">
+        Write a statement and see how Postgres plans it - as a tree, as a table of every node, with where the time went and what to
+        change. Explain plans it and runs nothing; Explain analyze runs it, in the same read-only transaction and under the same
+        statement timeout as the SQL console, and rolls back.
+    </p>
+
+    @if (!SqlEnabled)
+    {
+        <CapabilityDisabled Capability="@nameof(StudioCapability.RunSql)" Action="Planning a statement" />
+        <p class="ms-muted ms-query-sql-warning">@SqlConsolePanel.RunSqlWarning</p>
+    }
+    else if (!gateKnown)
+    {
+        <LoadingSpinner />
+    }
+    else if (State.ActiveScope is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick a database in the header to plan a statement against it.</p>
+        </div>
+    }
+    else
+    {
+        <WriteRefusal Refused="@(!mayRunSql)" Capability="@nameof(StudioCapability.RunSql)" />
+
+        <section class="ms-plan-compose" aria-label="Plan a statement">
+            <QueryEditor EditorId="ms-plan-sql"
+                         Label="SQL statement to plan"
+                         Placeholder="select … from … where id = $1"
+                         Rows="8"
+                         Value="@statement"
+                         ValueChanged="OnTextChangedAsync"
+                         Running="running"
+                         ElapsedMilliseconds="elapsedMilliseconds"
+                         ErrorMessage="@error"
+                         ErrorPosition="errorPosition"
+                         Status="@status"
+                         Disabled="@(!mayRunSql)"
+                         RunLabel="@ModeLabel(mode)"
+                         RunTitle="@ModeTitle(mode)"
+                         ShowSave="false"
+                         OnRun="RunAsync"
+                         OnCancel="CancelAsync" />
+
+            <div class="ms-plan-choices">
+                <fieldset class="ms-plan-modes">
+                    <legend>Plan</legend>
+                    @ModeRadio(PlanMode.Plan)
+                    @ModeRadio(PlanMode.Analyze)
+                    @ModeRadio(PlanMode.Generic)
+                </fieldset>
+
+                <fieldset class="ms-plan-options">
+                    <legend>Options</legend>
+                    @OptionBox("buffers", "BUFFERS", options.Buffers, static (o, v) => o with { Buffers = v }, NeedsAnalyze("Counts the blocks each node touched"))
+                    @OptionBox("timing", "TIMING", options.Timing, static (o, v) => o with { Timing = v }, NeedsAnalyze("Times each node; off is cheaper on a slow clock"))
+                    @OptionBox("verbose", "VERBOSE", options.Verbose, static (o, v) => o with { Verbose = v }, null)
+                    @OptionBox("settings", "SETTINGS", options.Settings, static (o, v) => o with { Settings = v }, null)
+                    @OptionBox("wal", "WAL", options.Wal, static (o, v) => o with { Wal = v }, NeedsAnalyze("Counts the write-ahead log each node produced"))
+                    @OptionBox("memory", "MEMORY", options.Memory, static (o, v) => o with { Memory = v }, TooOld())
+                    @OptionBox("serialize", "SERIALIZE", options.Serialize, static (o, v) => o with { Serialize = v }, NeedsAnalyze("Times turning the result into what a client receives", TooOld()))
+                </fieldset>
+            </div>
+
+            @if (placeholders > 0)
+            {
+                <fieldset class="ms-plan-params">
+                    <legend>Values for @(placeholders == 1 ? "$1" : "$1 to $" + placeholders.ToString(CultureInfo.InvariantCulture))</legend>
+
+                    @if (mode == PlanMode.Generic)
+                    {
+                        <p class="ms-muted ms-plan-params-note">A generic plan is planned with no values, whatever is typed here.</p>
+                    }
+                    else
+                    {
+                        <p class="ms-muted ms-plan-params-note">
+                            The statement is planned for these values, bound as parameters and read as the type Postgres infers for each
+                            placeholder. They are not put in the address.
+                        </p>
+                    }
+
+                    <div class="ms-plan-param-list">
+                        @for (int i = 0; i < boxes.Count; i++)
+                        {
+                            int index = i;
+                            ParamBox box = boxes[index];
+                            string id = "ms-plan-param-" + (index + 1).ToString(CultureInfo.InvariantCulture);
+
+                            <div class="ms-plan-param" @key="index">
+                                <label class="ms-plan-param-label" for="@id">
+                                    <code>$@((index + 1).ToString(CultureInfo.InvariantCulture))</code>
+                                    @if (index < parameterTypes.Count)
+                                    {
+                                        <span class="ms-plan-param-type">@parameterTypes[index]</span>
+                                    }
+                                </label>
+                                <input id="@id"
+                                       class="ms-input ms-input-mono ms-plan-param-input"
+                                       type="text"
+                                       value="@box.Text"
+                                       disabled="@(box.IsNull || mode == PlanMode.Generic)"
+                                       maxlength="@PlanStatements.MaxValueCharacters"
+                                       @onchange="(ChangeEventArgs args) => box.Text = args.Value?.ToString() ?? string.Empty" />
+                                <label class="ms-plan-param-null">
+                                    <input type="checkbox"
+                                           checked="@box.IsNull"
+                                           disabled="@(mode == PlanMode.Generic)"
+                                           @onchange="(ChangeEventArgs args) => box.IsNull = args.Value is true" />
+                                    <span>NULL</span>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                </fieldset>
+            }
+
+            @if (leftOut.Count > 0)
+            {
+                <p class="ms-muted ms-plan-left-out" role="status">
+                    Left out on this server@(serverMajor is { } major ? " (PostgreSQL " + major.ToString(CultureInfo.InvariantCulture) + ")" : string.Empty):
+                    @string.Join(", ", leftOut).
+                </p>
+            }
+
+            <p class="ms-muted ms-query-note">
+                One statement, inside <code>BEGIN; SET TRANSACTION READ ONLY</code> with a statement timeout, always rolled back: a write
+                is refused, and Explain analyze of one is never run. The statement is sent as typed, behind the <code>EXPLAIN</code>
+                that asks for its plan, and every run is audited as a SQL console run.
+            </p>
+        </section>
+
+        <PlanPaste Disabled="@(!mayRunSql)" OnPasted="OnPastedAsync" />
+
+        @if (planJson is not null)
+        {
+            <section class="ms-plan-result" aria-label="Plan result">
+                <PlanView Analyzer="true"
+                          Json="@planJson"
+                          Caption="@caption"
+                          Label="Query plan"
+                          ExportStatement="@exportStatement" />
+            </section>
+        }
+        else if (planUnavailable is not null)
+        {
+            <p class="ms-alert ms-alert-warning ms-plan-unavailable" role="status">@planUnavailable</p>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The caption of a pasted plan: what was done, and what cannot be said.</summary>
+    internal const string PastedCaption =
+        "A pasted plan, drawn from its JSON alone. Nothing was sent to the database and nothing was audited, so the database's own "
+        + "facts - its statistics, indexes and settings - are not available for it.";
+
+    /// <summary>What the page says of a plan too large to read.</summary>
+    internal const string PasteUnreadable = "The pasted text is not a plan Postgres printed. ";
+
+    private sealed class ParamBox
+    {
+        public string Text { get; set; } = string.Empty;
+
+        public bool IsNull { get; set; }
+    }
+
+    private readonly CancellationTokenSource lifetime = new();
+    private readonly List<ParamBox> boxes = [];
+
+    private CancellationTokenSource? runCts;
+    private CancellationTokenSource? tickCts;
+    private bool running;
+    private long elapsedMilliseconds;
+
+    private string statement = string.Empty;
+    private PlanMode mode = PlanMode.Plan;
+    private PlanOptions options = new();
+    private int placeholders;
+
+    private bool mayRunSql = true;
+    private bool gateKnown;
+
+    private string? error;
+    private int errorPosition = -1;
+    private string? status;
+    private string? planJson;
+    private string? caption;
+    private string? exportStatement;
+    private string? planUnavailable;
+    private IReadOnlyList<string> parameterTypes = [];
+    private IReadOnlyList<string> leftOut = [];
+    private int? serverMajor;
+
+    /// <summary>The key of the address the page last applied, so an address it wrote itself is not applied again.</summary>
+    private string? appliedKey;
+
+    /// <summary>The statement in the address.</summary>
+    [SupplyParameterFromQuery(Name = PlanLinks.SqlParameter)]
+    public string? SqlParameter { get; set; }
+
+    /// <summary>The mode in the address.</summary>
+    [SupplyParameterFromQuery(Name = PlanLinks.ModeParameter)]
+    public string? ModeParameter { get; set; }
+
+    /// <summary>The options in the address.</summary>
+    [SupplyParameterFromQuery(Name = PlanLinks.OptionsParameter)]
+    public string? OptionsParameter { get; set; }
+
+    private bool SqlEnabled => Capabilities.IsEnabled(StudioCapability.RunSql);
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        // Idempotent, and normally done by the layout: called here so the page also works when it is the only thing rendered.
+        await State.EnsureInitializedAsync(lifetime.Token);
+        await AskGateAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        string key = (SqlParameter ?? string.Empty) + "\u0001" + (ModeParameter ?? string.Empty) + "\u0001" + (OptionsParameter ?? "\u0002");
+
+        if (string.Equals(key, appliedKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        appliedKey = key;
+
+        if (SqlParameter is not null)
+        {
+            statement = SqlParameter;
+            SyncBoxes();
+        }
+
+        mode = PlanLinks.ParseMode(ModeParameter);
+        options = PlanLinks.ParseOptions(OptionsParameter);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        await lifetime.CancelAsync();
+        lifetime.Dispose();
+        runCts = null;
+        StopTicker();
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        // A plan read from one database must not sit under another's name.
+        ForgetResult();
+        await AskGateAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// The page's gate, asked the way the service asks it: the scope policy, then the write policy with <c>RunSql</c> on the
+    /// resource, both against the database as a whole. Said, not enforced: the service refuses regardless (hard rule 5).
+    /// </summary>
+    private async Task AskGateAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        try
+        {
+            mayRunSql = scope is null || !SqlEnabled || await MayRunSqlAsync(scope, lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The circuit is going away, or the scope moved under us.
+        }
+        catch (Exception exception)
+        {
+            // The policy itself threw. The service asks it again on every run; the page says what went wrong rather than
+            // drawing a refusal it did not get.
+            mayRunSql = true;
+            error = exception.Message;
+        }
+        finally
+        {
+            gateKnown = true;
+        }
+    }
+
+    private async Task<bool> MayRunSqlAsync(StudioScope scope, CancellationToken token)
+    {
+        StudioScope sqlScope = SqlConsoleService.SqlScope(scope);
+
+        return await Authorization.IsAuthorizedAsync(sqlScope, null, token)
+            && await Authorization.IsAuthorizedAsync(sqlScope, StudioCapability.RunSql, token);
+    }
+
+    // ---- The statement, the mode, the options and the values ----------------------------------------------------------
+
+    private Task OnTextChangedAsync(string value)
+    {
+        statement = value;
+        SyncBoxes();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Sizes the value boxes to the statement's placeholders, keeping what was typed for those that remain.</summary>
+    private void SyncBoxes()
+    {
+        placeholders = PlanStatements.Placeholders(statement);
+        int wanted = Math.Min(placeholders, PlanStatements.MaxParameters);
+
+        while (boxes.Count > wanted)
+        {
+            boxes.RemoveAt(boxes.Count - 1);
+        }
+
+        while (boxes.Count < wanted)
+        {
+            boxes.Add(new ParamBox());
+        }
+    }
+
+    private void SetMode(PlanMode value)
+    {
+        mode = value;
+        PushUrl();
+    }
+
+    private void SetOptions(PlanOptions value)
+    {
+        options = value;
+        PushUrl();
+    }
+
+    private RenderFragment ModeRadio(PlanMode value) => __builder =>
+    {
+        bool unavailable = value == PlanMode.Generic && placeholders == 0;
+
+        <label class="ms-plan-mode @(unavailable ? "ms-plan-mode-off" : null)" title="@(unavailable ? "A generic plan needs a statement with $1, $2 placeholders" : ModeTitle(value))">
+            <input type="radio"
+                   name="ms-plan-mode"
+                   value="@PlanLinks.ModeKey(value)"
+                   checked="@(mode == value)"
+                   disabled="@unavailable"
+                   @onchange="() => SetMode(value)" />
+            <span>@ModeLabel(value)</span>
+        </label>
+    };
+
+    private RenderFragment OptionBox(string key, string label, bool on, Func<PlanOptions, bool, PlanOptions> set, string? unavailable) => __builder =>
+    {
+        bool disabled = unavailable is not null;
+
+        <label class="ms-plan-option @(disabled ? "ms-plan-option-off" : null)" title="@(unavailable ?? OptionTitle(key))">
+            <input type="checkbox"
+                   id="@("ms-plan-option-" + key)"
+                   checked="@(on && !disabled)"
+                   disabled="@disabled"
+                   @onchange="(ChangeEventArgs args) => SetOptions(set(options, args.Value is true))" />
+            <span>@label</span>
+        </label>
+    };
+
+    /// <summary>Why an option is not on offer: it counts what a statement does while it runs, and only Explain analyze runs it.</summary>
+    private string? NeedsAnalyze(string what, string? alsoNeeds = null) =>
+        mode != PlanMode.Analyze
+            ? what + ": it needs Explain analyze, which runs the statement."
+            : alsoNeeds;
+
+    /// <summary>
+    /// Why MEMORY and SERIALIZE are not on offer: the server is older than 17, which its first plan tells the page. Before that the
+    /// options are offered, with their release in the tooltip, and the service leaves them out - and says so - on an older server.
+    /// </summary>
+    private string? TooOld() =>
+        serverMajor is < 17 and { } major
+            ? "This server is PostgreSQL " + major.ToString(CultureInfo.InvariantCulture) + ", and the option needs 17."
+            : null;
+
+    private static string ModeLabel(PlanMode value) => value switch
+    {
+        PlanMode.Analyze => "Explain analyze",
+        PlanMode.Generic => "Generic plan",
+        _ => "Explain",
+    };
+
+    private static string ModeTitle(PlanMode value) => value switch
+    {
+        PlanMode.Analyze => "Runs the statement under EXPLAIN ANALYZE, inside the console's read-only transaction and statement timeout, and draws what it did.",
+        PlanMode.Generic => "Plans a statement with $1, $2 placeholders as a prepared statement is planned with no values. Nothing runs.",
+        _ => "Plans the statement with EXPLAIN (FORMAT JSON) and draws the plan. Nothing runs.",
+    };
+
+    private static string OptionTitle(string key) => key switch
+    {
+        "buffers" => "BUFFERS: the blocks each node touched, and from the cache or not",
+        "timing" => "TIMING: each node's time; off is cheaper on a slow clock source",
+        "verbose" => "VERBOSE: every node's output columns, and every relation's schema",
+        "settings" => "SETTINGS: the planner settings that differ from the server's defaults",
+        "wal" => "WAL: the write-ahead log each node produced",
+        "memory" => "MEMORY: the memory planning used (PostgreSQL 17 and later)",
+        "serialize" => "SERIALIZE: the time turning the result into what a client receives (PostgreSQL 17 and later)",
+        _ => string.Empty,
+    };
+
+    // ---- The address (D9) ----------------------------------------------------------------------------------------------
+
+    /// <summary>Writes the statement, the mode and the options into the address, so a pasted link reopens the page as it is.</summary>
+    private void PushUrl()
+    {
+        string? sql = string.IsNullOrWhiteSpace(statement) || statement.Length > PlanLinks.MaxUrlStatementLength ? null : statement;
+        string? modeValue = mode == PlanMode.Plan ? null : PlanLinks.ModeKey(mode);
+        string? optionsValue = options == new PlanOptions() ? null : PlanLinks.OptionsKey(options);
+
+        // Recorded before navigating, so OnParametersSet sees its own address arrive and leaves the page alone.
+        appliedKey = (sql ?? string.Empty) + "\u0001" + (modeValue ?? string.Empty) + "\u0001" + (optionsValue ?? "\u0002");
+
+        Navigation.NavigateTo(
+            Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [PlanLinks.SqlParameter] = sql,
+                [PlanLinks.ModeParameter] = modeValue,
+                [PlanLinks.OptionsParameter] = optionsValue,
+            }),
+            replace: true);
+    }
+
+    // ---- Running -------------------------------------------------------------------------------------------------------
+
+    private void ForgetResult()
+    {
+        planJson = null;
+        caption = null;
+        exportStatement = null;
+        planUnavailable = null;
+        error = null;
+        errorPosition = -1;
+        status = null;
+        parameterTypes = [];
+        leftOut = [];
+    }
+
+    private async Task RunAsync(string text)
+    {
+        statement = text;
+        SyncBoxes();
+
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null || string.IsNullOrWhiteSpace(statement) || running)
+        {
+            return;
+        }
+
+        ForgetResult();
+        PushUrl();
+
+        PlanMode asked = mode;
+        PlanRunRequest request = new(statement, asked)
+        {
+            Options = options,
+            Values = asked == PlanMode.Generic || placeholders == 0 ? [] : [.. boxes.Select(static x => x.IsNull ? null : x.Text)],
+        };
+
+        using CancellationTokenSource cts = StartRun();
+
+        try
+        {
+            PlanRunResult result = await SqlConsole.PlanAsync(scope, request, cts.Token);
+
+            serverMajor = result.ServerMajor ?? serverMajor;
+            leftOut = result.LeftOut;
+            parameterTypes = result.ParameterTypes;
+
+            if (result.Rejection is { } rejection)
+            {
+                error = rejection.Message;
+                errorPosition = rejection.Position;
+            }
+            else if (result.Error is { } sqlError)
+            {
+                error = Describe(sqlError);
+
+                // Postgres counts from one, in the command it was sent - behind the EXPLAIN or the PREPARE the page put in front of
+                // the statement; the editor's caret counts from zero in the statement as typed. An error in another command (a
+                // value Postgres could not read as its type) points at no character of the statement.
+                int position = sqlError.Position - 1 - result.ErrorOffset;
+                errorPosition = result.ErrorOffset >= 0 && sqlError.Position > 0 && position >= 0 ? position : -1;
+            }
+            else if (result.PlanJson is { } json)
+            {
+                planJson = json;
+                exportStatement = request.Statement;
+                caption = Caption(asked, result);
+                status = Status(asked, result);
+            }
+            else
+            {
+                planUnavailable = result.PlanUnavailable ?? "Not planned: Postgres returned no plan.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            status = "Cancelled.";
+        }
+        catch (StudioCapabilityDeniedException exception)
+        {
+            // The service refuses whatever the page rendered: a circuit is a long-lived object a client can drive.
+            error = exception.Message;
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            error = SqlConsoleService.SqlRefusedMessage;
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+            await Toasts.Error(exception.Message);
+        }
+        finally
+        {
+            EndRun();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        if (runCts is null)
+        {
+            return;
+        }
+
+        // A real cancellation: the token is the one handed to Npgsql, so the command itself is cancelled.
+        try
+        {
+            await runCts.CancelAsync();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>A pasted plan: read with the same reader and bounds, and drawn - with no database read, nothing run and nothing audited.</summary>
+    private Task OnPastedAsync(string text)
+    {
+        ForgetResult();
+
+        QueryPlanRead read = QueryPlanReader.Read(text);
+
+        if (read.Plan is null)
+        {
+            error = PasteUnreadable + read.Failure;
+            return Task.CompletedTask;
+        }
+
+        planJson = text;
+        exportStatement = null;
+        caption = PastedCaption;
+        status = null;
+        return Task.CompletedTask;
+    }
+
+    private string Caption(PlanMode asked, PlanRunResult result)
+    {
+        string asking = "EXPLAIN (" + result.Options.Replace(", format json", string.Empty, StringComparison.Ordinal).ToUpperInvariant() + ")";
+
+        return asked switch
+        {
+            PlanMode.Analyze => "Ran under " + asking + " inside the console's read-only transaction, and rolled back. Rows and times are what it did.",
+            PlanMode.Generic => "The generic plan, planned with " + asking + " as a prepared statement is planned with no values (plan_cache_mode = force_generic_plan). Nothing ran.",
+            _ => result.Placeholders > 0
+                ? "A custom plan, planned with " + asking + " for the values given. Nothing ran."
+                : "Planned with " + asking + ". Nothing ran.",
+        };
+    }
+
+    private static string Status(PlanMode asked, PlanRunResult result)
+    {
+        string took = result.Duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
+
+        return asked switch
+        {
+            PlanMode.Analyze => "Ran under EXPLAIN ANALYZE in " + took + ", and rolled back.",
+            PlanMode.Generic => "Planned generically in " + took + "; nothing ran.",
+            _ => "Planned in " + took + "; nothing ran.",
+        };
+    }
+
+    private string Describe(SqlError sqlError)
+    {
+        string? headline = QuerySqlErrors.Describe(sqlError, Settings.QueryTimeout, Settings.Text);
+
+        return headline is null
+            ? QuerySqlErrors.Summarize(sqlError)
+            : headline + " (" + QuerySqlErrors.Summarize(sqlError) + ")";
+    }
+
+    private CancellationTokenSource StartRun()
+    {
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+
+        runCts = cts;
+        running = true;
+        elapsedMilliseconds = 0;
+
+        // The ticker has a token of its own, cancelled the moment the run ends: cancelling the run's after the statement
+        // finished would say something it did not mean.
+        StopTicker();
+        tickCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+        _ = TickAsync(tickCts.Token);
+
+        return cts;
+    }
+
+    private void EndRun()
+    {
+        running = false;
+        runCts = null;
+        StopTicker();
+    }
+
+    private void StopTicker()
+    {
+        if (tickCts is { } ticking)
+        {
+            tickCts = null;
+            ticking.Cancel();
+            ticking.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Keeps the "Running… N ms" label moving while a statement is in flight: a <see cref="Task" /> deliberately not awaited, and
+    /// never an <c>async void</c> - everything it can throw is caught here (hard rule 6). The console's ticker, for the same reasons.
+    /// </summary>
+    private async Task TickAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
+            System.Diagnostics.Stopwatch stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                await InvokeAsync(() =>
+                {
+                    if (!running || cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+
+                    elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+                    StateHasChanged();
+                }).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit went away while the timer was waiting.
+        }
+    }
+}

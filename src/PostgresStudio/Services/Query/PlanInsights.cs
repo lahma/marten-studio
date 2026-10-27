@@ -24,13 +24,30 @@ internal sealed record PlanInsightInfo(string Code, string Title, HealthSeverity
     public string DocsUrl => HealthCheckInfo.DocsRoot + PlanInsights.DocsFileName + "#" + DocsAnchor;
 }
 
+/// <summary>A studio page a finding's remedy points at, which the view that draws the finding resolves into a link.</summary>
+internal enum PlanInsightPage
+{
+    /// <summary>No page.</summary>
+    None,
+
+    /// <summary>Operations › Maintenance: autovacuum's triggers for each table, and what is running now.</summary>
+    Maintenance,
+}
+
 /// <summary>One insight about one node of one plan.</summary>
 /// <param name="Insight">Which insight.</param>
 /// <param name="NodeId">The node it is about (<see cref="PlanNode.Id" />).</param>
 /// <param name="Node">The node in words: <c>Seq Scan on public.t</c>.</param>
 /// <param name="Message">What the plan says, with its numbers.</param>
 /// <param name="Remedy">What would change it.</param>
-internal sealed record PlanInsightFinding(PlanInsightInfo Insight, int NodeId, string Node, string Message, string Remedy);
+internal sealed record PlanInsightFinding(PlanInsightInfo Insight, int NodeId, string Node, string Message, string Remedy)
+{
+    /// <summary>
+    /// A page of the studio the remedy refers to - an evaluator is pure and knows no address, so it names the page and the
+    /// view resolves it with the page's own link helper, for the scope on screen, where the studio offers it.
+    /// </summary>
+    public PlanInsightPage RelatedPage { get; init; }
+}
 
 /// <summary>
 /// X1b: plan insights - pure evaluators over a <see cref="QueryPlan" />, each with a stable code, a docs anchor and a remedy, in
@@ -115,9 +132,51 @@ internal static partial class PlanInsights
     /// <summary>P08.</summary>
     public static readonly PlanInsightInfo ShortWorkers = new("P08", "Parallel workers short of the plan", HealthSeverity.Info, true);
 
+    /// <summary>P09.</summary>
+    public static readonly PlanInsightInfo HeapFetching = new("P09", "Index-only scan fetching the heap", HealthSeverity.Warning, true);
+
+    /// <summary>P10.</summary>
+    public static readonly PlanInsightInfo DiscardingFilter = new("P10", "Filter discarding most rows after an index", HealthSeverity.Warning, true);
+
+    /// <summary>P11.</summary>
+    public static readonly PlanInsightInfo HashBatched = new("P11", "Hash built in batches", HealthSeverity.Info, true);
+
+    /// <summary>P12.</summary>
+    public static readonly PlanInsightInfo CostlyJit = new("P12", "JIT costing more than it saves", HealthSeverity.Info, true);
+
+    /// <summary>P13.</summary>
+    public static readonly PlanInsightInfo SlowPlanning = new("P13", "Planning slower than execution", HealthSeverity.Info, true);
+
+    /// <summary>P14.</summary>
+    public static readonly PlanInsightInfo MissingMemoize = new("P14", "Memoize mostly missing", HealthSeverity.Info, true);
+
     /// <summary>Every insight, by code.</summary>
     public static IReadOnlyList<PlanInsightInfo> All { get; } =
-        [RowEstimate, Spill, LossyBitmap, SelectiveScan, LargeNestedLoop, LargeOffset, LeadingWildcard, ShortWorkers];
+    [
+        RowEstimate, Spill, LossyBitmap, SelectiveScan, LargeNestedLoop, LargeOffset, LeadingWildcard, ShortWorkers,
+        HeapFetching, DiscardingFilter, HashBatched, CostlyJit, SlowPlanning, MissingMemoize,
+    ];
+
+    /// <summary>P09's "fetching": heap fetches are at least this share of the rows the scan returned over its loops.</summary>
+    public const double HeapFetchShare = 0.10;
+
+    /// <summary>P09's least heap fetches: a hundred of a thousand rows is nobody's vacuum problem.</summary>
+    public const double HeapFetchMinimum = 1_000;
+
+    /// <summary>P10's ratio: the filter discarded at least this many times the rows the scan returned.</summary>
+    public const double DiscardedRatio = 10;
+
+    /// <summary>P10's least rows discarded, over every loop.</summary>
+    public const double DiscardedMinimum = 10_000;
+
+    /// <summary>P12's share: JIT took at least this much of the execution time.</summary>
+    public const double JitShare = 0.20;
+
+    /// <summary>P12's "short query": the execution time, in milliseconds, is below this.</summary>
+    public const double JitShortMs = 1_000;
+
+    /// <summary>P13's least planning time, in milliseconds.</summary>
+    public const double SlowPlanningMs = 10;
 
     /// <summary>Every insight's findings on <paramref name="plan" />, in code order, each insight's worst first.</summary>
     /// <param name="plan">The plan.</param>
@@ -137,6 +196,12 @@ internal static partial class PlanInsights
             .. LargeOffsets(plan),
             .. LeadingWildcards(plan, text),
             .. ShortParallelWorkers(plan),
+            .. HeapFetches(plan),
+            .. DiscardingFilters(plan, text),
+            .. BatchedHashes(plan),
+            .. CostlyJitCompilation(plan),
+            .. SlowPlanner(plan),
+            .. MissingMemoizes(plan),
         ];
     }
 
@@ -431,8 +496,194 @@ internal static partial class PlanInsights
                 + "plan the workers it was costed for."));
     }
 
+    /// <summary>
+    /// P09: an index-only scan that visited the table for <see cref="HeapFetchShare" /> of the rows it returned or more, and for
+    /// <see cref="HeapFetchMinimum" /> or more - the pages of those rows are not marked all-visible, so the scan was no cheaper
+    /// than an index scan. <c>Heap Fetches</c> is the total over every loop, as the rows are counted here.
+    /// </summary>
+    internal static IEnumerable<PlanInsightFinding> HeapFetches(QueryPlan plan)
+    {
+        if (!plan.Analyzed)
+        {
+            return [];
+        }
+
+        return plan.Nodes
+            .Where(static x => x.NodeType == "Index Only Scan" && x is { HeapFetches: not null, ActualRows: not null, ActualLoops: > 0 })
+            .Select(static x => (Node: x, Fetches: x.HeapFetches!.Value, Rows: x.ActualRows!.Value * x.ActualLoops!.Value))
+            .Where(static x => x.Fetches >= HeapFetchMinimum && x.Fetches >= x.Rows * HeapFetchShare)
+            .OrderByDescending(static x => x.Fetches)
+            .ThenBy(static x => x.Node.Id)
+            .Take(MaxPerInsight)
+            .Select(static x => Finding(
+                HeapFetching,
+                x.Node,
+                x.Node.Description + " visited the table " + Count(x.Fetches) + " times"
+                + (x.Rows > 0 ? " to return " + Rows(x.Rows) + " rows (" + TableText.Percent(x.Fetches / x.Rows) + " as many fetches as rows)" : " and returned no rows")
+                + ", because the pages those rows are on are not marked all-visible - so it was no cheaper than an index scan.",
+                "A page is skipped only when its visibility-map bit is set, and VACUUM sets it: vacuum the table, and let autovacuum do it "
+                + "again by lowering autovacuum_vacuum_scale_factor (or autovacuum_vacuum_insert_scale_factor, for a table that is only "
+                + "inserted into) for it. Operations › Maintenance shows when autovacuum will next reach each table.") with
+            {
+                RelatedPage = PlanInsightPage.Maintenance,
+            });
+    }
+
+    /// <summary>
+    /// P10: an index scan, index-only scan or bitmap heap scan whose filter discarded <see cref="DiscardedRatio" /> times the rows
+    /// it returned or more, and <see cref="DiscardedMinimum" /> or more - both counted over every loop. The index found rows the
+    /// filter then rejected, so the table was visited for rows nobody wanted.
+    /// </summary>
+    internal static IEnumerable<PlanInsightFinding> DiscardingFilters(QueryPlan plan, StudioText text)
+    {
+        if (!plan.Analyzed)
+        {
+            return [];
+        }
+
+        return plan.Nodes
+            .Where(static x => x.NodeType is "Index Scan" or "Index Only Scan" or "Bitmap Heap Scan" && x is { RowsRemovedByFilter: not null, ActualRows: not null, ActualLoops: > 0 })
+            .Select(static x => (Node: x, Removed: x.RowsRemovedByFilter!.Value * x.ActualLoops!.Value, Kept: x.ActualRows!.Value * x.ActualLoops!.Value))
+            .Where(static x => x.Removed >= DiscardedMinimum && x.Removed >= x.Kept * DiscardedRatio)
+            .OrderByDescending(static x => x.Removed - x.Kept)
+            .ThenBy(static x => x.Node.Id)
+            .Take(MaxPerInsight)
+            .Select(x => Finding(
+                DiscardingFilter,
+                x.Node,
+                x.Node.Description + " returned " + Rows(x.Kept) + " rows and threw away " + Rows(x.Removed) + " more with its filter"
+                + (x.Node.Filter is { } filter ? ", " + filter : string.Empty)
+                + (x.Kept > 0 ? ": " + Times(x.Removed / x.Kept) + " as many as it kept" : string.Empty)
+                + ". The index found rows the filter then rejected, so the table was visited for rows nobody wanted.",
+                text.PlanIndexRemedy + " A column the index lacks can instead be added to it, or the condition made a partial index when "
+                + "every query has it."));
+    }
+
+    /// <summary>
+    /// P11: a hash that was built in more than one batch, or in more than it was planned with - it did not fit in memory. The
+    /// remedy says how much <c>work_mem</c> it would have needed: its peak memory times its batches, rounded up to a megabyte.
+    /// </summary>
+    internal static IEnumerable<PlanInsightFinding> BatchedHashes(QueryPlan plan)
+    {
+        if (!plan.Analyzed)
+        {
+            return [];
+        }
+
+        return plan.Nodes
+            .Where(static x => x.NodeType == "Hash" && x.HashBatches is { } batches && (batches > 1 || x.OriginalHashBatches < batches))
+            .OrderByDescending(static x => x.HashBatches)
+            .ThenBy(static x => x.Id)
+            .Take(MaxPerInsight)
+            .Select(static x =>
+            {
+                double batches = x.HashBatches!.Value;
+                double? needed = x.PeakMemoryKb is { } peak ? Math.Max(1, Math.Ceiling(peak * batches / 1024)) : null;
+                string planned = x.OriginalHashBatches is { } original && original < batches
+                    ? ", where " + Count(original) + " " + Plural(original, "was", "were") + " planned"
+                    : string.Empty;
+
+                return Finding(
+                    HashBatched,
+                    x,
+                    x.Description + " was built in " + Count(batches) + " batches" + planned
+                    + (x.PeakMemoryKb is { } kb ? ", " + Kilobytes(kb) + " in memory at its peak" : string.Empty)
+                    + ": the table did not fit in work_mem, so every batch but the first went through temporary files.",
+                    needed is { } megabytes
+                        ? "Keeping the whole hash in memory would take about " + Count(megabytes) + " MB (its peak memory times its " + Count(batches)
+                          + " batches): SET work_mem = '" + megabytes.ToString("0", CultureInfo.InvariantCulture) + "MB' for the role or the session that runs it. "
+                          + "A hash may use work_mem times hash_mem_multiplier, so a multiplier above 1 needs correspondingly less; and every "
+                          + "sort and hash of the statement may use that much, so raise it for this statement's role rather than the server."
+                        : "A larger work_mem keeps the whole hash in memory (a hash may use work_mem times hash_mem_multiplier): raise it for the "
+                          + "role or the session that runs the statement rather than the server, since every sort and hash may use that much.");
+            });
+    }
+
+    /// <summary>
+    /// P12: JIT took <see cref="JitShare" /> of the execution time or more, and the statement ran for less than
+    /// <see cref="JitShortMs" /> milliseconds - compiling cost more than it could save.
+    /// </summary>
+    internal static IEnumerable<PlanInsightFinding> CostlyJitCompilation(QueryPlan plan)
+    {
+        if (!plan.Analyzed || plan.JitMs is not { } jit || plan.ExecutionMs is not { } execution
+            || execution <= 0 || execution >= JitShortMs || jit < execution * JitShare)
+        {
+            return [];
+        }
+
+        return
+        [
+            Finding(
+                CostlyJit,
+                plan.Root,
+                "JIT" + (plan.JitFunctions is { } functions ? " compiled " + Count(functions) + " functions and" : string.Empty) + " took " + Milliseconds(jit)
+                + " - " + TableText.Percent(jit / execution) + " of the " + Milliseconds(execution) + " the statement ran for, which is a short run.",
+                "JIT pays for itself on a statement that runs for seconds and costs more than it saves on one that runs for milliseconds. "
+                + "Raise jit_above_cost, so that only statements the planner costs higher are compiled (it is 100000 unless somebody "
+                + "changed it), or turn JIT off for the role that runs these statements: ALTER ROLE ... SET jit = off."),
+        ];
+    }
+
+    /// <summary>
+    /// P13: planning took longer than execution, and longer than <see cref="SlowPlanningMs" /> milliseconds - the statement spends
+    /// its time deciding how to run, not running.
+    /// </summary>
+    internal static IEnumerable<PlanInsightFinding> SlowPlanner(QueryPlan plan)
+    {
+        if (!plan.Analyzed || plan.PlanningMs is not { } planning || plan.ExecutionMs is not { } execution
+            || planning <= execution || planning <= SlowPlanningMs)
+        {
+            return [];
+        }
+
+        return
+        [
+            Finding(
+                SlowPlanning,
+                plan.Root,
+                "Postgres spent " + Milliseconds(planning) + " planning the statement and " + Milliseconds(execution) + " running it.",
+                "A prepared statement is planned once and its plan reused (PREPARE, or the driver's own prepared statements - Npgsql's "
+                + "Max Auto Prepare), so a statement that runs often stops paying for planning each time. Fewer joins, or fewer partitions "
+                + "for the planner to weigh (a filter on the partition key, so pruning drops them at plan time), also shorten planning."),
+        ];
+    }
+
+    /// <summary>
+    /// P14: a <c>Memoize</c> node whose cache missed at least as often as it hit and had to evict results - the cache was too
+    /// small for the parameters it was asked about, so it cost its memory and saved little.
+    /// </summary>
+    internal static IEnumerable<PlanInsightFinding> MissingMemoizes(QueryPlan plan)
+    {
+        if (!plan.Analyzed)
+        {
+            return [];
+        }
+
+        return plan.Nodes
+            .Where(static x => x.NodeType == "Memoize" && x is { CacheMisses: not null, CacheEvictions: > 0 } && x.CacheMisses >= (x.CacheHits ?? 0) && !x.NeverExecuted)
+            .OrderByDescending(static x => x.CacheEvictions)
+            .ThenBy(static x => x.Id)
+            .Take(MaxPerInsight)
+            .Select(static x => Finding(
+                MissingMemoize,
+                x,
+                x.Description + " found " + Count(x.CacheHits ?? 0) + " of its lookups in the cache and missed " + Count(x.CacheMisses!.Value)
+                + ", and evicted " + Count(x.CacheEvictions!.Value) + " cached results to make room"
+                + (x.PeakMemoryKb is { } kb ? " (" + Kilobytes(kb) + " in the cache at its peak)" : string.Empty)
+                + ": the cache was too small for the parameters it was asked about, so it saved little.",
+                "A Memoize cache is bounded by work_mem times hash_mem_multiplier, and when it fills it throws results away: a larger "
+                + "work_mem for the role or the session that runs the statement keeps more. If nearly every lookup's parameters differ, "
+                + "no cache size helps - compare the statement with SET enable_memoize = off in the SQL console to see whether it is "
+                + "faster without."));
+    }
+
     private static PlanInsightFinding Finding(PlanInsightInfo insight, PlanNode node, string message, string remedy) =>
         new(insight, node.Id, node.Description, message, remedy);
+
+    private static string Milliseconds(double ms) =>
+        ms < 1 ? ms.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+        : ms < 1000 ? ms.ToString("0.#", CultureInfo.InvariantCulture) + " ms"
+        : (ms / 1000).ToString("0.##", CultureInfo.InvariantCulture) + " s";
 
     private static string Rows(double rows) => Count(Math.Round(rows));
 

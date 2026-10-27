@@ -351,6 +351,8 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
             "select pg_catalog.pg_get_viewdef('pg_catalog.pg_sequences'::pg_catalog.regclass) not like '%has_sequence_privilege%'",
         [PostgresFeature.ExplainFractionalRows] = null,
         [PostgresFeature.ExplainBuffersByDefault] = null,
+        [PostgresFeature.ExplainMemory] = null,
+        [PostgresFeature.ExplainSerialize] = null,
         [PostgresFeature.IdleSlotTimeout] = Setting("idle_replication_slot_timeout"),
         [PostgresFeature.ChecksumsDefaultOn] = "select pg_catalog.current_setting('data_checksums') = 'on'",
         [PostgresFeature.TotalVacuumTime] = Column("pg_catalog.pg_stat_all_tables", "total_vacuum_time"),
@@ -380,6 +382,13 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
             case PostgresFeature.ExplainGenericPlan:
                 // No $1: Npgsql's extended protocol would bind no value to it. Below 16 the option itself is 42601.
                 return await SucceedsAsync(connection, "explain (generic_plan) select * from store.child where id = 1");
+
+            case PostgresFeature.ExplainMemory:
+                // Below 17 the option itself is 42601.
+                return await SucceedsAsync(connection, "explain (memory) select * from store.child where id = 1");
+
+            case PostgresFeature.ExplainSerialize:
+                return await SucceedsAsync(connection, "explain (analyze, serialize) select * from store.child where id = 1");
 
             case PostgresFeature.ExplainFractionalRows:
                 return (await ExplainAsync(connection)).Contains("\"Actual Rows\": 1.00", StringComparison.Ordinal);

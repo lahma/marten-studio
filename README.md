@@ -571,10 +571,17 @@ The console's **Explain** and **Explain analyze** buttons draw a plan as a tree 
 estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
 `EXPLAIN (FORMAT JSON)` you type, and Mode A's plan. `EXPLAIN ANALYZE` runs only in the console, under `RunSql`, for a
 statement its guard accepts and inside its read-only transaction: a write the guard misses is refused by Postgres
-(`25006`) and changes nothing. Under every plan, **plan insights** with stable codes P01-P08
+(`25006`) and changes nothing. **Query › Plan** is the same gate as a page of its own: write a statement - or paste the JSON of
+a plan, which reads nothing - and get it planned, analyzed, or planned as a generic or custom plan of a statement with `$1`
+placeholders, then drawn as a tree and as a sortable table of every node, with a summary strip, the critical path, heat
+colouring, every key Postgres printed for a node and what each means, and Copy as Markdown / Download for
+[speedscope](https://www.speedscope.app) beside the raw JSON; the console's **Open in Plan** link carries a statement there.
+Under every plan, **plan insights** with stable codes P01-P14
 ([`docs/health/plans.md`](docs/health/plans.md)) point at a row estimate off tenfold, a sort or hash spilled to disk, a
 lossy bitmap heap scan, a selective sequential scan, a nested loop over a large outer side, a large `OFFSET`, a
-leading-wildcard `LIKE` and parallel workers short of the plan. Where the studio suggests an index - under a plan, or
+leading-wildcard `LIKE`, parallel workers short of the plan, an index-only scan fetching the heap, a filter discarding most
+rows after an index, a hash built in batches, JIT costing more than it saves, planning slower than execution and a memoize
+cache mostly missing. Where the studio suggests an index - under a plan, or
 in LINQ mode's and the Documents list's index advice - **What if?** plans the statement again with that one index
 imagined by [hypopg](https://github.com/HypoPG/hypopg), and draws the plan now and the plan with the index side by side.
 It creates nothing, and needs hypopg installed in the database, which is your decision; the studio never installs it.
