@@ -1,0 +1,42 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Append",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 0.28,
+      "Total Cost": 85.4,
+      "Plan Rows": 12,
+      "Plan Width": 36,
+      "Actual Startup Time": 0.041,
+      "Actual Total Time": 2.91,
+      "Actual Rows": 12.00,
+      "Actual Loops": 1,
+      "Subplans Removed": 0,
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "measurements_2026_01_pkey",
+          "Relation Name": "measurements_2026_01",
+          "Alias": "measurements",
+          "Startup Cost": 0.28,
+          "Total Cost": 8.3,
+          "Plan Rows": 1,
+          "Plan Width": 36,
+          "Actual Startup Time": 0.03,
+          "Actual Total Time": 0.04,
+          "Actual Rows": 1.00,
+          "Actual Loops": 1,
+          "Index Cond": "(id = 77)"
+        }
+      ]
+    },
+    "Planning Time": 24.1,
+    "Triggers": [],
+    "Execution Time": 3.2
+  }
+]

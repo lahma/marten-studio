@@ -46,4 +46,22 @@ internal interface ISqlConsoleService
     /// <param name="index">The index to imagine: one the plan suggested (<see cref="HypotheticalIndexCandidates" />).</param>
     /// <param name="cancellationToken">Cancels the what-if; never the reset that follows it.</param>
     Task<WhatIfResult> WhatIfAsync(StudioScope scope, string statement, HypotheticalIndex index, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X3 (issue #28): the Query › Plan page's plan of a statement - planned, analyzed, or as the generic or a custom plan of a
+    /// statement with <c>$n</c> placeholders - through the console's own gate, in its read-only transaction and under its
+    /// statement timeout, audited as a <c>RunSql</c> run exactly as the console's Explain buttons are. A statement the guard
+    /// refuses, an <c>EXPLAIN</c> typed already and a request that cannot be planned come back as a <see cref="PlanRunResult.Rejection" />;
+    /// <c>EXPLAIN ANALYZE</c> runs only under the console's guard, so a write is never analyzed.
+    /// </summary>
+    /// <param name="scope">The scope the console is pointed at; its tenant is ignored, never applied.</param>
+    /// <param name="request">The statement, the mode, the options and the values.</param>
+    /// <param name="cancellationToken">Cancels the run.</param>
+    /// <exception cref="StudioCapabilityDeniedException">
+    /// <see cref="StudioCapability.RunSql" /> is off, or the studio is read-only. Nothing is sent.
+    /// </exception>
+    /// <exception cref="StudioNotAuthorizedException">
+    /// The write policy refused this scope for <c>RunSql</c>. Nothing is sent.
+    /// </exception>
+    Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default);
 }

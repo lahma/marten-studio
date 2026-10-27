@@ -339,6 +339,7 @@ public class StudioLayoutTests
                 "Overview",
                 "Documents",
                 "Query",
+                "Plan",
                 "Tables",
                 "Relationships",
                 "Streams",
@@ -374,6 +375,7 @@ public class StudioLayoutTests
             "",
             "documents",
             "query",
+            "plan",
             "database",
             "relationships",
             "events/streams",
@@ -407,6 +409,7 @@ public class StudioLayoutTests
             "",
             "documents",
             "query",
+            "plan",
             "database",
             "relationships",
             "events/streams",
@@ -580,7 +583,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(19, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(20, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) and Plan (0.9) included");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

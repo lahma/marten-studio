@@ -55,6 +55,40 @@ public class StudioLinksTests
         path.Should().NotBeEmpty().And.NotStartWith("/").And.Contain("store=main").And.Contain("db=db1");
     }
 
+    /// <summary>Every member's exact path: the route its page's own link helper names, the tab's view parameter where it has one, then the scope.</summary>
+    [Theory]
+    [InlineData("Health", "health?store=main&db=db1")]
+    [InlineData("Sessions", "database/sessions?store=main&db=db1")]
+    [InlineData("Blocking", "database/sessions?view=blocking&store=main&db=db1")]
+    [InlineData("Statements", "statements?store=main&db=db1")]
+    [InlineData("Maintenance", "maintenance?store=main&db=db1")]
+    [InlineData("Storage", "storage?store=main&db=db1")]
+    [InlineData("Server", "server?store=main&db=db1")]
+    [InlineData("Plan", "plan?store=main&db=db1")]
+    [InlineData("Holders", "database/sessions?view=holders&store=main&db=db1")]
+    [InlineData("Replication", "replication?store=main&db=db1")]
+    [InlineData("Overview", "?store=main&db=db1")]
+    public void Every_page_has_its_exact_path_and_the_table_names_every_member(string page, string path)
+    {
+        Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), Enum.Parse<PostgresStudioPage>(page)).Should().Be(path);
+    }
+
+    [Fact]
+    public void The_enums_members_are_the_ones_the_exact_paths_name_with_their_numbers()
+    {
+        Enum.GetValues<PostgresStudioPage>().Select(static x => ((int) x, x.ToString())).Should().Equal(
+            (0, "Health"), (1, "Sessions"), (2, "Blocking"), (3, "Statements"), (4, "Maintenance"), (5, "Storage"), (6, "Server"),
+            (7, "Plan"), (8, "Holders"), (9, "Replication"), (10, "Overview"));
+    }
+
+    [Fact]
+    public void The_overview_is_the_studios_front_page_so_its_path_is_the_query_alone_and_still_carries_the_scope()
+    {
+        string path = Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresStudioPage.Overview);
+
+        path.Should().StartWith("?").And.Contain("store=main").And.Contain("db=db1");
+    }
+
     [Fact]
     public void The_blocking_page_carries_the_view_parameter() =>
         Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresStudioPage.Blocking).Should().Contain("view=blocking");

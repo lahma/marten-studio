@@ -75,18 +75,26 @@ internal static class QueryPlanReader
 
             JsonElement first = statements[0];
             Walk walk = new(mask);
-            PlanNode root = walk.Node(first.GetProperty("Plan"), 0);
+            PlanNode root = walk.Node(first.GetProperty(PlanKeys.Plan), 0);
 
             ComputeCosts(root);
             ComputeTimes(root);
 
             return QueryPlanRead.Of(new QueryPlan(root, walk.Count, walk.Truncated, statements.Count)
             {
-                PlanningMs = Number(first, "Planning Time"),
-                ExecutionMs = Number(first, "Execution Time"),
+                PlanningMs = Number(first, PlanKeys.PlanningTime),
+                ExecutionMs = Number(first, PlanKeys.ExecutionTime),
                 Triggers = Triggers(first, mask),
-                JitFunctions = Jit(first, "Functions"),
+                JitFunctions = Jit(first, PlanKeys.Functions),
                 JitMs = JitTotal(first),
+
+                // What the statement printed around the plan, kept as text only for an unmasked read: a setting's value can
+                // be a schema's name, which a masked plan must never carry.
+                Settings = mask is null ? StatementObject(first, PlanKeys.Settings) : [],
+                JitProperties = mask is null ? StatementObject(first, PlanKeys.Jit) : [],
+                PlanningMemoryBytes = Nested(first, PlanKeys.Planning, PlanKeys.MemoryUsed),
+                SerializationMs = Nested(first, PlanKeys.Serialization, PlanKeys.Time),
+                SerializationKb = Nested(first, PlanKeys.Serialization, PlanKeys.OutputVolume),
             });
         }
         catch (JsonException)
@@ -124,7 +132,7 @@ internal static class QueryPlanReader
 
             foreach (JsonElement statement in statements)
             {
-                Collect(statement.GetProperty("Plan"), relations, 0);
+                Collect(statement.GetProperty(PlanKeys.Plan), relations, 0);
             }
         }
         catch (JsonException)
@@ -141,12 +149,12 @@ internal static class QueryPlanReader
                 return;
             }
 
-            if (Text(node, "Relation Name") is { } relation)
+            if (Text(node, PlanKeys.RelationName) is { } relation)
             {
-                found.Add((Text(node, "Schema"), relation));
+                found.Add((Text(node, PlanKeys.Schema), relation));
             }
 
-            if (node.TryGetProperty("Plans", out JsonElement children) && children.ValueKind == JsonValueKind.Array)
+            if (node.TryGetProperty(PlanKeys.Plans, out JsonElement children) && children.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement child in children.EnumerateArray())
                 {
@@ -162,7 +170,7 @@ internal static class QueryPlanReader
         statements = [];
 
         if (root.ValueKind == JsonValueKind.Object
-            && root.TryGetProperty("Plan", out JsonElement single)
+            && root.TryGetProperty(PlanKeys.Plan, out JsonElement single)
             && single.ValueKind == JsonValueKind.Object)
         {
             // One statement's object without its array: what a reader hands over that took the array apart.
@@ -173,7 +181,7 @@ internal static class QueryPlanReader
             foreach (JsonElement statement in root.EnumerateArray())
             {
                 if (statement.ValueKind == JsonValueKind.Object
-                    && statement.TryGetProperty("Plan", out JsonElement plan)
+                    && statement.TryGetProperty(PlanKeys.Plan, out JsonElement plan)
                     && plan.ValueKind == JsonValueKind.Object)
                 {
                     statements.Add(statement);
@@ -194,11 +202,11 @@ internal static class QueryPlanReader
         public PlanNode Node(JsonElement node, int depth)
         {
             int id = Count++;
-            string type = Text(node, "Node Type") ?? "(unknown)";
+            string type = Text(node, PlanKeys.NodeType) ?? "(unknown)";
 
             List<PlanNode> children = [];
 
-            if (node.TryGetProperty("Plans", out JsonElement plans) && plans.ValueKind == JsonValueKind.Array)
+            if (node.TryGetProperty(PlanKeys.Plans, out JsonElement plans) && plans.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement child in plans.EnumerateArray())
                 {
@@ -223,60 +231,72 @@ internal static class QueryPlanReader
                 Depth = depth,
                 NodeType = type,
                 Label = Label(node, type),
-                ParentRelationship = Text(node, "Parent Relationship"),
-                SubplanName = Masked(node, "Subplan Name"),
-                Schema = Masked(node, "Schema"),
-                RelationName = Masked(node, "Relation Name"),
-                Alias = Masked(node, "Alias"),
-                IndexName = Masked(node, "Index Name"),
-                FunctionName = Masked(node, "Function Name"),
-                CteName = Masked(node, "CTE Name"),
-                Operation = Text(node, "Operation"),
-                Strategy = Text(node, "Strategy"),
-                JoinType = Text(node, "Join Type"),
-                PartialMode = Text(node, "Partial Mode"),
-                ParallelAware = Flag(node, "Parallel Aware") == true,
-                StartupCost = Number(node, "Startup Cost"),
-                TotalCost = Number(node, "Total Cost"),
-                PlanRows = Number(node, "Plan Rows"),
-                PlanWidth = Number(node, "Plan Width"),
-                ActualStartupMs = Number(node, "Actual Startup Time"),
-                ActualTotalMs = Number(node, "Actual Total Time"),
-                ActualRows = Number(node, "Actual Rows"),
-                ActualLoops = Number(node, "Actual Loops"),
-                Filter = Masked(node, "Filter"),
-                IndexCondition = Masked(node, "Index Cond"),
-                RecheckCondition = Masked(node, "Recheck Cond"),
-                HashCondition = Masked(node, "Hash Cond"),
-                MergeCondition = Masked(node, "Merge Cond"),
-                JoinFilter = Masked(node, "Join Filter"),
-                OneTimeFilter = Masked(node, "One-Time Filter"),
-                RowsRemovedByFilter = Number(node, "Rows Removed by Filter"),
-                RowsRemovedByIndexRecheck = Number(node, "Rows Removed by Index Recheck"),
-                RowsRemovedByJoinFilter = Number(node, "Rows Removed by Join Filter"),
-                SortKey = Texts(node, "Sort Key"),
-                GroupKey = Texts(node, "Group Key"),
-                SortMethod = Text(node, "Sort Method"),
-                SortSpaceType = Text(node, "Sort Space Type"),
-                SortSpaceUsedKb = Number(node, "Sort Space Used"),
+                ParentRelationship = Text(node, PlanKeys.ParentRelationship),
+                SubplanName = Masked(node, PlanKeys.SubplanName),
+                Schema = Masked(node, PlanKeys.Schema),
+                RelationName = Masked(node, PlanKeys.RelationName),
+                Alias = Masked(node, PlanKeys.Alias),
+                IndexName = Masked(node, PlanKeys.IndexName),
+                FunctionName = Masked(node, PlanKeys.FunctionName),
+                CteName = Masked(node, PlanKeys.CteName),
+                Operation = Text(node, PlanKeys.Operation),
+                Strategy = Text(node, PlanKeys.Strategy),
+                JoinType = Text(node, PlanKeys.JoinType),
+                PartialMode = Text(node, PlanKeys.PartialMode),
+                ParallelAware = Flag(node, PlanKeys.ParallelAware) == true,
+                StartupCost = Number(node, PlanKeys.StartupCost),
+                TotalCost = Number(node, PlanKeys.TotalCost),
+                PlanRows = Number(node, PlanKeys.PlanRows),
+                PlanWidth = Number(node, PlanKeys.PlanWidth),
+                ActualStartupMs = Number(node, PlanKeys.ActualStartupTime),
+                ActualTotalMs = Number(node, PlanKeys.ActualTotalTime),
+                ActualRows = Number(node, PlanKeys.ActualRows),
+                ActualLoops = Number(node, PlanKeys.ActualLoops),
+                Filter = Masked(node, PlanKeys.Filter),
+                IndexCondition = Masked(node, PlanKeys.IndexCond),
+                RecheckCondition = Masked(node, PlanKeys.RecheckCond),
+                HashCondition = Masked(node, PlanKeys.HashCond),
+                MergeCondition = Masked(node, PlanKeys.MergeCond),
+                JoinFilter = Masked(node, PlanKeys.JoinFilter),
+                OneTimeFilter = Masked(node, PlanKeys.OneTimeFilter),
+                RowsRemovedByFilter = Number(node, PlanKeys.RowsRemovedByFilter),
+                RowsRemovedByIndexRecheck = Number(node, PlanKeys.RowsRemovedByIndexRecheck),
+                RowsRemovedByJoinFilter = Number(node, PlanKeys.RowsRemovedByJoinFilter),
+                SortKey = Texts(node, PlanKeys.SortKey),
+                GroupKey = Texts(node, PlanKeys.GroupKey),
+                SortMethod = Text(node, PlanKeys.SortMethod),
+                SortSpaceType = Text(node, PlanKeys.SortSpaceType),
+                SortSpaceUsedKb = Number(node, PlanKeys.SortSpaceUsed),
                 WorkerSortDiskKb = WorkerSortDisk(node),
-                HashBuckets = Number(node, "Hash Buckets"),
-                HashBatches = Number(node, "Hash Batches"),
-                OriginalHashBatches = Number(node, "Original Hash Batches"),
-                PeakMemoryKb = Number(node, "Peak Memory Usage"),
-                HashAggBatches = Number(node, "HashAgg Batches"),
-                DiskUsageKb = Number(node, "Disk Usage"),
-                ExactHeapBlocks = Number(node, "Exact Heap Blocks"),
-                LossyHeapBlocks = Number(node, "Lossy Heap Blocks"),
-                WorkersPlanned = Number(node, "Workers Planned"),
-                WorkersLaunched = Number(node, "Workers Launched"),
-                Disabled = Flag(node, "Disabled"),
-                IndexSearches = Number(node, "Index Searches"),
-                Storage = Text(node, "Storage"),
-                MaximumStorageKb = Number(node, "Maximum Storage"),
+                HashBuckets = Number(node, PlanKeys.HashBuckets),
+                HashBatches = Number(node, PlanKeys.HashBatches),
+                OriginalHashBatches = Number(node, PlanKeys.OriginalHashBatches),
+                PeakMemoryKb = Number(node, PlanKeys.PeakMemoryUsage),
+                HashAggBatches = Number(node, PlanKeys.HashAggBatches),
+                DiskUsageKb = Number(node, PlanKeys.DiskUsage),
+                HeapFetches = Number(node, PlanKeys.HeapFetches),
+                CacheHits = Number(node, PlanKeys.CacheHits),
+                CacheMisses = Number(node, PlanKeys.CacheMisses),
+                CacheEvictions = Number(node, PlanKeys.CacheEvictions),
+                CacheOverflows = Number(node, PlanKeys.CacheOverflows),
+                WalRecords = Number(node, PlanKeys.WalRecords),
+                WalFpi = Number(node, PlanKeys.WalFpi),
+                WalBytes = Number(node, PlanKeys.WalBytes),
+                ExactHeapBlocks = Number(node, PlanKeys.ExactHeapBlocks),
+                LossyHeapBlocks = Number(node, PlanKeys.LossyHeapBlocks),
+                WorkersPlanned = Number(node, PlanKeys.WorkersPlanned),
+                WorkersLaunched = Number(node, PlanKeys.WorkersLaunched),
+                Disabled = Flag(node, PlanKeys.Disabled),
+                IndexSearches = Number(node, PlanKeys.IndexSearches),
+                Storage = Text(node, PlanKeys.Storage),
+                MaximumStorageKb = Number(node, PlanKeys.MaximumStorage),
                 Buffers = Buffers(node),
-                IoReadMs = Sum(node, "I/O Read Time", "Shared I/O Read Time", "Local I/O Read Time", "Temp I/O Read Time"),
-                IoWriteMs = Sum(node, "I/O Write Time", "Shared I/O Write Time", "Local I/O Write Time", "Temp I/O Write Time"),
+                IoReadMs = Sum(node, PlanKeys.IoReadTime, PlanKeys.SharedIoReadTime, PlanKeys.LocalIoReadTime, PlanKeys.TempIoReadTime),
+                IoWriteMs = Sum(node, PlanKeys.IoWriteTime, PlanKeys.SharedIoWriteTime, PlanKeys.LocalIoWriteTime, PlanKeys.TempIoWriteTime),
+
+                // Every key the node printed, as text, for the detail panel: an unmasked read only, because a key the reader
+                // does not model - Output, Cache Key, a function call - can name what a mask is there to hide.
+                Properties = mask is null ? PropertiesOf(node) : [],
                 Children = children,
             };
         }
@@ -313,24 +333,24 @@ internal static class QueryPlanReader
     {
         string name = type switch
         {
-            "Aggregate" => Text(node, "Strategy") switch
+            "Aggregate" => Text(node, PlanKeys.Strategy) switch
             {
                 "Sorted" => "GroupAggregate",
                 "Hashed" => "HashAggregate",
                 "Mixed" => "MixedAggregate",
                 _ => "Aggregate",
             },
-            "SetOp" => Text(node, "Strategy") == "Hashed" ? "HashSetOp" : "SetOp",
-            "ModifyTable" => Text(node, "Operation") ?? type,
-            "Nested Loop" => Join("Nested Loop", Text(node, "Join Type"), loop: true),
-            "Hash Join" => Join("Hash", Text(node, "Join Type"), loop: false),
-            "Merge Join" => Join("Merge", Text(node, "Join Type"), loop: false),
+            "SetOp" => Text(node, PlanKeys.Strategy) == "Hashed" ? "HashSetOp" : "SetOp",
+            "ModifyTable" => Text(node, PlanKeys.Operation) ?? type,
+            "Nested Loop" => Join("Nested Loop", Text(node, PlanKeys.JoinType), loop: true),
+            "Hash Join" => Join("Hash", Text(node, PlanKeys.JoinType), loop: false),
+            "Merge Join" => Join("Merge", Text(node, PlanKeys.JoinType), loop: false),
             _ => type,
         };
 
         if (type == "Aggregate")
         {
-            name = Text(node, "Partial Mode") switch
+            name = Text(node, PlanKeys.PartialMode) switch
             {
                 "Partial" => "Partial " + name,
                 "Finalize" => "Finalize " + name,
@@ -338,12 +358,12 @@ internal static class QueryPlanReader
             };
         }
 
-        if (Flag(node, "Parallel Aware") == true)
+        if (Flag(node, PlanKeys.ParallelAware) == true)
         {
             name = "Parallel " + name;
         }
 
-        if (Flag(node, "Async Capable") == true)
+        if (Flag(node, PlanKeys.AsyncCapable) == true)
         {
             name = "Async " + name;
         }
@@ -359,23 +379,23 @@ internal static class QueryPlanReader
     /// <summary>The node's buffers, or <see langword="null" /> when it printed none.</summary>
     private static PlanBuffers? Buffers(JsonElement node)
     {
-        if (!node.TryGetProperty("Shared Hit Blocks", out _) && !node.TryGetProperty("Temp Written Blocks", out _)
-            && !node.TryGetProperty("Local Hit Blocks", out _))
+        if (!node.TryGetProperty(PlanKeys.SharedHitBlocks, out _) && !node.TryGetProperty(PlanKeys.TempWrittenBlocks, out _)
+            && !node.TryGetProperty(PlanKeys.LocalHitBlocks, out _))
         {
             return null;
         }
 
         return new PlanBuffers(
-            Long(node, "Shared Hit Blocks"),
-            Long(node, "Shared Read Blocks"),
-            Long(node, "Shared Dirtied Blocks"),
-            Long(node, "Shared Written Blocks"),
-            Long(node, "Local Hit Blocks"),
-            Long(node, "Local Read Blocks"),
-            Long(node, "Local Dirtied Blocks"),
-            Long(node, "Local Written Blocks"),
-            Long(node, "Temp Read Blocks"),
-            Long(node, "Temp Written Blocks"));
+            Long(node, PlanKeys.SharedHitBlocks),
+            Long(node, PlanKeys.SharedReadBlocks),
+            Long(node, PlanKeys.SharedDirtiedBlocks),
+            Long(node, PlanKeys.SharedWrittenBlocks),
+            Long(node, PlanKeys.LocalHitBlocks),
+            Long(node, PlanKeys.LocalReadBlocks),
+            Long(node, PlanKeys.LocalDirtiedBlocks),
+            Long(node, PlanKeys.LocalWrittenBlocks),
+            Long(node, PlanKeys.TempReadBlocks),
+            Long(node, PlanKeys.TempWrittenBlocks));
 
         static long Long(JsonElement node, string property) =>
             Number(node, property) is { } value && value is > 0 and < long.MaxValue ? (long) value : 0;
@@ -384,7 +404,7 @@ internal static class QueryPlanReader
     /// <summary>The most disk any worker's sort used, in kB, when a worker's sort spilled.</summary>
     private static double? WorkerSortDisk(JsonElement node)
     {
-        if (!node.TryGetProperty("Workers", out JsonElement workers) || workers.ValueKind != JsonValueKind.Array)
+        if (!node.TryGetProperty(PlanKeys.Workers, out JsonElement workers) || workers.ValueKind != JsonValueKind.Array)
         {
             return null;
         }
@@ -393,9 +413,9 @@ internal static class QueryPlanReader
 
         foreach (JsonElement worker in workers.EnumerateArray())
         {
-            if (worker.ValueKind == JsonValueKind.Object && Text(worker, "Sort Space Type") == "Disk")
+            if (worker.ValueKind == JsonValueKind.Object && Text(worker, PlanKeys.SortSpaceType) == "Disk")
             {
-                double used = Number(worker, "Sort Space Used") ?? 0;
+                double used = Number(worker, PlanKeys.SortSpaceUsed) ?? 0;
                 most = most is { } seen ? Math.Max(seen, used) : used;
             }
         }
@@ -405,7 +425,7 @@ internal static class QueryPlanReader
 
     private static List<PlanTrigger> Triggers(JsonElement statement, Func<string, string>? mask)
     {
-        if (!statement.TryGetProperty("Triggers", out JsonElement triggers) || triggers.ValueKind != JsonValueKind.Array)
+        if (!statement.TryGetProperty(PlanKeys.Triggers, out JsonElement triggers) || triggers.ValueKind != JsonValueKind.Array)
         {
             return [];
         }
@@ -414,14 +434,14 @@ internal static class QueryPlanReader
 
         foreach (JsonElement trigger in triggers.EnumerateArray())
         {
-            if (trigger.ValueKind == JsonValueKind.Object && Text(trigger, "Trigger Name") is { } name)
+            if (trigger.ValueKind == JsonValueKind.Object && Text(trigger, PlanKeys.TriggerName) is { } name)
             {
-                string? relation = Text(trigger, "Relation");
+                string? relation = Text(trigger, PlanKeys.Relation);
                 read.Add(new PlanTrigger(
                     mask is null ? name : mask(name),
                     relation is null || mask is null ? relation : mask(relation),
-                    Number(trigger, "Time"),
-                    Number(trigger, "Calls")));
+                    Number(trigger, PlanKeys.Time),
+                    Number(trigger, PlanKeys.Calls)));
             }
         }
 
@@ -429,13 +449,124 @@ internal static class QueryPlanReader
     }
 
     private static double? Jit(JsonElement statement, string property) =>
-        statement.TryGetProperty("JIT", out JsonElement jit) && jit.ValueKind == JsonValueKind.Object ? Number(jit, property) : null;
+        statement.TryGetProperty(PlanKeys.Jit, out JsonElement jit) && jit.ValueKind == JsonValueKind.Object ? Number(jit, property) : null;
 
     private static double? JitTotal(JsonElement statement) =>
-        statement.TryGetProperty("JIT", out JsonElement jit) && jit.ValueKind == JsonValueKind.Object
-            && jit.TryGetProperty("Timing", out JsonElement timing) && timing.ValueKind == JsonValueKind.Object
-            ? Number(timing, "Total")
+        statement.TryGetProperty(PlanKeys.Jit, out JsonElement jit) && jit.ValueKind == JsonValueKind.Object
+            && jit.TryGetProperty(PlanKeys.Timing, out JsonElement timing) && timing.ValueKind == JsonValueKind.Object
+            ? Number(timing, PlanKeys.Total)
             : null;
+
+    /// <summary>A number inside an object of the statement - <c>Planning</c>'s memory, <c>Serialization</c>'s time - or <see langword="null" />.</summary>
+    private static double? Nested(JsonElement statement, string objectName, string property) =>
+        statement.TryGetProperty(objectName, out JsonElement inner) && inner.ValueKind == JsonValueKind.Object ? Number(inner, property) : null;
+
+    /// <summary>The most properties kept for one node's detail, and the longest value each keeps.</summary>
+    internal const int MaxProperties = 200;
+
+    /// <summary>The longest a property's value is kept, in characters.</summary>
+    internal const int MaxPropertyCharacters = 2_000;
+
+    /// <summary>One statement-level object (<c>Settings</c>, <c>JIT</c>) as flattened properties, or none.</summary>
+    private static List<PlanProperty> StatementObject(JsonElement statement, string name)
+    {
+        List<PlanProperty> properties = [];
+
+        if (statement.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Object)
+        {
+            Flatten(value, null, 0, properties);
+        }
+
+        return properties;
+    }
+
+    /// <summary>
+    /// Every scalar key <paramref name="node" /> printed, as text, in the order Postgres printed them: <c>Plans</c> is the
+    /// children, read by the walk, and every other value is kept - nested objects and arrays flattened to
+    /// <c>Parent › Child</c> and <c>Parent[0] › Child</c>, bounded at <see cref="MaxProperties" /> keys.
+    /// </summary>
+    private static List<PlanProperty> PropertiesOf(JsonElement node)
+    {
+        List<PlanProperty> properties = [];
+        Flatten(node, null, 0, properties);
+        return properties;
+    }
+
+    private static void Flatten(JsonElement element, string? prefix, int depth, List<PlanProperty> into)
+    {
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            if (into.Count >= MaxProperties)
+            {
+                return;
+            }
+
+            if (depth == 0 && property.Name == PlanKeys.Plans)
+            {
+                continue;
+            }
+
+            string key = prefix is null ? property.Name : prefix + " › " + property.Name;
+            Add(property.Value, key, depth, into);
+        }
+    }
+
+    private static void Add(JsonElement value, string key, int depth, List<PlanProperty> into)
+    {
+        if (into.Count >= MaxProperties)
+        {
+            return;
+        }
+
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.String:
+                into.Add(new PlanProperty(key, Clip(value.GetString() ?? string.Empty)));
+                break;
+
+            case JsonValueKind.Number:
+                into.Add(new PlanProperty(key, value.GetRawText()));
+                break;
+
+            case JsonValueKind.True:
+                into.Add(new PlanProperty(key, "true"));
+                break;
+
+            case JsonValueKind.False:
+                into.Add(new PlanProperty(key, "false"));
+                break;
+
+            case JsonValueKind.Object when depth < 3:
+                Flatten(value, key, depth + 1, into);
+                break;
+
+            case JsonValueKind.Array:
+                if (value.EnumerateArray().All(static x => x.ValueKind is JsonValueKind.String or JsonValueKind.Number))
+                {
+                    // A list of scalars - a sort key, a group key, the methods an incremental sort used - is one value.
+                    into.Add(new PlanProperty(key, Clip(string.Join(", ", value.EnumerateArray().Take(50).Select(static x => x.ValueKind == JsonValueKind.String ? x.GetString() : x.GetRawText())))));
+                }
+                else if (depth < 3)
+                {
+                    int index = 0;
+
+                    foreach (JsonElement item in value.EnumerateArray().Take(16))
+                    {
+                        if (item.ValueKind == JsonValueKind.Object)
+                        {
+                            Flatten(item, key + "[" + index.ToString(CultureInfo.InvariantCulture) + "]", depth + 1, into);
+                        }
+
+                        index++;
+                    }
+                }
+
+                break;
+        }
+    }
+
+    private static string Clip(string text) =>
+        text.Length <= MaxPropertyCharacters ? text : text[..MaxPropertyCharacters] + "…";
 
     /// <summary>Each node's own cost and its share of the plan's: its total less its children's, never below zero.</summary>
     private static void ComputeCosts(PlanNode root)

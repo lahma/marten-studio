@@ -1,11 +1,13 @@
 # Plan insights (P)
 
 Every place the studio shows a query plan draws it as a tree, and under the tree it lists what the plan says is wrong with
-it: **plan insights**. A plan is drawn in three places:
+it: **plan insights**. A plan is drawn in four places:
 
+- **Query › Plan** (`RunSql`), the plan analyzer: write a statement, or paste a plan, and see it as a tree and as a table of
+  every node, with its summary, where the time went and what to fix - [below](#query--plan-the-plan-analyzer);
 - **the SQL console** (`RunSql`): its **Explain** and **Explain analyze** buttons run the statement in the editor as
   `EXPLAIN (FORMAT JSON)` or `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, and an `EXPLAIN (FORMAT JSON …)` typed by hand is
-  drawn the same way;
+  drawn the same way; **Open in Plan** carries the statement to the Plan page;
 - **Query › Marten where clause** (Marten Studio only): the plan of the statement the clause composed, as before, now drawn
   as a tree;
 - **Operations › Statements**: open a statement's **Plan** to see the plan of its text as `pg_stat_statements` recorded it
@@ -42,9 +44,10 @@ statement, and the plan is no more masked than the console's rows are. The State
 program's text, behind the same gate as the page (`ViewDatabaseActivity`, the source or store policy and the write policy,
 asked with no tenant), and masked for the visitor - see [below](#the-statements-drill-ins-plan).
 
-**Five need `ANALYZE`.** P01, P02, P03, P04 and P08 read what only `EXPLAIN ANALYZE` prints - rows returned, a spill, a
-lossy page, the rows a filter threw away, the workers given - so a plain plan lists them as not judged rather than as
-quiet. P05, P06 and P07 read the planner's estimates when there is nothing better.
+**Eleven need `ANALYZE`.** P01, P02, P03, P04, P08 and, from 0.9, P09 to P14 read what only `EXPLAIN ANALYZE` prints - rows
+returned, a spill, a lossy page, the rows a filter threw away, the workers given, the heap fetches, a hash's batches, JIT and
+execution time, a memoize cache's hits - so a plain plan lists them as not judged rather than as quiet. P05, P06 and P07
+read the planner's estimates when there is nothing better.
 
 **At most five findings an insight**, the worst first.
 
@@ -125,6 +128,121 @@ rest of its work fell to the processes it got. The Statements page says the same
 
 **Remedy.** Parallel workers come from `max_parallel_workers` and `max_worker_processes`, which other parallel queries
 were holding when it ran: raise them in the server's settings, or run fewer parallel queries at once.
+
+## P09 Index-only scan fetching the heap
+
+**Warning**, under `ANALYZE`. An index-only scan visited the table (`Heap Fetches`) for 10% or more of the rows it returned, and
+at least 1,000 times - over all its loops, as Postgres prints the counter. An index-only scan skips the table only for a page
+the visibility map marks all-visible; for any other it reads the row from the table to check it, so it was no cheaper than an
+index scan.
+
+**Remedy.** `VACUUM` sets the visibility-map bits: vacuum the table, and let autovacuum do it again by lowering
+`autovacuum_vacuum_scale_factor` (or `autovacuum_vacuum_insert_scale_factor` for a table that is only inserted into) for it.
+Operations › Maintenance shows when autovacuum will next reach each table, and the finding links to it.
+
+## P10 Filter discarding most rows after an index
+
+**Warning**, under `ANALYZE`. An index scan, index-only scan or bitmap heap scan threw away ten times the rows it returned or
+more with its filter, and 10,000 or more - each counted over all its loops. The index found rows the filter then rejected, so
+the table was visited for rows nobody wanted: the filter's column is not in the index.
+
+**Remedy.** The same as P04's, with the placement each studio needs: an index whose leading column the filter compares, or the
+filter's column added to the index this node used, or - when every query has the same condition - a partial index. In Marten
+Studio an index on a document table is declared in the store's options; elsewhere it goes in your own migrations, built
+`CONCURRENTLY` on a table in use. What if? is offered for a sequential scan's filter (P04); an index scan's plan does not give it a
+column to imagine an index on, so P10 offers none.
+
+## P11 Hash built in batches
+
+**Info**, under `ANALYZE`. A `Hash` node was built in more than one batch, or in more batches than it was planned with: its table
+did not fit in `work_mem` (times `hash_mem_multiplier`), so every batch but the first went through temporary files. P02 says that a
+hash spilled; P11 says how much memory it would have needed.
+
+**Remedy.** `work_mem` of about the hash's peak memory times its batches, rounded up to a megabyte - the finding prints the
+number, and the `SET work_mem` to try - for the role or the session that runs the statement, never the whole server: every sort
+and hash of the statement may use that much. A `hash_mem_multiplier` above 1 needs correspondingly less.
+
+## P12 JIT costing more than it saves
+
+**Info**, under `ANALYZE`. JIT took 20% or more of the execution time, and the statement ran for less than a second: compiling
+cost more than it could save on a run that short.
+
+**Remedy.** Raise `jit_above_cost` (100000 unless somebody changed it), so that only statements the planner costs higher are
+compiled, or turn JIT off for the role that runs these statements: `ALTER ROLE … SET jit = off`.
+
+## P13 Planning slower than execution
+
+**Info**, under `ANALYZE`. Postgres spent longer planning the statement than running it, and more than 10 ms planning.
+
+**Remedy.** A prepared statement is planned once and its plan reused (`PREPARE`, or the driver's own prepared statements -
+Npgsql's `Max Auto Prepare`), so a statement that runs often stops paying for planning each time. Fewer joins, or fewer
+partitions for the planner to weigh (a filter on the partition key, so pruning drops them at plan time), also shorten it.
+
+## P14 Memoize mostly missing
+
+**Info**, under `ANALYZE`. A `Memoize` node's cache missed at least as often as it hit, and evicted cached results to make room:
+it was too small for the parameters it was asked about, so it cost its memory and saved little.
+
+**Remedy.** A Memoize cache is bounded by `work_mem` times `hash_mem_multiplier`, and when it fills it throws results away: a
+larger `work_mem` for the role or the session that runs the statement keeps more. If nearly every lookup's parameters differ,
+no cache size helps - compare the statement with `SET enable_memoize = off` in the SQL console to see whether it is faster
+without.
+
+## Query › Plan: the plan analyzer
+
+The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in Marten Studio) is the console's Explain buttons as a page of
+its own. It is behind **`RunSql`** and the write policy, resolved against the database as a whole, exactly as the console is, a
+pasted plan included; with `RunSql` off it shows the console's own disabled state, naming the property.
+
+**Three ways to plan.** *Explain* plans the statement and runs nothing. *Explain analyze* runs it, only through the console's
+guard, in its read-only transaction and under its statement timeout - a write is refused by the guard, and one the guard misses
+(`with d as (delete … returning *) select * from d`) by Postgres (`25006`), so nothing is ever changed. *Generic plan* is for a
+statement with `$1`, `$2` placeholders: prepared and explained under `plan_cache_mode = force_generic_plan` (never `EXPLAIN
+(GENERIC_PLAN)`, which Npgsql breaks - see below), as a prepared statement is planned with no values. With values typed in for the
+placeholders, Explain and Explain analyze plan the statement **for those values**: the statement is prepared, only to read the
+types Postgres inferred for the placeholders from `pg_prepared_statements` (shown beside the boxes), and deallocated at once; then
+the statement itself is explained with each value bound to it as a parameter - never written into the statement - and the planner,
+given a bound value, plans for it as a constant. (A parameter cannot be bound to an `explain … execute`: Postgres does not analyze
+a utility statement's arguments with the command's own parameters and answers "could not determine data type of parameter $1",
+measured on 14, 17 and 18.) All of it is one read-only transaction; a run that stopped while it held the prepared statement - an
+error, a cancel - deallocates it in a transaction of its own. Every run and every refusal is audited as a `RunSql` run, as the
+console's are, with `$1` where the value was: a value is never in the audit or the log.
+
+**Options.** `BUFFERS` and `TIMING` (on by default), `VERBOSE`, `SETTINGS`, `WAL`, and from PostgreSQL 17 `MEMORY` and `SERIALIZE`.
+The ones that count what a statement does while it runs - `BUFFERS`, `TIMING`, `WAL`, `SERIALIZE` - need Explain analyze, and are
+disabled without it with a title that says why; a server older than 17 is told apart after its first plan, and `MEMORY` and
+`SERIALIZE` are left out of the statement - and named on the page - on it.
+
+**Paste a plan.** The JSON of `EXPLAIN (FORMAT JSON)`, one plan or the array Postgres prints, from `auto_explain`, a log or another
+server, is read by the same reader with its same bounds (2,000 nodes, 200 levels, 4 MB) and drawn with no database read: nothing
+is sent, nothing is audited, and the page says the database's own facts are not available for it. The text goes from the browser
+to the server in chunks, because a Blazor Server circuit accepts only 32 KB a message by default and a plan of thirty nodes is
+more than that. Text-format plans are not read.
+
+**The address** carries the statement, the mode and the options (`?sql=…&mode=analyze&options=buffers,timing,verbose`), so a link
+reopens the page with the editor filled - and never runs it: a run needs a click. The plan and the values of the placeholders are
+never in it. The console's **Open in Plan** link carries the statement there; the console keeps its inline plan panel.
+
+**Views of one plan.** The tree stays the default. *Node table*: every node as a row - its own time (or cost), rows, estimate,
+the misestimate as `×N`, loops, shared hit and read, temp read and written and I/O time - sortable by clicking a header. A
+node's buffers and I/O are its **own**, its total less its children's, because Postgres prints them cumulatively. Selecting a row
+selects the node in the tree and the other way round. *Summary strip*: planning and execution time, JIT and its share, the
+triggers' time, rows returned, shared hits and reads and the cache hit ratio, temp written, and - when asked for - WAL, planning
+memory and serialization; blank where Postgres printed nothing. *Critical path*: from the root, repeatedly the child with the
+largest inclusive time (or cost, when the plan was not timed), marked `critical` in the tree and the table. *Heat*: a node's bar
+coloured by its own time, its row misestimate, its buffers read or its temp I/O, from a four-step scale with a dark theme of its
+own - and the value is printed as text, so colour is never the only signal. *Node detail*: every key Postgres printed for the
+selected node, grouped as the node, estimate, actual, buffers, I/O and WAL, workers, sort/hash/memoize and JIT, each with a
+one-line explanation of what it means.
+
+**Export.** *Copy JSON*, *Copy as Markdown* (the summary, then the node table, as GitHub tables, for a pull request or an
+issue) and *Download plan.json*. *Download for speedscope* saves the plan as `plan.speedscope.json`, in
+[speedscope](https://www.speedscope.app)'s file format: one frame for each node (named as the tree labels it, plus its index in
+pre-order, `[#3]`), and one sampled profile for each measure the plan has - *Self time* (analyzed with timing), *Self cost*,
+*Shared blocks read* and *Temp blocks written* (each when buffers were printed and not all zero) - the weight of a node being its
+own value, the same self time or cost the tree shows. The file is saved by the browser; there is no link to the viewer, which is
+opened by hand at speedscope.app (the file stays in the browser). A plan from Operations › Statements gets no export, as its
+masked form is not offered raw.
 
 ## The console's EXPLAIN ANALYZE
 

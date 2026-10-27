@@ -2,10 +2,14 @@
 @using PostgresStudio.Components.Json
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services.Health
+@using PostgresStudio.Services
 @using PostgresStudio.Services.Health.Checks
+@using PostgresStudio.Services.Maintenance
 @using PostgresStudio.Services.Query
 @using PostgresStudio.Services.Settings
 @inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
 
 @*
     X1: a plan as a hand-rolled tree, and under it X1b's insights - for every place the studio shows a plan: the SQL
@@ -20,6 +24,10 @@
     The tree sits in a labelled scroll region (D25): a deep plan is wide, and scrolls sideways rather than squeezing its
     labels. Nothing here links within the page: under the studio-rooted <base href>, a fragment link navigates to the
     studio's front page, so an insight names its node and the node carries the insight's code.
+
+    X3 (issue #28): with Analyzer set - the Plan page's own, never the console's, Mode A's or the drill-in's - the same plan also
+    has a summary strip, a node table beside the tree (one selected node for both), the critical path, heat colouring, the
+    selected node's every key and the raw JSON with Copy, Copy as Markdown and Download. Without it the markup is what it was.
 *@
 
 <div class="ms-plan">
@@ -29,22 +37,29 @@
     }
     else
     {
-        <p class="ms-plan-summary">
-            <span class="ms-plan-summary-item">@(plan.Analyzed ? "EXPLAIN ANALYZE" : "EXPLAIN")</span>
-            @if (plan.Root.TotalCost is { } cost)
-            {
-                <span class="ms-plan-summary-item">estimated cost @Number(cost)</span>
-            }
-            @if (plan.PlanningMs is { } planning)
-            {
-                <span class="ms-plan-summary-item">planned in @Milliseconds(planning)</span>
-            }
-            @if (plan.ExecutionMs is { } execution)
-            {
-                <span class="ms-plan-summary-item">ran in @Milliseconds(execution)</span>
-            }
-            <span class="ms-plan-summary-item">@NodeCount(plan)</span>
-        </p>
+        @if (Analyzer)
+        {
+            <PlanSummaryStrip Plan="plan" />
+        }
+        else
+        {
+            <p class="ms-plan-summary">
+                <span class="ms-plan-summary-item">@(plan.Analyzed ? "EXPLAIN ANALYZE" : "EXPLAIN")</span>
+                @if (plan.Root.TotalCost is { } cost)
+                {
+                    <span class="ms-plan-summary-item">estimated cost @Number(cost)</span>
+                }
+                @if (plan.PlanningMs is { } planning)
+                {
+                    <span class="ms-plan-summary-item">planned in @Milliseconds(planning)</span>
+                }
+                @if (plan.ExecutionMs is { } execution)
+                {
+                    <span class="ms-plan-summary-item">ran in @Milliseconds(execution)</span>
+                }
+                <span class="ms-plan-summary-item">@NodeCount(plan)</span>
+            </p>
+        }
 
         @if (!string.IsNullOrWhiteSpace(Caption))
         {
@@ -56,6 +71,44 @@
             <p class="ms-plan-caption">Postgres planned @plan.Statements.ToString(CultureInfo.InvariantCulture) statements for this one (a rewrite rule); the first is drawn.</p>
         }
 
+        @if (Analyzer)
+        {
+            <div class="ms-plan-controls">
+                <div class="ms-plan-view-switch" role="group" aria-label="Plan view">
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-tree" aria-pressed="@(table ? "false" : "true")" @onclick="() => ShowTable(false)">Tree</button>
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-table" aria-pressed="@(table ? "true" : "false")" @onclick="() => ShowTable(true)">Node table</button>
+                </div>
+
+                <label class="ms-plan-heat-label">
+                    <span>Heat</span>
+                    <select class="ms-input ms-plan-heat-select" value="@PlanAnalysis.Key(heat)" @onchange="OnHeatChanged">
+                        @foreach (PlanHeat option in PlanAnalysis.Heats)
+                        {
+                            <option value="@PlanAnalysis.Key(option)" selected="@(option == heat)" @key="option">@PlanAnalysis.Label(option, plan)</option>
+                        }
+                    </select>
+                </label>
+
+                <label class="ms-plan-critical-toggle">
+                    <input type="checkbox" class="ms-plan-critical-input" checked="@critical" @onchange="OnCriticalChanged" />
+                    <span>Critical path</span>
+                </label>
+            </div>
+
+            @if (heat != PlanHeat.None)
+            {
+                <p class="ms-plan-legend ms-plan-heat-legend">@PlanAnalysis.Legend(plan, heat)</p>
+            }
+
+            @if (critical)
+            {
+                <p class="ms-plan-legend ms-plan-critical-legend">
+                    The critical path is the chain of nodes that carries most of the plan's @(plan.Timed ? "time" : "estimated cost"): from the root, each
+                    step follows the child with the largest @(plan.Timed ? "inclusive time" : "total cost"). It is marked <span class="ms-chip ms-plan-chip">critical</span> here and in the node table.
+                </p>
+            }
+        }
+
         <p class="ms-plan-legend">
             @(plan.Timed
                 ? "Each node's bar is its share of the plan's time - its own, less the nodes below it."
@@ -63,11 +116,28 @@
             @(plan.Analyzed ? " Rows are per loop, as Postgres counts them." : " Rows are the planner's estimates.")
         </p>
 
-        <TableScroll Label="@Label">
-            <ul class="ms-plan-tree">
-                @NodeView(plan.Root)
-            </ul>
-        </TableScroll>
+        @if (Analyzer && table)
+        {
+            <PlanNodeTable Plan="plan"
+                           SelectedId="selectedId"
+                           OnSelect="SelectAsync"
+                           Critical="critical"
+                           Heat="@PlanAnalysis.Key(heat)"
+                           Flags="flags" />
+        }
+        else
+        {
+            <TableScroll Label="@Label">
+                <ul class="ms-plan-tree">
+                    @NodeView(plan.Root)
+                </ul>
+            </TableScroll>
+        }
+
+        @if (Analyzer && selectedId is not null)
+        {
+            <PlanNodeDetail Plan="plan" NodeId="selectedId" OnClose="ClearSelectionAsync" />
+        }
 
         @if (plan.Triggers.Count > 0)
         {
@@ -112,6 +182,10 @@
                             </p>
                             <p class="ms-plan-insight-message">@finding.Message</p>
                             <p class="ms-plan-insight-remedy">@finding.Remedy</p>
+                            @if (RelatedLink(finding) is { } related)
+                            {
+                                <p class="ms-plan-insight-link"><a class="ms-plan-insight-page" href="@related.Href">@related.Label</a></p>
+                            }
                         </li>
                     }
                 </ul>
@@ -120,7 +194,7 @@
             @if (notJudged.Count > 0)
             {
                 <p class="ms-plan-not-judged">
-                    Not judged without EXPLAIN ANALYZE, which only the SQL console runs:
+                    @(Analyzer ? "Not judged without Explain analyze:" : "Not judged without EXPLAIN ANALYZE, which only the SQL console runs:")
                     @string.Join(", ", notJudged.Select(static x => x.Code + " " + x.Title)).
                 </p>
             }
@@ -131,9 +205,14 @@
             @* X2: the indexes this plan suggests, and how Postgres would plan it under each - through the plan's own gate. *@
             <WhatIfPanel Source="WhatIf" Plan="plan" />
         }
+
+        @if (Analyzer && Plan is null)
+        {
+            <PlanExport Json="@Json" Plan="plan" FileName="@DownloadFileName" Statement="@ExportStatement" />
+        }
     }
 
-    @if (Plan is null && !string.IsNullOrWhiteSpace(Json))
+    @if (Plan is null && !string.IsNullOrWhiteSpace(Json) && !(Analyzer && read?.Plan is not null))
     {
         <details class="ms-plan-raw">
             <summary>The plan as Postgres printed it (JSON)</summary>
@@ -152,6 +231,30 @@
     private Dictionary<int, List<string>> flags = [];
     private string? readJson;
     private QueryPlan? readPlan;
+
+    // X3: the analyzer's view state, one for the tree and the table both - what is selected, which view, the heat, the path.
+    private int? selectedId;
+    private bool table;
+    private PlanHeat heat;
+    private bool critical;
+    private HashSet<int> criticalIds = [];
+    private IReadOnlyDictionary<int, PlanHeatCell> heatCells = new Dictionary<int, PlanHeatCell>();
+
+    /// <summary>
+    /// X3 (issue #28): draw the plan as the Plan page does - a summary strip, a node table beside the tree, the critical path,
+    /// heat, the selected node's every key and the raw JSON's export. Off, the markup is the console's, Mode A's and the
+    /// drill-in's, unchanged. Only for a plan the visitor ran or pasted, which is unmasked: the keys the detail lists are
+    /// <see cref="PlanNode.Properties" />, which a masked read does not keep.
+    /// </summary>
+    [Parameter]
+    public bool Analyzer { get; set; }
+
+    /// <summary>
+    /// The statement the plan is of, which names the speedscope export; <see langword="null" /> for a pasted plan (X3). Read only
+    /// under <see cref="Analyzer" />.
+    /// </summary>
+    [Parameter]
+    public string? ExportStatement { get; set; }
 
     /// <summary>The plan as <c>EXPLAIN (FORMAT JSON)</c> printed it - read here, and offered whole as raw JSON.</summary>
     [Parameter]
@@ -210,6 +313,9 @@
     {
         read = next;
 
+        // A new plan: what was selected on the last one is another plan's node.
+        selectedId = null;
+
         if (next.Plan is { } plan)
         {
             insights = PlanInsights.Evaluate(plan, Settings.Text);
@@ -217,19 +323,107 @@
             flags = insights
                 .GroupBy(static x => x.NodeId)
                 .ToDictionary(static x => x.Key, static x => x.Select(static f => f.Insight.Code).Distinct(StringComparer.Ordinal).ToList());
+
+            if (Analyzer)
+            {
+                criticalIds = [.. PlanAnalysis.CriticalPath(plan)];
+                heatCells = PlanAnalysis.HeatMap(plan, heat);
+            }
         }
         else
         {
             insights = [];
             notJudged = [];
             flags = [];
+            criticalIds = [];
+            heatCells = new Dictionary<int, PlanHeatCell>();
         }
     }
 
+    private Task SelectAsync(int id)
+    {
+        selectedId = id;
+        return Task.CompletedTask;
+    }
+
+    private Task ClearSelectionAsync()
+    {
+        selectedId = null;
+        return Task.CompletedTask;
+    }
+
+    private void ShowTable(bool value) => table = value;
+
+    private void OnHeatChanged(ChangeEventArgs args)
+    {
+        heat = PlanAnalysis.ParseHeat(args.Value?.ToString());
+        heatCells = read?.Plan is { } plan ? PlanAnalysis.HeatMap(plan, heat) : new Dictionary<int, PlanHeatCell>();
+    }
+
+    private void OnCriticalChanged(ChangeEventArgs args) => critical = args.Value is true;
+
+    /// <summary>The page a finding's remedy refers to, as a link for the scope on screen - or <see langword="null" /> where the studio offers none.</summary>
+    private (string Href, string Label)? RelatedLink(PlanInsightFinding finding) => finding.RelatedPage switch
+    {
+        PlanInsightPage.Maintenance when MaintenanceLinks.ToMaintenance(Settings, Descriptor, State.ActiveScope) is { } href => (href, "Open Operations › Maintenance"),
+        _ => null,
+    };
+
     private RenderFragment NodeView(PlanNode node) => __builder =>
     {
+        bool selected = Analyzer && selectedId == node.Id;
+        bool onPath = Analyzer && critical && criticalIds.Contains(node.Id);
+        PlanHeatCell? cell = Analyzer ? heatCells.GetValueOrDefault(node.Id) : null;
+
         <li class="ms-plan-item" @key="node.Id">
-            <div class="ms-plan-node @(node.NeverExecuted ? "ms-plan-node-idle" : null)">
+            @if (Analyzer)
+            {
+                @* The whole card selects the node for a mouse; the button inside it is the same selection for a keyboard. *@
+                <div class="@NodeClass(node, selected, onPath, cell)" aria-current="@(selected ? "true" : null)" @onclick="() => SelectAsync(node.Id)">
+                    @NodeBody(node, selected, onPath, cell)
+                </div>
+            }
+            else
+            {
+                <div class="@NodeClass(node, selected, onPath, cell)">
+                    @NodeBody(node, selected, onPath, cell)
+                </div>
+            }
+
+            @if (node.Children.Any(static x => x.Id < MaxDrawnNodes))
+            {
+                <ul class="ms-plan-children">
+                    @foreach (PlanNode child in node.Children.Where(static x => x.Id < MaxDrawnNodes))
+                    {
+                        @NodeView(child)
+                    }
+                </ul>
+            }
+        </li>
+    };
+
+    private static string NodeClass(PlanNode node, bool selected, bool onPath, PlanHeatCell? cell) =>
+        string.Join(' ', new[]
+        {
+            "ms-plan-node",
+            node.NeverExecuted ? "ms-plan-node-idle" : null,
+            selected ? "ms-plan-node-selected" : null,
+            onPath ? "ms-plan-critical" : null,
+            cell is { Level: > 0 } ? "ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture) : null,
+        }.Where(static x => x is not null));
+
+    private RenderFragment NodeBody(PlanNode node, bool selected, bool onPath, PlanHeatCell? cell) => __builder =>
+    {
+                @if (Analyzer)
+                {
+                    <button type="button"
+                            class="ms-plan-pick ms-plan-node-pick"
+                            aria-pressed="@(selected ? "true" : "false")"
+                            aria-label="@("Select " + node.Description)"
+                            @onclick="() => SelectAsync(node.Id)"
+                            @onclick:stopPropagation="true"></button>
+                }
+
                 <p class="ms-plan-node-head">
                     @if (node.SubplanName is { } subplan)
                     {
@@ -252,6 +446,10 @@
                     {
                         <span class="ms-chip ms-plan-chip">never executed</span>
                     }
+                    @if (onPath)
+                    {
+                        <span class="ms-chip ms-plan-chip ms-plan-critical-flag" title="On the critical path: the chain of nodes that carries most of the plan's time">critical</span>
+                    }
                     @if (flags.TryGetValue(node.Id, out List<string>? codes))
                     {
                         @foreach (string code in codes)
@@ -265,8 +463,16 @@
                 @if (Share(node) is { } share)
                 {
                     <p class="ms-plan-share">
-                        <span class="ms-plan-bar" style="--ms-plan-share: @Width(share.Value)" aria-hidden="true"></span>
+                        <span class="ms-plan-bar @(cell is { Level: > 0 } ? "ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture) : null)" style="--ms-plan-share: @Width(share.Value)" aria-hidden="true"></span>
                         <span class="ms-plan-share-value">@TableText.Percent(share.Value) of @share.Of</span>
+                    </p>
+                }
+
+                @if (cell is not null)
+                {
+                    @* The heat as text beside the colour: colour is never the only signal. *@
+                    <p class="ms-plan-heat-line">
+                        <span class="ms-plan-heat-chip ms-plan-heat-@cell.Level.ToString(CultureInfo.InvariantCulture)">@PlanAnalysis.Label(heat, read?.Plan): @cell.Text</span>
                     </p>
                 }
 
@@ -294,18 +500,6 @@
                         </dl>
                     </details>
                 }
-            </div>
-
-            @if (node.Children.Any(static x => x.Id < MaxDrawnNodes))
-            {
-                <ul class="ms-plan-children">
-                    @foreach (PlanNode child in node.Children.Where(static x => x.Id < MaxDrawnNodes))
-                    {
-                        @NodeView(child)
-                    }
-                </ul>
-            }
-        </li>
     };
 
     /// <summary>The node's share of the plan's time, when it was analyzed with timing, or else of its cost.</summary>

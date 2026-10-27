@@ -83,6 +83,9 @@ internal static class MartenStudioDescriptor
             new("Overview", "", "grid"),
             new("Documents", "documents", "doc"),
             new("Query", "query", "query"),
+
+            // X3 (issue #28): PostgresStudio's Plan page, which the studio re-roots under /marten like every shared page.
+            new("Plan", "plan", "plan", Title: "A statement's plan, drawn every way, with what to fix"),
         ]),
 
         // What else lives in the store's database, beside what Marten declares (D27). Relationships moved

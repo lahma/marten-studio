@@ -219,7 +219,9 @@ range by where its rows stop, from the partitions' estimated rows and without op
 **Plans.** The console's **Explain** and **Explain analyze** buttons draw a plan as a tree - each node's type and what
 it reads, estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
 `EXPLAIN (FORMAT JSON)` you type. `EXPLAIN ANALYZE` runs only in the console, under `RunSql`, inside its read-only
-transaction, so a write its guard misses is refused by Postgres (`25006`). Under every plan, **plan insights** (P01-P08,
+transaction, so a write its guard misses is refused by Postgres (`25006`). **Query › Plan** is the same gate as a page of its own:
+write a statement, or paste a plan's JSON (which reads nothing), and get it drawn as a tree and a table of every node, with a
+summary, the critical path, heat colouring and an export, including one for speedscope. Under every plan, **plan insights** (P01-P14,
 [`docs/health/plans.md`](https://github.com/lahma/marten-studio/blob/main/docs/health/plans.md)) point at what is wrong
 with it. Operations › Statements opens one statement's drill-in (`?queryid=`): its text, its counters and its generic
 plan, planned as `SqlConsoleRole` behind the page's own gate, masked as the text is, and audited. Where a plan's

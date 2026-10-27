@@ -1,0 +1,128 @@
+@using PostgresStudio.Components.Json
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Query
+@using PostgresStudio.Services.Settings
+@implements IDisposable
+@inject IJSRuntime JsRuntime
+@inject IStudioSettings Settings
+
+@*
+    X3 (issue #28): the plan as Postgres printed it, and ways out of the page with it - Copy JSON, Copy as Markdown (the summary and
+    the node table, as GitHub tables, for a pull request or an issue) and Download plan.json. The Markdown is PlanTable.Markdown's;
+    the clipboard and the download are studio.js's own helpers (martenStudio.clipboard.copyText and martenStudio.download.text),
+    the ones the Health page's Snapshot menu uses.
+
+    Every call is guarded by StudioLiveUpdates.IsInteropUnavailable (hard rule 15): a tab that closed between the click and the call
+    is not an error anybody can act on. A copy or a download the browser refuses is said on screen, in a polite live region.
+*@
+
+@if (Json is { Length: > 0 })
+{
+    <section class="ms-plan-export" aria-label="Raw plan and export">
+        <div class="ms-plan-export-actions">
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-json" @onclick="CopyJsonAsync">Copy JSON</button>
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-markdown" disabled="@(plan is null)" @onclick="CopyMarkdownAsync">Copy as Markdown</button>
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-download" @onclick="DownloadAsync">Download @FileName</button>
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-download-speedscope" disabled="@(plan is null)" @onclick="DownloadSpeedscopeAsync">Download for speedscope</button>
+            <span class="ms-plan-export-status" role="status" aria-live="polite">@message</span>
+        </div>
+
+        <p class="ms-muted ms-plan-export-note">Open it at speedscope.app (drag the file in; it stays in your browser).</p>
+
+        <details class="ms-plan-raw">
+            <summary>The plan as Postgres printed it (JSON)</summary>
+            <JsonView Json="@Json" Label="Query plan JSON" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="@FileName" />
+        </details>
+    </section>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private QueryPlan? plan;
+    private string? message;
+
+    /// <summary>The plan as <c>EXPLAIN (FORMAT JSON)</c> printed it.</summary>
+    [Parameter]
+    public string? Json { get; set; }
+
+    /// <summary>The plan read from <see cref="Json" />, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type), for the Markdown.</summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    /// <summary>The download's name.</summary>
+    [Parameter]
+    public string FileName { get; set; } = "plan.json";
+
+    /// <summary>
+    /// The statement the plan is of, for the speedscope file's name - its first line, at most 80 characters - or
+    /// <see langword="null" /> for a pasted plan, which has none.
+    /// </summary>
+    [Parameter]
+    public string? Statement { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        QueryPlan? next = Plan as QueryPlan;
+
+        if (!ReferenceEquals(next, plan))
+        {
+            plan = next;
+            message = null;
+        }
+    }
+
+    private async Task CopyJsonAsync() => await CopyAsync(Json ?? string.Empty, "Copied the plan's JSON.");
+
+    private async Task CopyMarkdownAsync()
+    {
+        if (plan is not null)
+        {
+            await CopyAsync(PlanTable.Markdown(plan), "Copied the plan as Markdown.");
+        }
+    }
+
+    private async Task CopyAsync(string text, string done)
+    {
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", lifetime.Token, new object?[] { text });
+            message = copied ? done : "The browser did not allow the copy.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The copy did not reach the browser.";
+        }
+    }
+
+    private async Task DownloadAsync() => await SaveAsync(FileName, Json ?? string.Empty);
+
+    private async Task DownloadSpeedscopeAsync()
+    {
+        if (plan is not null)
+        {
+            await SaveAsync(
+                PlanSpeedscope.FileName,
+                PlanSpeedscope.Build(plan, PlanSpeedscope.NameOf(Statement), PlanSpeedscope.Exporter(Settings.ProductName)));
+        }
+    }
+
+    private async Task SaveAsync(string fileName, string content)
+    {
+        try
+        {
+            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, fileName, "application/json", content);
+            message = saved ? "Saved " + fileName + "." : "The browser did not save the file.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The download did not reach the browser.";
+        }
+    }
+
+    public void Dispose()
+    {
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

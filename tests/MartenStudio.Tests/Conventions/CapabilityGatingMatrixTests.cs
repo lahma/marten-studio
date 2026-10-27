@@ -16,6 +16,7 @@ using MartenStudio.Tests.Support;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Query;
@@ -111,6 +112,11 @@ public class CapabilityGatingMatrixTests
         new(typeof(ISchemaDataService), nameof(ISchemaDataService.ApplyAsync), StudioCapability.ApplySchemaChanges),
 
         new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.RunSqlAsync), StudioCapability.RunSql),
+
+        // X3 (issue #28): the Plan page's plan of a statement - planned, analyzed, generic or custom - is the console's gate whole
+        // (capability, write policy for the database as a whole, guard) and refuses by throwing as RunSqlAsync does, so it is
+        // asked the same three refusals. EXPLAIN ANALYZE runs the statement, which is why it is no read.
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.PlanAsync), StudioCapability.RunSql),
 
         // F7: a read gated like a write that refuses by throwing, exactly as the console does - so it sits
         // here, beside RunSqlAsync, and gets the same three refusals.
@@ -685,6 +691,13 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(SqlConsoleRequest))
         {
             return new SqlConsoleRequest("select 1");
+        }
+
+        // The Plan page's request, with a placeholder and its value and the options that need ANALYZE on: a gate that ran after
+        // the text or the values were looked at would be caught looking rather than refusing.
+        if (type == typeof(PlanRunRequest))
+        {
+            return new PlanRunRequest("select 1 where $1 = 1", PlanMode.Analyze) { Values = ["1"], Options = new PlanOptions { Wal = true, Serialize = true } };
         }
 
         // A request the screen would accept, so a gate that ran after the text was looked at would be caught

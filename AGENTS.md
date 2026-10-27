@@ -433,7 +433,7 @@ nothing. `StylesheetTests` (plus its `.Shell` part) pins the ones that were meas
 `UX-6`, `StylesheetTests.FinalPolish` `UX-7` and `StylesheetTests.QueryRefusal` `UX-8`; from 0.5.0 each section's own
 stylesheet test reads it out of `studio.css` by its header. 0.6.0 appended `M1`, `X3`, `M3` (tested in
 `DeadLetterGroupsTests`), `M2`, `X1`, `X2`, `M47` and `UI-0.6` (tested in
-`StylesheetTests.UiSweep`), in that order. 0.6.1 appended `UI-0.6.1`, tested there too. 0.8.0 appended `0.8-B` and `UI-0.8`. `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
+`StylesheetTests.UiSweep`), in that order. 0.6.1 appended `UI-0.6.1`, tested there too. 0.8.0 appended `0.8-B` and `UI-0.8`; 0.9.0 appended `0.9-A` (the plan analyzer, tested in `PlanAnalyzerStylesheetTests`). `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
 no specificity, so any rule that names a link wins over it. Earlier releases' sections: decision-notes.md, D26.
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
@@ -723,7 +723,13 @@ shown; the rest is masked like the text, and each plan is audited by `queryid`. 
 output, unmasked (D27). What if? (X2) imagines one index with hypopg behind the gate of the plan it accompanies, only
 one a builder writes (`MigrationSqlText`, or Marten's own `ToDDL`), re-derived on the server. Read-only; never
 `CREATE EXTENSION` or a real index; `hypopg_reset()` on the same connection, and a session whose reset fails ends
-itself, so no pooled backend keeps a hypothetical index.
+itself, so no pooled backend keeps a hypothetical index. **Query › Plan (0.9, issue #28)** is the console's gate as a page of its
+own, and nothing new: `ISqlConsoleService.PlanAsync` takes the same capability, write policy, guard, read-only transaction
+and timeout, audited as `RunSql` (the matrix classifies it with `RunSqlAsync`), planned, analyzed, or as a generic or custom plan
+of a statement with `$n` placeholders - a custom plan binds the typed values to the statement `EXPLAIN` explains, because a
+protocol parameter cannot reach `EXECUTE`, and a prepared statement only reads the inferred types - with `PlanView`'s
+`Analyzer` mode drawing it (unmasked: only `RunSql` output keeps every key of a node). A pasted plan reads nothing and goes
+over in chunks, since the circuit accepts 32 KB a message. P09 to P14 join the plan insight registry.
 
 ## Package budget
 

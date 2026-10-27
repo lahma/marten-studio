@@ -246,6 +246,8 @@ tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the v
                                          classifier, the cost meter's connection tracker, and the page; the plan reader
                                          and insights over ExplainFixtures.json (PROBE's 108 plans), and the drill-in
                                          - no database
+tests/PostgresStudio.Tests/Statements/PlanCorpus/  The plan analyzer's corpus (X3, issue #28): one EXPLAIN (FORMAT JSON) fixture
+                                         for each of P09 to P14 firing and quiet, and the shapes the views are tested on
 tests/MartenStudio.Tests/Statements/      MartenStudio's classifier over Marten's own recorded SQL, and its metered connections
 tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a server of its own, 14 and 18 through the
                                          matrix, and the Aurora shim's storage reads in the 15/16 and 17 shapes, and

@@ -33,6 +33,15 @@ public class PlanInsightsTests
         ["P06"] = static x => ExplainFixtures.ShapeOf(x) == "offset",
         ["P07"] = static x => ExplainFixtures.ShapeOf(x) == "seqfilter",
         ["P08"] = static _ => false,
+
+        // 0.9's six: no probe fixture is an index-only scan with heap fetches, a filter an index scan discards, a hash in batches, a
+        // JIT run, a slow plan or a memoize - the corpus (PlanCorpus/) holds their shapes, and PlanCorpusTests fires and quiets each.
+        ["P09"] = static _ => false,
+        ["P10"] = static _ => false,
+        ["P11"] = static _ => false,
+        ["P12"] = static _ => false,
+        ["P13"] = static _ => false,
+        ["P14"] = static _ => false,
     };
 
     public static TheoryData<string, string> EveryInsightOnEveryFixture()
@@ -80,7 +89,7 @@ public class PlanInsightsTests
         QueryPlan plan = QueryPlanReader.Read(ExplainFixtures.Get(name)).Plan!;
 
         PlanInsights.NotJudged(plan).Select(static x => x.Code).Should().Equal(
-            ExplainFixtures.IsAnalyze(name) ? [] : ["P01", "P02", "P03", "P04", "P08"]);
+            ExplainFixtures.IsAnalyze(name) ? [] : ["P01", "P02", "P03", "P04", "P08", "P09", "P10", "P11", "P12", "P13", "P14"]);
     }
 
     [Theory]
@@ -307,8 +316,12 @@ public class PlanInsightsTests
                 {"Node Type": "Seq Scan", "Parent Relationship": "Outer", "Relation Name": "t", "Filter": "(c ~~ '%x%'::text)", "Plan Rows": 2, "Actual Rows": 5000, "Rows Removed by Filter": 300000, "Actual Loops": 1},
                 {"Node Type": "Gather", "Parent Relationship": "Inner", "Workers Planned": 2, "Workers Launched": 0, "Actual Rows": 1, "Actual Loops": 5000, "Plans": [
                   {"Node Type": "Sort", "Sort Method": "external merge", "Sort Space Type": "Disk", "Sort Space Used": 100, "Actual Rows": 1, "Actual Loops": 5000, "Plans": [
-                    {"Node Type": "Bitmap Heap Scan", "Lossy Heap Blocks": 3, "Actual Rows": 1, "Actual Loops": 5000}]}]}]}]}
-            """);
+                    {"Node Type": "Bitmap Heap Scan", "Lossy Heap Blocks": 3, "Rows Removed by Filter": 400000, "Filter": "(k = 1)", "Actual Rows": 1, "Actual Loops": 5000, "Plans": [
+                      {"Node Type": "Index Only Scan", "Heap Fetches": 9000, "Actual Rows": 10, "Actual Loops": 1},
+                      {"Node Type": "Hash", "Hash Batches": 4, "Original Hash Batches": 1, "Peak Memory Usage": 2048, "Actual Rows": 1, "Actual Loops": 1},
+                      {"Node Type": "Memoize", "Cache Hits": 1, "Cache Misses": 9, "Cache Evictions": 3, "Actual Rows": 1, "Actual Loops": 10}]}]}]}]}]}
+            """).Replace("\"Execution Time\": 1.0", "\"Execution Time\": 100.0", StringComparison.Ordinal)
+            .Replace("\"Planning Time\": 0.1", "\"Planning Time\": 250.0, \"JIT\": {\"Functions\": 3, \"Timing\": {\"Total\": 60.0}}", StringComparison.Ordinal);
 
         IReadOnlyList<PlanInsightFinding> findings = Evaluate(json, PostgresStudioText.Instance);
         findings.Select(static x => x.Insight.Code).Distinct().Should().BeEquivalentTo(PlanInsights.All.Select(static x => x.Code));

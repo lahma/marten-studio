@@ -185,6 +185,15 @@ public class StudioRouteTableTests
         MartenSpine.Descriptor.QueryComponent.Should().Be<MartenStudio.Components.Pages.Query.Query>();
     }
 
+    /// <summary>X3 (issue #28): PostgresStudio's Plan page is below Marten Studio's root like every shared page - <c>/marten/plan</c>.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/ops/marten")]
+    public void The_plan_route_matches_the_shared_plan_page_under_the_marten_root(string? path)
+    {
+        Routes.Match("plan", Options(path))!.PageType.Should().Be<PostgresStudio.Components.Pages.Query.PlanPage>();
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("/ops/marten")]

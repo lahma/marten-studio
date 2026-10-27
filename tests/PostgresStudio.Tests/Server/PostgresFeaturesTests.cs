@@ -56,6 +56,8 @@ public class PostgresFeaturesTests
         (PostgresFeature.MaintainRole, 170000),
         (PostgresFeature.ExplainGenerationObject, 170000),
         (PostgresFeature.TransactionTimeout, 170000),
+        (PostgresFeature.ExplainMemory, 170000),
+        (PostgresFeature.ExplainSerialize, 170000),
         (PostgresFeature.RelAllFrozen, 180000),
         (PostgresFeature.VacuumMaxThreshold, 180000),
         (PostgresFeature.PgStatIoBytes, 180000),

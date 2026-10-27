@@ -75,6 +75,12 @@ baseline, so editing or deleting a row is a reviewed change.
 | [P06](plans.md#p06-large-offset) | Large OFFSET | Plans | - | plan node | both | 0.6 | - |
 | [P07](plans.md#p07-leading-wildcard-like) | Leading-wildcard LIKE | Plans | - | plan node | both | 0.6 | - |
 | [P08](plans.md#p08-parallel-workers-short-of-the-plan) | Parallel workers short of the plan | Plans | - | plan node | both | 0.6 | - |
+| [P09](plans.md#p09-index-only-scan-fetching-the-heap) | Index-only scan fetching the heap | Plans | - | plan node | both | 0.9 | - |
+| [P10](plans.md#p10-filter-discarding-most-rows-after-an-index) | Filter discarding most rows after an index | Plans | - | plan node | both | 0.9 | - |
+| [P11](plans.md#p11-hash-built-in-batches) | Hash built in batches | Plans | - | plan node | both | 0.9 | - |
+| [P12](plans.md#p12-jit-costing-more-than-it-saves) | JIT costing more than it saves | Plans | - | plan node | both | 0.9 | - |
+| [P13](plans.md#p13-planning-slower-than-execution) | Planning slower than execution | Plans | - | plan node | both | 0.9 | - |
+| [P14](plans.md#p14-memoize-mostly-missing) | Memoize mostly missing | Plans | - | plan node | both | 0.9 | - |
 | [R01](replication.md#r01-replication-slot-retaining-wal) | Replication slot retaining WAL | Replication | `near-limit`, `inactive`, `lost` | - | both | 0.4 | - |
 | [R02](replication.md#r02-wal-archiving-failing) | WAL archiving failing | Replication | `failing`, `backlog` | - | both | 0.5 | - |
 | [R03](replication.md#r03-standby-lag) | Standby lag | Replication | `primary-view`, `standby-view`, `paused`, `aurora-reader` | - | both | 0.5 | - |
