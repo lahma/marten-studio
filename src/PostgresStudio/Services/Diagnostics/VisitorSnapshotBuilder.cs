@@ -42,6 +42,12 @@ internal sealed record VisitorSnapshot(string Json, string FileName);
 /// <b>The server section</b> is the Server page's, at the database-wide gate, version and platform included: one gate for the
 /// whole object rather than a split no page makes. Compute is the Health page's server line, at the same gate.
 /// </para>
+/// <para>
+/// <b>What the download leaves null.</b> The <c>wal</c> section: it is the Replication page's facts, which this builder asks
+/// no service for and whose gate it would be a second one, so the visitor's file carries <c>wal: null</c> and the API's snapshot
+/// is where a baseline reads it. The checksum failures and the all-visible ratio are carried: the Server and Storage pages
+/// already hold them, at the gates those pages apply.
+/// </para>
 /// </remarks>
 internal sealed class VisitorSnapshotBuilder
 {
@@ -285,6 +291,7 @@ internal sealed class VisitorSnapshotBuilder
                     ShareOfDatabase = x.ShareOfDatabase ?? 0,
                     HotUpdateRatio = x.HotUpdateRatio,
                     GrowthBytesPerDay = Whole(x.GrowthBytesPerDay),
+                    AllVisibleRatio = DiagnosticsMapper.Ratio(x.AllVisibleRatio),
                 }),
             ],
         };
@@ -378,6 +385,9 @@ internal sealed class VisitorSnapshotBuilder
             MeasuredAt = view.MeasuredAt,
             Settings = [.. view.Settings.SelectMany(static x => x.Settings).Select(static x => DiagnosticsMapper.Setting(x.Row))],
             Extensions = [.. view.Extensions.Select(DiagnosticsMapper.Extension)],
+            DataChecksums = ServerConnectionPosture.ChecksumsState(view.DataChecksums),
+            ChecksumFailures = view.ChecksumFailures,
+            LastChecksumFailure = view.LastChecksumFailure,
         });
     }
 

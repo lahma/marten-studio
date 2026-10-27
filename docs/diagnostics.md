@@ -77,14 +77,38 @@ PostgresDiagnosticsSnapshot s = await diagnostics.GetSnapshotAsync(
 | `Server` | which server answered: version, platform, instance, whether it is in recovery, when it started | always |
 | `Compute` | the compute capacity an `IPostgresCapacitySource` you register reports (Aurora Serverless v2's ACU, say) | always |
 | `Findings`, `Checks`, `FindingsMeasuredAt`, `FindingsWithheld` | the advisor's findings and every check's outcome | `Findings` (on by default) |
-| `Storage` | the database's size, its growth per day, and its largest tables | `Storage` |
+| `Storage` | the database's size, its growth per day, and its largest tables, each with its all-visible ratio | `Storage` |
 | `Statements` | the most expensive statements over the statement checks' window | `Statements` |
-| `Settings` | the curated server settings and the extensions | `Settings` |
+| `Settings` | the curated server settings and the extensions, and whether data checksums are on and what they have counted | `Settings` |
 | `Connections` | sessions by state for the database, the server's connection budget, and sessions per application | `Connections` |
+| `Wal` | the write-ahead log's records, full-page images and bytes since the statistics last began | `Wal` |
 | `Withheld` | each section or part left out, keyed by its name, with what it would take | always |
 
 `PostgresDiagnosticsRequest.FindingsOnly` asks for the findings alone; `PostgresDiagnosticsRequest.AllSections` for every
 section. A section not asked for is `null`.
+
+### A measurement baseline
+
+A baseline taken at a fixed point - a week after a PostgreSQL upgrade, say - reads the numbers a decision is made from:
+the statements and their window (`Statements.StatisticsSince`, `Statements.Window`), the size and growth (`Storage`),
+the settings and the connection budget (`Settings`, `Connections`), and three more that are cumulative counts of the
+server's own, never Activity-grade and so never withheld:
+
+- **`Wal`** is `pg_stat_wal`: `Records`, `FullPageImages` and `Bytes` since `StatsReset`. WAL volume is what a
+  point-in-time-recovery window has to keep; two snapshots' `Bytes` over the time between their `MeasuredAt` is a rate,
+  while `StatsReset` is the same in both. It is the Replication page's read, shared with it: on Amazon Aurora, whose
+  storage layer writes no WAL of yours, `Outcome` is `NotApplicable` with the reason. It carries no write or sync
+  counter, which `pg_stat_wal` has on PostgreSQL 14 to 17 and gave up to `pg_stat_io` on 18.
+- **`Settings.DataChecksums`** says whether the server checks page checksums, and **`Settings.ChecksumFailures`** with
+  **`LastChecksumFailure`** what this database has counted (`pg_stat_database.checksum_failures`): null while checksums are
+  off, where the server counts none, and any number above zero is corruption. Checksums are chosen when a cluster is made,
+  on by default from PostgreSQL 18.
+- **`Storage.LargestTables[].AllVisibleRatio`** is `relallvisible / relpages`, 0 to 1: how much of the table an index-only
+  scan can answer without touching the heap, as of its last `VACUUM` or `ANALYZE`. It decides whether a covering index
+  would pay on a large append-mostly table. Null while the catalog counts no pages for it.
+
+The studio's own download carries the checksum fields and the ratio too, as the visitor's Server and Storage pages hold
+them. It carries `wal: null`: that section is the API's.
 
 A section that could not be read is still there, with its own `Outcome` and `Reason`: a privilege the role lacks or a
 statement timeout is `Unavailable` or `TimedOut`, anything else `Failed` with the SQLSTATE. The rest of the snapshot is
@@ -192,7 +216,7 @@ Adding a key keeps the version. Removing or renaming one, changing its type or c
 
 | `schemaVersion` | Written by | What changed |
 |---|---|---|
-| 1 | 0.5.0 | The first version. |
+| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. |
 
 ## The Snapshot menu
 

@@ -149,6 +149,12 @@ internal static class MatrixReads
             {
                 Found(facts.LargestTables.FirstOrDefault(static y => y.Table.Table == "child"), "store.child among the largest tables");
             }
+
+            // Issue #31: the all-visible ratio is a share, or nothing - never outside 0 to 1, on any release or role.
+            foreach (StorageTableFacts table in facts.LargestTables.Where(static y => y.AllVisibleRatio is < 0 or > 1))
+            {
+                throw new InvalidOperationException(table.Table.Schema + "." + table.Table.Table + " has an all-visible ratio of " + table.AllVisibleRatio + ".");
+            }
         }),
         new("stats: window", true, static async (x, t) =>
         {
@@ -279,6 +285,12 @@ internal static class MatrixReads
         {
             throw new InvalidOperationException("The replication facts read failed: " + string.Join("; ", facts.Failures));
         }
+
+        // Issue #31: pg_stat_wal is read on every release the matrix holds (14 and later), as every role: records, images and bytes.
+        if (facts.Wal is not { Outcome: ReplicationReadOutcome.Read, Value: { Records: >= 0, FullPageImages: >= 0, Bytes: >= 0 } })
+        {
+            throw new InvalidOperationException("The WAL counters were not read: " + facts.Wal.Outcome + " " + facts.Wal.Note);
+        }
     }
 
     /// <summary>Fails a Server page facts read any section of which failed: on every release each one reads.</summary>
@@ -287,6 +299,19 @@ internal static class MatrixReads
         if (facts.Failures.Count > 0)
         {
             throw new InvalidOperationException("The server facts read failed: " + string.Join("; ", facts.Failures));
+        }
+
+        // Issue #31: checksums are on or off - a bool on every release - and the failure count is null exactly while they are off.
+        PostgresStudio.Services.Server.ServerConnectionPosture posture = facts.Posture.Value!;
+
+        if (posture.ChecksumsOn is not { } on)
+        {
+            throw new InvalidOperationException("data_checksums read as '" + posture.DataChecksums + "', which is neither on nor off.");
+        }
+
+        if (on != posture.ChecksumFailures.HasValue || posture.ChecksumFailures < 0)
+        {
+            throw new InvalidOperationException("data_checksums is " + posture.DataChecksums + " and checksum_failures reads " + posture.ChecksumFailures + ".");
         }
     }
 

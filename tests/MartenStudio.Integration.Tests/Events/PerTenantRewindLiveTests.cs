@@ -148,6 +148,33 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
             async () => (await LettersAsync(Acme)).Count > 0 && (await LettersAsync(Globex)).Count > 0,
             "the daemon to record a dead letter in each tenant",
             DescribeDaemonAsync);
+
+        // And settled: the dead letter is recorded first, and the agent's progression row follows when it has finished the
+        // batch - so a test that read "globex's progression" the moment the letter appeared read nothing, and the row
+        // arrived at the tenant's last event while it ran (issue #27: "Expected value to be <null>, but found 2L"). The
+        // state every test here starts from is each agent at its tenant's last event, so nothing is still moving.
+        await WaitForAsync(
+            async () => await ProgressAsync(ShardName(Acme)) >= await LastEventAsync(Acme)
+                && await ProgressAsync(ShardName(Globex)) >= await LastEventAsync(Globex),
+            "each tenant's agent to reach its tenant's last event",
+            DescribeDaemonAsync);
+    }
+
+    /// <summary>The name of a tenant's progression row: the projection's shard for that tenant.</summary>
+    private static string ShardName(string tenant) => $"{Projection}:All:{tenant}";
+
+    /// <summary>The sequence of a tenant's newest event, or <see langword="null" /> when it has none.</summary>
+    private async Task<long?> LastEventAsync(string tenant)
+    {
+        await using var connection = new NpgsqlConnection(postgres.ConnectionString);
+        await connection.OpenAsync(Token);
+
+        await using var command = new NpgsqlCommand(
+            "select max(seq_id) from " + SqlIdentifier.Qualify(Schema, "mt_events") + " where tenant_id = @tenant",
+            connection);
+        command.Parameters.AddWithValue("tenant", tenant);
+
+        return await command.ExecuteScalarAsync(Token) is long value ? value : null;
     }
 
     /// <summary>What the daemon and the dead-letter table hold, for a wait that timed out.</summary>

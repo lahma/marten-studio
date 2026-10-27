@@ -127,17 +127,25 @@ public class IndexLintLiveTests(PostgresFixture postgres)
         await using StudioHost host = Host(database, schema);
 
         // 3.5 million int4 entries make a pkey of about 75 MiB (22.6 bytes an entry, measured on 17); deleting 39 rows in 40
-        // and vacuuming leaves the pages and 87,500 entries - some 900 bytes an entry, past the issue's 640.
+        // and vacuuming leaves the pages and 87,500 entries - some 900 bytes an entry, past the issue's 640. Autovacuum is
+        // off for the table, so the VACUUM below is the only one: an autovacuum worker that came for the insert would hold
+        // pages and the table's lock while it ran.
         await ExecuteInAsync(
             database,
-            "create table ps_lint_t25.ledger (id int primary key)",
+            "create table ps_lint_t25.ledger (id int primary key) with (autovacuum_enabled = false)",
             "insert into ps_lint_t25.ledger select g from generate_series(1, 3500000) g");
         await ExecuteInAsync(database, "delete from ps_lint_t25.ledger where id % 40 <> 0");
-        await ExecuteInAsync(database, "vacuum ps_lint_t25.ledger");
+
+        // FREEZE, which makes the VACUUM aggressive and so a VACUUM that waits for a page's cleanup lock instead of skipping
+        // the page. A plain VACUUM skips a heap page another backend has pinned for that instant - the checkpointer or the
+        // background writer writing out the pages the delete just dirtied, on a CI disk - and the deleted rows on it stay in
+        // the index: "tuples missed: 220 dead from 1 pages not removed due to cleanup lock contention" for each page, and a
+        // pkey that read 100,060 here, 12,560 past the live rows' 87,500 (issue #27). Reproduced and measured on 17 with one
+        // pinned page: a plain VACUUM leaves its 220, VACUUM (FREEZE) waits for the pin and removes every one.
+        await ExecuteInAsync(database, "vacuum (freeze) ps_lint_t25.ledger");
 
         // The precondition, read where T25 reads it: the index's own reltuples, which only a VACUUM that removed entries writes.
-        // It keeps the 87,500 live rows' and, of the deleted rows', those on a page another process had pinned as it passed -
-        // measured, now and then, one page's 220 ("not removed due to cleanup lock contention"). T25's line is some 122,800.
+        // With every page cleaned it is the 87,500 live rows' alone. T25's line is some 122,800.
         (await ScalarInAsync(database, "select c.reltuples::int8 from pg_catalog.pg_class c where c.oid = 'ps_lint_t25.ledger_pkey'::pg_catalog.regclass"))
             .Should().BeInRange(87_500, 100_000, "VACUUM removes the deleted rows' index entries once no session of this database can still see the rows");
 

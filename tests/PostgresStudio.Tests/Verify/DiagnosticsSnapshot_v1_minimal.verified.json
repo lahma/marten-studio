@@ -21,5 +21,6 @@
   "statements": null,
   "settings": null,
   "connections": null,
+  "wal": null,
   "withheld": {}
 }

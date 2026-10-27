@@ -75,6 +75,16 @@ internal sealed record ServerPageView
     /// <summary>What the checksums' state means here.</summary>
     public string? DataChecksumsNote { get; init; }
 
+    /// <summary>
+    /// The pages this database has read whose checksum failed (<c>pg_stat_database.checksum_failures</c>), or
+    /// <see langword="null" /> when checksums are off or the posture was not read. Not drawn on the page, which names S03;
+    /// the snapshot download carries it.
+    /// </summary>
+    public long? ChecksumFailures { get; init; }
+
+    /// <summary>When the latest of those was counted, or <see langword="null" />.</summary>
+    public DateTimeOffset? LastChecksumFailure { get; init; }
+
     /// <summary>When the server started, or <see langword="null" /> when not read.</summary>
     public DateTimeOffset? ServerStarted { get; init; }
 
@@ -236,6 +246,8 @@ internal sealed class ServerPageService : IServerPageService
                     + "(pg_checksums --enable).",
                 _ => null,
             },
+            ChecksumFailures = posture?.ChecksumFailures,
+            LastChecksumFailure = posture?.LastChecksumFailure,
             ServerStarted = posture?.ServerStarted,
             Uptime = posture?.ServerStarted is { } started && read.ReadAt > started ? read.ReadAt - started : null,
             LoginRole = posture?.LoginRole ?? grants?.LoginRole,

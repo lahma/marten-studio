@@ -159,6 +159,9 @@ public class DiagnosticsServiceTests
         snapshot.Storage.Reason.Should().NotBeNullOrWhiteSpace();
         snapshot.Settings!.Outcome.Should().NotBe(PostgresReadOutcome.Read);
         snapshot.Connections!.Outcome.Should().NotBe(PostgresReadOutcome.Read);
+        snapshot.Wal.Should().NotBeNull("AllSections asks for the write-ahead log too (issue #31)");
+        snapshot.Wal!.Outcome.Should().NotBe(PostgresReadOutcome.Read, "the same store refuses the Replication page's read");
+        snapshot.Withheld.Should().NotContainKey("wal", "nothing in it is Activity-grade");
     }
 
     /// <summary>
@@ -185,6 +188,7 @@ public class DiagnosticsServiceTests
             ("statements", snapshot.Statements?.Outcome, snapshot.Statements?.Reason),
             ("settings", snapshot.Settings?.Outcome, snapshot.Settings?.Reason),
             ("connections", snapshot.Connections?.Outcome, snapshot.Connections?.Reason),
+            ("wal", snapshot.Wal?.Outcome, snapshot.Wal?.Reason),
         })
         {
             section.Outcome.Should().Be(PostgresReadOutcome.Failed, section.Name + " is there, and says it was not read");

@@ -25,6 +25,10 @@ namespace PostgresStudio.Services.Storage;
 /// <param name="HotUpdateRatio">The share of updates that were HOT, 0 to 1; <see langword="null" /> with no updates.</param>
 /// <param name="NewPageShare">The share of updates that went to another page (16+); <see langword="null" /> below 16 or with none.</param>
 /// <param name="GrowthBytesPerDay">Its growth a day, until the window has counted for a day <see langword="null" />.</param>
+/// <param name="AllVisibleRatio">
+/// The share of its heap's pages the visibility map marks all-visible (<c>relallvisible / relpages</c>), 0 to 1; <see langword="null" />
+/// while the catalog counts no pages. Not drawn on the page: the snapshot download carries it.
+/// </param>
 internal sealed record StorageTableView(
     string? Schema,
     string? Name,
@@ -39,7 +43,8 @@ internal sealed record StorageTableView(
     double? ShareOfDatabase,
     double? HotUpdateRatio,
     double? NewPageShare,
-    double? GrowthBytesPerDay)
+    double? GrowthBytesPerDay,
+    double? AllVisibleRatio = null)
 {
     /// <summary>Whether its name is withheld from this visitor.</summary>
     public bool Withheld => Name is null;
@@ -299,7 +304,8 @@ internal sealed class StorageService : IStorageService
                 share > 0 ? (double) table.TotalBytes / share : null,
                 table.HotUpdateRatio,
                 table.NewPageShare,
-                window is null ? null : table.GrowthBytesPerDay(window)));
+                window is null ? null : table.GrowthBytesPerDay(window),
+                table.AllVisibleRatio));
         }
 
         string? withheldReason = withheld == 0 ? null : WithheldReason(withheld, gate is not null);

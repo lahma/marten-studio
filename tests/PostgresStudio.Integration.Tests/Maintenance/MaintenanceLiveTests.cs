@@ -168,25 +168,35 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
     public async Task A_table_read_but_never_analysed_after_its_counters_began_again_is_T08_until_it_is_analysed()
     {
         const string schema = "ps_maint_t08";
-        await postgres.CreateSchemaAsync(schema, Token);
+
+        // A database of its own, not a schema of the shared one. pg_stat_reset_single_table_counters() moves the whole
+        // database's stats_reset (null becomes a time on 15 and later - measured on 17), and the statistics window reads a
+        // moved reset time between two sweeps as a reset: T01, T05 and T06 withhold their verdicts. Another class judging
+        // usage over the shared `postgres` database, TableHealthLiveTests among them, met exactly that when this test ran
+        // beside it (issue #27).
+        string database = await postgres.CreateDatabaseAsync(schema, Token);
+        await RunAsync(database, "create schema ps_maint_t08");
         ManualClock clock = new(Start);
-        await using StudioHost host = FixtureHost(schema, clock);
+        await using StudioHost host = FixtureHost(database, schema, clock);
 
         // Loaded with autovacuum off, so nothing analyses it; then its counters reset, as pg_upgrade starts them, and
         // autovacuum on again - with nothing modified, it has no reason to analyse.
-        await ExecuteAsync(
+        await RunAsync(
+            database,
             "create table ps_maint_t08.upgraded (id int primary key, note text) with (autovacuum_enabled = false)",
             "insert into ps_maint_t08.upgraded select g, 'n' || g from generate_series(1, 5000) g");
-        await ExecuteAsync(
+        await RunAsync(
+            database,
             "select pg_catalog.pg_stat_reset_single_table_counters('ps_maint_t08.upgraded'::regclass)",
             "alter table ps_maint_t08.upgraded reset (autovacuum_enabled)");
-        await ExecuteAsync(
+        await RunAsync(
+            database,
             "select pg_catalog.count(*) from ps_maint_t08.upgraded",
             "select pg_catalog.count(*) from ps_maint_t08.upgraded");
 
-        (await ScalarAsync<double>("select c.reltuples::float8 from pg_catalog.pg_class c where c.oid = 'ps_maint_t08.upgraded'::regclass"))
+        (await ScalarInAsync<double>(database, "select c.reltuples::float8 from pg_catalog.pg_class c where c.oid = 'ps_maint_t08.upgraded'::regclass"))
             .Should().Be(-1, "the shape pg_upgrade leaves: no statistics");
-        (await ScalarAsync<long>("select n_live_tup from pg_catalog.pg_stat_user_tables where relid = 'ps_maint_t08.upgraded'::regclass"))
+        (await ScalarInAsync<long>(database, "select n_live_tup from pg_catalog.pg_stat_user_tables where relid = 'ps_maint_t08.upgraded'::regclass"))
             .Should().Be(0, "and counters that say nothing lives there, so the live-row rule alone never holds");
 
         await AutovacuumServer.ReportAsync(host);
@@ -199,7 +209,7 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         finding.Evidence.Should().Contain(new HealthEvidence("Rows read since the counters began", "10,000"));
         finding.Finding.WhyItMatters.Should().Contain("vacuumdb --all --analyze-in-stages");
 
-        await ExecuteAsync("analyze ps_maint_t08.upgraded");
+        await RunAsync(database, "analyze ps_maint_t08.upgraded");
         clock.Advance(TimeSpan.FromMinutes(2));
         HealthReport quiet = await AutovacuumServer.ReportAsync(host);
 
@@ -500,18 +510,25 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         return await check.GatherAsync(context, Token);
     }
 
-    private StudioHost FixtureHost(string schema, ManualClock clock) =>
+    private StudioHost FixtureHost(string schema, ManualClock clock) => FixtureHost(postgres.ConnectionString, schema, clock);
+
+    /// <summary>A host over the database <paramref name="connectionString" /> names, whose only browsable schema is <paramref name="schema" />.</summary>
+    private static StudioHost FixtureHost(string connectionString, string schema, ManualClock clock) =>
         StudioHost.Create(
             services =>
             {
-                services.AddSingleton(_ => NpgsqlDataSource.Create(postgres.ConnectionString));
+                services.AddSingleton(_ => NpgsqlDataSource.Create(connectionString));
                 services.AddSingleton<TimeProvider>(clock);
             },
             options => options.BrowsableSchemas.Add(schema));
 
-    private async Task<T> ScalarAsync<T>(string sql)
+    private Task<T> ScalarAsync<T>(string sql) => ScalarInAsync<T>(postgres.ConnectionString, sql);
+
+    /// <summary>One value the test reads for itself, in the database <paramref name="connectionString" /> names.</summary>
+    private static async Task<T> ScalarInAsync<T>(string connectionString, string sql)
     {
-        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        await using NpgsqlConnection connection = new(connectionString);
+        await connection.OpenAsync(Token);
         await using NpgsqlCommand command = new(sql, connection);
         return (T) (await command.ExecuteScalarAsync(Token))!;
     }

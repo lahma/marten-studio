@@ -38,4 +38,12 @@ public sealed record PostgresTableStorage
 
     /// <summary>Its estimated growth a day; null until the statistics have counted for a day.</summary>
     public long? GrowthBytesPerDay { get; init; }
+
+    /// <summary>
+    /// The share of the heap's pages the visibility map marks all-visible, 0 to 1 (<c>relallvisible / relpages</c>, as of the
+    /// last <c>VACUUM</c> or <c>ANALYZE</c>); null while the catalog counts no pages (<c>relpages = 0</c>). An index-only scan
+    /// answers from the index alone for these pages and reads the heap for the rest, so it is what decides whether a covering
+    /// index would pay on a large, append-mostly table. A partitioned table's is over its partitions together.
+    /// </summary>
+    public double? AllVisibleRatio { get; init; }
 }

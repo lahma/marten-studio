@@ -286,6 +286,10 @@ internal enum ServerConnectionKind
 /// <param name="ServerStarted">When the server started.</param>
 /// <param name="DataChecksums"><c>data_checksums</c>: <c>on</c> or <c>off</c>.</param>
 /// <param name="StatementsLoaded">Whether <c>pg_stat_statements</c>' library was loaded when the server started.</param>
+/// <param name="ChecksumFailures">
+/// This database's <c>pg_stat_database.checksum_failures</c>: <see langword="null" /> when checksums are off, as the column is.
+/// </param>
+/// <param name="LastChecksumFailure">Its <c>checksum_last_failure</c>, or <see langword="null" /> when there has been none.</param>
 internal sealed record ServerConnectionPosture(
     string LoginRole,
     bool LoginSuperuser,
@@ -300,8 +304,22 @@ internal sealed record ServerConnectionPosture(
     bool InRecovery,
     DateTimeOffset? ServerStarted,
     string? DataChecksums,
-    bool StatementsLoaded)
+    bool StatementsLoaded,
+    long? ChecksumFailures = null,
+    DateTimeOffset? LastChecksumFailure = null)
 {
+    /// <summary>Whether the server checks page checksums: <see langword="null" /> when <c>data_checksums</c> was not read.</summary>
+    public bool? ChecksumsOn => ChecksumsState(DataChecksums);
+
+    /// <summary>The state a <c>data_checksums</c> spelling says - <c>on</c> or <c>off</c> - or <see langword="null" /> for any other.</summary>
+    /// <param name="setting">The setting as the page shows it: <c>on</c>, <c>off</c> or <c>not read</c>.</param>
+    internal static bool? ChecksumsState(string? setting) => setting switch
+    {
+        "on" => true,
+        "off" => false,
+        _ => null,
+    };
+
     /// <summary>How the connection came: a socket, the loopback interface, or the network.</summary>
     public ServerConnectionKind Kind => KindOf(ClientAddress);
 
@@ -366,7 +384,9 @@ internal sealed record ServerConnectionPosture(
                     reader.GetBoolean(10),
                     reader.IsDBNull(11) ? null : reader.GetFieldValue<DateTimeOffset>(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    reader.GetBoolean(13)),
+                    reader.GetBoolean(13),
+                    reader.IsDBNull(14) ? null : reader.GetInt64(14),
+                    reader.IsDBNull(15) ? null : reader.GetFieldValue<DateTimeOffset>(15)),
                 cancellationToken)
             .ConfigureAwait(false);
 

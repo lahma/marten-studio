@@ -98,7 +98,7 @@ anything; read *this* file before writing anything.
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt`, and it must not move because of
    PostgresStudio. PostgresStudio's is the same six (its own registration types), plus its six inbound types
    (`IPostgresDatabaseSource`, `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`,
-   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model's twenty-one
+   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model's twenty-two
    types, which `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt` lists type by type.
    Anything else that appears in either baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
@@ -660,7 +660,7 @@ refuses the other's registration (what the seams leave room for: decision-notes.
 studio.** History: decision-notes.md, D31. `IPostgresDiagnostics`, registered by `AddPostgresStudio()` and by
 `AddMartenStudio()` (one per process, like the studio), lists the databases the studio would list (`ListDatabasesAsync`)
 and returns each one's `PostgresDiagnosticsSnapshot` (`GetSnapshotAsync`): findings by stable code and variant, and
-typed sections for storage, statements, settings and extensions, and connections. `IPostgresDatabaseSource` (D30) and
+typed sections for storage, statements, settings and extensions, connections and the write-ahead log (`Wal`). `IPostgresDatabaseSource` (D30) and
 `IPostgresCapacitySource`, found in DI to report compute capacity SQL cannot see (Aurora Serverless v2's ACU), point the
 other way. MartenStudio's hosts reach it through the PostgresStudio assembly their exact pin names (hard rule 7).
 
@@ -1009,7 +1009,17 @@ graph:
    `marten-studio.tests=PostgresStudio.Integration.Tests` so it never attaches to this suite's.
    A live test whose assertion needs a `VACUUM` to remove rows works in a database of its own, as `IndexLintLiveTests`'
    T25 test does: a snapshot or transaction id that any other session of the database holds keeps the rows dead but not
-   removable (from PostgreSQL 14, sessions of other databases do not count).
+   removable (from PostgreSQL 14, sessions of other databases do not count). It also runs `VACUUM (FREEZE)`, not a plain
+   one: a plain VACUUM skips a heap page another backend has pinned at that instant (a checkpoint writing out the pages
+   the delete dirtied) and leaves its deleted rows' index entries, while an aggressive one waits for the page's cleanup lock.
+   A test that needs a `VACUUM` to mark pages all-visible (or frozen) loads with `set synchronous_commit = on`: the
+   matrix and the shared container run with it off, a row cannot be hinted committed until the WAL writer has flushed its
+   commit, and a VACUUM within that moment sets no page (`BaselineLiveTests`, measured on 14 to 18).
+   A live test that resets statistics (`pg_stat_reset()`, `pg_stat_reset_shared()`, and `pg_stat_reset_single_table_counters()`
+   too, which moves the database's `stats_reset` from null to a time) works in a database of its own, or on a server of its
+   own, as `MaintenanceLiveTests`' T08 test and `SinceRestartLiveTests` do: the statistics window reads a reset time that
+   moves between two sweeps as a reset, and every usage verdict (T01, T05, T06) of a class judging the shared `postgres`
+   database withholds itself.
    Waits are always wait-on-condition, **never `Task.Delay`**. The Playwright scenarios live in `Browser/`
    (and the Health page's first one in `Health/`): locally they skip with the install command in the
    reason when Chromium is missing; on CI a missing browser throws (D19).

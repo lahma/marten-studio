@@ -93,6 +93,53 @@ public class ServerSettingsFactsTests
             []);
 
     [Fact]
+    public void The_posture_read_adds_this_databases_checksum_counters_after_the_columns_it_always_had()
+    {
+        string sql = PostgresStudio.Internal.Sql.ServerPostureQueries.Posture().Sql;
+
+        sql.Should().Contain("as data_checksums").And.Contain("as statements_loaded");
+        sql.Should().Contain("select d.checksum_failures from pg_catalog.pg_stat_database d where d.datname = pg_catalog.current_database()) as checksum_failures");
+        sql.Should().Contain("select d.checksum_last_failure from pg_catalog.pg_stat_database d where d.datname = pg_catalog.current_database()) as checksum_last_failure");
+        sql.IndexOf("as checksum_failures", StringComparison.Ordinal).Should().BeGreaterThan(sql.IndexOf("as statements_loaded", StringComparison.Ordinal),
+            "the mapper reads the first fourteen columns by position, and the new ones are the fifteenth and sixteenth");
+        sql.IndexOf("as checksum_last_failure", StringComparison.Ordinal).Should().BeGreaterThan(sql.IndexOf("as checksum_failures", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_page_view_carries_the_checksum_counters_the_posture_read_and_none_when_it_read_nothing()
+    {
+        ServerPageView counted = ServerPageService.Build(
+            Facts(posture: Posture() with { DataChecksums = "on", ChecksumFailures = 4, LastChecksumFailure = Now.AddMinutes(-5) }),
+            Services.Settings.StudioText.Marten,
+            consoleRoleSet: false);
+        ServerPageView unread = ServerPageService.Build(
+            new ServerSettingsFacts(
+                Now,
+                new PostgresServerFacts(Now, 170011, "17.11", SelfHosted),
+                ServerRead<PostgresGrants>.Of(Grants()),
+                ServerRead<ServerSettingsRead>.Of(Settings()),
+                ServerRead<ServerExtensionsRead>.Of(new ServerExtensionsRead([], 0)),
+                new ServerRead<ServerConnectionPosture>(null, "This could not be read (SQLSTATE 57014)."),
+                []),
+            Services.Settings.StudioText.Marten,
+            consoleRoleSet: false);
+
+        (counted.DataChecksums, counted.ChecksumFailures, counted.LastChecksumFailure).Should().Be(("on", (long?) 4, (DateTimeOffset?) Now.AddMinutes(-5)));
+        (unread.DataChecksums, unread.ChecksumFailures, unread.LastChecksumFailure).Should().Be(("not read", (long?) null, (DateTimeOffset?) null));
+    }
+
+    [Theory]
+    [InlineData("on", true)]
+    [InlineData("off", false)]
+    [InlineData("not read", null)]
+    [InlineData(null, null)]
+    public void The_checksum_setting_is_a_bool_only_when_it_says_on_or_off(string? setting, bool? expected)
+    {
+        ServerConnectionPosture.ChecksumsState(setting).Should().Be(expected);
+        (Posture() with { DataChecksums = setting }).ChecksumsOn.Should().Be(expected);
+    }
+
+    [Fact]
     public void A_setting_the_role_is_not_shown_is_hidden_and_one_the_release_lacks_needs_its_version()
     {
         ServerSettingsFacts facts = Facts(160015, Grants("probe"), Settings(Setting("work_mem", "4096", "kB")));

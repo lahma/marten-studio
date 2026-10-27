@@ -27,6 +27,12 @@ public sealed record PostgresDiagnosticsRequest
     public bool Connections { get; init; }
 
     /// <summary>
+    /// The write-ahead log's counters (<c>pg_stat_wal</c>): records, full-page images and bytes. Read with the Replication
+    /// page's facts, which a call shares with the page.
+    /// </summary>
+    public bool Wal { get; init; }
+
+    /// <summary>
     /// Include what the studio shows only past its activity gate: statement texts and the statements section, application
     /// names, other sessions' evidence, and findings about one tenant. Off by default; without it each is counted as
     /// withheld.
@@ -52,5 +58,6 @@ public sealed record PostgresDiagnosticsRequest
         Statements = true,
         Settings = true,
         Connections = true,
+        Wal = true,
     };
 }

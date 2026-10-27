@@ -217,6 +217,24 @@ public class StorageFactsTests
     }
 
     [Fact]
+    public void The_all_visible_ratio_is_the_heaps_relallvisible_over_its_relpages_and_null_with_no_pages()
+    {
+        string sql = StorageQueries.TablesSql;
+
+        sql.Should().Contain("pg_catalog.sum(d.relallvisible::bigint) as all_visible_pages", "summed over a partitioned table's leaves with the heap pages");
+        sql.Should().Contain("case when coalesce(r.heap_pages, 0) > 0", "relpages = 0 is no ratio, not a division by nought");
+        sql.Should().Contain("least(r.all_visible_pages::float8 / r.heap_pages::float8, 1::float8)", "held to 1");
+        sql.Should().NotContain("pg_visibility", "the extension is not the studio's to need; the catalog's relallvisible is the visibility map's count");
+    }
+
+    [Fact]
+    public void The_all_visible_ratio_is_the_rows_and_a_table_the_catalog_has_not_counted_has_none()
+    {
+        new StorageTableFacts(Table("t"), Row("t", heap: 8_192) with { AllVisibleRatio = 0.75 }).AllVisibleRatio.Should().Be(0.75);
+        new StorageTableFacts(Table("t"), Row("t", heap: 0)).AllVisibleRatio.Should().BeNull();
+    }
+
+    [Fact]
     public void The_table_statement_names_no_table_and_binds_two_arrays()
     {
         var query = StorageQueries.Tables([new HealthTableTarget("store", "orders")]);
