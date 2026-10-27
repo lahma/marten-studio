@@ -30,10 +30,14 @@ internal static class DiagnosticsSnapshotBuilder
     /// <param name="results">Every check's part of the sweeps, regular first.</param>
     /// <param name="gate">The host gate.</param>
     /// <param name="runtime">The studio's runtime.</param>
+    /// <param name="sourceParameter">The studio's source parameter, for the findings' links.</param>
+    /// <param name="scope">The database, for the findings' links.</param>
     public static (IReadOnlyList<PostgresFinding> Findings, IReadOnlyList<PostgresCheck> Checks, int Withheld) Findings(
         IEnumerable<HealthCheckResult> results,
         HostGate gate,
-        IStudioRuntime runtime)
+        IStudioRuntime runtime,
+        string sourceParameter,
+        StudioScope scope)
     {
         ArgumentNullException.ThrowIfNull(results);
         ArgumentNullException.ThrowIfNull(gate);
@@ -55,7 +59,7 @@ internal static class DiagnosticsSnapshotBuilder
                     continue;
                 }
 
-                findings.Add(DiagnosticsMapper.Finding(finding, result.Check, gate, runtime));
+                findings.Add(DiagnosticsMapper.Finding(finding, result.Check, gate, runtime, sourceParameter, scope));
                 included++;
             }
 

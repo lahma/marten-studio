@@ -138,7 +138,7 @@ public class DiagnosticsSnapshotBuilderTests
             Result(c05, findings: [Finding(c05, "slow") with { Severity = HealthSeverity.Info }]));
 
         (IReadOnlyList<PostgresFinding> findings, IReadOnlyList<PostgresCheck> checks, int withheld) =
-            DiagnosticsSnapshotBuilder.Findings(sweep.Results, Gate(false), NoStudioRuntime.Instance);
+            DiagnosticsSnapshotBuilder.Findings(sweep.Results, Gate(false), NoStudioRuntime.Instance, "store", new PostgresStudio.Services.StudioScope("main", "db1", null));
 
         findings.Select(static x => x.Key).Should().Equal("T03|index|public.a_idx", "T03|index|public.b_idx", "C05");
         checks.Select(static x => (x.Code, x.Findings)).Should().Equal(("C05", 1), ("T03", 2));

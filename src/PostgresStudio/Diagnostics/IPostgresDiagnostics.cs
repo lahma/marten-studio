@@ -59,4 +59,14 @@ public interface IPostgresDiagnostics
         PostgresDatabaseRef database,
         PostgresDiagnosticsRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The path of <paramref name="page" /> for <paramref name="database" />, relative to the studio's mount path with no
+    /// leading slash and with the database's scope in its query (<see cref="PostgresStudioLink" />). Reads nothing.
+    /// </summary>
+    /// <param name="database">The database.</param>
+    /// <param name="page">The page.</param>
+    /// <returns>The path; the default implementation, for a host's own test double, returns an empty string.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="database" /> is null.</exception>
+    string GetStudioPath(PostgresDatabaseRef database, PostgresStudioPage page) => "";
 }

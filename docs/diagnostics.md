@@ -123,6 +123,15 @@ names, other sessions' process ids and roles, and findings about one tenant. On 
 The default is the safe one: the call somebody writes without reading this page must not be the one that puts
 statement texts in an e-mail.
 
+## Linking to the studio
+
+Each finding carries `StudioPath`, its card on the Health page, and `StudioLinks`, the screens that help with it;
+`GetStudioPath(database, page)` gives Health, Sessions, its blocking view, Statements, Maintenance, Storage or Server for
+a database. Each is relative to where you mapped the studio, with the database's scope in its query, so
+`$"{options.Path}/{finding.StudioPath}"` opens it. Take them from here rather than building routes: the studio's routes
+and query parameters are its own and may change between releases. A link opens the page for whoever follows it, under
+that visitor's own gates; it carries nothing the page would not show them.
+
 ## Security
 
 **It answers your code, not a visitor.** No authorization policy, capability or `ReadOnly` is asked: those decide what

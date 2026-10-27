@@ -52,7 +52,7 @@ public class HostGateSentinelTests
             Result(tenants, findings: [Finding(tenants, "A hot stream") with { TenantId = TenantSentinel, Subject = "stream-7" }]));
 
         (IReadOnlyList<PostgresFinding> findings, IReadOnlyList<PostgresCheck> checks, int withheld) =
-            DiagnosticsSnapshotBuilder.Findings(sweep.Results, gate, NoStudioRuntime.Instance);
+            DiagnosticsSnapshotBuilder.Findings(sweep.Results, gate, NoStudioRuntime.Instance, "store", new PostgresStudio.Services.StudioScope("main", "db1", null));
 
         Dictionary<string, string> sections = new(StringComparer.Ordinal);
         PostgresStatementsSection? statements = null;

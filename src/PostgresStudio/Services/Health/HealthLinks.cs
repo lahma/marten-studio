@@ -50,6 +50,38 @@ internal static class HealthLinks
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceParameter);
 
         StringBuilder builder = new(StudioLink.To(settings, route));
+        AppendQuery(builder, sourceParameter, scope, parameters);
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// The same link as <see cref="To" />, relative to the studio's mount path rather than to its <c>&lt;base href&gt;</c>:
+    /// the form the diagnostics API hands a host (<see cref="PostgresStudioLink" />).
+    /// </summary>
+    /// <param name="sourceParameter">The studio's source parameter.</param>
+    /// <param name="route">The page, relative to the studio root, with no leading slash.</param>
+    /// <param name="scope">The scope to carry, or <see langword="null" />.</param>
+    /// <param name="parameters">The page's own parameters; an entry whose value is blank is left out.</param>
+    public static string Relative(
+        string sourceParameter,
+        string route,
+        StudioScope? scope,
+        params IReadOnlyList<KeyValuePair<string, string?>> parameters)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceParameter);
+        ArgumentNullException.ThrowIfNull(route);
+
+        StringBuilder builder = new(route);
+        AppendQuery(builder, sourceParameter, scope, parameters);
+        return builder.ToString();
+    }
+
+    private static void AppendQuery(
+        StringBuilder builder,
+        string sourceParameter,
+        StudioScope? scope,
+        IReadOnlyList<KeyValuePair<string, string?>> parameters)
+    {
         bool first = true;
 
         foreach (KeyValuePair<string, string?> parameter in parameters)
@@ -63,8 +95,6 @@ internal static class HealthLinks
             Append(builder, ref first, StudioScopeQuery.DatabaseIdParameter, scope.DatabaseId);
             Append(builder, ref first, StudioScopeQuery.TenantIdParameter, scope.TenantId);
         }
-
-        return builder.ToString();
     }
 
     private static void Append(StringBuilder builder, ref bool first, string key, string? value)
