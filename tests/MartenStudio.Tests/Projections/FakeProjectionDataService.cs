@@ -277,10 +277,18 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
             {
                 Trends = Trends,
                 HealthHistory = HealthHistory,
+                LagHistories = LagHistories,
+                Thresholds = Thresholds,
                 TenantPartitionedEvents = TenantPartitionedEvents,
                 DatabaseAutoCreate = DatabaseAutoCreate,
             });
     }
+
+    /// <summary>The page's own histories the view carries - what the real service builds from its own samples (M2).</summary>
+    public Dictionary<string, ShardLagHistory> LagHistories { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The thresholds that apply, as the view carries them; <see langword="null" /> draws no list.</summary>
+    public ProjectionThresholds? Thresholds { get; set; }
 
     /// <summary>What the view says of <c>UseTenantPartitionedEvents</c>.</summary>
     public bool TenantPartitionedEvents { get; set; }

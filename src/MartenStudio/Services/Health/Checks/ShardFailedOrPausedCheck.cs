@@ -1,10 +1,14 @@
 using System.Globalization;
+using System.Reflection;
 
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
+
+using Microsoft.Extensions.DependencyInjection;
+
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
@@ -19,7 +23,18 @@ namespace MartenStudio.Services.Health.Checks;
 internal sealed record ShardFailedOrPausedFacts(
     DaemonCheckConfiguration Configuration,
     IReadOnlyList<DaemonShardRow>? Rows,
-    DaemonInProcess InProcess);
+    DaemonInProcess InProcess)
+{
+    private static readonly IReadOnlySet<string> NoShards = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The shards an earlier sample of this database recorded failed or paused (<see cref="DaemonSeries.ShardFailedAt" />),
+    /// read from the advisor's history at D05's own gate when the facts are gathered: the shards whose agents' positions D05
+    /// samples in a series of its own (<see cref="DaemonSeries.AgentPosition" />), so that its progress rule has a position
+    /// where D03 records none.
+    /// </summary>
+    public IReadOnlySet<string> Remembered { get; init; } = NoShards;
+}
 
 /// <summary>
 /// D05: a shard has failed or is paused - or keeps failing and being restarted.
@@ -53,10 +68,18 @@ internal sealed record ShardFailedOrPausedFacts(
 /// again, by a later pause, no further on. Committed progress past the position ends it - any later sample that saw the
 /// shard's position (D03's series) beyond it, so a shard that failed once and got past the event is quiet from its next
 /// page - and so does <see cref="RestartMemoryFor" /> (10 min, or three sampling intervals) without a sample that saw it
-/// fail again or still standing where it failed. A store D03 does not judge (one that partitions its events by tenant,
-/// <c>ShardStalledCheck</c>) samples no positions, so there only the failures themselves renew the memory, and progress
-/// never ends it: a shard that recovered and is then restarted for another reason, reading 0, is reported again until the
-/// memory runs out. A known limit of 0.4; a positions series of D05's own would close it.
+/// fail again or still standing where it failed.
+/// </para>
+/// <para>
+/// <b>A position series of D05's own</b> (0.6, M2). A store D03 does not judge - one that partitions its events by tenant,
+/// <c>ShardStalledCheck</c> - samples no positions, so in 0.4 and 0.5 only the failures themselves renewed the memory there,
+/// and progress never ended it: a shard that recovered and was then restarted for another reason, reading 0, was reported
+/// again until the memory ran out. So D05 samples, for each shard its history remembers failing
+/// (<see cref="ShardFailedOrPausedFacts.Remembered" />), where the daemon in this process has that shard's agent now
+/// (<see cref="DaemonSeries.AgentPosition" />: <c>ISubscriptionAgent.Position</c>, its last committed sequence, JasperFx
+/// 2.74.0 and 2.95.1), and the progress and renewal rules read that series beside D03's. Only remembered shards, so the
+/// series costs nothing for a shard that never failed. A studio beside a daemon in another process has no agent to ask,
+/// and is where it was.
 /// </para>
 /// <para>
 /// <b>What that cannot see.</b> The first sweep after watching begins, when it lands between a restart and the next
@@ -105,24 +128,62 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
     {
         DaemonCheckConfiguration configuration = DaemonCheckConfiguration.Read(context);
         DaemonInProcess inProcess = await DaemonInProcess.ReadAsync(context, configuration.AsyncShards, cancellationToken).ConfigureAwait(false);
+        IReadOnlySet<string> remembered = RememberedOf(context);
 
         if (!configuration.ExtendedProgressionTracking)
         {
-            return new ShardFailedOrPausedFacts(configuration, null, inProcess);
+            return new ShardFailedOrPausedFacts(configuration, null, inProcess) { Remembered = remembered };
         }
 
         EventStoreRelations shape = await EventHealth.ShapeAsync(context, cancellationToken).ConfigureAwait(false);
 
         if (shape.Progression is null || !shape.ProgressionColumns.Contains("agent_status", StringComparer.Ordinal))
         {
-            return new ShardFailedOrPausedFacts(configuration, null, inProcess);
+            return new ShardFailedOrPausedFacts(configuration, null, inProcess) { Remembered = remembered };
         }
 
         IReadOnlyList<DaemonShardRow> rows = await DaemonShardRow
             .ReadProblemsAsync(context, shape, configuration.EventSchema, cancellationToken)
             .ConfigureAwait(false);
 
-        return new ShardFailedOrPausedFacts(configuration, rows, inProcess);
+        return new ShardFailedOrPausedFacts(configuration, rows, inProcess) { Remembered = remembered };
+    }
+
+    /// <summary>D05's own gate, which the sweep stamps on every series it writes and at which it reads them back.</summary>
+    private static readonly HealthGate OwnGate = typeof(ShardFailedOrPausedCheck).GetCustomAttribute<HealthCheckAttribute>()!.Gate;
+
+    /// <summary>
+    /// The shards this database's regular history recorded failed or paused, read at D05's own gate - memory, not a
+    /// statement: the advisor's in-process ring, as this check's evaluator would read it.
+    /// </summary>
+    private static IReadOnlySet<string> RememberedOf(HealthCheckContext context)
+    {
+        HealthHistory? history = context.Services.GetService<HealthHistory>();
+
+        return history is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : RememberedIn(history.Read(context.StoreKey, HealthHistory.RingOf(context.DatabaseId, HealthSweepKind.Regular)).VisibleAt(OwnGate));
+    }
+
+    /// <summary>Every shard a history recorded failed or paused: each <see cref="DaemonSeries.ShardFailedAt" /> series in it.</summary>
+    internal static IReadOnlySet<string> RememberedIn(HealthHistoryView history)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+
+        HashSet<string> shards = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (HealthSample sample in history.Samples)
+        {
+            foreach (string series in sample.Values.Keys)
+            {
+                if (series.StartsWith(DaemonSeries.ShardFailedAtPrefix, StringComparison.Ordinal))
+                {
+                    shards.Add(series[DaemonSeries.ShardFailedAtPrefix.Length..]);
+                }
+            }
+        }
+
+        return shards;
     }
 
     /// <summary>
@@ -152,6 +213,18 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
             if (CategoryNumber(problem.FailureCategory) is { } category)
             {
                 parts.Add(new HealthSamplePart(DaemonSeries.ShardFailureCategory(problem.Shard), category));
+            }
+        }
+
+        // D05's own position series: where each remembered shard's agent here stands now - what ends a failure it got past
+        // on a store D03 records no positions for. A replay's position says nothing about the continuous agent's failure.
+        foreach (DaemonAgentFact agent in facts.InProcess.Agents)
+        {
+            if (agent.Position is { } position
+                && facts.Remembered.Contains(agent.ShardName)
+                && !facts.InProcess.IsKnownRebuilding(agent.ShardName))
+            {
+                parts.Add(new HealthSamplePart(DaemonSeries.AgentPosition(agent.ShardName), position));
             }
         }
 
@@ -308,13 +381,15 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
                 sample.Values.TryGetValue(category, out double number) ? CategoryName(number) : null));
         }
 
-        // A failure ends with the shard's progress past it: once any later sample saw the shard's position (D03's series)
-        // beyond where it failed, it got past - a later restart for another reason, reading 0, is not this failure again.
+        // A failure ends with the shard's progress past it: once any later sample saw the shard's position beyond where it
+        // failed - D03's committed row, or D05's own series of its agent here - it got past, and a later restart for another
+        // reason, reading 0, is not this failure again.
         string shardPosition = DaemonSeries.ShardPosition(shard);
+        string agentPosition = DaemonSeries.AgentPosition(shard);
+
         seen.RemoveAll(failure => evaluation.History.Samples.Any(sample =>
             sample.At > failure.At
-            && sample.Values.TryGetValue(shardPosition, out double later)
-            && later > failure.Position));
+            && (Beyond(sample, shardPosition, failure.Position) || Beyond(sample, agentPosition, failure.Position))));
 
         // And it lasts the memory from the last sample that saw it: failing, or still standing exactly where it failed, as a
         // restarted shard short of its failure does - so a shard that keeps failing keeps it for as long as the history holds
@@ -329,7 +404,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
 
             foreach (HealthSample sample in evaluation.History.Samples)
             {
-                if (sample.At > last && sample.Values.TryGetValue(shardPosition, out double at) && (long) at == failure.Position)
+                if (sample.At > last && (StandingAt(sample, shardPosition, failure.Position) || StandingAt(sample, agentPosition, failure.Position)))
                 {
                     last = sample.At;
                 }
@@ -337,6 +412,12 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
 
             return last;
         }
+
+        static bool Beyond(HealthSample sample, string series, long position) =>
+            sample.Values.TryGetValue(series, out double later) && later > position;
+
+        static bool StandingAt(HealthSample sample, string series, long position) =>
+            sample.Values.TryGetValue(series, out double at) && (long) at == position;
     }
 
     /// <summary>

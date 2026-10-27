@@ -105,7 +105,8 @@ internal static class DaemonThresholds
 /// <remarks>
 /// One writer per series, as the sweep requires: D01 writes the sequence, the mark and whether a committed event
 /// waits behind it, D03 the shard positions and per-row thresholds, D05 where each shard it saw failed or paused stood
-/// and how, D06 the dead-letter counts. D04 and the projections screen only read. Every writer is a
+/// and how - and, for those shards, where their agents here stand since - D06 the dead-letter counts. D04 and the
+/// projections screen only read (the screen's own chart keeps samples of its own, <c>ProjectionLagHistory</c>). Every writer is a
 /// <see cref="HealthGate.Database" /> check, so every series here is read at that gate.
 /// </remarks>
 internal static class DaemonSeries
@@ -144,13 +145,24 @@ internal static class DaemonSeries
     /// D05: the position a shard stood at when a sweep saw it failed or paused - what a later sweep, which may land after
     /// the coordinator has restarted it and before it fails again, when its agent reads Running, judges its progress by.
     /// </summary>
-    public static string ShardFailedAt(string shard) => "daemon.shard-failed-at:" + shard;
+    public static string ShardFailedAt(string shard) => ShardFailedAtPrefix + shard;
 
     /// <summary>D05: when that pause began, in Unix milliseconds of the daemon's own clock - a later pause is a later attempt.</summary>
     public static string ShardPausedAt(string shard) => "daemon.shard-paused-at:" + shard;
 
     /// <summary>D05: how it failed, as the number of its <c>ShardFailureCategory</c>, so that a finding made from memory names its remedy.</summary>
     public static string ShardFailureCategory(string shard) => "daemon.shard-failure-category:" + shard;
+
+    /// <summary>
+    /// D05's own position series: where the agent the daemon in this process runs for a shard stood
+    /// (<c>ISubscriptionAgent.Position</c>, its last committed sequence), sampled only for a shard an earlier sample saw
+    /// failed or paused. What D05's progress rule reads besides <see cref="ShardPosition" />, so that a store D03 does not
+    /// judge - one that partitions its events by tenant - still ends a failure the shard got past.
+    /// </summary>
+    public static string AgentPosition(string shard) => "daemon.agent-position:" + shard;
+
+    /// <summary>The prefix every <see cref="ShardFailedAt" /> series shares.</summary>
+    public const string ShardFailedAtPrefix = "daemon.shard-failed-at:";
 }
 
 /// <summary>What the store's configuration says about its daemon - configuration only, no connection.</summary>

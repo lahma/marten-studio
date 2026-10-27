@@ -357,4 +357,133 @@ public class ShardRestartMemoryTests
         check.Evaluate(Facts(Hosted(Running(41))), HealthEvaluation.At(Now, history: seen))
             .Findings.Should().BeEmpty();
     }
+
+    // ---- D05's own position series (0.6, M2): a store D03 records no positions for -----------------------------------
+
+    /// <summary>One tenant's shard, on a store that partitions its events by tenant - where D03 does not run.</summary>
+    private const string TenantShard = "ShipmentTracker:All:acme";
+
+    private static HealthSample AgentAt(TimeSpan ago, string shard, long position) =>
+        new(Now - ago, new Dictionary<string, double>(StringComparer.Ordinal) { [DaemonSeries.AgentPosition(shard)] = position });
+
+    private static HealthSample TenantSeenFailing(TimeSpan ago, long position) =>
+        new(Now - ago, new Dictionary<string, double>(StringComparer.Ordinal)
+        {
+            [DaemonSeries.ShardFailedAt(TenantShard)] = position,
+            [DaemonSeries.ShardPausedAt(TenantShard)] = FirstPause.ToUnixTimeMilliseconds(),
+        });
+
+    private static ShardFailedOrPausedFacts TenantFacts(DaemonInProcess inProcess, params string[] remembered) =>
+        new(DaemonConfiguration() with { TenantPartitionedEvents = true }, null, inProcess)
+        {
+            Remembered = new HashSet<string>(remembered, StringComparer.OrdinalIgnoreCase),
+        };
+
+    /// <summary>
+    /// The backlog case 0.4 and 0.5 reported again: a shard that failed, recovered - its agent here went past the failure -
+    /// and was then restarted for an unrelated reason, reading 0 before its start is processed. D03 records no position on
+    /// such a store; D05's own series of its agent's position is what says it got past.
+    /// </summary>
+    [Fact]
+    public void On_a_store_D03_does_not_judge_a_recovered_shard_restarted_for_another_reason_is_not_reported()
+    {
+        DaemonInProcess restarted = Hosted(new DaemonAgentFact(TenantShard, "Running", null, null, null, 0));
+        HealthSample failed = TenantSeenFailing(TimeSpan.FromMinutes(3), 40);
+        HealthSample recovered = AgentAt(TimeSpan.FromMinutes(2), TenantShard, 55);
+
+        new ShardFailedOrPausedCheck().Evaluate(TenantFacts(restarted, TenantShard), HealthEvaluation.At(Now, history: new HealthHistoryView([failed, recovered])))
+            .Findings.Should().BeEmpty("its agent here was seen at 55, past where it failed at 40");
+
+        new ShardFailedOrPausedCheck().Evaluate(TenantFacts(restarted, TenantShard), HealthEvaluation.At(Now, history: new HealthHistoryView([failed])))
+            .Findings.Should().ContainSingle("without that series - 0.5's behaviour - a fresh agent at 0 reads as the restart window")
+            .Which.Title.Should().EndWith("keeps failing and being restarted");
+    }
+
+    /// <summary>The series renews the memory as D03's does: an agent still standing exactly where it failed is short of it.</summary>
+    [Fact]
+    public void An_agent_seen_still_standing_where_it_failed_renews_the_memory()
+    {
+        DaemonInProcess restarted = Hosted(new DaemonAgentFact(TenantShard, "Running", null, null, null, 40));
+        HealthSample failed = TenantSeenFailing(TimeSpan.FromMinutes(20), 40);
+
+        new ShardFailedOrPausedCheck().Evaluate(TenantFacts(restarted), HealthEvaluation.At(Now, history: new HealthHistoryView([failed])))
+            .Findings.Should().BeEmpty("twenty minutes is past the memory");
+
+        new ShardFailedOrPausedCheck().Evaluate(
+                TenantFacts(restarted),
+                HealthEvaluation.At(Now, history: new HealthHistoryView([failed, AgentAt(TimeSpan.FromMinutes(2), TenantShard, 40)])))
+            .Findings.Should().ContainSingle("two minutes ago its agent was still where it failed");
+
+        new ShardFailedOrPausedCheck().Evaluate(
+                TenantFacts(restarted),
+                HealthEvaluation.At(Now, history: new HealthHistoryView([failed, AgentAt(TimeSpan.FromMinutes(2), TenantShard, 0)])))
+            .Findings.Should().BeEmpty("an agent at 0 is a fresh start, not a sighting of the failure");
+    }
+
+    [Fact]
+    public void A_sweep_samples_the_agent_position_of_each_shard_it_remembers_and_no_other()
+    {
+        DaemonInProcess agents = Hosted(
+            new DaemonAgentFact(TenantShard, "Running", null, null, null, 55),
+            new DaemonAgentFact("ShipmentTracker:All:other", "Running", null, null, null, 70),
+            new DaemonAgentFact("Unknown:All:acme", "Running", null, null, null, null));
+
+        IReadOnlyList<HealthSamplePart> parts = [.. new ShardFailedOrPausedCheck().Sample(TenantFacts(agents, TenantShard, "Unknown:All:acme"))];
+
+        parts.Should().BeEquivalentTo([new HealthSamplePart(DaemonSeries.AgentPosition(TenantShard), 55)],
+            "only a remembered shard, and only one whose position can be read");
+
+        new ShardFailedOrPausedCheck().Sample(TenantFacts(agents)).Should().BeEmpty("nothing remembered, nothing sampled");
+        new ShardFailedOrPausedCheck().Sample(TenantFacts(agents with { StudioRebuilds = ["ShipmentTracker"] }, TenantShard))
+            .Should().BeEmpty("a replay's position says nothing about the continuous agent's failure");
+    }
+
+    [Fact]
+    public void The_shards_remembered_are_every_failure_the_history_holds()
+    {
+        HealthHistoryView history = new(
+        [
+            SeenFailing(TimeSpan.FromMinutes(40), 10),
+            TenantSeenFailing(TimeSpan.FromMinutes(3), 40),
+            AgentAt(TimeSpan.FromMinutes(2), "Other:All", 5),
+        ]);
+
+        ShardFailedOrPausedCheck.RememberedIn(history).Should().BeEquivalentTo([Shard, TenantShard]);
+        ShardFailedOrPausedCheck.RememberedIn(HealthHistoryView.Empty).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Three sweeps as the sweeper runs them, at D05's own gate: the first sees the shard fail, the second - which remembers it
+    /// - samples its recovered agent, and the third finds it restarted for another reason and is quiet.
+    /// </summary>
+    [Fact]
+    public void Across_three_sweeps_the_series_is_written_and_read_back_at_D05s_own_gate()
+    {
+        HealthGate gate = typeof(ShardFailedOrPausedCheck).GetCustomAttribute<HealthCheckAttribute>()!.Gate;
+        ShardFailedOrPausedCheck check = new();
+        List<HealthSample> ring = [];
+
+        void Sweep(TimeSpan ago, ShardFailedOrPausedFacts facts)
+        {
+            List<HealthSamplePart> parts = [.. check.Sample(facts)];
+            ring.Add(new HealthSample(Now - ago, parts.ToDictionary(static x => x.Series, static x => x.Value, StringComparer.Ordinal))
+            {
+                Gates = parts.ToDictionary(static x => x.Series, _ => gate, StringComparer.Ordinal),
+            });
+        }
+
+        HealthHistoryView Seen() => new HealthHistoryView([.. ring]).VisibleAt(gate);
+
+        DaemonAgentFact paused = new(TenantShard, "Paused", "ApplyEvent", "boom", FirstPause, 40, 41, "item_added");
+        Sweep(TimeSpan.FromMinutes(3), TenantFacts(Hosted(paused)) with { Remembered = ShardFailedOrPausedCheck.RememberedIn(Seen()) });
+
+        DaemonAgentFact recovered = new(TenantShard, "Running", null, null, null, 55);
+        Sweep(TimeSpan.FromMinutes(2), TenantFacts(Hosted(recovered)) with { Remembered = ShardFailedOrPausedCheck.RememberedIn(Seen()) });
+
+        ring[^1].Values.Should().ContainKey(DaemonSeries.AgentPosition(TenantShard)).WhoseValue.Should().Be(55);
+
+        DaemonAgentFact restarted = new(TenantShard, "Running", null, null, null, 0);
+        check.Evaluate(TenantFacts(Hosted(restarted)), HealthEvaluation.At(Now, history: Seen()))
+            .Findings.Should().BeEmpty();
+    }
 }

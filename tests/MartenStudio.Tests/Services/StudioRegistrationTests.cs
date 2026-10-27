@@ -189,6 +189,9 @@ public class StudioRegistrationTests
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),
+
+        // 0.6, M2: the projections screen's own samples - a singleton fed by the snapshot read, bounded per database.
+        (typeof(ProjectionLagHistory), ServiceLifetime.Singleton, How.Type, typeof(ProjectionLagHistory)),
         (typeof(DaemonAccessor), ServiceLifetime.Scoped, How.Type, typeof(DaemonAccessor)),
         (typeof(IProjectionDataService), ServiceLifetime.Scoped, How.Type, typeof(ProjectionDataService)),
 
