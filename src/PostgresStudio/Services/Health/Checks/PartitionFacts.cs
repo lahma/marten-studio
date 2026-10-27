@@ -49,9 +49,9 @@ internal sealed record RangePartitionNext(string KeyType, double From, double To
 
 /// <summary>The partition facts' one read per sweep, whichever of T19 and T20 asks first (W5-B1, from W5-P1's step 1).</summary>
 /// <remarks>
-/// Gate-free, and about the database: the Partitions page that would cache it beside the sweep's other facts is W5-P1's,
-/// in 0.6; here it is the sweep's shared read alone, so it costs a database one statement per sweep, and none when the
-/// judged set is empty.
+/// Gate-free, and about the database: the sweep's shared read alone - W5-P1's Partitions page, which would cache it beside
+/// the sweep's other facts, is not built (0.6's X4 kept to the checks) - so it costs a database one statement per sweep,
+/// and none when the judged set is empty.
 /// </remarks>
 internal static class HealthPartitions
 {

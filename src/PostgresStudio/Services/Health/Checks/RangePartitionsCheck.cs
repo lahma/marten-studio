@@ -36,8 +36,9 @@ internal sealed record DataRunway(double Upper, double? Width, double PopulatedU
 }
 
 /// <summary>
-/// T20: a table partitioned by range on a time key whose newest partition runs out soon or has run out - or whose
-/// <c>DEFAULT</c> partition is taking rows (W5-B1, moved from W5-P1).
+/// T20: a table partitioned by range on a time key whose newest partition runs out soon or has run out, one on an integer
+/// key whose rows near its newest partition's end (X4) - or one whose <c>DEFAULT</c> partition is taking rows (W5-B1, moved
+/// from W5-P1).
 /// </summary>
 /// <remarks>
 /// <para>

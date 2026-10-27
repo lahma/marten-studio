@@ -109,7 +109,7 @@ internal sealed record HealthPartitionedTableRow
 
 /// <summary>
 /// The partition facts the T19 and T20 checks read: one lock-free catalog statement over the judged set's partitioned tables
-/// (W5-B1, moved from W5-P1's step 1; the Partitions page that would draw the rest is P1's, in 0.6).
+/// (W5-B1, moved from W5-P1's step 1; 0.6's X4 reads its bounds as text, parsed by <see cref="PartitionBoundText" />).
 /// </summary>
 /// <remarks>
 /// <para>
