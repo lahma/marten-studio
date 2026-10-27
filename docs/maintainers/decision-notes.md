@@ -323,9 +323,10 @@ never enabled the new one sees the same Activity entries. Three choices worth ke
 Storage, Maintenance, Sessions and the LINQ page's masks read `GateAsync`'s, where only `BrowseDatabase` opens anything, so
 the new capability adds no name or number to any other screen; (2) a Marten-owned object outside the store's own schemas
 stays `BrowseDatabase`'s (today's rule, which already said an `mt_` definition shows only with it), and the store's own
-Marten definitions stay the Schema screen's, free; (3) a sequence's value, which already sat in the definitions' half of the
-gate (`DefinitionAccess`), moves with the rest - reading a value can say how many rows a table has had, and a host that
-minds should leave `ViewDefinitions` off.
+Marten definitions stay the Schema screen's, free; (3) a sequence's current value stays `BrowseDatabase`'s alone
+(`DatabaseGate.SequenceValueAccess`, `RequireBrowseAsync`): it is data, not a definition - it says how many rows a table
+has had. `DefinitionAccess` used to decide it with the definitions, and the first cut of `ViewDefinitions` moved it along;
+review put it back. A sequence's definition (type, start, increment, range) is on its list row, structure, as ever.
 
 ## D29 — The health advisor
 

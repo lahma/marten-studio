@@ -117,6 +117,26 @@ public class ViewDefinitionsGateTests
             .Should().BeTrue("BrowseDatabase reads it, as it did before ViewDefinitions existed");
     }
 
+    [Fact]
+    public void A_sequences_current_value_is_BrowseDatabases_alone_and_refused_to_ViewDefinitions_naming_it()
+    {
+        DatabaseGate definitionsOnly = Gate(browse: false, browseAuthorized: null, ["quartz"], DefinitionsPass);
+
+        DatabaseRowAccess refused = definitionsOnly.SequenceValueAccess("quartz", Other);
+        refused.Allowed.Should().BeFalse("a value says how many rows a table has had: data, not a definition");
+        refused.Refusal.Should().Be(DatabaseRefusal.CapabilityOff);
+        refused.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+
+        definitionsOnly.DefinitionAccess("quartz", Other).Allowed.Should().BeTrue("while its definition is shown, as the rest of the schema's");
+
+        definitionsOnly.SequenceValueAccess(DocumentSchema, Marten).Allowed.Should().BeTrue(
+            "Marten's own sequences in the store's own schemas are the Schema screen's, as they were");
+
+        DatabaseGate browse = Gate(browse: true, browseAuthorized: true, ["quartz"], DefinitionsPass);
+        browse.SequenceValueAccess("quartz", Other).Allowed.Should().BeTrue("BrowseDatabase reads it, as it always did");
+        browse.SequenceValueAccess("legacy", Other).Allowed.Should().BeFalse("in a schema BrowsableSchemas lists, as it always was");
+    }
+
     // ---------------------------------------------------------------------------------------------
     // BrowseDatabase implies it
     // ---------------------------------------------------------------------------------------------
@@ -270,7 +290,7 @@ public class ViewDefinitionsGateTests
     }
 
     [Fact]
-    public void A_routine_a_trigger_and_a_sequence_value_in_a_named_schema_are_offered_and_the_starred_schemas_are_absent()
+    public void A_routine_a_trigger_and_a_type_in_a_named_schema_are_offered_a_sequence_value_is_not_and_the_starred_schemas_are_absent()
     {
         DatabaseGate gate = Gate(browse: false, browseAuthorized: null, ["quartz", "*"], DefinitionsPass);
 
@@ -298,8 +318,8 @@ public class ViewDefinitionsGateTests
             .Cast<DatabaseTriggerSummary>().Should().ContainSingle().Which.DefinitionAvailable.Should().BeTrue();
 
         DatabaseObjectAssembler.Summaries(gate, snapshot, DatabaseObjectCategory.Sequences)
-            .Cast<DatabaseSequenceSummary>().Should().ContainSingle().Which.CanReadValue.Should().BeTrue(
-                "a sequence's value is the definitions' half of the gate, as it was");
+            .Cast<DatabaseSequenceSummary>().Should().ContainSingle().Which.CanReadValue.Should().BeFalse(
+                "a sequence's value is data, not a definition: BrowseDatabase's alone");
 
         DatabaseObjectAssembler.Summaries(gate, snapshot, DatabaseObjectCategory.Types)
             .Cast<DatabaseTypeSummary>().Should().ContainSingle().Which.DefinitionAvailable.Should().BeTrue();

@@ -697,7 +697,7 @@ internal static class DatabaseObjectAssembler
             // Whether asking for the value (IDatabaseObjectService.GetSequenceValueAsync) would be answered -
             // decided by name, exactly as that call decides it, so a control drawn enabled is one whose call
             // passes. The value itself is never in a list: reading it locks the sequence.
-            bool valueAllowed = sequence.CanReadValue && gate.DefinitionAccess(sequence.Schema, SequenceValueOwnership(gate, sequence)).Allowed;
+            bool valueAllowed = sequence.CanReadValue && gate.SequenceValueAccess(sequence.Schema, SequenceValueOwnership(gate, sequence)).Allowed;
 
             yield return new DatabaseSequenceSummary(
                 DatabaseObjectKind.Sequence,

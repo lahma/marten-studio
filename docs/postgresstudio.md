@@ -174,12 +174,12 @@ option is exactly the application it was.
 Four, all `false` by default, all turned on by `PostgresStudioCapabilities.All()`, all off under `ReadOnly`. Each is a
 read that is authorized like a write, because each reads beyond structure:
 
-- **`BrowseDatabase`** - the rows of the database browser's tables and views, and every definition in every schema
-  `BrowsableSchemas` admits. It implies `ViewDefinitions`.
+- **`BrowseDatabase`** - the rows of the database browser's tables and views, a sequence's current value, and every
+  definition in every schema `BrowsableSchemas` admits. It implies `ViewDefinitions`.
 - **`ViewDefinitions`** - the definitions alone (a view's or materialized view's query, a function's or procedure's body,
-  a trigger's definition, a sequence's value, a type's description) in the schemas `BrowsableSchemas` names **exactly**:
-  for a host that keeps its rows off the screen and still wants the SQL its own migrations wrote. Never a row, and never
-  a schema only `"*"` admits.
+  a trigger's definition, a type's description) in the schemas `BrowsableSchemas` names **exactly**: for a host that
+  keeps its rows off the screen and still wants the SQL its own migrations wrote. Never a row, never a sequence's current
+  value (data: it says how many rows a table has had), and never a schema only `"*"` admits.
 - **`ViewDatabaseActivity`** - other sessions' process ids, roles, client addresses, application names and statements,
   on Database › Sessions, the Health page and Operations › Statements. Without it the counts, ages and states are still
   shown.

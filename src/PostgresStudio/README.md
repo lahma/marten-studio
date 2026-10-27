@@ -163,8 +163,8 @@ a write.
 
 | Capability | What it allows |
 |---|---|
-| `BrowseDatabase` | The rows of tables and views, and the definitions of views, functions, triggers, sequences and types, in the schemas `BrowsableSchemas` admits. Implies `ViewDefinitions` |
-| `ViewDefinitions` | The definitions alone - a view's query, a function's body, a trigger's definition, a sequence's value, a type's description - in the schemas `BrowsableSchemas` names exactly: never a row, never a schema only `"*"` admits |
+| `BrowseDatabase` | The rows of tables and views, a sequence's current value, and the definitions of views, functions, triggers and types, in the schemas `BrowsableSchemas` admits. Implies `ViewDefinitions` |
+| `ViewDefinitions` | The definitions alone - a view's query, a function's body, a trigger's definition, a type's description - in the schemas `BrowsableSchemas` names exactly: never a row, never a sequence's current value, never a schema only `"*"` admits |
 | `ViewDatabaseActivity` | Other sessions' process ids, roles, client addresses, application names and statements, on Database › Sessions, the Health page and Operations › Statements |
 | `RunSql` | Read-only SQL from the Query page's console, its Explain analyze, and What if? under a console plan |
 

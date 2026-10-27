@@ -149,9 +149,32 @@ public class ViewDefinitionsServiceTests
         definition.Reason.Should().Be(StudioText.Marten.DefinitionReadOnlyDenial);
 
         DatabaseSequenceValue value = await harness.Objects.GetSequenceValueAsync(TenantScope, "legacy", "orders_id_seq", Token);
-        value.Refusal.Should().Be(DatabaseRefusal.ReadOnly, "a sequence's value is the definitions' half of the gate");
+        value.Refusal.Should().Be(DatabaseRefusal.ReadOnly);
 
         harness.Ring.GetLatest().Should().HaveCount(2).And.OnlyContain(static x => !x.Succeeded);
+    }
+
+    [Fact]
+    public async Task A_sequences_value_is_refused_to_ViewDefinitions_naming_BrowseDatabase_and_nobody_is_asked_about_ViewDefinitions()
+    {
+        await using Harness harness = Harness.Create(static options =>
+        {
+            options.Capabilities.ViewDefinitions = true;
+            options.BrowsableSchemas.Add("legacy");
+        });
+
+        DatabaseSequenceValue value = await harness.Objects.GetSequenceValueAsync(TenantScope, "legacy", "orders_id_seq", Token);
+
+        value.Found.Should().BeFalse();
+        value.Refusal.Should().Be(DatabaseRefusal.CapabilityOff, "a value is data: BrowseDatabase's alone");
+        value.Reason.Should().Be(StudioText.Marten.BrowseCapabilityDenial).And.Contain("MartenStudioOptions.Capabilities.BrowseDatabase");
+
+        StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
+        entry.Action.Should().Be(DatabaseObjectService.SequenceValueAction);
+        entry.Succeeded.Should().BeFalse();
+        entry.Capability.Should().Be(nameof(StudioCapability.BrowseDatabase));
+
+        harness.Policies.Calls.Should().NotContain(static x => x.Resource.Capability == nameof(StudioCapability.ViewDefinitions));
     }
 
     [Fact]

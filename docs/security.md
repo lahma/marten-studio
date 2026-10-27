@@ -154,8 +154,8 @@ the failure mode of every feature-flagged admin UI.
 
 ### `ViewDefinitions`
 
-`BrowseDatabase` covers two different things: the rows of tables and views, and the definitions of views, functions,
-triggers, sequences and types. A host can have good reasons to refuse the first and want the second - the studio has no
+`BrowseDatabase` covers two different things: the rows of tables and views (and a sequence's current value), and the
+definitions of views, functions, triggers and types. A host can have good reasons to refuse the first and want the second - the studio has no
 row-level filtering, some tables hold credentials or personal data, and a view's query, a trigger function or a function
 body is schema the application's own migrations wrote, which is what you need to read when Statements or a Health
 finding points at one. `ViewDefinitions` is the second alone: off by default, included in `All()`, off under `ReadOnly`,
@@ -165,7 +165,9 @@ and authorized as a write - the write policy asked with `Capability = "ViewDefin
   `BrowsableSchemas` names exactly. A schema only `"*"` admits, which is a statement about the database rather than this
   configuration, still needs `BrowseDatabase` for its definitions, as does an object Marten owns outside the store's own
   schemas. The `‹withheld›` masking of every other schema's name inside a definition is unchanged.
-- **Never a row.** The rows of a table and of a view are `BrowseDatabase`'s alone, and refused naming it.
+- **Never a row, and never a sequence's current value.** The rows of a table and of a view are `BrowseDatabase`'s alone,
+  and so is a sequence's last value - data, since it says how many rows a table has had - each refused naming it. A
+  sequence's type, start, increment and range are structure, on its list row.
 - **`BrowseDatabase` implies it.** A visitor `BrowseDatabase` admits reads definitions exactly as before, whether or not
   `ViewDefinitions` is on; the write policy is asked about `BrowseDatabase` first, and only when it refuses (or the
   capability is off) about `ViewDefinitions`. A definition can carry a literal - a function body with a constant in it -

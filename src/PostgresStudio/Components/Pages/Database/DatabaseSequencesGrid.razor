@@ -191,10 +191,9 @@
         }
 
         // Marten's own sequences are structure only where a store declares them (MartenStudio's Schema screen). A value is
-        // a definition's read, so either way in admits it - ViewDefinitions only for the host's own, in the schemas it
-        // names exactly.
+        // data, not a definition: BrowseDatabase's alone, whatever ViewDefinitions admits.
         return (Settings.Text.Product == StudioProduct.MartenStudio && sequence.Ownership.IsMarten && access.StoreSchemas.Contains(sequence.Schema))
-            || (access.DefinitionsOpen && access.DefinitionSchemas.Contains(sequence.Schema) && (access.IsOpen || !sequence.Ownership.IsMarten));
+            || (access.IsOpen && access.BrowsableSchemas.Contains(sequence.Schema));
     }
 
     /// <summary>
@@ -272,7 +271,7 @@
     private string WithheldTitle(DatabaseSequenceSummary sequence) =>
         MayReadData(sequence)
             ? "The reading role has neither SELECT nor USAGE on this sequence, so its value cannot be read."
-            : List?.Access.DefinitionDenial ?? "Its value is data, and the gate does not let this visitor read data in this schema.";
+            : List?.Access.Denial ?? "Its value is data, and the gate does not let this visitor read data in this schema.";
 
     /// <summary>A bound, with the type's own limits spelled as such rather than as nineteen digits.</summary>
     private static string Bound(long value, string dataType) => (value, dataType) switch
