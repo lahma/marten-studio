@@ -50,6 +50,7 @@
     <Compile Include="../MartenStudio.Tests/Health/FakeHealthService.cs" Link="Support/Linked/FakeHealthService.cs" />
     <Compile Include="../MartenStudio.Tests/Conventions/RepositoryRoot.cs" Link="Support/Linked/RepositoryRoot.cs" />
     <Compile Include="../MartenStudio.Tests/Support/CapturingLoggerProvider.cs" Link="Support/Linked/CapturingLoggerProvider.cs" />
+    <Compile Include="../MartenStudio.Tests/Support/HostHubOptionsScenarios.cs" Link="Support/Linked/HostHubOptionsScenarios.cs" />
   </ItemGroup>
 
 </Project>

@@ -118,9 +118,6 @@ app.MapLogin();
 // the host chooses. Anonymous, because an orchestrator's probe signs in as nobody.
 app.MapHealthChecks("/healthz").AllowAnonymous();
 
-// A browser asks for /favicon.ico on the first page that names no icon of its own, and the studio's pages name none.
-app.MapGet("/favicon.ico", static () => Results.NoContent()).AllowAnonymous();
-
 app.MapGet("/", (HttpContext context, IAntiforgery antiforgery) =>
 {
     ClaimsPrincipal user = context.User;

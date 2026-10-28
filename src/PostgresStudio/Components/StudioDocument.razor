@@ -19,6 +19,13 @@
         which is per-page and genuinely is a section.
     *@
     <link rel="stylesheet" href="_content/PostgresStudio/css/studio.css" />
+    @*
+        The studio's own icon. A document that declares none makes the browser ask the host for /favicon.ico, and a
+        host that serves none answers 404 to it on every studio page (issue #33). Relative, like every other asset here:
+        it resolves against the studio-rooted <base href> to the mirror under the mount path, so the host is asked for
+        nothing and the tab says which studio it is.
+    *@
+    <link rel="icon" type="image/svg+xml" href="_content/PostgresStudio/favicon.svg" />
     <HeadOutlet @rendermode="RenderMode.InteractiveServer" />
 </head>
 <body>

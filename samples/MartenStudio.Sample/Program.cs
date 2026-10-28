@@ -168,12 +168,6 @@ app.MapLogin();
 // chooses. Anonymous, because an orchestrator's probe signs in as nobody.
 app.MapHealthChecks("/healthz").AllowAnonymous();
 
-// The sample has no icon, and says so rather than answering 404: a browser asks for /favicon.ico on the
-// first page that names no icon of its own - the studio's pages name none, since the icon is the host's to
-// choose - and a 404 there was a console error on every demo run. The sample's own two pages name an empty
-// data: icon and never ask at all.
-app.MapGet("/favicon.ico", static () => Results.NoContent()).AllowAnonymous();
-
 // Development, or --allow-data-generation, and nothing else. Outside that the endpoints are not mapped
 // at all, so a POST is a 404 rather than a 403 - there is nothing there to refuse.
 bool dataGeneration = sample.DataGenerationEnabled(app.Environment);

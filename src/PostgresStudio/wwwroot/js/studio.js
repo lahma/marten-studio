@@ -967,4 +967,75 @@
             }
         }
     };
+
+    // A finding's address ends in its card's fragment (`health?store=x#finding-c08-temp-files`, issue #33), and the
+    // browser looks for that element when the document arrives, before the circuit has read the sweep and drawn the
+    // cards, so it finds nothing and leaves the page at the top. The page calls this once its report is on screen:
+    // it opens whatever <details> holds the card (a muted finding sits in a closed one), scrolls the card to the top of
+    // the view and marks it with `ms-health-finding-linked` for two seconds, so the eye finds it. Answers whether the
+    // card was there, so the page can say when it is not.
+    //
+    // A promise, not a value: the render batch that draws the cards and this call travel the same connection in order,
+    // so the card is normally already in the document, but a call that raced the batch should not be a missing finding.
+    // It looks again for a second and a half, on a timer rather than a frame (a background tab throttles frames), and
+    // then gives up. Every step is in a try: scrolling and marking are courtesies, and the page is correct without them.
+    if (typeof window.martenStudio.health.revealFinding !== "function") {
+        let markedCard = null;
+        let markTimer = 0;
+
+        const findingCard = function (id) {
+            try {
+                return typeof id === "string" && id.length > 0 ? document.getElementById(id) : null;
+            } catch (e) {
+                return null;
+            }
+        };
+
+        const revealCard = function (card) {
+            try {
+                for (let details = card.closest("details"); details; details = details.parentElement ? details.parentElement.closest("details") : null) {
+                    details.open = true;
+                }
+
+                card.scrollIntoView({ block: "start", behavior: "auto" });
+
+                if (markedCard) {
+                    markedCard.classList.remove("ms-health-finding-linked");
+                }
+
+                window.clearTimeout(markTimer);
+                markedCard = card;
+                card.classList.add("ms-health-finding-linked");
+                markTimer = window.setTimeout(function () {
+                    card.classList.remove("ms-health-finding-linked");
+                    if (markedCard === card) {
+                        markedCard = null;
+                    }
+                }, 2000);
+            } catch (e) {
+                // Nothing to do: the card is on the page, which is what the answer says.
+            }
+
+            return true;
+        };
+
+        window.martenStudio.health.revealFinding = function (id) {
+            return new Promise(function (resolve) {
+                const started = Date.now();
+
+                const look = function () {
+                    const card = findingCard(id);
+                    if (card) {
+                        resolve(revealCard(card));
+                    } else if (Date.now() - started >= 1500) {
+                        resolve(false);
+                    } else {
+                        window.setTimeout(look, 50);
+                    }
+                };
+
+                look();
+            });
+        };
+    }
 })();

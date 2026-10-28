@@ -1,3 +1,21 @@
+# 0.9.1
+
+A patch for three issues found on 0.9.0.
+
+- A finding's address (`PostgresFinding.StudioPath`, `health?…#finding-…`) scrolls to its card once the Health page has
+  drawn it, opens the muted list when the card is in it, and marks the card for two seconds. A finding the report no
+  longer holds reads "This finding is no longer reported." (#33). The studio's pages also name an icon of their own
+  (`favicon.svg`, served under the mount path), so a host that serves no `/favicon.ico` no longer logs a 404 for it on
+  every studio page.
+- Query and Plan leave the sidebar while `RunSql` is off or `ReadOnly` is on, so an administrator is not offered a page
+  that only says the capability is off. In Marten Studio only Plan goes: Query also hosts Mode A and LINQ mode, which do
+  not need `RunSql`. A page opened by its address still shows its notice (#37).
+- Registering a studio no longer resets the circuit options of a host that registered Blazor Server first (#38). The
+  framework's hub-options setup was added a second time after the host's `AddServerSideBlazor().AddHubOptions(...)` and
+  copied the defaults over `ClientTimeoutInterval`, `KeepAliveInterval`, `HandshakeTimeout`, `MaximumReceiveMessageSize`
+  and the rest, so the host's circuits ran on 30 seconds and 32 KB. A setup the container already holds is now left as
+  it was, whichever order the host registers in; so is `WebSocketOptions.KeepAliveInterval`, which the same call reset.
+
 # 0.9.0
 
 0.9 adds Query › Plan, a plan analyzer, and makes the diagnostics snapshot a measurement baseline.

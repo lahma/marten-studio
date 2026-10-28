@@ -339,7 +339,6 @@ public class StudioLayoutTests
                 "Overview",
                 "Documents",
                 "Query",
-                "Plan",
                 "Tables",
                 "Relationships",
                 "Streams",
@@ -366,6 +365,7 @@ public class StudioLayoutTests
     {
         using var context = new StudioComponentContext();
         context.Options.Path = "/ops/marten";
+        context.Options.Capabilities.RunSql = true; // Plan is in the rail only while RunSql is on (issue #37)
 
         var layout = RenderLayout(context);
 
@@ -402,6 +402,7 @@ public class StudioLayoutTests
     public void The_nav_links_have_the_same_shape_at_the_default_path()
     {
         using var context = new StudioComponentContext();
+        context.Options.Capabilities.RunSql = true; // Plan is in the rail only while RunSql is on (issue #37)
 
         var layout = RenderLayout(context);
 
@@ -571,6 +572,46 @@ public class StudioLayoutTests
     }
 
     /// <summary>
+    /// Issue #37: Plan is a door to a page that runs SQL, so it is absent from the rail while <c>RunSql</c> is off. Query
+    /// stays: besides the SQL console it hosts Mode A and LINQ mode, which need no <c>RunSql</c>.
+    /// </summary>
+    [Fact]
+    public void Plan_is_absent_from_the_rail_while_RunSql_is_off_and_Query_stays()
+    {
+        using var context = new StudioComponentContext();
+        context.Options.Capabilities.RunSql.Should().BeFalse("the default is a read-only browser");
+
+        var layout = RenderLayout(context);
+
+        string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
+        links.Should().Contain("Query").And.NotContain("Plan");
+    }
+
+    [Fact]
+    public void Plan_joins_the_rail_with_RunSql_on_after_Query()
+    {
+        using var context = new StudioComponentContext();
+        context.Options.Capabilities.RunSql = true;
+
+        var layout = RenderLayout(context);
+
+        string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
+        links.Should().ContainInOrder("Query", "Plan", "Tables");
+    }
+
+    [Fact]
+    public void Plan_goes_with_the_master_switch_even_with_RunSql_set()
+    {
+        using var context = new StudioComponentContext().WithReadOnly();
+        context.Options.Capabilities.RunSql.Should().BeTrue("ReadOnly leaves the flags as the host set them and overrides them");
+
+        var layout = RenderLayout(context);
+
+        string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
+        links.Should().Contain("Query").And.NotContain("Plan", "ReadOnly turns every capability off");
+    }
+
+    /// <summary>
     /// The one thing the sidebar must never do is stop rendering. A badge is a decoration, and a
     /// decoration that could take navigation down with it would be worse than no badge at all.
     /// </summary>
@@ -583,7 +624,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(20, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) and Plan (0.9) included");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(19, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included, and Plan (0.9) while RunSql is on");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

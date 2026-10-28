@@ -12,6 +12,7 @@
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
 @inject IJSRuntime JsRuntime
+@inject NavigationManager Navigation
 
 <PageTitle>Health</PageTitle>
 
@@ -171,6 +172,16 @@
             </div>
         }
 
+        @if (linkedFindingGone)
+        {
+            @* The address named a finding card (issue #33) that this report does not hold, or that the page could not find. *@
+            <div class="ms-alert ms-alert-info ms-health-finding-gone" role="status">
+                <div class="ms-alert-content">
+                    <p>This finding is no longer reported.</p>
+                </div>
+            </div>
+        }
+
         @if (VisibleFindings.Count == 0)
         {
             @* Never an all-clear while findings are withheld: the notice above counts them, and this must not then say
@@ -259,6 +270,16 @@
     private bool interactive;
     private bool disposed;
 
+    /// <summary>
+    /// The element id of the finding card the address's fragment names (<c>#finding-c08-temp-files</c>), until the first
+    /// render that shows a report has scrolled to it or said it is not there. <see langword="null" /> when the address
+    /// names none, and again once it has been dealt with: a poll must not scroll the visitor back to it.
+    /// </summary>
+    private string? linkedFinding;
+
+    /// <summary>The address named a finding card the report does not hold (issue #33).</summary>
+    private bool linkedFindingGone;
+
     private List<HealthReportFinding> VisibleFindings =>
         report is null ? [] : [.. report.Findings.Where(x => !Mutes.IsMuted(x.MuteKey))];
 
@@ -287,12 +308,24 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender || disposed)
+        if (disposed)
         {
             return;
         }
 
+        if (!firstRender)
+        {
+            // Every render after the first, because the one that draws the cards is not the first: it is the one the
+            // sweep's answer causes.
+            await RevealLinkedFindingAsync();
+            return;
+        }
+
         interactive = true;
+
+        // Read here and not in OnInitialized: a prerender's address has no fragment (a browser does not send one), and
+        // the circuit's does. Taken before the first await, so no later render can look before it is set.
+        linkedFinding = FindingFragment(Navigation.Uri);
 
         // Idempotent, and normally already done by the layout. Awaited here so the first read is never made
         // before the circuit's scope is settled - a scope change that arrived before this render is in it.
@@ -323,6 +356,64 @@
 
         live = LiveFactory.Create();
         await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, token);
+    }
+
+    /// <summary>
+    /// The card id an address's fragment names, or <see langword="null" /> when it names none: <c>#finding-…</c> only, as
+    /// every card's id starts, bounded so an address cannot make the page carry a long string around.
+    /// </summary>
+    private static string? FindingFragment(string uri)
+    {
+        int hash = uri.IndexOf('#', StringComparison.Ordinal);
+        if (hash < 0 || uri.Length - hash > 256)
+        {
+            return null;
+        }
+
+        string fragment = Uri.UnescapeDataString(uri[(hash + 1)..]);
+        return fragment.StartsWith("finding-", StringComparison.Ordinal) ? fragment : null;
+    }
+
+    /// <summary>
+    /// Once a report with findings is on screen, scrolls to the card the address's fragment names and marks it, or says the
+    /// finding is gone (issue #33). It runs after the render that drew the cards, because a browser looks for the fragment
+    /// when the document arrives, before the circuit has read the sweep, and finds nothing; and it runs once, so a poll
+    /// that redraws the page does not scroll the visitor back.
+    /// </summary>
+    private async Task RevealLinkedFindingAsync()
+    {
+        if (linkedFinding is not { } id || loading || report is not { Refusal: HealthRefusal.None } shown)
+        {
+            return;
+        }
+
+        linkedFinding = null;
+
+        // Only an id the report holds goes to the script, which looks it up by id and does nothing else with it.
+        bool found = shown.Findings.Any(x => string.Equals(x.Anchor, id, StringComparison.Ordinal));
+
+        if (found)
+        {
+            try
+            {
+                found = await JsRuntime.InvokeAsync<bool>("martenStudio.health.revealFinding", lifetime.Token, id);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+            {
+                // A circuit that closed, or a browser that refused: the page is right without the scroll.
+                return;
+            }
+        }
+
+        if (!found && !disposed)
+        {
+            linkedFindingGone = true;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private async Task TickAsync(CancellationToken _)

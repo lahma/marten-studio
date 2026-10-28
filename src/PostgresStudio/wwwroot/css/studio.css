@@ -13580,3 +13580,28 @@ a.ms-schema-health-mark:focus-visible {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+
+/* ==========================================================================
+   0.9.1. Health: the linked finding
+
+   A finding's address ends in its card's fragment (issue #33), and the page scrolls to the card once the sweep has drawn it
+   (studio.js, martenStudio.health.revealFinding). The card is marked for two seconds by an outline and the primary tint,
+   both from tokens that have a dark value, and not by the severity border, which stays the card's own. The outline is what
+   a forced-colors user sees, as a box-shadow would be dropped. The scroll leaves a margin above the card.
+   ========================================================================== */
+
+.ms-health-finding {
+    scroll-margin-top: var(--ms-space-md);
+}
+
+.ms-health-finding-linked {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    background: var(--ms-color-primary-light);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .ms-health-finding {
+        transition: background-color 0.4s ease;
+    }
+}

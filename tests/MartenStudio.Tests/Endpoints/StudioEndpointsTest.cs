@@ -351,6 +351,7 @@ public class StudioEndpointsTest
             body.Should().Contain("<script src=\"_content/PostgresStudio/js/studio.js\">");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/PostgresStudio/css/studio.css\"");
+            body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/PostgresStudio/favicon.svg\"", "the document names its own icon (issue #33)");
             body.Should().Contain("<title>Marten Studio</title>");
         }
         finally
@@ -486,6 +487,7 @@ public class StudioEndpointsTest
                 ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
                 ["_content/PostgresStudio/css/studio.css"] = ":root { }"u8.ToArray(),
                 ["_content/PostgresStudio/js/studio.js"] = "// marten-studio.js"u8.ToArray(),
+                ["_content/PostgresStudio/favicon.svg"] = "<svg xmlns=\"http://www.w3.org/2000/svg\" />"u8.ToArray(),
             }));
 
         app.MapMartenStudio().AllowAnonymous();
@@ -511,6 +513,12 @@ public class StudioEndpointsTest
             helpers.StatusCode.Should().Be(HttpStatusCode.OK);
             helpers.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
             (await helpers.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
+
+            // The icon the document names (issue #33), under the mount path's mirror like the other two.
+            using var icon = await client.GetAsync(new Uri("/ops/marten/_content/PostgresStudio/favicon.svg", UriKind.Relative), Token);
+            icon.StatusCode.Should().Be(HttpStatusCode.OK);
+            icon.Content.Headers.ContentType!.MediaType.Should().Be("image/svg+xml");
+            (await icon.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
 
             // The root-level asset endpoint stays for hosts that do not path-forward.
             using var rootCss = await client.GetAsync(new Uri("/_content/PostgresStudio/css/studio.css", UriKind.Relative), Token);
