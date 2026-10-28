@@ -166,7 +166,7 @@ a write.
 | `BrowseDatabase` | The rows of tables and views, a sequence's current value, and the definitions of views, functions, triggers and types, in the schemas `BrowsableSchemas` admits. Implies `ViewDefinitions` |
 | `ViewDefinitions` | The definitions alone - a view's query, a function's body, a trigger's definition, a type's description - in the schemas `BrowsableSchemas` names exactly: never a row, never a sequence's current value, never a schema only `"*"` admits |
 | `ViewDatabaseActivity` | Other sessions' process ids, roles, client addresses, application names and statements, on Database › Sessions, the Health page and Operations › Statements |
-| `RunSql` | Read-only SQL from the Query page's console, its Explain analyze, and What if? under a console plan |
+| `RunSql` | Read-only SQL from the Query page's console, its Explain analyze, and What if? under a console plan. The sidebar's Query and Plan entries are there only while it is on |
 
 **The database browser's gate.** The schemas `BrowsableSchemas` names exactly - `public` when nothing names any - are
 the data source's own: their structure (tables, columns, keys, indexes, estimates) is shown to anyone the source policy

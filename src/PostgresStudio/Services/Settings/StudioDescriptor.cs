@@ -160,6 +160,22 @@ internal sealed record StudioNavItem(
 /// <param name="Title">Its tooltip and accessible name.</param>
 internal sealed record StudioNavBadge(string Text, string CssClass, string Title);
 
+/// <summary>The conditions a sidebar entry may carry (<see cref="StudioNavItem.IsShown" />), shared by both studios' descriptors.</summary>
+internal static class StudioNavConditions
+{
+    /// <summary>
+    /// Whether the SQL console's capability is effectively on: <c>RunSql</c> set and the master switch off. The entries that
+    /// are only a door to a page that runs SQL (Postgres Studio's Query, both studios' Plan) are absent otherwise, so an
+    /// administrator is not offered a page whose one sentence is addressed to the developer who configures the host
+    /// (issue #37). The page keeps its notice for anyone who reaches it by address.
+    /// </summary>
+    public static bool RunSqlEnabled(IStudioSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return !settings.ReadOnly && settings.IsConfigured(StudioCapability.RunSql);
+    }
+}
+
 /// <summary>The badge keys the shared sidebar draws itself.</summary>
 internal static class StudioNavBadgeKeys
 {

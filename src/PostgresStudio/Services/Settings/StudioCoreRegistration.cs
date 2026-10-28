@@ -72,8 +72,10 @@ internal static class StudioCoreRegistration
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IHostedService, StudioEndpointAuthorizationGuard>());
 
-        services.AddRazorComponents()
-            .AddInteractiveServerComponents();
+        // Not a bare AddRazorComponents().AddInteractiveServerComponents(): called after a host's own AddServerSideBlazor()
+        // that would put the framework's hub-options setup in the container twice, the second after the host's
+        // Configure<HubOptions<ComponentHub>>, and reset the host's circuit options to the defaults (issue #38).
+        ServerSideBlazorRegistration.Add(services);
 
         // Deliberately no AddSignalR().AddJsonProtocol(...) and no JsonStringEnumConverter: those options
         // belong to the whole application's SignalR and its own hubs must keep their own format

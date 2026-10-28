@@ -82,10 +82,18 @@ internal static class MartenStudioDescriptor
         [
             new("Overview", "", "grid"),
             new("Documents", "documents", "doc"),
+
+            // Query stays whatever RunSql says (issue #37): besides the SQL console it hosts Mode A, a typed where clause that
+            // needs no capability, and LINQ mode, which has its own (RunLinqQueries).
             new("Query", "query", "query"),
 
             // X3 (issue #28): PostgresStudio's Plan page, which the studio re-roots under /marten like every shared page.
-            new("Plan", "plan", "plan", Title: "A statement's plan, drawn every way, with what to fix"),
+            // Absent while RunSql is off or ReadOnly is on: planning is the console's gate, a page of its own, and with the
+            // gate shut it opens only a sentence for the developer who configures the host (issue #37).
+            new("Plan", "plan", "plan", Title: "A statement's plan, drawn every way, with what to fix")
+            {
+                IsShown = StudioNavConditions.RunSqlEnabled,
+            },
         ]),
 
         // What else lives in the store's database, beside what Marten declares (D27). Relationships moved

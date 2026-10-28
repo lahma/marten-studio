@@ -81,4 +81,61 @@ public class HealthBrowserScenarioTests(BrowserSuiteFixture fixture)
             studio.AssertClean("opening the Health page, muting a finding and unmuting it");
         });
     }
+
+    /// <summary>
+    /// Issue #33: a finding's address ends in its card's fragment, and the browser resolves that against the prerendered
+    /// document, before the circuit has drawn the cards, and leaves the page at the top. The page scrolls to the card itself
+    /// once the report is on screen, marks it for two seconds and takes the mark off.
+    /// </summary>
+    /// <remarks>
+    /// The window is short, so the card is below the fold without any scrolling and "it is in view" says something; the
+    /// scenario asserts as much from the card's own layout position. The mark is recorded by an observer installed before
+    /// the page's scripts run, because it is on the card for two seconds and a poll could come late on a slow runner.
+    /// A fresh page, so the fragment is the address the document arrives at, as a host's link in a new tab is. Like every
+    /// browser scenario it skips locally without Chromium and throws on CI (D19).
+    /// </remarks>
+    [BrowserFact]
+    public async Task A_finding_address_scrolls_to_its_card_and_marks_it_briefly_and_the_studio_asks_the_host_for_no_icon()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "health-finding-link", fixture.Root, "admin", async studio =>
+        {
+            const string anchor = "finding-s02-setting-synchronous_commit";
+
+            await studio.Page.SetViewportSizeAsync(StudioPage.ViewportWidth, 360);
+            await studio.Page.AddInitScriptAsync(
+                """
+                window.__msLinked = { added: false, removed: false };
+                new MutationObserver(function () {
+                    const card = document.getElementById('finding-s02-setting-synchronous_commit');
+                    if (!card) { return; }
+                    const marked = card.classList.contains('ms-health-finding-linked');
+                    if (marked) { window.__msLinked.added = true; }
+                    else if (window.__msLinked.added) { window.__msLinked.removed = true; }
+                }).observe(document, { subtree: true, attributes: true, attributeFilter: ['class'] });
+                """);
+
+            await studio.GoAsync(fixture.Root.StudioUrl("health") + "#" + anchor);
+
+            ILocator card = studio.Page.Locator("#" + anchor);
+            await card.WaitForAsync();
+            await studio.Page.WaitForFunctionAsync("() => window.__msLinked.added", null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            // Where the card sits in the page, whatever the scroll: it is further down than the window is tall.
+            double natural = await card.EvaluateAsync<double>(
+                "e => { let y = 0; for (let n = e; n; n = n.offsetParent) { y += n.offsetTop; } return y; }");
+            natural.Should().BeGreaterThan(360, "otherwise the card was in view without a scroll, and the scenario proves nothing");
+
+            LocatorBoundingBoxResult? box = await card.BoundingBoxAsync();
+            box.Should().NotBeNull();
+            box!.Y.Should().BeInRange(0, 360 - 1, "the card's top edge is in the window: the page scrolled to it");
+
+            // Marked, then not: the class is the brief mark, and it is gone about two seconds later.
+            await studio.Page.WaitForFunctionAsync("() => window.__msLinked.removed", null, new PageWaitForFunctionOptions { Timeout = 30_000 });
+            (await card.GetAttributeAsync("class")).Should().NotContain("ms-health-finding-linked");
+
+            // A host that serves no /favicon.ico is asked for nothing: the document names its own icon, so AssertClean
+            // (no response of 400 or more) holds without the sample's workaround for it.
+            studio.AssertClean("opening a finding's address");
+        });
+    }
 }

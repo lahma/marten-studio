@@ -348,7 +348,7 @@ mapped studio is a read-only browser of Marten's own data.
 | `RebuildProjections` | Rebuild a projection |
 | `CorrectProgression` | Advance the high-water mark, or correct projection progression in the database |
 | `ApplySchemaChanges` | Apply pending schema migrations |
-| `RunSql` | Run read-only SQL from the Query page's console, and its Explain analyze. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN`, the subquery lift and What if? under a console or Mode A plan |
+| `RunSql` | Run read-only SQL from the Query page's console, and its Explain analyze; the sidebar's Plan entry is there only while it is on. Authorized like a write and always with `TenantId = null` — the console is not limited to a tenant — which also governs the Mode A `EXPLAIN`, the subquery lift and What if? under a console or Mode A plan |
 | `BrowseDatabase` | Browse the rows and definitions of non-Marten tables, views, functions, triggers, sequences and types in the schemas `BrowsableSchemas` names. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Implies `ViewDefinitions` |
 | `ViewDefinitions` | Read the definitions alone - a view's or materialized view's query, a function's or procedure's body, a trigger's definition, a type's description - of the non-Marten objects in the schemas `BrowsableSchemas` names *exactly*, and see those schemas' structure; never a row, never a sequence's current value (data, so `BrowseDatabase`'s), and never a schema only `"*"` admits. For a host that keeps rows off the screen and still wants the SQL its own migrations wrote. A read, authorized like `BrowseDatabase` as a write (the write policy asked with this name, always with `TenantId = null`). Off by default, in `All()` |
 | `ViewDatabaseActivity` | See who and what is using the database: other sessions' process ids, roles, client addresses, application names and statements, on the Health page, on Database › Sessions and in the Projections screen's high-water Explain, and run the health advisor's statement checks over `pg_stat_statements`. Without it the counts, ages and states are still shown. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Off by default, in `All()` |
@@ -752,7 +752,11 @@ tenant, because there is nothing to filter on and hiding it would hide something
   `_content/PostgresStudio/{**path}` endpoints as a fallback, so an API-only host that configures neither
   still gets a styled, interactive studio. Both are asked for by the studio's own pages and by nothing
   else: the package ships no Blazor JS initializer, so a host that runs a Blazor app of its own never
-  fetches anything of the studio's on pages that have nothing to do with it.
+  fetches anything of the studio's on pages that have nothing to do with it. The document names an icon of its
+  own, `_content/PostgresStudio/favicon.svg`, so the browser does not ask your site root for `/favicon.ico`.
+- **A host's own Blazor Server options survive, in either order.** Registering the studio does not undo a
+  `services.AddServerSideBlazor().AddHubOptions(...)` you made before it: the framework's own repeated hub-options
+  registration is left out, so your `ClientTimeoutInterval` and `MaximumReceiveMessageSize` stay yours.
 - **Not trimmable.** `IsTrimmable=false` is stated in the csproj on purpose. Blazor Server sets
   `[Parameter]` properties by name from the render tree and the document viewer deserializes into types
   discovered from `IDocumentType.DocumentType` at run time; a trimmer told it may cut has no way to see

@@ -52,6 +52,7 @@ public class PostgresStudioEndpointsTests
             ["_framework/blazor.web.js"] = "// blazor.web.js"u8.ToArray(),
             ["_content/PostgresStudio/css/studio.css"] = ":root { }"u8.ToArray(),
             ["_content/PostgresStudio/js/studio.js"] = "// studio.js"u8.ToArray(),
+            ["_content/PostgresStudio/favicon.svg"] = "<svg xmlns=\"http://www.w3.org/2000/svg\" />"u8.ToArray(),
         });
 
     [Fact]
@@ -72,12 +73,20 @@ public class PostgresStudioEndpointsTests
             body.Should().Contain("<title>Postgres Studio</title>");
             body.Should().Contain("<link rel=\"stylesheet\" href=\"_content/PostgresStudio/css/studio.css\"");
             body.Should().Contain("<script src=\"_framework/blazor.web.js\">");
+            body.Should().Contain("<link rel=\"icon\" type=\"image/svg+xml\" href=\"_content/PostgresStudio/favicon.svg\"", "the document names its own icon (issue #33)");
             body.Should().Contain("<h1 class=\"ms-page-title\">Overview</h1>", "the root page renders PostgresStudio's overview");
             body.Should().NotContain("__RequestVerificationToken");
 
             using HttpResponseMessage css = await client.GetAsync(new Uri("/postgres/_content/PostgresStudio/css/studio.css", UriKind.Relative), Token);
             css.StatusCode.Should().Be(HttpStatusCode.OK);
             css.Content.Headers.ContentType!.MediaType.Should().Be("text/css");
+
+            // The icon the document names, relative to its studio-rooted <base href>: under the mount path's mirror, so a host
+            // that serves no /favicon.ico is asked for nothing.
+            using HttpResponseMessage icon = await client.GetAsync(new Uri("/postgres/_content/PostgresStudio/favicon.svg", UriKind.Relative), Token);
+            icon.StatusCode.Should().Be(HttpStatusCode.OK);
+            icon.Content.Headers.ContentType!.MediaType.Should().Be("image/svg+xml");
+            (await icon.Content.ReadAsByteArrayAsync(Token)).Should().NotBeEmpty();
 
             using HttpResponseMessage script = await client.GetAsync(new Uri("/postgres/_framework/blazor.web.js", UriKind.Relative), Token);
             script.StatusCode.Should().Be(HttpStatusCode.OK);

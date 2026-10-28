@@ -71,10 +71,20 @@ internal static class PostgresStudioDescriptor
         new("Data",
         [
             new("Overview", "", "grid"),
-            new("Query", "query", "query", Title: "The SQL console"),
+
+            // Query and Plan are the SQL console and a page behind its gate: with RunSql off (or ReadOnly on) each opens a
+            // sentence for the developer who configures the host, so neither is drawn then (issue #37). A visitor who reaches
+            // either by address still reads the notice.
+            new("Query", "query", "query", Title: "The SQL console")
+            {
+                IsShown = StudioNavConditions.RunSqlEnabled,
+            },
 
             // X3 (issue #28): a statement's plan drawn every way, and what to fix - the console's gate, a page of its own.
-            new("Plan", PlanLinks.Route, "plan", Title: "A statement's plan, drawn every way, with what to fix"),
+            new("Plan", PlanLinks.Route, "plan", Title: "A statement's plan, drawn every way, with what to fix")
+            {
+                IsShown = StudioNavConditions.RunSqlEnabled,
+            },
         ]),
         new("Database",
         [

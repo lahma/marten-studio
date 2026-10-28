@@ -205,7 +205,48 @@ public class CorePageSmokeTests
 
         string[] links = [.. menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent)];
         links.Should().Equal(
-            "Overview", "Query", "Plan", "Tables", "Sessions", "Relationships", "Health", "Statements", "Maintenance", "Storage", "Replication", "Server", "Activity");
+            "Overview", "Tables", "Sessions", "Relationships", "Health", "Statements", "Maintenance", "Storage", "Replication", "Server", "Activity");
+    }
+
+    /// <summary>
+    /// Issue #37: Query and Plan are doors to pages that run SQL, so a host with <c>RunSql</c> off - the default, and most
+    /// hosts' choice - does not offer them to its administrators. A visitor who reaches either by address reads the notice.
+    /// </summary>
+    [Fact]
+    public async Task Query_and_Plan_are_absent_from_the_rail_while_RunSql_is_off()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        context.Options.Capabilities.RunSql.Should().BeFalse();
+
+        var menu = context.Render<NavMenu>();
+
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().NotContain(["query", "plan"]);
+        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain(["Query", "Plan"]);
+    }
+
+    [Fact]
+    public async Task Query_and_Plan_are_in_the_rail_with_RunSql_on_in_their_place()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+        context.Options.Capabilities.RunSql = true;
+
+        var menu = context.Render<NavMenu>();
+
+        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().StartWith(["Overview", "Query", "Plan", "Tables"]);
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain(["query", "plan"]);
+    }
+
+    /// <summary>The master switch turns every capability off, so it takes the two entries with it whatever <c>RunSql</c> says.</summary>
+    [Fact]
+    public async Task Query_and_Plan_go_with_the_master_switch_even_with_RunSql_set()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
+        context.Options.ReadOnly = true;
+        context.Options.Capabilities.RunSql.Should().BeTrue();
+
+        var menu = context.Render<NavMenu>();
+
+        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain(["Query", "Plan"]).And.Contain("Tables");
     }
 
     /// <summary>
