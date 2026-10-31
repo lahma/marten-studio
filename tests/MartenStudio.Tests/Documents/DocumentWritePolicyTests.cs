@@ -193,6 +193,41 @@ public class DocumentWritePolicyTests
         page.FindAll(".ms-write-refusal").Should().BeEmpty();
     }
 
+    /// <summary>
+    /// A document a projection writes shows a note, and its Edit button is disabled with the refusal as its title before
+    /// anyone presses it - while Delete stays live (a rebuild recreates the document).
+    /// </summary>
+    [Fact]
+    public void A_projection_owned_document_shows_a_note_and_a_disabled_edit_with_the_reason()
+    {
+        using var context = new DocumentsComponentContext();
+        context.WithAllCapabilities();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail() with { WrittenByProjection = true });
+
+        var page = RenderDetail(context);
+
+        IElement edit = page.Find(".ms-doc-edit-btn");
+        edit.HasAttribute("disabled").Should().BeTrue();
+        edit.GetAttribute("title").Should().Be(ProjectionOwnedDocuments.EditRefusal(Id));
+
+        page.Find(".ms-doc-projection-note").TextContent.Should().Contain("Written by its projection").And.Contain(Id);
+        page.Find(".ms-doc-delete-btn").HasAttribute("disabled").Should().BeFalse();
+    }
+
+    /// <summary>An ordinary document shows neither the note nor the refusal.</summary>
+    [Fact]
+    public void An_ordinary_document_has_no_projection_note_and_a_live_edit()
+    {
+        using var context = new DocumentsComponentContext();
+        context.WithAllCapabilities();
+        context.Data.Detail = DocumentDetailResult.Ok(Detail());
+
+        var page = RenderDetail(context);
+
+        page.FindAll(".ms-doc-projection-note").Should().BeEmpty();
+        page.Find(".ms-doc-edit-btn").HasAttribute("disabled").Should().BeFalse();
+    }
+
     /// <summary>An undelete is a write like any other, and answers to the same capability.</summary>
     [Fact]
     public void Undelete_is_refused_for_the_same_visitor()

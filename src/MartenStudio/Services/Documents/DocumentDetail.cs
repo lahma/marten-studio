@@ -143,6 +143,12 @@ internal sealed record DocumentDetail
     /// <summary>Whether a mapping claims this collection.</summary>
     public bool IsRegistered { get; init; } = true;
 
+    /// <summary>
+    /// Whether a projection writes this document with the version of its event stream as its revision, which is why the
+    /// studio does not edit it (<see cref="ProjectionOwnedDocuments" />).
+    /// </summary>
+    public bool WrittenByProjection { get; init; }
+
     /// <summary>Whether the row is soft-deleted.</summary>
     public bool IsDeleted { get; init; }
 

@@ -59,7 +59,7 @@ public class DocumentWriteServiceTests
         public void Dispose() => Provider.Dispose();
     }
 
-    private static Harness CreateHarness(Action<MartenStudioOptions>? configure = null)
+    private static Harness CreateHarness(Action<MartenStudioOptions>? configure = null, Action<StoreOptions>? configureStore = null)
     {
         var options = new MartenStudioOptions
         {
@@ -72,7 +72,11 @@ public class DocumentWriteServiceTests
         var wrapped = Options.Create(options);
 
         var services = new ServiceCollection();
-        services.AddMarten(x => x.Connection(DummyConnectionString));
+        services.AddMarten(x =>
+        {
+            x.Connection(DummyConnectionString);
+            configureStore?.Invoke(x);
+        });
 
         var registry = new MartenStoreRegistry(services);
         var provider = services.BuildServiceProvider();
@@ -251,6 +255,65 @@ public class DocumentWriteServiceTests
         entry.Succeeded.Should().BeFalse();
 
         harness.Captured.Entries.Select(x => x.EventId.Id).Should().Contain(9201);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // F1: a document a projection writes with the stream's version as its revision is not edited.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The preview of an edit to a projection-owned document is refused by the mapping alone, with no connection (this
+    /// store's host does not resolve), and the refusal is audited without the id the visitor typed.
+    /// </summary>
+    [Fact]
+    public async Task The_preview_of_a_projection_owned_document_is_refused_before_a_connection_is_opened()
+    {
+        using var harness = CreateHarness(configureStore: static x => x.Projections.Snapshot<ProjectedTally>(JasperFx.Events.Projections.SnapshotLifecycle.Inline));
+        harness.Users.SignIn("ops");
+        string id = Guid.NewGuid().ToString();
+
+        var preview = await harness.Service.PreviewAsync(Scope, "projectedtally", id, "{}", Token);
+
+        preview.Status.Should().Be(WritePreviewStatus.Refused);
+        preview.Reason.Should().Be(ProjectionOwnedDocuments.EditRefusal(id));
+        preview.Reason.Should().Contain("written by its projection").And.Contain(id).And.Contain("skip the next event");
+
+        var entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
+        entry.Action.Should().Be("PreviewDocumentEdit");
+        entry.Succeeded.Should().BeFalse();
+        entry.Message.Should().Be(ProjectionOwnedDocuments.AuditReason).And.NotContain(id);
+        harness.Captured.Entries.Select(x => x.EventId.Id).Should().Contain(9201);
+    }
+
+    /// <summary>The save is refused the same way, audited as an EditDocument failure, and never opens a session.</summary>
+    [Fact]
+    public async Task The_save_of_a_projection_owned_document_is_refused_and_audited()
+    {
+        using var harness = CreateHarness(configureStore: static x => x.Projections.Snapshot<ProjectedTally>(JasperFx.Events.Projections.SnapshotLifecycle.Async));
+        harness.Users.SignIn("ops");
+        string id = Guid.NewGuid().ToString();
+
+        var result = await harness.Service.SaveAsync(
+            Scope, "projectedtally", id, "{}", DocumentConcurrencyToken.ForRevision(3), acknowledgeDrops: true, Token);
+
+        result.Status.Should().Be(WriteStatus.Refused);
+        result.Reason.Should().Be(ProjectionOwnedDocuments.EditRefusal(id));
+
+        var entry = harness.Ring.GetLatest().Should().ContainSingle().Which;
+        entry.Action.Should().Be("EditDocument");
+        entry.Succeeded.Should().BeFalse();
+        entry.Message.Should().Be(ProjectionOwnedDocuments.AuditReason).And.NotContain(id);
+        harness.Captured.Entries.Select(x => x.EventId.Id).Should().Contain(9201);
+    }
+
+    /// <summary>The refusal puts a typed id through the same sanitiser as every other message: one line, bounded.</summary>
+    [Fact]
+    public void The_refusal_text_is_one_bounded_line_whatever_the_id_holds()
+    {
+        string text = ProjectionOwnedDocuments.EditRefusal("a\r\nb" + new string('x', 1000));
+
+        text.Should().NotContain("\r").And.NotContain("\n");
+        text.Length.Should().BeLessThan(1000);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -709,3 +772,20 @@ public abstract class WriteTestAbstractDocument
 {
     public Guid Id { get; set; }
 }
+
+/// <summary>A projection's document: the snapshot below makes its mapping use the version of the matching stream.</summary>
+public sealed class ProjectedTally
+{
+    /// <summary>The stream id.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>A member to edit.</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>Starts it.</summary>
+    public static ProjectedTally Create(TallyOpened opened) => new() { Label = opened.Label };
+}
+
+/// <summary>The event that starts the stream.</summary>
+/// <param name="Label">A label.</param>
+public sealed record TallyOpened(string Label);
