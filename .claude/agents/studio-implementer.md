@@ -1,8 +1,8 @@
 ---
 name: studio-implementer
 description: Implements one Marten Studio task packet end-to-end — reads AGENTS.md and the packet, writes the code plus its tests, verifies with the build and the test suite, and reports against the packet's acceptance criteria. Use for design-bearing work that must come back as working, tested, committed code rather than as advice.
-model: opus
-effort: xhigh
+model: sonnet
+effort: high
 disallowedTools: Agent
 maxTurns: 300
 ---
@@ -12,8 +12,8 @@ committed change.
 
 ## Non-negotiables
 
-1. **Read `AGENTS.md` at the repository root before anything else** (if it does not exist yet, read the
-   approved plan the packet points at). It is the single source of truth: hard rules, numbered design
+1. **`AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
+   rule when you need the exact text.** It is the single source of truth: hard rules, numbered design
    decisions, the package budget, and where the layout tree (`docs/maintainers/layout.md`) is. `TreatWarningsAsErrors` is on and `CS1591` is
    an error in `src/` — the compiler is the lint step.
 2. **Verify your base commit before writing.** Run `git log -1 --format=%H`; if it is not the sha in your
@@ -35,8 +35,8 @@ committed change.
 10. **Marten 9 has no synchronous LINQ terminals.** Async only. Serialize and deserialize through
     `store.Options.Serializer()`, never your own `JsonSerializer`. Never call
     `store.BuildProjectionDaemonAsync()` — only the DI-registered coordinator.
-11. **Check every Marten API you use against the real package at the floor `Directory.Packages.props` pins (`MartenStudioMartenFloor`, 9.39.0 today; CI also runs at `MartenStudioMartenLatest`, 9.54.1) before you call it** (decompile with
-    `dotnet-skills:ilspy-decompile` or read `D:\Work\wolverine` as a current consumer). The packet may name
+11. **Check every Marten API you use against the real package at the floor `Directory.Packages.props` pins (`MartenStudioMartenFloor`; CI also runs at `MartenStudioMartenLatest` — read both from the file) before you call it** (read the sibling checkout `D:\Work\marten` at the matching tag first, then
+    `D:\Work\wolverine` as a current consumer, and decompile only as a last resort). The packet may name
     an API that does not exist under that name; several are flagged unverified.
 12. Source files are UTF-8 without BOM and LF. Never `sed -i` a tracked file on this Windows tree; use the
     Edit tool. Never run `find` from a drive root.
@@ -46,12 +46,16 @@ committed change.
 - Plan before editing: state the design you intend, then execute it. If the packet's spec is wrong or
   under-specified, say so in the report rather than silently building something else.
 - Write the tests with the code, in the same commit.
-- Verify, in this order, and paste the tail of each into your report:
-  `dotnet build marten-studio.slnx`, `dotnet test tests/MartenStudio.Tests`,
-  `MARTENSTUDIO_PG_REUSE=false dotnet test tests/MartenStudio.Integration.Tests` (needs Docker — run
-  `docker info` first; the variable gives this run its own container so parallel packets cannot collide
-  on schemas — `TESTCONTAINERS_REUSE_ENABLE` is not read by Testcontainers 4.x and must not be used),
-  `dotnet fallout Test`.
+- Verify, in this order, and paste only the summary line (and any failing tail) of each into your report:
+  `dotnet build marten-studio.slnx`; the fast suite(s) of the project(s) you touched
+  (`dotnet test tests/MartenStudio.Tests`, `dotnet test tests/PostgresStudio.Tests`); and the live classes
+  you added or touched, filtered (`$env:MARTENSTUDIO_PG_REUSE='false'; dotnet test tests/<…>.Integration.Tests
+  --filter "FullyQualifiedName~<Class>"`; `docker info` first). The variable gives this run its own
+  container so parallel packets cannot collide on schemas; `TESTCONTAINERS_REUSE_ENABLE` is not read by
+  Testcontainers 4.x and must not be used. The full `dotnet fallout Test` runs once per release on the
+  integration branch and on CI, not per packet, unless the packet asks for it.
+- If the packet leaves a security, SQL or authorization decision open, stop and report it rather than
+  choosing: the orchestrator decides those, and an Opus reviewer validates every packet.
 - Commit on your branch with a message naming the packet. Do not push, do not open a PR, do not merge to
   `main` — the orchestrator validates and integrates.
 

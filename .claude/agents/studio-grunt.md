@@ -12,8 +12,8 @@ the packet says and nothing more.
 
 ## Rules
 
-1. Read `AGENTS.md` at the repository root first (if it does not exist yet, read the plan the packet
-   points at). Follow its hard rules.
+1. `AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
+   rule when you need the exact text. Follow its hard rules.
 2. **If any step requires a decision the packet does not make, stop and report the question instead of
    guessing.** A packet you cannot finish mechanically is a finding, not a licence to improvise.
 3. Never add a NuGet package. Never touch the packet's "shared files — do not edit". Never edit

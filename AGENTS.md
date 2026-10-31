@@ -363,11 +363,13 @@ skip message names the exact command that would install them.
 contract change, the baseline becomes noise, and the one diff that mattered gets approved along with forty
 that did not. There is no `PublicApiRendering` annotator in v1.
 
-**D21 — Agent routing.** A packet goes to Sonnet (`studio-grunt`) only when it is mechanical *and* fully
-specified: verbatim copies and ports with listed renames, boilerplate emitted from a table in the packet,
-scripted runs and artefact collection. Anything involving design choices, security, SQL, authorization,
-Marten API verification, Blazor circuit subtleties or test-case design goes to Opus at `xhigh`. Every
-Sonnet result is still reviewed by the orchestrator, and by `studio-reviewer` when it touches `src/`.
+**D21 — Agent routing (revised 2026-10-31: Sonnet implements, Opus validates).** A packet goes to `studio-grunt`
+(Sonnet, medium) only when it is mechanical *and* fully specified: verbatim copies and ports with listed renames, boilerplate emitted from a table in the packet,
+scripted runs and artefact collection. Design-bearing packets go to `studio-implementer` (Sonnet, high), but the
+design itself is not delegated: the orchestrator (Opus) writes every security, SQL, authorization and Marten-API
+decision into the packet, and the implementer stops on one the packet leaves open. Final validation is Opus:
+`studio-reviewer` (xhigh) reads every packet that touches `src/`, scoped to its diff, and the orchestrator reviews
+authorization code itself. Agents read AGENTS.md from context (CLAUDE.md imports it), never with a fresh Read.
 
 **D22 — `blazor.web.js` reaches the host through a `PackageReference`, not through a copy in this
 package.** On .NET 10 the file is only a static web asset of `Microsoft.AspNetCore.App.Internal.Assets`, resolved only
