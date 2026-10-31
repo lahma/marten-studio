@@ -467,6 +467,7 @@ internal sealed partial class DocumentDataService
             ClrType = context.ClrType,
             NamingPolicy = context.NamingPolicy,
             IsRegistered = context.IsRegistered,
+            WrittenByProjection = ProjectionOwnedDocuments.IsProjectionOwned(context.DocumentType as DocumentMapping),
             IsDeleted = string.Equals(metadata.GetValueOrDefault(DocumentMetadataColumn.IsSoftDeleted), "true", StringComparison.Ordinal),
             TenantId = metadata.GetValueOrDefault(DocumentMetadataColumn.TenantId),
             DocumentTypeAlias = metadata.GetValueOrDefault(DocumentMetadataColumn.DocumentType),

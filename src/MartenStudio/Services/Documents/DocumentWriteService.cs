@@ -193,6 +193,17 @@ internal sealed class DocumentWriteService : IDocumentWriteService
             {
                 preview = WritePreview.Refused(alias, id, described.Refusal!, editedJson: editedJson);
             }
+            else if (ProjectionOwnedDocuments.IsProjectionOwned(described.Target.Mapping))
+            {
+                // Before a connection: the mapping alone says an edit would move the revision past the stream.
+                preview = WritePreview.Refused(
+                    alias,
+                    id,
+                    ProjectionOwnedDocuments.EditRefusal(id),
+                    editedJson: editedJson,
+                    documentTypeName: described.Target.TypeName,
+                    auditReason: ProjectionOwnedDocuments.AuditReason);
+            }
             else
             {
                 await using var connection = await OpenReadConnectionAsync(resolved, cancellationToken).ConfigureAwait(false);
@@ -756,6 +767,16 @@ internal sealed class DocumentWriteService : IDocumentWriteService
         if (described.Target is null)
         {
             return WriteResult.Refused(described.Refusal!);
+        }
+
+        // Before any connection or session: an edit of a projection's document moves its revision past the stream and
+        // the daemon then skips the next event (ProjectionOwnedDocuments). A delete and an undelete do not.
+        if (ProjectionOwnedDocuments.IsProjectionOwned(described.Target.Mapping))
+        {
+            return WriteResult.Refused(
+                ProjectionOwnedDocuments.EditRefusal(id),
+                preview: null,
+                auditReason: ProjectionOwnedDocuments.AuditReason);
         }
 
         WriteTarget writeTarget;

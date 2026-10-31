@@ -108,7 +108,7 @@
                                           IsDeleted="detail.IsDeleted"
                                           Editing="editing"
                                           Busy="writing"
-                                          EditRefusal="@editRefusal"
+                                          EditRefusal="@(editRefusal ?? ProjectionRefusal(detail))"
                                           MayEdit="mayEdit"
                                           MayDelete="mayDelete"
                                           OnEdit="StartEditAsync"
@@ -123,6 +123,13 @@
             <div class="ms-alert ms-alert-warning ms-doc-deleted-banner" role="status">
                 This document is soft-deleted: the row is still in the table, and Marten's own queries do
                 not return it.
+            </div>
+        }
+
+        @if (detail.WrittenByProjection)
+        {
+            <div class="ms-alert ms-alert-info ms-doc-projection-note" role="status">
+                Written by its projection from the events of stream '@detail.Id': the studio does not edit it.
             </div>
         }
 
@@ -391,6 +398,10 @@
 
     private string BackHref =>
         SafeFrom ?? DocumentLinks.ToCollection(Options.Value, State.ActiveScope, Alias);
+
+    /// <summary>Why Edit is off before anyone presses it, when a projection owns the document.</summary>
+    private static string? ProjectionRefusal(DocumentModel detail) =>
+        detail.WrittenByProjection ? ProjectionOwnedDocuments.EditRefusal(detail.Id) : null;
 
     private string QueryHref(DocumentModel detail) =>
         DocumentLinks.ToQuery(Options.Value, State.ActiveScope, Alias, $"id = '{detail.Id}'");
