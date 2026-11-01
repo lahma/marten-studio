@@ -4,7 +4,7 @@ Guidance for humans and AI agents working in this repository. `CLAUDE.md` import
 source of truth.
 
 This repository ships two MIT-licensed Razor Class Libraries, embeddable Blazor Server admin UIs that run inside the
-host's own ASP.NET Core application (D30):
+host's own ASP.NET Core application, and the diagnostics engine under both as a package of its own (D30):
 
 - **Marten Studio** (`MartenStudio`), for [MartenDB](https://martendb.io). A host adds `AddMartenStudio()` to its
   container and `MapMartenStudio()` to its endpoint pipeline, and the studio runs against *that application's own*
@@ -13,8 +13,12 @@ host's own ASP.NET Core application (D30):
 - **Postgres Studio** (`PostgresStudio`), for any application that registers an `NpgsqlDataSource`, Marten or not:
   `AddPostgresStudio()` and `MapPostgresStudio()`, against the application's own data sources. It is also the core
   Marten Studio is built on: the shell, the scope and authorization layers, the audit, the database browser, Sessions,
-  the health advisor and its pages, the SQL console and Relationships are PostgresStudio's, and MartenStudio adds the
-  Marten screens, the Marten checks and the Marten halves of every seam.
+  the health advisor's pages, the SQL console and Relationships are PostgresStudio's, and MartenStudio adds the Marten
+  screens, the Marten checks and the Marten halves of every seam.
+- **Postgres Studio Diagnostics** (`PostgresStudio.Diagnostics`, since 0.11), the engine both studios are built on, with
+  no UI and no ASP.NET Core: the health sweep and its checks, the facts they read, `IPostgresDiagnostics` and the
+  health-check export. A host with no UI to mount (a worker, a job host, a shared library) takes it alone and calls
+  `AddPostgresDiagnostics()`; each studio brings it at exactly its own version.
 
 Neither is a standalone application, a fleet monitor or a connection-string tool. Everything Marten Studio knows, it
 knows because the host configured Marten that way: aliases, duplicated fields, soft delete, tenancy, projections and
@@ -98,8 +102,11 @@ Each rule's full text, with its lists of events, tests and history, is in
    codebase raises is declared `event Func<Task>?`. `NoAsyncVoidTests` scans `src/`. Full text: hard rule 6.
 
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** MartenStudio's surface is three
-   static classes, two classes and one record, and it must not move because of PostgresStudio; PostgresStudio's adds its
-   six inbound types and the D31 read model. Anything else that appears in either baseline is a mistake, not a feature.
+   static classes, two classes and one record, and it must not move because of PostgresStudio; PostgresStudio's is its five
+   registration types, and PostgresStudio.Diagnostics' (a baseline of its own) is `AddPostgresDiagnostics`, the health-check
+   extension, `PostgresDiagnosticsOptions`, the six inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and
+   their records) and the D31 read model. Anything else that appears in any baseline is a mistake,
+   not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request what moved and
    why, then accept the baseline. The read model is extend-only (D31). **`docs/health/codes.md` is a contract too, and a
    row is never deleted**: every registered check's code has its row; a retired check keeps its row, marked with the
@@ -187,12 +194,14 @@ studio run against the host's in-process `IDocumentStore`; WebAssembly would nee
 security problem. `IsTrimmable=false` is stated in the csproj, because components are bound by name and the document
 viewer deserializes into types found at run time. Full text: [architecture.md](docs/maintainers/architecture.md#d2).
 
-**D3 — Two dependencies a package, and no upper bound on either: MartenStudio (`Marten`, floor `9.39.0`, and
-PostgresStudio at exactly its own version), PostgresStudio (`Npgsql`, floor `8.0.3`, and
+**D3 — Few dependencies a package, and no upper bound on any: MartenStudio (`Marten`, floor `9.39.0`, and PostgresStudio
+at exactly its own version), PostgresStudio (PostgresStudio.Diagnostics at exactly its own version, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`) - each plus `FrameworkReference
-Microsoft.AspNetCore.App`.** No `Marten.AspNetCore`; MartenStudio has no direct `Npgsql`, which arrives through
-`Weasel.Postgresql`, while PostgresStudio references `Npgsql` directly. The Marten floor is a *security* floor, tested
-and packed as *Build* says. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
+Microsoft.AspNetCore.App` - and PostgresStudio.Diagnostics (`Npgsql`, floor `8.0.3`, and four `Microsoft.Extensions.*`
+abstractions, floor `10.0.0`), with no framework reference at all.** No `Marten.AspNetCore`; MartenStudio has no direct
+`Npgsql`, which arrives through `Weasel.Postgresql`, while PostgresStudio.Diagnostics references `Npgsql` directly and
+PostgresStudio takes it through that. The Marten floor is a *security* floor, tested and packed as *Build* says. Full
+text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a read-only
 browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and every disabled control
@@ -236,8 +245,10 @@ assembly's own root (`/postgres`, `/marten`), and `/_blazor`, `blazor.web.js`, `
 
 **D12 — The data seam is internal, across both assemblies.** Per-area service interfaces (`IDocumentDataService`,
 `IEventDataService`, …) are internal, with `InternalsVisibleTo` for the test projects and, from PostgresStudio, for
-MartenStudio (D30). Each package's *registration* surface is three static classes, two classes and one record,
-snapshot-tested. Full text: [architecture.md](docs/maintainers/architecture.md#d12).
+MartenStudio (D30), and from the engine for PostgresStudio and MartenStudio. Each package's *registration* surface is
+snapshot-tested: MartenStudio's three static classes, two classes and one record; PostgresStudio's five registration types;
+PostgresStudio.Diagnostics' `AddPostgresDiagnostics`, the health-check extension, `PostgresDiagnosticsOptions`, the six
+inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and their records) and the D31 read model. Full text: [architecture.md](docs/maintainers/architecture.md#d12).
 
 **D13 — The SQL console is off by default, and its real guard is the transaction.** `RunSql` is a capability like any
 other. What makes it safe is `SET TRANSACTION READ ONLY` plus `statement_timeout` and an optional `SET LOCAL ROLE`, not
@@ -345,7 +356,14 @@ and state; acceptance changes no gate. Full text: [health-engine.md](docs/mainta
 **D30 — PostgresStudio: the core is a package of its own, and Marten Studio is built on it.** PostgresStudio is
 everything about a PostgreSQL database rather than a Marten store, Marten-free (hard rule 16); Marten Studio is built on
 it through `InternalsVisibleTo` and an exact version pin, not a public extension API, and `AddMartenStudio()` first runs
-`PostgresStudioVersionGuard`. PostgresStudio browses the application's own `NpgsqlDataSource` registrations, never a
+`PostgresStudioVersionGuard`. **Since 0.11 the diagnostics engine is a third package,** `PostgresStudio.Diagnostics`
+(health sweep and checks, facts, sources, `IPostgresDiagnostics`, the health-check export, `PostgresDiagnosticsOptions` and
+`AddPostgresDiagnostics`), with no ASP.NET Core in it and the same exact-pin discipline one level down: PostgresStudio is
+packed with `PostgresStudio.Diagnostics [x.y.z]` and `AddPostgresStudio()` first runs
+`PostgresStudioDiagnosticsVersionGuard`, which `AddMartenStudio()`'s guard repeats for the engine too. The studios register
+the engine themselves: one registration per container, `AddPostgresDiagnostics()` refused beside either studio. Settings
+split in two seams, `IDiagnosticsSettings` for the engine and `IStudioSettings` for the studio; a studio's one options
+object answers both. PostgresStudio browses the application's own `NpgsqlDataSource` registrations, never a
 connection string, and is asked against its own `PostgresStudioResource`. One studio per process. The public
 `AddMartenStudio`'s own body stays free of PostgresStudio types (`PostgresStudioVersionGuardTests` scans its IL).
 `PostgresStudioResource` has no tenant and is deliberately unrelated to `MartenStoreResource`: a handler written for one
@@ -354,7 +372,9 @@ host sees a word change; static assets live only in `_content/PostgresStudio/`. 
 [architecture.md](docs/maintainers/architecture.md#d30).
 
 **D31 — The diagnostics API: what the studio found, for the host's own code, by stable code, and never served by the
-studio.** `IPostgresDiagnostics` returns what the studio found, for the host's own code, by stable code; results are
+studio.** `IPostgresDiagnostics` (registered by `AddPostgresDiagnostics()`, or by either studio) returns what the engine
+found, for the host's own code, by stable code; there are no mutes without a UI, and its studio paths are mount-relative
+strings that mean nothing where no studio is mounted; results are
 extend-only records, and activity-grade data is returned only when the call sets `IncludeActivity = true`. The studio
 never serves it: nothing in either package puts an API result into an HTTP response, a log line above Debug, a metric,
 the Activity ring or the health check's data, and no endpoint maps one; the Health page's Snapshot download is built
@@ -380,7 +400,8 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 | `src/PostgresStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it reaches a MartenStudio host through MartenStudio's `ProjectReference` to PostgresStudio (two hops, measured by PS-0, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. MartenStudio no longer references it, but MartenStudio's nuspec still lists it at this version: under `CentralPackageTransitivePinningEnabled` NuGet writes a centrally pinned transitive package into the nuspec (the same line MartenStudio 0.4.0 carried when it referenced the pack directly), and `Pack` asserts the line. |
 | `src/PostgresStudio.Diagnostics` | `Npgsql` | `8.0.3` (latest tested `10.0.3`) | The diagnostics engine's database driver, and the studio's: since 0.11-C `src/PostgresStudio` takes it through its `ProjectReference` to this project and no longer references it directly (*Package budget changes* 2026-11-01). PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin, measured by PS-7 (*Package budget changes* 2026-10-26); a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`). `samples/PostgresStudio.SampleData` references it directly too, and `samples/PostgresStudio.Sample`, both PostgresStudio test projects and `src/PostgresStudio` itself set `PostgresStudioPinsNpgsql` so the same row pins it transitively; all of them are in `postgres-studio.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
 | `src/PostgresStudio.Diagnostics` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` each | The engine has no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so the abstractions it registers into, logs through and exports a health check with come as packages. Four conditional central rows, visible only to projects that set `PostgresStudioDiagnosticsPinsExtensions` (this one, and the 0.11 worker sample), so Marten's, JasperFx's and Weasel's own Microsoft.Extensions.* stay unpinned in MartenStudio and its tests. Floors, not exact pins. 10.0.0 and not 8.0.x because Npgsql 10.0.3's net10.0 asset asks for `Logging.Abstractions` 10.0.0 and an older pin would silently win (measured: no NU code, 8.0.0 resolved), which is not a floor (D1: the library is net10.0 only). *Package budget changes* 2026-11-01. |
-| both sample hosts, both `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container each integration suite runs against. |
+| the three sample hosts, both `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres (the Marten and Postgres Studio sample hosts and the diagnostics worker), and the container each integration suite runs against. |
+| `samples/PostgresStudio.Worker` | `Microsoft.Extensions.Hosting` | `10.0.0` | The generic host the diagnostics worker sample runs in (*Package budget changes* 2026-11-01). A fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group: no shipped package references it. |
 | all four test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | all four test projects | `xunit.v3` | `3.2.2` | Held — see below. |
 | all four test projects | `xunit.runner.visualstudio` | `3.1.5` | The VSTest bridge. |
@@ -441,7 +462,7 @@ by folder-name convention.
 .\build.ps1 Test --playwright              # ... and install Chromium first (D19)
 .\build.ps1 Test --marten-version latest   # ... at the latest-tested Marten instead of the floor
 .\build.ps1 Test --npgsql-version latest   # ... and then PostgresStudio's projects at the latest-tested Npgsql
-.\build.ps1 Pack                           # both NuGet packages into artifacts/packages (always at the floors)
+.\build.ps1 Pack                           # the three NuGet packages into artifacts/packages (always at the floors)
 .\build.ps1 Browsers                       # just the Chromium install
 ```
 
@@ -457,8 +478,9 @@ anything else ships it empty (*Release engineering*).
 The Marten version is `Directory.Packages.props`'s: `MartenStudioMartenFloor` and `MartenStudioMartenLatest`, chosen by
 `--marten-version` (`floor`, `latest` or an exact version, never a range). `Pack` packs at the floors only and refuses
 anything else. PostgresStudio's Npgsql follows the same scheme with `--npgsql-version`; anything but its floor gets a
-pass of its own over `postgres-studio.slnf`, never the `.slnx`. `Pack` packs `src/PostgresStudio` then
-`src/MartenStudio`, both at the CHANGELOG version, MartenStudio depending on exactly `PostgresStudio [<version>]`. The
+pass of its own over `postgres-studio.slnf`, never the `.slnx`. `Pack` packs `src/PostgresStudio.Diagnostics`, then
+`src/PostgresStudio`, then `src/MartenStudio`, all at the CHANGELOG version, each depending on exactly the one below it
+(`PostgresStudio.Diagnostics [<version>]`, `PostgresStudio [<version>]`), and `Publish` pushes the three in that order. The
 build needs at least one commit. To bump the latest-tested Marten, change `MartenStudioMartenLatest`, run both suites
 with `--marten-version latest` and fix or record every difference, in a pull request of its own. A project that sets
 `PostgresStudioPinsNpgsql` goes into `postgres-studio.slnf` in the same pull request. Full text:

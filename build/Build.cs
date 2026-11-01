@@ -26,8 +26,8 @@ using Project = Fallout.Solutions.Project;
 /// <c>Build.Publish.cs</c>, the Playwright browser install in <c>Build.Browsers.cs</c>, the choice of
 /// Marten - the floor, or the latest-tested 9.x - in <c>Build.Marten.cs</c>, and the choice of Npgsql for
 /// the PostgresStudio-only projects, with its second pass over <c>postgres-studio.slnf</c>, in
-/// <c>Build.Npgsql.cs</c>. There is no publish or archive target: the studio ships as two NuGet packages,
-/// PostgresStudio and MartenStudio, released together, and nothing else.
+/// <c>Build.Npgsql.cs</c>. There is no publish or archive target: the studio ships as three NuGet packages,
+/// PostgresStudio.Diagnostics, PostgresStudio and MartenStudio, released together, and nothing else.
 /// </remarks>
 [ShutdownDotNetAfterServerBuild]
 partial class Build : FalloutBuild,
@@ -55,6 +55,7 @@ partial class Build : FalloutBuild,
     // Spelled out rather than looked up through the solution: on Linux the path is case-sensitive, and
     // a typo here should fail as a missing file rather than as a null reference three targets later.
     AbsolutePath StudioProject => SourceDirectory / "MartenStudio" / "MartenStudio.csproj";
+    AbsolutePath DiagnosticsProject => SourceDirectory / "PostgresStudio.Diagnostics" / "PostgresStudio.Diagnostics.csproj";
     AbsolutePath PostgresStudioProject => SourceDirectory / "PostgresStudio" / "PostgresStudio.csproj";
     AbsolutePath SampleProject => SamplesDirectory / "MartenStudio.Sample" / "MartenStudio.Sample.csproj";
 

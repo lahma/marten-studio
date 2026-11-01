@@ -47,4 +47,11 @@ internal class DiagnosticsDescriptor
 
     /// <summary>A source as a control's label: <c>Store</c>.</summary>
     public required string SourceLabel { get; init; }
+
+    /// <summary>
+    /// Who runs the check codes <c>AcceptedChecks</c> may name, as the refusal of an unknown one says it: <c>of this studio</c>
+    /// for a studio, so no studio host's sentence changes, and for a host with no studio, whose engine is all there is, the
+    /// package that runs them.
+    /// </summary>
+    public string CheckCodeOwner { get; init; } = "of this studio";
 }

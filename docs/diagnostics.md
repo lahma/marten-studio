@@ -1,7 +1,8 @@
 # The diagnostics API
 
 From 0.5, the studio's findings and measurements are available to your own code: `IPostgresDiagnostics`, registered by
-`AddPostgresStudio()` and by `AddMartenStudio()`. It answers what the Health, Storage, Statements, Server and
+`AddPostgresStudio()` and by `AddMartenStudio()` - and, from 0.11, by `AddPostgresDiagnostics()` alone, with no studio and
+no ASP.NET Core ([Without the UI](#without-the-ui)). It answers what the Health, Storage, Statements, Server and
 Database › Sessions pages read, for one database at a time, as typed results with stable codes - so you can put a
 summary in your own e-mail, your own admin page or your own alerting, worded in your own language.
 
@@ -13,7 +14,8 @@ decision.
 
 `IPostgresDiagnostics` is a singleton in the container. Resolve it wherever your code runs: a hosted service, an endpoint
 behind your own authorization, a background job. You do not need to map the studio (`MapPostgresStudio()` /
-`MapMartenStudio()`) to use it - an application can register the studio for the API alone.
+`MapMartenStudio()`) to use it - an application can register the studio for the API alone - and a host with no UI at all
+registers `AddPostgresDiagnostics()` instead.
 
 ```csharp
 // Postgres Studio: an admin database and one database per tenant.
@@ -183,6 +185,75 @@ that visitor's own gates; it carries nothing the page would not show them. A fin
 fragment: the Health page scrolls to the card once it has drawn it, opens the muted list if the card is in it, and marks
 the card for two seconds. A finding the report no longer holds, or one the visitor is not shown, reads "This finding is
 no longer reported."
+
+## Without the UI
+
+`PostgresStudio.Diagnostics` is the engine under both studios as a package of its own, with no ASP.NET Core in it: the
+health sweep and its checks, the facts they read, `IPostgresDiagnostics` and its read model, and the opt-in health check.
+Take it when the host has no UI to mount and only wants the findings:
+
+- a **worker or job host** that mails or posts a daily summary, as above, or runs the checks before a deployment;
+- a **shared library** of your own that other applications call to ask "is this database healthy?", without the library
+  pulling a Blazor UI into every one of them;
+- an application that wants the **health check** (`AddHealthChecks().AddPostgresStudio()`) and no pages.
+
+```shell
+dotnet add package PostgresStudio.Diagnostics
+```
+
+```csharp
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Services.AddNpgsqlDataSource(connectionString);      // the unkeyed source is found by itself, as "default"
+builder.Services.AddPostgresDiagnostics(o =>
+{
+    o.HealthInterval = TimeSpan.FromMinutes(5);
+    o.BrowsableSchemas.Add("public");
+    o.AddDatabaseSource("tenants", sp => sp.GetRequiredService<TenantDatabases>());
+});
+builder.Services.AddHostedService<DailySummary>();           // resolves IPostgresDiagnostics, as in "Getting it"
+
+await builder.Build().RunAsync();
+```
+
+[`samples/PostgresStudio.Worker`](../samples/PostgresStudio.Worker) is this, complete: a generic host that references
+`PostgresStudio.Diagnostics` alone and logs a summary of every database at start and then every `Summary:Interval`
+(24 hours by default), with each finding's link when `Summary:StudioBaseUrl` is set. A real host sends the text where it
+already notifies - e-mail, a chat webhook - and keeps the loop.
+
+Code compiled against PostgresStudio 0.10 that uses the types that moved to this package - `IPostgresDiagnostics` and
+its read model, `PostgresDatabaseRef`, `IPostgresDatabaseSource`, `IPostgresCapacitySource` and the health-check
+extension - must be recompiled against 0.11: they keep their namespace and their names, so it is source-compatible, but
+the types are in a new assembly and there is no type forwarding, so it is not binary-compatible.
+
+**What differs from the studio's registration:**
+
+- **No mutes.** Muting a finding is a visitor's choice on the Health page, and there is no visitor. What the host decides
+  for everyone is `AcceptedChecks`, which `PostgresDiagnosticsOptions` has and the snapshot reports as `accepted`.
+- **Links are mount-relative strings, meaningless without a UI.** `StudioPath`, `StudioLinks` and `GetStudioPath` are the
+  same strings as ever (`health?store=default&db=app`) and are only useful joined to the path a studio is mounted at -
+  yours, if a separate application hosts one. With nothing mounted anywhere, ignore them.
+- **Options are validated on start** (`ValidateOnStart`): a host that registers `AddPostgresDiagnostics()` with a
+  `QueryTimeout`, `SqlConsoleRole`, `HealthInterval`, schema name or source name the engine refuses stops at startup, naming
+  the member, not at the first read. The studio validates the same members, and its own besides.
+- **No K-checks.** K05 to K07 judge the studio's own configuration and live in `PostgresStudio`, so they never run under
+  `AddPostgresDiagnostics()` alone, and naming one in `AcceptedChecks` there stops the host at startup.
+- **One registration.** `AddPostgresDiagnostics()` throws in a container that already called `AddPostgresStudio()` or
+  `AddMartenStudio()`, and they throw after it: the studios register the engine themselves, from the same options object.
+  An application that wants a studio calls the studio's method alone.
+- **No studio-only options.** `PostgresDiagnosticsOptions` has `QueryTimeout`, `SqlConsoleRole`, `HealthInterval`,
+  `AcceptedChecks`, `BrowsableSchemas`, `IncludeDefaultDataSource`, `AddDataSource` and `AddDatabaseSource`. The path, the
+  title, the three authorization policies, `ReadOnly`, the capabilities, paging, the console's limits and `RefreshInterval`
+  belong to `PostgresStudioOptions`, which inherits all of the above: configure a member the same way in either.
+
+**The health check** is the same call as with a studio, and needs `AddPostgresDiagnostics()` (or a studio) registered
+first; without either it reports `Degraded` and says so:
+
+```csharp
+builder.Services.AddHealthChecks().AddPostgresStudio(tags: ["postgres"]);
+```
+
+It reports codes, outcomes, severities and counts, never a name, as in the studio's ([Security](#security)).
 
 ## Security
 

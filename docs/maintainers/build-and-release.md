@@ -4,15 +4,18 @@ This is the full text of D3, D21, the *Package budget changes* and *Held deliber
 
 ## D3
 
-**D3 — Two dependencies a package, and no upper bound on either: MartenStudio (`Marten`, floor `9.39.0`, and
-PostgresStudio at exactly its own version), PostgresStudio (`Npgsql`, floor `8.0.3`, and
+**D3 — Few dependencies a package, and no upper bound on any: MartenStudio (`Marten`, floor `9.39.0`, and PostgresStudio
+at exactly its own version), PostgresStudio (PostgresStudio.Diagnostics at exactly its own version, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`) - each plus `FrameworkReference
-Microsoft.AspNetCore.App`.** Everything else either RCL needs (Blazor, SignalR, authorization, endpoint routing) is in
-the shared framework, so neither pins an ASP.NET Core patch onto its host; nor does the assets pack, three `.js` files
-and an MSBuild target with no `lib/`, no `ref/` and no runtime assembly (D22). No `Marten.AspNetCore`: its value is
+Microsoft.AspNetCore.App` - and PostgresStudio.Diagnostics (`Npgsql`, floor `8.0.3`, and four `Microsoft.Extensions.*`
+abstractions, floor `10.0.0`), with no framework reference at all.** Everything else either RCL needs (Blazor, SignalR,
+authorization, endpoint routing) is in the shared framework, so neither pins an ASP.NET Core patch onto its host; nor does
+the assets pack, three `.js` files and an MSBuild target with no `lib/`, no `ref/` and no runtime assembly (D22); and the
+engine, which a worker host takes alone, needs no ASP.NET Core at all (hard rule 16). No `Marten.AspNetCore`: its value is
 ETag'd HTTP JSON writers generic over `T`, and the studio only ever has a runtime `Type`. MartenStudio has no direct
-`Npgsql`, which arrives through `Weasel.Postgresql` and must not drift from it; PostgresStudio, with no Marten to bring
-it, references `Npgsql` directly (*Build*). The Marten floor is a *security* floor (*Package budget changes*), tested
+`Npgsql`, which arrives through `Weasel.Postgresql` and must not drift from it; PostgresStudio.Diagnostics, with no Marten
+to bring it, references `Npgsql` directly, and PostgresStudio takes it through that reference (*Build*; since 0.11-C, with
+the engine in a package of its own - *Package budget changes* 2026-11-01). The Marten floor is a *security* floor (*Package budget changes*), tested
 and packed as *Build* says. The studio compiles without the JasperFx source generator Marten bundles, so its public API
 is the same whichever Marten built it.
 
@@ -115,19 +118,29 @@ pass's. `marten-latest.yml` sets `MARTEN_VERSION: latest` and `NPGSQL_VERSION: l
 latest legs. Without Fallout: `dotnet test postgres-studio.slnf -p:PostgresStudioNpgsqlVersion=10.0.3` - never the
 `.slnx`. A project that sets `PostgresStudioPinsNpgsql` goes into `postgres-studio.slnf` in the same pull request.
 
-**Two packages, one version.** `Pack` packs `src/PostgresStudio` and then `src/MartenStudio`, one after the other,
-both at the CHANGELOG version and both at the floors - it refuses a `--marten-version` or `--npgsql-version` that is
-not the floor, and each csproj refuses a bare `dotnet pack` off its floor, by property and by `project.assets.json` -
-and then asserts both nuspecs. MartenStudio depends on exactly `PostgresStudio [<version>]`, on `Marten <floor>` and
-on `Microsoft.AspNetCore.App.Internal.Assets` (written there by transitive pinning); PostgresStudio on
-`Npgsql <floor>` and `Microsoft.AspNetCore.App.Internal.Assets` and nothing else. The exact range is
-`MartenStudioPinsPostgresStudioExactly` in `MartenStudio.csproj`, which brackets NuGet-private item metadata; the
-nuspec assertion is what turns a NuGet that renamed it into a red build rather than a shipped `>=`. NuGet enforces the
-pin everywhere but one place: with `CentralPackageTransitivePinningEnabled` and a central `PackageVersion` for
-PostgresStudio at another version, the SDK drops PostgresStudio from the graph without a warning (PS-0;
-NuGet/Home#14698). So `AddMartenStudio` first runs `PostgresStudioVersionGuard` (D30), which throws an
-`InvalidOperationException` naming the central pin when PostgresStudio is missing or its informational version
-(before the `+`) differs.
+**Three packages, one version.** `Pack` packs `src/PostgresStudio.Diagnostics`, then `src/PostgresStudio`, then
+`src/MartenStudio`, one after the other, all at the CHANGELOG version and all at the floors - it refuses a
+`--marten-version` or `--npgsql-version` that is not the floor, and each csproj refuses a bare `dotnet pack` off its
+floor, by property and by `project.assets.json` (`PostgresStudio.Diagnostics` and `PostgresStudio` for Npgsql, MartenStudio
+for Marten) - and then asserts all three nuspecs, each dependency at exactly the range NuGet wrote. MartenStudio depends on
+exactly `PostgresStudio [<version>]`, on `Marten <floor>` and on `Microsoft.AspNetCore.App.Internal.Assets` (written there
+by transitive pinning), and not on the engine, which a host gets through PostgresStudio's pin. PostgresStudio depends on
+exactly `PostgresStudio.Diagnostics [<version>]`, `Npgsql <floor>` (it no longer references Npgsql itself, but it still sets
+`PostgresStudioPinsNpgsql`, so the central row pins the Npgsql that arrives through the engine and NuGet writes that pinned
+transitive package into the nuspec) and `Microsoft.AspNetCore.App.Internal.Assets`, and nothing else.
+PostgresStudio.Diagnostics depends on `Npgsql <floor>` and the four `Microsoft.Extensions.*` abstractions at their central
+rows, and on no ASP.NET Core package and no part of the Marten family. Each exact range is a target that brackets
+NuGet-private item metadata: `MartenStudioPinsPostgresStudioExactly` in `MartenStudio.csproj` and
+`PostgresStudioPinsDiagnosticsExactly` in `PostgresStudio.csproj`; the nuspec assertion is what turns a NuGet that renamed
+it into a red build rather than a shipped `>=`. NuGet enforces a pin everywhere but one place: with
+`CentralPackageTransitivePinningEnabled` and a central `PackageVersion` for the pinned package at another version, the SDK
+drops it from the graph without a warning (PS-0; NuGet/Home#14698). So `AddMartenStudio` first runs
+`PostgresStudioVersionGuard` (D30), which throws an `InvalidOperationException` naming the central pin when PostgresStudio
+or PostgresStudio.Diagnostics is missing or its informational version (before the `+`) differs, and `AddPostgresStudio`
+first runs `PostgresStudioDiagnosticsVersionGuard`, which does the same for the engine - but only for a newer engine or
+another commit of the same version: `AddPostgresStudio`'s parameter type derives from an engine type, so a missing or older
+engine fails in the loader when it is first called, with a `FileNotFoundException` that names the engine and the version
+(measured 2026-11-01). `AddPostgresDiagnostics` needs no guard: nothing is below it.
 
 `build/_build.csproj` restores with `NU1902`/`NU1903` warnings for `System.Security.Cryptography.Xml` and
 `System.Security.Cryptography.Pkcs` 10.0.10, which `Fallout.Components` 10.4.0 brings transitively (seen
@@ -161,7 +174,7 @@ floor, and `Pack` refuses any other Marten.
 `GITHUB_REF_NAME` equals `v{version parsed from CHANGELOG.md}`. To release: land the changelog entry first,
 then tag that commit.
 
-The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). Both packages are consumed
+The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). All three packages are consumed
 by `PackageReference`; there is nothing a user could usefully download, and attaching a copy of a .nupkg
 would only invite installing a file that never went through the trusted-publishing path. The release body
 is written by `Build.WriteReleaseNotes` into `artifacts/release-notes.md`: `ICreateGitHubRelease` composes
@@ -186,11 +199,12 @@ a logged *skip* (there is no preview feed), and once past that gate it asserts, 
 GitHub Actions, that `NUGET_USER` is set, and that `GITHUB_REF_NAME` matches the changelog version. Only
 then does it mint the key, immediately before pushing — the key lives 15–60 minutes and one OIDC token
 mints exactly one key. Before it mints the key, it asserts that `artifacts/packages` holds exactly
-`PostgresStudio.<version>.nupkg` and `MartenStudio.<version>.nupkg`, and it pushes them with that one key one at a
-time, PostgresStudio first, the first failure ending the run, so a PostgresStudio push that fails never lets a
-MartenStudio that depends on exactly it reach nuget.org. `--skip-duplicate` keeps a re-run after a partial failure
-safe. nuget.org still validates and indexes each package on its own, so for a few minutes after a release MartenStudio
-can be listed while its PostgresStudio is not yet restorable. `ReleasePushOrderTests` pins the order and the stop.
+`PostgresStudio.Diagnostics.<version>.nupkg`, `PostgresStudio.<version>.nupkg` and `MartenStudio.<version>.nupkg`, and it
+pushes them with that one key one at a time, the engine first and MartenStudio last, the first failure ending the run, so a
+push that fails never lets a package that depends on exactly it reach nuget.org. `--skip-duplicate` keeps a re-run after a
+partial failure safe. nuget.org still validates and indexes each package on its own, so for a few minutes after a release
+PostgresStudio can be listed while its PostgresStudio.Diagnostics is not yet restorable, and MartenStudio while its
+PostgresStudio is not. `ReleasePushOrderTests` pins the order and the stop.
 
 The whole ladder is exercisable locally, and should be before any tag:
 

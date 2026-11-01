@@ -34,7 +34,7 @@ internal sealed class PostgresDiagnosticsSettings : IDiagnosticsSettings
     public string OptionsTypeName => nameof(PostgresDiagnosticsOptions);
 
     /// <inheritdoc />
-    public StudioText Text => PostgresStudioText.Instance;
+    public StudioText Text => PostgresStudioText.DiagnosticsInstance;
 
     /// <inheritdoc />
     public TimeSpan QueryTimeout => Value.QueryTimeout;

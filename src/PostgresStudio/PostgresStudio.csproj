@@ -46,6 +46,35 @@
   </ItemGroup>
 
   <!--
+    PostgresStudio depends on exactly its own PostgresStudio.Diagnostics: `PostgresStudio.Diagnostics [0.11.0]` in the
+    nuspec, not NuGet's default `>= 0.11.0`. The two assemblies are one program split in two files - the engine grants
+    PostgresStudio its internals - so PostgresStudio 0.11.0 beside PostgresStudio.Diagnostics 0.11.1 is a
+    MissingMethodException on the first internal signature that moved. The same mechanism, for the same reason, as
+    MartenStudioPinsPostgresStudioExactly in src/MartenStudio/MartenStudio.csproj (measured by PS-0, 2026-10-20, SDK
+    10.0.402).
+
+    How: GenerateNuspec hands PackTask @(_ProjectReferencesWithVersions), which _GetProjectReferenceVersions fills
+    with each referenced project's $(PackageVersion) as ProjectVersion metadata, and PackTask reads that metadata as a
+    version RANGE. Bracketing it after that target is the whole change. Both names are NuGet-private, so the build's
+    Pack target also asserts the nuspec text: a NuGet that renames them fails the build instead of shipping `>=`. The
+    Error is the second half of the same defence: a pack that finds no PostgresStudio.Diagnostics project reference to
+    pin refuses rather than shipping a package with no pin at all.
+
+    A host that ends up with another PostgresStudio.Diagnostics anyway - a central PackageVersion under transitive
+    pinning drops it from the graph with no NuGet diagnostic at all - is stopped at startup by
+    Internal/PostgresStudioDiagnosticsVersionGuard.cs.
+  -->
+  <Target Name="PostgresStudioPinsDiagnosticsExactly" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'PostgresStudio.Diagnostics'">
+        <ProjectVersion>[%(ProjectVersion)]</ProjectVersion>
+      </_ProjectReferencesWithVersions>
+    </ItemGroup>
+    <Error Condition="'@(_ProjectReferencesWithVersions->WithMetadataValue('Filename', 'PostgresStudio.Diagnostics'))' == ''"
+           Text="PostgresStudio must depend on exactly its own PostgresStudio.Diagnostics build, and pack found no PostgresStudio.Diagnostics project reference to pin." />
+  </Target>
+
+  <!--
     The package is packed at the Npgsql floor and nowhere else - the same refusal, for the same reason, as
     MartenStudioPackOnlyAtTheMartenFloor in src/MartenStudio/MartenStudio.csproj. A nupkg packed after a
     restore at Npgsql 10.0.3 would say `Npgsql >= 10.0.3` and raise every host's Npgsql, every MartenStudio

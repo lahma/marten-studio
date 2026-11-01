@@ -28,12 +28,24 @@ internal static class PostgresStudioText
     /// <summary>The options type's name, as a host's registration spells it.</summary>
     public const string OptionsTypeName = "PostgresStudioOptions";
 
+    /// <summary>The options type a host with no studio configures: the engine's own.</summary>
+    public const string DiagnosticsOptionsTypeName = "PostgresDiagnosticsOptions";
+
     /// <summary>Postgres Studio's words.</summary>
-    public static StudioText Instance { get; } = new()
+    public static StudioText Instance { get; } = Build(OptionsTypeName);
+
+    /// <summary>
+    /// The same words for a host that registered <c>AddPostgresDiagnostics()</c> and no studio, which has no
+    /// <c>PostgresStudioOptions</c>: every sentence that names an option names it on <c>PostgresDiagnosticsOptions</c>. Every
+    /// other word is <see cref="Instance" />'s, and a studio's host never meets this instance.
+    /// </summary>
+    public static StudioText DiagnosticsInstance { get; } = Build(DiagnosticsOptionsTypeName);
+
+    private static StudioText Build(string optionsTypeName) => new()
     {
         Product = StudioProduct.PostgresStudio,
         ProductName = "Postgres Studio",
-        OptionsTypeName = OptionsTypeName,
+        OptionsTypeName = optionsTypeName,
         RegistrationMethod = "AddPostgresStudio",
         AlternativeRegistrationMethod = "AddPostgresDiagnostics",
         SourceNoun = "data source",
@@ -163,7 +175,7 @@ internal static class PostgresStudioText
         JudgedTablesRead = "the tables in the browsable schemas",
         NoJudgedTable = "No table exists in the browsable schemas yet.",
         UnjudgedOldest =
-            " The oldest table in this database is not one the studio judges - in a schema PostgresStudioOptions.BrowsableSchemas "
+            " The oldest table in this database is not one the studio judges - in a schema " + optionsTypeName + ".BrowsableSchemas "
             + "does not admit, or beyond the largest tables a sweep reads - and wraparound protection counts every table in the "
             + "database, so it holds the whole database back as surely as one of these would.",
         MartenTablePartitionParameters =

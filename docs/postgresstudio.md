@@ -19,7 +19,9 @@ the store in place of the data source.
 dotnet add package PostgresStudio
 ```
 
-The package references `Npgsql` (floor 8.0.3; tested at 8.0.3 and 10.0.3) and
+The package references `PostgresStudio.Diagnostics` at exactly its own version - the diagnostics engine, which brings
+`Npgsql` (floor 8.0.3; tested at 8.0.3 and 10.0.3) and the `Microsoft.Extensions.*` abstractions, and which you can take
+alone when you have no UI to mount ([diagnostics.md](diagnostics.md#without-the-ui)) - and
 `Microsoft.AspNetCore.App.Internal.Assets` (floor 10.0.12, which puts `_framework/blazor.web.js` in your application's
 own static web assets), takes everything else from the shared framework, and references no Marten, JasperFx or Weasel
 package. It targets `net10.0`. PostgreSQL 14 to 18 are supported ([postgres-versions.md](postgres-versions.md)).
@@ -324,7 +326,8 @@ bounds fails the host with a message that names the option.
 `IPostgresDiagnostics`, registered by `AddPostgresStudio()`, is the same reads for your own code: the databases the
 studio would list, and for each the findings, by stable code and variant, with Storage, Statements, Settings and
 Connections sections. It answers host code rather than a visitor, so no policy, capability or `ReadOnly` is asked;
-Activity-grade data needs `IncludeActivity`, which is off by default; and the studio never serves a result. See
+Activity-grade data needs `IncludeActivity`, which is off by default; and the studio never serves a result. With no UI to
+mount, `PostgresStudio.Diagnostics` and `AddPostgresDiagnostics()` give the same API alone. See
 [diagnostics.md](diagnostics.md).
 
 `IPostgresCapacitySource`, registered as a singleton, reports what SQL cannot see - an Aurora Serverless v2 cluster's ACU,

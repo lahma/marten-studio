@@ -83,6 +83,28 @@ for; with IVT the two packages are one program in two files, as the nuspec's `[x
 PostgresStudio type and loads the assembly by name; the public `AddMartenStudio`'s own body stays free of PostgresStudio
 types (the rest is in a `NoInlining` method), and `PostgresStudioVersionGuardTests` scans its IL to keep it so.
 
+*The engine is a third package since 0.11* (issue #29; packets 0.11-C and 0.11-D). `PostgresStudio.Diagnostics` holds what
+needs no UI and no ASP.NET Core: the health sweep and its checks (D29), the facts and their readers and caches, the sources
+(`IPostgresDatabaseSource`, `IPostgresCapacitySource`) and the data-source registry, the SQL builders they need (the first of
+the three hard-rule-4 folders), `IPostgresDiagnostics` and its read model (D31), the health-check export,
+`PostgresDiagnosticsOptions` and `AddPostgresDiagnostics`. PostgresStudio keeps everything visitor-facing - the shell, the
+pages, authorization, capabilities, the audit, the console, the browser, mutes - and references the engine with
+`InternalsVisibleTo`; MartenStudio reaches it the same way and its public surface does not move. The same exact-pin discipline
+repeats one level down: PostgresStudio is packed with `PostgresStudio.Diagnostics [x.y.z]` (`PostgresStudioPinsDiagnosticsExactly`),
+`AddPostgresStudio()` runs `PostgresStudioDiagnosticsVersionGuard` before it names an engine type (its public body names none, a
+`NoInlining` method holds the rest, and `PostgresStudioDiagnosticsVersionGuardTests` scans the IL, so a newer engine whose
+members moved gets the guard's message). It cannot explain a missing or older engine: `AddPostgresStudio`'s parameter type
+`Action<PostgresStudioOptions>` derives from the engine's `PostgresDiagnosticsOptions`, so the runtime loads the engine to
+compile `AddPostgresStudio` itself, in every host, and a missing or older engine fails in the loader with a
+`FileNotFoundException` that names it and its version (measured 2026-11-01). MartenStudio's guard names no options type and covers
+all three cases, and
+`PostgresStudioVersionGuard` in MartenStudio checks the engine by assembly name too. **One registration:** the studios call the
+engine's registration themselves from their one options object, and `AddPostgresDiagnostics()` is refused in a container that
+holds either studio, in either order; the settings split into `IDiagnosticsSettings` (the engine) and `IStudioSettings` (the
+studio), and one options instance answers both. **No mutes without a UI:** a mute is a visitor's choice, so the engine has
+`AcceptedChecks` (the host's) and no mute list, and a finding's `StudioPath` and `StudioLinks` stay mount-relative strings that
+mean nothing where no studio is mounted. `samples/PostgresStudio.Worker` is the engine alone, as a worker host.
+
 *What PostgresStudio browses.* The application's own singleton `NpgsqlDataSource` registrations, never a connection
 string (see the introduction): the unkeyed one by default (`IncludeDefaultDataSource`, the source `default`), a keyed or
 otherwise-held one named with `AddDataSource`, and a host's own databases named with `AddDatabaseSource` and an
@@ -109,8 +131,9 @@ refuses the other's registration (what the seams leave room for: decision-notes.
 ## D31
 
 **D31 — The diagnostics API: what the studio found, for the host's own code, by stable code, and never served by the
-studio.** History: decision-notes.md, D31. `IPostgresDiagnostics`, registered by `AddPostgresStudio()` and by
-`AddMartenStudio()` (one per process, like the studio), lists the databases the studio would list (`ListDatabasesAsync`)
+studio.** History: decision-notes.md, D31. `IPostgresDiagnostics`, registered by `AddPostgresDiagnostics()` alone (0.11:
+no UI, no ASP.NET Core) and by `AddPostgresStudio()` and `AddMartenStudio()` (one registration per process: the
+studios register it themselves and the engine's own call is refused beside them), lists the databases the studio would list (`ListDatabasesAsync`)
 and returns each one's `PostgresDiagnosticsSnapshot` (`GetSnapshotAsync`): findings by stable code and variant, and
 typed sections for storage, statements, settings and extensions, connections and the write-ahead log (`Wal`). `IPostgresDatabaseSource` (D30) and
 `IPostgresCapacitySource`, found in DI to report compute capacity SQL cannot see (Aurora Serverless v2's ACU), point the

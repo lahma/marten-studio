@@ -3,9 +3,9 @@ using System.Text.RegularExpressions;
 namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
-/// <c>Publish</c> pushes PostgresStudio and then MartenStudio, one <c>dotnet nuget push</c> at a time, and the first
-/// failure ends the run - so a PostgresStudio push that fails never leaves behind a MartenStudio that depends on exactly
-/// the version that is not there.
+/// <c>Publish</c> pushes PostgresStudio.Diagnostics, then PostgresStudio, then MartenStudio, one <c>dotnet nuget push</c>
+/// at a time, and the first failure ends the run - so a push that fails never leaves behind a package that depends on
+/// exactly the version that is not there.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,7 +28,7 @@ public class ReleasePushOrderTests
     }
 
     [Fact]
-    public void The_release_packages_are_PostgresStudio_then_MartenStudio_and_nothing_else()
+    public void The_release_packages_are_the_engine_then_PostgresStudio_then_MartenStudio_and_nothing_else()
     {
         Match list = Regex.Match(PublishSource, @"AbsolutePath\[\] ReleasePackages =>\s*\[(?<items>[^\]]*)\]", RegexOptions.CultureInvariant);
 
@@ -36,9 +36,10 @@ public class ReleasePushOrderTests
 
         string[] items = [.. list.Groups["items"].Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)];
 
-        items.Should().HaveCount(2);
-        items[0].Should().Contain("PostgresStudioPackageId", "MartenStudio depends on exactly PostgresStudio, so PostgresStudio is pushed first");
-        items[1].Should().Contain("MartenStudioPackageId");
+        items.Should().HaveCount(3);
+        items[0].Should().Contain("DiagnosticsPackageId", "PostgresStudio depends on exactly PostgresStudio.Diagnostics, so the engine is pushed first");
+        items[1].Should().Contain("PostgresStudioPackageId", "MartenStudio depends on exactly PostgresStudio, so PostgresStudio is pushed before it");
+        items[2].Should().Contain("MartenStudioPackageId");
     }
 
     [Fact]

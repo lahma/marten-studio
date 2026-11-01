@@ -1,7 +1,7 @@
 # Marten Studio
 
 An embeddable Blazor Server admin UI for [MartenDB](https://martendb.io), shipped as an MIT-licensed
-Razor Class Library built on [Postgres Studio](#two-packages). You add `AddMartenStudio()` to your container and
+Razor Class Library built on [Postgres Studio](#three-packages). You add `AddMartenStudio()` to your container and
 `MapMartenStudio()` to your endpoint pipeline, and the studio runs inside your own ASP.NET Core application against *that
 application's own* configured `IDocumentStore` — browsing document collections and their JSON,
 inspecting and steering event streams, projections and the async daemon, running guarded queries and
@@ -25,20 +25,24 @@ component-library version pinned onto your host, no middleware ordering requirem
 authentication, no second projection daemon. A host that adds the package and never maps it is
 byte-for-byte the application it was.
 
-## Two packages
+## Three packages
 
-Since 0.5 the studio is two packages, released together at one version:
+From 0.5 the studio is two packages and from 0.11 three, released together at one version:
 
 | Package | For | Register and map | Mounted at |
 |---|---|---|---|
 | `MartenStudio` | an application with a Marten `IDocumentStore` | `AddMartenStudio()`, `MapMartenStudio()` | `/marten` |
 | `PostgresStudio` | any application that registers an `NpgsqlDataSource`, and no Marten | `AddPostgresStudio()`, `MapPostgresStudio()` | `/postgres` |
+| `PostgresStudio.Diagnostics` | the findings in your own code, with no UI and no ASP.NET Core: a worker, a job host, a shared library | `AddPostgresDiagnostics()` | nothing: no pages |
 
 **Which to choose.** If the application uses Marten, take `MartenStudio`: it brings `PostgresStudio` with it, at
 exactly its own version, and shows everything Postgres Studio shows for the store's databases - the database browser,
 Sessions, the health advisor and its pages, the SQL console, Relationships - beside the Marten screens. Otherwise take
 `PostgresStudio` alone: it references Npgsql and no Marten, JasperFx or Weasel package, and browses the application's
-own data sources. This README is Marten Studio's; Postgres Studio's is
+own data sources. And if all you want is the health advisor's findings in your own code - a worker that mails a daily
+summary, a shared library - take `PostgresStudio.Diagnostics` alone, the engine both studios are built on, which has no
+ASP.NET Core in it ([`docs/diagnostics.md`](docs/diagnostics.md#without-the-ui), and its own
+[README](src/PostgresStudio.Diagnostics/README.md)). This README is Marten Studio's; Postgres Studio's is
 [`src/PostgresStudio/README.md`](src/PostgresStudio/README.md), with the long form in
 [`docs/postgresstudio.md`](docs/postgresstudio.md).
 
@@ -47,11 +51,14 @@ the reverse; each `Map*Studio()` names the other call to make. Marten Studio's d
 in the store's own databases - a job store, a legacy schema - but a separate plain database of a Marten application
 is not listed in 0.5.
 
-**Upgrade both together.** The two assemblies are one program in two files, so `MartenStudio` depends on exactly its
-own `PostgresStudio` (`[0.5.0]` in the nuspec). A central `PackageVersion` for `PostgresStudio`, if your repository has
-one, must equal `MartenStudio`'s, or be removed. Under `CentralPackageTransitivePinningEnabled` a central pin at another
-version makes NuGet drop `PostgresStudio` from the graph without a warning, so `AddMartenStudio()` checks at startup
-and throws an `InvalidOperationException` that says which version to pin.
+**Upgrade them together.** The assemblies are one program in several files, so `MartenStudio` depends on exactly its
+own `PostgresStudio` (`[0.5.0]` in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A
+central `PackageVersion` for either, if your repository has one, must equal `MartenStudio`'s, or be removed. Under
+`CentralPackageTransitivePinningEnabled` a central pin at another version makes NuGet drop the package from the graph
+without a warning, so `AddMartenStudio()` checks all three at startup and throws an `InvalidOperationException` that says
+which version to pin, and `AddPostgresStudio()` checks a newer `PostgresStudio.Diagnostics` or another build of its version
+the same way; a missing or older one fails when `AddPostgresStudio()` is first called, in the loader, with a
+`FileNotFoundException` that names the package and the version to pin.
 
 ## Screenshots
 
@@ -1016,7 +1023,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 ```powershell
 .\build.ps1 Test                 # restore, compile, run all four test projects
 .\build.ps1 Test --playwright    # ... and install the Chromium build the browser suites drive first
-.\build.ps1 Pack                 # both NuGet packages into artifacts/packages
+.\build.ps1 Pack                 # the three NuGet packages into artifacts/packages
 ```
 
 The fast suites need nothing:

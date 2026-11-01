@@ -26,11 +26,22 @@ The long form, with every option and the reasons behind them, is
 dotnet add package PostgresStudio
 ```
 
-One package reference. It brings `Npgsql` (floor `8.0.3`, tested at 8.0.3 and 10.0.3) and
-`Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files and an MSBuild target, no runtime
-assembly), and takes everything else from the shared framework. It references no Marten, JasperFx or Weasel package.
+One package reference. It brings [`PostgresStudio.Diagnostics`](https://www.nuget.org/packages/PostgresStudio.Diagnostics)
+at exactly its own version (the diagnostics engine, with `Npgsql` - floor `8.0.3`, tested at 8.0.3 and 10.0.3 - and the
+`Microsoft.Extensions.*` abstractions) and `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files
+and an MSBuild target, no runtime assembly), and takes everything else from the shared framework. It references no Marten,
+JasperFx or Weasel package.
 Target framework: `net10.0`. PostgreSQL 14 to 18 are supported, and every release is tested on each
 ([`docs/postgres-versions.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgres-versions.md)).
+
+**Which package.** Want the UI: this one. Want only the findings in your own code - a worker that mails a daily summary, a
+shared library, a job host with nothing to mount - take `PostgresStudio.Diagnostics` alone: it has no ASP.NET Core in it
+([`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md#without-the-ui)). The two are
+released together at one version, and this package depends on exactly its own `PostgresStudio.Diagnostics`
+(`[x.y.z]` in the nuspec), so a central `PackageVersion` for it must equal this package's, or be removed:
+`AddPostgresStudio()` checks a newer `PostgresStudio.Diagnostics`, or another build of this version, at startup and throws an
+`InvalidOperationException` that says which version to pin; a missing or older one fails when `AddPostgresStudio()` is first
+called, in the loader, with a `FileNotFoundException` that names it and the version to pin.
 
 One studio per application: `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and the
 reverse.
@@ -247,7 +258,8 @@ used, and C14 the connections that set no `Application Name` (Info), both behind
 `IPostgresDiagnostics`, registered by `AddPostgresStudio()`, gives your own code what the studio reads: the databases it
 would list, and for each the findings, with stable codes and variants, and Storage, Statements, Settings and Connections
 sections. It answers host code, not a visitor; Activity-grade data needs `IncludeActivity`, off by default; and the
-studio never serves a result. See
+studio never serves a result. With no UI to mount, take `PostgresStudio.Diagnostics` and `AddPostgresDiagnostics()` for the
+same API alone. See
 [`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md).
 
 ## Security model and limits
