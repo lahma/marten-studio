@@ -1,10 +1,4 @@
-using System.Text.RegularExpressions;
-
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-
-using PostgresStudio.Services.Database;
-using PostgresStudio.Services.Health;
 
 namespace PostgresStudio.Services.Settings;
 
@@ -47,7 +41,7 @@ internal sealed record StudioOptionsShape(
 /// first part and the capabilities, and its tenant ids between the capabilities and the schemas, exactly where they have
 /// always been - so its messages, and their order, are unchanged.
 /// </remarks>
-internal static partial class StudioOptionsValidation
+internal static class StudioOptionsValidation
 {
     /// <summary>The path, the page sizes, the timeouts, the inline cap, the console's rows and role, the count threshold and the intervals.</summary>
     /// <param name="builder">The studio's options builder.</param>
@@ -78,8 +72,8 @@ internal static partial class StudioOptionsValidation
                 options => shape(options).MaxPageSize is >= 1 and <= 5000,
                 optionsType + ".MaxPageSize must be between 1 and 5000: a larger page is a sequential scan rendered into a browser")
             .Validate(
-                options => shape(options).QueryTimeout is var timeout && timeout >= TimeSpan.FromSeconds(1) && timeout <= TimeSpan.FromMinutes(10),
-                optionsType + ".QueryTimeout must be between one second and ten minutes")
+                options => DiagnosticsOptionsValidation.IsQueryTimeout(shape(options).QueryTimeout),
+                DiagnosticsOptionsValidation.QueryTimeoutMessage(optionsType))
             .Validate(
                 options => shape(options).MaxInlineBytes is > 0 and <= 64 * 1024 * 1024,
                 optionsType + "." + inlineMember + " must be between 1 and 64 MiB")
@@ -87,8 +81,8 @@ internal static partial class StudioOptionsValidation
                 options => shape(options).MaxSqlConsoleRows is >= 1 and <= 10_000,
                 optionsType + ".MaxSqlConsoleRows must be between 1 and 10000")
             .Validate(
-                options => shape(options).SqlConsoleRole is not { } role || PostgresRoleName().IsMatch(role),
-                optionsType + ".SqlConsoleRole must be a plain Postgres identifier: it is written into SET LOCAL ROLE, where it cannot be a parameter")
+                options => DiagnosticsOptionsValidation.IsSqlConsoleRole(shape(options).SqlConsoleRole),
+                DiagnosticsOptionsValidation.SqlConsoleRoleMessage(optionsType))
             .Validate(
                 options => shape(options).ExactCountThreshold >= 0,
                 optionsType + ".ExactCountThreshold cannot be negative")
@@ -96,8 +90,8 @@ internal static partial class StudioOptionsValidation
                 options => shape(options).RefreshInterval is var interval && interval >= TimeSpan.FromSeconds(1) && interval <= TimeSpan.FromMinutes(5),
                 optionsType + ".RefreshInterval must be between one second and five minutes")
             .Validate(
-                options => shape(options).HealthInterval is var interval && interval >= TimeSpan.FromSeconds(15) && interval <= TimeSpan.FromHours(1),
-                optionsType + ".HealthInterval must be between fifteen seconds and one hour: several health checks scan the server's lock table and process array, and a page polls them no faster than this");
+                options => DiagnosticsOptionsValidation.IsHealthInterval(shape(options).HealthInterval),
+                DiagnosticsOptionsValidation.HealthIntervalMessage(optionsType));
     }
 
     /// <summary>The capabilities object, which a host may set to <see langword="null" /> by mistake.</summary>
@@ -134,90 +128,7 @@ internal static partial class StudioOptionsValidation
         ArgumentNullException.ThrowIfNull(shape);
 
         return builder.Validate(
-            options => shape(options).BrowsableSchemas.All(BrowsableSchemaMatcher.IsValidEntry),
-            optionsType + ".BrowsableSchemas entries must each be \"*\" or a Postgres schema name: not " +
-            "empty or whitespace, at most 63 bytes in UTF-8, and with no double quote (\") and no NUL - a " +
-            "name the studio could never quote is a name no schema it can read has");
-    }
-
-    /// <summary>
-    /// The accepted checks (issue #35): each key a check code of <paramref name="descriptor" />'s own registry - a Marten code
-    /// in Postgres Studio is unknown - and each reason non-blank and at most <see cref="MaxAcceptedReasonLength" />
-    /// characters. A message names the offending key and nothing else: no list of the codes that would have been valid.
-    /// </summary>
-    /// <param name="builder">The studio's options builder.</param>
-    /// <param name="optionsType">The options type's name.</param>
-    /// <param name="descriptor">The studio, whose checks are the valid codes.</param>
-    /// <param name="accepted">The options' accepted checks.</param>
-    public static OptionsBuilder<TOptions> ValidateSharedAcceptedChecks<TOptions>(
-        this OptionsBuilder<TOptions> builder,
-        string optionsType,
-        StudioDescriptor descriptor,
-        Func<TOptions, IEnumerable<KeyValuePair<string, string>>> accepted)
-        where TOptions : class
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-        ArgumentNullException.ThrowIfNull(descriptor);
-        ArgumentNullException.ThrowIfNull(accepted);
-
-        builder.Services.AddSingleton<IValidateOptions<TOptions>>(
-            new AcceptedChecksValidator<TOptions>(builder.Name, optionsType, descriptor, accepted));
-
-        return builder;
-    }
-
-    /// <summary>The longest reason an accepted check may carry.</summary>
-    public const int MaxAcceptedReasonLength = 500;
-
-    /// <summary>
-    /// A Postgres role name as <c>SET LOCAL ROLE</c> will accept it. The console's role cannot be a parameter - it is an
-    /// identifier - so it is held to the shape of an unquoted identifier here, at startup, rather than escaped later.
-    /// <c>\A</c> and <c>\z</c>, because .NET's <c>$</c> also matches before a final line feed.
-    /// </summary>
-    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_$]{0,62}\z", RegexOptions.CultureInvariant)]
-    private static partial Regex PostgresRoleName();
-}
-
-/// <summary>
-/// Validates <c>AcceptedChecks</c> (issue #35) against the studio's own check codes: an unknown key, a blank reason and a
-/// reason over <see cref="StudioOptionsValidation.MaxAcceptedReasonLength" /> are each a failure naming the key and nothing
-/// else. A type of its own, not a lambda, because the message names the offending key.
-/// </summary>
-internal sealed class AcceptedChecksValidator<TOptions>(
-    string name,
-    string optionsType,
-    StudioDescriptor descriptor,
-    Func<TOptions, IEnumerable<KeyValuePair<string, string>>> accepted) : IValidateOptions<TOptions>
-    where TOptions : class
-{
-    public ValidateOptionsResult Validate(string? optionsName, TOptions options)
-    {
-        if (optionsName is not null && !string.Equals(optionsName, name, StringComparison.Ordinal))
-        {
-            return ValidateOptionsResult.Skip;
-        }
-
-        List<string> failures = [];
-        IReadOnlySet<string>? codes = null;
-
-        foreach ((string key, string? reason) in accepted(options))
-        {
-            codes ??= StudioCheckCodes.Of(descriptor);
-
-            if (!codes.Contains(key))
-            {
-                failures.Add(optionsType + ".AcceptedChecks key '" + key + "' is not a health check code of this studio");
-            }
-            else if (string.IsNullOrWhiteSpace(reason))
-            {
-                failures.Add(optionsType + ".AcceptedChecks['" + key + "'] needs a reason: an empty or whitespace one explains nothing to the people who read the Health page");
-            }
-            else if (reason.Length > StudioOptionsValidation.MaxAcceptedReasonLength)
-            {
-                failures.Add(optionsType + ".AcceptedChecks['" + key + "'] has a reason longer than " + StudioOptionsValidation.MaxAcceptedReasonLength + " characters");
-            }
-        }
-
-        return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+            options => DiagnosticsOptionsValidation.AreSchemas(shape(options).BrowsableSchemas),
+            DiagnosticsOptionsValidation.SchemasMessage(optionsType));
     }
 }

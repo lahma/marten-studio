@@ -14,7 +14,7 @@ namespace PostgresStudio.Services.Query;
 internal static class PlanLinks
 {
     /// <summary>The page's route under the studio's path.</summary>
-    public const string Route = "plan";
+    public const string Route = StudioPageRoutes.Plan;
 
     /// <summary>The query-string name of the statement.</summary>
     public const string SqlParameter = "sql";

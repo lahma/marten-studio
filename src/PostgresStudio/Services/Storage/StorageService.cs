@@ -106,7 +106,7 @@ internal sealed record StorageView
 
     /// <summary>
     /// Operations › Maintenance for this scope (W5-V1), where autovacuum's view of the same tables is - or <see langword="null" />
-    /// when the studio offers no such page (<see cref="MaintenanceLinks.ToMaintenance" />).
+    /// when the studio offers no such page (<c>MaintenanceLinks.ToMaintenance</c>).
     /// </summary>
     public string? MaintenanceLink { get; init; }
 
@@ -356,23 +356,7 @@ internal sealed class StorageService : IStorageService
     }
 
     /// <summary>What the growth tiles say while there is no growth: why, and how long there is to go.</summary>
-    internal static string GrowthPendingText(StatisticsWindow window)
-    {
-        ArgumentNullException.ThrowIfNull(window);
-
-        if (window.LooksReset)
-        {
-            return "the statistics look reset since the last check (" + (window.Signal ?? window.ReasonText)
-                + "): growth is estimated again once they have counted for a day";
-        }
-
-        return "needs a day of statistics: " + HoursSoFar(window.Length) + " so far";
-    }
-
-    /// <summary>"under an hour", "1 h", "17 h".</summary>
-    private static string HoursSoFar(TimeSpan length) => length < TimeSpan.FromHours(1)
-        ? "under an hour"
-        : ((int) length.TotalHours).ToString(System.Globalization.CultureInfo.InvariantCulture) + " h";
+    internal static string GrowthPendingText(StatisticsWindow window) => StorageGrowthText.Pending(window);
 
     /// <summary>The database browser's gate for this visitor and the database as a whole, or <see langword="null" />.</summary>
     private async Task<DatabaseGate?> GateAsync(StudioScope whole, ResolvedSource resolved, CancellationToken cancellationToken)

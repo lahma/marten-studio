@@ -164,4 +164,27 @@
     <PackageVersion Include="Npgsql" Version="$(PostgresStudioNpgsqlVersion)" Condition="'$(PostgresStudioPinsNpgsql)' == 'true'" />
   </ItemGroup>
 
+  <!--
+    The Microsoft.Extensions.* packages of src/PostgresStudio.Diagnostics, which has no FrameworkReference to
+    Microsoft.AspNetCore.App and so needs the abstractions it uses as packages (AGENTS.md, Package budget
+    changes, 2026-11-01). They are floors, not exact pins.
+
+    Why 10.0.0 and not 8.0.x: Npgsql 10.0.3's net10.0 dependency group asks for
+    Microsoft.Extensions.Logging.Abstractions 10.0.0. Measured with the rows at 8.0.0 and
+    PostgresStudioNpgsqlVersion=10.0.3: restore raises no NU code and resolves Logging.Abstractions 8.0.0 under it,
+    the central pin silently winning, and a floor that lets the resolved set sit below what the driver asks for is not
+    a floor. The library is net10.0 only (D1), so nothing older than the first net10.0 release is a host this package
+    could meet.
+
+    Why conditional: an unconditional row would pin, through CentralPackageTransitivePinningEnabled, the
+    Microsoft.Extensions.* that Marten, JasperFx and Weasel bring in MartenStudio and its tests. Only a project
+    that sets PostgresStudioDiagnosticsPinsExtensions (the Diagnostics project and the worker sample) sees the rows.
+  -->
+  <ItemGroup Label="PostgresStudio.Diagnostics (it sets PostgresStudioDiagnosticsPinsExtensions)" Condition="'$(PostgresStudioDiagnosticsPinsExtensions)' == 'true'">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0" />
+  </ItemGroup>
+
 </Project>

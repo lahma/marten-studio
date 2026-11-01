@@ -37,7 +37,7 @@ public class OneSqlScannerTests
     /// The file that owns the lexing, repository-relative. Everything else in either studio's builders' folder asks it -
     /// MartenStudio's composer through the shared assembly.
     /// </summary>
-    private const string TheLexer = "src/PostgresStudio/Internal/Sql/SqlLexer.cs";
+    private const string TheLexer = "src/PostgresStudio.Diagnostics/Internal/Sql/SqlLexer.cs";
 
     /// <summary>A <c>'\n'</c> character literal, however it is spaced.</summary>
     private static readonly Regex LineFeedLiteral = new(@"'\\n'", RegexOptions.Compiled, TimeSpan.FromSeconds(5));

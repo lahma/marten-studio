@@ -26,7 +26,7 @@ namespace MartenStudio.Tests.Health;
 /// </remarks>
 public class HealthCheckConventionTests
 {
-    /// <summary>Every check class in the studio's check assemblies - the shared engine's and MartenStudio's own.</summary>
+    /// <summary>Every check class in the studio's check assemblies - the engine's, the studio's own posture ones and MartenStudio's.</summary>
     private static IReadOnlyList<Type> Discovered =>
     [
         .. MartenStudio.Services.MartenStudioDescriptor.Instance.HealthCheckAssemblies
@@ -60,7 +60,7 @@ public class HealthCheckConventionTests
         typeof(HealthCheckRegistry).GetConstructors().Should().ContainSingle(
             "a second public constructor is one the container may prefer")
             .Which.GetParameters().Select(static x => x.ParameterType).Should().Equal(
-                [typeof(PostgresStudio.Services.Settings.StudioDescriptor), typeof(IStudioRuntime), typeof(PostgresStudio.Services.Settings.IStudioSettings)],
+                [typeof(PostgresStudio.Services.Settings.DiagnosticsDescriptor), typeof(IStudioRuntime), typeof(PostgresStudio.Services.Settings.IDiagnosticsSettings)],
                 "the descriptor is resolvable only where a studio registered one, and then it is the list to use; the settings carry "
                 + "the studio's words, which title a check its own way (wave 6)");
     }
@@ -80,9 +80,10 @@ public class HealthCheckConventionTests
     [Fact]
     public void Every_check_lives_in_the_checks_folder()
     {
-        // Each assembly's own Services/Health/Checks: the shared engine's and MartenStudio's are one folder until the move.
+        // Each assembly's own Services/Health/Checks: the engine's and the studio's share the root namespace PostgresStudio, and
+        // MartenStudio's has its own.
         Discovered.Should().OnlyContain(
-            static x => x.Namespace == x.Assembly.GetName().Name + ".Services.Health.Checks",
+            static x => x.Namespace == (x.Assembly == StudioProjects.DiagnosticsAssembly ? "PostgresStudio" : x.Assembly.GetName().Name) + ".Services.Health.Checks",
             "a check is added by adding its file to its assembly's Services/Health/Checks, and nowhere else");
     }
 

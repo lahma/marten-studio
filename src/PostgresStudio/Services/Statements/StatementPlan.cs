@@ -13,38 +13,6 @@ using Npgsql;
 
 namespace PostgresStudio.Services.Statements;
 
-/// <summary>The Statements page's addresses: the list, and one statement's drill-in by its <c>queryid</c> (D9).</summary>
-internal static class StatementLinks
-{
-    /// <summary>The page's route under the studio's path.</summary>
-    public const string Route = "statements";
-
-    /// <summary>The query-string name of the drill-in's statement.</summary>
-    public const string QueryIdParameter = "queryid";
-
-    /// <summary>The page, with the scope carried under the studio's own source parameter.</summary>
-    public static string ToStatements(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(descriptor);
-        return Components.StudioScopeQuery.Append(Components.StudioLink.To(settings, Route), scope, descriptor.SourceQueryParameter);
-    }
-
-    /// <summary>One statement's drill-in: the page, its <c>queryid</c> and the scope - a link that reopens the same statement.</summary>
-    public static string ToStatement(IStudioSettings settings, StudioDescriptor descriptor, StudioScope? scope, long queryId)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(descriptor);
-
-        string url = Components.StudioLink.To(settings, Route) + "?" + QueryIdParameter + "=" + queryId.ToString(CultureInfo.InvariantCulture);
-        return Components.StudioScopeQuery.Append(url, scope, descriptor.SourceQueryParameter);
-    }
-
-    /// <summary>A <c>queryid</c> from the query string, or <see langword="null" /> for anything that is not one.</summary>
-    public static long? ParseQueryId(string? value) =>
-        long.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long queryId) ? queryId : null;
-}
-
 /// <summary>What the Statements page's drill-in shows of one statement, and of its plan, for one visitor (X1).</summary>
 internal sealed record StatementPlanView
 {

@@ -75,12 +75,13 @@ Each rule's full text, with its lists of events, tests and history, is in
    driven by the design tokens in `src/PostgresStudio/wwwroot/css/studio.css`. There is still exactly one stylesheet,
    and it holds both studios' sections (D26). Full text: hard rule 3.
 
-4. **No raw SQL outside the two builders' folders, `src/PostgresStudio/Internal/Sql/` and
-   `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder, values are always parameters. The
-   shared studio's builders, `SqlIdentifier` and `SqlLexer` among them, live in the first; the statements only a Marten
-   store has (the document, event, daemon and projection reads) in the second, which calls the first's quoting. The
-   compiled fence in `HealthQueryConventionTests` exempts each folder's namespace by name, and each **only in its own
-   folder**. Full text: hard rule 4.
+4. **No raw SQL outside the three builders' folders, `src/PostgresStudio.Diagnostics/Internal/Sql/`,
+   `src/PostgresStudio/Internal/Sql/` and `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder,
+   values are always parameters. The engine's builders, `SqlIdentifier` and `SqlLexer` among them, live in the first; the
+   shared studio's own (the console's plans, the browser's rows) in the second; the statements only a Marten store has
+   (the document, event, daemon and projection reads) in the third, which calls the first's quoting. The compiled fence in
+   `HealthQueryConventionTests` exempts each assembly's builders' namespace by name, and each assembly **only in its own
+   folder** (the first two share a namespace). Full text: hard rule 4.
 
 5. **Every mutating operation, and every read authorized like a write, is capability-gated in the service layer, and
    audited.** (PostgresStudio has only the latter: `RunSql`, `BrowseDatabase`, `ViewDefinitions` and
@@ -160,10 +161,12 @@ Each rule's full text, with its lists of events, tests and history, is in
     before handing it to an API with no tenant predicate. **In both studios, catch interop loss with `catch (Exception
     e) when (StudioLiveUpdates.IsInteropUnavailable(e))`**, never a ladder of `catch` clauses. Full text: hard rule 15.
 
-16. **The core is Marten-free, and the fence is the assembly.** `src/PostgresStudio` references no Marten, JasperFx or
-    Weasel assembly or package, directly, through a project or transitively: `PostgresStudioFenceTests` holds that line
-    at the project files, the restore graphs, the built assembly's references and the test project's output folder, and
-    `CoreFenceTests` at the text the compiler does not bind. MartenStudio reaches PostgresStudio only through
+16. **The core is Marten-free, and the fence is the assembly.** `src/PostgresStudio` and `src/PostgresStudio.Diagnostics`
+    reference no Marten, JasperFx or Weasel assembly or package, directly, through a project or transitively:
+    `PostgresStudioFenceTests` holds that line at the project files, the restore graphs, the built assemblies' references
+    and the test project's output folder, and `CoreFenceTests` at the text the compiler does not bind. **The diagnostics
+    assembly also has no ASP.NET Core** (no `FrameworkReference`, `Microsoft.AspNetCore.*`, `Microsoft.JSInterop` or Razor),
+    checked at its project file, restore graph and built references. MartenStudio reaches PostgresStudio only through
     `InternalsVisibleTo`, and is packed with an **exact** dependency on its own PostgresStudio build (`[x.y.z]`, D30),
     which `Pack` asserts in the nuspec and `AddMartenStudio()` checks at startup. A page route belongs to one assembly
     of a studio, below that assembly's own compile-time root (`/postgres`, `/marten`), and the route table refuses a
@@ -375,7 +378,8 @@ Complete, as of the bootstrap commit. Versions are centrally pinned in `Director
 |---|---|---|---|
 | `src/MartenStudio` | `Marten` | `9.39.0` (latest tested `9.56.0`) | One of the two `PackageReference`s the shipped package makes. Floor, not exact pin — a consumer on a newer Marten 9.x must not be dragged back. 9.39.0 is a **security** floor: it fixes GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, and the code itself still needs nothing above 9.31.0 (bisected 2026-09-19; see *Package budget changes*, 2026-10-15). Both suites also run at a pinned latest-tested version, `MartenStudioMartenLatest`; the package is packed only at the floor. JasperFx / JasperFx.Events 2.74.0, Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.33.0 and Npgsql 9.0.4 arrive transitively at the floor. The studio's own compilation drops the JasperFx source generator Marten bundles (`MartenStudio.csproj`). |
 | `src/PostgresStudio` | `Microsoft.AspNetCore.App.Internal.Assets` | `10.0.12` | `blazor.web.js`, which as of .NET 10 lives nowhere else (D22); it reaches a MartenStudio host through MartenStudio's `ProjectReference` to PostgresStudio (two hops, measured by PS-0, *Package budget changes* 2026-10-20). Three `.js` files and one MSBuild target: no `lib/`, no `ref/`, no runtime assembly, so it pins no ASP.NET Core patch on the host. Floor, not exact pin — a host whose own SDK already resolves this pack keeps its version, because NuGet takes the higher of the two. Its `buildTransitive` targets are what put the script in the *consumer's* static web assets. MartenStudio no longer references it, but MartenStudio's nuspec still lists it at this version: under `CentralPackageTransitivePinningEnabled` NuGet writes a centrally pinned transitive package into the nuspec (the same line MartenStudio 0.4.0 carried when it referenced the pack directly), and `Pack` asserts the line. |
-| `src/PostgresStudio` | `Npgsql` | `8.0.3` (latest tested `10.0.3`) | The shared studio's database driver: PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin, measured by PS-7 (*Package budget changes* 2026-10-26); a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`). `samples/PostgresStudio.SampleData` references it directly too, and `samples/PostgresStudio.Sample` and both PostgresStudio test projects set `PostgresStudioPinsNpgsql` so the same row pins it transitively; all of them are in `postgres-studio.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
+| `src/PostgresStudio.Diagnostics` | `Npgsql` | `8.0.3` (latest tested `10.0.3`) | The diagnostics engine's database driver, and the studio's: since 0.11-C `src/PostgresStudio` takes it through its `ProjectReference` to this project and no longer references it directly (*Package budget changes* 2026-11-01). PostgresStudio has no Marten to bring it. A central row that only projects setting `PostgresStudioPinsNpgsql` see, so MartenStudio keeps taking Npgsql through Marten and the two never drift there (D3; *Package budget changes* 2026-10-20). Floor, not exact pin, measured by PS-7 (*Package budget changes* 2026-10-26); a MartenStudio host resolves Marten's Npgsql, which is never lower (`NpgsqlVersionTests`). `samples/PostgresStudio.SampleData` references it directly too, and `samples/PostgresStudio.Sample`, both PostgresStudio test projects and `src/PostgresStudio` itself set `PostgresStudioPinsNpgsql` so the same row pins it transitively; all of them are in `postgres-studio.slnf`, so the latest-Npgsql pass builds them at 10.0.3. |
+| `src/PostgresStudio.Diagnostics` | `Microsoft.Extensions.DependencyInjection.Abstractions`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.Options`, `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` each | The engine has no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so the abstractions it registers into, logs through and exports a health check with come as packages. Four conditional central rows, visible only to projects that set `PostgresStudioDiagnosticsPinsExtensions` (this one, and the 0.11 worker sample), so Marten's, JasperFx's and Weasel's own Microsoft.Extensions.* stay unpinned in MartenStudio and its tests. Floors, not exact pins. 10.0.0 and not 8.0.x because Npgsql 10.0.3's net10.0 asset asks for `Logging.Abstractions` 10.0.0 and an older pin would silently win (measured: no NU code, 8.0.0 resolved), which is not a floor (D1: the library is net10.0 only). *Package budget changes* 2026-11-01. |
 | both sample hosts, both `tests/…Integration.Tests` | `Testcontainers.PostgreSql` | `4.15.0` | D18's throwaway Postgres, and the container each integration suite runs against. |
 | all four test projects | `Microsoft.NET.Test.Sdk` | `18.10.0` | The VSTest host Fallout's `ITest` drives. |
 | all four test projects | `xunit.v3` | `3.2.2` | Held — see below. |

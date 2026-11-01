@@ -13,8 +13,8 @@ namespace PostgresStudio.Services.Settings;
 /// </para>
 /// <para>
 /// <b>Names, not values, are what a sentence needs.</b> A disabled control says which option a host would set, spelled
-/// the way the host's own registration spells it (D4). <see cref="OptionName" /> composes that spelling from
-/// <see cref="OptionsTypeName" />, so the shared code that writes the sentence never names a studio's type itself:
+/// the way the host's own registration spells it (D4). <c>OptionName</c> composes that spelling from
+/// <c>OptionsTypeName</c>, so the shared code that writes the sentence never names a studio's type itself:
 /// MartenStudio answers <c>MartenStudioOptions.Capabilities.RunSql</c>, and a studio with options of its own answers in
 /// its own type's name.
 /// </para>
@@ -24,26 +24,10 @@ namespace PostgresStudio.Services.Settings;
 /// is a singleton - nothing on it is about a visitor.
 /// </para>
 /// </remarks>
-internal interface IStudioSettings
+internal interface IStudioSettings : IDiagnosticsSettings
 {
-    /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
-    string ProductName { get; }
-
-    /// <summary>The public options type's name, as a host's registration spells it: <c>MartenStudioOptions</c>.</summary>
-    string OptionsTypeName { get; }
-
     /// <summary>The public capabilities type's name: <c>MartenStudioCapabilities</c>, whose <c>All()</c> a remedy names.</summary>
     string CapabilitiesTypeName { get; }
-
-    /// <summary>
-    /// Every sentence the shared studio says in this studio's own words (<see cref="StudioText" />): MartenStudio's is
-    /// <see cref="StudioText.Marten" />, which is 0.4's wording to the byte. This member has no default implementation, so
-    /// a studio's settings must say. A few shared services take the settings optionally, only so that a test can build
-    /// them by hand, and fall back to MartenStudio's words when given none (<see cref="StudioText.Of" />); every studio's
-    /// registration supplies its settings, which <c>PostgresStudioWiringTests</c> holds a real <c>AddPostgresStudio()</c>
-    /// host to.
-    /// </summary>
-    StudioText Text { get; }
 
     /// <summary>The browser title.</summary>
     string Title { get; }
@@ -105,63 +89,16 @@ internal interface IStudioSettings
 
     /// <summary>
     /// The options member <see cref="MaxInlineValueBytes" /> is read from, as a sentence names it through
-    /// <see cref="OptionName" />: <c>MaxInlineDocumentBytes</c> in MartenStudio, <c>MaxInlineValueBytes</c> in
+    /// <c>OptionName</c>: <c>MaxInlineDocumentBytes</c> in MartenStudio, <c>MaxInlineValueBytes</c> in
     /// PostgresStudio - the one option the two studios spell differently.
     /// </summary>
     string MaxInlineValueBytesMember { get; }
 
-    /// <summary>The <c>statement_timeout</c> every studio statement runs under.</summary>
-    TimeSpan QueryTimeout { get; }
-
     /// <summary>How often a live page polls.</summary>
     TimeSpan RefreshInterval { get; }
 
-    /// <summary>The health sweep interval, never shorter than <see cref="RefreshInterval" />.</summary>
-    TimeSpan EffectiveHealthInterval { get; }
-
     /// <summary>Above this estimate an exact count is offered on demand rather than run.</summary>
     long ExactCountThreshold { get; }
-
-    /// <summary>The role the console, the browser's reads and plans run as (<c>SET LOCAL ROLE</c>), or <see langword="null" />.</summary>
-    string? SqlConsoleRole { get; }
-
-    /// <summary>The schemas the database browser may show beyond a source's own: exact names, or <c>"*"</c> (D27).</summary>
-    IReadOnlyList<string> BrowsableSchemas { get; }
-
-    /// <summary>
-    /// The checks the host accepted, by code with its reason (<c>AcceptedChecks</c>), keys compared ignoring case. Host
-    /// configuration, validated at startup. Empty by default, so a settings object built without one accepts nothing.
-    /// </summary>
-    IReadOnlyDictionary<string, string> AcceptedChecks => EmptyAcceptedChecks.Instance;
-
-    /// <summary>
-    /// The host's document-type filter, or <see langword="null" /> when every type is visible - which is always the
-    /// answer of a studio that has no document types. Every rule that exists only to protect a hidden type is off
-    /// while this is <see langword="null" />, which under D27 is correct when no hidden type can exist.
-    /// </summary>
-    Func<Type, bool>? IsDocumentTypeVisible { get; }
-
-    /// <summary>
-    /// The source picker's label for this configuration, or <see langword="null" /> for the descriptor's own
-    /// (<see cref="StudioDescriptor.SourceLabel" />). PostgresStudio says "Source" once a host or <c>AddDataSource</c>
-    /// source exists, so the source picker and the database picker are never both called "Database".
-    /// </summary>
-    string? SourceLabel => null;
-
-    /// <summary>
-    /// <paramref name="member" /> spelled the way a host's registration spells it: <c>MartenStudioOptions.ReadOnly</c>,
-    /// <c>MartenStudioOptions.Capabilities.RunSql</c>.
-    /// </summary>
-    /// <param name="member">The member path below the options type, such as <c>ReadOnly</c> or <c>Capabilities.RunSql</c>.</param>
-    string OptionName(string member) => OptionsTypeName + "." + member;
-}
-
-/// <summary>The accepted checks of a settings object that has none.</summary>
-internal static class EmptyAcceptedChecks
-{
-    /// <summary>No check accepted, keys compared ignoring case.</summary>
-    public static IReadOnlyDictionary<string, string> Instance { get; } =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>The sentences built from <see cref="IStudioSettings" /> that more than one place writes.</summary>
@@ -179,16 +116,6 @@ internal static class StudioSettingsText
     {
         ArgumentNullException.ThrowIfNull(settings);
         return settings.OptionName("ReadOnly");
-    }
-
-    /// <summary>
-    /// The source picker's label: what <paramref name="settings" /> says for this configuration, or the descriptor's.
-    /// </summary>
-    public static string SourceLabelOf(this IStudioSettings settings, StudioDescriptor descriptor)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(descriptor);
-        return settings.SourceLabel ?? descriptor.SourceLabel;
     }
 
     /// <summary>The one-line opt-in that turns every capability on: <c>MartenStudioCapabilities.All()</c>.</summary>

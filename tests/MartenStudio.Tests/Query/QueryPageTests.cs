@@ -828,7 +828,8 @@ public class QueryPageTests
 
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
-        foreach (string project in StudioProjects.Names)
+        // The engine, PostgresStudio.Diagnostics, has no Razor component at all (the fence that says so is PostgresStudioFenceTests).
+        foreach (string project in StudioProjects.Names.Where(static x => x != StudioProjects.Diagnostics))
         {
             files.Should().Contain(
                 x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,

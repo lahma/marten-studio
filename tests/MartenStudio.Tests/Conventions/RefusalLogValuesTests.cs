@@ -211,7 +211,7 @@ public partial class RefusalLogValuesTests
         direct.Should().BeEmpty("a site that calls an event's generated template writes the visitor's values uncapped");
 
         string dispatchers = string.Concat(DispatcherFiles.Select(static x =>
-            SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", x)))));
+            SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio.Diagnostics", "Services", x)))));
         foreach (string name in Dispatched)
         {
             Regex.IsMatch(dispatchers, @"public static void " + name + @"\(this ILogger logger, StudioProduct product[^{]*\{\s*\([^;]*StudioLogValue\.Cap|public static void " + name + @"\(this ILogger logger, StudioProduct product[^{]*\{\s*user = StudioLogValue\.Cap")

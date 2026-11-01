@@ -5,9 +5,10 @@ using PostgresStudio.Services.Settings;
 namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
-/// The two shipped projects under <c>src/</c> since the 0.5 move: the shared studio, <c>PostgresStudio</c>, and
-/// <c>MartenStudio</c>, which references it. A convention that scanned one folder or one assembly before the move scans
-/// both through here, and asserts what it found is not nothing.
+/// The three shipped projects under <c>src/</c> since the 0.11 split: the shared studio, <c>PostgresStudio</c>, the diagnostics
+/// engine it is built on, <c>PostgresStudio.Diagnostics</c> (no ASP.NET Core), and <c>MartenStudio</c>, which references
+/// both. A convention that scanned one folder or one assembly before the move scans all of them through here, and asserts
+/// what it found is not nothing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,20 +24,26 @@ internal static class StudioProjects
     /// <summary>The shared studio's project folder name under <c>src/</c>, and its assembly name.</summary>
     public const string Shared = "PostgresStudio";
 
+    /// <summary>The diagnostics engine's project folder name under <c>src/</c>, and its assembly name.</summary>
+    public const string Diagnostics = "PostgresStudio.Diagnostics";
+
     /// <summary>MartenStudio's project folder name under <c>src/</c>, and its assembly name.</summary>
     public const string Marten = "MartenStudio";
 
-    /// <summary>Both, the shared studio first.</summary>
-    public static IReadOnlyList<string> Names { get; } = [Shared, Marten];
+    /// <summary>All three, the shared studio first and the engine it is built on second.</summary>
+    public static IReadOnlyList<string> Names { get; } = [Shared, Diagnostics, Marten];
 
     /// <summary>The shared studio's assembly.</summary>
     public static Assembly SharedAssembly => typeof(StudioCoreRegistration).Assembly;
 
+    /// <summary>The diagnostics engine's assembly.</summary>
+    public static Assembly DiagnosticsAssembly => typeof(IDiagnosticsSettings).Assembly;
+
     /// <summary>MartenStudio's assembly.</summary>
     public static Assembly MartenAssembly => typeof(MartenStudioOptions).Assembly;
 
-    /// <summary>Both assemblies, the shared studio's first; two distinct ones, or the move did not happen.</summary>
-    public static IReadOnlyList<Assembly> Assemblies => [SharedAssembly, MartenAssembly];
+    /// <summary>All three assemblies, the shared studio's first; three distinct ones, or the split did not happen.</summary>
+    public static IReadOnlyList<Assembly> Assemblies => [SharedAssembly, DiagnosticsAssembly, MartenAssembly];
 
     /// <summary>
     /// <c>src/&lt;project&gt;/&lt;segments&gt;</c> for each project, as a repository-relative path with forward slashes and a

@@ -61,6 +61,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
         Services.AddSingleton(DataSource);
         Services.AddSingleton<IOptions<PostgresStudioOptions>>(Microsoft.Extensions.Options.Options.Create(Options));
+        Services.AddSingleton<IOptions<PostgresDiagnosticsOptions>>(Microsoft.Extensions.Options.Options.Create<PostgresDiagnosticsOptions>(Options));
         Services.AddSingleton<IStudioSettings>(static provider =>
             new PostgresStudioSettings(provider.GetRequiredService<IOptions<PostgresStudioOptions>>()));
         Services.AddSingleton(PostgresStudioDescriptor.Instance);

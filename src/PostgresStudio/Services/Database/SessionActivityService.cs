@@ -71,26 +71,17 @@ internal sealed class SessionActivityService : ISessionActivityService
     /// <summary>What the audit ring says was read.</summary>
     internal const string DetailsTarget = "sessions, locks and prepared transactions";
 
-    /// <summary>What a capability that is off says.</summary>
-    internal const string CapabilityDenial =
-        "Process ids, roles, client addresses, application names, connection times and statements need "
-        + "MartenStudioOptions.Capabilities.ViewDatabaseActivity.";
+    /// <summary><see cref="StudioDenialText.SessionsCapabilityDenial" />, where the sentence is kept.</summary>
+    internal const string CapabilityDenial = StudioDenialText.SessionsCapabilityDenial;
 
-    /// <summary>What <c>ReadOnly</c> says.</summary>
-    internal const string ReadOnlyDenial =
-        "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDatabaseActivity off with every "
-        + "other capability.";
+    /// <summary><see cref="StudioDenialText.SessionsReadOnlyDenial" />, where the sentence is kept.</summary>
+    internal const string ReadOnlyDenial = StudioDenialText.SessionsReadOnlyDenial;
 
-    /// <summary>What the store policy's refusal says.</summary>
-    internal const string StorePolicyDenial =
-        "Your account may not see this database's sessions. The store policy (MartenStudioOptions.StoreAuthorizationPolicy) "
-        + "refused this store and database as a whole, with no tenant selected: a session belongs to no tenant.";
+    /// <summary><see cref="StudioDenialText.SessionsStorePolicyDenial" />, where the sentence is kept.</summary>
+    internal const string StorePolicyDenial = StudioDenialText.SessionsStorePolicyDenial;
 
-    /// <summary>What the write policy's refusal says.</summary>
-    internal const string WritePolicyDenial =
-        "Your account may not see who is using this database. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, "
-        + "or StoreAuthorizationPolicy when no write policy is set) refused ViewDatabaseActivity for this store and database "
-        + "as a whole, with no tenant selected.";
+    /// <summary><see cref="StudioDenialText.SessionsWritePolicyDenial" />, where the sentence is kept.</summary>
+    internal const string WritePolicyDenial = StudioDenialText.SessionsWritePolicyDenial;
 
     // The audit ledger is keyed by store, database and what was read; these name "what" for the ledger, which
     // was written for relations and is reused here as it is.

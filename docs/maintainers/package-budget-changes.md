@@ -547,3 +547,41 @@ with each:
   known limit holds.
 
 **Exit condition:** unchanged.
+
+**2026-11-01 — four `Microsoft.Extensions.*` packages at `10.0.0` are added to a new project, `src/PostgresStudio.Diagnostics`,
+and `src/PostgresStudio` stops referencing `Npgsql` directly.** Packet 0.11-C (issue #29) splits the diagnostics engine out of
+`PostgresStudio` into a project with no `FrameworkReference` to `Microsoft.AspNetCore.App` (hard rule 16), so that a worker or
+a console host can run the health sweep without a web stack. What the shared framework gave `PostgresStudio` for free, the new
+project has to name:
+
+| Package | Floor | Why it is needed | What already present could not do it |
+|---|---|---|---|
+| `Microsoft.Extensions.DependencyInjection.Abstractions` | `10.0.0` | `AddPostgresDiagnostics` registers into an `IServiceCollection`; the engine resolves through `IServiceProvider` and `IServiceScopeFactory`. | Nothing in the budget brings it without the web stack: `Npgsql` depends on none of it, and the ASP.NET Core shared framework is the thing excluded. |
+| `Microsoft.Extensions.Logging.Abstractions` | `10.0.0` | Every log event (`StudioLog`, `PostgresStudioLog`) is an `ILogger` extension. | `Npgsql` 8.0.3 and later depend on it, so it arrives anyway; it is named so that the floor is this project's and not whichever `Npgsql` happens to resolve. |
+| `Microsoft.Extensions.Options` | `10.0.0` | `PostgresDiagnosticsOptions`, its validation and `ValidateOnStart`. | As above. |
+| `Microsoft.Extensions.Diagnostics.HealthChecks` | `10.0.0` | The opt-in ASP.NET Core health check (`PostgresStudioHealthChecksBuilderExtensions`, `StudioHealthCheck`) needs `IHealthChecksBuilder`, which is in this package and not in the ASP.NET Core assemblies it was taken from (`IHealthCheck` is in its `.Abstractions` dependency, which comes with it); `.Abstractions` alone has no `IHealthChecksBuilder`. | Plan §6.1 moved the export to the engine because it needs only this package; leaving it behind would have meant a second registration. |
+
+**Rows.** Four `PackageVersion` items in `Directory.Packages.props`, in an `ItemGroup` conditioned on
+`PostgresStudioDiagnosticsPinsExtensions`, a property only projects that opt in set (`src/PostgresStudio.Diagnostics` now, the
+0.11 worker sample next). Conditional because an unconditional row would pin, through
+`CentralPackageTransitivePinningEnabled`, the `Microsoft.Extensions.*` that Marten, JasperFx and Weasel bring into
+`MartenStudio` and its tests, which is exactly the "pinned onto the host" the project exists not to do. Floors, not exact pins.
+
+**Why `10.0.0` and not `8.0.x`.** The library is `net10.0` only (D1), and `Npgsql` 10.0.3's `net10.0` dependency group asks for
+`Microsoft.Extensions.Logging.Abstractions` `10.0.0` (read from its nuspec). Measured on 2026-11-01 with the four rows at
+`8.0.0` and `-p:PostgresStudioNpgsqlVersion=10.0.3`: restore raised no `NU` code, and resolved `Logging.Abstractions` **8.0.0**
+under a driver that asks for 10.0.0 - the central pin silently won. The plan expected NU1605/NU1109 here and neither appeared,
+so the argument for `10.0.0` is the second one, not the first: a floor that lets the resolved set sit below what the driver
+asks for is not a floor. At `10.0.0` the resolved `Logging.Abstractions` is 10.0.0 at the `Npgsql` floor and at 10.0.3.
+
+**`PostgresStudio` drops its direct `Npgsql` `PackageReference`** (plan §6.6) and takes `Npgsql` through its
+`ProjectReference` to the engine. It keeps `PostgresStudioPinsNpgsql`, because the conditional central row still has to pin
+`Npgsql` transitively, and keeps its own pack guard. The guard is not redundant: `Pack` writes `Npgsql` into the nuspec from
+`project.assets.json`, which reads the same either way. What each nuspec says is packet 0.11-D's to assert.
+
+**Measured.** `dotnet restore` of `src/PostgresStudio.Diagnostics` at the `Npgsql` floor (`8.0.3`) and at
+`-p:PostgresStudioNpgsqlVersion=10.0.3`, with `--force`: no `NU1605`, `NU1109`, `NU190x` or any other `NU` code at either.
+The fast suites and every live class named in the packet report pass at the floor and at Marten 9.56.0.
+
+**Exit condition:** unchanged for `Npgsql` (the next `Npgsql` floor measurement). For the four rows: raise them with the
+`net10.0` floor of the host runtime the library supports, never ahead of it.

@@ -58,7 +58,7 @@ internal sealed record DatabaseRowLink(string? Schema, string? Name, IReadOnlyLi
 /// <para>
 /// The page parameters come first and the scope last, which is the order the event screens' links write
 /// them in: the part a person reads is at the front of the address bar. The scope's source travels under the
-/// studio's own parameter (<see cref="StudioDescriptor.SourceQueryParameter" />), which is why every link here takes
+/// studio's own parameter (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />), which is why every link here takes
 /// the descriptor beside the settings.
 /// </para>
 /// <para>
@@ -70,7 +70,7 @@ internal sealed record DatabaseRowLink(string? Schema, string? Name, IReadOnlyLi
 internal static class DatabaseLinks
 {
     /// <summary>The browser: the schemas, the kind tabs and the grids.</summary>
-    public const string BrowserRoute = "database";
+    public const string BrowserRoute = StudioPageRoutes.DatabaseBrowser;
 
     /// <summary>One relation's detail.</summary>
     public const string ObjectRoute = "database/object";
@@ -79,19 +79,19 @@ internal static class DatabaseLinks
     public const string RowRoute = "database/row";
 
     /// <summary>The query-string key the schema travels under.</summary>
-    public const string SchemaParameter = "schema";
+    public const string SchemaParameter = StudioPageRoutes.DatabaseSchemaParameter;
 
     /// <summary>The query-string key an object's name travels under.</summary>
     public const string NameParameter = "name";
 
     /// <summary>The query-string key the kind tab travels under.</summary>
-    public const string KindParameter = "kind";
+    public const string KindParameter = StudioPageRoutes.DatabaseKindParameter;
 
     /// <summary>The query-string key the owner filter travels under.</summary>
     public const string OwnerParameter = "owner";
 
     /// <summary>The query-string key the name filter travels under.</summary>
-    public const string FilterParameter = "q";
+    public const string FilterParameter = StudioPageRoutes.DatabaseFilterParameter;
 
     /// <summary>The query-string key the object detail tab travels under.</summary>
     public const string TabParameter = "tab";
@@ -415,26 +415,10 @@ internal static class DatabaseLinks
     }
 
     /// <summary>The kind tab as <c>?kind=</c> spells it.</summary>
-    public static string KindToken(DatabaseObjectCategory category) => category switch
-    {
-        DatabaseObjectCategory.Views => "views",
-        DatabaseObjectCategory.Functions => "functions",
-        DatabaseObjectCategory.Triggers => "triggers",
-        DatabaseObjectCategory.Sequences => "sequences",
-        DatabaseObjectCategory.Types => "types",
-        _ => "tables",
-    };
+    public static string KindToken(DatabaseObjectCategory category) => StudioPageRoutes.KindToken(category);
 
     /// <summary>Reads <c>?kind=</c>, defaulting to tables.</summary>
-    public static DatabaseObjectCategory ParseKind(string? token) => token?.Trim().ToLowerInvariant() switch
-    {
-        "views" => DatabaseObjectCategory.Views,
-        "functions" => DatabaseObjectCategory.Functions,
-        "triggers" => DatabaseObjectCategory.Triggers,
-        "sequences" => DatabaseObjectCategory.Sequences,
-        "types" => DatabaseObjectCategory.Types,
-        _ => DatabaseObjectCategory.Tables,
-    };
+    public static DatabaseObjectCategory ParseKind(string? token) => StudioPageRoutes.ParseKind(token);
 
     /// <summary>The owner filter as <c>?owner=</c> spells it.</summary>
     public static string OwnerToken(DatabaseOwnerFilter owner) => owner switch
@@ -576,7 +560,7 @@ internal static class DatabaseLinks
     }
 
     /// <summary>The name as a person reads it: <c>schema.name</c>, unquoted.</summary>
-    public static string QualifiedName(string schema, string name) => schema + "." + name;
+    public static string QualifiedName(string schema, string name) => StudioPageRoutes.QualifiedName(schema, name);
 
     /// <summary>
     /// Every parameter of <paramref name="uri" />'s query string, decoded, in order. <c>+</c> is a space, as

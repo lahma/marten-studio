@@ -28,8 +28,8 @@ public class PostgresStudioSolutionFilterTests
     {
         string[] pinning = ProjectsThatPinNpgsql();
 
-        // Not vacuous: the shared studio sets the property, and the scan found it.
-        pinning.Should().Contain("src/PostgresStudio/PostgresStudio.csproj");
+        // Not vacuous: the shared studio and the engine it is built on set the property, and the scan found both.
+        pinning.Should().Contain("src/PostgresStudio/PostgresStudio.csproj").And.Contain("src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj");
 
         FilterProjects().Should().BeEquivalentTo(pinning,
             "postgres-studio.slnf is what the latest-Npgsql pass builds and tests: a project that sets " +

@@ -33,9 +33,16 @@ internal sealed record StudioLintFacts(
     public string MapMethod => RegistrationMethod.StartsWith("Add", StringComparison.Ordinal) ? "Map" + RegistrationMethod[3..] : RegistrationMethod;
 
     /// <summary>Reads them off the studio's settings.</summary>
-    public static StudioLintFacts Of(IStudioSettings settings)
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="diagnostics" /> is not a studio's settings: these checks are discovered only for a host that registered
+    /// a studio, whose one settings object answers both interfaces.
+    /// </exception>
+    public static StudioLintFacts Of(IDiagnosticsSettings diagnostics)
     {
-        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+
+        IStudioSettings settings = diagnostics as IStudioSettings
+            ?? throw new InvalidOperationException("The studio's posture checks read a studio's settings, and these are the diagnostics engine's alone.");
 
         return new StudioLintFacts(
             settings.ReadOnly,

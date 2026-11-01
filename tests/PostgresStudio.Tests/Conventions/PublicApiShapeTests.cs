@@ -26,9 +26,12 @@ public class PublicApiShapeTests
     /// </summary>
     private static readonly Type[] PositionalByDesign = [typeof(PostgresStudioResource)];
 
+    private static readonly string[] SourceProjects = ["PostgresStudio", "PostgresStudio.Diagnostics"];
+
     private static Type[] Exported() =>
     [
         .. typeof(PostgresStudioOptions).Assembly.GetExportedTypes()
+            .Concat(typeof(PostgresDiagnosticsOptions).Assembly.GetExportedTypes())
             .Where(static type => !typeof(IComponent).IsAssignableFrom(type) && type.Name != "_Imports")
             .OrderBy(static type => type.FullName, StringComparer.Ordinal),
     ];
@@ -142,8 +145,8 @@ public class PublicApiShapeTests
 
     private static string EnumBody(Type type)
     {
-        string path = Directory
-            .EnumerateFiles(RepositoryRoot.Combine("src", "PostgresStudio"), type.Name + ".cs", SearchOption.AllDirectories)
+        string path = SourceProjects
+            .SelectMany(project => Directory.EnumerateFiles(RepositoryRoot.Combine("src", project), type.Name + ".cs", SearchOption.AllDirectories))
             .Single(static x => !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
                 && !x.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal));
 

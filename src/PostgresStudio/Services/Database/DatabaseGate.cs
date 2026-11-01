@@ -97,7 +97,7 @@ internal sealed class DatabaseGate
     /// is shown as the classifier has it.
     /// </param>
     /// <param name="text">
-    /// The studio's own words for each refusal (<see cref="IStudioSettings.Text" />). <c>DatabaseAccess</c>, the gate's one
+    /// The studio's own words for each refusal (<see cref="IDiagnosticsSettings.Text" />). <c>DatabaseAccess</c>, the gate's one
     /// builder, always hands the settings' over; <see langword="null" /> is MartenStudio's, for a test that builds a gate
     /// by hand.
     /// </param>
@@ -275,59 +275,29 @@ internal sealed class DatabaseGate
                 ? nameof(StudioCapability.ViewDefinitions)
                 : nameof(StudioCapability.BrowseDatabase);
 
-    /// <summary>What <c>ReadOnly</c> says in MartenStudio (<see cref="StudioText.BrowseReadOnlyDenial" />).</summary>
-    public const string ReadOnlyDenial =
-        "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.BrowseDatabase off " +
-        "with every other capability.";
+    /// <summary><see cref="StudioDenialText.BrowseReadOnlyDenial" />, where the sentence is kept.</summary>
+    public const string ReadOnlyDenial = StudioDenialText.BrowseReadOnlyDenial;
 
-    /// <summary>What a capability that is off says in MartenStudio (<see cref="StudioText.BrowseCapabilityDenial" />).</summary>
-    public const string CapabilityDenial =
-        "Other schemas, and the rows and definitions of objects Marten does not own, need " +
-        "MartenStudioOptions.Capabilities.BrowseDatabase.";
+    /// <summary><see cref="StudioDenialText.BrowseCapabilityDenial" />, where the sentence is kept.</summary>
+    public const string CapabilityDenial = StudioDenialText.BrowseCapabilityDenial;
 
-    /// <summary>
-    /// What the write policy's refusal says in MartenStudio: the account, and the policy that answered for it
-    /// (<see cref="StudioText.BrowseWritePolicyDenial" />).
-    /// </summary>
-    public const string WritePolicyDenial =
-        "Your account may not browse the database here. The write policy (MartenStudioOptions." +
-        "WriteAuthorizationPolicy, or StoreAuthorizationPolicy when no write policy is set) refused " +
-        "BrowseDatabase for this store and database as a whole, with no tenant selected.";
+    /// <summary><see cref="StudioDenialText.BrowseWritePolicyDenial" />, where the sentence is kept.</summary>
+    public const string WritePolicyDenial = StudioDenialText.BrowseWritePolicyDenial;
 
-    /// <summary>
-    /// What the store policy's refusal says in MartenStudio (<see cref="StudioText.BrowseStorePolicyDenial" />): asked
-    /// first, for the database as a whole, before the write
-    /// policy is asked at all.
-    /// </summary>
-    public const string StorePolicyDenial =
-        "Your account may not browse the database here. The store policy (MartenStudioOptions." +
-        "StoreAuthorizationPolicy) refused this store and database as a whole, with no tenant selected.";
+    /// <summary><see cref="StudioDenialText.BrowseStorePolicyDenial" />, where the sentence is kept.</summary>
+    public const string StorePolicyDenial = StudioDenialText.BrowseStorePolicyDenial;
 
-    /// <summary>
-    /// What <c>ReadOnly</c> says about a definition in MartenStudio (<see cref="StudioText.DefinitionReadOnlyDenial" />): it
-    /// turns both ways in off.
-    /// </summary>
-    public const string DefinitionReadOnlyDenial =
-        "MartenStudioOptions.ReadOnly is true, which turns MartenStudioOptions.Capabilities.ViewDefinitions and " +
-        "MartenStudioOptions.Capabilities.BrowseDatabase off with every other capability.";
+    /// <summary><see cref="StudioDenialText.DefinitionReadOnlyDenial" />, where the sentence is kept.</summary>
+    public const string DefinitionReadOnlyDenial = StudioDenialText.DefinitionReadOnlyDenial;
 
-    /// <summary>
-    /// What both ways into a definition being off says in MartenStudio (<see cref="StudioText.DefinitionCapabilityDenial" />).
-    /// </summary>
-    public const string DefinitionCapabilityDenial =
-        "The definitions of objects Marten does not own need MartenStudioOptions.Capabilities.ViewDefinitions, for the " +
-        "schemas MartenStudioOptions.BrowsableSchemas names exactly, or MartenStudioOptions.Capabilities.BrowseDatabase.";
+    /// <summary><see cref="StudioDenialText.DefinitionCapabilityDenial" />, where the sentence is kept.</summary>
+    public const string DefinitionCapabilityDenial = StudioDenialText.DefinitionCapabilityDenial;
 
-    /// <summary>
-    /// What opens MartenStudio's write-policy refusal of a definition; the names of the capabilities the policy refused
-    /// follow (<see cref="StudioText.DefinitionWritePolicyDenialFor" />).
-    /// </summary>
-    public const string DefinitionWritePolicyDenialHead =
-        "Your account may not read definitions here. The write policy (MartenStudioOptions.WriteAuthorizationPolicy, or " +
-        "StoreAuthorizationPolicy when no write policy is set) refused ";
+    /// <summary><see cref="StudioDenialText.DefinitionWritePolicyDenialHead" />, where the sentence is kept.</summary>
+    public const string DefinitionWritePolicyDenialHead = StudioDenialText.DefinitionWritePolicyDenialHead;
 
-    /// <summary>What closes it in MartenStudio.</summary>
-    public const string DefinitionWritePolicyDenialTail = " for this store and database as a whole, with no tenant selected.";
+    /// <summary><see cref="StudioDenialText.DefinitionWritePolicyDenialTail" />, where the sentence is kept.</summary>
+    public const string DefinitionWritePolicyDenialTail = StudioDenialText.DefinitionWritePolicyDenialTail;
 
     /// <summary>What a view that reaches into a withheld schema says.</summary>
     public const string WithheldDependencyDenial = "It reads from a schema you cannot see.";
@@ -361,14 +331,8 @@ internal sealed class DatabaseGate
         "This view reads a table some of whose rows are stored in a partition or child table in a schema you " +
         "cannot see, so its rows are not shown.";
 
-    /// <summary>
-    /// What a view that reads one of Marten's own tables says about its rows in MartenStudio
-    /// (<see cref="StudioText.MartenDependencyDenial" />).
-    /// </summary>
-    public const string MartenDependencyDenial =
-        "This view reads one of Marten's own tables - a document or event table, or Marten's bookkeeping - " +
-        "whose rows are never read raw: open them in Documents or Events, where tenancy, soft delete and the " +
-        "store's serializer apply.";
+    /// <summary><see cref="StudioDenialText.MartenDependencyDenial" />, where the sentence is kept.</summary>
+    public const string MartenDependencyDenial = StudioDenialText.MartenDependencyDenial;
 
     /// <summary>
     /// What a view that calls a function the studio cannot see into says about its rows, while some schema
@@ -397,10 +361,8 @@ internal sealed class DatabaseGate
         "or StoreAuthorizationPolicy when no write policy is set) refused BrowseDatabase for that store, with " +
         "no tenant selected.";
 
-    /// <summary>What an empty <c>BrowsableSchemas</c> says in MartenStudio (<see cref="StudioText.BrowseEmptyListDenial" />).</summary>
-    public const string EmptyListDenial =
-        "MartenStudioOptions.BrowsableSchemas is empty, so no schema's non-Marten rows or definitions are " +
-        "browsable. List the schema names, or \"*\".";
+    /// <summary><see cref="StudioDenialText.BrowseEmptyListDenial" />, where the sentence is kept.</summary>
+    public const string EmptyListDenial = StudioDenialText.BrowseEmptyListDenial;
 
     /// <summary>Whose each object is.</summary>
     public DatabaseObjectClassifier Classifier { get; }

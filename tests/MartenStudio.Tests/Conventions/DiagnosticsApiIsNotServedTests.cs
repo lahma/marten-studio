@@ -5,8 +5,9 @@ namespace MartenStudio.Tests.Conventions;
 
 /// <summary>
 /// D31's "the studio never serves it" (API design §5.2): the diagnostics API is for host code alone, so its service, its host
-/// gate and the builder behind it appear only under <c>src/PostgresStudio/Services/Diagnostics/</c>, in the read model's own
-/// folder and in the two <c>Add*Studio</c> registrations; the studio's snapshot download (<c>VisitorSnapshotBuilder</c>) never
+/// gate and the builder behind it appear only under <c>src/PostgresStudio.Diagnostics/Services/Diagnostics/</c>, in the read model's own
+/// folder and in the engine's one registration (<c>DiagnosticsCoreRegistration</c>, which both <c>Add*Studio</c> and
+/// <c>AddPostgresDiagnostics</c> call); the studio's snapshot download (<c>VisitorSnapshotBuilder</c>) never
 /// names any of them; no component, endpoint mapper or the health-check export names a read-model type; and no log event takes
 /// one as an argument. A text scan with comments and strings stripped, as <see cref="NoAsyncVoidTests" /> is, with an
 /// anti-vacuity theory of its own.
@@ -20,10 +21,9 @@ public partial class DiagnosticsApiIsNotServedTests
     /// <summary>Where the host path may be named.</summary>
     private static readonly string[] HostPathHomes =
     [
-        "src/PostgresStudio/Services/Diagnostics/",
-        "src/PostgresStudio/Diagnostics/",
-        "src/PostgresStudio/PostgresStudioServiceCollectionExtensions.cs",
-        "src/MartenStudio/MartenStudioServiceCollectionExtensions.cs",
+        "src/PostgresStudio.Diagnostics/Services/Diagnostics/",
+        "src/PostgresStudio.Diagnostics/Diagnostics/",
+        "src/PostgresStudio.Diagnostics/Services/Settings/DiagnosticsCoreRegistration.cs",
     ];
 
     /// <summary>The studio's own download, which is built from the pages and must never reach the host path.</summary>
@@ -34,7 +34,7 @@ public partial class DiagnosticsApiIsNotServedTests
     /// <summary>The read model's twenty types and the two links into the studio, by the files that declare them.</summary>
     internal static string[] ReadModel() =>
     [
-        .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "PostgresStudio", "Diagnostics"), "*.cs")
+        .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", "PostgresStudio.Diagnostics", "Diagnostics"), "*.cs")
             .Select(Path.GetFileNameWithoutExtension)
             .OfType<string>()
             .Order(StringComparer.Ordinal),
@@ -63,13 +63,14 @@ public partial class DiagnosticsApiIsNotServedTests
                 continue;
             }
 
-            if (!home)
+            if (relative == VisitorBuilder)
+            {
+                // The studio's own download sits beside the engine's service, in a folder of the UI assembly, and may name none of it.
+                offences.Add(relative + " names " + token + ": the download is built from the pages, as the visitor, never through the API's host gate.");
+            }
+            else if (!home)
             {
                 offences.Add(relative + " names " + token + ": the diagnostics API is host code's, never the studio's (D31).");
-            }
-            else if (relative == VisitorBuilder)
-            {
-                offences.Add(relative + " names " + token + ": the download is built from the pages, as the visitor, never through the API's host gate.");
             }
         }
 
@@ -81,7 +82,7 @@ public partial class DiagnosticsApiIsNotServedTests
             }
         }
 
-        if (relative.StartsWith("src/PostgresStudio/Services/Diagnostics/", StringComparison.Ordinal) && LoudLog().IsMatch(code))
+        if (relative.StartsWith("src/PostgresStudio.Diagnostics/Services/Diagnostics/", StringComparison.Ordinal) && LoudLog().IsMatch(code))
         {
             offences.Add(relative + " logs above Debug directly: a diagnostics line above Debug is one of the declared events, which carry codes and names, never a result.");
         }
@@ -121,7 +122,7 @@ public partial class DiagnosticsApiIsNotServedTests
     [Fact]
     public void No_log_event_takes_a_diagnostics_result()
     {
-        Assembly postgres = typeof(PostgresStudio.PostgresStudioOptions).Assembly;
+        Assembly postgres = typeof(PostgresStudio.PostgresDiagnosticsOptions).Assembly;
         Assembly marten = typeof(MartenStudio.MartenStudioOptions).Assembly;
         HashSet<string> readModel = [.. ReadModel(), "HostGate"];
 
@@ -154,9 +155,9 @@ public partial class DiagnosticsApiIsNotServedTests
     [InlineData("src/PostgresStudio/Components/Pages/Health/Bad.razor", "@inject IPostgresDiagnostics Diagnostics", "names IPostgresDiagnostics")]
     [InlineData("src/PostgresStudio/Services/Health/HealthService.cs", "var gate = new HostGate(true, screen);", "names HostGate")]
     [InlineData(VisitorBuilder, "var snapshot = await diagnostics.GetSnapshotAsync(x); IPostgresDiagnostics d;", "never through the API's host gate")]
-    [InlineData("src/PostgresStudio/Services/Health/Export/HealthExportRunner.cs", "PostgresDiagnosticsSnapshot snapshot = null!;", "names PostgresDiagnosticsSnapshot")]
+    [InlineData("src/PostgresStudio.Diagnostics/Services/Health/Export/HealthExportRunner.cs", "PostgresDiagnosticsSnapshot snapshot = null!;", "names PostgresDiagnosticsSnapshot")]
     [InlineData("src/PostgresStudio/Components/Pages/Health/Bad.razor", "@code { PostgresFinding? finding; }", "names PostgresFinding")]
-    [InlineData("src/PostgresStudio/Services/Diagnostics/Loud.cs", "logger.LogWarning(\"x\");", "logs above Debug directly")]
+    [InlineData("src/PostgresStudio.Diagnostics/Services/Diagnostics/Loud.cs", "logger.LogWarning(\"x\");", "logs above Debug directly")]
     public void The_scan_finds_each_offender(string relative, string source, string offence)
     {
         Offences(relative, source, ["PostgresDiagnosticsSnapshot", "PostgresFinding"])
@@ -166,10 +167,10 @@ public partial class DiagnosticsApiIsNotServedTests
     [Theory]
     [InlineData("src/PostgresStudio/Components/Pages/Health/Fine.razor", "@* Never IPostgresDiagnostics: see HostGate. *@")]
     [InlineData("src/PostgresStudio/Services/Health/HealthService.cs", "/// <see cref=\"HostGate\" /> is the host's.\nvar text = \"IPostgresDiagnostics\";")]
-    [InlineData("src/PostgresStudio/Services/Diagnostics/PostgresDiagnosticsService.cs", "internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics { HostGate gate; }")]
-    [InlineData("src/MartenStudio/MartenStudioServiceCollectionExtensions.cs", "services.TryAddSingleton<IPostgresDiagnostics, PostgresDiagnosticsService>();")]
+    [InlineData("src/PostgresStudio.Diagnostics/Services/Diagnostics/PostgresDiagnosticsService.cs", "internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics { HostGate gate; }")]
+    [InlineData("src/PostgresStudio.Diagnostics/Services/Settings/DiagnosticsCoreRegistration.cs", "services.TryAddSingleton<IPostgresDiagnostics, PostgresDiagnosticsService>();")]
     [InlineData("src/PostgresStudio/Services/Health/HealthService.cs", "var x = MyHostGateway.Open(); var y = a.IPostgresDiagnosticsLike; var z = HostGates;")]
-    [InlineData("src/PostgresStudio/Services/Diagnostics/Quiet.cs", "logger.LogDebug(\"x\"); logger.DiagnosticsSectionFailed(level, e, s, k, d, q);")]
+    [InlineData("src/PostgresStudio.Diagnostics/Services/Diagnostics/Quiet.cs", "logger.LogDebug(\"x\"); logger.DiagnosticsSectionFailed(level, e, s, k, d, q);")]
     public void The_scan_ignores_prose_strings_homes_and_lookalikes(string relative, string source)
     {
         Offences(relative, source, ["PostgresDiagnosticsSnapshot", "PostgresFinding"]).Should().BeEmpty();
