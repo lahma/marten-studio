@@ -54,7 +54,11 @@ graph:
    every direct Warning that names a route value, to `StudioLogValue`, and holds 9204 to the whole statement that ran;
    `MuteKeyHashTests`, which holds the mute list to the HMAC; `LogLevelsTests`, which reads every partial of
    `StudioLog`, `PostgresStudioLog` and `MartenLog` (a throttled event has no product dispatcher, because the level
-   must be the throttle's at the call); `PublicApiShapeTests` and `DiagnosticsApiIsNotServedTests` (D31);
+   must be the throttle's at the call); `PublicApiShapeTests` and `DiagnosticsApiIsNotServedTests` (D31); `PostgresStudioDiagnosticsVersionGuardTests`
+   (PostgresStudio.Tests: the engine's version guard, which refuses a newer or differently built `PostgresStudio.Diagnostics` (a
+   missing or older one fails in the loader first), and an IL scan that keeps `AddPostgresStudio`'s own body free of engine
+   types so that a newer engine whose members moved still reaches the guard, as MartenStudio.Tests'
+   `PostgresStudioVersionGuardTests` does for PostgresStudio and the engine one package up);
    `HealthCodesTests` (hard rule 7's codes table); `NpgsqlVersionTests` and `PostgresStudioSolutionFilterTests`
    (*Build*); and `ReleasePushOrderTests` (*Release engineering*). `ReadmeSnippetTests` holds both READMEs to their
    samples: `README.md` to `samples/MartenStudio.Sample/Program.cs` and `src/PostgresStudio/README.md` to

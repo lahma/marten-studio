@@ -15,7 +15,7 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.cs                               CHANGELOG-driven version, Clean, test projects, release notes
   Build.CI.GitHubActions.cs              The four [GitHubActions] attributes every workflow comes from
   Build.Browsers.cs                      The Playwright install target, and Test's dependency on it (D19)
-  Build.Publish.cs                       Pack (both packages) + the in-build nuget.org OIDC token exchange (D15)
+  Build.Publish.cs                       Pack (the three packages) + the in-build nuget.org OIDC token exchange (D15)
   Build.Marten.cs                        --marten-version: the floor, the latest-tested Marten or an exact one (D3)
   Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, PostgresStudio's latest-Npgsql pass (D30)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
@@ -60,6 +60,9 @@ samples/PostgresStudio.Sample/           The Postgres Studio sample host (D18), 
                                          tenant databases through its own IPostgresDatabaseSource - README snippet regions
 samples/PostgresStudio.Sample/Auth/      Cookie auth, the three demo users, the studio policy and the per-capability one
 samples/PostgresStudio.Sample/Properties/  launchSettings.json, fixed at http://localhost:5211
+samples/PostgresStudio.Worker/           The diagnostics worker (0.11-D, issue #29): a generic host that references
+                                         src/PostgresStudio.Diagnostics alone - no ASP.NET Core, no studio - and logs a
+                                         summary of every database's findings at start and every Summary:Interval (D18)
 tests/                                   All four test projects match *.Tests, so one Test run covers them all
 tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metadata, API snapshot,
                                          conventions. No Docker

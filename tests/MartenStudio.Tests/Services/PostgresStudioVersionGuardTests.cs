@@ -31,6 +31,8 @@ public class PostgresStudioVersionGuardTests
 
     private static readonly Assembly Shared = typeof(StudioCoreRegistration).Assembly;
 
+    private static readonly Assembly Engine = typeof(PostgresStudio.PostgresDiagnosticsOptions).Assembly;
+
     private static readonly Dictionary<short, OpCode> ByValue = typeof(OpCodes)
         .GetFields(BindingFlags.Public | BindingFlags.Static)
         .Select(static field => (OpCode) field.GetValue(null)!)
@@ -46,6 +48,8 @@ public class PostgresStudioVersionGuardTests
         PostgresStudioVersionGuard.ReleaseVersion(Shared).Should().Be(marten);
         PostgresStudioVersionGuard.InformationalVersion(Shared).Should().Be(PostgresStudioVersionGuard.InformationalVersion(Marten),
             "one build stamps both, commit included");
+        PostgresStudioVersionGuard.InformationalVersion(Engine).Should().Be(PostgresStudioVersionGuard.InformationalVersion(Marten),
+            "and the engine too: one build stamps all three");
 
         FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure()).Should().NotThrow();
         FluentActions.Invoking(() => new ServiceCollection().AddMartenStudio()).Should().NotThrow();
@@ -69,6 +73,55 @@ public class PostgresStudioVersionGuardTests
             .And.Contain("central PackageVersion for PostgresStudio")
             .And.Contain("CentralPackageTransitivePinningEnabled")
             .And.Contain($"pin PostgresStudio to {required}");
+    }
+
+    [Fact]
+    public void A_missing_PostgresStudio_Diagnostics_is_refused_and_the_central_pin_is_named()
+    {
+        var missing = new FileNotFoundException("Could not load file or assembly 'PostgresStudio.Diagnostics'.", "PostgresStudio.Diagnostics");
+        string required = PostgresStudioVersionGuard.ReleaseVersion(Marten);
+
+        InvalidOperationException refusal = FluentActions
+            .Invoking(() => PostgresStudioVersionGuard.Ensure(Marten, () => Shared, () => throw missing))
+            .Should().Throw<InvalidOperationException>().Which;
+
+        refusal.InnerException.Should().BeSameAs(missing);
+        refusal.Message.Should()
+            .Contain($"MartenStudio {required} needs PostgresStudio.Diagnostics {required} exactly")
+            .And.Contain("deployed without PostgresStudio.Diagnostics")
+            .And.Contain("central PackageVersion for PostgresStudio.Diagnostics")
+            .And.Contain("CentralPackageTransitivePinningEnabled")
+            .And.Contain($"pin PostgresStudio.Diagnostics to {required}")
+            .And.Contain("let PostgresStudio bring it");
+    }
+
+    [Fact]
+    public void Another_PostgresStudio_Diagnostics_version_is_refused_and_named()
+    {
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(WithVersion("0.5.0"), () => WithVersion("0.5.0"), () => WithVersion("0.5.1")))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain("MartenStudio 0.5.0 needs PostgresStudio.Diagnostics 0.5.0 exactly, and found PostgresStudio.Diagnostics 0.5.1.")
+            .And.Contain("upgraded together")
+            .And.Contain("central PackageVersion or a PackageReference for PostgresStudio.Diagnostics must say 0.5.0");
+    }
+
+    [Fact]
+    public void Two_commits_of_one_PostgresStudio_Diagnostics_version_are_named_in_full()
+    {
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(
+                WithVersion("0.5.0+5f1c2a9d", "Release"), () => WithVersion("0.5.0+5f1c2a9d", "Release"), () => WithVersion("0.5.0+0b7e3c41", "Release")))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should()
+            .Contain("MartenStudio 0.5.0+5f1c2a9d needs PostgresStudio.Diagnostics 0.5.0+5f1c2a9d exactly, and found PostgresStudio.Diagnostics 0.5.0+0b7e3c41.");
+    }
+
+    [Fact]
+    public void PostgresStudio_is_checked_before_PostgresStudio_Diagnostics()
+    {
+        FluentActions.Invoking(() => PostgresStudioVersionGuard.Ensure(WithVersion("0.5.0"), () => WithVersion("0.5.1"), () => WithVersion("0.5.2")))
+            .Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("found PostgresStudio 0.5.1").And.NotContain("PostgresStudio.Diagnostics");
     }
 
     [Fact]
@@ -214,8 +267,9 @@ public class PostgresStudioVersionGuardTests
         MethodInfo healthCheck = typeof(MartenStudioHealthChecksBuilderExtensions).GetMethod("AddMartenStudioHealthCheck", Declared)!;
         MethodInfo ensure = typeof(PostgresStudioVersionGuard).GetMethod(nameof(PostgresStudioVersionGuard.Ensure), Type.EmptyTypes)!;
         MethodInfo load = typeof(PostgresStudioVersionGuard).GetMethod("LoadPostgresStudio", Declared)!;
+        MethodInfo loadEngine = typeof(PostgresStudioVersionGuard).GetMethod("LoadDiagnostics", Declared)!;
 
-        foreach (MethodInfo method in new[] { services, healthCheck, ensure, load })
+        foreach (MethodInfo method in new[] { services, healthCheck, ensure, load, loadEngine })
         {
             method.Should().NotBeNull();
             method.MethodImplementationFlags.HasFlag(MethodImplAttributes.NoInlining).Should().BeTrue(

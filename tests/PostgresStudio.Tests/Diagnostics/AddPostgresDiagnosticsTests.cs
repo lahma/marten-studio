@@ -100,8 +100,8 @@ public class AddPostgresDiagnosticsTests
         { "console role", "PostgresDiagnosticsOptions.SqlConsoleRole must be a plain Postgres identifier" },
         { "health interval", "PostgresDiagnosticsOptions.HealthInterval must be between fifteen seconds and one hour" },
         { "schema", "PostgresDiagnosticsOptions.BrowsableSchemas entries must each be" },
-        { "studio code", "PostgresDiagnosticsOptions.AcceptedChecks key 'K05' is not a health check code of this studio" },
-        { "unknown code", "PostgresDiagnosticsOptions.AcceptedChecks key 'Z99' is not a health check code of this studio" },
+        { "studio code", "PostgresDiagnosticsOptions.AcceptedChecks key 'K05' is not a health check code PostgresStudio.Diagnostics runs" },
+        { "unknown code", "PostgresDiagnosticsOptions.AcceptedChecks key 'Z99' is not a health check code PostgresStudio.Diagnostics runs" },
         { "blank reason", "PostgresDiagnosticsOptions.AcceptedChecks['C01'] needs a reason" },
     };
 
@@ -213,6 +213,33 @@ public class AddPostgresDiagnosticsTests
         provider.GetRequiredService<IOptions<PostgresDiagnosticsOptions>>().Value.Should().BeSameAs(provider.GetRequiredService<IOptions<PostgresStudioOptions>>().Value);
         provider.GetRequiredService<PostgresStudio.Services.Settings.IDiagnosticsSettings>().Should().BeSameAs(provider.GetRequiredService<PostgresStudio.Services.Settings.IStudioSettings>());
         provider.GetRequiredService<PostgresStudio.Services.Settings.IDiagnosticsSettings>().QueryTimeout.Should().Be(TimeSpan.FromSeconds(12));
+    }
+
+    /// <summary>
+    /// A host with no studio has no <c>PostgresStudioOptions</c>: the words its settings carry name the option on
+    /// <c>PostgresDiagnosticsOptions</c>, and a studio's host keeps the sentence it always had.
+    /// </summary>
+    [Fact]
+    public async Task A_host_with_no_studio_reads_findings_that_name_PostgresDiagnosticsOptions()
+    {
+        await using ServiceProvider provider = Engine().BuildServiceProvider();
+
+        PostgresStudio.Services.Settings.StudioText words = provider.GetRequiredService<PostgresStudio.Services.Settings.IDiagnosticsSettings>().Text;
+
+        words.Should().BeSameAs(PostgresStudio.Services.Postgres.PostgresStudioText.DiagnosticsInstance);
+        words.OptionsTypeName.Should().Be("PostgresDiagnosticsOptions");
+        words.UnjudgedOldest.Should().Contain("a schema PostgresDiagnosticsOptions.BrowsableSchemas does not admit").And.NotContain("PostgresStudioOptions");
+
+        PostgresStudio.Services.Postgres.PostgresStudioText.Instance.UnjudgedOldest
+            .Should().Contain("a schema PostgresStudioOptions.BrowsableSchemas does not admit", "a studio host's sentence is unchanged")
+            .And.NotContain("PostgresDiagnosticsOptions");
+
+        // Only the option's owner differs: every other word is the studio's.
+        foreach (System.Reflection.PropertyInfo property in typeof(PostgresStudio.Services.Settings.StudioText).GetProperties()
+            .Where(static x => x.PropertyType == typeof(string) && x.Name is not (nameof(PostgresStudio.Services.Settings.StudioText.OptionsTypeName) or nameof(PostgresStudio.Services.Settings.StudioText.UnjudgedOldest))))
+        {
+            property.GetValue(words).Should().Be(property.GetValue(PostgresStudio.Services.Postgres.PostgresStudioText.Instance), property.Name);
+        }
     }
 
     private sealed class Nobody : AuthenticationStateProvider

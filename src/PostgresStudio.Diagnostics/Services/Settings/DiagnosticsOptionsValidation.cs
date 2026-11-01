@@ -150,7 +150,7 @@ internal sealed class AcceptedChecksValidator<TOptions>(
 
             if (!codes.Contains(key))
             {
-                failures.Add(optionsType + ".AcceptedChecks key '" + key + "' is not a health check code of this studio");
+                failures.Add(optionsType + ".AcceptedChecks key '" + key + "' is not a health check code " + descriptor.CheckCodeOwner);
             }
             else if (string.IsNullOrWhiteSpace(reason))
             {

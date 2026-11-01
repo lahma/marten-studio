@@ -6,7 +6,7 @@ namespace PostgresStudio;
 
 /// <summary>
 /// Options for the Postgres diagnostics engine, configured through
-/// <c>AddPostgresDiagnostics(Action&lt;PostgresDiagnosticsOptions&gt;)</c>, and the base of <see cref="PostgresDiagnosticsOptions" />:
+/// <c>AddPostgresDiagnostics(Action&lt;PostgresDiagnosticsOptions&gt;)</c>, and the base of <c>PostgresStudioOptions</c>:
 /// everything about which databases are read and how, with nothing about a UI.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace PostgresStudio;
 /// application's own data sources, with their role, TLS and settings, and adds no new place that holds credentials.
 /// </para>
 /// <para>
-/// The members keep the defaults and the bounds they have on <see cref="PostgresDiagnosticsOptions" />, which inherits them, so a
+/// The members keep the defaults and the bounds they have on <c>PostgresStudioOptions</c>, which inherits them, so a
 /// host that registers a studio configures them exactly as before.
 /// </para>
 /// </remarks>
@@ -40,14 +40,15 @@ public class PostgresDiagnosticsOptions
     /// <summary>
     /// How often the health advisor re-checks a database while somebody has its Health page or the Overview open.
     /// Between fifteen seconds and one hour; a <c>RefreshInterval</c> of a studio longer than it wins. Nothing is checked
-    /// while no page is open, and every open page shares one result per database per interval.
+    /// while no page is open - unless host code calls <see cref="IPostgresDiagnostics" />, which drives the same reads - and
+    /// every open page and every call share one result per database per interval.
     /// </summary>
     public TimeSpan HealthInterval { get; set; } = TimeSpan.FromSeconds(60);
 
     private readonly Dictionary<string, string> acceptedChecks = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Health checks this application has decided to live with, each by its code (<c>"K05"</c>) with the reason, in the host's
+    /// Health checks this application has decided to live with, each by its code (<c>"S04"</c>) with the reason, in the host's
     /// own words. The check still runs and its finding is still shown - as <em>Accepted</em>, muted, with the reason beside it
     /// - but it is out of the Warning and Critical counts, the Health page's state, the navigation badge, the banners and
     /// the ASP.NET Core health check's status; and <c>PostgresFinding.Accepted</c> says so for host code that reads the
@@ -55,10 +56,12 @@ public class PostgresDiagnosticsOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Meant for findings about configuration the host owns and has chosen - K05, the SQL console reading as the data
-    /// source's own role on a managed database whose roles belong to another team - which carry the same evidence every
-    /// time. A finding that moves with the data (connections, vacuum, storage) is not one to accept: it would stop counting
-    /// the day it matters.
+    /// Meant for findings about configuration the host owns and has chosen - S04, the application connecting as a superuser
+    /// on a managed database whose roles belong to another team, or K05, the studio's SQL console reading as the data
+    /// source's own role - which carry the same evidence every time. A finding that moves with the data (connections,
+    /// vacuum, storage) is not one to accept: it would stop counting the day it matters. The K-checks (K05 to K07) judge the
+    /// studio's own configuration and exist only where a studio is registered: <c>AddPostgresDiagnostics()</c> refuses them
+    /// here.
     /// </para>
     /// <para>
     /// The check's row on the Health page shows the reason only beside a finding the visitor may see. The <em>Accepted
@@ -106,6 +109,11 @@ public class PostgresDiagnosticsOptions
     /// <b>This limits what the screens show, not what can be read.</b> The SQL console reads whatever the connection's
     /// role can read; <see cref="SqlConsoleRole" /> is the boundary for both. A <c>"*"</c> with no
     /// <see cref="SqlConsoleRole" /> is logged as a warning at startup.
+    /// </para>
+    /// <para>
+    /// <b>For the engine alone</b> it is the schema filter of the tables the health checks judge and of the objects
+    /// <see cref="IPostgresDiagnostics" /> reports on: a table in another schema is neither checked nor named in a finding,
+    /// although a check that counts the whole database (transaction-id wraparound, say) still counts it.
     /// </para>
     /// <para>
     /// A Marten table (<c>mt_</c>) seen here is listed as Marten's and its rows are never read: they are browsed in

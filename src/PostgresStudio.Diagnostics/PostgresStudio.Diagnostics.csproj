@@ -5,6 +5,7 @@
     <RootNamespace>PostgresStudio</RootNamespace>
     <PackageId>PostgresStudio.Diagnostics</PackageId>
     <IsPackable>true</IsPackable>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>postgresql;npgsql;database;diagnostics;health;monitoring</PackageTags>
     <Description>The diagnostics engine of Postgres Studio and Marten Studio, with no ASP.NET Core: the health sweep and its checks, the facts they read and IPostgresDiagnostics, for any host that registers an NpgsqlDataSource.</Description>
     <EnablePackageValidation>true</EnablePackageValidation>
@@ -18,6 +19,10 @@
     <IsTrimmable>false</IsTrimmable>
     <IsAotCompatible>false</IsAotCompatible>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 
   <!-- No FrameworkReference: this assembly is the engine alone, and a worker or console host must not need ASP.NET Core
        to use it. PostgresStudioFenceTests holds that at this file, the assets file and the built references. -->

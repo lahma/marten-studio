@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
+using PostgresStudio.Internal;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
 
@@ -12,9 +15,6 @@ namespace PostgresStudio;
 /// </summary>
 public static class PostgresStudioServiceCollectionExtensions
 {
-    /// <summary>The schema browsed when nothing names one (<see cref="PostgresDiagnosticsOptions.BrowsableSchemas" />).</summary>
-    internal const string DefaultBrowsableSchema = "public";
-
     /// <summary>
     /// Registers everything Postgres Studio renders with: its Blazor components, the source provider that finds this
     /// application's <c>NpgsqlDataSource</c>s, the scope, authorization, capability and audit services, the database
@@ -43,13 +43,35 @@ public static class PostgresStudioServiceCollectionExtensions
     /// <param name="configure">Configures the studio, including the path it is served under and its sources.</param>
     /// <returns>The same collection, so calls can be chained.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="services" /> is null.</exception>
-    /// <exception cref="InvalidOperationException">Marten Studio is already registered in this container.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Marten Studio is already registered in this container, or the application carries a newer
+    /// PostgresStudio.Diagnostics than the one this package was released with, or another build of the same version. A
+    /// missing or older PostgresStudio.Diagnostics fails earlier, in the loader, with a <see cref="FileNotFoundException" />
+    /// that names it and the version to pin.
+    /// </exception>
     public static IServiceCollection AddPostgresStudio(
         this IServiceCollection services,
         Action<PostgresStudioOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        // Before anything that names a PostgresStudio.Diagnostics type: this body names none, and everything else is in
+        // AddPostgresStudioServices, which is NoInlining so that it is compiled only once the guard has passed - so a newer
+        // engine whose members moved, or another build of the same version, gets the guard's message rather than a
+        // MissingMethodException. (The parameter type below derives from an engine type, so a missing or older engine fails
+        // in the loader before this line, with a FileNotFoundException that names it; see the guard's remarks.)
+        // PostgresStudioDiagnosticsVersionGuardTests scans this method's IL to keep it that way.
+        PostgresStudioDiagnosticsVersionGuard.Ensure();
+
+        return AddPostgresStudioServices(services, configure);
+    }
+
+    /// <summary>The body of <see cref="AddPostgresStudio" />, once the engine is known to be the right one.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static IServiceCollection AddPostgresStudioServices(
+        IServiceCollection services,
+        Action<PostgresStudioOptions>? configure)
+    {
         // First, so that a second studio in this container is refused before anything of this one is registered.
         StudioCoreRegistration.Add(
             services,

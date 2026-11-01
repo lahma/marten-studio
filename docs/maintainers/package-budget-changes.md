@@ -585,3 +585,25 @@ The fast suites and every live class named in the packet report pass at the floo
 
 **Exit condition:** unchanged for `Npgsql` (the next `Npgsql` floor measurement). For the four rows: raise them with the
 `net10.0` floor of the host runtime the library supports, never ahead of it.
+
+**2026-11-01 — `Microsoft.Extensions.Hosting` `10.0.0` is added to a new sample, `samples/PostgresStudio.Worker`.** Packet 0.11-D
+(issue #29) adds a worker that references `src/PostgresStudio.Diagnostics` alone and logs a summary of every database's
+findings (plan §6.10). A worker needs a generic host: `Host.CreateApplicationBuilder`, `BackgroundService` and the options
+and logging it wires. Nothing already present brings it: the diagnostics engine takes only the four abstractions packages,
+which have no host, and the ASP.NET Core shared framework, which does, is exactly what the sample must not use.
+
+**What it is not.** It is not a dependency of any shipped package: no nuspec names it (the `Pack` target asserts all three),
+and the samples are not packed. It is a fifth row of the conditional `PostgresStudioDiagnosticsPinsExtensions` group in
+`Directory.Packages.props`, so only the Diagnostics project and the worker see it, and Marten, JasperFx and Weasel keep
+their own `Microsoft.Extensions.*` unpinned. A floor, not an exact pin, at `10.0.0` for the reason the other four rows give
+(D1: `net10.0` only).
+
+**`Testcontainers.PostgreSql`'s row text** now says "the three sample hosts": the worker starts the same throwaway Postgres
+(D18) when no connection string is configured, with the same banner and the same refusal when Docker is absent.
+
+**Measured.** `dotnet restore --force` of the worker at the `Npgsql` floor (`8.0.3`) and at
+`-p:PostgresStudioNpgsqlVersion=10.0.3`: no `NU` code at either; `Microsoft.Extensions.Hosting` and `.Abstractions` resolve to
+`10.0.0` and the four abstractions rows stay at `10.0.0`; 45 libraries, none of them an `Microsoft.AspNetCore.*` package. The
+worker runs against a throwaway Postgres and prints its summary.
+
+**Exit condition:** as the four rows: raise them with the `net10.0` floor of the host runtime the library supports.

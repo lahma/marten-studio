@@ -64,11 +64,15 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** MartenStudio's surface is
    three static classes, two classes and one record, in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt`, and it must not move because of
-   PostgresStudio. PostgresStudio's is the same six (its own registration types), plus its six inbound types
+   PostgresStudio. PostgresStudio's, in `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt`, is
+   its five registration types: `PostgresStudioServiceCollectionExtensions`, `PostgresStudioEndpointRouteBuilderExtensions`,
+   `PostgresStudioOptions`, `PostgresStudioCapabilities` and `PostgresStudioResource`. Since 0.11 the engine is a package
+   of its own with a baseline of its own, `PublicApiTest_PostgresStudioDiagnostics.verified.txt`, which lists type by
+   type `PostgresDiagnosticsServiceCollectionExtensions` (`AddPostgresDiagnostics`),
+   `PostgresStudioHealthChecksBuilderExtensions`, `PostgresDiagnosticsOptions`, the six inbound types
    (`IPostgresDatabaseSource`, `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`,
-   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model's twenty-two
-   types, which `tests/PostgresStudio.Tests/Verify/PublicApiTest_PostgresStudio.verified.txt` lists type by type.
-   Anything else that appears in either baseline is a mistake, not a feature.
+   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model.
+   Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
    what moved and why, then accept the baseline. The read model is extend-only (D31), and `PublicApiShapeTests` holds
    it to that.
@@ -183,5 +187,7 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
     checks the project file, the restore graph (libraries and `frameworkReferences`) and the built references. MartenStudio reaches
     PostgresStudio only through `InternalsVisibleTo`, and is packed with an **exact** dependency on its own
     PostgresStudio build (`[x.y.z]`, D30), which `Pack` asserts in the nuspec and `AddMartenStudio()` checks at
-    startup. A page route belongs to one assembly of a studio, below that assembly's own compile-time root
+    startup; PostgresStudio reaches `PostgresStudio.Diagnostics` the same way (`InternalsVisibleTo`, an exact
+    `PostgresStudio.Diagnostics [x.y.z]`, asserted by `Pack` and checked by `AddPostgresStudio()`, and again by
+    `AddMartenStudio()`'s guard). A page route belongs to one assembly of a studio, below that assembly's own compile-time root
     (`/postgres`, `/marten`), and the route table refuses a route two pages claim (`StudioRouteTableTests`).

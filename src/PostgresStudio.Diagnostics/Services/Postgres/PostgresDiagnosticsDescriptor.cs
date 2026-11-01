@@ -26,5 +26,6 @@ internal static class PostgresDiagnosticsDescriptor
         SourceQueryParameter = "store",
         SourceNoun = "data source",
         SourceLabel = "Database",
+        CheckCodeOwner = "PostgresStudio.Diagnostics runs",
     };
 }

@@ -179,12 +179,16 @@
     Why conditional: an unconditional row would pin, through CentralPackageTransitivePinningEnabled, the
     Microsoft.Extensions.* that Marten, JasperFx and Weasel bring in MartenStudio and its tests. Only a project
     that sets PostgresStudioDiagnosticsPinsExtensions (the Diagnostics project and the worker sample) sees the rows.
+
+    Microsoft.Extensions.Hosting is the worker sample's only addition (0.11-D, Package budget changes 2026-11-01): the
+    generic host a worker runs in, which no shipped package references.
   -->
   <ItemGroup Label="PostgresStudio.Diagnostics (it sets PostgresStudioDiagnosticsPinsExtensions)" Condition="'$(PostgresStudioDiagnosticsPinsExtensions)' == 'true'">
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

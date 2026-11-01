@@ -28,6 +28,7 @@
     <Project Path="samples/MartenStudio.Sample/MartenStudio.Sample.csproj" />
     <Project Path="samples/PostgresStudio.SampleData/PostgresStudio.SampleData.csproj" />
     <Project Path="samples/PostgresStudio.Sample/PostgresStudio.Sample.csproj" />
+    <Project Path="samples/PostgresStudio.Worker/PostgresStudio.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MartenStudio.Tests/MartenStudio.Tests.csproj" />
