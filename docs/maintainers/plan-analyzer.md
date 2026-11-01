@@ -43,3 +43,11 @@ audited per relation as a `BrowseDatabase` read, a failed read included; the fac
 relation. P15 to P18 (`NeedsFacts`) judge the plan against the facts and are listed as not judged without them; P19 and P20
 read the plan alone. Condition texts are read for column names by `PlanConditionText`, a bounded scan that returns names only,
 which are afterwards only ever bound as parameters.
+
+**Comparing plans (0.10-B).** Compare draws `PlanDiff`, a pure function over two parsed plans that reads nothing. The
+settings what-if changes only names on the allow-list in `PlanSettingsQueries`, refused before a connection is opened, with
+`work_mem` held to 1 GB and `hash_mem_multiplier` to 8 in every mode (refused, never reduced), and with name and value bound
+to `pg_catalog.set_config(..., true)` inside the console's read-only transaction, which always rolls back; the audit entry
+names them. The per-run timeout is clamped to the host's `QueryTimeout`. What if? in place is `ISqlConsoleService.PlanWhatIfAsync`:
+X2's engine behind the console's gate, for an index `MigrationSqlText` writes only (so not P17's expression index). P21
+judges a generic and a custom plan of one statement, so it runs in the compare path only.
