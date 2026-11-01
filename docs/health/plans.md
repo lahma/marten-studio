@@ -44,10 +44,16 @@ statement, and the plan is no more masked than the console's rows are. The State
 program's text, behind the same gate as the page (`ViewDatabaseActivity`, the source or store policy and the write policy,
 asked with no tenant), and masked for the visitor - see [below](#the-statements-drill-ins-plan).
 
-**Eleven need `ANALYZE`.** P01, P02, P03, P04, P08 and, from 0.9, P09 to P14 read what only `EXPLAIN ANALYZE` prints - rows
-returned, a spill, a lossy page, the rows a filter threw away, the workers given, the heap fetches, a hash's batches, JIT and
-execution time, a memoize cache's hits - so a plain plan lists them as not judged rather than as quiet. P05, P06 and P07
-read the planner's estimates when there is nothing better.
+**Fourteen need `ANALYZE`.** P01, P02, P03, P04, P08, from 0.9 P09 to P14 and from 0.10 P15, P16 and P20 read what only
+`EXPLAIN ANALYZE` prints - rows returned, a spill, a lossy page, the rows a filter threw away, the workers given, the heap
+fetches, a hash's batches, JIT and execution time, a memoize cache's hits, the time the triggers took - so a plain plan lists
+them as not judged rather than as quiet. P05, P06, P07, P17, P18 and P19 read the planner's estimates when there is nothing
+better.
+
+**Four need the database's facts.** From 0.10, P15, P16, P17 and P18 judge a plan against what the database knows about the
+relations it names - [facts beside the plan](#facts-beside-the-plan) - which only a plan the Query › Plan page ran has. A plan
+pasted there lists them as not judged, never as quiet; the console's, Mode A's and the Statements drill-in's plans read no facts in
+0.10 and do not name them.
 
 **At most five findings an insight**, the worst first.
 
@@ -188,6 +194,78 @@ larger `work_mem` for the role or the session that runs the statement keeps more
 no cache size helps - compare the statement with `SET enable_memoize = off` in the SQL console to see whether it is faster
 without.
 
+## P15 Stale statistics behind a misestimate
+
+**Warning**, under `ANALYZE`, on a plan the Plan page ran. A node [P01](#p01-row-estimate-off-tenfold-or-more) flags - or a node below
+it - reads a table that has never been analyzed, or that has had at least 10% of its rows (`reltuples`) inserted, updated or
+deleted since it was last analyzed (`n_mod_since_analyze`): the planner's row counts for it are out of date. One finding for each
+such table, on the node with the worst misestimate that reads it. **Not judged** without the database's facts (a pasted plan has none).
+
+**Remedy.** `ANALYZE schema.table;` - shown as text for your own migrations or a maintenance window, never run by the studio. It
+takes only a `SHARE UPDATE EXCLUSIVE` lock, so reads and writes carry on. To keep the statistics current, give the table a lower
+`autovacuum_analyze_scale_factor` (autovacuum analyzes a table once 10% of its rows changed unless somebody set otherwise).
+Operations › Maintenance shows when autovacuum will next reach it.
+
+## P16 Correlated columns without extended statistics
+
+**Warning**, under `ANALYZE`, on a plan the Plan page ran. A scan [P01](#p01-row-estimate-off-tenfold-or-more) flags compares two or
+more columns of the table in its `Filter` or `Index Cond`, and the table has no extended statistics (`pg_statistic_ext`) covering
+any two of them. The planner multiplies each column's selectivity as if the columns were independent, which is wrong wherever one
+tells you something about the other. A condition that joins the columns with `OR` is not read as one. **Not judged** without facts.
+
+**Remedy.** `CREATE STATISTICS schema.table_a_b_stats (dependencies, ndistinct, mcv) ON a, b FROM schema.table;` and then `ANALYZE`
+the table, shown as text for your own migrations, never run. The statistics' name is built from the table's and the columns'
+(PostgreSQL 14 requires a name) and goes in the table's schema; where a name cannot be printed honestly - it would pass 63 bytes,
+or hold a character the studio will not quote - the finding names the columns and gives no statement.
+
+## P17 Function or cast on an indexed column
+
+**Warning.** A `Filter` or `Join Filter` wraps a column of a table in a function (`lower(email)`, `date_trunc(...)`) or casts it
+to a type that is not its own (`(created_at)::date`), and that column leads a valid index of its table: an index serves a condition
+on the column, not on a function or a cast of it. A cast between `varchar` and `text` is the same bytes and is no wrapper. An
+`Index Cond` is not read: an index that serves a condition is already being used. **Not judged** without facts.
+
+The condition is found in the text Postgres deparsed (the plan's own `Filter`), by a bounded scan that skips string literals and
+reads quoted names (`PlanConditionText`); it never reads the statement as typed and runs nothing. A column a function takes as its
+second argument is not seen as wrapped: a false negative, never a false finding.
+
+**Remedy.** Compare the column as it is - move the function to the value it is compared with - or build an index on the expression
+the filter uses. For a cast, cast the other side (the constant or the parameter) to the column's type, or index the cast
+expression; a range on the column itself (`created_at >= ... and created_at < ...`) uses the plain index where a cast to `date`
+cannot.
+
+## P18 No partition pruning
+
+**Warning.** An `Append` or `Merge Append` reads at least four partitions of one partitioned table, more than half of the partitions
+that table has, and Postgres removed none of them (no `Subplans Removed`): nothing narrowed the partitions, at plan time or at run
+time. The finding says whether any scanned partition's condition names a column of the partition key. **Not judged** without facts.
+
+**Remedy.** Postgres prunes partitions on a condition that compares the partition key as it is with a value - a constant at plan
+time, a parameter at run time. A function or a cast of the key (`date_trunc('day', ts)`, `ts::date`), an `OR` across other columns
+or a comparison with another column defeats it; for a timestamp key use a range (`ts >= ... and ts < ...`). With no condition on
+the key at all, add one - or accept that every partition is needed, when it really is.
+
+## P19 Default row estimate on a function
+
+**Info.** A `Function Scan` is expected to return exactly 1,000 rows, which is what Postgres assumes of any set-returning function
+it has no better figure for (`pg_proc.prorows`). Under `ANALYZE`, a function that really did return 1,000 rows is not flagged: the
+guess was right. Every join and sort above the scan was planned for that number.
+
+**Remedy.** A function you wrote takes its estimate from its `ROWS` clause: `ALTER FUNCTION ... ROWS n` (or `CREATE FUNCTION ...
+ROWS n`) with the typical result size. For a function of Postgres' or an extension's, put its result in a subquery or a CTE the
+planner can see through, or filter and join in a form that does not depend on the estimate.
+
+## P20 Triggers dominating the statement
+
+**Warning**, under `ANALYZE`. The triggers that fired took at least 30% of the execution time: the statement spends its time in
+them, not in the plan the tree draws. The Plan page plans a write only as a *pasted* plan - it never runs `EXPLAIN ANALYZE` of
+one - so this is judged for plans from `auto_explain`, a log or another session.
+
+**Remedy.** Trigger time is in no node's time. Look at what the slowest trigger's function does for each row it fires on - a
+lookup without an index on its key, a write to another table, an audit insert - and whether a statement-level trigger (`FOR EACH
+STATEMENT`, with a transition table) can do it once for the whole statement. A foreign key is a trigger too: an unindexed
+referencing column makes every delete or update of the referenced row scan the referencing table.
+
 ## Query › Plan: the plan analyzer
 
 The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in Marten Studio) is the console's Explain buttons as a page of
@@ -208,7 +286,7 @@ measured on 14, 17 and 18.) All of it is one read-only transaction; a run that s
 error, a cancel - deallocates it in a transaction of its own. Every run and every refusal is audited as a `RunSql` run, as the
 console's are, with `$1` where the value was: a value is never in the audit or the log.
 
-**Options.** `BUFFERS` and `TIMING` (on by default), `VERBOSE`, `SETTINGS`, `WAL`, and from PostgreSQL 17 `MEMORY` and `SERIALIZE`.
+**Options.** `BUFFERS`, `TIMING` and (from 0.10) `VERBOSE` (on by default: it changes the output, never the plan, and it is what gives every relation its schema, so the [facts beside the plan](#facts-beside-the-plan) can be read; an address with no `options` means these three), `SETTINGS`, `WAL`, and from PostgreSQL 17 `MEMORY` and `SERIALIZE`.
 The ones that count what a statement does while it runs - `BUFFERS`, `TIMING`, `WAL`, `SERIALIZE` - need Explain analyze, and are
 disabled without it with a title that says why; a server older than 17 is told apart after its first plan, and `MEMORY` and
 `SERIALIZE` are left out of the statement - and named on the page - on it.
@@ -243,6 +321,57 @@ pre-order, `[#3]`), and one sampled profile for each measure the plan has - *Sel
 own value, the same self time or cost the tree shows. The file is saved by the browser; there is no link to the viewer, which is
 opened by hand at speedscope.app (the file stays in the browser). A plan from Operations › Statements gets no export, as its
 masked form is not offered raw.
+
+## Facts beside the plan
+
+Under the tree, the **Facts** panel lists what the database knows about the relations the plan names and the columns it uses, and
+four insights ([P15](#p15-stale-statistics-behind-a-misestimate) to [P18](#p18-no-partition-pruning)) judge the plan against them.
+They are read **once, after the plan**, for a plan this page ran - never for a pasted plan, which reads nothing, and never on a
+poll - in the console's own read-only transaction, under its statement timeout and `lock_timeout`, as the console's role
+(`SqlConsoleRole`). They are the page's second step, not a second gate: the whole read is part of the plan's `RunSql` operation,
+audited as one more `RunSql` entry ("RunSql plan facts") that names no relation.
+
+**What is read, and how.** Everything is `pg_catalog` and the statistics views, by oid, and **locks nothing**: no size function and
+no deparse (`pg_get_indexdef`, `pg_get_expr` with a relation and `pg_get_partkeydef` open the relation and queue behind a
+migration's `ACCESS EXCLUSIVE`, D27). A relation is named by the schema and name the plan printed - which only a plan run with
+`VERBOSE` carries - which Query › Plan asks for by default, and a visitor who unticks it is told the facts need it: a scan that names none says so and is not resolved - and resolved by a join of `pg_namespace` and `pg_class` on the exact names, which takes no lock and, unlike `to_regclass`, never fails
+for a schema your role has no `USAGE` on (a view's table, say);
+the names go in as parameters, never into the statement. At most 50 relations are read; the rest say "not read".
+
+- **Per relation:** `reltuples`, `relpages`, `relallvisible`; when it was last analyzed and vacuumed, by hand and by autovacuum,
+  rows changed since the last analyze and dead tuples; its indexes with the columns the Schema screens show (keys, access method,
+  size, scans, last scan from PostgreSQL 16); its extended statistics; and, for a partition, its partitioned parent, how many
+  partitions that has and its partition key.
+- **Per column** the plan filters, joins, sorts or groups on (at most 32 for each relation): its type and `n_distinct`, `null_frac`
+  and `correlation` from `pg_stats`. A column with no statistics yet says "not analyzed".
+- **Settings:** the plan's own `SETTINGS` list first, then the server's planner settings and any `enable_*` switched off, as the
+  Server page reads them.
+
+**What a relation is judged by.** The relation itself, and **every table above it** in `pg_inherits`, walked to the root inside the same
+statement (never with `pg_partition_root`, which opens the relation). A hidden document type's per-tenant partition is named
+`mt_doc_<type>_<tenant>`, which by its name alone is Marten infrastructure and no hidden table, so it is its root that is hidden - and
+a partition whose root is in a schema you may not see is withheld however its own schema reads. A withheld record keeps neither name.
+A column's type is masked as the database browser masks one (`‹withheld›` for a schema you may not see), and so is an extended
+statistics object in such a schema.
+
+**The gate, in this order.** `RunSql` and the write policy first, as for the plan itself. Then, before any fact is read, every
+relation is resolved to its oid and judged: **a relation in a schema whose structure you may not see** (the studio's
+`BrowsableSchemas` and the database browser's rules, D27), a Postgres system schema included, **is shown as `‹withheld›`, with
+no facts and no count**, and so is a hidden document type's table. Only then are the facts of the rest read. A plan's own text -
+its `Filter` and `Index Cond` - is what you wrote and ran, and is unmasked as the console's plans are; the facts are what the
+database adds to it, and so are gated.
+
+**Values are data, and a gate of their own.** `most_common_vals`, `most_common_freqs` and `histogram_bounds` are values from the
+table's rows. They are read only for a relation the database browser's **row gate** admits - `BrowseDatabase` on, the write policy
+asked with no tenant, the schema browsable, the relation one the browser reads rows of - and each such read is audited as a
+`BrowseDatabase` read naming the relation, once per relation per plan. Without it the panel says "values need `BrowseDatabase`".
+**A Marten document or event table's values are never shown** (D27: Marten's tables are never read raw; their rows are a `data`
+jsonb and Marten's columns): its structure and its column statistics are, its values are not. At most ten relations' values are read
+for one plan.
+
+**Per node.** The node table gains a **Facts** column - for a scan, its relation's estimate and when it was analyzed - and the
+selected node's detail lists its relation and, for each column it filters, joins, sorts or groups on, that column's statistics (and
+its values, where they were read). The console's inline plan and the Statements drill-in show no facts in 0.10.
 
 ## The console's EXPLAIN ANALYZE
 

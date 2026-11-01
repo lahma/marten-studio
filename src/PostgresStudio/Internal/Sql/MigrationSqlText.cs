@@ -304,6 +304,46 @@ internal static partial class MigrationSqlText
             ? "DELETE FROM " + qualified + " WHERE " + SqlIdentifier.Quote(column) + " = " + literal + ";"
             : null;
 
+    // ---- 0.10-A -------------------------------------------------------------------------------------------------------
+
+    /// <summary>The longest name Postgres keeps; a longer one it cuts without a word, so a statement that names one is not written.</summary>
+    private const int MaxNameBytes = 63;
+
+    /// <summary><c>ANALYZE schema.table;</c> (P15), or <see langword="null" /> when a name cannot be printed honestly.</summary>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    public static string? Analyze(string schema, string table) =>
+        Qualified(schema, table) is { } qualified ? "ANALYZE " + qualified + ";" : null;
+
+    /// <summary>
+    /// <c>CREATE STATISTICS schema.table_a_b_stats (dependencies, ndistinct, mcv) ON a, b FROM schema.table;</c> (P16): extended
+    /// statistics over the columns a filter compares together - or <see langword="null" /> when a name cannot be printed honestly,
+    /// fewer than two distinct columns are given, or the statistics object's name would pass 63 bytes. The name is built from the
+    /// table's and the columns' (PostgreSQL 14 requires one) and goes in the table's schema.
+    /// </summary>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="columns">The columns, at least two, distinct.</param>
+    public static string? CreateStatistics(string schema, string table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        if (columns.Count < 2 || columns.Count > 8 || columns.Distinct(StringComparer.Ordinal).Count() != columns.Count || !columns.All(IsQuotable))
+        {
+            return null;
+        }
+
+        string name = table + "_" + string.Join("_", columns) + "_stats";
+
+        if (System.Text.Encoding.UTF8.GetByteCount(name) > MaxNameBytes || Qualified(schema, table) is not { } qualified || Qualified(schema, name) is not { } statistics)
+        {
+            return null;
+        }
+
+        return "CREATE STATISTICS " + statistics + " (dependencies, ndistinct, mcv) ON " + string.Join(", ", columns.Select(SqlIdentifier.Quote))
+            + " FROM " + qualified + ";";
+    }
+
     /// <summary>Whether <paramref name="parameter" /> has a storage parameter's shape: lower-case letters and underscores.</summary>
     public static bool IsParameterName(string? parameter) => parameter is { Length: > 0 } && ParameterName().IsMatch(parameter);
 

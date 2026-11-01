@@ -13631,5 +13631,110 @@ a.ms-schema-health-mark:focus-visible {
 }
 
 .ms-accepted-checks-table .ms-table-cell {
+
+/* ==========================================================================
+   0.10-A. Facts beside the plan
+
+   Query › Plan, issue #28 phase 2: what the database knows about the relations a plan names and the columns it uses, read
+   after the plan (PlanFactsPanel), in the node table's Facts column and under the selected node. Every class is its own
+   (ms-plan-dbfact-, ms-plan-dbfacts-), and every colour is a token the earlier sections already define: the panel adds no literal
+   colour, so it has the dark theme's values by construction. The values a column's most common values and histogram print are
+   rows' data and wrap, bounded to the width of the region they are in; nothing here is a link.
+   ========================================================================== */
+
+.ms-plan-dbfacts {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+}
+
+.ms-plan-dbfacts-title,
+.ms-plan-dbfact-settings-title {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-plan-dbfact-settings-title {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ms-plan-dbfacts-caption,
+.ms-plan-dbfacts-none {
+    max-width: 90ch;
+    margin: 0;
+}
+
+.ms-plan-dbfacts-none {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-dbfact-relation {
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-dbfact-relation[open] {
+    padding-bottom: var(--ms-space-sm);
+}
+
+.ms-plan-dbfact-summary {
+    cursor: pointer;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-dbfact-summary:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+}
+
+.ms-plan-dbfact-list {
+    margin: var(--ms-space-sm) 0 0;
+}
+
+.ms-plan-dbfact-note {
+    max-width: 90ch;
+    margin: var(--ms-space-xs) 0 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-dbfact-extended {
+    margin: var(--ms-space-xs) 0 0;
+    padding-left: var(--ms-space-lg);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-dbfact-table {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-plan-dbfact-values {
+    max-width: 32ch;
+    overflow-wrap: anywhere;
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-dbfact-settings {
+    display: flex;
+    flex-direction: column;
+}
+
+/* A node's facts: a column in the node table, and a group in the selected node's detail. */
+
+.ms-plan-table-facts {
+    min-width: 20ch;
+    max-width: 44ch;
+    overflow-wrap: anywhere;
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-node-facts .ms-plan-detail-value {
     overflow-wrap: anywhere;
 }

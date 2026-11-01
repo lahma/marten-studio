@@ -33,6 +33,10 @@
                     {
                         <th scope="col" class="ms-plan-table-heat-head">@PlanAnalysis.Label(heat, plan)</th>
                     }
+                    @if (nodeFacts is not null)
+                    {
+                        <th scope="col" class="ms-plan-table-facts-head" title="What the database knows about the relation a scan reads: its estimate and when it was analyzed. The selected node's detail lists its columns' statistics.">Facts</th>
+                    }
                 </tr>
             </thead>
             <tbody>
@@ -93,6 +97,10 @@
                                 }
                             </td>
                         }
+                        @if (nodeFacts is not null)
+                        {
+                            <td class="ms-plan-table-facts">@nodeFacts.Summary(node, factsAt)</td>
+                        }
                     </tr>
                 }
             </tbody>
@@ -122,6 +130,10 @@
     private bool descending;
     private object? builtFor;
     private string? builtHeat;
+    private PlanNodeFacts? nodeFacts;
+    private DateTimeOffset factsAt;
+    private object? factsFor;
+    private object? factsPlanFor;
 
     /// <summary>The plan, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type).</summary>
     [Parameter]
@@ -147,9 +159,23 @@
     [Parameter]
     public object? Flags { get; set; }
 
+    /// <summary>0.10-A: the plan's facts, a <c>PlanFacts</c> (<see cref="object" />: a public parameter cannot have an internal type), or <see langword="null" />.</summary>
+    [Parameter]
+    public object? Facts { get; set; }
+
     protected override void OnParametersSet()
     {
         flags = Flags as Dictionary<int, List<string>> ?? [];
+
+        if (!ReferenceEquals(Facts, factsFor) || !ReferenceEquals(Plan, factsPlanFor))
+        {
+            factsFor = Facts;
+            factsPlanFor = Plan;
+
+            // A Facts column is for facts that name a relation: with none read, it would be a column of nothing.
+            nodeFacts = Facts is PlanFacts { Relations.Count: > 0 } read && Plan is QueryPlan current ? new PlanNodeFacts(current, read) : null;
+            factsAt = (Facts as PlanFacts)?.ReadAt ?? default;
+        }
 
         if (!ReferenceEquals(Plan, builtFor) || !string.Equals(Heat, builtHeat, StringComparison.Ordinal))
         {

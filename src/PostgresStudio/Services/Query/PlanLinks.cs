@@ -58,7 +58,7 @@ internal static class PlanLinks
             url = QueryHelpers.AddQueryString(url, ModeParameter, ModeKey(mode));
         }
 
-        if (options is not null && options != new PlanOptions())
+        if (options is not null && options != PlanOptions.PageDefault)
         {
             url = QueryHelpers.AddQueryString(url, OptionsParameter, OptionsKey(options));
         }
@@ -109,14 +109,14 @@ internal static class PlanLinks
     }
 
     /// <summary>
-    /// The options an address names. An address with no <c>options</c> at all means the defaults (<c>BUFFERS</c> and <c>TIMING</c>
-    /// on); one with the parameter present means exactly the options it lists, so <c>options=</c> is none.
+    /// The options an address names. An address with no <c>options</c> at all means the page's defaults
+    /// (<see cref="PlanOptions.PageDefault" />: <c>BUFFERS</c>, <c>TIMING</c> and <c>VERBOSE</c> on); one with the parameter present means exactly the options it lists, so <c>options=</c> is none.
     /// </summary>
     public static PlanOptions ParseOptions(string? value)
     {
         if (value is null)
         {
-            return new PlanOptions();
+            return PlanOptions.PageDefault;
         }
 
         HashSet<string> on = new(

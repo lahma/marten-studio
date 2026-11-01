@@ -184,6 +184,9 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<SqlConsoleService>();
         services.TryAddScoped<ISqlConsoleService>(static provider => provider.GetRequiredService<SqlConsoleService>());
 
+        // 0.10-A: the facts beside a plan the Plan page ran - the console's gate, then each relation's own.
+        services.TryAddScoped<IPlanFactsService, PlanFactsService>();
+
         // Relationships: the foreign-key graph and its reads. A studio adds what it knows beside the catalog through its
         // IRelationshipNodeSource, which the data service takes as optional - a studio with none draws plain tables.
         services.TryAddScoped<RelationshipReads>();

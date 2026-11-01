@@ -1,0 +1,25 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Index Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "users",
+      "Schema": "public",
+      "Alias": "users",
+      "Startup Cost": 0.0,
+      "Total Cost": 1000.0,
+      "Plan Rows": 1,
+      "Plan Width": 64,
+      "Actual Startup Time": 0.02,
+      "Actual Total Time": 12.5,
+      "Actual Rows": 1.0,
+      "Actual Loops": 1,
+      "Index Name": "users_email_idx",
+      "Index Cond": "(email = 'ann@example.com'::text)"
+    },
+    "Planning Time": 0.2,
+    "Triggers": [],
+    "Execution Time": 0.1
+  }
+]

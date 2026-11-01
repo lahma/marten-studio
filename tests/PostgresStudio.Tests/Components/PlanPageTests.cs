@@ -260,14 +260,34 @@ public class PlanPageTests
         page.Find("#ms-plan-sql").Change("select * from t where a = $1");
         page.Find("#ms-plan-param-1").Change("a secret value");
         page.FindAll("input[name=ms-plan-mode]")[1].Change(true);
-        page.Find("#ms-plan-option-verbose").Change(true);
+        page.Find("#ms-plan-option-wal").Change(true);
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
         page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
 
         string uri = context.CurrentUri;
 
-        uri.Should().Contain("sql=select%20%2A%20from%20t%20where%20a%20%3D%20%241").And.Contain("mode=analyze").And.Contain("options=buffers%2Ctiming%2Cverbose");
+        uri.Should().Contain("sql=select%20%2A%20from%20t%20where%20a%20%3D%20%241").And.Contain("mode=analyze").And.Contain("options=buffers%2Ctiming%2Cverbose%2Cwal");
         uri.Should().NotContain("secret").And.NotContain("Node%20Type");
+    }
+
+    [Fact]
+    public async Task VERBOSE_is_ticked_by_default_and_unticking_it_is_written_into_the_address_and_asked_for_in_the_run_and_the_facts_say_to_plan_again()
+    {
+        await using PostgresStudioComponentContext context = await ReadyAsync();
+        context.PlanFacts.Answer = _ => new PlanFacts(DateTimeOffset.UnixEpoch, [], []) { Unqualified = 1 };
+
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+        page.Find("#ms-plan-option-verbose").HasAttribute("checked").Should().BeTrue("VERBOSE changes the output, not the plan, and the facts need it");
+
+        context.SqlConsole.NextPlan = Ran();
+        page.Find("#ms-plan-sql").Change("select o.id from orders o");
+        page.Find("#ms-plan-option-verbose").Change(false);
+        await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+
+        context.SqlConsole.Plans.Single().Request.Options.Verbose.Should().BeFalse();
+        context.CurrentUri.Should().Contain("options=buffers%2Ctiming").And.NotContain("verbose");
+        page.Find(".ms-plan-dbfacts-none").TextContent.Should().Contain("Plan it again with VERBOSE");
     }
 
     [Fact]
@@ -292,7 +312,8 @@ public class PlanPageTests
         PlanRunRequest request = context.SqlConsole.Plans.Single().Request;
         request.Statement.Should().Be("select o.id from orders o");
         request.Mode.Should().Be(PlanMode.Plan);
-        request.Options.Should().Be(new PlanOptions());
+        request.Options.Should().Be(PlanOptions.PageDefault);
+        request.Options.Verbose.Should().BeTrue("VERBOSE gives every relation its schema, which the facts beside the plan need");
 
         Dictionary<string, string> strip = page.FindAll(".ms-plan-strip-item")
             .ToDictionary(static x => x.QuerySelector("dt")!.TextContent, static x => x.QuerySelector("dd")!.TextContent);

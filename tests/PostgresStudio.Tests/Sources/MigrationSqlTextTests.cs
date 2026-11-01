@@ -97,4 +97,41 @@ public class MigrationSqlTextTests
             sql.Should().BeNull();
         }
     }
+
+    // ---- 0.10-A: P15's ANALYZE and P16's CREATE STATISTICS --------------------------------------------------------------
+
+    [Fact]
+    public void Analyze_quotes_both_names_and_gives_nothing_for_one_it_cannot_print()
+    {
+        MigrationSqlText.Analyze("public", "orders").Should().Be("ANALYZE \"public\".\"orders\";");
+        MigrationSqlText.Analyze("Sales", "Line Items").Should().Be("ANALYZE \"Sales\".\"Line Items\";");
+        MigrationSqlText.Analyze("public", "x\"; drop table y; --").Should().BeNull();
+        MigrationSqlText.Analyze("public", "").Should().BeNull();
+    }
+
+    [Fact]
+    public void CreateStatistics_names_the_object_after_the_table_and_columns_in_the_tables_schema_and_quotes_everything()
+    {
+        MigrationSqlText.CreateStatistics("public", "addresses", ["city", "postcode"]).Should().Be(
+            "CREATE STATISTICS \"public\".\"addresses_city_postcode_stats\" (dependencies, ndistinct, mcv) ON \"city\", \"postcode\" FROM \"public\".\"addresses\";");
+    }
+
+    [Theory]
+    [InlineData("city")]
+    [InlineData("x\"; drop table y; --")]
+    [InlineData("")]
+    public void CreateStatistics_gives_nothing_for_fewer_than_two_distinct_printable_columns(string column)
+    {
+        MigrationSqlText.CreateStatistics("public", "addresses", [column]).Should().BeNull("one column is not correlated with anything");
+        MigrationSqlText.CreateStatistics("public", "addresses", ["city", "city"]).Should().BeNull("a column twice is one column");
+        MigrationSqlText.CreateStatistics("public", "addresses", ["city", column]).Should().BeNull(column.Length == 0 || column.Contains('"') ? "a name that cannot be quoted gets no statement" : "city twice");
+    }
+
+    [Fact]
+    public void CreateStatistics_gives_nothing_for_a_name_past_the_sixty_three_bytes_postgres_keeps_and_for_nine_columns()
+    {
+        MigrationSqlText.CreateStatistics("public", new string('t', 40), [new string('a', 15), new string('b', 15)]).Should().BeNull("Postgres would cut the name without a word");
+        MigrationSqlText.CreateStatistics("public", "t", [.. Enumerable.Range(1, 9).Select(static x => "c" + x)]).Should().BeNull("the statement takes at most eight columns");
+        MigrationSqlText.CreateStatistics("public", "t", [.. Enumerable.Range(1, 8).Select(static x => "c" + x)]).Should().NotBeNull();
+    }
 }

@@ -160,6 +160,31 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
     }
 }
 
+/// <summary>The Plan page's facts read (0.10-A): records each plan it was asked about and answers what a test says.</summary>
+internal sealed class FakePlanFacts : IPlanFactsService
+{
+    /// <summary>Every plan the page asked the facts of, with the scope.</summary>
+    public List<(StudioScope Scope, QueryPlan Plan)> Reads { get; } = [];
+
+    /// <summary>What a read answers, or <see langword="null" /> for facts that name no relation.</summary>
+    public Func<QueryPlan, PlanFacts>? Answer { get; set; }
+
+    /// <summary>When set, a read throws it - a gate that answered differently a moment after the plan was run.</summary>
+    public Exception? Throws { get; set; }
+
+    public Task<PlanFacts> ReadAsync(StudioScope scope, QueryPlan plan, CancellationToken cancellationToken = default)
+    {
+        Reads.Add((scope, plan));
+
+        if (Throws is { } exception)
+        {
+            throw exception;
+        }
+
+        return Task.FromResult(Answer?.Invoke(plan) ?? new PlanFacts(DateTimeOffset.UnixEpoch, [], []));
+    }
+}
+
 /// <summary>The Overview's server read: PostgreSQL 17.4 on a server of somebody's own.</summary>
 internal sealed class FakeServerReader : IPostgresServerReader
 {

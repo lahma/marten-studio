@@ -212,7 +212,9 @@ public class PlanStatementsTests
     [Fact]
     public void Options_in_the_address_are_exactly_the_ones_it_lists_and_none_at_all_means_the_defaults()
     {
-        PlanLinks.ParseOptions(null).Should().Be(new PlanOptions(), "BUFFERS and TIMING are on by default");
+        PlanLinks.ParseOptions(null).Should().Be(PlanOptions.PageDefault, "BUFFERS, TIMING and VERBOSE are on by default on the page");
+        PlanOptions.PageDefault.Should().Be(new PlanOptions { Verbose = true });
+        new PlanOptions().Verbose.Should().BeFalse("the service-level default is unchanged: only the page asks for VERBOSE");
         PlanLinks.ParseOptions("verbose,wal").Should().Be(new PlanOptions { Buffers = false, Timing = false, Verbose = true, Wal = true });
         PlanLinks.ParseOptions(string.Empty).Should().Be(new PlanOptions { Buffers = false, Timing = false }, "options= is none");
         PlanLinks.ParseOptions(" Buffers , SETTINGS ,nonsense").Should().Be(new PlanOptions { Timing = false, Settings = true });

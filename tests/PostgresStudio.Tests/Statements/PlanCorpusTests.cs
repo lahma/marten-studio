@@ -58,7 +58,7 @@ public class PlanCorpusTests
     public void Every_new_insight_has_a_firing_and_a_quiet_fixture()
     {
         PlanFixtures.Names.Should().Contain(["p09-fires", "p09-quiet", "p10-fires", "p10-quiet", "p11-fires", "p11-quiet", "p12-fires", "p12-quiet", "p13-fires", "p13-quiet", "p14-fires", "p14-quiet"]);
-        Fires.Keys.Should().BeEquivalentTo(PlanInsights.All.Skip(8).Select(static x => x.Code), "P09 onward are 0.9's");
+        Fires.Keys.Should().BeEquivalentTo(PlanInsights.All.Skip(8).Take(6).Select(static x => x.Code), "P09 to P14 are 0.9's");
     }
 
     [Theory]
@@ -138,7 +138,7 @@ public class PlanCorpusTests
     }
 
     /// <summary>The fixture's plan with everything only <c>ANALYZE</c> prints removed: what a plain <c>EXPLAIN</c> would have said.</summary>
-    private static string StripActuals(string json)
+    internal static string StripActuals(string json)
     {
         string[] analyzeOnly =
         [

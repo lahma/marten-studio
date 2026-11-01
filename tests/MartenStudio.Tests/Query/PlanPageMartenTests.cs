@@ -18,10 +18,21 @@ public class PlanPageMartenTests
           "Actual Startup Time": 0.01, "Actual Total Time": 0.9, "Actual Rows": 100.00, "Actual Loops": 1}, "Planning Time": 0.1, "Triggers": [], "Execution Time": 1.2}]
         """;
 
+    /// <summary>The Plan page's facts read (0.10-A): the page is smoke-tested here, so it reads no relation.</summary>
+    private sealed class NoFacts : IPlanFactsService
+    {
+        public Task<PlanFacts> ReadAsync(PostgresStudio.Services.StudioScope scope, QueryPlan plan, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new PlanFacts(DateTimeOffset.UnixEpoch, [], []));
+    }
+
     private sealed class Services(FakeQueryService instance) : IServiceProvider
     {
+        private readonly NoFacts facts = new();
+
         public object? GetService(Type requested) =>
-            requested == typeof(PostgresStudio.Services.Sources.ISqlConsoleService) ? instance : null;
+            requested == typeof(PostgresStudio.Services.Sources.ISqlConsoleService) ? instance
+            : requested == typeof(IPlanFactsService) ? facts
+            : null;
     }
 
     private static StudioComponentContext CreateContext(FakeQueryService service)

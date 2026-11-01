@@ -1,0 +1,305 @@
+@using System.Globalization
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services.Health.Checks
+@using PostgresStudio.Services.Query
+
+@*
+    0.10-A (issue #28): the facts beside a plan the Plan page ran - what the database knows about each relation the plan names
+    (the planner's estimate, when it was last analyzed, what has changed since, its indexes, its extended statistics) and about the
+    columns the plan filters, joins and sorts on (n_distinct, nulls, correlation), and the planner settings that shaped the plan.
+
+    Read after the plan, by PlanFactsService, behind the console's gate and then each relation's own: a relation in a schema the
+    visitor may not see is named ‹withheld› and nothing about it is shown or counted. The most common values and the histogram are
+    rows' values and a gate of their own (BrowseDatabase); without it the panel says so instead of showing them. Every value that
+    came from the database is written through Razor's encoding. Every class is ms-plan-dbfact-, in studio.css's 0.10-A section.
+*@
+
+@if (facts is not null)
+{
+    <section class="ms-plan-dbfacts" aria-label="Facts beside the plan">
+        <h3 class="ms-plan-dbfacts-title">Facts beside the plan</h3>
+        <p class="ms-plan-caption ms-plan-dbfacts-caption">
+            Read from the database after the plan, at @TableText.When(facts.ReadAt), as the SQL console's role, in a read-only transaction.
+            They are the statistics the planner worked from, not the plan's own numbers.
+        </p>
+
+        @if (facts.Failure is { } failure)
+        {
+            <p class="ms-alert ms-alert-warning ms-plan-dbfacts-failure" role="status">@failure</p>
+        }
+
+        @if (facts.Relations.Count == 0 && facts.Failure is null)
+        {
+            <p class="ms-muted ms-plan-dbfacts-none">
+                @(facts.Unqualified > 0
+                    ? "No relation was named with its schema, so none could be resolved. Plan it again with VERBOSE to read their facts."
+                    : "The plan reads no table or index.")
+            </p>
+        }
+
+        @for (int position = 0; position < facts.Relations.Count; position++)
+        {
+            PlanRelationFacts relation = facts.Relations[position];
+
+            @* Keyed by position: every withheld relation is called the same, and a duplicate key ends the circuit on the next render. *@
+            <details class="ms-plan-dbfact-relation" open="@(facts.Relations.Count <= 3)" @key="position">
+                <summary class="ms-plan-dbfact-summary">@PlanFactsText.RelationLine(relation, facts.ReadAt)</summary>
+
+                @if (relation.State == PlanRelationState.Read)
+                {
+                    <dl class="ms-plan-detail-list ms-plan-dbfact-list">
+                        @Item("Kind", Kind(relation.Kind))
+                        @Item("Estimated rows", relation.EstimatedRows is { } rows ? "~" + TableText.Count(Math.Round(rows)) : "none: never analyzed")
+                        @Item("Pages", relation.Pages is { } pages ? TableText.Count(pages) : "-")
+                        @Item("All-visible pages", AllVisible(relation))
+                        @Item("Last analyze", TableText.When(relation.LastAnalyze))
+                        @Item("Last autoanalyze", TableText.When(relation.LastAutoAnalyze))
+                        @Item("Changed since analyze", relation.ModifiedSinceAnalyze is { } changed ? TableText.Count(changed) : "-")
+                        @Item("Dead tuples", relation.DeadTuples is { } dead ? TableText.Count(dead) : "-")
+                        @Item("Last vacuum", TableText.When(relation.LastVacuum))
+                        @Item("Last autovacuum", TableText.When(relation.LastAutoVacuum))
+                    </dl>
+
+                    @if (relation.Partition is { } partition)
+                    {
+                        <p class="ms-plan-dbfact-note">
+                            A partition of <code>@(partition.ParentSchema + "." + partition.ParentName)</code>, which has
+                            @TableText.Count(partition.Partitions) @(partition.Partitions == 1 ? "partition" : "partitions"), partitioned by
+                            @string.Join(", ", partition.KeyColumns).
+                        </p>
+                    }
+
+                    @if (relation.Indexes.Count == 0)
+                    {
+                        <p class="ms-muted ms-plan-dbfact-note">No index.</p>
+                    }
+                    else
+                    {
+                        <TableScroll Label="@("Indexes of " + relation.Label)">
+                            <table class="ms-table ms-plan-dbfact-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Index</th>
+                                        <th scope="col">Keys</th>
+                                        <th scope="col">Method</th>
+                                        <th scope="col" class="ms-plan-num">Size</th>
+                                        <th scope="col" class="ms-plan-num">Scans</th>
+                                        <th scope="col">Last scan</th>
+                                        <th scope="col">Note</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (PlanIndexFact index in relation.Indexes)
+                                    {
+                                        <tr @key="index.Name">
+                                            <th scope="row">@index.Name</th>
+                                            <td>@PlanFactsText.Keys(index)</td>
+                                            <td>@index.AccessMethod</td>
+                                            <td class="ms-plan-num">@(index.SizeBytes is { } size ? TableText.Bytes(size) : "-")</td>
+                                            <td class="ms-plan-num">@(index.Scans is { } scans ? TableText.Count(scans) : "-")</td>
+                                            <td>@(index.LastScan is { } last ? TableText.When(last) : "-")</td>
+                                            <td>@IndexNote(index)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </TableScroll>
+                    }
+
+                    @if (relation.ExtendedStatistics.Count == 0)
+                    {
+                        <p class="ms-muted ms-plan-dbfact-note">No extended statistics (CREATE STATISTICS).</p>
+                    }
+                    else
+                    {
+                        <ul class="ms-plan-dbfact-extended" aria-label="@("Extended statistics of " + relation.Label)">
+                            @for (int at = 0; at < relation.ExtendedStatistics.Count; at++)
+                            {
+                                PlanExtendedStatistic statistic = relation.ExtendedStatistics[at];
+
+                                @* A statistics object has a schema of its own, and a withheld one has no name: the position keeps the key unique. *@
+                                <li @key="(at, statistic.Schema, statistic.Name)">
+                                    <code>@statistic.Name</code> on @string.Join(", ", statistic.Columns) (@KindsText(statistic.Kinds))
+                                </li>
+                            }
+                        </ul>
+                    }
+
+                    @if (relation.Columns.Count > 0)
+                    {
+                        <TableScroll Label="@("Column statistics of " + relation.Label)">
+                            <table class="ms-table ms-plan-dbfact-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Column</th>
+                                        <th scope="col">Type</th>
+                                        <th scope="col" class="ms-plan-num" title="pg_stats.n_distinct: a count, or a share of the rows">Distinct</th>
+                                        <th scope="col" class="ms-plan-num">Nulls</th>
+                                        <th scope="col" class="ms-plan-num" title="How closely the column's order follows the table's physical order">Correlation</th>
+                                        @if (relation.Values == PlanValuesState.Read)
+                                        {
+                                            <th scope="col">Most common values</th>
+                                            <th scope="col">Histogram bounds</th>
+                                        }
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (PlanColumnFact column in relation.Columns)
+                                    {
+                                        <tr @key="column.Column">
+                                            <th scope="row">@column.Column</th>
+                                            <td>@(column.Type ?? "-")</td>
+                                            @if (column.HasStatistics)
+                                            {
+                                                <td class="ms-plan-num">@PlanFactsText.Distinct(column.Distinct)</td>
+                                                <td class="ms-plan-num">@PlanFactsText.NullShare(column.NullFraction)</td>
+                                                <td class="ms-plan-num">@PlanFactsText.Correlation(column.Correlation)</td>
+                                            }
+                                            else
+                                            {
+                                                <td colspan="3" class="ms-muted">not analyzed: no statistics yet</td>
+                                            }
+                                            @if (relation.Values == PlanValuesState.Read)
+                                            {
+                                                <td class="ms-plan-dbfact-values">@(column.Values?.MostCommonValues ?? "-")</td>
+                                                <td class="ms-plan-dbfact-values">@(column.Values?.HistogramBounds ?? "-")</td>
+                                            }
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </TableScroll>
+
+                        @if (PlanFactsText.ValuesNote(relation) is { } note)
+                        {
+                            <p class="ms-muted ms-plan-dbfact-note ms-plan-dbfact-values-note">@note</p>
+                        }
+                    }
+                }
+            </details>
+        }
+
+        @if (facts.NotRead > 0)
+        {
+            <p class="ms-muted ms-plan-dbfact-note ms-plan-dbfact-not-read">
+                @TableText.Count(facts.NotRead) more @(facts.NotRead == 1 ? "relation was" : "relations were") not read: a facts read takes at most
+                @PlanFactsTargets.MaxRelations.ToString(CultureInfo.InvariantCulture) relations.
+            </p>
+        }
+
+        @if (facts.Unqualified > 0 && facts.Relations.Count > 0)
+        {
+            <p class="ms-muted ms-plan-dbfact-note ms-plan-dbfact-unqualified">
+                @TableText.Count(facts.Unqualified) @(facts.Unqualified == 1 ? "scan names its relation" : "scans name their relations") without a schema, which cannot be
+                resolved: plan the statement with VERBOSE and every relation carries its schema.
+            </p>
+        }
+
+        <section class="ms-plan-dbfact-settings" aria-label="Planner settings">
+            <h4 class="ms-plan-dbfact-settings-title">Planner settings</h4>
+
+            @if (facts.SettingsNote is { } settingsNote)
+            {
+                <p class="ms-muted ms-plan-dbfact-note">@settingsNote</p>
+            }
+
+            @if (facts.Settings.Count == 0)
+            {
+                <p class="ms-muted ms-plan-dbfact-note">No setting was read.</p>
+            }
+            else
+            {
+                <dl class="ms-plan-detail-list ms-plan-dbfact-list">
+                    @foreach (PlanSettingFact setting in facts.Settings)
+                    {
+                        <div class="ms-plan-detail" @key="setting.Name">
+                            <dt>@setting.Name</dt>
+                            <dd>
+                                <code class="ms-plan-detail-value">@setting.Text</code>
+                                <span class="ms-plan-key-help">@(setting.FromPlan ? "printed by the plan (SETTINGS): the value it was planned with" : "the server's, as this role sees it" + (setting.Source is { Length: > 0 } source ? " (set by " + source + ")" : string.Empty))</span>
+                            </dd>
+                        </div>
+                    }
+                </dl>
+            }
+        </section>
+    </section>
+}
+
+@code {
+    private PlanFacts? facts;
+
+    /// <summary>The facts, a <c>PlanFacts</c> (<see cref="object" />: a public parameter cannot have an internal type) - or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public object? Facts { get; set; }
+
+    protected override void OnParametersSet() => facts = Facts as PlanFacts;
+
+    private static RenderFragment Item(string term, string value) => __builder =>
+    {
+        <div class="ms-plan-detail" @key="term">
+            <dt>@term</dt>
+            <dd><code class="ms-plan-detail-value">@value</code></dd>
+        </div>
+    };
+
+    private static string Kind(string? kind) => kind switch
+    {
+        "r" => "table",
+        "p" => "partitioned table",
+        "m" => "materialized view",
+        "t" => "TOAST table",
+        "f" => "foreign table",
+        "i" => "index",
+        "I" => "partitioned index",
+        "v" => "view",
+        null => "-",
+        _ => kind,
+    };
+
+    private static string AllVisible(PlanRelationFacts relation) =>
+        relation.AllVisiblePages is { } visible && relation.Pages is { } pages
+            ? TableText.Count(visible) + (pages > 0 ? " (" + TableText.Percent((double) visible / pages) + ")" : string.Empty)
+            : "-";
+
+    private static string IndexNote(PlanIndexFact index)
+    {
+        List<string> notes = [];
+
+        if (index.IsPrimary)
+        {
+            notes.Add("primary key");
+        }
+        else if (index.IsUnique)
+        {
+            notes.Add("unique");
+        }
+
+        if (!index.IsValid)
+        {
+            notes.Add("invalid: not used by the planner");
+        }
+
+        if (index.IsPartial)
+        {
+            notes.Add("partial");
+        }
+
+        if (index.HasExpressions)
+        {
+            notes.Add("on an expression");
+        }
+
+        return notes.Count == 0 ? string.Empty : string.Join(", ", notes);
+    }
+
+    private static string KindsText(IReadOnlyList<string> kinds) =>
+        string.Join(", ", kinds.Select(static x => x switch
+        {
+            "d" => "n-distinct",
+            "f" => "dependencies",
+            "m" => "most common values",
+            "e" => "expressions",
+            _ => x,
+        }));
+}

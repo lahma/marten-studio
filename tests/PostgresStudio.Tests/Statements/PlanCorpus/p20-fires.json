@@ -1,0 +1,53 @@
+[
+  {
+    "Plan": {
+      "Node Type": "ModifyTable",
+      "Operation": "Insert",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "orders",
+      "Schema": "public",
+      "Alias": "orders",
+      "Startup Cost": 0.0,
+      "Total Cost": 10.0,
+      "Plan Rows": 0,
+      "Plan Width": 0,
+      "Actual Startup Time": 120.0,
+      "Actual Total Time": 120.0,
+      "Actual Rows": 0.0,
+      "Actual Loops": 1,
+      "Plans": [
+        {
+          "Node Type": "Result",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.0,
+          "Total Cost": 10.0,
+          "Plan Rows": 1000,
+          "Plan Width": 8,
+          "Actual Startup Time": 0.01,
+          "Actual Total Time": 0.2,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1
+        }
+      ]
+    },
+    "Planning Time": 0.2,
+    "Triggers": [
+      {
+        "Trigger Name": "orders_audit",
+        "Relation": "orders",
+        "Time": 700.0,
+        "Calls": 1000
+      },
+      {
+        "Trigger Name": "RI_ConstraintTrigger_c_1234",
+        "Relation": "orders",
+        "Time": 100.0,
+        "Calls": 1000
+      }
+    ],
+    "Execution Time": 1000.0
+  }
+]

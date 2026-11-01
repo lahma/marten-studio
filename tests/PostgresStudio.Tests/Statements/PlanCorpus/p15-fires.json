@@ -1,0 +1,25 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Seq Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "orders",
+      "Schema": "public",
+      "Alias": "orders",
+      "Startup Cost": 0.0,
+      "Total Cost": 1000.0,
+      "Plan Rows": 100,
+      "Plan Width": 64,
+      "Actual Startup Time": 0.02,
+      "Actual Total Time": 12.5,
+      "Actual Rows": 50000.0,
+      "Actual Loops": 1,
+      "Filter": "(status = 'open'::text)",
+      "Rows Removed by Filter": 10
+    },
+    "Planning Time": 0.2,
+    "Triggers": [],
+    "Execution Time": 14.0
+  }
+]

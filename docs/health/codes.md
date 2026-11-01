@@ -83,6 +83,12 @@ baseline, so editing or deleting a row is a reviewed change.
 | [P12](plans.md#p12-jit-costing-more-than-it-saves) | JIT costing more than it saves | Plans | - | plan node | both | 0.9 | - |
 | [P13](plans.md#p13-planning-slower-than-execution) | Planning slower than execution | Plans | - | plan node | both | 0.9 | - |
 | [P14](plans.md#p14-memoize-mostly-missing) | Memoize mostly missing | Plans | - | plan node | both | 0.9 | - |
+| [P15](plans.md#p15-stale-statistics-behind-a-misestimate) | Stale statistics behind a misestimate | Plans | - | plan node | both | 0.10 | - |
+| [P16](plans.md#p16-correlated-columns-without-extended-statistics) | Correlated columns without extended statistics | Plans | - | plan node | both | 0.10 | - |
+| [P17](plans.md#p17-function-or-cast-on-an-indexed-column) | Function or cast on an indexed column | Plans | - | plan node | both | 0.10 | - |
+| [P18](plans.md#p18-no-partition-pruning) | No partition pruning | Plans | - | plan node | both | 0.10 | - |
+| [P19](plans.md#p19-default-row-estimate-on-a-function) | Default row estimate on a function | Plans | - | plan node | both | 0.10 | - |
+| [P20](plans.md#p20-triggers-dominating-the-statement) | Triggers dominating the statement | Plans | - | plan node | both | 0.10 | - |
 | [R01](replication.md#r01-replication-slot-retaining-wal) | Replication slot retaining WAL | Replication | `near-limit`, `inactive`, `lost` | - | both | 0.4 | - |
 | [R02](replication.md#r02-wal-archiving-failing) | WAL archiving failing | Replication | `failing`, `backlog` | - | both | 0.5 | - |
 | [R03](replication.md#r03-standby-lag) | Standby lag | Replication | `primary-view`, `standby-view`, `paused`, `aurora-reader` | - | both | 0.5 | - |
