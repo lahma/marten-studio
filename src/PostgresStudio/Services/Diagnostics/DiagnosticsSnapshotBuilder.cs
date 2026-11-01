@@ -254,34 +254,7 @@ internal static class DiagnosticsSnapshotBuilder
 
         ReplicationRead<WalStatistics> read = facts.Wal;
 
-        if (read.Value is not { } wal)
-        {
-            return new PostgresWalSection
-            {
-                Outcome = read.Outcome switch
-                {
-                    ReplicationReadOutcome.NotApplicable or ReplicationReadOutcome.NeedsVersion => PostgresReadOutcome.NotApplicable,
-                    ReplicationReadOutcome.Failed => PostgresReadOutcome.Failed,
-                    _ => PostgresReadOutcome.Unavailable,
-                },
-                Reason = read.Note ?? "pg_stat_wal returned no row.",
-                MeasuredAt = facts.ReadAt,
-            };
-        }
-
-        return new PostgresWalSection
-        {
-            Outcome = PostgresReadOutcome.Read,
-            MeasuredAt = facts.ReadAt,
-            Records = wal.Records,
-            FullPageImages = wal.FullPageImages,
-            Bytes = Whole(wal.Bytes),
-            Writes = wal.Writes,
-            Syncs = wal.Syncs,
-            WriteTimeMs = Finite(wal.WriteTimeMs),
-            SyncTimeMs = Finite(wal.SyncTimeMs),
-            StatsReset = wal.StatsReset,
-        };
+        return DiagnosticsMapper.Wal(read.Value, read.Outcome, read.Note, facts.ReadAt);
     }
 
     /// <summary>
@@ -327,6 +300,4 @@ internal static class DiagnosticsSnapshotBuilder
     private static int Count(long value) => DiagnosticsMapper.Count(value);
 
     private static long? Whole(double? value) => value is { } number && double.IsFinite(number) ? (long) Math.Round(number) : null;
-
-    private static double? Finite(double? value) => value is { } number && double.IsFinite(number) ? number : null;
 }

@@ -11,6 +11,7 @@ using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Statements;
 using PostgresStudio.Tests.Components;
@@ -58,6 +59,25 @@ public class SnapshotMenuTests
             Task.FromResult(new ServerPageView { MeasuredAt = DateTimeOffset.UnixEpoch });
     }
 
+    /// <summary>The Replication page's service: the numbers the download carries (Q36), never names.</summary>
+    private sealed class FakeReplication : IReplicationService
+    {
+        public static readonly WalStatistics Counters = new(1000, 250, 64e6, 5, 12_345, 678, null, null, null);
+
+        public Task<ReplicationView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The Snapshot menu asks for the numbers only.");
+
+        public Task<ReplicationView> GetNumbersAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ReplicationView
+            {
+                MeasuredAt = DateTimeOffset.UnixEpoch,
+                Wal = ReplicationSectionView<WalView>.Of(new WalView(Counters, null, null, null)),
+            });
+
+        public Task<TablespaceSize> MeasureTablespaceAsync(StudioScope scope, string tablespace, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The Snapshot menu never measures a tablespace.");
+    }
+
     private static async Task<(PostgresStudioComponentContext Context, FakeStatements Statements)> ContextAsync(Action<IServiceCollection>? more = null)
     {
         FakeStatements statements = new();
@@ -66,6 +86,7 @@ public class SnapshotMenuTests
         {
             services.AddSingleton<IStatementsService>(statements);
             services.AddSingleton<IServerPageService>(new FakeServer());
+            services.AddSingleton<IReplicationService>(new FakeReplication());
             services.AddSingleton(new HealthCheckRegistry(PostgresStudioDescriptor.Instance));
             services.AddScoped<VisitorSnapshotBuilder>();
             more?.Invoke(services);
@@ -105,6 +126,11 @@ public class SnapshotMenuTests
         document.RootElement.GetProperty("withheld").GetProperty("statements").GetString()
             .Should().Be(StatementsRefusal, "the Statements page's own sentence names its gate");
         document.RootElement.GetProperty("findings").GetProperty("items")[0].GetProperty("code").GetString().Should().Be("T01");
+
+        System.Text.Json.JsonElement wal = document.RootElement.GetProperty("wal");
+        wal.GetProperty("outcome").GetString().Should().Be("read", "the Replication page's WAL read is in the download (issue #36)");
+        wal.GetProperty("records").GetInt64().Should().Be(FakeReplication.Counters.Records);
+        wal.GetProperty("syncs").GetInt64().Should().Be(FakeReplication.Counters.Syncs);
 
         statements.Reads.Should().Be(0, "a snapshot never starts a statement sweep the visitor did not start");
         statements.Latest.Should().Be(1);

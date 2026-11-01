@@ -135,6 +135,42 @@ public class ReplicationServiceTests
         harness.Reader.Measured.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Q36: the Snapshot download's read is the page's numbers at the page's gate - and shows, so records, no names: a visitor
+    /// with every gate open leaves no "names shown" entry for a file that carries none.
+    /// </summary>
+    [Fact]
+    public async Task The_numbers_for_the_snapshot_download_are_the_pages_and_record_no_names_as_shown()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+
+        ReplicationView view = await harness.Service.GetNumbersAsync(Scope, Token);
+
+        view.Refusal.Should().Be(ReplicationRefusal.None);
+        view.Wal.Value.Should().NotBeNull("the page's own WAL read");
+        view.NamesShown.Should().BeFalse();
+        view.Standbys.Value!.Rows.Single().Name.Should().BeNull("no name is carried by a download");
+        harness.Ring.Should().BeEmpty("nothing the activity gate guards was shown");
+        harness.Policies.Calls.Should().NotContain(static x => x.Resource.Capability != null, "the activity gate is not asked");
+        harness.Reader.Reads.Should().Be(1);
+
+        await harness.Service.GetAsync(Scope, Token);
+        harness.Reader.Reads.Should().Be(1, "the page and the download share the one cached read");
+    }
+
+    [Fact]
+    public async Task A_store_policy_that_refuses_the_database_refuses_the_snapshot_downloads_numbers_and_reads_nothing()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = PostgresStudioCapabilities.All(), policies: true);
+        harness.Policies.Allow(static _ => false);
+
+        ReplicationView view = await harness.Service.GetNumbersAsync(Scope, Token);
+
+        view.Refusal.Should().Be(ReplicationRefusal.StorePolicy);
+        view.Reason.Should().Contain("PostgresStudioOptions.SourceAuthorizationPolicy");
+        harness.Reader.Reads.Should().Be(0);
+    }
+
     [Fact]
     public async Task A_visitors_spelling_that_is_not_the_resolved_identity_is_asked_again_by_the_resolved_names()
     {

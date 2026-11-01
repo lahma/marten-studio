@@ -18,6 +18,13 @@ internal interface IReplicationService
     /// <summary>The visitor's view of the scope's database. Never throws but for cancellation; a refusal is a value.</summary>
     Task<ReplicationView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The numbers of <see cref="GetAsync" /> at the same gate - the store policy over the whole database, the one cached facts
+    /// read - for the Health page's Snapshot download: no names are shown and none is recorded as shown, because the download
+    /// carries none (the audit ring says only what a visitor was shown). Never throws but for cancellation; a refusal is a value.
+    /// </summary>
+    Task<ReplicationView> GetNumbersAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
     /// <summary>One tablespace's size, on demand and one at a time. Never throws but for cancellation.</summary>
     Task<TablespaceSize> MeasureTablespaceAsync(StudioScope scope, string tablespace, CancellationToken cancellationToken = default);
 }
@@ -301,6 +308,34 @@ internal sealed class ReplicationService : IReplicationService
         }
 
         return view;
+    }
+
+    /// <inheritdoc />
+    public async Task<ReplicationView> GetNumbersAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        (ResolvedSource? resolved, ReplicationView? refused) = await ResolveAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        if (resolved is null)
+        {
+            return refused!;
+        }
+
+        ReplicationFacts read;
+
+        try
+        {
+            read = await facts.GetAsync(resolved, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return ReplicationView.Refused(ReplicationRefusal.Unavailable, Unreachable(exception, resolved));
+        }
+
+        HealthHistoryView samples = history.Read(resolved.Source.Key, resolved.Target.Identity).VisibleAt(HealthGate.Database);
+
+        return Build(read, names: false, withheld: null, samples, settings.Text);
     }
 
     /// <inheritdoc />
