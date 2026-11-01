@@ -97,11 +97,13 @@ An accepted check **still runs**, and its finding is still **shown**, but it cou
 - The diagnostics API returns it with `Accepted = true` and your reason as `AcceptedReason`, and `ToJson()` keeps it, so an
   escalation snapshot still shows the whole picture. A summary of your own leaves out the findings where `Accepted` is true,
   with no list of codes of its own to keep in step with the studio's.
-- Marten Studio's Configuration page, and Postgres Studio's Server page under its security posture, list each accepted check
-  with its title and reason.
+- The Server page, under its security posture (in both studios), and Marten Studio's Configuration page list each accepted
+  check with its title and reason.
 
 Acceptance changes how a finding counts, not who may see it. A finding a visitor's gate withholds stays withheld and is
-counted as withheld, and your reason is shown only where the finding itself would be. A mute in a browser and an acceptance are
+counted as withheld, and the check's row shows your reason only beside a finding that visitor may see. The *Accepted checks*
+list is configuration: it shows every accepted code and reason to anyone who may open the page it is on, so a reason should
+say nothing you would not show them. A mute in a browser and an acceptance are
 independent: an accepted finding is out of every count whether or not anybody muted it.
 
 **When to accept.** Accept a finding about configuration you own, which says the same thing every time it is measured: K05

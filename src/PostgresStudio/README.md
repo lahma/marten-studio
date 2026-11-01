@@ -193,6 +193,7 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 | `ExactCountThreshold` | `100000` | Above this estimate, counts stay `reltuples` estimates. |
 | `RefreshInterval` | 5 seconds | How often live pages poll. 1 second … 5 minutes. |
 | `HealthInterval` | 60 seconds | How often the health advisor re-checks a database while a page watches it. 15 seconds … 1 hour. |
+| `AcceptedChecks` | empty | Health checks the application accepts, by code with a reason: still run and shown, as accepted, but counted nowhere. |
 
 ## Screens
 

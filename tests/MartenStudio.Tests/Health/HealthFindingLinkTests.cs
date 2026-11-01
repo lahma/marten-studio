@@ -141,6 +141,24 @@ public class HealthFindingLinkTests
     }
 
     /// <summary>
+    /// A finding the host accepted draws no card (issue #35): a link to it is neither revealed nor called gone, but said to be
+    /// accepted, pointing at its check's row.
+    /// </summary>
+    [Fact]
+    public async Task A_link_to_an_accepted_finding_says_it_is_accepted_not_gone()
+    {
+        HealthFinding accepted = K01 with { Accepted = true, AcceptedReason = "Migrations run at deploy time." };
+        await using StudioComponentContext context = await ReadyAsync("marten/health#finding-k01", accepted);
+
+        var page = context.Render<HealthPage>();
+
+        page.WaitForAssertion(() => page.Find(".ms-health-finding-accepted").TextContent.Should().Contain("K01"), TimeSpan.FromSeconds(5));
+        page.Find(".ms-health-finding-accepted").GetAttribute("role").Should().Be("status");
+        page.FindAll(".ms-health-finding-gone").Should().BeEmpty();
+        Reveals(context).Should().BeEmpty("an accepted finding has no card to scroll to");
+    }
+
+    /// <summary>
     /// A muted finding's card moves into the closed list (the script opens it); muting the finding that was linked is not a
     /// new address, so the page does not reveal it a second time.
     /// </summary>

@@ -135,6 +135,11 @@ public sealed class PostgresStudioOptions
     /// the day it matters.
     /// </para>
     /// <para>
+    /// The check's row on the Health page shows the reason only beside a finding the visitor may see. The <em>Accepted
+    /// checks</em> list on the Server page (and on Marten Studio's Configuration page) is configuration, shown to anyone who
+    /// may open that page, so a reason should hold nothing you would not show them.
+    /// </para>
+    /// <para>
     /// Keys are compared ignoring case. Validation at startup refuses a key that is not a check of this studio, and a reason
     /// that is empty, whitespace or longer than 500 characters.
     /// </para>

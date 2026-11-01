@@ -628,7 +628,7 @@ internal sealed class MaintenanceService : IMaintenanceService
 
         return shownFindings.Count > 0
             ? new MaintenanceHorizonView(shownFindings[0], null)
-            : new MaintenanceHorizonView(null, "T14's finding is muted on the Health page, so it is not shown here either.");
+            : new MaintenanceHorizonView(null, "T14's finding is muted on the Health page or accepted by this application, so it is not shown here either.");
     }
 
     /// <summary>Runs the measure: the preconditions, then pgstattuple, in a read-only transaction as the console's role.</summary>
