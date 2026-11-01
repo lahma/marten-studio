@@ -13908,3 +13908,19 @@ a.ms-schema-health-mark:focus-visible {
 .ms-plan-whatif-settings-actions {
     margin: 0;
 }
+
+/* ==========================================================================
+   UI-0.10. What 0.10's UI sweep found
+
+   Appended in D26 order, after 0.10-B. A selected plan node's facts carry its columns' most common values and histogram
+   bounds, one long text with no break in it: at 390 px it pushed the content column sideways (743 px wide in a 334 px
+   column). It wraps anywhere, and its cell may shrink below the text's own width.
+   ========================================================================== */
+
+.ms-plan-node-facts .ms-plan-key-help {
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-node-facts dd {
+    min-width: 0;
+}

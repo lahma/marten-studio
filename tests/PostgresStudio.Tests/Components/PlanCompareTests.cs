@@ -105,6 +105,39 @@ public class PlanCompareTests
         page.FindAll(".ms-plan-tree").Should().ContainSingle("the plan on screen stays");
     }
 
+    /// <summary>
+    /// UI-0.10: a run's own timeout that fired is the one named, not the host's <c>QueryTimeout</c>; without one, the host's
+    /// option is named as before.
+    /// </summary>
+    [Fact]
+    public async Task A_run_s_own_timeout_is_the_one_its_timeout_message_names()
+    {
+        await using PostgresStudioComponentContext context = await ReadyAsync();
+        IRenderedComponent<PlanPage> page = await FirstAsync(context, "seq-before");
+
+        page.Find("#ms-plan-timeout").Change("1");
+        context.SqlConsole.NextPlan = new PlanRunResult
+        {
+            Error = new SqlError("57014", "canceling statement due to statement timeout", 0, null, null),
+            ServerMajor = 17,
+            TimeoutSeconds = 1,
+        };
+        await RunAsync(page, "select pg_sleep(3)");
+
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("timed out after 1 s, the timeout set for this run"));
+        page.Find(".ms-query-error-message").TextContent.Should().NotContain("QueryTimeout");
+
+        page.Find("#ms-plan-timeout").Change(string.Empty);
+        context.SqlConsole.NextPlan = new PlanRunResult
+        {
+            Error = new SqlError("57014", "canceling statement due to statement timeout", 0, null, null),
+            ServerMajor = 17,
+        };
+        await RunAsync(page, "select pg_sleep(60)");
+
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("QueryTimeout is what sets that"));
+    }
+
     [Fact]
     public async Task A_pasted_plan_is_compared_with_nothing_read_from_the_database()
     {

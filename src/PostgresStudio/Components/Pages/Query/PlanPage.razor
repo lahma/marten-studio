@@ -702,7 +702,7 @@
 
         if (result.Error is { } sqlError)
         {
-            error = Describe(sqlError);
+            error = Describe(sqlError, request, result);
 
             // Postgres counts from one, in the command it was sent - behind the EXPLAIN or the PREPARE the page put in front of
             // the statement; the editor's caret counts from zero in the statement as typed. An error in another command (a
@@ -1035,9 +1035,16 @@
         return said;
     }
 
-    private string Describe(SqlError sqlError)
+    private string Describe(SqlError sqlError, PlanRunRequest request, PlanRunResult result)
     {
-        string? headline = QuerySqlErrors.Describe(sqlError, Settings.QueryTimeout, Settings.Text);
+        // A run's own timeout (0.10-B) is the one that fired when it is below the host's: say that one, and not the option.
+        TimeSpan heldTo = result.TimeoutSeconds > 0 ? TimeSpan.FromSeconds(result.TimeoutSeconds) : Settings.QueryTimeout;
+        bool ownTimeout = request.TimeoutSeconds is not null && heldTo < Settings.QueryTimeout;
+
+        string? headline = ownTimeout && sqlError.SqlState == QuerySqlErrors.QueryCanceled
+            ? "Statement timed out after " + heldTo.TotalSeconds.ToString("0.##", CultureInfo.InvariantCulture)
+                + " s, the timeout set for this run."
+            : QuerySqlErrors.Describe(sqlError, heldTo, Settings.Text);
 
         return headline is null
             ? QuerySqlErrors.Summarize(sqlError)

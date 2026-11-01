@@ -79,4 +79,5 @@ stylesheet test reads it out of `studio.css` by its header. 0.6.0 appended `M1`,
 `StylesheetTests.UiSweep`), in that order. 0.6.1 appended `UI-0.6.1`, tested there too. 0.8.0 appended `0.8-B` and `UI-0.8`; 0.9.0 appended `0.9-A` (the plan analyzer, tested in `PlanAnalyzerStylesheetTests`). `UI-0.6` holds the file's one rule for a bare link, `:where(.ms-studio a)`:
 no specificity, so any rule that names a link wins over it. Earlier releases' sections: decision-notes.md, D26.
 0.10.0 appended `0.10-Q35` (accepted checks) `0.10-A` (the plan facts panel, tested in `PlanFactsStylesheetTests`) and `0.10-B` (Compare and the settings what-if,
-tested in `PlanCompareStylesheetTests`), in that order.
+tested in `PlanCompareStylesheetTests`) and `UI-0.10` (the sweep's wrap for a node's values, tested in
+`PlanUiSweepStylesheetTests`), in that order.

@@ -32,7 +32,8 @@ public partial class PlanCompareStylesheetTests
 
         css.Split(Header).Should().HaveCount(2, "the header is the section's, once");
         css.IndexOf(Header, StringComparison.Ordinal).Should().BeGreaterThan(css.IndexOf("0.10-A. Facts beside the plan", StringComparison.Ordinal), "D26: appended in cascade order");
-        css.IndexOf("/* ====", css.IndexOf(Header, StringComparison.Ordinal), StringComparison.Ordinal).Should().Be(-1, "nothing follows it yet");
+        int next = css.IndexOf("/* ====", css.IndexOf(Header, StringComparison.Ordinal), StringComparison.Ordinal);
+        (next < 0 || css.IndexOf("UI-0.10. What 0.10's UI sweep found", next, StringComparison.Ordinal) > next).Should().BeTrue("only the release's UI sweep section follows it");
     }
 
     [Fact]
