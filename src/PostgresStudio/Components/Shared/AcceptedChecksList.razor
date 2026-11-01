@@ -1,0 +1,57 @@
+@using Microsoft.Extensions.DependencyInjection
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+@inject IServiceProvider Services
+
+@*
+    The checks this application accepted (issue #35): code, check and the host's reason. Host configuration, drawn as text -
+    Blazor encodes it - and nothing a visitor shapes. Absent when the host accepted nothing.
+*@
+
+@if (Settings.AcceptedChecks.Count > 0)
+{
+    <section class="ms-section ms-accepted-checks" aria-label="Accepted checks">
+        <h3 class="ms-config-group-title">Accepted checks</h3>
+        <p class="ms-schema-note">
+            The checks this application decided to live with (<code>@(Settings.OptionName("AcceptedChecks"))</code>). They still run,
+            and their findings are still listed on the Health page, marked as accepted; they count in no total, badge, banner or
+            health-check status.
+        </p>
+        <TableScroll Label="Accepted checks table">
+            <table class="ms-table ms-accepted-checks-table">
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Check</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ((string checkCode, string reason) in Rows())
+                    {
+                        <tr class="ms-table-row" @key="checkCode">
+                            <td class="ms-table-cell ms-table-cell-mono">@checkCode</td>
+                            <td class="ms-table-cell">@TitleOf(checkCode)</td>
+                            <td class="ms-table-cell">@reason</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+    </section>
+}
+
+@code {
+    private IEnumerable<(string Code, string Reason)> Rows() =>
+        Settings.AcceptedChecks
+            .Select(static x => (Code: x.Key.ToUpperInvariant(), Reason: x.Value))
+            .OrderBy(static x => x.Code, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The check's title as this studio words it, or nothing for a code the registry does not hold. The registry is asked for
+    /// lazily and optionally: a host always has it, and a component test that registers none still draws the list.
+    /// </summary>
+    private string TitleOf(string checkCode) => Services.GetService<HealthCheckRegistry>()?.All
+        .FirstOrDefault(x => string.Equals(x.Info.Code, checkCode, StringComparison.OrdinalIgnoreCase))?.Info.Title ?? string.Empty;
+}

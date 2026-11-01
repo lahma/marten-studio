@@ -100,7 +100,8 @@ public static partial class MartenStudioServiceCollectionExtensions
             .Validate(
                 static options => options.KnownTenantIds.All(static tenantId => !string.IsNullOrWhiteSpace(tenantId)),
                 "MartenStudioOptions.KnownTenantIds cannot contain an empty or whitespace tenant id")
-            .ValidateSharedSchemas(nameof(MartenStudioOptions), Shape);
+            .ValidateSharedSchemas(nameof(MartenStudioOptions), Shape)
+            .ValidateSharedAcceptedChecks(nameof(MartenStudioOptions), MartenStudioDescriptor.Instance, static options => options.AcceptedCheckReasons);
 
         if (configure is not null)
         {

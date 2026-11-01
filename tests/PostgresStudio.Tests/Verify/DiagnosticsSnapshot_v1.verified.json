@@ -55,7 +55,9 @@
         ],
         "docsUrl": "https://github.com/lahma/marten-studio/blob/v0.5.0/docs/health/tables.md#t07-vacuum-falling-behind",
         "measuredAt": "2026-11-02T06:00:01.0000000+00:00",
-        "key": "T07|dead-rows|public.orders"
+        "key": "T07|dead-rows|public.orders",
+        "accepted": false,
+        "acceptedReason": null
       }
     ],
     "checks": [

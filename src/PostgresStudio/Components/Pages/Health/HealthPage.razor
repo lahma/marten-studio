@@ -238,6 +238,13 @@
                                 <td class="ms-table-cell">@HealthPresentation.TierLabel(check.Tier)</td>
                                 <td class="ms-table-cell">
                                     <span class="ms-health-outcome">@HealthPresentation.OutcomeLabel(check.Outcome, check.FindingCount, check.FindingsWithheld)</span>
+                                    @if (check.AcceptedCount > 0)
+                                    {
+                                        @* The host's own words, drawn as text (Blazor encodes it): the finding is shown here, muted and counted nowhere. *@
+                                        <span class="ms-health-accepted">
+                                            <span class="ms-health-accepted-label">Accepted</span>@HealthPresentation.AcceptedReasonText(check.AcceptedReason)
+                                        </span>
+                                    }
                                     @if (check.Problem is { Length: > 0 } problem)
                                     {
                                         <span class="ms-health-outcome-detail">@problem</span>
@@ -281,10 +288,10 @@
     private bool linkedFindingGone;
 
     private List<HealthReportFinding> VisibleFindings =>
-        report is null ? [] : [.. report.Findings.Where(x => !Mutes.IsMuted(x.MuteKey))];
+        report is null ? [] : [.. report.Findings.Where(x => x.Counts(Mutes.IsMuted))];
 
     private List<HealthReportFinding> MutedFindings =>
-        report is null ? [] : [.. report.Findings.Where(x => Mutes.IsMuted(x.MuteKey))];
+        report is null ? [] : [.. report.Findings.Where(x => !x.Accepted && Mutes.IsMuted(x.MuteKey))];
 
     private string DeeperTitle => report switch
     {

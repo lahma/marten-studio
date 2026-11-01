@@ -167,4 +167,39 @@ public class DiagnosticsMapperTests
         check.Variants.Should().NotBeSameAs(info.Variants);
         check.Outcome.Should().BeNull("the catalogue has no outcome");
     }
+
+    // ---- Accepted checks (issue #35) ----------------------------------------------------------------------------------
+
+    [Fact]
+    public void An_accepted_finding_carries_the_hosts_reason_through_the_host_gate_and_the_visitors_view()
+    {
+        HealthCheckInfo info = Info("K05", HealthArea.Configuration, HealthGate.None);
+        HealthFinding finding = Finding(info, "The console reads as the data source's own role") with
+        {
+            Accepted = true,
+            AcceptedReason = "Roles belong to the platform team; the console is admin-only.",
+        };
+
+        PostgresFinding api = DiagnosticsMapper.Finding(finding, info, Gate(false), NoStudioRuntime.Instance, "store", new PostgresStudio.Services.StudioScope("main", "db1", null));
+        PostgresFinding page = DiagnosticsMapper.Finding(new HealthReportFinding(finding, [], "main|db1|K05", info.DocsUrl, true, null));
+
+        foreach (PostgresFinding mapped in new[] { api, page })
+        {
+            mapped.Accepted.Should().BeTrue();
+            mapped.AcceptedReason.Should().Be("Roles belong to the platform team; the console is admin-only.");
+            mapped.Severity.Should().Be(PostgresSeverity.Warning, "acceptance changes how a finding counts, never what it says");
+        }
+    }
+
+    [Fact]
+    public void A_finding_nobody_accepted_says_so_and_carries_no_reason()
+    {
+        HealthCheckInfo info = Info("K05", HealthArea.Configuration, HealthGate.None);
+        HealthFinding finding = Finding(info, "The console reads as the data source's own role");
+
+        PostgresFinding api = DiagnosticsMapper.Finding(finding, info, Gate(false), NoStudioRuntime.Instance, "store", new PostgresStudio.Services.StudioScope("main", "db1", null));
+
+        api.Accepted.Should().BeFalse();
+        api.AcceptedReason.Should().BeNull();
+    }
 }

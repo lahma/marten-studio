@@ -142,6 +142,13 @@ A finding has a stable `Code` (`T03`), a `Variant` when its check finds more tha
 [health/codes.md](health/codes.md), which is the contract: a code is never reused or renamed, and a newer studio may
 return a code you have no wording for - fall back to `Title`, which is always set.
 
+`Accepted` is true when the application accepted the finding's check (`AcceptedChecks` in the studio's options,
+[health.md](health.md#accepting-a-check)), and `AcceptedReason` is the application's own reason. The finding is still
+returned, so a snapshot shows the whole picture, but the studio counts it nowhere. A summary of your own - an e-mail, a
+support page - leaves out the findings where `Accepted` is true, and needs no list of codes of its own to do it. Every
+check's `Findings` count still includes them. Acceptance changes no gate: a finding `IncludeActivity` withholds is still
+counted as withheld, and an accepted one is no exception.
+
 `Action` is the remedy as text: a line for your `StoreOptions`, SQL for a migration, a server setting. `ActionKind` says
 which. The studio never runs one. `ActionRequires` names what the remedy needs that this application lacks ("Marten
 9.47+"), when it does.
@@ -229,7 +236,7 @@ no serializer options of yours or a global's.
   that is not finite is `null`.
 - **Every key is always present**, with `null` for "not asked, not allowed or not known".
 - The snapshot's four findings properties are one `findings` object (`items`, `checks`, `measuredAt`, `withheld`), and a
-  finding's `key` is written too.
+  finding's `key` is written too, with `accepted` (a boolean) and `acceptedReason` (the application's text or `null`).
 - `schema` is `postgresstudio-diagnostics`, so a file attached to a ticket says what it is.
 
 Adding a key keeps the version. Removing or renaming one, changing its type or changing what it means bumps
@@ -237,7 +244,7 @@ Adding a key keeps the version. Removing or renaming one, changing its type or c
 
 | `schemaVersion` | Written by | What changed |
 |---|---|---|
-| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. |
+| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. |
 
 ## The Snapshot menu
 

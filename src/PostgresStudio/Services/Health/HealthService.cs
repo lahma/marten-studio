@@ -429,7 +429,8 @@ internal sealed class HealthService : IHealthService
                 browserGate: null)
             .ConfigureAwait(false);
 
-        return (sweep, [.. findings.Where(x => !mutes.IsMuted(x.MuteKey))], withheld);
+        // An accepted finding (issue #35) counts for neither the badge, the toast nor a banner: both read this list.
+        return (sweep, [.. findings.Where(x => x.Counts(mutes.IsMuted))], withheld);
     }
 
     /// <summary>
@@ -921,21 +922,29 @@ internal sealed class HealthService : IHealthService
                     : problem + " What the connection error said is withheld - " + gate.WhyNot(HealthGate.Database) + ".";
             }
 
-            int shownCount = shown.Count(x => string.Equals(x.Code, result.Check.Code, StringComparison.Ordinal));
+            List<HealthReportFinding> ofCheck = [.. shown.Where(x => string.Equals(x.Code, result.Check.Code, StringComparison.Ordinal))];
+            int shownCount = ofCheck.Count;
+            int acceptedCount = ofCheck.Count(static x => x.Accepted);
 
+            // An accepted finding is shown on its check's row - as accepted, with the host's reason - and is not a finding
+            // the row counts; withholding is judged against everything this visitor is shown.
             statuses.Add(new HealthCheckStatus(
                 result.Check.Code,
                 result.Check.Title,
                 result.Check.Area,
                 result.Check.Tier,
                 result.Outcome,
-                shownCount,
+                shownCount - acceptedCount,
                 result.Note,
                 problem,
                 result.Problem?.SqlState,
                 result.Check.DocsUrl,
                 result.Statements,
-                FindingsWithheld: result.Findings.Count > shownCount));
+                FindingsWithheld: result.Findings.Count > shownCount)
+            {
+                AcceptedCount = acceptedCount,
+                AcceptedReason = acceptedCount > 0 ? ofCheck.First(static x => x.Accepted).AcceptedReason : null,
+            });
         }
 
         return statuses;

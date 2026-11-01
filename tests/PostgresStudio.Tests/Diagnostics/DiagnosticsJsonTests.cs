@@ -344,4 +344,31 @@ public class DiagnosticsJsonTests
         using JsonDocument parsed = JsonDocument.Parse(json);
         parsed.RootElement.GetProperty("reason").GetString().Should().Be("Tietokanta ‹withheld› isn't \"here\"\n\\ <script>", "and the text round-trips");
     }
+
+    [Fact]
+    public void An_accepted_finding_is_marked_in_the_json_and_the_schema_version_stays_1()
+    {
+        PostgresDiagnosticsSnapshot snapshot = new()
+        {
+            SchemaVersion = 1,
+            Producer = "PostgresStudio 0.10.0",
+            GeneratedAt = At,
+            Database = new PostgresDatabaseRef("default", string.Empty),
+            Outcome = PostgresReadOutcome.Read,
+            Findings =
+            [
+                new PostgresFinding { Code = "K05", Title = "Accepted", Accepted = true, AcceptedReason = "Roles are managed elsewhere." },
+                new PostgresFinding { Code = "K06", Title = "Not accepted" },
+            ],
+        };
+
+        using JsonDocument json = JsonDocument.Parse(snapshot.ToJson());
+        JsonElement[] findings = [.. json.RootElement.GetProperty("findings").GetProperty("items").EnumerateArray()];
+
+        json.RootElement.GetProperty("schemaVersion").GetInt32().Should().Be(1, "the two fields are additive");
+        findings[0].GetProperty("accepted").GetBoolean().Should().BeTrue();
+        findings[0].GetProperty("acceptedReason").GetString().Should().Be("Roles are managed elsewhere.");
+        findings[1].GetProperty("accepted").GetBoolean().Should().BeFalse();
+        findings[1].GetProperty("acceptedReason").ValueKind.Should().Be(JsonValueKind.Null, "every key is always present");
+    }
 }

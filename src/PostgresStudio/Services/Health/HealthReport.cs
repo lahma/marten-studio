@@ -64,6 +64,26 @@ internal sealed record HealthReportFinding(
     public HealthSeverity Severity => Finding.Severity;
 
     /// <summary>
+    /// Whether the host accepted this finding's check (issue #35): drawn muted as accepted, and in no count or state.
+    /// Independent of a browser's mute, and the stronger of the two for counting.
+    /// </summary>
+    public bool Accepted => Finding.Accepted;
+
+    /// <summary>The host's reason, shown only where this finding is.</summary>
+    public string? AcceptedReason => Finding.AcceptedReason;
+
+    /// <summary>
+    /// Whether this finding counts toward the Warning and Critical totals, the worst state, the badge, the banners and the
+    /// toast: not when the host accepted its check, and not when this browser muted it.
+    /// </summary>
+    /// <param name="isMuted">Whether this browser muted the finding's key.</param>
+    public bool Counts(Func<string, bool> isMuted)
+    {
+        ArgumentNullException.ThrowIfNull(isMuted);
+        return !Accepted && !isMuted(MuteKey);
+    }
+
+    /// <summary>
     /// The page anchor of the finding's card, unique within a report: the report suffixes one whose key reads
     /// like another's, because an element id is one per page.
     /// </summary>
@@ -117,6 +137,15 @@ internal sealed record HealthCheckStatus(
     /// one: the studio's snapshot download says "withheld" for the first and counts the second (W5-API).
     /// </summary>
     public string? BelowGate { get; init; }
+
+    /// <summary>
+    /// How many of the findings this visitor is shown the host accepted (<see cref="HealthCheckStatus.FindingCount" /> leaves
+    /// them out, as every count does). Zero for a row the visitor is short of the gate of.
+    /// </summary>
+    public int AcceptedCount { get; init; }
+
+    /// <summary>The host's reason for accepting the check, when <see cref="AcceptedCount" /> is above zero; else <see langword="null" />.</summary>
+    public string? AcceptedReason { get; init; }
 }
 
 /// <summary>
@@ -247,8 +276,8 @@ internal sealed record HealthReport
     /// </summary>
     public string? StatementChecksRefused { get; init; }
 
-    /// <summary>The worst severity among the findings, or <see langword="null" /> for none.</summary>
-    public HealthSeverity? Worst => Findings.Count == 0 ? null : Findings.Min(static x => x.Severity);
+    /// <summary>The worst severity among the findings the host has not accepted, or <see langword="null" /> for none.</summary>
+    public HealthSeverity? Worst => Findings.Where(static x => !x.Accepted).Select(static x => (HealthSeverity?) x.Severity).Min();
 
     /// <summary>A report that says why there is none.</summary>
     public static HealthReport Refused(HealthRefusal refusal, string reason) => new() { Refusal = refusal, Reason = reason };

@@ -215,6 +215,8 @@ internal static class DiagnosticsJson
         json.WriteString("docsUrl", finding.DocsUrl);
         Time(json, "measuredAt", finding.MeasuredAt);
         json.WriteString("key", finding.Key);
+        json.WriteBoolean("accepted", finding.Accepted);
+        Text(json, "acceptedReason", finding.AcceptedReason);
         json.WriteEndObject();
     }
 

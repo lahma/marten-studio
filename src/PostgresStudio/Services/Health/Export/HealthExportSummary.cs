@@ -62,6 +62,13 @@ internal sealed record HealthExportSummary
     /// <summary>How many Info findings.</summary>
     public int InfoFindings { get; init; }
 
+    /// <summary>
+    /// How many findings the host accepted (<c>AcceptedChecks</c>, issue #35), of any severity, across every database. A
+    /// count and nothing more: an accepted finding is in none of the severity lists and counts above, and never makes the
+    /// status Degraded or Unhealthy.
+    /// </summary>
+    public int AcceptedFindings { get; init; }
+
     /// <summary>The codes of checks that failed somewhere - a "could not check" row on the Health page.</summary>
     public IReadOnlyList<string> Failed { get; init; } = [];
 
@@ -185,6 +192,7 @@ internal sealed record HealthExportSummary
         int criticalFindings = 0;
         int warningFindings = 0;
         int infoFindings = 0;
+        int acceptedFindings = 0;
 
         foreach (HealthExportDatabaseResult database in results)
         {
@@ -222,6 +230,8 @@ internal sealed record HealthExportSummary
                     info.Add(code);
                     infoFindings += result.Info;
                 }
+
+                acceptedFindings += result.Accepted;
             }
         }
 
@@ -234,6 +244,7 @@ internal sealed record HealthExportSummary
             CriticalFindings = criticalFindings,
             WarningFindings = warningFindings,
             InfoFindings = infoFindings,
+            AcceptedFindings = acceptedFindings,
             Failed = [.. failed],
             Unavailable = [.. unavailable],
             TimedOut = [.. timedOut],
@@ -322,6 +333,12 @@ internal sealed record HealthExportSummary
             }
 
             text.Append(found.Count == 0 ? "No findings" : string.Join(", ", found));
+
+            if (AcceptedFindings > 0)
+            {
+                text.Append(" (and ").Append(Count(AcceptedFindings, "accepted", "accepted")).Append(')');
+            }
+
             text.Append(" on ").Append(Count(Databases, "database", "databases"));
 
             if (Failed.Count > 0)
@@ -391,6 +408,7 @@ internal sealed record HealthExportSummary
         ["failed"] = Failed.ToArray(),
         ["unavailable"] = Unavailable.ToArray(),
         ["timedOut"] = TimedOut.ToArray(),
+        ["accepted"] = AcceptedFindings,
         ["databases"] = Databases,
         ["databasesSkipped"] = DatabasesSkipped + DatabasesUnnamed,
         ["databasesTimedOut"] = DatabasesTimedOut,
@@ -424,10 +442,13 @@ internal sealed record HealthExportDatabaseResult(DateTimeOffset MeasuredAt, IRe
                         x.Check.Code,
                         x.Outcome,
                         x.Outcome == HealthCheckOutcome.Unavailable ? x.Problem?.UnavailableReason : null,
-                        x.Findings.Count(static f => f.Severity == HealthSeverity.Critical),
-                        x.Findings.Count(static f => f.Severity == HealthSeverity.Warning),
-                        x.Findings.Count(static f => f.Severity == HealthSeverity.Info)))
-                    .Where(static x => x.Outcome != HealthCheckOutcome.Checked || x.Critical + x.Warning + x.Info > 0),
+                        x.Findings.Count(static f => !f.Accepted && f.Severity == HealthSeverity.Critical),
+                        x.Findings.Count(static f => !f.Accepted && f.Severity == HealthSeverity.Warning),
+                        x.Findings.Count(static f => !f.Accepted && f.Severity == HealthSeverity.Info))
+                    {
+                        Accepted = x.Findings.Count(static f => f.Accepted),
+                    })
+                    .Where(static x => x.Outcome != HealthCheckOutcome.Checked || x.Critical + x.Warning + x.Info + x.Accepted > 0),
             ]);
     }
 }
@@ -445,4 +466,8 @@ internal sealed record HealthExportCheckResult(
     HealthUnavailableReason? UnavailableReason,
     int Critical,
     int Warning,
-    int Info);
+    int Info)
+{
+    /// <summary>How many findings the host accepted: counted apart, and in none of the three severities above.</summary>
+    public int Accepted { get; init; }
+}

@@ -13605,3 +13605,31 @@ a.ms-schema-health-mark:focus-visible {
         transition: background-color 0.4s ease;
     }
 }
+
+/* ===== 0.10-Q35 Accepted checks (issue #35) ===== */
+
+/*
+   A check the host accepted keeps its row on the Health page and the Server page's posture table, marked "Accepted" with the
+   host's reason, in the muted colour the rest of a row's detail uses: the finding is shown and counted nowhere. The list on the
+   Configuration page (Marten Studio) and the Server page (Postgres Studio) is a plain table in a scroll region (D25).
+*/
+
+.ms-health-accepted {
+    display: block;
+    max-width: 60ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.ms-health-accepted-label {
+    font-weight: 600;
+}
+
+.ms-accepted-checks {
+    margin-top: var(--ms-space-md);
+}
+
+.ms-accepted-checks-table .ms-table-cell {
+    overflow-wrap: anywhere;
+}

@@ -66,6 +66,12 @@ internal static class HealthPresentation
         _ => "could not check",
     };
 
+    /// <summary>
+    /// ": the host's reason" after the "Accepted" label of a check's row, or nothing for a reason the host did not give.
+    /// </summary>
+    /// <param name="reason">The host's reason, as configured.</param>
+    public static string AcceptedReasonText(string? reason) => string.IsNullOrWhiteSpace(reason) ? string.Empty : ": " + reason;
+
     /// <summary>A cost tier, in words.</summary>
     public static string TierLabel(HealthCostTier tier) => tier switch
     {

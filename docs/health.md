@@ -67,6 +67,49 @@ threshold, Critical one sweep and a Warning the next, toasts once rather than ev
 finding the tab's first look found Critical too. Another finding - another code, or the same code about another
 subject - toasts at once, and a muted finding never toasts.
 
+## Accepting a check
+
+A finding about a decision your application made on purpose and cannot change stays a Warning for ever, and then "is
+anything wrong?" never reads clean. `AcceptedChecks` says, in your registration, that you have looked at it and why:
+
+```csharp
+builder.Services.AddMartenStudio(options =>   // or AddPostgresStudio
+{
+    // K05: the SQL console reads as the data source's own role. On a managed PostgreSQL the roles belong to the platform
+    // team, so SqlConsoleRole stays unset - a trade-off this application made knowingly.
+    options.AcceptedChecks["K05"] = "Database roles are managed by the platform team; the console is admin-only.";
+});
+```
+
+The key is a check's code (compared ignoring case) and the value is the reason, in your own words: up to 500 characters,
+never empty. Startup refuses a key that is not a check of that studio - a typo can never silently accept nothing, and a
+Marten check's code is unknown to Postgres Studio - and a reason that is blank or too long.
+
+An accepted check **still runs**, and its finding is still **shown**, but it counts for nothing:
+
+- On the Health page the finding draws no card. The check's row in *What was checked* reads "Accepted" with your reason,
+  in the muted colour, beside "checked, nothing found" - the same row a check that found nothing shows, because that is
+  what the finding now is to the page. A check that now passes shows as passing, as usual, with no mention of acceptance.
+- It is in no count or state: not the Warning and Critical totals, the page's worst state or the Overview's tile, not the
+  navigation badge, not the banners on Projections, Event types, Schema and Replication, and never the Critical toast.
+- The opt-in ASP.NET Core health check does not report it: an accepted finding never makes the status `Degraded` or
+  `Unhealthy`. Its data counts them under a separate `accepted` key, a number and nothing more.
+- The diagnostics API returns it with `Accepted = true` and your reason as `AcceptedReason`, and `ToJson()` keeps it, so an
+  escalation snapshot still shows the whole picture. A summary of your own leaves out the findings where `Accepted` is true,
+  with no list of codes of its own to keep in step with the studio's.
+- Marten Studio's Configuration page, and Postgres Studio's Server page under its security posture, list each accepted check
+  with its title and reason.
+
+Acceptance changes how a finding counts, not who may see it. A finding a visitor's gate withholds stays withheld and is
+counted as withheld, and your reason is shown only where the finding itself would be. A mute in a browser and an acceptance are
+independent: an accepted finding is out of every count whether or not anybody muted it.
+
+**When to accept.** Accept a finding about configuration you own, which says the same thing every time it is measured: K05
+and K06 where a role cannot be created, K07 behind a gateway that is the real authentication, S04 on a login that has to be a
+superuser. Do not accept a check whose finding moves with the data - connections, vacuum, storage, replication lag, a
+projection's lag. It would stop counting on the day it begins to matter, and an accepted check is exactly the one nobody
+reads. The studio does not refuse that; it is advice, because only you know which of your findings are decisions.
+
 ## What it costs
 
 Checks come in four cost tiers:
@@ -215,6 +258,9 @@ worse than `failureStatus`, so a check registered with `failureStatus: HealthSta
 - a store that would not build or list its databases;
 - a run that ran out of its own budget.
 
+A finding the host accepted (*Accepting a check*) is none of these: it leaves the status where it was and is counted only
+under `accepted`.
+
 Info findings, and checks that could not run for a reason that is the host's choice - no privilege, no extension,
 an old Postgres - leave it `Healthy`. The Health page shows both kinds of "not checked" the same way; the export
 does not, because a database that cannot answer a catalog read in time is worth somebody's look. A host that added
@@ -229,6 +275,7 @@ who can reach the endpoint may read:
 | Key | What it is |
 |---|---|
 | `critical`, `warning`, `info` | The codes with a finding of that severity in any database, each code once. |
+| `accepted` | How many findings the host accepted (*Accepting a check*), across every database: a number, never a code. They are in none of the lists above. |
 | `failed` | The codes of checks that failed somewhere. |
 | `unavailable` | The codes of checks that could not run somewhere for a reason that is the host's choice. |
 | `timedOut` | The codes of checks that ran out of time somewhere. |
