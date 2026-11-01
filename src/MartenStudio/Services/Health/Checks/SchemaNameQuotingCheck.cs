@@ -104,7 +104,7 @@ internal static class SchemaNameQuoting
 
     /// <summary>
     /// Every schema the store declares that needs quoting, each once: the document and events schemas first, then a document
-    /// type's own, a flat table's and an extended object's.
+    /// type's own, a flat table's and an extended object's, in ordinal order.
     /// </summary>
     /// <remarks>
     /// Read with <see cref="SchemaDeclarationReader" />, which touches no connection. A schema only a hidden document type
@@ -165,18 +165,27 @@ internal static class SchemaNameQuoting
                 visible.Add(declared.Schema);
             }
 
+            // In ordinal order after the two store-level names: the store's type list has no stable order, and the
+            // finding's sentence and its evidence must read the same on every sweep.
+            SortedSet<string> ordered = new(StringComparer.Ordinal);
+
             foreach (string schema in declarations.Schemas)
             {
                 if (visible.Contains(schema))
                 {
-                    Add(schema);
+                    ordered.Add(schema);
                 }
             }
 
             // An extended object's schema is deliberately not in Schemas (D27); it is a schema an apply creates in all the same.
-            foreach (MartenDeclaredObject declared in shown)
+            foreach (MartenDeclaredObject declaredObject in shown)
             {
-                Add(declared.Schema);
+                ordered.Add(declaredObject.Schema);
+            }
+
+            foreach (string schema in ordered)
+            {
+                Add(schema);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
