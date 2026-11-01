@@ -1,0 +1,77 @@
+# The health advisor
+
+This is the full text of D29 (see also hard rule 7's codes paragraph in hard-rules.md and D31 in architecture.md), moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+
+## D29
+
+**D29 — The health advisor: one shared sweep, three gates, and two deliberate exceptions.** A sweep is the database's,
+once per interval under no visitor's identity; what a visitor sees of it is decided per finding and per piece of
+evidence (`HealthService`). `None` is for what the Configuration page already says (K01–K04, S01): anyone the scope
+admits. `Database`, every other check's default, is for whole-database numbers: the store policy asked with
+`TenantId = null` about the store's registered key and the resolved database's own `Id.Identity` (never the visitor's
+spelling, another case or an empty id), so gates, audit, mute keys and the high-water Explain name one resource.
+`Activity` is for other people's sessions and statements (process ids, roles, client addresses, statement text):
+`ViewDatabaseActivity` (off by default and under `ReadOnly`), then that store policy, then the write policy with the
+capability named, as Database › Sessions asks. `Database` covers the role the studio reads as (`SqlConsoleRole`, else
+the store's login), which a "not checked" row names with its missing grant to a visitor the check's own gate admits; the
+login the data source connects as (named by S04, S05, S08 and S10, and by C02 and C03 as `session_user` in the
+role-limit evidence and the quiet row); and an Aurora instance's identifier (`aurora_db_instance_identifier()`,
+`aurora_replica_status().server_id`), the cluster's name for an instance, not a session's, role's or client's. So R03's
+`aurora-reader` evidence, the Replication page's Aurora replicas, the "Answered by" line, the Server page's Aurora
+section (instance waits included) and the capacity line need no `ViewDatabaseActivity`; a session's Aurora waits
+(`aurora_stat_backend_waits`) are `Activity`, read only through that gate and shown as counts and shares, never as a
+time. A finding about one tenant names it, so it also needs `Activity` and that tenant's store policy: T18's, whose
+tenant partitions are summed in SQL and never listed (`ColumnSkewQueries`), is one. A withheld
+finding is counted, never described; a row below its check's gate reads "findings not shown to you" whether or not there
+are any; the badge and banners read only a scope the report would be shown to. A finding naming a table outside the
+store's schemas (`HealthFinding.GatedSchemas`, as for an `ExtendedSchemaObjects` table) also needs D27's gate for that
+schema; the badge, banners and Critical toast, which resolve no scope, withhold such a finding from everybody, and T12
+and T13, being the database's, name such a table generically.
+The first exception is to D13 and D27, which call `SqlConsoleRole` the real boundary: T02, T22 and T23 read
+`pg_stat_statements`' counters and texts as the store's own role, as the extension shows a narrowed console role
+`<insufficient privilege>` for Marten's statements. The reads are fenced to `userid = current_user` and this database
+(`StatementChecksFenceTests`), so they show what that role could read anyway; a text still carrying a literal as
+written, or not a plain query or write, is withheld; plans run as `SqlConsoleRole`. The Statements page (W5-Q1) widens
+the same read to the hundred statements with the most execution time (on Aurora, storage reads), under the same fence,
+withholding and comment masking at read, every text behind the Activity gate and the visitor's own mask. Every other
+health read and console statement stays under `SqlConsoleRole`. The second exception, the opt-in ASP.NET Core health
+check, runs with no visitor (every store, up to 25 databases, no policy), acceptable only because it reports codes,
+outcomes, severities and counts, never a name, a tenant, a statement or anything Postgres said; the host's own endpoint
+is its only gate (`docs/health.md`, `docs/security.md`). A mute lives in the browser as an HMAC-SHA256 under the
+browser's own random key, held only as the host's Data Protection protected it (purpose
+`PostgresStudio.Health.MuteKeys.v1`, `HealthMuteKeys`), never as a plain hash a guess could confirm; an instance whose
+key ring cannot open it reads nothing as muted and leaves the list to the instance that made it until the browser next
+mutes there. The studio registers no Data Protection: `AddRazorComponents()` and `AddInteractiveServerComponents()` do,
+and a container without it keys in memory.
+**Whole-database table scope.** MartenStudio's table checks judge every table of the store's own schemas and, while
+`BrowseDatabase` is on, of those `BrowsableSchemas` admits: the store's declarations over one catalog list
+(`MartenHealthTableSource`, issue #8 G1). A declared table keeps its kind, origins and `StoreOptions` remedies (Marten's
+event and bookkeeping tables are the store's own); an undeclared one is the host's (migration SQL), a recognised
+library's (exempt only from the index-design rules) or somebody else's; one outside the store's schemas carries
+`GatedSchemas`. Left out, and counted in the coverage sentence: other registered stores' tables, as a visitor-less sweep
+cannot ask their policies, and, while any type may be hidden, tables named like a document table.
+**Two studios, one engine.** MartenStudio's checks run only on Marten sources (the registry's source kinds), the shared
+checks on both. A relational table's remedy may be migration SQL, shown "for your own migrations - the studio never runs
+this" and built only in `MigrationSqlText`, which quotes every name and gives no statement for a name it cannot; a
+Marten table's remedy is never DDL: a `StoreOptions` line in Marten Studio, nothing in Postgres Studio.
+**The statistics window** (`StatisticsWindow`), the one answer to "since when have these counters counted", is
+`max(database, min(shared, archiver))` over each view's `stats_reset` (`pg_stat_database.stats_reset`; the shared view,
+`pg_stat_bgwriter` up to 16 or `pg_stat_checkpointer` from 17; `pg_stat_archiver`), so one view's
+`pg_stat_reset_shared()` never shortens it. Restarts and failovers: decision-notes.md, D29. A verdict needing a long
+window (T01's, T05's and T06's seven days, C08's and C11's day) gives none until the window covers it, nor while it
+looks reset.
+**The Maintenance page reads nothing of its own** but the on-demand bloat measure; its facts are the sweep's shared
+reads (`HealthSweep.Shared`: the table read with each table's autovacuum triggers, T16's workers and progress reads, T12
+and T13's wraparound read, T14's result). The bloat measure runs as `SqlConsoleRole` in a read-only transaction under
+`lock_timeout` and `QueryTimeout`, one per database at a time, never in a sweep or a list, and is audited as "Measure
+bloat" with the table only. The triggers T07, T08 and the page judge by are computed in SQL
+(`HealthTableQueries.TablesSql`), mirrored in C# by `Autovacuum.Triggers` and held equal by `TriggerParityLiveTests`: no
+rule of thumb that ignores a table's storage parameters is used.
+**The lock table is read once per regular sweep** (X3): `HealthConnectionQueries.LockTable`, memoized as
+`connections.locks` (`LockTableReads`), feeds C04, C06, C12, T14 and, as `oid[]` parameters, the table and index
+reads; only the index read's `55P03` retry reads it again (`LockTableReadLiveTests` counts), and `HealthTableQueries`
+reads no activity view (`ActivityViewsOffThePollPathTests`, which no longer exempts it). C12 names a chain's head, so
+it is an Activity check; its terminate and cancel text is built in `SessionHandOver` and never run.
+**A check whose platform does what it judges** throws `HealthCheckNotApplicableException` with `ReplicationPlatform`'s
+sentence: listed as not applicable, never run, nothing logged (issue #8, A2), an expected state like a missing extension
+or privilege, never a Warning. The platform is recognised only from markers a role short of a superuser cannot plant.

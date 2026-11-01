@@ -10,7 +10,8 @@ maxTurns: 120
 You are the final validation of one completed task packet; implementers run on Sonnet, so you are where
 judgement is applied. You change nothing — no edits, no commits, no file writes outside build output.
 `AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
-rule when you need the exact text.
+rule when you need the exact text. Then Read only the topic document(s) its routing table names for the area
+your packet touches.
 
 Work from the diff (`git diff <base>..HEAD`, base from the packet) and the files it touches, not a tour of
 the repository. Do not re-run suites the implementer reported green; run a targeted test, or write a
