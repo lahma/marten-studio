@@ -1,3 +1,35 @@
+# 0.11.0
+
+0.11 splits the diagnostics engine into a package of its own, `PostgresStudio.Diagnostics`, so a worker, a job host or a
+shared library can use the health advisor and `IPostgresDiagnostics` without Blazor or ASP.NET Core (#29).
+
+- New package `PostgresStudio.Diagnostics`: the health sweep and its checks, the facts they read, `IPostgresDiagnostics`
+  and its read model, and the opt-in ASP.NET Core health check, depending only on Npgsql and `Microsoft.Extensions.*`
+  abstractions (10.0.0), with no ASP.NET Core framework reference and no static web assets. The new
+  `AddPostgresDiagnostics()` registers it alone, against the application's own `NpgsqlDataSource`s: it validates its
+  options when the host starts, maps nothing, adds no hosted service and connects to nothing until host code calls the
+  API. There, findings are never muted, the studio-exposure checks K05-K07 do not run, and `GetStudioPath` and each
+  finding's links stay relative to wherever a UI is mounted. `PostgresStudio` and `MartenStudio` bring the package at
+  exactly their own version, so existing hosts change nothing.
+- Registering `AddPostgresDiagnostics()` beside `AddPostgresStudio()` or `AddMartenStudio()` throws, in either order: a
+  studio registers the engine itself.
+- `PostgresStudioOptions` now derives from a new public `PostgresDiagnosticsOptions`, which holds
+  `IncludeDefaultDataSource`, `AddDataSource`, `AddDatabaseSource`, `BrowsableSchemas`, `SqlConsoleRole`,
+  `HealthInterval`, `QueryTimeout` and `AcceptedChecks`. A host's configuration compiles and behaves as before, and
+  chained `AddDataSource` calls on `PostgresStudioOptions` still return `PostgresStudioOptions`.
+- The diagnostics read model, `IPostgresDiagnostics`, `PostgresDatabaseRef`, `IPostgresDatabaseSource`,
+  `IPostgresCapacitySource` and the `AddPostgresStudio(this IHealthChecksBuilder)` health check moved to the
+  `PostgresStudio.Diagnostics` assembly, with their namespace unchanged. Source compiles as before, but code compiled
+  against 0.10 that uses these types must be recompiled against 0.11: there are no type forwards. The health check's
+  "not registered" sentence now names `AddPostgresDiagnostics()` or `AddPostgresStudio()`.
+- `AddPostgresStudio()` refuses to start beside a `PostgresStudio.Diagnostics` of another version (a central
+  `PackageVersion` or a direct reference can override NuGet's exact pin), and `AddMartenStudio()` now checks it too.
+- A release now packs and pushes three packages, `PostgresStudio.Diagnostics`, `PostgresStudio` and `MartenStudio`, each
+  depending on exactly the one below it.
+- New sample `samples/PostgresStudio.Worker`: a generic host on the diagnostics package alone that logs a summary of
+  every database's findings at start and every `Summary:Interval`. `docs/diagnostics.md` has a new section, "Without
+  the UI".
+
 # 0.10.0
 
 0.10 puts the database's facts beside a plan and lets two plans be compared (#28, phase 2), lets a host accept a
