@@ -13,7 +13,8 @@ committed change.
 ## Non-negotiables
 
 1. **`AGENTS.md` is already in your context (`CLAUDE.md` imports it); do not Read it again — Grep it for a
-   rule when you need the exact text.** It is the single source of truth: hard rules, numbered design
+   rule when you need the exact text.** Then Read only the topic document(s) its routing table names for the area
+   your packet touches. AGENTS.md is the single source of truth: hard rules, numbered design
    decisions, the package budget, and where the layout tree (`docs/maintainers/layout.md`) is. `TreatWarningsAsErrors` is on and `CS1591` is
    an error in `src/` — the compiler is the lint step.
 2. **Verify your base commit before writing.** Run `git log -1 --format=%H`; if it is not the sha in your
