@@ -133,14 +133,14 @@ public class MartenRuntimeProbeTests
         }
         else if (running == latest)
         {
-            latest.Should().Be(new Version(9, 54, 2),"the latest tested moved: re-read what the table says there, and pin it here");
+            latest.Should().Be(new Version(9, 56, 0),"the latest tested moved: re-read what the table says there, and pin it here");
 
-            // Marten 9.54.2 brings JasperFx and JasperFx.Events 2.95.1 (its Directory.Packages.props at v9.54.2).
-            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx).Should().Be(new Version(2, 95, 1));
-            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents).Should().Be(new Version(2, 95, 1));
+            // Marten 9.56.0 brings JasperFx and JasperFx.Events 2.97.0 (its Directory.Packages.props at v9.56.0).
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx).Should().Be(new Version(2, 97, 0));
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents).Should().Be(new Version(2, 97, 0));
             available.Should().Equal(
                 [.. RuntimeFeature.All.Select(static x => x.Name).Order(StringComparer.Ordinal)],
-                "Marten 9.54.1 with JasperFx 2.95.1 has everything in the table");
+                "Marten 9.56.0 with JasperFx 2.97.0 has everything in the table");
 
             // Named, so that a feature added to the table later cannot make this pass by being the one that moved.
             available.Should().Contain(

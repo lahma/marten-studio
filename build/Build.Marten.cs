@@ -42,7 +42,7 @@ partial class Build
 
     [Parameter("The Marten version to restore, compile and test against: 'floor' (the default - the version " +
                "the package depends on, and the only one Pack packs at), 'latest' (the newest 9.x CI tests, " +
-               "pinned in Directory.Packages.props), or an exact version such as 9.54.2. (env: MARTEN_VERSION)")]
+               "pinned in Directory.Packages.props), or an exact version such as 9.56.0. (env: MARTEN_VERSION)")]
     readonly string MartenVersion;
 
     AbsolutePath PackagesPropsFile => RootDirectory / "Directory.Packages.props";

@@ -67,6 +67,8 @@ baseline, so editing or deleting a row is a reviewed change.
 | [K06](configuration.md#k06-database-browser-open-to-every-schema-without-a-narrowed-role) | Database browser open to every schema without a narrowed role | Configuration | - | - | both | 0.5 | - |
 | [K07](configuration.md#k07-studio-open-to-anonymous-visitors-with-a-capability-on) | Studio open to anonymous visitors with a capability on | Configuration | - | - | both | 0.5 | - |
 | [K08](configuration.md#k08-server-timeouts-end-the-daemons-leadership) | Server timeouts end the daemon's leadership | Configuration | `idle-in-transaction`, `transaction-timeout`, `idle-session` | setting | Marten | 0.5 | - |
+| [K09](configuration.md#k09-document-storage-named-under-a-turkish-or-azerbaijani-culture) | Document storage named under a Turkish or Azerbaijani culture | Configuration | `dotless-only`, `both` | table or function | Marten | 0.10 | - |
+| [K10](configuration.md#k10-schema-name-breaks-every-apply-after-the-first) | Schema name breaks every apply after the first | Configuration | - | - | Marten | 0.10 | - |
 | [P01](plans.md#p01-row-estimate-off-tenfold-or-more) | Row estimate off tenfold or more | Plans | - | plan node | both | 0.6 | - |
 | [P02](plans.md#p02-sort-or-hash-spilled-to-disk) | Sort or hash spilled to disk | Plans | - | plan node | both | 0.6 | - |
 | [P03](plans.md#p03-lossy-bitmap-heap-scan) | Lossy bitmap heap scan | Plans | - | plan node | both | 0.6 | - |

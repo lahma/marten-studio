@@ -12,6 +12,7 @@ using Marten.Events;
 using Marten.Services;
 using Marten.Storage;
 
+using MartenStudio.Services.Configuration;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Sql;
 
@@ -149,6 +150,38 @@ public class EventsApiSurfaceTests
             NaturalKeyDefinition? key = aggregate.NaturalKeyDefinition;
             _ = (key?.AggregateType, key?.Member, key?.InnerType, key?.IsValid());
         }
+    }
+
+    /// <summary>
+    /// <c>IReadOnlyEventStore.QueryRawEvents(string? tenantId = null)</c> (jasperfx#1094, marten#5792) is the
+    /// raw-event <c>IQueryable&lt;IEvent&gt;</c> from Marten 9.56.0 with JasperFx 2.97.0. It is a default interface
+    /// member on the JasperFx interface, so below JasperFx 2.97 there is no such member and Marten's
+    /// internal <c>QueryEventStore</c> does not implement it. The studio does not use it in 0.10 (the 0.11 packets start
+    /// from this shape); there is no <c>RuntimeFeature</c> for it yet. Read at <c>v9.56.0</c> and JasperFx
+    /// <c>v2.97.0</c>; absent at <c>V9.39.0</c> / <c>V2.74.0</c> and at <c>v9.54.2</c> / <c>V2.95.1</c>.
+    /// </summary>
+    [Fact]
+    public void Query_raw_events_is_on_the_read_only_event_store_from_JasperFx_2_97_and_not_below()
+    {
+        Version jasperFx = MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents)!;
+        MethodInfo? member = typeof(IReadOnlyEventStore).GetMethod("QueryRawEvents");
+        Type queryEventStore = typeof(IDocumentStore).Assembly.GetType("Marten.Events.QueryEventStore", throwOnError: true)!;
+
+        if (jasperFx < new Version(2, 97, 0))
+        {
+            member.Should().BeNull("JasperFx.Events {0} predates jasperfx#1094", jasperFx);
+            queryEventStore.GetMethod("QueryRawEvents").Should().BeNull();
+            return;
+        }
+
+        member.Should().NotBeNull();
+        member!.ReturnType.Should().Be<IQueryable<IEvent>>();
+        member.GetParameters().Should().ContainSingle()
+            .Which.Should().Match<ParameterInfo>(x => x.ParameterType == typeof(string) && x.IsOptional && x.Name == "tenantId");
+        member.IsAbstract.Should().BeFalse("it is a default interface member: a store built against older JasperFx still loads");
+
+        queryEventStore.GetMethod("QueryRawEvents", BindingFlags.Public | BindingFlags.Instance).Should().NotBeNull(
+            "Marten {0} implements it on QueryEventStore", MartenRuntime.Current.VersionOf(RuntimePackage.Marten));
     }
 
     private static DocumentStore Store(Action<StoreOptions> configure) =>

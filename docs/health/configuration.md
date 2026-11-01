@@ -7,9 +7,11 @@ daemon mode and the leadership lock's scope, and its Runtime card the host's env
 is K04's host and port, which are evidence at the database-wide gate - the store policy for the database as a
 whole - because that is what the Configuration page asks before it lists a database's server and port. K05-K07 read
 the studio's own options the same way, in both studios. K08 is the one that reads the server too: three timeouts in
-`pg_settings`, a catalog read, so it is shown at the database-wide gate. Back to the [index](../health.md).
+`pg_settings`, a catalog read, so it is shown at the database-wide gate, and so is K09, which reads the catalog for document
+tables named under a Turkish or Azerbaijani culture; K10 reads two configuration names and nothing else. Back to the
+[index](../health.md).
 
-**Studios.** K05, K06 and K07 run in both studios. K01 to K04 and K08 read a Marten store's configuration, and run
+**Studios.** K05, K06 and K07 run in both studios. K01 to K04, K08, K09 and K10 read a Marten store's configuration, and run
 only in Marten Studio ([codes.md](codes.md)).
 
 ## K01 AutoCreate in Production
@@ -252,3 +254,76 @@ opts.Events.UseAdvisoryLockTransaction = false;
 
 A session-scoped lock cannot work behind a transaction-mode pooler (K04), so there the timeout is what changes; and for
 `idle-session` the line is the other way round.
+
+## K09 Document storage named under a Turkish or Azerbaijani culture
+
+**Warning**, one finding per table (or per function that belongs to no table). Marten Studio only, database-wide gate. Since 0.10.
+Marten 9.55 lowers document aliases, `DdlTemplate` lookups and flat-table upsert function names with the invariant culture
+(marten#5778, #5783). Before it, a host running under `tr-TR` or `az-AZ` got `mt_doc_ınvoice` (a dotless `ı`, U+0131) for
+the document type `Invoice`; from 9.55 Marten expects `mt_doc_invoice` and creates it, empty. The existing documents stay in
+the old table, and the application no longer sees them. Nothing is lost and nothing is migrated.
+
+The check reads the store's own schemas in the catalog (`pg_class` and `pg_proc`, locking nothing) for `mt_` tables and for
+`mt_upsert_`, `mt_insert_`, `mt_update_` and `mt_overwrite_` functions whose name has a dotless `ı`, and runs at **every** Marten
+version, because the hazard is the upgrade: a host on Marten 9.39 under `tr-TR` is warned before it upgrades. Two variants:
+
+- **`dotless-only`**: the invariant name does not exist. After upgrading to Marten 9.55 these documents will appear missing (on
+  a 9.55 or later that has not yet touched the type, they already do).
+- **`both`**: both names exist, so the documents are split between two tables. A function is judged against a function of the
+  same schema.
+
+**A name Marten writes itself is left out.** A document type may carry a literal `ı` in its own name (`Kayıt`, `Satış`),
+and Marten keeps it at every version: from 9.55 it lowers with `ToLowerInvariant()`, which leaves `ı` alone. So a table (and
+the functions that share its stem) whose schema and name are exactly what a document type this process knows is called today
+is not a finding, as long as this process's Marten writes that exact name itself: from 9.55 always, and before it only when the
+process's culture lowers `I` to `i`. (Under `tr-TR` on a Marten before 9.55 the name does not settle it, since the same Marten
+writes `mt_doc_ınvoice` for `Invoice`, so the table is judged.) Renaming a healthy `mt_doc_kayıt` to `mt_doc_kayit` would lose
+its documents.
+
+A document type's functions are evidence of its table's finding; any other function with a dotless letter, such as a flat-table
+projection's, is a finding of its own. The subject is `schema.name`.
+
+**A host that hides document types** (`IsDocumentTypeVisible`) is never told one's table name: a name the process attributes to a
+hidden type is dropped with the type's other findings, and one it cannot attribute to a visible type is counted under the subject
+`(not listed)` and not named, as T17 does.
+
+**A name no known type claims is judged by its letters alone.** The studio cannot tell a `ı` that came from a capital `I`
+from one that was always there, so the remedy applies only where the `ı` came from a capital `I`: a table of a type this
+process no longer has, or has not loaded yet, may be a `Kayıt` that is healthy.
+
+**Known limits.** An index, constraint or sequence named with the letter follows its table and is not looked for; a partition is
+not looked at, its parent is. Tables and functions of other schemas than the store's own are not read, and a database with more
+than 500 of a kind says the read stopped.
+
+The remedy is in words, and the studio renames and drops nothing: before upgrading, in your own migration, rename each table to the
+invariant name, **drop** the dotless `mt_upsert_`, `mt_insert_`, `mt_update_` and `mt_overwrite_` functions, and apply the schema so
+Marten recreates them under the invariant name. Do not rename the functions: a renamed upsert function still writes to the old
+dotless table inside its body. Where both tables exist, merge the rows first.
+
+## K10 Schema name breaks every apply after the first
+
+**Warning**, Marten Studio only, shown to anybody the scope admits (the schema names are on the Configuration page). Since 0.10.
+Weasel 9.47.1 (in Marten 9.55) fixed index readback for a `DatabaseSchemaName`, or an events schema, that is a reserved word or
+needs quoting (weasel#750). Before it, `regclassout` wrote such a schema quoted, none of the four spellings
+Weasel compared the indexed table against did, and no index of the schema was ever read back: every declared index looked
+missing, and **every schema apply after the first failed with `42P07`**, "relation already exists", which aborts everything
+ordered after it. The first apply works, which is why it goes unnoticed. Marten lowercases the schema names it is given, so in
+a store an upper-case letter is never the cause: the name that triggers it is a reserved word (`order`, `user`) or one with a
+character outside `a` to `z`, digits and underscore, such as a hyphen.
+
+The check fires when the loaded `Weasel.Postgresql` is older than 9.47.1 **and** a schema the store declares is a name
+Postgres writes quoted: anything not made of `a` to `z`, digits and underscores, one starting with a digit, or one of the
+keywords `quote_ident` quotes (the reserved, type-or-function and column-name categories). That is `quote_ident`'s rule, not
+`SqlIdentifier`'s, which quotes every name. The schemas judged are every one the store declares: the document schema, the events
+schema, a document type's own (`[DatabaseSchemaName]`), a flat-table projection's and an `ExtendedSchemaObjects` object's, so a
+type declared in `order` breaks just the same. A schema only a hidden document type declares is never named. It reads no database. On Marten 9.55 and later it is always quiet. No variants; the
+subject is the store as a whole. The Schema screen's Apply area shows the same sentence as a notice while the check would fire.
+
+**Known limits.** A schema on the connection's `search_path` reads back fine below 9.47.1, because `regclassout` writes the bare
+name for it, so the check can fire for a host that is not affected. And the keyword list is PostgreSQL 17's: on PostgreSQL 14 and 15
+`json`, `json_array`, `json_arrayagg`, `json_exists`, `json_object`, `json_objectagg`, `json_query`, `json_scalar`,
+`json_serialize`, `json_table` and `json_value`, `merge_action` and `system_user` are not keywords, so a schema named so is not
+quoted there.
+
+The remedy is an upgrade, or lower-case names without a reserved word (`opts.DatabaseSchemaName = "orders"`), which moves the
+store to schemas that do not exist yet: a migration of the data, not a setting.
