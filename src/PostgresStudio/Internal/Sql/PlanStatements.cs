@@ -44,6 +44,13 @@ internal sealed record PlanOptions
 
     /// <summary><c>SERIALIZE</c>: the cost of turning the result into what a client receives. <c>ANALYZE</c> only, PostgreSQL 17 and later.</summary>
     public bool Serialize { get; init; }
+
+    /// <summary>
+    /// What Query › Plan starts with, and what an address with no <c>options</c> means (0.10-A): <c>BUFFERS</c>, <c>TIMING</c> and
+    /// <c>VERBOSE</c>. <c>VERBOSE</c> changes the output, never the plan, and it is what gives every relation its schema, so the
+    /// facts beside the plan can be read; a visitor who unticks it is told the facts need it.
+    /// </summary>
+    public static PlanOptions PageDefault { get; } = new() { Verbose = true };
 }
 
 /// <summary>The commands one plan run sends, and what is known about them before anything is sent.</summary>

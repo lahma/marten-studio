@@ -227,7 +227,63 @@ internal static class MatrixReads
                     && y.TopValues.All(static v => PartitionBoundText.SingleListValue(v) is "a" or "b")),
                 "store.l's two tenant partitions, read by their bounds");
         }),
+
+        // ---- 0.10-A: the Plan page's facts - the six statements of PlanFactsQueries, over store's tables by name, the two the matrix
+        // holds ACCESS EXCLUSIVE on among them: they resolve by name with no lock and read the catalog by oid with no size or deparse
+        // function, so each returns behind the lock (issue #28; D27).
+        new("plan facts: resolve, relations, indexes, extended statistics, columns and values", true, static (x, t) => PlanFactsReadAsync(x, t)),
     ];
+
+    /// <summary>
+    /// The Plan page's facts reads (0.10-A), asked about the fixture's tables by the names a VERBOSE plan prints: a table, a list
+    /// partition and its parent, a range partition, the table and the partition the matrix holds ACCESS EXCLUSIVE on, and a name
+    /// that is nothing. The owner finds every one; a role with no <c>USAGE</c> on <c>store</c> reads on without one - the read
+    /// raises nothing and finds what the catalog shows it.
+    /// </summary>
+    private static async Task PlanFactsReadAsync(MatrixReadContext x, CancellationToken token)
+    {
+        string[] names = ["child", "l_a", "l", "r_2026_10", "child", "no_such_relation"];
+        string[] schemas = [.. names.Select(static _ => "store")];
+
+        IReadOnlyList<PlanFactsResolvedRow> resolved = await PlanFactsQueries.ResolveAsync(x.Connection, x.Transaction, schemas, names, x.Timeout, token);
+
+        if (resolved.Count != names.Length || resolved[^1].Oid is not null)
+        {
+            throw new InvalidOperationException("The resolve answered " + resolved.Count + " rows, or found a relation that does not exist.");
+        }
+
+        List<uint> oids = [.. resolved.Where(static y => y.Oid is not null).Select(static y => y.Oid!.Value).Distinct()];
+        IReadOnlyList<PlanFactsRelationRow> relations = await PlanFactsQueries.ReadRelationsAsync(x.Connection, x.Transaction, oids, x.Timeout, token);
+
+        if (relations.Count != oids.Count)
+        {
+            throw new InvalidOperationException("The relations read answered " + relations.Count + " rows for " + oids.Count + " relations.");
+        }
+
+        // The partition: its parent, how many partitions the parent has, and its key - store.l is list-partitioned on tenant_id, two ways.
+        uint partition = resolved[1].Oid ?? 0;
+        PlanFactsRelationRow? listPartition = relations.FirstOrDefault(y => y.Oid == partition);
+        Owned(x, listPartition is { ParentName: "l", ParentSchema: "store", ParentPartitions: 2 } && listPartition.ParentKey.SequenceEqual(["tenant_id"]) ? listPartition : null,
+            "store.l_a, a partition of store.l by tenant_id, one of two");
+
+        // Its ancestors, found by walking pg_inherits (never pg_partition_root, which opens the relation): the partition's one is store.l.
+        Owned(x, resolved[1].AncestorNames.SequenceEqual(["l"]) && resolved[1].AncestorSchemas.SequenceEqual(["store"]) ? resolved[1] : null, "store.l_a's ancestor, store.l");
+
+        IReadOnlyList<PlanFactsIndexRow> indexes = await PlanFactsQueries.ReadIndexesAsync(x.Connection, x.Transaction, oids, x.Timeout, token);
+        Owned(x, indexes.FirstOrDefault(y => y.Table == resolved[0].Oid && y is { IsPrimary: true } && y.Keys.SequenceEqual(["id"])), "store.child's primary key on id");
+
+        await PlanFactsQueries.ReadExtendedStatisticsAsync(x.Connection, x.Transaction, oids, x.Timeout, token);
+
+        // Columns of store.child (analyzed by the setup) and of the locked partition: asked by relation oid and column name.
+        uint child = resolved[0].Oid ?? 0;
+        uint[] relids = [child, child, child, resolved[3].Oid ?? 0];
+        string[] columns = ["id", "n", "label", "id"];
+        IReadOnlyList<PlanFactsColumnRow> columnRows = await PlanFactsQueries.ReadColumnsAsync(x.Connection, x.Transaction, relids, columns, x.Timeout, token);
+        Owned(x, columnRows.FirstOrDefault(y => y.Table == child && y.Column == "n" && y is { HasStatistics: true, Distinct: > 0 }), "store.child.n's statistics");
+
+        // Values are data: the read is the row gate's to ask for, and runs here as the role to prove the statement itself.
+        await PlanFactsQueries.ReadValuesAsync(x.Connection, x.Transaction, relids, columns, x.Timeout, token);
+    }
 
     /// <summary>The fixture's tables the lint reads are asked about (W5-B1): a range and a list partitioning, and a key.</summary>
     /// <remarks>A property, not a field: <see cref="All" /> is initialised first, and reads it.</remarks>

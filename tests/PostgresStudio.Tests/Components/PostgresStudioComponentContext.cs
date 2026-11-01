@@ -20,6 +20,7 @@ using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Live;
 using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -77,6 +78,8 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<ISessionActivityService>(Sessions);
         Services.AddSingleton<PostgresStudio.Services.Storage.IStorageService>(Storage);
         Services.AddSingleton<ISqlConsoleService>(SqlConsole);
+        PlanFacts = new FakePlanFacts();
+        Services.AddSingleton<IPlanFactsService>(PlanFacts);
         Services.AddSingleton<IPostgresServerReader>(new FakeServerReader());
         Aurora = new FakeAurora();
         Services.AddSingleton<PostgresStudio.Services.Aurora.IAuroraService>(Aurora);
@@ -133,6 +136,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     public FakeStorage Storage { get; }
 
     public FakeSqlConsole SqlConsole { get; }
+
+    /// <summary>The Plan page's facts read (0.10-A).</summary>
+    public FakePlanFacts PlanFacts { get; }
 
     /// <summary>The Server page's Aurora section (W5-AUR).</summary>
     internal FakeAurora Aurora { get; }

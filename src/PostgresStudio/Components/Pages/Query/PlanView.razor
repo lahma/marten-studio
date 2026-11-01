@@ -123,7 +123,8 @@
                            OnSelect="SelectAsync"
                            Critical="critical"
                            Heat="@PlanAnalysis.Key(heat)"
-                           Flags="flags" />
+                           Flags="flags"
+                           Facts="@PlanFactsValue" />
         }
         else
         {
@@ -136,7 +137,7 @@
 
         @if (Analyzer && selectedId is not null)
         {
-            <PlanNodeDetail Plan="plan" NodeId="selectedId" OnClose="ClearSelectionAsync" />
+            <PlanNodeDetail Plan="plan" NodeId="selectedId" OnClose="ClearSelectionAsync" Facts="@PlanFactsValue" />
         }
 
         @if (plan.Triggers.Count > 0)
@@ -198,7 +199,21 @@
                     @string.Join(", ", notJudged.Select(static x => x.Code + " " + x.Title)).
                 </p>
             }
+
+            @if (notJudgedWithoutFacts.Count > 0)
+            {
+                <p class="ms-plan-not-judged ms-plan-not-judged-facts">
+                    Not judged without the database's facts, which are read only for a plan this page ran:
+                    @string.Join(", ", notJudgedWithoutFacts.Select(static x => x.Code + " " + x.Title)).
+                </p>
+            }
         </section>
+
+        @if (Analyzer && PlanFactsValue is not null)
+        {
+            @* 0.10-A: what the database knows beside the plan - read after it, behind the console's gate and each relation's own. *@
+            <PlanFactsPanel Facts="@PlanFactsValue" />
+        }
 
         @if (WhatIf is not null)
         {
@@ -228,6 +243,8 @@
     private QueryPlanRead? read;
     private IReadOnlyList<PlanInsightFinding> insights = [];
     private IReadOnlyList<PlanInsightInfo> notJudged = [];
+    private IReadOnlyList<PlanInsightInfo> notJudgedWithoutFacts = [];
+    private PlanFacts? facts;
     private Dictionary<int, List<string>> flags = [];
     private string? readJson;
     private QueryPlan? readPlan;
@@ -255,6 +272,14 @@
     /// </summary>
     [Parameter]
     public string? ExportStatement { get; set; }
+
+    /// <summary>
+    /// 0.10-A: what the database knows beside the plan, a <c>PlanFacts</c> (<see cref="object" />, as <see cref="Plan" /> is) read for a
+    /// plan the Plan page ran - or <see langword="null" />, for a pasted plan, the console's and every other place. Read only under
+    /// <see cref="Analyzer" />. It feeds P15 to P18 and the Facts panel; without it those four are listed as not judged.
+    /// </summary>
+    [Parameter]
+    public object? PlanFactsValue { get; set; }
 
     /// <summary>The plan as <c>EXPLAIN (FORMAT JSON)</c> printed it - read here, and offered whole as raw JSON.</summary>
     [Parameter]
@@ -289,13 +314,23 @@
 
     protected override void OnParametersSet()
     {
-        if (Plan is QueryPlan given)
+        PlanFacts? given = Analyzer ? PlanFactsValue as PlanFacts : null;
+        bool factsChanged = !ReferenceEquals(given, facts);
+        facts = given;
+
+        if (factsChanged && read?.Plan is { } current)
         {
-            if (!ReferenceEquals(given, readPlan))
+            // The same plan, with its facts arriving (or going): the insights are judged again; what is selected stays.
+            EvaluateInsights(current);
+        }
+
+        if (Plan is QueryPlan given2)
+        {
+            if (!ReferenceEquals(given2, readPlan))
             {
-                readPlan = given;
+                readPlan = given2;
                 readJson = null;
-                Evaluate(QueryPlanRead.Of(given));
+                Evaluate(QueryPlanRead.Of(given2));
             }
 
             return;
@@ -318,11 +353,7 @@
 
         if (next.Plan is { } plan)
         {
-            insights = PlanInsights.Evaluate(plan, Settings.Text);
-            notJudged = PlanInsights.NotJudged(plan);
-            flags = insights
-                .GroupBy(static x => x.NodeId)
-                .ToDictionary(static x => x.Key, static x => x.Select(static f => f.Insight.Code).Distinct(StringComparer.Ordinal).ToList());
+            EvaluateInsights(plan);
 
             if (Analyzer)
             {
@@ -334,10 +365,23 @@
         {
             insights = [];
             notJudged = [];
+            notJudgedWithoutFacts = [];
             flags = [];
             criticalIds = [];
             heatCells = new Dictionary<int, PlanHeatCell>();
         }
+    }
+
+    private void EvaluateInsights(QueryPlan plan)
+    {
+        insights = PlanInsights.Evaluate(plan, Settings.Text, facts);
+        notJudged = PlanInsights.NotJudged(plan);
+
+        // Only the Plan page reads facts, so only it names what their absence leaves unjudged.
+        notJudgedWithoutFacts = Analyzer ? PlanInsights.NotJudgedWithoutFacts(plan, facts) : [];
+        flags = insights
+            .GroupBy(static x => x.NodeId)
+            .ToDictionary(static x => x.Key, static x => x.Select(static f => f.Insight.Code).Distinct(StringComparer.Ordinal).ToList());
     }
 
     private Task SelectAsync(int id)

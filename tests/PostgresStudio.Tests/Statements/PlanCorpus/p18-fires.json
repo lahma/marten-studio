@@ -1,0 +1,142 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Append",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 0.0,
+      "Total Cost": 5000.0,
+      "Plan Rows": 6000,
+      "Plan Width": 16,
+      "Actual Startup Time": 0.02,
+      "Actual Total Time": 30.0,
+      "Actual Rows": 6000.0,
+      "Actual Loops": 1,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events_2026_01",
+          "Schema": "public",
+          "Alias": "events_2026_01",
+          "Startup Cost": 0.0,
+          "Total Cost": 1000.0,
+          "Plan Rows": 1000,
+          "Plan Width": 64,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 12.5,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1,
+          "Output": [
+            "id",
+            "created_at"
+          ]
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events_2026_02",
+          "Schema": "public",
+          "Alias": "events_2026_02",
+          "Startup Cost": 0.0,
+          "Total Cost": 1000.0,
+          "Plan Rows": 1000,
+          "Plan Width": 64,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 12.5,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1,
+          "Output": [
+            "id",
+            "created_at"
+          ]
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events_2026_03",
+          "Schema": "public",
+          "Alias": "events_2026_03",
+          "Startup Cost": 0.0,
+          "Total Cost": 1000.0,
+          "Plan Rows": 1000,
+          "Plan Width": 64,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 12.5,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1,
+          "Output": [
+            "id",
+            "created_at"
+          ]
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events_2026_04",
+          "Schema": "public",
+          "Alias": "events_2026_04",
+          "Startup Cost": 0.0,
+          "Total Cost": 1000.0,
+          "Plan Rows": 1000,
+          "Plan Width": 64,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 12.5,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1,
+          "Output": [
+            "id",
+            "created_at"
+          ]
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events_2026_05",
+          "Schema": "public",
+          "Alias": "events_2026_05",
+          "Startup Cost": 0.0,
+          "Total Cost": 1000.0,
+          "Plan Rows": 1000,
+          "Plan Width": 64,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 12.5,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1,
+          "Output": [
+            "id",
+            "created_at"
+          ]
+        },
+        {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "events_2026_06",
+          "Schema": "public",
+          "Alias": "events_2026_06",
+          "Startup Cost": 0.0,
+          "Total Cost": 1000.0,
+          "Plan Rows": 1000,
+          "Plan Width": 64,
+          "Actual Startup Time": 0.02,
+          "Actual Total Time": 12.5,
+          "Actual Rows": 1000.0,
+          "Actual Loops": 1,
+          "Output": [
+            "id",
+            "created_at"
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.2,
+    "Triggers": [],
+    "Execution Time": 31.0
+  }
+]

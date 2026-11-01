@@ -42,6 +42,15 @@ public class PlanInsightsTests
         ["P12"] = static _ => false,
         ["P13"] = static _ => false,
         ["P14"] = static _ => false,
+
+        // 0.10's six (PlanFactsInsightsTests): P15 to P18 need the database's facts, which no probe fixture has; P19 and P20 need a
+        // function scan on the default estimate and a plan with triggers, which none of the probe's shapes is.
+        ["P15"] = static _ => false,
+        ["P16"] = static _ => false,
+        ["P17"] = static _ => false,
+        ["P18"] = static _ => false,
+        ["P19"] = static _ => false,
+        ["P20"] = static _ => false,
     };
 
     public static TheoryData<string, string> EveryInsightOnEveryFixture()
@@ -89,7 +98,7 @@ public class PlanInsightsTests
         QueryPlan plan = QueryPlanReader.Read(ExplainFixtures.Get(name)).Plan!;
 
         PlanInsights.NotJudged(plan).Select(static x => x.Code).Should().Equal(
-            ExplainFixtures.IsAnalyze(name) ? [] : ["P01", "P02", "P03", "P04", "P08", "P09", "P10", "P11", "P12", "P13", "P14"]);
+            ExplainFixtures.IsAnalyze(name) ? [] : ["P01", "P02", "P03", "P04", "P08", "P09", "P10", "P11", "P12", "P13", "P14", "P15", "P16", "P20"]);
     }
 
     [Theory]
@@ -324,7 +333,7 @@ public class PlanInsightsTests
             .Replace("\"Planning Time\": 0.1", "\"Planning Time\": 250.0, \"JIT\": {\"Functions\": 3, \"Timing\": {\"Total\": 60.0}}", StringComparison.Ordinal);
 
         IReadOnlyList<PlanInsightFinding> findings = Evaluate(json, PostgresStudioText.Instance);
-        findings.Select(static x => x.Insight.Code).Distinct().Should().BeEquivalentTo(PlanInsights.All.Select(static x => x.Code));
+        findings.Select(static x => x.Insight.Code).Distinct().Should().BeEquivalentTo(PlanInsights.All.Take(14).Select(static x => x.Code), "P15 to P20 are held to Postgres Studio's words in PlanFactsInsightsTests");
 
         foreach (PlanInsightFinding finding in findings)
         {

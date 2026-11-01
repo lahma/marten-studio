@@ -9,6 +9,7 @@
 @using PostgresStudio.Services.Sources
 @implements IAsyncDisposable
 @inject ISqlConsoleService SqlConsole
+@inject IPlanFactsService PlanFactsReader
 @inject StudioState State
 @inject StudioCapabilityGuard Capabilities
 @inject StudioAuthorization Authorization
@@ -181,6 +182,7 @@
             <section class="ms-plan-result" aria-label="Plan result">
                 <PlanView Analyzer="true"
                           Json="@planJson"
+                          PlanFactsValue="@facts"
                           Caption="@caption"
                           Label="Query plan"
                           ExportStatement="@exportStatement" />
@@ -219,7 +221,7 @@
 
     private string statement = string.Empty;
     private PlanMode mode = PlanMode.Plan;
-    private PlanOptions options = new();
+    private PlanOptions options = PlanOptions.PageDefault;
     private int placeholders;
 
     private bool mayRunSql = true;
@@ -229,6 +231,7 @@
     private int errorPosition = -1;
     private string? status;
     private string? planJson;
+    private PlanFacts? facts;
     private string? caption;
     private string? exportStatement;
     private string? planUnavailable;
@@ -453,7 +456,7 @@
     {
         string? sql = string.IsNullOrWhiteSpace(statement) || statement.Length > PlanLinks.MaxUrlStatementLength ? null : statement;
         string? modeValue = mode == PlanMode.Plan ? null : PlanLinks.ModeKey(mode);
-        string? optionsValue = options == new PlanOptions() ? null : PlanLinks.OptionsKey(options);
+        string? optionsValue = options == PlanOptions.PageDefault ? null : PlanLinks.OptionsKey(options);
 
         // Recorded before navigating, so OnParametersSet sees its own address arrive and leaves the page alone.
         appliedKey = (sql ?? string.Empty) + "\u0001" + (modeValue ?? string.Empty) + "\u0001" + (optionsValue ?? "\u0002");
@@ -473,6 +476,7 @@
     private void ForgetResult()
     {
         planJson = null;
+        facts = null;
         caption = null;
         exportStatement = null;
         planUnavailable = null;
@@ -532,6 +536,8 @@
             }
             else if (result.PlanJson is { } json)
             {
+                // 0.10-A: the plan's facts, read before the plan is drawn so it is judged once - for a plan this page ran, never a pasted one.
+                facts = await ReadFactsAsync(scope, json, cts.Token);
                 planJson = json;
                 exportStatement = request.Statement;
                 caption = Caption(asked, result);
@@ -564,6 +570,31 @@
         {
             EndRun();
             await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>
+    /// The facts beside a plan the page ran, or <see langword="null" /> when the plan cannot be read. The service's own refusals - the
+    /// gate answering differently a moment after the plan was run - come back as a facts value that says so, never as a lost plan.
+    /// </summary>
+    private async Task<PlanFacts?> ReadFactsAsync(StudioScope scope, string json, CancellationToken cancellationToken)
+    {
+        if (QueryPlanReader.Read(json).Plan is not { } plan)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await PlanFactsReader.ReadAsync(scope, plan, cancellationToken);
+        }
+        catch (StudioCapabilityDeniedException exception)
+        {
+            return new PlanFacts(DateTimeOffset.UtcNow, [], []) { Failure = exception.Message };
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            return new PlanFacts(DateTimeOffset.UtcNow, [], []) { Failure = SqlConsoleService.SqlRefusedMessage };
         }
     }
 

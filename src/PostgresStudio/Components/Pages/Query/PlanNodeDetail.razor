@@ -25,6 +25,38 @@
             <p class="ms-muted ms-plan-node-detail-none">Postgres printed no keys for this node that are kept for it.</p>
         }
 
+        @if (relationFacts is not null || columnFacts.Count > 0)
+        {
+            @* 0.10-A: what the database knows about the relation this node scans and the columns it filters, joins or sorts on. *@
+            <section class="ms-plan-key-group ms-plan-node-facts" aria-label="Facts about this node">
+                <h4 class="ms-plan-key-group-title">Facts from the database</h4>
+                <dl class="ms-plan-detail-list ms-plan-key-list">
+                    @if (relationFacts is not null)
+                    {
+                        <div class="ms-plan-detail">
+                            <dt>Relation</dt>
+                            <dd><code class="ms-plan-detail-value">@PlanFactsText.RelationLine(relationFacts, factsAt)</code></dd>
+                        </div>
+                    }
+                    @foreach ((PlanNodeColumn used, PlanRelationFacts relation, PlanColumnFact? column) in columnFacts)
+                    {
+                        <div class="ms-plan-detail" @key="used.Source.ToString() + used.Column + relation.Label">
+                            <dt>@(used.Column + " (" + SourceText(used.Source) + ")")</dt>
+                            <dd>
+                                <code class="ms-plan-detail-value">@PlanFactsText.ColumnLine(column)</code>
+                                @if (column?.Values is { } values)
+                                {
+                                    <span class="ms-plan-key-help">
+                                        most common values: @(values.MostCommonValues ?? "-"); histogram bounds: @(values.HistogramBounds ?? "-")
+                                    </span>
+                                }
+                            </dd>
+                        </div>
+                    }
+                </dl>
+            </section>
+        }
+
         @foreach ((PlanKeyGroup group, IReadOnlyList<(PlanProperty Property, PlanKeyMeaning? Meaning)> entries) in groups)
         {
             <section class="ms-plan-key-group" @key="group">
@@ -53,6 +85,9 @@
     private QueryPlan? plan;
     private PlanNode? node;
     private IReadOnlyList<(PlanKeyGroup Group, IReadOnlyList<(PlanProperty Property, PlanKeyMeaning? Meaning)> Entries)> groups = [];
+    private PlanRelationFacts? relationFacts;
+    private IReadOnlyList<(PlanNodeColumn Used, PlanRelationFacts Relation, PlanColumnFact? Column)> columnFacts = [];
+    private DateTimeOffset factsAt;
 
     /// <summary>The plan, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type).</summary>
     [Parameter]
@@ -61,6 +96,10 @@
     /// <summary>The node whose keys are listed, by its id, or <see langword="null" /> for none.</summary>
     [Parameter]
     public int? NodeId { get; set; }
+
+    /// <summary>0.10-A: the plan's facts, a <c>PlanFacts</c> (<see cref="object" />: a public parameter cannot have an internal type), or <see langword="null" />.</summary>
+    [Parameter]
+    public object? Facts { get; set; }
 
     /// <summary>Raised when "Clear selection" is clicked.</summary>
     [Parameter]
@@ -71,7 +110,29 @@
         plan = Plan as QueryPlan;
         node = plan is not null && NodeId is { } id ? plan.Nodes.FirstOrDefault(x => x.Id == id) : null;
         groups = node is null ? [] : Group(node, plan!);
+
+        relationFacts = null;
+        columnFacts = [];
+
+        if (node is not null && plan is not null && Facts is PlanFacts read)
+        {
+            PlanNodeFacts lookup = new(plan, read);
+            factsAt = read.ReadAt;
+            relationFacts = lookup.RelationOf(node);
+            columnFacts = lookup.ColumnsOf(node);
+        }
     }
+
+    private static string SourceText(PlanConditionSource source) => source switch
+    {
+        PlanConditionSource.Filter => "filter",
+        PlanConditionSource.IndexCondition => "index condition",
+        PlanConditionSource.Join => "join key",
+        PlanConditionSource.JoinFilter => "join filter",
+        PlanConditionSource.Sort => "sort key",
+        PlanConditionSource.Group => "group key",
+        _ => "used",
+    };
 
     private Task CloseAsync() => OnClose.InvokeAsync();
 

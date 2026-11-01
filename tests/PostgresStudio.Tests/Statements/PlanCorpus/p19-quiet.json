@@ -1,0 +1,22 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Function Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Function Name": "generate_series",
+      "Alias": "g",
+      "Startup Cost": 0.0,
+      "Total Cost": 12.5,
+      "Plan Rows": 50,
+      "Plan Width": 4,
+      "Actual Startup Time": 0.01,
+      "Actual Total Time": 0.05,
+      "Actual Rows": 50.0,
+      "Actual Loops": 1
+    },
+    "Planning Time": 0.2,
+    "Triggers": [],
+    "Execution Time": 1.0
+  }
+]

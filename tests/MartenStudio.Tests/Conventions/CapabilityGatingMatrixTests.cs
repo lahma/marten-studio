@@ -118,6 +118,11 @@ public class CapabilityGatingMatrixTests
         // asked the same three refusals. EXPLAIN ANALYZE runs the statement, which is why it is no read.
         new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.PlanAsync), StudioCapability.RunSql),
 
+        // 0.10-A (issue #28): the facts the Plan page reads beside a plan it ran - the console's gate whole, thrown and audited the
+        // same way, before any relation is resolved. Its second gate (each relation's schema) and the values' third (BrowseDatabase,
+        // audited per relation) are asked after this one and are held by the live suite's gate tests.
+        new(typeof(IPlanFactsService), nameof(IPlanFactsService.ReadAsync), StudioCapability.RunSql),
+
         // F7: a read gated like a write that refuses by throwing, exactly as the console does - so it sits
         // here, beside RunSqlAsync, and gets the same three refusals.
         new(typeof(ILinqQueryService), nameof(ILinqQueryService.RunAsync), StudioCapability.RunLinqQueries),
@@ -231,6 +236,7 @@ public class CapabilityGatingMatrixTests
 
         // PS-1d: the console is the shared seam now, and its run is gated (Mutating); X2's what-if is a gated read.
         [typeof(ISqlConsoleService)] = ["WhatIfAsync"],
+        [typeof(IPlanFactsService)] = [],
         [typeof(ILinqQueryService)] = ["DescribeAsync", "WhatIfAsync"],
         [typeof(IDatabaseObjectService)] =
         [
@@ -691,6 +697,14 @@ public class CapabilityGatingMatrixTests
         if (type == typeof(SqlConsoleRequest))
         {
             return new SqlConsoleRequest("select 1");
+        }
+
+        // The plan the Plan page just ran, naming a relation and a column, so a gate that ran after the plan was looked at - to find the
+        // relations to ask about - would be caught looking rather than refusing.
+        if (type == typeof(QueryPlan))
+        {
+            return QueryPlanReader.Read(
+                """[{"Plan":{"Node Type":"Seq Scan","Relation Name":"orders","Schema":"public","Alias":"o","Filter":"(o.status = 'open'::text)","Total Cost":10}}]""").Plan!;
         }
 
         // The Plan page's request, with a placeholder and its value and the options that need ANALYZE on: a gate that ran after

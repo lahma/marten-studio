@@ -17,6 +17,12 @@ internal sealed record PlanInsightInfo(string Code, string Title, HealthSeverity
     /// <summary>The heading <c>docs/health/plans.md</c> must carry for it.</summary>
     public string DocsHeading => "## " + Code + " " + Title;
 
+    /// <summary>
+    /// Whether it reads what the Plan page asks the database for after it has run a plan (<see cref="PlanFacts" />), and so cannot be
+    /// judged on a plan this page did not run.
+    /// </summary>
+    public bool NeedsFacts { get; init; }
+
     /// <summary>The heading's anchor, as GitHub derives it.</summary>
     public string DocsAnchor => HealthCheckInfo.Anchor(Code + " " + Title);
 
@@ -150,11 +156,30 @@ internal static partial class PlanInsights
     /// <summary>P14.</summary>
     public static readonly PlanInsightInfo MissingMemoize = new("P14", "Memoize mostly missing", HealthSeverity.Info, true);
 
+    /// <summary>P15.</summary>
+    public static readonly PlanInsightInfo StaleStatistics = new("P15", "Stale statistics behind a misestimate", HealthSeverity.Warning, true) { NeedsFacts = true };
+
+    /// <summary>P16.</summary>
+    public static readonly PlanInsightInfo CorrelatedColumns = new("P16", "Correlated columns without extended statistics", HealthSeverity.Warning, true) { NeedsFacts = true };
+
+    /// <summary>P17.</summary>
+    public static readonly PlanInsightInfo WrappedIndexedColumn = new("P17", "Function or cast on an indexed column", HealthSeverity.Warning, false) { NeedsFacts = true };
+
+    /// <summary>P18.</summary>
+    public static readonly PlanInsightInfo NoPartitionPruning = new("P18", "No partition pruning", HealthSeverity.Warning, false) { NeedsFacts = true };
+
+    /// <summary>P19.</summary>
+    public static readonly PlanInsightInfo DefaultFunctionRows = new("P19", "Default row estimate on a function", HealthSeverity.Info, false);
+
+    /// <summary>P20.</summary>
+    public static readonly PlanInsightInfo TriggerTime = new("P20", "Triggers dominating the statement", HealthSeverity.Warning, true);
+
     /// <summary>Every insight, by code.</summary>
     public static IReadOnlyList<PlanInsightInfo> All { get; } =
     [
         RowEstimate, Spill, LossyBitmap, SelectiveScan, LargeNestedLoop, LargeOffset, LeadingWildcard, ShortWorkers,
         HeapFetching, DiscardingFilter, HashBatched, CostlyJit, SlowPlanning, MissingMemoize,
+        StaleStatistics, CorrelatedColumns, WrappedIndexedColumn, NoPartitionPruning, DefaultFunctionRows, TriggerTime,
     ];
 
     /// <summary>P09's "fetching": heap fetches are at least this share of the rows the scan returned over its loops.</summary>
@@ -181,10 +206,16 @@ internal static partial class PlanInsights
     /// <summary>Every insight's findings on <paramref name="plan" />, in code order, each insight's worst first.</summary>
     /// <param name="plan">The plan.</param>
     /// <param name="text">The studio's words, for the remedies that differ between studios.</param>
-    public static IReadOnlyList<PlanInsightFinding> Evaluate(QueryPlan plan, StudioText text)
+    /// <param name="facts">
+    /// What the Plan page read from the database beside the plan (0.10-A), or <see langword="null" /> for a plan it did not run: the
+    /// insights that need facts (<see cref="PlanInsightInfo.NeedsFacts" />) then find nothing and are listed as not judged.
+    /// </param>
+    public static IReadOnlyList<PlanInsightFinding> Evaluate(QueryPlan plan, StudioText text, PlanFacts? facts = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(text);
+
+        PlanFactsTargets? targets = facts is null ? null : PlanFactsTargets.From(plan);
 
         return
         [
@@ -202,6 +233,12 @@ internal static partial class PlanInsights
             .. CostlyJitCompilation(plan),
             .. SlowPlanner(plan),
             .. MissingMemoizes(plan),
+            .. StaleStatisticsBehindMisestimates(plan, facts),
+            .. CorrelatedColumnFilters(plan, facts, targets),
+            .. WrappedIndexedColumns(plan, facts, targets),
+            .. UnprunedPartitions(plan, facts, targets),
+            .. DefaultRowFunctionScans(plan),
+            .. DominatingTriggers(plan),
         ];
     }
 
@@ -213,10 +250,48 @@ internal static partial class PlanInsights
     }
 
     /// <summary>
+    /// The insights that need the database's facts which have none to read (<paramref name="facts" /> is <see langword="null" />) -
+    /// those a plain plan is already not judged by (<see cref="NotJudged(QueryPlan)" />) are left out, as they are listed there.
+    /// </summary>
+    /// <param name="plan">The plan.</param>
+    /// <param name="facts">What was read, or <see langword="null" /> when nothing was.</param>
+    public static IReadOnlyList<PlanInsightInfo> NotJudgedWithoutFacts(QueryPlan plan, PlanFacts? facts)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return facts is not null ? [] : [.. All.Where(x => x.NeedsFacts && (plan.Analyzed || !x.NeedsAnalyze))];
+    }
+
+    /// <summary>
     /// P01: a node that returned ten times more or fewer rows than the planner expected - per loop, over at least
     /// <see cref="MisestimateMinRows" /> rows on the larger side - and so was planned for a different statement than ran.
     /// </summary>
     internal static IEnumerable<PlanInsightFinding> RowEstimates(QueryPlan plan)
+    {
+        if (!plan.Analyzed)
+        {
+            return [];
+        }
+
+        return MisestimatedNodes(plan)
+            .OrderByDescending(static x => x.Ratio)
+            .ThenBy(static x => x.Node.Id)
+            .Take(MaxPerInsight)
+            .Select(static x => Finding(
+                RowEstimate,
+                x.Node,
+                x.Node.Description + " was planned for " + Rows(x.Expected) + " rows a loop and returned " + Rows(x.Actual)
+                + Loops(x.Node) + ": " + Times(x.Ratio) + (x.Actual > x.Expected ? " more" : " fewer")
+                + " than expected, so the join and scan above it were chosen for a different statement than ran.",
+                "Plan it again after ANALYZE on the table it reads, so its statistics are current. Where one column's values are "
+                + "skewed, a higher statistics target for it (ALTER TABLE ... ALTER COLUMN ... SET STATISTICS) lets the planner "
+                + "see the skew; where columns move together, extended statistics (CREATE STATISTICS) let it see that."));
+    }
+
+    /// <summary>
+    /// The nodes P01 judges off: ten times more or fewer rows than expected - per loop - over at least <see cref="MisestimateMinRows" />
+    /// rows on the larger side. Under <c>ANALYZE</c> only; P15 and P16 read the same nodes.
+    /// </summary>
+    internal static IEnumerable<(PlanNode Node, double Expected, double Actual, double Ratio)> MisestimatedNodes(QueryPlan plan)
     {
         if (!plan.Analyzed)
         {
@@ -232,19 +307,7 @@ internal static partial class PlanInsights
                 double ratio = Math.Max(expected, actual) / Math.Max(Math.Min(expected, actual), 1);
                 return (Node: x, Expected: expected, Actual: actual, Ratio: ratio);
             })
-            .Where(static x => x.Ratio >= MisestimateRatio && Math.Max(x.Expected, x.Actual) * x.Node.ActualLoops!.Value >= MisestimateMinRows)
-            .OrderByDescending(static x => x.Ratio)
-            .ThenBy(static x => x.Node.Id)
-            .Take(MaxPerInsight)
-            .Select(static x => Finding(
-                RowEstimate,
-                x.Node,
-                x.Node.Description + " was planned for " + Rows(x.Expected) + " rows a loop and returned " + Rows(x.Actual)
-                + Loops(x.Node) + ": " + Times(x.Ratio) + (x.Actual > x.Expected ? " more" : " fewer")
-                + " than expected, so the join and scan above it were chosen for a different statement than ran.",
-                "Plan it again after ANALYZE on the table it reads, so its statistics are current. Where one column's values are "
-                + "skewed, a higher statistics target for it (ALTER TABLE ... ALTER COLUMN ... SET STATISTICS) lets the planner "
-                + "see the skew; where columns move together, extended statistics (CREATE STATISTICS) let it see that."));
+            .Where(static x => x.Ratio >= MisestimateRatio && Math.Max(x.Expected, x.Actual) * x.Node.ActualLoops!.Value >= MisestimateMinRows);
     }
 
     /// <summary>

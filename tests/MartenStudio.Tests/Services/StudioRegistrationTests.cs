@@ -141,6 +141,9 @@ public class StudioRegistrationTests
         (typeof(IStudioRuntime), ServiceLifetime.Singleton, How.Factory, typeof(IStudioRuntime)),
         (typeof(SqlConsoleService), ServiceLifetime.Scoped, How.Type, typeof(SqlConsoleService)),
         (typeof(ISqlConsoleService), ServiceLifetime.Scoped, How.Factory, typeof(ISqlConsoleService)),
+
+        // 0.10-A: the facts beside a plan the Plan page ran, a new shared service and the only registration 0.10-A adds.
+        (typeof(IPlanFactsService), ServiceLifetime.Scoped, How.Type, typeof(PlanFactsService)),
         (typeof(IRelationshipNodeSource), ServiceLifetime.Scoped, How.Type, typeof(MartenRelationshipNodeSource)),
         (typeof(INavIndicatorContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenNavIndicatorContributor)),
         (typeof(IndexCatalog), ServiceLifetime.Singleton, How.Type, typeof(IndexCatalog)),

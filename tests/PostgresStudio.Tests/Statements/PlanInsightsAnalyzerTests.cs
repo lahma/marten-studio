@@ -185,8 +185,9 @@ public class PlanInsightsAnalyzerTests
     [Fact]
     public void The_six_are_registered_in_code_order_and_every_one_needs_ANALYZE()
     {
-        PlanInsights.All.Select(static x => x.Code).Should().Equal("P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11", "P12", "P13", "P14");
-        PlanInsights.All.Skip(8).Should().OnlyContain(static x => x.NeedsAnalyze);
+        // 0.10-A added P15 to P20 after them (PlanFactsInsightsTests); the first fourteen are what this class is about.
+        PlanInsights.All.Take(14).Select(static x => x.Code).Should().Equal("P01", "P02", "P03", "P04", "P05", "P06", "P07", "P08", "P09", "P10", "P11", "P12", "P13", "P14");
+        PlanInsights.All.Skip(8).Take(6).Should().OnlyContain(static x => x.NeedsAnalyze);
     }
 
     [Fact]
