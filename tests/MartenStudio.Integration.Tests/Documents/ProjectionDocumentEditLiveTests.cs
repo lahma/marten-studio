@@ -80,7 +80,10 @@ public class SoftGauge
 /// Marten 9.55 (#5773): for a mapping with <c>UseVersionFromMatchingStream</c> and numeric revisions the revision is the
 /// version of the stream the snapshot reflects, and the studio's save moves it with <c>UpdateRevision(revision + 1)</c>.
 /// These tests edit through <see cref="IDocumentWriteService" />, append one more event and ask whether the document
-/// reflects it, for an inline projection, an async one, and an undelete.
+/// reflects it, for an inline projection, an async one, and an undelete. Only the async fetch path is affected:
+/// <see cref="An_async_fetch_after_a_studio_edit_still_sees_the_event_the_daemon_has_not_yet_projected" /> is the test
+/// that fails without the refusal (measured on the base commit at the floor: Count 2, not 3). The inline and
+/// daemon-running variants pass on the base too; they stay as guards for those paths, not as proof of the fix.
 /// </remarks>
 public class ProjectionDocumentEditLiveTests(PostgresFixture postgres) : DocumentWriteFixture(postgres)
 {
@@ -112,7 +115,11 @@ public class ProjectionDocumentEditLiveTests(PostgresFixture postgres) : Documen
         }
     }
 
-    /// <summary>Edit an inline projection's document, then append an event: the document must reflect it.</summary>
+    /// <summary>
+    /// Edit an inline projection's document, then append an event: the document must reflect it. This variant is not
+    /// affected by #5773 and passes without the refusal; it guards the inline path. The fix's proof is
+    /// <see cref="An_async_fetch_after_a_studio_edit_still_sees_the_event_the_daemon_has_not_yet_projected" />.
+    /// </summary>
     [PostgresFact]
     public async Task An_inline_projection_document_still_reflects_the_next_event_after_a_studio_edit()
     {
@@ -126,7 +133,11 @@ public class ProjectionDocumentEditLiveTests(PostgresFixture postgres) : Documen
         JsonNode.Parse((await StoredJsonAsync("mt_doc_inlinegauge", id))!)!["Count"]!.GetValue<int>().Should().Be(3);
     }
 
-    /// <summary>Edit an async projection's document while the daemon runs, then append an event.</summary>
+    /// <summary>
+    /// Edit an async projection's document while the daemon runs, then append an event. This variant is not affected
+    /// by #5773 and passes without the refusal; it guards the running-daemon path. The fix's proof is
+    /// <see cref="An_async_fetch_after_a_studio_edit_still_sees_the_event_the_daemon_has_not_yet_projected" />.
+    /// </summary>
     [PostgresFact]
     public async Task An_async_projection_document_still_reflects_the_next_event_after_a_studio_edit()
     {
