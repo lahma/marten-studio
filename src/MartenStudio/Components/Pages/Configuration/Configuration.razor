@@ -188,6 +188,9 @@
             </div>
         </section>
 
+        @* Issue #35: the health checks this application accepted, with the host's reasons. Absent when none. *@
+        <AcceptedChecksList />
+
         <h2 class="ms-section-title">Document types</h2>
         <SearchFilter Placeholder="Filter by alias, type or table" OnFilterChanged="OnFilterChangedAsync" />
 

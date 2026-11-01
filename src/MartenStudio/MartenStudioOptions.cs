@@ -162,6 +162,32 @@ public sealed class MartenStudioOptions
     /// </summary>
     internal TimeSpan EffectiveHealthInterval => HealthInterval >= RefreshInterval ? HealthInterval : RefreshInterval;
 
+    private readonly Dictionary<string, string> acceptedChecks = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Health checks this application has decided to live with, each by its code (<c>"K05"</c>) with the reason, in the host's
+    /// own words. The check still runs and its finding is still shown - as <em>Accepted</em>, muted, with the reason beside it
+    /// - but it is out of the Warning and Critical counts, the Health page's state, the navigation badge, the banners and
+    /// the ASP.NET Core health check's status; and <c>PostgresFinding.Accepted</c> says so for host code that reads the
+    /// diagnostics API.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Meant for findings about configuration the host owns and has chosen - K05, the SQL console reading as the store's own
+    /// login on a managed database whose roles belong to another team - which carry the same evidence every time. A finding
+    /// that moves with the data (projection lag, vacuum, storage) is not one to accept: it would stop counting the day it
+    /// matters.
+    /// </para>
+    /// <para>
+    /// Keys are compared ignoring case. Validation at startup refuses a key that is not a check of this studio, and a reason
+    /// that is empty, whitespace or longer than 500 characters.
+    /// </para>
+    /// </remarks>
+    public IDictionary<string, string> AcceptedChecks => acceptedChecks;
+
+    /// <summary><see cref="AcceptedChecks"/> as the studio reads it.</summary>
+    internal IReadOnlyDictionary<string, string> AcceptedCheckReasons => acceptedChecks;
+
     /// <summary>
     /// The per-shard replay timeout handed to Marten's rebuild. At least one minute.
     /// </summary>

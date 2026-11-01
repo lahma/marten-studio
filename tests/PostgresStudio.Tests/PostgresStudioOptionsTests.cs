@@ -348,4 +348,84 @@ public class PostgresStudioOptionsTests
         Enum.GetValues<PostgresPlatformKind>().Select(static x => ((int) x, x.ToString())).Should().Equal(
             (0, "SelfHosted"), (1, "AmazonRds"), (2, "AmazonAurora"), (3, "Azure"), (4, "CloudSql"), (5, "Neon"), (6, "Supabase"));
     }
+
+    // ---- AcceptedChecks (issue #35) -----------------------------------------------------------------------------------
+
+    [Fact]
+    public void AcceptedChecks_starts_empty_ignores_case_and_is_never_null()
+    {
+        PostgresStudioOptions options = new();
+
+        options.AcceptedChecks.Should().NotBeNull().And.BeEmpty();
+
+        options.AcceptedChecks["k05"] = "managed roles";
+        options.AcceptedChecks["K05"].Should().Be("managed roles", "keys are compared ignoring case");
+        options.AcceptedChecks.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void An_accepted_check_of_this_studio_is_valid_in_any_case_and_a_500_character_reason_is_the_longest()
+    {
+        PostgresStudioOptions options = Resolve(static x =>
+        {
+            x.AcceptedChecks["k05"] = new string('r', 500);
+            x.AcceptedChecks["S04"] = "the login is a superuser on purpose";
+        });
+
+        options.AcceptedChecks.Should().HaveCount(2);
+        options.AcceptedCheckReasons["K05"].Should().HaveLength(500);
+        PostgresStudioSettings.Of(options).AcceptedChecks["s04"].Should().Be("the login is a superuser on purpose");
+    }
+
+    [Theory]
+    [InlineData("X99")]
+    [InlineData("K5")]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("D01")]
+    [InlineData("K01")]
+    public void An_accepted_key_that_is_not_a_check_of_this_studio_is_refused_naming_the_key_and_nothing_else(string key)
+    {
+        // D01 and K01 are Marten Studio's checks: in Postgres Studio's registry they do not exist.
+        OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks[key] = "a reason")
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().ContainSingle().Which.Should()
+            .Be("PostgresStudioOptions.AcceptedChecks key '" + key + "' is not a health check code of this studio");
+        refusal.Message.Should().NotContain("K05", "the message lists no valid code");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t\n")]
+    public void An_empty_or_whitespace_reason_is_refused(string reason)
+    {
+        OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks["K05"] = reason)
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().ContainSingle().Which.Should().StartWith("PostgresStudioOptions.AcceptedChecks['K05'] needs a reason");
+    }
+
+    [Fact]
+    public void A_reason_over_500_characters_is_refused()
+    {
+        OptionsValidationException refusal = ResolveAction(x => x.AcceptedChecks["K05"] = new string('r', 501))
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().ContainSingle().Which.Should().Be("PostgresStudioOptions.AcceptedChecks['K05'] has a reason longer than 500 characters");
+    }
+
+    [Fact]
+    public void Every_refusal_of_one_configuration_is_listed()
+    {
+        OptionsValidationException refusal = ResolveAction(static x =>
+            {
+                x.AcceptedChecks["X99"] = "no such check";
+                x.AcceptedChecks["K05"] = " ";
+            })
+            .Should().Throw<OptionsValidationException>().Which;
+
+        refusal.Failures.Should().HaveCount(2);
+    }
 }

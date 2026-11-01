@@ -551,7 +551,7 @@
     private List<HealthReportFinding> TopFindings =>
         health is null || health.Refusal != HealthRefusal.None
             ? []
-            : [.. health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Take(TopFindingCount)];
+            : [.. health.Findings.Where(x => x.Counts(HealthMutes.IsMuted)).Take(TopFindingCount)];
 
     private string HealthValue
     {
@@ -562,7 +562,7 @@
                 return healthRead ? "unknown" : "checking";
             }
 
-            List<HealthReportFinding> unmuted = [.. health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey))];
+            List<HealthReportFinding> unmuted = [.. health.Findings.Where(x => x.Counts(HealthMutes.IsMuted))];
             int critical = unmuted.Count(static x => x.Severity == HealthSeverity.Critical);
             int warning = unmuted.Count(static x => x.Severity == HealthSeverity.Warning);
 
@@ -597,7 +597,7 @@
                 return "info";
             }
 
-            HealthSeverity? worst = health.Findings.Where(x => !HealthMutes.IsMuted(x.MuteKey)).Select(static x => (HealthSeverity?) x.Severity).Min();
+            HealthSeverity? worst = health.Findings.Where(x => x.Counts(HealthMutes.IsMuted)).Select(static x => (HealthSeverity?) x.Severity).Min();
             return worst is null && health.WithheldCount > 0 ? "info" : HealthPresentation.TileColor(worst);
         }
     }

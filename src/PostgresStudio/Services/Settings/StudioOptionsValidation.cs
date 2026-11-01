@@ -1,8 +1,10 @@
 using System.Text.RegularExpressions;
 
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Health;
 
 namespace PostgresStudio.Services.Settings;
 
@@ -139,10 +141,83 @@ internal static partial class StudioOptionsValidation
     }
 
     /// <summary>
+    /// The accepted checks (issue #35): each key a check code of <paramref name="descriptor" />'s own registry - a Marten code
+    /// in Postgres Studio is unknown - and each reason non-blank and at most <see cref="MaxAcceptedReasonLength" />
+    /// characters. A message names the offending key and nothing else: no list of the codes that would have been valid.
+    /// </summary>
+    /// <param name="builder">The studio's options builder.</param>
+    /// <param name="optionsType">The options type's name.</param>
+    /// <param name="descriptor">The studio, whose checks are the valid codes.</param>
+    /// <param name="accepted">The options' accepted checks.</param>
+    public static OptionsBuilder<TOptions> ValidateSharedAcceptedChecks<TOptions>(
+        this OptionsBuilder<TOptions> builder,
+        string optionsType,
+        StudioDescriptor descriptor,
+        Func<TOptions, IEnumerable<KeyValuePair<string, string>>> accepted)
+        where TOptions : class
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(accepted);
+
+        builder.Services.AddSingleton<IValidateOptions<TOptions>>(
+            new AcceptedChecksValidator<TOptions>(builder.Name, optionsType, descriptor, accepted));
+
+        return builder;
+    }
+
+    /// <summary>The longest reason an accepted check may carry.</summary>
+    public const int MaxAcceptedReasonLength = 500;
+
+    /// <summary>
     /// A Postgres role name as <c>SET LOCAL ROLE</c> will accept it. The console's role cannot be a parameter - it is an
     /// identifier - so it is held to the shape of an unquoted identifier here, at startup, rather than escaped later.
     /// <c>\A</c> and <c>\z</c>, because .NET's <c>$</c> also matches before a final line feed.
     /// </summary>
     [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_$]{0,62}\z", RegexOptions.CultureInvariant)]
     private static partial Regex PostgresRoleName();
+}
+
+/// <summary>
+/// Validates <c>AcceptedChecks</c> (issue #35) against the studio's own check codes: an unknown key, a blank reason and a
+/// reason over <see cref="StudioOptionsValidation.MaxAcceptedReasonLength" /> are each a failure naming the key and nothing
+/// else. A type of its own, not a lambda, because the message names the offending key.
+/// </summary>
+internal sealed class AcceptedChecksValidator<TOptions>(
+    string name,
+    string optionsType,
+    StudioDescriptor descriptor,
+    Func<TOptions, IEnumerable<KeyValuePair<string, string>>> accepted) : IValidateOptions<TOptions>
+    where TOptions : class
+{
+    public ValidateOptionsResult Validate(string? optionsName, TOptions options)
+    {
+        if (optionsName is not null && !string.Equals(optionsName, name, StringComparison.Ordinal))
+        {
+            return ValidateOptionsResult.Skip;
+        }
+
+        List<string> failures = [];
+        IReadOnlySet<string>? codes = null;
+
+        foreach ((string key, string? reason) in accepted(options))
+        {
+            codes ??= StudioCheckCodes.Of(descriptor);
+
+            if (!codes.Contains(key))
+            {
+                failures.Add(optionsType + ".AcceptedChecks key '" + key + "' is not a health check code of this studio");
+            }
+            else if (string.IsNullOrWhiteSpace(reason))
+            {
+                failures.Add(optionsType + ".AcceptedChecks['" + key + "'] needs a reason: an empty or whitespace one explains nothing to the people who read the Health page");
+            }
+            else if (reason.Length > StudioOptionsValidation.MaxAcceptedReasonLength)
+            {
+                failures.Add(optionsType + ".AcceptedChecks['" + key + "'] has a reason longer than " + StudioOptionsValidation.MaxAcceptedReasonLength + " characters");
+            }
+        }
+
+        return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+    }
 }

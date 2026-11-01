@@ -68,6 +68,7 @@ public static class PostgresStudioServiceCollectionExtensions
             .ValidateSharedBounds(nameof(PostgresStudioOptions), nameof(PostgresStudioOptions.MaxInlineValueBytes), Shape)
             .ValidateSharedCapabilities(nameof(PostgresStudioOptions), nameof(PostgresStudioCapabilities), Shape)
             .ValidateSharedSchemas(nameof(PostgresStudioOptions), Shape)
+            .ValidateSharedAcceptedChecks(nameof(PostgresStudioOptions), PostgresStudioDescriptor.Instance, static options => options.AcceptedCheckReasons)
             .Validate(
                 static options => SourceNames(options).All(PostgresSourceNames.IsValidKey),
                 "PostgresStudioOptions.AddDataSource and AddDatabaseSource names must each be a letter or digit followed by " +

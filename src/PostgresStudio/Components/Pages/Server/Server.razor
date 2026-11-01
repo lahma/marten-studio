@@ -249,8 +249,9 @@
                 else
                 {
                     (IReadOnlyList<HealthReportFinding> findings, IReadOnlyList<HealthCheckStatus> checks) = ServerPosture.Of(report);
-                    List<HealthReportFinding> shown = [.. findings.Where(x => !Mutes.IsMuted(x.MuteKey))];
-                    int muted = findings.Count - shown.Count;
+                    // An accepted finding (issue #35) is not drawn as a card: its check's row says it was accepted, and why.
+                    List<HealthReportFinding> shown = [.. findings.Where(x => x.Counts(Mutes.IsMuted))];
+                    int muted = findings.Count(x => !x.Accepted && Mutes.IsMuted(x.MuteKey));
 
                     @foreach (HealthReportFinding finding in shown)
                     {
@@ -324,6 +325,12 @@
                                             <td class="ms-table-cell">@check.Title</td>
                                             <td class="ms-table-cell">
                                                 <span class="ms-health-outcome">@HealthPresentation.OutcomeLabel(check.Outcome, check.FindingCount, check.FindingsWithheld)</span>
+                                                @if (check.AcceptedCount > 0)
+                                                {
+                                                    <span class="ms-health-accepted">
+                                                        <span class="ms-health-accepted-label">Accepted</span>@HealthPresentation.AcceptedReasonText(check.AcceptedReason)
+                                                    </span>
+                                                }
                                                 @if (check.Problem is { Length: > 0 } problem)
                                                 {
                                                     <span class="ms-health-outcome-detail">@problem</span>
@@ -339,6 +346,8 @@
                             </table>
                         </TableScroll>
                     }
+
+                    <AcceptedChecksList />
                 }
             }
         </section>

@@ -392,6 +392,18 @@ internal sealed record HealthFinding
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
 
     /// <summary>
+    /// Whether the host accepted this finding's check (<c>AcceptedChecks</c>, issue #35): shown as accepted and out of every
+    /// count and state. Stamped by the sweep from the options, never set by an evaluator.
+    /// </summary>
+    public bool Accepted { get; init; }
+
+    /// <summary>
+    /// The host's reason for accepting the check - the host's own text, shown only where the finding itself is shown, and
+    /// <see langword="null" /> unless <see cref="Accepted" />.
+    /// </summary>
+    public string? AcceptedReason { get; init; }
+
+    /// <summary>
     /// What identifies this finding among the others of its database: the code, then the variant when there is one, then
     /// the subject - <c>Code</c>, <c>Code|Subject</c>, <c>Code|Variant</c> or <c>Code|Variant|Subject</c>. A finding with
     /// no variant keeps the key it always had, so no mute key moves until a check sets one.

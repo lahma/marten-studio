@@ -183,6 +183,8 @@ internal static class DiagnosticsMapper
                 ? [new PostgresStudioLink { Label = link.Label, Path = HealthLinks.Relative(sourceParameter, link.Route, scope, link.Query) }]
                 : [],
             MeasuredAt = finding.MeasuredAt,
+            Accepted = finding.Accepted,
+            AcceptedReason = finding.AcceptedReason,
         };
     }
 
@@ -216,6 +218,8 @@ internal static class DiagnosticsMapper
             Evidence = [.. shown.Evidence.Select(static x => new KeyValuePair<string, string>(x.Label, x.Value))],
             DocsUrl = shown.DocsUrl,
             MeasuredAt = finding.MeasuredAt,
+            Accepted = finding.Accepted,
+            AcceptedReason = finding.AcceptedReason,
         };
     }
 

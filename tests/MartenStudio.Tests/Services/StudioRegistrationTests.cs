@@ -125,6 +125,7 @@ public class StudioRegistrationTests
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
+        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(AcceptedChecksValidator<MartenStudioOptions>)),
         (typeof(MartenStoreRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenStoreRegistry)),
         (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenStudioSourceProvider)),
         (typeof(IStudioLinks), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioLinks)),

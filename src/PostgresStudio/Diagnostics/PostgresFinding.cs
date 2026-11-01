@@ -89,6 +89,18 @@ public sealed record PostgresFinding
     public DateTimeOffset MeasuredAt { get; init; }
 
     /// <summary>
+    /// Whether the host accepted this finding's check (<c>AcceptedChecks</c> in the studio's options): the finding is still
+    /// here, so a snapshot shows the whole picture, but the studio counts it nowhere - not on the Health page, the badge, the
+    /// banners or the ASP.NET Core health check. A host's own summary leaves out the findings where this is true.
+    /// </summary>
+    public bool Accepted { get; init; }
+
+    /// <summary>
+    /// The host's reason for accepting the check, in the host's own words, or null when <see cref="Accepted" /> is false.
+    /// </summary>
+    public string? AcceptedReason { get; init; }
+
+    /// <summary>
     /// What identifies it among one database's findings, and across snapshots while it lasts: the code, then the variant
     /// when there is one, then the subject when there is one, joined by <c>|</c> - <c>T03|index|public.orders_idx</c>,
     /// <c>C08|deadlocks</c>. The studio refuses two findings of one database under one key, so it needs no tenant of its own.

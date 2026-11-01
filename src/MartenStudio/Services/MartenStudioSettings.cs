@@ -113,6 +113,9 @@ internal sealed class MartenStudioSettings : IStudioSettings
         Value.BrowsableSchemas as IReadOnlyList<string> ?? [.. Value.BrowsableSchemas];
 
     /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> AcceptedChecks => Value.AcceptedCheckReasons;
+
+    /// <inheritdoc />
     public Func<Type, bool>? IsDocumentTypeVisible => Value.IsDocumentTypeVisible;
 
     /// <summary>

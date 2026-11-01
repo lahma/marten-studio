@@ -207,6 +207,53 @@ public class HealthExportSummaryTests
             "Marten Studio could not check: its health export failed with InvalidOperationException, logged as event 9270. Refreshed after 60 s, served for at most 120 s.");
     }
 
+    // ---- Accepted checks (issue #35) ----------------------------------------------------------------
+
+    /// <summary>An accepted finding never makes the health check Degraded or Unhealthy: it is counted apart.</summary>
+    [Theory]
+    [InlineData(nameof(HealthSeverity.Warning))]
+    [InlineData(nameof(HealthSeverity.Critical))]
+    [InlineData(nameof(HealthSeverity.Info))]
+    public void An_accepted_finding_leaves_the_run_healthy_and_is_counted_under_accepted(string severity)
+    {
+        HealthExportSummary summary = HealthExportSummary.From(Now, [Sweep(Accepted("K05", Enum.Parse<HealthSeverity>(severity)))]);
+
+        summary.Level.Should().Be(HealthExportLevel.Healthy);
+        summary.Critical.Should().BeEmpty();
+        summary.Warning.Should().BeEmpty();
+        summary.Info.Should().BeEmpty();
+        summary.CriticalFindings.Should().Be(0);
+        summary.WarningFindings.Should().Be(0);
+        summary.InfoFindings.Should().Be(0);
+        summary.AcceptedFindings.Should().Be(1);
+        summary.ToData()["accepted"].Should().Be(1);
+        summary.Describe(TimeSpan.FromSeconds(60)).Should().Be(
+            "No findings (and 1 accepted) on 1 database. Refreshed after 60 s, served for at most 120 s.");
+        StudioHealthCheck.StatusOf(summary.Level, HealthStatus.Unhealthy).Should().Be(HealthStatus.Healthy);
+    }
+
+    [Fact]
+    public void An_accepted_finding_beside_a_real_one_leaves_the_real_ones_status_and_counts()
+    {
+        HealthExportSummary summary = HealthExportSummary.From(
+            Now,
+            [Sweep(Accepted("K05", HealthSeverity.Warning), Found("T06", HealthSeverity.Warning)), Sweep(Accepted("K05", HealthSeverity.Warning))]);
+
+        summary.Level.Should().Be(HealthExportLevel.Degraded);
+        summary.Warning.Should().Equal("T06");
+        summary.WarningFindings.Should().Be(1);
+        summary.AcceptedFindings.Should().Be(2, "counted across databases, like every other count");
+        summary.ToData()["accepted"].Should().Be(2);
+    }
+
+    [Fact]
+    public void The_accepted_count_names_no_code_so_the_data_stays_codes_and_counts()
+    {
+        HealthExportSummary summary = HealthExportSummary.From(Now, [Sweep(Accepted("K05", HealthSeverity.Warning))]);
+
+        System.Text.Json.JsonSerializer.Serialize(summary.ToData()).Should().NotContain("K05");
+    }
+
     // ---- The status a level reports -----------------------------------------------------------------
 
     /// <param name="level">A <c>HealthExportLevel</c> name: the enum is internal, so a public theory takes its name.</param>
@@ -241,7 +288,7 @@ public class HealthExportSummaryTests
 
         string[] keys =
         [
-            "critical", "warning", "info", "failed", "unavailable", "timedOut", "databases", "databasesSkipped", "databasesTimedOut",
+            "critical", "warning", "info", "accepted", "failed", "unavailable", "timedOut", "databases", "databasesSkipped", "databasesTimedOut",
             "storesNotReached", "storesNotEnumerated", "measuredAt",
         ];
 
@@ -345,6 +392,17 @@ public class HealthExportSummaryTests
             Severity = severity,
             Title = "A finding",
             WhyItMatters = "Because.",
+        });
+
+    private static StudioCheckResult Accepted(string code, HealthSeverity severity) =>
+        Result(code, HealthCheckOutcome.Checked, new HealthFinding
+        {
+            Code = code,
+            Severity = severity,
+            Title = "A finding",
+            WhyItMatters = "Because.",
+            Accepted = true,
+            AcceptedReason = "The host decided.",
         });
 
     private static StudioCheckResult Result(string code, HealthCheckOutcome outcome, params HealthFinding[] findings) =>

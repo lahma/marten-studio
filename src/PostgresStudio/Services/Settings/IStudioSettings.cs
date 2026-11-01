@@ -129,6 +129,12 @@ internal interface IStudioSettings
     IReadOnlyList<string> BrowsableSchemas { get; }
 
     /// <summary>
+    /// The checks the host accepted, by code with its reason (<c>AcceptedChecks</c>), keys compared ignoring case. Host
+    /// configuration, validated at startup. Empty by default, so a settings object built without one accepts nothing.
+    /// </summary>
+    IReadOnlyDictionary<string, string> AcceptedChecks => EmptyAcceptedChecks.Instance;
+
+    /// <summary>
     /// The host's document-type filter, or <see langword="null" /> when every type is visible - which is always the
     /// answer of a studio that has no document types. Every rule that exists only to protect a hidden type is off
     /// while this is <see langword="null" />, which under D27 is correct when no hidden type can exist.
@@ -148,6 +154,14 @@ internal interface IStudioSettings
     /// </summary>
     /// <param name="member">The member path below the options type, such as <c>ReadOnly</c> or <c>Capabilities.RunSql</c>.</param>
     string OptionName(string member) => OptionsTypeName + "." + member;
+}
+
+/// <summary>The accepted checks of a settings object that has none.</summary>
+internal static class EmptyAcceptedChecks
+{
+    /// <summary>No check accepted, keys compared ignoring case.</summary>
+    public static IReadOnlyDictionary<string, string> Instance { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>The sentences built from <see cref="IStudioSettings" /> that more than one place writes.</summary>

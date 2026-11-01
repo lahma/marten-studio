@@ -39,6 +39,7 @@ namespace MartenStudio
     public sealed class MartenStudioOptions
     {
         public MartenStudioOptions() { }
+        public System.Collections.Generic.IDictionary<string, string> AcceptedChecks { get; }
         public string? AuthorizationPolicy { get; set; }
         public System.Collections.Generic.IList<string> BrowsableSchemas { get; }
         public MartenStudio.MartenStudioCapabilities Capabilities { get; set; }

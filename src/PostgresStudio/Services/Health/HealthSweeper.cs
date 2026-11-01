@@ -620,6 +620,9 @@ internal sealed class HealthSweeper
                     $"{info.Code}'s evaluator produced more than one finding keyed '{shared[0].Key}'; give each its own Subject.");
             }
 
+            // The host's own decision about this check (issue #35): a finding is stamped, never dropped, so it is still shown.
+            settings.AcceptedChecks.TryGetValue(info.Code, out string? acceptedReason);
+
             List<HealthFinding> findings = [];
             foreach (HealthFinding finding in verdict.Findings)
             {
@@ -656,6 +659,8 @@ internal sealed class HealthSweeper
                     CheckTitle = info.Title,
                     MeasuredAt = evaluation.Now,
                     Statements = gathered.Statements,
+                    Accepted = acceptedReason is not null,
+                    AcceptedReason = acceptedReason,
                 });
             }
 

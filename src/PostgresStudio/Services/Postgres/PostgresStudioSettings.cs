@@ -117,6 +117,9 @@ internal sealed class PostgresStudioSettings : IStudioSettings
         Value.BrowsableSchemas as IReadOnlyList<string> ?? [.. Value.BrowsableSchemas];
 
     /// <inheritdoc />
+    public IReadOnlyDictionary<string, string> AcceptedChecks => Value.AcceptedCheckReasons;
+
+    /// <inheritdoc />
     /// <remarks>
     /// "Source" once <c>AddDataSource</c> or <c>AddDatabaseSource</c> named one - the only configurations with a source
     /// picker, and the ones where a host source's database picker, "Database", sits beside it - and otherwise the
