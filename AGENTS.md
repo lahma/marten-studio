@@ -362,8 +362,9 @@ digits, never reused, renamed or moved to another area, and a variant is frozen 
 **D32 — The studio draws every plan, plan insights judge it, and EXPLAIN ANALYZE is the console's alone.** Every plan is
 drawn through `QueryPlanReader` and `PlanView`; plan insights are pure evaluators with stable `P` codes in `codes.md`,
 never a health check; `EXPLAIN ANALYZE` runs only under `RunSql`, for a statement the guard accepts, in the read-only
-transaction; a plan reading a withheld schema is not shown. Full text:
-[plan-analyzer.md](docs/maintainers/plan-analyzer.md).
+transaction; a plan reading a withheld schema is not shown. The facts Query › Plan reads beside a plan it ran (0.10)
+pass each relation's schema and every ancestor's, then the row gate for values, which are never a Marten table's. Full
+text: [plan-analyzer.md](docs/maintainers/plan-analyzer.md).
 
 ## Package budget
 

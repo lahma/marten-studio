@@ -13631,6 +13631,8 @@ a.ms-schema-health-mark:focus-visible {
 }
 
 .ms-accepted-checks-table .ms-table-cell {
+    overflow-wrap: anywhere;
+}
 
 /* ==========================================================================
    0.10-A. Facts beside the plan

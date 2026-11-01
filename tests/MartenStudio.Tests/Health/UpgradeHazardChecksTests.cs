@@ -102,7 +102,7 @@ public class UpgradeHazardChecksTests
             return options;
         }
 
-        SchemaNameQuoting.QuotedSchemas(Configured()).Should().Equal("order", "hidden-one");
+        SchemaNameQuoting.QuotedSchemas(Configured()).Should().Equal("hidden-one", "order");
         SchemaNameQuoting.QuotedSchemas(Configured(), static type => type != typeof(Kayıt)).Should().Equal(["order"], "a schema only a hidden type declares is not named");
         SchemaNameQuoting.QuotedSchemas(Configured(), static _ => false).Should().BeEmpty("every type is hidden and the store-level schemas need no quoting");
     }

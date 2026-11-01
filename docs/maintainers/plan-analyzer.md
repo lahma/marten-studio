@@ -27,4 +27,19 @@ and timeout, audited as `RunSql` (the matrix classifies it with `RunSqlAsync`), 
 of a statement with `$n` placeholders - a custom plan binds the typed values to the statement `EXPLAIN` explains, because a
 protocol parameter cannot reach `EXECUTE`, and a prepared statement only reads the inferred types - with `PlanView`'s
 `Analyzer` mode drawing it (unmasked: only `RunSql` output keeps every key of a node). A pasted plan reads nothing and goes
-over in chunks, since the circuit accepts 32 KB a message. P09 to P14 join the plan insight registry.
+over in chunks, since the circuit accepts 32 KB a message. P09 to P14 (0.9) and P15 to P20 (0.10) join the plan insight registry.
+
+**Facts beside the plan (0.10, issue #28).** After a plan the Plan page ran - never a pasted one, never on a poll - `PlanFactsService`
+reads what the database knows about the relations it names, in the console's read-only transaction as `SqlConsoleRole`, behind
+the console's own gate whole and then, in this order: each relation's schema and every table above it in `pg_inherits`, walked
+inside `ResolveSql` (`DatabaseGate.CanSeeStructure`, a hidden type's table; a relation that fails is `‹withheld›`, with no facts,
+no count and no name in the record or the audit), then the values' row gate (`DatabaseAccess.RequireRowAccessAsync`, with the
+page's own `BrowseDatabase` question asked first and unaudited). Relations are named by the schema and name a `VERBOSE` plan
+prints (the page's default, `PlanOptions.PageDefault`) and resolved by a catalog join - never `to_regclass`, which raises 42501
+for a schema the role has no USAGE on; every statement (`PlanFactsQueries`) reads `pg_catalog` and the statistics views by oid,
+with no size and no deparse function, held lock-free by `MatrixReads` on 14 to 19. Column types are masked like the browser's.
+`most_common_vals` and `histogram_bounds` are data: read only for a relation the row gate admits, never a Marten table's, and
+audited per relation as a `BrowseDatabase` read, a failed read included; the facts read itself is one `RunSql` entry naming no
+relation. P15 to P18 (`NeedsFacts`) judge the plan against the facts and are listed as not judged without them; P19 and P20
+read the plan alone. Condition texts are read for column names by `PlanConditionText`, a bounded scan that returns names only,
+which are afterwards only ever bound as parameters.
