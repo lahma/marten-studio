@@ -93,6 +93,11 @@ every tenant's rows and every deleted one — live-proven by the P6 review.
 browser tab — and an exception escaping a component's `DisposeAsync` takes the rest of that disposal with it, leaving
 the `DotNetObjectReference` that pins the component undisposed and the page's `CancellationTokenSource` uncancelled.
 
+## Hard rule 7
+
+The public surface grows only by extension. 0.10 (issue #35) added `PostgresFinding.Accepted` and `AcceptedReason`
+to the D31 read model and `AcceptedChecks` to each options type; the snapshot's `schemaVersion` stayed 1.
+
 ## D3 — Two dependencies a package
 
 No direct `Npgsql` either; it arrives through `Weasel.Postgresql`, and adding it would let the two drift. The Marten

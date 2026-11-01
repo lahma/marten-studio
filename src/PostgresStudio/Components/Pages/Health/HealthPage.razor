@@ -182,6 +182,16 @@
             </div>
         }
 
+        @if (linkedFindingAccepted is { } acceptedCode)
+        {
+            @* The address named a finding the host accepted (issue #35): it draws no card, and its check's row says why. *@
+            <div class="ms-alert ms-alert-info ms-health-finding-accepted" role="status">
+                <div class="ms-alert-content">
+                    <p>This application accepted @acceptedCode's finding: its row under What was checked says why.</p>
+                </div>
+            </div>
+        }
+
         @if (VisibleFindings.Count == 0)
         {
             @* Never an all-clear while findings are withheld: the notice above counts them, and this must not then say
@@ -286,6 +296,9 @@
 
     /// <summary>The address named a finding card the report does not hold (issue #33).</summary>
     private bool linkedFindingGone;
+
+    /// <summary>The code of the finding the address named when the host accepted its check (issue #35): no card to reveal.</summary>
+    private string? linkedFindingAccepted;
 
     private List<HealthReportFinding> VisibleFindings =>
         report is null ? [] : [.. report.Findings.Where(x => x.Counts(Mutes.IsMuted))];
@@ -397,7 +410,21 @@
         linkedFinding = null;
 
         // Only an id the report holds goes to the script, which looks it up by id and does nothing else with it.
-        bool found = shown.Findings.Any(x => string.Equals(x.Anchor, id, StringComparison.Ordinal));
+        HealthReportFinding? match = shown.Findings.FirstOrDefault(x => string.Equals(x.Anchor, id, StringComparison.Ordinal));
+
+        if (match is { Accepted: true })
+        {
+            // An accepted finding draws no card (issue #35), so there is nothing to reveal, and it is not gone either.
+            if (!disposed)
+            {
+                linkedFindingAccepted = match.Code;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            return;
+        }
+
+        bool found = match is not null;
 
         if (found)
         {

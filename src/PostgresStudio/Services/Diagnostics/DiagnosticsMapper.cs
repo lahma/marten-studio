@@ -226,7 +226,8 @@ internal static class DiagnosticsMapper
     /// <summary>
     /// A check's row as one visitor's Health page shows it, for the studio's snapshot download:
     /// <see cref="PostgresReadOutcome.Withheld" /> with the page's own sentence for a row past the visitor's gate, otherwise
-    /// its outcome, the page's words for a problem, and how many findings the visitor is shown.
+    /// its outcome, the page's words for a problem, and how many findings the visitor is shown - accepted ones included, as the
+    /// snapshot's items include them (issue #35).
     /// </summary>
     /// <param name="status">The row.</param>
     /// <param name="info">The check, from the registry, for its variants and gate; <see langword="null" /> when unknown.</param>
@@ -254,7 +255,7 @@ internal static class DiagnosticsMapper
             Outcome = Outcome(status.Outcome),
             Reason = status.Problem ?? (status.Outcome == HealthCheckOutcome.Checked ? null : status.Note),
             SqlState = status.SqlState,
-            Findings = status.FindingCount,
+            Findings = status.FindingCount + status.AcceptedCount,
         };
     }
 

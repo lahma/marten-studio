@@ -202,4 +202,21 @@ public class DiagnosticsMapperTests
         api.Accepted.Should().BeFalse();
         api.AcceptedReason.Should().BeNull();
     }
+
+    /// <summary>
+    /// The download's check row counts the findings its items hold: a row's <c>FindingCount</c> leaves accepted ones out
+    /// (they draw no card), but the snapshot lists them, so the count adds them back (issue #35).
+    /// </summary>
+    [Fact]
+    public void A_visitor_check_row_counts_its_accepted_findings_as_the_snapshot_lists_them()
+    {
+        HealthCheckStatus status = new("K05", "SQL console role", HealthArea.Tables, HealthCostTier.Catalog, HealthCheckOutcome.Checked, 0, null, null, null, "docs", [])
+        {
+            AcceptedCount = 1,
+            AcceptedReason = "Roles belong to the platform team.",
+        };
+
+        DiagnosticsMapper.Check(status, info: null).Findings.Should().Be(1);
+        DiagnosticsMapper.Check(status with { FindingCount = 2 }, info: null).Findings.Should().Be(3);
+    }
 }

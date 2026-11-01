@@ -151,6 +151,9 @@ member, so a host can build one in its tests and a new property breaks nothing. 
 and request flag; the three interfaces gain members only as default interface members. The JSON snapshot's
 `schemaVersion` changes only for a removal, a rename or a change of meaning.
 
+*Accepted checks* (0.10, issue #35). `PostgresFinding.Accepted` and `AcceptedReason` are the API's half of D29's accepted
+checks: the finding is returned either way, so a host's summary leaves out `Accepted` ones without a code list of its own.
+
 *Cost and DDL.* An API nobody calls reads nothing. Calls share the pages' sweep and section caches, so polling every few
 seconds costs one sweep per interval per database; fresh reads that calls start run at most two at a time per process,
 and a cache hit waits behind nothing. Listing never enumerates a tenancy that builds: Marten's databases are the held

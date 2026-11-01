@@ -75,3 +75,12 @@ it is an Activity check; its terminate and cancel text is built in `SessionHandO
 **A check whose platform does what it judges** throws `HealthCheckNotApplicableException` with `ReplicationPlatform`'s
 sentence: listed as not applicable, never run, nothing logged (issue #8, A2), an expected state like a missing extension
 or privilege, never a Warning. The platform is recognised only from markers a role short of a superuser cannot plant.
+
+**Accepted checks** (`AcceptedChecks`, issue #35): a host accepts a check by code with a reason (at most 500 characters,
+validated at startup against that studio's own registry by `AcceptedChecksValidator`, naming only the key). The sweep
+stamps the check's findings `Accepted`, so every reader sees the same mark; it never drops one. An accepted finding is
+shown on its check's row, never a card, and is out of every count and state: the Overview tile, the badge, the toast, the
+banners (all through `HealthReportFinding.Counts` and the one list `CachedAsync` builds), and the export's `Degraded` and
+`Unhealthy` (counted apart under `accepted`). It changes no gate: a withheld accepted finding is still counted as
+withheld, and its reason is shown on the check's row only beside a finding the visitor may see. The *Accepted checks*
+list (the Server page, Marten Studio's Configuration page) is configuration, shown to anyone who may open that page.
