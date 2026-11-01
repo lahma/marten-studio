@@ -41,9 +41,11 @@ internal static class PostgresStudioDescriptor
             new StudioPageAssembly(typeof(StudioHome).Assembly, PostgresStudioOptions.DefaultPath),
         ],
 
-        // The shared checks, which read nothing but Postgres, run against every kind of source this studio has.
+        // The shared checks, which read nothing but Postgres, run against every kind of source this studio has: the engine's
+        // (the diagnostics assembly) and the ones that judge this studio's own exposure (this assembly).
         HealthCheckAssemblies =
         [
+            new StudioHealthCheckAssembly(typeof(PostgresDiagnosticsDescriptor).Assembly),
             new StudioHealthCheckAssembly(typeof(StudioHome).Assembly),
         ],
         Navigation = Navigation(),

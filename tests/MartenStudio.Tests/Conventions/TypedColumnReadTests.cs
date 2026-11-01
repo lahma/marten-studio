@@ -19,7 +19,7 @@ public partial class TypedColumnReadTests
     /// </summary>
     private static readonly Dictionary<string, string> Exempt = new(StringComparer.Ordinal)
     {
-        ["src/PostgresStudio/Internal/Sql/ReadOnlySqlSession.cs"] =
+        ["src/PostgresStudio.Diagnostics/Internal/Sql/ReadOnlySqlSession.cs"] =
             "the SQL console's result grid reads columns of types only the visitor's statement decides, and formats them for display",
     };
 
@@ -27,7 +27,7 @@ public partial class TypedColumnReadTests
     internal static bool Covered(string relative) =>
         relative.Contains("/Internal/Sql/", StringComparison.Ordinal)
         || relative.Contains("/Services/Health/Checks/", StringComparison.Ordinal)
-        || (relative.StartsWith("src/PostgresStudio/Services/", StringComparison.Ordinal)
+        || ((relative.StartsWith("src/PostgresStudio/Services/", StringComparison.Ordinal) || relative.StartsWith("src/PostgresStudio.Diagnostics/Services/", StringComparison.Ordinal))
             && (Path.GetFileName(relative).Contains("Facts", StringComparison.Ordinal) || Path.GetFileName(relative).Contains("Reader", StringComparison.Ordinal)));
 
     /// <summary>Every untyped column read in one file's code.</summary>
@@ -41,8 +41,8 @@ public partial class TypedColumnReadTests
     {
         string[] covered = [.. SourceScanner.ShippedSourceFiles().Select(SourceScanner.Relative).Where(Covered).Where(static x => x.EndsWith(".cs", StringComparison.Ordinal))];
 
-        covered.Should().Contain("src/PostgresStudio/Services/Storage/StorageFacts.cs")
-            .And.Contain("src/PostgresStudio/Services/Database/SessionActivityReader.cs")
+        covered.Should().Contain("src/PostgresStudio.Diagnostics/Services/Storage/StorageFacts.cs")
+            .And.Contain("src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs")
             .And.Contain(static x => x.StartsWith("src/MartenStudio/Internal/Sql/", StringComparison.Ordinal))
             .And.Contain(Exempt.Keys, "an exemption names a file the rule covers");
 

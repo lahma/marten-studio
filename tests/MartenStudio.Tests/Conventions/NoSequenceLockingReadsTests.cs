@@ -63,7 +63,7 @@ public class NoSequenceLockingReadsTests
             .ToDictionary(static x => x.File, static x => x.Count, StringComparer.Ordinal);
 
         calls.Should().Equal(
-            new Dictionary<string, int> { ["src/PostgresStudio/Internal/Sql/DatabaseCatalogQueries.cs"] = LastValue.Count(DatabaseCatalogQueries.SequenceValueSql) },
+            new Dictionary<string, int> { ["src/PostgresStudio.Diagnostics/Internal/Sql/DatabaseCatalogQueries.cs"] = LastValue.Count(DatabaseCatalogQueries.SequenceValueSql) },
             "pg_sequence_last_value takes a RowExclusiveLock on its sequence, so it is read for one sequence, on demand, in SequenceValueSql alone");
 
         string sql = DatabaseCatalogQueries.SequenceValueSql;

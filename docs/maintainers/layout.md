@@ -20,17 +20,24 @@ build/                                   The Fallout orchestrator. `build/` is a
   Build.Npgsql.cs                        --npgsql-version and NpgsqlPass, PostgresStudio's latest-Npgsql pass (D30)
 build/Extensions/                        Vendored Cake helpers (StringExtensions) - do not edit
 src/                                     The shipped libraries, and nothing else: the shared studio and MartenStudio
+src/PostgresStudio.Diagnostics/          The diagnostics engine, with no ASP.NET Core (0.11-C, issue #29): the health sweep and its
+                                         checks, the facts readers, the sources, the settings seam and IPostgresDiagnostics.
+                                         References no Marten, no MartenStudio and no web stack (PostgresStudioFenceTests,
+                                         CoreFenceTests); namespaces stay PostgresStudio.*, and the UI reaches its internals
+                                         through InternalsVisibleTo
 src/PostgresStudio/                      The shared studio's Razor Class Library (0.5, PS-2): shell, routes, scope,
-                                         authorization, audit, the database browser, Sessions, Health, the SQL
-                                         console, Relationships, the JSON toolkit and wwwroot/. References no Marten
-                                         and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
+                                         authorization, audit, the database browser, Sessions, the Health page, the SQL
+                                         console, Relationships, the JSON toolkit and wwwroot/. Built on the diagnostics
+                                         engine; references no Marten and no MartenStudio (PostgresStudioFenceTests, CoreFenceTests)
 src/PostgresStudio/Components/           the shared document every root renders, route table, links, scope query
 src/PostgresStudio/Components/Shared/    small building-block components: TableScroll (D25), CopyButton,
                                          dialogs, chips, the empty and error states
 src/PostgresStudio/Internal/             startup authorization guard, endpoint marker, mapped-endpoint
                                          tracking and the endpoint mapper (D11)
-src/PostgresStudio/Services/             scope, state, authorization, the capability guard, the action log,
-                                         toasts and the shared log events
+src/PostgresStudio.Diagnostics/Internal/  Nothing but the engine's SQL builders, in Internal/Sql/ (hard rule 4)
+src/PostgresStudio.Diagnostics/Services/  The scope types, the shared log events (StudioLog, PostgresStudioLog), the log throttle and the
+                                         capping of a visitor's value in a log line
+src/PostgresStudio/Services/             state, authorization, the capability guard, the action log and toasts
 src/PostgresStudio/wwwroot/              static web assets, packed under `_content/PostgresStudio/`
 src/PostgresStudio/wwwroot/css/          the one stylesheet, studio.css
 src/PostgresStudio/wwwroot/js/           the studio's browser helpers, studio.js, loaded by the shell (never a
@@ -59,9 +66,12 @@ tests/MartenStudio.Tests/                Fast suite: unit, bUnit, endpoint metad
 tests/MartenStudio.Tests/Conventions/    Rules too easy to break silently to leave to review
 tests/MartenStudio.Tests/Marten/         MartenApiSurfaceTest - the Marten 9.35 contract, pinned
 tests/MartenStudio.Integration.Tests/    Testcontainers Postgres + Playwright. Needs Docker
-src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the source provider over the application's NpgsqlDataSources
-                                         and host database sources, settings, descriptor, the Overview's server read, and
-                                         the seams' plain-Postgres implementations (declarations, tables, remedies, locks, links)
+src/PostgresStudio.Diagnostics/Services/Postgres/  The engine's plain-Postgres half: the source registry and provider over the application's
+                                         NpgsqlDataSources and host database sources, the diagnostics settings and descriptor, and the
+                                         seams' implementations (declarations, tables, remedies, locks, statements' words), and
+                                         AddPostgresDiagnostics's seam registration
+src/PostgresStudio/Services/Postgres/    PostgresStudio's own: the studio's settings and descriptor, the links out of the browser
+                                         and the Overview's server read
 tests/PostgresStudio.Tests/              PostgresStudio's fast suite: no Docker, and no Marten anywhere in its graph
 tests/PostgresStudio.Tests/Components/   bUnit: PostgresStudioComponentContext and the core pages' smoke tests, the plan view
                                          and the console's Explain buttons
@@ -83,11 +93,16 @@ tests/PostgresStudio.Integration.Tests/Query/  Live Postgres: every SQL console 
                                          postgresql-17-hypopg)
 tests/PostgresStudio.Integration.Tests/Sources/  Live Postgres: discovery, and isolation between a host source's
                                          databases through every cache
-src/PostgresStudio/Internal/Sql/         The shared builders, SqlIdentifier and SqlLexer: one of the two places a
-                                         Postgres identifier becomes SQL text (hard rule 4); hypopg's calls (X2); the
-                                         blocking chain's hand-over text (X3); partition bounds and column skew (X4)
+src/PostgresStudio.Diagnostics/Internal/Sql/  The engine's builders, SqlIdentifier and SqlLexer: the first of the three places a Postgres
+                                         identifier becomes SQL text (hard rule 4) - the health sweep's and the facts readers'
+                                         statements, the catalog's, the read-only guard and session; the blocking chain's
+                                         hand-over text (X3); partition bounds and column skew (X4)
+src/PostgresStudio/Internal/Sql/         The shared studio's own builders - the second place (hard rule 4): the SQL console's
+                                         plans and their settings (X1), the facts beside a plan (0.10), hypopg's calls (X2),
+                                         the browser's rows, Relationships and the console's examples; the same namespace
+                                         as the engine's, each assembly exempt in its own folder only
 src/MartenStudio/Internal/Sql/           The Marten builders - documents, events, the daemon, projections: the
-                                         other (hard rule 4); Marten's own DDL for a what-if (X2); the dead-letter
+                                         third (hard rule 4); Marten's own DDL for a what-if (X2); the dead-letter
                                          groups (M3)
 src/PostgresStudio/Components/Layout/    Shell chrome: layout, nav, scope selector, capability chip, the
                                          preferences popover (theme and time zone, behind the gear)
@@ -105,6 +120,7 @@ src/PostgresStudio/Components/Json/      The JSON toolkit: viewer, raw view, edi
 src/PostgresStudio/Services/Json/        Flat model, path expressions, pretty printer, canonicalizer,
                                          round-trip differ, C# record generator
 src/MartenStudio/Services/Query/         Search grammar, index advisor, the document list request, LINQ mode
+src/PostgresStudio.Diagnostics/Services/Query/  The scan of an EXPLAIN plan for the relations it reads, which the statement checks take
 src/PostgresStudio/Services/Query/       The SQL console service, export, saved queries, error text, index
                                          verdicts and search chips; the plan reader and the plan insights (X1); the
                                          what-if engine and its hypothetical indexes (X2)
@@ -117,12 +133,16 @@ tests/MartenStudio.Tests/Documents/       Document service unit tests - no datab
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker; the lag history
                                          (M2); the progression-row classifier and the daemon topology (M47)
-src/PostgresStudio/Services/Live/         Snapshot cache, the per-page polling helper (D10), the nav indicators
+src/PostgresStudio.Diagnostics/Services/Live/  The single-flight snapshot cache every reader shares (D10)
+src/PostgresStudio/Services/Live/         The per-page polling helper (D10) and the nav indicators
 src/MartenStudio/Services/Live/           The tracker observer: the in-process daemon's latest shard state (D10)
-src/PostgresStudio/Services/Settings/     The shared studio's settings seam, descriptor, links, mount path, registration
-                                         marker and core registrations (PS-1a; moved whole in PS-2)
-src/PostgresStudio/Services/Sources/      The source seam - databases, the source provider, the shared resolver - and the
-                                         seams MartenStudio implements (PS-1a-1d; moved whole in PS-2)
+src/PostgresStudio.Diagnostics/Services/Settings/  The engine's settings seam, descriptor, words, mount path, registration marker, option validation and
+                                         core registration (AddPostgresDiagnostics and every Add*Studio call it)
+src/PostgresStudio/Services/Settings/     The studio's settings seam (it extends the engine's), descriptor, links, registration
+                                         marker, option validation and core registration (PS-1a; moved whole in PS-2)
+src/PostgresStudio.Diagnostics/Services/Sources/  The source seam - databases, the source provider, the declarations, the table and lock seams
+src/PostgresStudio/Services/Sources/      The shared resolver and the seams MartenStudio implements for a UI (PS-1a-1d; moved
+                                         whole in PS-2)
 src/MartenStudio/Components/Pages/Projections/  The projections screen and its parts
 samples/MartenStudio.SampleDomain/Events/ The demo events and the three projections
 tests/MartenStudio.Tests/Projections/     Daemon accessor, snapshot cache, live updates, operation tracker, page
@@ -137,7 +157,8 @@ tests/MartenStudio.Tests/Events/          Event builder cases, links, the page t
 tests/MartenStudio.Integration.Tests/Events/  Live Postgres: the event reads and the dead-letter writes, the stepper
                                          against Marten's own fold, and the dead-letter groups over a corpus
 src/MartenStudio/Services/Schema/         Schema data service, index advice, migration risk and their DTOs
-src/PostgresStudio/Services/Schema/       The DDL tokenizer, schema declarations, storage parameters, index redundancy
+src/PostgresStudio.Diagnostics/Services/Schema/  The DDL tokenizer, schema declarations, storage parameters, index redundancy
+                                         and foreign-key coverage the table checks judge by
 src/MartenStudio/Services/Configuration/  The read-only StoreOptions describer and its DTOs
 src/MartenStudio/Components/Pages/Schema/ The schema screen's five tabs and their parts
 src/MartenStudio/Components/Pages/Configuration/  The configuration dump screen
@@ -172,23 +193,27 @@ src/PostgresStudio/Components/Pages/Relationships/  The relationships screen: th
 tests/MartenStudio.Tests/Relationships/       Layout, graph builder, SQL shape, page and panel - no database
 tests/MartenStudio.Integration.Tests/Relationships/  Live Postgres: drift both ways, visibility, bounded counts
 tests/MartenStudio.Integration.Tests/Browser/  Playwright over the sample host on real Kestrel: thirteen scenarios, the D19 gate, the large-data passes
-src/PostgresStudio/Services/Database/     The database browser: the per-visitor gate, the schema matcher, the
-                                         ownership classifier, the catalog cache and the object service; Sessions'
-                                         lock graph (X3)
+src/PostgresStudio.Diagnostics/Services/Database/  What the engine reads of a database: the schema matcher, the ownership classifier, the lock graph (X3),
+                                         the sessions' reader, models and pool observer, and the statement screen
+src/PostgresStudio/Services/Database/     The database browser: the per-visitor gate, the catalog cache and the object
+                                         service; Sessions' per-visitor service; the visitor's links
 src/PostgresStudio/Components/Pages/Database/  The database browser's screens: the rail, the kind tabs and grids,
                                          object detail and its tabs, the Rows and Relationships slots; Sessions and
                                          its Blocking tab (X3)
 tests/MartenStudio.Tests/Database/        Gate, matcher, classifier, catalog SQL shape, options - no database
 tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, the gate and its audit, no DDL,
                                          and the relational demo schemas' idempotency and demo-data flows
-src/PostgresStudio/Services/Health/       The health advisor: check model and registry, sweeper, sweep cache,
-                                         history, per-visitor report and gates, mutes and toasts
-src/PostgresStudio/Services/Health/Checks/  One file per shared health check (attribute, gatherer, pure evaluator); a
+src/PostgresStudio.Diagnostics/Services/Health/  The health advisor's engine: check model and registry, sweeper, sweep cache, history, the
+                                         gate every reader applies, links and platform
+src/PostgresStudio/Services/Health/       The health advisor's visitor half: the per-visitor report and gates, mutes and toasts
+src/PostgresStudio.Diagnostics/Services/Health/Checks/  One file per shared health check (attribute, gatherer, pure evaluator); a
                                          check is added by adding its file here, nothing else
+src/PostgresStudio/Services/Health/Checks/  The three checks that judge the studio's own exposure (K05-K07): they read the
+                                         studio's settings and mapping, so they are run only where a studio is registered
 src/MartenStudio/Services/Health/         What MartenStudio's checks read of the store (MartenHealthContext)
 src/MartenStudio/Services/Health/Checks/  One file per Marten-only health check - the store, the event store, the
                                          daemon - run against Marten stores only; added the same way
-src/PostgresStudio/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every
+src/PostgresStudio.Diagnostics/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every
                                          store and database, summarised as codes and counts, never names
 src/PostgresStudio/Components/Pages/Health/ The Health page and its presentation helpers
 tests/MartenStudio.Tests/Health/          Evaluators, sweeper, cache, history, gates, page, badge, toast, the
@@ -199,31 +224,34 @@ docs/health/                             One file per health area, one "## <code
                                          the plan insights (P)
 tests/MartenStudio.Integration.Tests/Tenancy/  Live Postgres: first navigation per tenancy shape changes nothing,
                                          and the enumerations that still apply a lookup table
-src/PostgresStudio/Services/Server/       The server facts every W5 packet uses: the PostgreSQL version gates
+src/PostgresStudio.Diagnostics/Services/Server/  The server facts every W5 packet uses: the PostgreSQL version gates
                                          (PostgresFeatures), the reading role's grants and the "not checked"
                                          sentences (PostgresGrants), and server-setting remedies
+src/PostgresStudio/Services/Server/       The Server page's per-visitor service
 tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per platform and grant, the remedy kinds
 tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
                                          the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
                                          server per major, started on first use (an assembly fixture)
-src/PostgresStudio/Services/Maintenance/  The Maintenance page's facts (the regular sweep's own reads), its
-                                         per-visitor view, and the on-demand bloat measure
+src/PostgresStudio.Diagnostics/Services/Maintenance/  The Maintenance page's facts (the regular sweep's own reads) and the page's route
+src/PostgresStudio/Services/Maintenance/  The Maintenance page's per-visitor view, and the on-demand bloat measure
 src/PostgresStudio/Components/Pages/Maintenance/  The Maintenance page: autovacuum's triggers per table, running
                                          maintenance, the workers, the freeze forecast and the vacuum horizon
 tests/PostgresStudio.Integration.Tests/Maintenance/  Live Postgres on autovacuum servers of their own: T07 against
                                          each table's triggers, T08, T16, T24, S02, the bloat measure, C06's VACUUM
                                          at the head and T14's standby through a slot
-src/PostgresStudio/Services/Storage/      The Storage page's facts (sizes from relpages, growth over the statistics
-                                         window, the largest tables) and its per-visitor view (W5-CAP)
+src/PostgresStudio.Diagnostics/Services/Storage/  The Storage page's facts (sizes from relpages, growth over the statistics window, the largest
+                                         tables) and the words for a growth not yet known (W5-CAP)
+src/PostgresStudio/Services/Storage/      The Storage page's per-visitor view
 src/PostgresStudio/Components/Pages/Storage/  The Storage page: the tiles and the largest tables
 tests/PostgresStudio.Tests/Storage/       The statistics window over hand-built histories, the growth arithmetic, the
                                          Storage builder's D27 fence - no database
 tests/MartenStudio.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
 tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 14-18: the Storage facts, behind a held lock, no DDL,
                                          and the statistics window across a real crash
-src/PostgresStudio/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
-                                         WAL, checkpoints, pg_stat_io, tablespaces), A2's not-applicable rules, the
-                                         advisor's counter windows, and the per-visitor service
+src/PostgresStudio.Diagnostics/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
+                                         WAL, checkpoints, pg_stat_io, tablespaces), A2's not-applicable rules and the
+                                         advisor's counter windows
+src/PostgresStudio/Services/Replication/  The Replication page's per-visitor service
 src/PostgresStudio/Components/Pages/Replication/  Operations › Replication: slots, standbys, the archiver, WAL,
                                          checkpoints, I/O by backend type and tablespaces
 tests/PostgresStudio.Tests/Replication/   R02-R04's evaluators at every edge, WAL file names, the facts' version shapes,
@@ -234,16 +262,16 @@ src/PostgresStudio/Components/Pages/Server/  System › Server: the server's fac
                                          settings, the extension chips, the security posture and the platform slot
 tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
                                          14-18 as app and probe, and their no-lock, no-DDL reads
-src/PostgresStudio/Services/Aurora/       Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
-                                         profile and its samples, the parameter reference, the host's capacity reader, and
-                                         the Server page section's facts and per-visitor view
+src/PostgresStudio.Diagnostics/Services/Aurora/  Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
+                                         profile and its samples, the parameter reference and the host's capacity reader
+src/PostgresStudio/Services/Aurora/       The Server page Aurora section's per-visitor view
 tests/PostgresStudio.Tests/Aurora/        By-name mapping of Aurora's functions, the wait windows, commit latency, the capacity
                                          reader, the parameter wording and R03's aurora-reader view - no database
 tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the instance, R03 aurora-reader, the wait section, a
                                          failover, the not-applicable checks, C03's remedy and the spoof-proof markers
-src/PostgresStudio/Services/Statements/   The Statements page (W5-Q1): its facts (the statement sweep's own read and
-                                         history), the per-visitor view behind the activity gate, the plain classifier
-                                         and the drill-in's planner
+src/PostgresStudio.Diagnostics/Services/Statements/  The Statements page's facts (the statement sweep's own read and history), the plain classifier,
+                                         the page's route and the words for pg_stat_statements' state (W5-Q1)
+src/PostgresStudio/Services/Statements/   The Statements page's per-visitor view behind the activity gate, and the drill-in's planner
 src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group,
                                          and one statement's drill-in
 tests/PostgresStudio.Tests/Statements/    The window and share arithmetic, the view's ranking and groups, the gate, the
@@ -258,10 +286,10 @@ tests/PostgresStudio.Integration.Tests/Statements/  Live pg_stat_statements on a
                                          the drill-in's plan on 14, 16 and 18
 tests/PostgresStudio.Tests/Tables/        T15, T19, T20, T25 and T26 at their edges, the usage guards, foreign-key coverage,
                                          sequence headroom and the lint statements' D27 shape - no database
-src/PostgresStudio/Diagnostics/          The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
+src/PostgresStudio.Diagnostics/Diagnostics/  The public diagnostics read model (D31): IPostgresDiagnostics, its request, snapshot,
                                          findings, checks and sections - namespace PostgresStudio, like the registration types
-src/PostgresStudio/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builders, read limiter and JSON
-                                         writer, and the Health page's visitor download builder (W5-API)
+src/PostgresStudio.Diagnostics/Services/Diagnostics/  The API's service, host gate, mapper, snapshot builder, read limiter and JSON writer (W5-API)
+src/PostgresStudio/Services/Diagnostics/  The Health page's visitor download builder, which never reaches the API (W5-API)
 tests/PostgresStudio.Tests/Diagnostics/   The mapper over every enum member, the host gate's sentinels, the JSON baselines, the
                                          limiter, the sections from hand-built facts, the visitor download and the Snapshot
                                          menu - no database

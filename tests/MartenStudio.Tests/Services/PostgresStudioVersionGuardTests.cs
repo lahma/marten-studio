@@ -343,7 +343,12 @@ public class PostgresStudioVersionGuardTests
         }
     }
 
+    /// <summary>
+    /// A type of PostgresStudio - or of PostgresStudio.Diagnostics, the engine it is built on, which a deployment can lack in
+    /// the same way and which MartenStudio names directly (<c>HealthExportRunner</c>, <c>FreshReadLimiter</c>).
+    /// </summary>
     private static bool IsPostgresStudio(Type type) =>
         !type.IsGenericParameter
-        && string.Equals(type.Assembly.GetName().Name, PostgresStudioVersionGuard.PostgresStudioAssemblyName, StringComparison.Ordinal);
+        && (string.Equals(type.Assembly.GetName().Name, PostgresStudioVersionGuard.PostgresStudioAssemblyName, StringComparison.Ordinal)
+            || string.Equals(type.Assembly.GetName().Name, "PostgresStudio.Diagnostics", StringComparison.Ordinal));
 }

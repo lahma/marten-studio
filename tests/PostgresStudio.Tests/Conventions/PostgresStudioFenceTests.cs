@@ -7,9 +7,11 @@ using MartenStudio.Tests.Conventions;
 namespace PostgresStudio.Tests.Conventions;
 
 /// <summary>
-/// The compiled half of the fence around the shared studio: <c>PostgresStudio.dll</c> references no Marten, JasperFx or
-/// Weasel assembly, its project brings in no such package - directly, through a project, or transitively - and neither
-/// does this test project, whose output folder is the proof that nothing drags them in (design §7.2).
+/// The compiled half of the fence around the shared studio: <c>PostgresStudio.dll</c> and <c>PostgresStudio.Diagnostics.dll</c>
+/// reference no Marten, JasperFx or Weasel assembly, their projects bring in no such package - directly, through a project,
+/// or transitively - and neither does this test project, whose output folder is the proof that nothing drags them in
+/// (design §7.2). The diagnostics assembly has a second fence of its own: it references no ASP.NET Core and no JSInterop,
+/// and is no Razor project, so a worker or console host can use it with nothing of a web stack (0.11-C).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,6 +37,8 @@ public class PostgresStudioFenceTests
 {
     private const string Shared = "PostgresStudio";
 
+    private const string Diagnostics = "PostgresStudio.Diagnostics";
+
     private const string TestProject = "PostgresStudio.Tests";
 
     /// <summary>The prefixes of the Marten family: Marten itself and every package it brings, and MartenStudio.</summary>
@@ -51,7 +55,8 @@ public class PostgresStudioFenceTests
     /// </summary>
     public static TheoryData<string, string, string> ProjectFiles => new()
     {
-        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets" },
+        { "src", Diagnostics, "Npgsql,Microsoft.Extensions.Logging.Abstractions,Microsoft.Extensions.Options,Microsoft.Extensions.Diagnostics.HealthChecks" },
+        { "src", Shared, Diagnostics + ",Microsoft.AspNetCore.App.Internal.Assets" },
         { "tests", TestProject, Shared + ",bunit" },
     };
 
@@ -61,8 +66,9 @@ public class PostgresStudioFenceTests
     /// </summary>
     public static TheoryData<string, string, string> RestoreGraphs => new()
     {
-        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets" },
-        { "tests", TestProject, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Shared },
+        { "src", Diagnostics, "Npgsql,Microsoft.Extensions.Logging.Abstractions,Microsoft.Extensions.Options,Microsoft.Extensions.Diagnostics.HealthChecks" },
+        { "src", Shared, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Diagnostics },
+        { "tests", TestProject, "Npgsql,Microsoft.AspNetCore.App.Internal.Assets," + Shared + "," + Diagnostics },
     };
 
     [Fact]
@@ -70,8 +76,8 @@ public class PostgresStudioFenceTests
     {
         string[] references = [.. typeof(PostgresStudioOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
-        // Not vacuous: the list is the real one - the shared framework and Npgsql are on it.
-        references.Should().Contain("Npgsql", "the shared studio talks to Postgres through Npgsql alone")
+        // Not vacuous: the list is the real one - the shared framework is on it, and Npgsql is reached through the engine.
+        references.Should().Contain(Diagnostics, "the shared studio is built on the diagnostics engine")
             .And.Contain(static x => x.StartsWith("Microsoft.AspNetCore.", StringComparison.Ordinal), "and is a Blazor library");
 
         references.Where(IsMartenFamily).Should().BeEmpty(
@@ -80,11 +86,110 @@ public class PostgresStudioFenceTests
     }
 
     [Fact]
+    public void The_diagnostics_assembly_references_no_Marten_JasperFx_or_Weasel_assembly()
+    {
+        string[] references = [.. typeof(PostgresDiagnosticsOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+
+        // Not vacuous: the list is the real one - Npgsql and the Microsoft.Extensions abstractions are on it.
+        references.Should().Contain("Npgsql", "the engine talks to Postgres through Npgsql alone")
+            .And.Contain("Microsoft.Extensions.Logging.Abstractions", "and logs through the abstractions");
+
+        references.Where(IsMartenFamily).Should().BeEmpty(
+            "PostgresStudio.Diagnostics.dll must run in a host with no Marten at all, so it may reference no Marten, JasperFx or Weasel assembly");
+    }
+
+    /// <summary>
+    /// The diagnostics assembly's own fence, at the built assembly: it references no ASP.NET Core, no JSInterop and no
+    /// Components assembly, so a worker host that references it loads none of them.
+    /// </summary>
+    [Fact]
+    public void The_diagnostics_assembly_references_no_ASP_NET_Core_JSInterop_or_Components_assembly()
+    {
+        string[] references = [.. typeof(PostgresDiagnosticsOptions).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
+
+        references.Should().Contain("Npgsql", "the list is the real one");
+
+        references.Where(IsWebStack).Should().BeEmpty(
+            "PostgresStudio.Diagnostics.dll is the engine alone: " + string.Join(", ", references.Where(IsWebStack)));
+    }
+
+    /// <summary>The diagnostics project file names no ASP.NET Core package or framework and is no Razor project.</summary>
+    [Fact]
+    public void The_diagnostics_project_file_names_no_ASP_NET_Core_framework_package_or_Razor_SDK()
+    {
+        XDocument document = XDocument.Load(RepositoryRoot.Combine("src", Diagnostics, Diagnostics + ".csproj"));
+
+        // Not vacuous: the file is the real one.
+        References(document, "PackageReference").Should().Contain("Npgsql");
+
+        WebStackInProject(document).Should().BeEmpty("the engine's project names nothing of a web stack: " + string.Join(", ", WebStackInProject(document)));
+
+        Directory.EnumerateFiles(RepositoryRoot.Combine("src", Diagnostics), "*.razor", SearchOption.AllDirectories)
+            .Where(static x => !x.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            .Should().BeEmpty("the engine has no Razor component");
+    }
+
+    /// <summary>The diagnostics restore resolved no ASP.NET Core library and no framework reference to it.</summary>
+    [Fact]
+    public void What_the_diagnostics_project_restores_holds_no_ASP_NET_Core_library_or_framework_reference()
+    {
+        string assets = RepositoryRoot.Combine("src", Diagnostics, "obj", "project.assets.json");
+
+        File.Exists(assets).Should().BeTrue(
+            $"src/{Diagnostics} has been restored to build this suite, so {assets} must exist; if the restore output moved, move this check with it");
+
+        string json = File.ReadAllText(assets);
+
+        // Not vacuous: the graph is read.
+        Libraries(json).Select(static x => x.Split('/')[0]).Should().Contain("Npgsql");
+
+        WebStackInAssets(json).Should().BeEmpty("the engine's restore graph holds nothing of a web stack: " + string.Join(", ", WebStackInAssets(json)));
+    }
+
+    /// <summary>The web-stack test, on synthetic assembly names: ASP.NET Core, JSInterop and Components are found, and their neighbours are not.</summary>
+    [Theory]
+    [InlineData("Microsoft.AspNetCore", true)]
+    [InlineData("Microsoft.AspNetCore.Http.Abstractions", true)]
+    [InlineData("Microsoft.AspNetCore.Components.Web", true)]
+    [InlineData("Microsoft.JSInterop", true)]
+    [InlineData("Microsoft.Extensions.Logging.Abstractions", false)]
+    [InlineData("Microsoft.Extensions.Diagnostics.HealthChecks", false)]
+    [InlineData("Npgsql", false)]
+    [InlineData("System.Runtime", false)]
+    public void The_web_stack_test_finds_ASP_NET_Core_and_JSInterop_and_nothing_else(string name, bool webStack)
+    {
+        IsWebStack(name).Should().Be(webStack);
+    }
+
+    /// <summary>The project-file half of the web-stack fence, on synthetic project text.</summary>
+    [Theory]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><PackageReference Include=\"Npgsql\" /></ItemGroup></Project>", "")]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><FrameworkReference Include=\"Microsoft.AspNetCore.App\" /></ItemGroup></Project>", "FrameworkReference Microsoft.AspNetCore.App")]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><PackageReference Include=\"Microsoft.AspNetCore.Http.Abstractions\" /></ItemGroup></Project>", "Microsoft.AspNetCore.Http.Abstractions")]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk\"><ItemGroup><PackageReference Include=\"Microsoft.JSInterop\" /></ItemGroup></Project>", "Microsoft.JSInterop")]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Razor\"><ItemGroup><PackageReference Include=\"Npgsql\" /></ItemGroup></Project>", "Sdk Microsoft.NET.Sdk.Razor")]
+    [InlineData("<Project Sdk=\"Microsoft.NET.Sdk.Web\" />", "Sdk Microsoft.NET.Sdk.Web")]
+    public void A_web_stack_reference_is_found_in_a_project_file(string text, string expected)
+    {
+        WebStackInProject(XDocument.Parse(text)).Should().Equal(expected.Length == 0 ? Array.Empty<string>() : new[] { expected });
+    }
+
+    /// <summary>The assets half of the web-stack fence, on a synthetic assets file shaped as NuGet writes one.</summary>
+    [Theory]
+    [InlineData("""{ "libraries": { "Npgsql/9.0.4": { "type": "package" } }, "project": { "frameworks": { "net10.0": { "frameworkReferences": { "Microsoft.NETCore.App": { "privateAssets": "all" } } } } } }""", "")]
+    [InlineData("""{ "libraries": { "Microsoft.AspNetCore.Http.Abstractions/2.3.0": { "type": "package" } } }""", "Microsoft.AspNetCore.Http.Abstractions/2.3.0")]
+    [InlineData("""{ "libraries": { "Npgsql/9.0.4": { "type": "package" } }, "project": { "frameworks": { "net10.0": { "frameworkReferences": { "Microsoft.AspNetCore.App": { "privateAssets": "none" } } } } } }""", "framework Microsoft.AspNetCore.App")]
+    public void A_web_stack_library_is_found_in_an_assets_file(string json, string expected)
+    {
+        WebStackInAssets(json).Should().Equal(expected.Length == 0 ? Array.Empty<string>() : new[] { expected });
+    }
+
+    [Fact]
     public void This_test_assembly_references_no_Marten_JasperFx_or_Weasel_assembly()
     {
         string[] references = [.. typeof(PostgresStudioFenceTests).Assembly.GetReferencedAssemblies().Select(static x => x.Name!)];
 
-        references.Should().Contain(Shared, "the suite tests the shared studio");
+        references.Should().Contain(Shared, "the suite tests the shared studio").And.Contain(Diagnostics, "and its diagnostics engine");
 
         references.Where(IsMartenFamily).Should().BeEmpty(
             "PostgresStudio.Tests stands for a host with only Npgsql: it may reference no Marten-family assembly");
@@ -99,8 +204,8 @@ public class PostgresStudioFenceTests
     {
         string[] assemblies = [.. Directory.EnumerateFiles(AppContext.BaseDirectory, "*.dll").Select(Path.GetFileNameWithoutExtension).OfType<string>()];
 
-        // Not vacuous: the folder is the real one - the studio and Npgsql are in it.
-        assemblies.Should().Contain(Shared).And.Contain("Npgsql");
+        // Not vacuous: the folder is the real one - the studio, its engine and Npgsql are in it.
+        assemblies.Should().Contain(Shared).And.Contain(Diagnostics).And.Contain("Npgsql");
 
         assemblies.Where(IsMartenFamily).Should().BeEmpty(
             "nothing this suite references may bring Marten, JasperFx or Weasel with it: " + string.Join(", ", assemblies.Where(IsMartenFamily)));
@@ -205,6 +310,55 @@ public class PostgresStudioFenceTests
     {
         Libraries(json).Where(static x => IsMartenFamily(x.Split('/')[0])).Should().Equal(
             expected.Length == 0 ? Array.Empty<string>() : new[] { expected });
+    }
+
+    /// <summary>Whether an assembly or package name is of the web stack: ASP.NET Core, JSInterop (and so Components).</summary>
+    private static bool IsWebStack(string name) =>
+        name.StartsWith("Microsoft.AspNetCore", StringComparison.OrdinalIgnoreCase) || name.StartsWith("Microsoft.JSInterop", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What a project file names of the web stack: a package, a framework reference or a web SDK.</summary>
+    private static IEnumerable<string> WebStackInProject(XDocument project)
+    {
+        foreach (string package in References(project, "PackageReference").Where(IsWebStack))
+        {
+            yield return package;
+        }
+
+        foreach (string framework in References(project, "FrameworkReference").Where(IsWebStack))
+        {
+            yield return "FrameworkReference " + framework;
+        }
+
+        if ((string?) project.Root?.Attribute("Sdk") is { } sdk && (sdk.Contains(".Razor", StringComparison.Ordinal) || sdk.Contains(".Web", StringComparison.Ordinal)))
+        {
+            yield return "Sdk " + sdk;
+        }
+    }
+
+    /// <summary>What an assets file holds of the web stack: a library, or a framework reference the project declared.</summary>
+    private static IEnumerable<string> WebStackInAssets(string json)
+    {
+        foreach (string library in Libraries(json).Where(static x => IsWebStack(x.Split('/')[0])))
+        {
+            yield return library;
+        }
+
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        if (document.RootElement.TryGetProperty("project", out JsonElement project)
+            && project.TryGetProperty("frameworks", out JsonElement frameworks))
+        {
+            foreach (JsonProperty framework in frameworks.EnumerateObject())
+            {
+                if (framework.Value.TryGetProperty("frameworkReferences", out JsonElement references))
+                {
+                    foreach (JsonProperty reference in references.EnumerateObject().Where(static x => IsWebStack(x.Name)))
+                    {
+                        yield return "framework " + reference.Name;
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>The <c>Include</c> or <c>Update</c> of every item of <paramref name="kind" />, as a package id or a project name.</summary>

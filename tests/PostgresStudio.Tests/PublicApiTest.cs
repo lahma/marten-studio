@@ -27,8 +27,26 @@ public class PublicApiTest
     [Fact]
     public async Task The_public_api_has_not_changed_unintentionally()
     {
-        var assembly = typeof(PostgresStudioOptions).Assembly;
+        await Verify(PublicApi(typeof(PostgresStudioOptions).Assembly), extension: "txt")
+            .UseDirectory("Verify")
+            .UseFileName("PublicApiTest_PostgresStudio");
+    }
 
+    /// <summary>
+    /// The diagnostics engine's own baseline (0.11-C): the types that moved out of <c>PostgresStudio.dll</c> with the engine,
+    /// and the two the engine adds - <c>PostgresDiagnosticsOptions</c>, the base of <c>PostgresStudioOptions</c>, and
+    /// <c>AddPostgresDiagnostics</c>. Read like the other: a diff is deliberate, never accepted by hand.
+    /// </summary>
+    [Fact]
+    public async Task The_diagnostics_public_api_has_not_changed_unintentionally()
+    {
+        await Verify(PublicApi(typeof(PostgresDiagnosticsOptions).Assembly), extension: "txt")
+            .UseDirectory("Verify")
+            .UseFileName("PublicApiTest_PostgresStudioDiagnostics");
+    }
+
+    private static string PublicApi(System.Reflection.Assembly assembly)
+    {
         var options = new ApiGeneratorOptions
         {
             // The same generator options as MartenStudio's baseline, for the same reasons.
@@ -53,28 +71,27 @@ public class PublicApiTest
                 .ToArray(),
         };
 
-        await Verify(assembly.GeneratePublicApi(options), extension: "txt")
-            .UseDirectory("Verify")
-            .UseFileName("PublicApiTest_PostgresStudio");
+        return assembly.GeneratePublicApi(options);
     }
 
     /// <summary>
-    /// The thirty-four public types, by name, so an extra one fails with its name rather than a diff: the six registration
-    /// types, the six inbound types and the twenty of the diagnostics read model (API design §5.1, and issue #31's
-    /// <c>PostgresWalSection</c>) and the two that link into the studio (issue #24).
+    /// The thirty-six public types of the two assemblies, by name, so an extra one fails with its name rather than a diff:
+    /// the studio's five (its options, capabilities, resource, registration and mapping) and the engine's thirty-one - the
+    /// registration, the options it shares as a base, the six inbound types, the twenty of the diagnostics read model (API
+    /// design §5.1, and issue #31's <c>PostgresWalSection</c>), the two that link into the studio (issue #24) and the
+    /// health-check export (0.11-C).
     /// </summary>
     [Fact]
     public void The_public_types_are_the_registration_types_the_inbound_types_and_the_diagnostics_read_model()
     {
-        string[] exported =
-        [
-            .. typeof(PostgresStudioOptions).Assembly.GetExportedTypes()
-                .Where(static type => !typeof(IComponent).IsAssignableFrom(type) && type.Name != "_Imports")
-                .Select(static type => type.FullName!)
-                .Order(StringComparer.Ordinal),
-        ];
+        Exported(typeof(PostgresStudioOptions).Assembly).Should().Equal(
+            "PostgresStudio.PostgresStudioCapabilities",
+            "PostgresStudio.PostgresStudioEndpointRouteBuilderExtensions",
+            "PostgresStudio.PostgresStudioOptions",
+            "PostgresStudio.PostgresStudioResource",
+            "PostgresStudio.PostgresStudioServiceCollectionExtensions");
 
-        exported.Should().Equal(
+        Exported(typeof(PostgresDiagnosticsOptions).Assembly).Should().Equal(
             "PostgresStudio.IPostgresCapacitySource",
             "PostgresStudio.IPostgresDatabaseSource",
             "PostgresStudio.IPostgresDiagnostics",
@@ -84,7 +101,9 @@ public class PublicApiTest
             "PostgresStudio.PostgresConnectionCounts",
             "PostgresStudio.PostgresConnectionsSection",
             "PostgresStudio.PostgresDatabaseRef",
+            "PostgresStudio.PostgresDiagnosticsOptions",
             "PostgresStudio.PostgresDiagnosticsRequest",
+            "PostgresStudio.PostgresDiagnosticsServiceCollectionExtensions",
             "PostgresStudio.PostgresDiagnosticsSnapshot",
             "PostgresStudio.PostgresExtension",
             "PostgresStudio.PostgresFinding",
@@ -98,16 +117,19 @@ public class PublicApiTest
             "PostgresStudio.PostgresStatement",
             "PostgresStudio.PostgresStatementsSection",
             "PostgresStudio.PostgresStorageSection",
-            "PostgresStudio.PostgresStudioCapabilities",
-            "PostgresStudio.PostgresStudioEndpointRouteBuilderExtensions",
             "PostgresStudio.PostgresStudioHealthChecksBuilderExtensions",
             "PostgresStudio.PostgresStudioLink",
-            "PostgresStudio.PostgresStudioOptions",
             "PostgresStudio.PostgresStudioPage",
-            "PostgresStudio.PostgresStudioResource",
-            "PostgresStudio.PostgresStudioServiceCollectionExtensions",
             "PostgresStudio.PostgresTableOwnership",
             "PostgresStudio.PostgresTableStorage",
             "PostgresStudio.PostgresWalSection");
     }
+
+    private static string[] Exported(System.Reflection.Assembly assembly) =>
+    [
+        .. assembly.GetExportedTypes()
+            .Where(static type => !typeof(IComponent).IsAssignableFrom(type) && type.Name != "_Imports")
+            .Select(static type => type.FullName!)
+            .Order(StringComparer.Ordinal),
+    ];
 }

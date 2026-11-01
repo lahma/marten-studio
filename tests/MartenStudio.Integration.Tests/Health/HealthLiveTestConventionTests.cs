@@ -73,8 +73,12 @@ public class HealthLiveTestConventionTests
             PostgresStudio.Services.Health.HealthCheckDescriptor? check = StudioHealthChecks.Registry.Find(code);
 
             check.Should().NotBeNull(code + " is listed but is not a check MartenStudio ships");
-            check!.Info.CheckType.Assembly.Should().BeSameAs(typeof(PostgresStudio.Services.Health.HealthCheckRegistry).Assembly,
-                code + " is MartenStudio's own, whose live proof needs a Marten store and belongs here");
+
+            // The shared studio's two assemblies: the engine's checks, and the three that judge a studio's own exposure.
+            System.Reflection.Assembly assembly = check!.Info.CheckType.Assembly;
+            (assembly == typeof(PostgresStudio.Services.Health.HealthCheckRegistry).Assembly
+                || assembly == typeof(PostgresStudio.Services.Settings.StudioDescriptor).Assembly)
+                .Should().BeTrue(code + " is MartenStudio's own, whose live proof needs a Marten store and belongs here");
         }
     }
 

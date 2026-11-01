@@ -23,18 +23,21 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    embeddable component that injects global styles or pins a component-library version is a component that
    breaks the host's own UI on upgrade; that is the failure Quartz.Dashboard documented and this project
    inherits the rule from.
-4. **No raw SQL outside the two builders' folders, `src/PostgresStudio/Internal/Sql/` and
-   `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the builder, values are always
-   parameters. Marten only ever hands the studio a runtime `Type`, and the shared studio knows a relation only
-   by its catalog name, so the reads *are* generated SQL — which means there is exactly one place per assembly
-   where an interpolated identifier could become an injection, and each is small enough to review. The shared
-   studio's builders, `SqlIdentifier` and `SqlLexer` among them, live in the first; the statements only a Marten
-   store has (the document, event, daemon and projection reads) in the second, which calls the first's quoting.
-   The compiled fence in `HealthQueryConventionTests` exempts each folder's namespace by name —
-   `PostgresStudio.Internal.Sql` in `PostgresStudio.dll`, `MartenStudio.Internal.Sql` in `MartenStudio.dll` —
-   and each **only in its own folder**, so the same test refuses a declaration of either namespace, or of one
-   inside it, in any `.cs` or `.razor` file under `src/` outside that namespace's own folder, the other
-   studio's folder included, comparing names as C# does (a leading `@` removed, Unicode escapes decoded,
+4. **No raw SQL outside the three builders' folders, `src/PostgresStudio.Diagnostics/Internal/Sql/`,
+   `src/PostgresStudio/Internal/Sql/` and `src/MartenStudio/Internal/Sql/`.** Identifiers are quoted through the
+   builder, values are always parameters. Marten only ever hands the studio a runtime `Type`, and the shared studio
+   knows a relation only by its catalog name, so the reads *are* generated SQL — which means there is exactly one
+   place per assembly where an interpolated identifier could become an injection, and each is small enough to
+   review. The diagnostics engine's builders - the health sweep's and the facts readers' statements, the catalog's,
+   `SqlIdentifier`, `SqlLexer` and the read-only guard and session - live in the first; the shared studio's own
+   (the SQL console's plans, the browser's rows, Relationships) in the second; the statements only a Marten store
+   has (the document, event, daemon and projection reads) in the third, which calls the first's quoting. The
+   compiled fence in `HealthQueryConventionTests` exempts each assembly's builders' namespace by name —
+   `PostgresStudio.Internal.Sql` in `PostgresStudio.Diagnostics.dll` and in `PostgresStudio.dll`,
+   `MartenStudio.Internal.Sql` in `MartenStudio.dll` — and each assembly **only in its own folder** (the first two
+   assemblies share a namespace, so the exemption is by assembly and folder, not by namespace alone), so the same test
+   refuses a declaration of either namespace, or of one inside it, in any `.cs` or `.razor` file under `src/` outside
+   a folder that namespace belongs to, comparing names as C# does (a leading `@` removed, Unicode escapes decoded,
    formatting characters removed).
 5. **Every mutating operation, and every read authorized like a write, is capability-gated in the service layer,
    and audited.** (PostgresStudio has only the latter: `RunSql`, `BrowseDatabase`, `ViewDefinitions` and `ViewDatabaseActivity`.)
@@ -169,11 +172,15 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
     exception escaping a component's `DisposeAsync` abandons the rest of that disposal, leaving the
     `DotNetObjectReference` that pins the component undisposed and the page's `CancellationTokenSource` uncancelled. A
     filter still rethrows anything that is a real bug (history: decision-notes.md, hard rule 15).
-16. **The core is Marten-free, and the fence is the assembly.** `src/PostgresStudio` references no Marten, JasperFx or
-    Weasel assembly or package, directly, through a project or transitively: `PostgresStudioFenceTests` holds that line
-    at the project files, the restore graphs (`obj/project.assets.json`), the built assembly's references and the
-    test project's output folder, and MartenStudio.Tests' `CoreFenceTests` at the text the compiler does not bind
-    (Razor markup, attribute values, crefs and a `MartenStudio` namespace named in a shared file). MartenStudio reaches
+16. **The core is Marten-free, and the fence is the assembly.** `src/PostgresStudio` and `src/PostgresStudio.Diagnostics`
+    reference no Marten, JasperFx or Weasel assembly or package, directly, through a project or transitively:
+    `PostgresStudioFenceTests` holds that line at the project files, the restore graphs (`obj/project.assets.json`), the
+    built assemblies' references and the test project's output folder, and MartenStudio.Tests' `CoreFenceTests` at the text
+    the compiler does not bind (Razor markup, attribute values, crefs and a `MartenStudio` namespace named in a shared
+    file, either assembly's). **`PostgresStudio.Diagnostics` has a second fence of its own: no ASP.NET Core.** It has no
+    `FrameworkReference`, no `Microsoft.AspNetCore.*` or `Microsoft.JSInterop` package, no Razor SDK or component, and its
+    built assembly references none of them, so a worker or console host that uses it loads no web stack; the same test class
+    checks the project file, the restore graph (libraries and `frameworkReferences`) and the built references. MartenStudio reaches
     PostgresStudio only through `InternalsVisibleTo`, and is packed with an **exact** dependency on its own
     PostgresStudio build (`[x.y.z]`, D30), which `Pack` asserts in the nuspec and `AddMartenStudio()` checks at
     startup. A page route belongs to one assembly of a studio, below that assembly's own compile-time root

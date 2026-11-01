@@ -21,7 +21,7 @@ namespace PostgresStudio.Services.Relationships;
 /// <b>One shared read, filtered per visitor.</b> The foreign keys come from one <c>pg_constraint</c> read per
 /// database, cached through <see cref="StudioSnapshotCache" /> under a key built only from the source, the database,
 /// <c>SqlConsoleRole</c> and a schema set that is the same for every visitor: the source's own schemas and whatever
-/// <see cref="IStudioSettings.BrowsableSchemas" /> admits. Who is asking is never part of it. Each visitor's
+/// <see cref="IDiagnosticsSettings.BrowsableSchemas" /> admits. Who is asking is never part of it. Each visitor's
 /// database-browser gate (<see cref="DatabaseAccess.GateAsync" />, D27) is then applied by
 /// <see cref="RelationshipGraphBuilder" /> <em>after</em> the cache, so nothing another visitor may not see is ever
 /// handed to them from it.

@@ -61,7 +61,7 @@ internal sealed class MartenHealthTableSource : IHealthTableSource
             return MartenDatabaseTables.DeclaredOnly(declared, MartenDatabaseTables.UnclassifiedCoverage);
         }
 
-        MartenTableScope scope = MartenTableScope.For(declared, classifier, context.Settings, context.StoreKey, TableCap);
+        MartenTableScope scope = MartenTableScope.For(declared, classifier, context.StudioOptions, context.StoreKey, TableCap);
 
         IReadOnlyList<HealthRelationalTableRow> rows = scope.ReadsCatalog
             ? await context

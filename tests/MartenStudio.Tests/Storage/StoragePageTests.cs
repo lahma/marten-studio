@@ -12,6 +12,7 @@ using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Sources;
 using PostgresStudio.Services.Storage;
 
@@ -218,10 +219,10 @@ public class StoragePageTests
         PostgresStudio.Services.Settings.IStudioSettings settings = MartenStudioSettings.Of(new MartenStudioOptions());
         PostgresStudio.Services.Settings.StudioDescriptor marten = MartenStudioDescriptor.Instance;
 
-        PostgresStudio.Services.Maintenance.MaintenanceLinks.ToMaintenance(settings, marten, scope).Should().NotBeNull();
-        PostgresStudio.Services.Maintenance.MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: false), scope)
+        MaintenanceLinks.ToMaintenance(settings, marten, scope).Should().NotBeNull();
+        MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: false), scope)
             .Should().BeNull("a studio with no Maintenance entry is never linked to one");
-        PostgresStudio.Services.Maintenance.MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: true), scope)
+        MaintenanceLinks.ToMaintenance(settings, Without(marten, hide: true), scope)
             .Should().BeNull("an entry the sidebar does not draw is not offered either");
 
         static PostgresStudio.Services.Settings.StudioDescriptor Without(PostgresStudio.Services.Settings.StudioDescriptor descriptor, bool hide) => new()

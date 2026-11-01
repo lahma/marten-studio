@@ -31,7 +31,7 @@ namespace MartenStudio.Tests.Conventions;
 /// </remarks>
 public class ActivityViewsOffThePollPathTests
 {
-    private const string Builder = "src/PostgresStudio/Internal/Sql/HealthConnectionQueries.cs";
+    private const string Builder = "src/PostgresStudio.Diagnostics/Internal/Sql/HealthConnectionQueries.cs";
 
     /// <summary>
     /// The daemon checks' builder: D02 reads the advisory locks in <c>pg_locks</c> and D01's Explain reads
@@ -49,7 +49,7 @@ public class ActivityViewsOffThePollPathTests
     /// in the regular sweep, at <c>HealthInterval</c>, and only T14 calls it (the third net below), with H3's own session
     /// predicate (<c>HealthConnectionQueries.ClientSession</c>), which is why it is the one builder that may name H3's.
     /// </summary>
-    private const string HorizonBuilder = "src/PostgresStudio/Internal/Sql/HealthHorizonQueries.cs";
+    private const string HorizonBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/HealthHorizonQueries.cs";
 
     /// <summary>
     /// The table checks' builder (W5-VERS). Its index read never deparses an index of a table a migration is altering
@@ -59,7 +59,7 @@ public class ActivityViewsOffThePollPathTests
     /// exemption. It still runs only in the regular sweep, at <c>HealthInterval</c>, through the sweep's shared index read -
     /// which only the health checks call (the net below).
     /// </summary>
-    private const string TableBuilder = "src/PostgresStudio/Internal/Sql/HealthTableQueries.cs";
+    private const string TableBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/HealthTableQueries.cs";
 
     /// <summary>
     /// The maintenance builder (W5-V1): T16 counts the autovacuum workers in <c>pg_stat_activity</c> and reads what an
@@ -67,7 +67,7 @@ public class ActivityViewsOffThePollPathTests
     /// sweep's two shared maintenance reads - which only T16 calls (the net below) - and the Maintenance page reads the sweep's
     /// memo of them, never the builder.
     /// </summary>
-    private const string MaintenanceBuilder = "src/PostgresStudio/Internal/Sql/MaintenanceQueries.cs";
+    private const string MaintenanceBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/MaintenanceQueries.cs";
 
     /// <summary>
     /// The replication builder (W5-R2-fix B1): its standby read joins <c>pg_stat_activity</c> on the WAL senders' pids for
@@ -75,7 +75,7 @@ public class ActivityViewsOffThePollPathTests
     /// database's logical sender is never named. It runs in R03's regular sweep and in the Replication page's facts read,
     /// which the page polls at <c>HealthInterval</c> through a cache of that time to live (the nets below).
     /// </summary>
-    private const string ReplicationBuilder = "src/PostgresStudio/Internal/Sql/ReplicationQueries.cs";
+    private const string ReplicationBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ReplicationQueries.cs";
 
     /// <summary>
     /// The Aurora builder (W5-AUR, issue #8 A4): its per-session read lists this database's client sessions from
@@ -84,7 +84,7 @@ public class ActivityViewsOffThePollPathTests
     /// only through <c>AuroraFactsCache</c>'s single flight of <c>HealthInterval</c> time to live, and the Server page that
     /// shows it polls at <c>HealthInterval</c>.
     /// </summary>
-    private const string AuroraBuilder = "src/PostgresStudio/Internal/Sql/AuroraQueries.cs";
+    private const string AuroraBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/AuroraQueries.cs";
 
     /// <summary>
     /// The connections-by-application builder (W5-API, issue #8 G9): one aggregate of this database's sessions by
@@ -92,7 +92,7 @@ public class ActivityViewsOffThePollPathTests
     /// snapshot's fourth statement, so it is read exactly when Database › Sessions' snapshot is - at <c>HealthInterval</c>
     /// or on Refresh, behind the snapshot's ten-second floor - and by the diagnostics API through that same snapshot.
     /// </summary>
-    private const string ApplicationsBuilder = "src/PostgresStudio/Internal/Sql/ConnectionsByApplicationQueries.cs";
+    private const string ApplicationsBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ConnectionsByApplicationQueries.cs";
 
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
@@ -143,7 +143,7 @@ public class ActivityViewsOffThePollPathTests
                 .Select(SourceScanner.Relative),
         ];
 
-        callers.Should().Equal(["src/PostgresStudio/Services/Database/SessionActivityReader.cs"],
+        callers.Should().Equal(["src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs"],
             "connections by application are the sessions snapshot's fourth statement, behind its ten-second floor, and nothing else's");
     }
 
@@ -164,19 +164,19 @@ public class ActivityViewsOffThePollPathTests
         ];
 
         callers.Should().BeEquivalentTo(
-            ["src/PostgresStudio/Services/Database/SessionActivityReader.cs", "src/PostgresStudio/Services/Health/Checks/ServerConnectionHolders.cs"],
+            ["src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs", "src/PostgresStudio.Diagnostics/Services/Health/Checks/ServerConnectionHolders.cs"],
             "the holders are the Sessions snapshot's and the sweep's one shared read - which C13 and C14 alone ask for");
 
         List<string> askers =
         [
             .. SourceScanner.ShippedSourceFiles()
-                .Where(static file => SourceScanner.Relative(file) != "src/PostgresStudio/Services/Health/Checks/ServerConnectionHolders.cs")
+                .Where(static file => SourceScanner.Relative(file) != "src/PostgresStudio.Diagnostics/Services/Health/Checks/ServerConnectionHolders.cs")
                 .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("ServerConnectionHolders.", StringComparison.Ordinal))
                 .Select(SourceScanner.Relative),
         ];
 
         askers.Should().BeEquivalentTo(
-            ["src/PostgresStudio/Services/Health/Checks/IdleConnectionsHoardedCheck.cs", "src/PostgresStudio/Services/Health/Checks/UnattributedConnectionsCheck.cs"],
+            ["src/PostgresStudio.Diagnostics/Services/Health/Checks/IdleConnectionsHoardedCheck.cs", "src/PostgresStudio.Diagnostics/Services/Health/Checks/UnattributedConnectionsCheck.cs"],
             "only the two activity checks take the shared holders read");
     }
 
@@ -191,7 +191,7 @@ public class ActivityViewsOffThePollPathTests
                 .Select(SourceScanner.Relative),
         ];
 
-        callers.Should().Equal(["src/PostgresStudio/Services/Aurora/AuroraFacts.cs"],
+        callers.Should().Equal(["src/PostgresStudio.Diagnostics/Services/Aurora/AuroraFacts.cs"],
             "the per-session waits are read by AuroraFactsReader.ReadSessionsAsync alone, which only the activity gate reaches");
 
         string service = SourceScanner.StripCommentsAndStrings(
@@ -214,7 +214,7 @@ public class ActivityViewsOffThePollPathTests
                 .Select(SourceScanner.Relative),
         ];
 
-        callers.Should().Equal(["src/PostgresStudio/Services/Replication/ReplicationFacts.cs"],
+        callers.Should().Equal(["src/PostgresStudio.Diagnostics/Services/Replication/ReplicationFacts.cs"],
             "the standby read is StandbySnapshot's, which R03's regular sweep and the page's cached facts read share");
     }
 
@@ -224,7 +224,7 @@ public class ActivityViewsOffThePollPathTests
         string page = SourceScanner.StripCommentsAndStrings(
             File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Components", "Pages", "Replication", "Replication.razor")));
         string cache = SourceScanner.StripCommentsAndStrings(
-            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", "Replication", "ReplicationFactsReader.cs")));
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio.Diagnostics", "Services", "Replication", "ReplicationFactsReader.cs")));
 
         page.Should().Contain("EffectiveHealthInterval").And.NotContain("RefreshInterval");
         cache.Should().Contain("new StudioSnapshotCache(timeProvider ?? TimeProvider.System, settings.EffectiveHealthInterval)");
@@ -321,10 +321,10 @@ public class ActivityViewsOffThePollPathTests
         ];
 
         callers.Should().NotBeEmpty();
-        callers.Should().Contain("src/PostgresStudio/Services/Database/SessionActivityReader.cs", "the Sessions reader is a caller, so the scan reads the shared studio");
+        callers.Should().Contain("src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs", "the Sessions reader is a caller, so the scan reads the shared studio");
         callers.Should().OnlyContain(
             static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks")
-                || x == "src/PostgresStudio/Services/Database/SessionActivityReader.cs"
+                || x == "src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs"
                 || x == HorizonBuilder
                 || x == ApplicationsBuilder,
             "every other caller would be a new path to the process array and the lock table; the horizon and applications builders take only H3's session predicate");

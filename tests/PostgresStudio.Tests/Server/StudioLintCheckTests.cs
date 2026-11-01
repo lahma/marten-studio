@@ -1,6 +1,7 @@
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
+using PostgresStudio.Services.Settings;
 
 using static PostgresStudio.Tests.Server.ServerTestFacts;
 
@@ -151,7 +152,7 @@ public class StudioLintCheckTests
             info.Area.Should().Be(HealthArea.Configuration);
             info.Tier.Should().Be(HealthCostTier.InProcess);
             info.Gate.Should().Be(HealthGate.None);
-            check.Assembly.Should().BeSameAs(typeof(HealthCheckRegistry).Assembly, "the shared studio's, so both studios run it");
+            check.Assembly.Should().BeSameAs(typeof(StudioDescriptor).Assembly, "the shared studio's, so both studios run it: every descriptor lists this assembly beside the engine's");
         }
     }
 }

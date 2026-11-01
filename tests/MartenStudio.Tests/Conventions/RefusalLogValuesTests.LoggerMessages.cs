@@ -104,7 +104,7 @@ public partial class RefusalLogValuesTests
     [Fact]
     public void The_canonical_spellings_a_template_may_be_passed_are_the_resolved_sources()
     {
-        string context = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", "Health", "HealthCheckContext.cs"));
+        string context = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio.Diagnostics", "Services", "Health", "HealthCheckContext.cs"));
 
         context.Should().Contain("public string StoreKey => Source.Source.Key;")
             .And.Contain("public string DatabaseId => Source.Target.Identity;");

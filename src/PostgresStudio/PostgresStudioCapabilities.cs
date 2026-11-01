@@ -11,14 +11,14 @@ public sealed class PostgresStudioCapabilities
     /// <summary>
     /// Run read-only SQL from the Query page. The statement runs inside a read-only transaction under a statement
     /// timeout, but it reads everything the data source's Postgres role can read (or
-    /// <see cref="PostgresStudioOptions.SqlConsoleRole" />, when set); grant this only to people you would give
+    /// <see cref="PostgresDiagnosticsOptions.SqlConsoleRole" />, when set); grant this only to people you would give
     /// <c>psql</c> to.
     /// </summary>
     public bool RunSql { get; set; }
 
     /// <summary>
     /// Read the rows and the definitions (view SQL, function bodies, trigger definitions) of the database objects in
-    /// the schemas <see cref="PostgresStudioOptions.BrowsableSchemas" /> admits, and see the structure of a schema only
+    /// the schemas <see cref="PostgresDiagnosticsOptions.BrowsableSchemas" /> admits, and see the structure of a schema only
     /// <c>"*"</c> admits. The structure of the schemas it names exactly is visible without it. It implies
     /// <see cref="ViewDefinitions" />: a visitor it admits reads definitions exactly as before. It is a read treated as
     /// a write for authorization: <see cref="PostgresStudioOptions.WriteAuthorizationPolicy" /> is asked, against the
@@ -30,7 +30,7 @@ public sealed class PostgresStudioCapabilities
     /// <summary>
     /// Read the definitions of the database objects - a view's or materialized view's query, a function's or procedure's
     /// body, a trigger's definition and a type's description - in the schemas
-    /// <see cref="PostgresStudioOptions.BrowsableSchemas" /> names <em>exactly</em>, and nothing else: no rows and no
+    /// <see cref="PostgresDiagnosticsOptions.BrowsableSchemas" /> names <em>exactly</em>, and nothing else: no rows and no
     /// sequence's current value (those are data, and need <see cref="BrowseDatabase" />), and no definition in a schema
     /// only <c>"*"</c> admits. A definition is schema the
     /// application's own migrations wrote, but it can carry a literal - a function body with a constant in it - which is

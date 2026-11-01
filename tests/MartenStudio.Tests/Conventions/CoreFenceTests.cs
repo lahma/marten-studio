@@ -52,6 +52,17 @@ public class CoreFenceTests
     /// <summary>The shared studio's root, repository-relative: every file under it is fenced.</summary>
     private const string SharedRoot = "src/PostgresStudio/";
 
+    /// <summary>The engine's folder: the shared studio's, since the 0.11 split, in an assembly of its own - inside the same fence.</summary>
+    private const string DiagnosticsRoot = "src/PostgresStudio.Diagnostics/";
+
+    private static readonly string[] SharedRoots = [SharedRoot, DiagnosticsRoot];
+
+    /// <summary>Whether a repository-relative path is a file of the shared studio: the UI's or the engine's.</summary>
+    private static bool IsShared(string file) => SharedRoots.Any(root => file.StartsWith(root, StringComparison.Ordinal));
+
+    /// <summary>The path below whichever shared root <paramref name="file" /> is under.</summary>
+    private static string BelowShared(string file) => file[SharedRoots.First(root => file.StartsWith(root, StringComparison.Ordinal)).Length..];
+
     /// <summary>MartenStudio's root, repository-relative: the stay-behind list is what its files declare.</summary>
     private const string MartenRoot = "src/MartenStudio/";
 
@@ -126,7 +137,7 @@ public class CoreFenceTests
 
     /// <summary>Every C# and Razor file of the shared studio, repository-relative, build output excluded.</summary>
     private static string[] SharedFiles() =>
-        [.. SourceScanner.ShippedSourceFiles().Select(SourceScanner.Relative).Where(static x => x.StartsWith(SharedRoot, StringComparison.Ordinal)).Order(StringComparer.Ordinal)];
+        [.. SourceScanner.ShippedSourceFiles().Select(SourceScanner.Relative).Where(static x => IsShared(x)).Order(StringComparer.Ordinal)];
 
     /// <summary>
     /// The one fence: every C# and Razor file under <c>src/PostgresStudio/</c> names no Marten-family type or namespace,
@@ -187,7 +198,7 @@ public class CoreFenceTests
             string code = SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine(file.Split('/'))));
             string[] declared = [.. NamespaceDeclaration.Matches(code).Select(static x => x.Groups["name"].Value)];
 
-            if (file.StartsWith(SharedRoot, StringComparison.Ordinal))
+            if (IsShared(file))
             {
                 sharedFiles++;
 
@@ -198,9 +209,9 @@ public class CoreFenceTests
                         problems.Add(file + ": @namespace overrides the folder's namespace");
                     }
                 }
-                else if (declared is not [{ } only] || only != FolderNamespace("PostgresStudio", file[SharedRoot.Length..]))
+                else if (declared is not [{ } only] || only != FolderNamespace("PostgresStudio", BelowShared(file)))
                 {
-                    problems.Add(file + ": declares [" + string.Join(", ", declared) + "], not " + FolderNamespace("PostgresStudio", file[SharedRoot.Length..]));
+                    problems.Add(file + ": declares [" + string.Join(", ", declared) + "], not " + FolderNamespace("PostgresStudio", BelowShared(file)));
                 }
             }
             else if (file.StartsWith(MartenRoot, StringComparison.Ordinal))
@@ -254,7 +265,7 @@ public class CoreFenceTests
         foreach (string path in SourceScanner.ShippedSourceFiles())
         {
             string file = SourceScanner.Relative(path);
-            bool shared = file.StartsWith(SharedRoot, StringComparison.Ordinal);
+            bool shared = IsShared(file);
 
             if (!shared && !file.StartsWith(MartenRoot, StringComparison.Ordinal))
             {
@@ -264,7 +275,7 @@ public class CoreFenceTests
             // A component is a class named for its file in its folder's namespace (neither side overrides it with
             // @namespace - the rule above holds the shared side), so it is read as that declaration.
             string code = file.EndsWith(".razor", StringComparison.Ordinal)
-                ? "namespace " + FolderNamespace(shared ? "PostgresStudio" : "MartenStudio", file[(shared ? SharedRoot : MartenRoot).Length..])
+                ? "namespace " + FolderNamespace(shared ? "PostgresStudio" : "MartenStudio", (shared ? BelowShared(file) : file[MartenRoot.Length..]))
                     + ";\ninternal partial class " + Path.GetFileNameWithoutExtension(file) + " { }"
                 : SourceScanner.StripCommentsAndStrings(File.ReadAllText(path));
 
@@ -347,7 +358,7 @@ public class CoreFenceTests
         [
             .. declaredIn
                 .Where(static x => x.Key.StartsWith("MartenStudio", StringComparison.Ordinal))
-                .SelectMany(static x => x.Value.Where(static f => f.StartsWith(SharedRoot, StringComparison.Ordinal)).Select(f => f + ": " + x.Key)),
+                .SelectMany(static x => x.Value.Where(static f => IsShared(f)).Select(f => f + ": " + x.Key)),
         ];
 
         named.Should().BeEmpty("the shared studio's types take neutral names: " + string.Join(", ", named));
@@ -356,7 +367,7 @@ public class CoreFenceTests
         foreach (string renamed in new[] { "StudioEndpointAuthorizationGuard", "StudioEndpointMarker", "StudioMappedEndpoints", "StudioConventionBuilder", "StudioHealthCheck" })
         {
             declaredIn.Should().ContainKey(renamed);
-            declaredIn[renamed].Should().ContainSingle().Which.Should().StartWith(SharedRoot, "{0} moved and was renamed with its file", renamed);
+            declaredIn[renamed].Should().ContainSingle().Which.Should().Match<string>(static x => IsShared(x), "{0} moved and was renamed with its file", renamed);
         }
 
         declaredIn.Keys.Should().Contain(static x => x.StartsWith("MartenStudio", StringComparison.Ordinal), "MartenStudio's own MartenStudio* types are read, or the rule reads nothing");
@@ -512,13 +523,15 @@ public class CoreFenceTests
         string[] projectFiles =
         [
             .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", StudioProjects.Shared), "*.csproj", SearchOption.TopDirectoryOnly),
+            .. Directory.EnumerateFiles(RepositoryRoot.Combine("src", StudioProjects.Diagnostics), "*.csproj", SearchOption.TopDirectoryOnly),
             .. RepositoryProjectFiles
                 .Select(static x => RepositoryRoot.Combine(x))
                 .Where(File.Exists),
         ];
 
         projectFiles.Select(SourceScanner.Relative).Should().Contain(
-            "src/PostgresStudio/PostgresStudio.csproj", "scanning no project file would pass for the wrong reason");
+            "src/PostgresStudio/PostgresStudio.csproj", "scanning no project file would pass for the wrong reason")
+            .And.Contain("src/PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj", "the engine's project is inside the fence too");
 
         foreach (string file in projectFiles)
         {
@@ -644,7 +657,7 @@ public class CoreFenceTests
         foreach (string file in SourceScanner.ShippedSourceFiles())
         {
             string relative = SourceScanner.Relative(file);
-            bool isShared = relative.StartsWith(SharedRoot, StringComparison.Ordinal);
+            bool isShared = IsShared(relative);
 
             if (!isShared && !relative.StartsWith(MartenRoot, StringComparison.Ordinal))
             {

@@ -17,6 +17,7 @@
  */
 #endregion
 
+using PostgresStudio.Services;
 using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Components;
@@ -43,7 +44,7 @@ internal static class StudioLink
         // Relative to the studio-rooted document base; an empty href resolves to the base URI
         // (RFC 3986 §5.4), which is the studio's own front page.
         _ = settings;
-        return subPath;
+        return StudioPageRoutes.BaseRelative(subPath);
     }
 
     /// <summary>

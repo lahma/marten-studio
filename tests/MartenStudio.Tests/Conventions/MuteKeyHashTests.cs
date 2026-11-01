@@ -13,7 +13,7 @@ public partial class MuteKeyHashTests
     private static readonly Dictionary<string, string> Allowed = new(StringComparer.Ordinal)
     {
         ["src/PostgresStudio/Internal/StudioEndpointMapper.cs"] = "a packaged static asset's content, for its ETag",
-        ["src/PostgresStudio/Services/Health/Checks/HorizonHeldCheck.cs"] = "a horizon holder's identity, for a series name the server keeps in memory",
+        ["src/PostgresStudio.Diagnostics/Services/Health/Checks/HorizonHeldCheck.cs"] = "a horizon holder's identity, for a series name the server keeps in memory",
     };
 
     [Fact]

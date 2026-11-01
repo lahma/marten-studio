@@ -2,12 +2,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
-using PostgresStudio.Services.Diagnostics;
-using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Postgres;
 using PostgresStudio.Services.Settings;
-using PostgresStudio.Services.Sources;
-using PostgresStudio.Services.Statements;
 
 namespace PostgresStudio;
 
@@ -16,7 +12,7 @@ namespace PostgresStudio;
 /// </summary>
 public static class PostgresStudioServiceCollectionExtensions
 {
-    /// <summary>The schema browsed when nothing names one (<see cref="PostgresStudioOptions.BrowsableSchemas" />).</summary>
+    /// <summary>The schema browsed when nothing names one (<see cref="PostgresDiagnosticsOptions.BrowsableSchemas" />).</summary>
     internal const string DefaultBrowsableSchema = "public";
 
     /// <summary>
@@ -29,7 +25,7 @@ public static class PostgresStudioServiceCollectionExtensions
     /// <para>
     /// No option points the studio at a database by connection string. It renders the data sources <em>this
     /// application</em> registered - the unkeyed <c>NpgsqlDataSource</c> as <c>default</c>, and whatever
-    /// <see cref="PostgresStudioOptions.AddDataSource" /> and <see cref="PostgresStudioOptions.AddDatabaseSource" />
+    /// <see cref="PostgresDiagnosticsOptions.AddDataSource" /> and <see cref="PostgresDiagnosticsOptions.AddDatabaseSource" />
     /// name. Call this before or after <c>AddNpgsqlDataSource()</c>; the scan that finds the default one runs lazily on
     /// first use, when the container is complete, and nothing connects until somebody opens a page.
     /// </para>
@@ -69,17 +65,7 @@ public static class PostgresStudioServiceCollectionExtensions
             .ValidateSharedCapabilities(nameof(PostgresStudioOptions), nameof(PostgresStudioCapabilities), Shape)
             .ValidateSharedSchemas(nameof(PostgresStudioOptions), Shape)
             .ValidateSharedAcceptedChecks(nameof(PostgresStudioOptions), PostgresStudioDescriptor.Instance, static options => options.AcceptedCheckReasons)
-            .Validate(
-                static options => SourceNames(options).All(PostgresSourceNames.IsValidKey),
-                "PostgresStudioOptions.AddDataSource and AddDatabaseSource names must each be a letter or digit followed by " +
-                "at most 63 letters, digits, '.', '_' or '-': the name travels in the URL and keys every cache")
-            .Validate(
-                static options => !SourceNames(options).Contains(PostgresSourceNames.Default, StringComparer.OrdinalIgnoreCase),
-                "PostgresStudioOptions.AddDataSource and AddDatabaseSource cannot name a source 'default': it is the " +
-                "application's unkeyed NpgsqlDataSource's, listed unless IncludeDefaultDataSource is false")
-            .Validate(
-                static options => SourceNames(options).Distinct(StringComparer.OrdinalIgnoreCase).Count() == SourceNames(options).Count(),
-                "PostgresStudioOptions.AddDataSource and AddDatabaseSource names must be unique, ignoring case, across both");
+            .ValidateSourceNames(nameof(PostgresStudioOptions), SourceNames);
 
         if (configure is not null)
         {
@@ -88,38 +74,17 @@ public static class PostgresStudioServiceCollectionExtensions
 
         // After every Configure, including configuration binding, which appends to a list rather than replacing it: the
         // default schema is the answer to "nothing named any", never an entry a host has to remove.
-        optionsBuilder.PostConfigure(static options =>
-        {
-            if (options.BrowsableSchemas.Count == 0)
-            {
-                options.BrowsableSchemas.Add(DefaultBrowsableSchema);
-            }
-        });
+        optionsBuilder.PostConfigure(static options => PostgresSeamRegistration.DefaultBrowsableSchemas(options));
 
-        // The registry captures this collection and scans it lazily, on first use: AddPostgresStudio() may be called
-        // before AddNpgsqlDataSource(), and a scan now would find nothing. A singleton built by the container, so the
-        // provider it is handed is the root one - what the default source and every factory resolve from.
-        services.TryAddSingleton(provider => new PostgresSourceRegistry(services, provider, provider.GetService<TimeProvider>()));
+        // The engine's seams, answered for plain PostgreSQL - the source registry and provider, the lock labeler, the
+        // declarations, the health table source and the statement classifier - over the options this studio configured.
+        PostgresSeamRegistration.Add<PostgresStudioOptions>(services);
 
-        // The shared seams, answered for plain PostgreSQL. The source provider is scoped, as the seam asks: its refresh
-        // generation is the circuit's.
-        services.TryAddScoped<IStudioSourceProvider, PostgresStudioSourceProvider>();
+        // The shared seams only a UI has, answered for plain PostgreSQL.
         services.TryAddSingleton<IStudioLinks, PostgresStudioLinks>();
-        services.TryAddSingleton<ISessionLockLabeler, PostgresSessionLockLabeler>();
-        services.TryAddScoped<IDatabaseDeclarationsSource, PostgresDatabaseDeclarationsSource>();
-        services.TryAddSingleton<IHealthTableSource, PostgresHealthTableSource>();
-        services.TryAddSingleton<IHealthTableRemedies, PostgresHealthTableRemedies>();
-
-        // W5-Q1: the Statements page's groups - a statement's verb and its first table of the judged set.
-        services.TryAddSingleton<IStatementClassifier>(PostgresStatementClassifier.Instance);
 
         // The Overview's server read: scoped, because what it remembers is the circuit's.
         services.TryAddScoped<IPostgresServerReader, PostgresServerReader>();
-
-        // W5-API: the diagnostics API for the host's own code (D31) - a singleton over the studio's own caches, and the
-        // process's limit of two fresh reads at a time for it. Inert until host code calls it: no endpoint, no hosted service.
-        services.TryAddSingleton<FreshReadLimiter>();
-        services.TryAddSingleton<IPostgresDiagnostics, PostgresDiagnosticsService>();
 
         return services;
     }

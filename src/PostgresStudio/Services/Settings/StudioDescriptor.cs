@@ -1,7 +1,6 @@
 using System.Reflection;
 
 using PostgresStudio.Components;
-using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Settings;
 
@@ -12,17 +11,6 @@ namespace PostgresStudio.Services.Settings;
 /// endpoint mapping re-roots under the configured mount path.
 /// </param>
 internal sealed record StudioPageAssembly(Assembly Assembly, string CompileTimeRoot);
-
-/// <summary>
-/// One assembly whose health checks a studio runs, and the kinds of source they may run against.
-/// </summary>
-/// <param name="Assembly">The assembly the registry discovers checks in.</param>
-/// <param name="SourceKinds">
-/// The kinds of source its checks are offered, or <see langword="null" /> for every kind. A check that reads a source
-/// through a studio's own types - MartenStudio's checks read the store, its options and its daemon - names that studio's
-/// kind here, and is then never run against any other: no row, not a "could not check" one.
-/// </param>
-internal sealed record StudioHealthCheckAssembly(Assembly Assembly, IReadOnlySet<StudioSourceKind>? SourceKinds = null);
 
 /// <summary>
 /// What makes one studio this studio: its name, its pages, its navigation, how it names a source, and how it builds the
@@ -36,11 +24,11 @@ internal sealed record StudioHealthCheckAssembly(Assembly Assembly, IReadOnlySet
 /// </para>
 /// <para>
 /// <b>Text is here so that shared markup says the right noun.</b> A page refusal says "this Marten store" in MartenStudio;
-/// the same shared component says what <see cref="SourceNoun" /> says in any other studio. Every sentence it feeds keeps
+/// the same shared component says what <c>SourceNoun</c> says in any other studio. Every sentence it feeds keeps
 /// MartenStudio's wording exactly as it was, so registering the descriptor changed nothing a host or a visitor reads.
 /// </para>
 /// </remarks>
-internal sealed class StudioDescriptor
+internal sealed class StudioDescriptor : DiagnosticsDescriptor
 {
     private readonly Lazy<StudioRouteTable> routes;
 
@@ -52,24 +40,11 @@ internal sealed class StudioDescriptor
 
     private StudioRouteTable BuildRoutes() => new(PageAssemblies);
 
-    /// <summary>The studio's key: <c>marten</c>. Also what <see cref="StudioRegistrationMarker" /> holds.</summary>
-    public required string Key { get; init; }
-
-    /// <summary>The product's name in a sentence: <c>Marten Studio</c>.</summary>
-    public required string ProductName { get; init; }
-
     /// <summary>
     /// Every assembly whose pages this studio serves, each with its compile-time root. The route table and the endpoint
     /// re-rooting are built from this list and nothing else; a relative route two of them claim is an error.
     /// </summary>
     public required IReadOnlyList<StudioPageAssembly> PageAssemblies { get; init; }
-
-    /// <summary>
-    /// The assemblies the health registry discovers checks in, each with the kinds of source its checks may run against.
-    /// A check found in more than one entry runs only against a kind every one of them admits - which is what keeps a
-    /// studio's own checks off another studio's sources while both are compiled into one assembly.
-    /// </summary>
-    public required IReadOnlyList<StudioHealthCheckAssembly> HealthCheckAssemblies { get; init; }
 
     /// <summary>The sidebar, section by section.</summary>
     public required IReadOnlyList<StudioNavSection> Navigation { get; init; }
@@ -85,15 +60,6 @@ internal sealed class StudioDescriptor
     /// the shared SQL console panel alone - as <see cref="OverviewComponent" />.
     /// </summary>
     public required Type QueryComponent { get; init; }
-
-    /// <summary>The query-string name the source key travels under: <c>store</c>.</summary>
-    public required string SourceQueryParameter { get; init; }
-
-    /// <summary>A source in a sentence: <c>Marten store</c>.</summary>
-    public required string SourceNoun { get; init; }
-
-    /// <summary>A source as a control's label: <c>Store</c>.</summary>
-    public required string SourceLabel { get; init; }
 
     /// <summary>
     /// What a page served to anyone exposes, in the banner that says so: "every document, event stream and schema in

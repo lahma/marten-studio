@@ -37,24 +37,24 @@ namespace PostgresStudio.Components;
 /// values arrive from a URL and a URL is something anyone can type.
 /// </para>
 /// <para>
-/// The source key's parameter is the studio's own (<see cref="StudioDescriptor.SourceQueryParameter" />:
+/// The source key's parameter is the studio's own (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />:
 /// <c>store</c> in MartenStudio); the database and the tenant are spelled the same in every studio.
 /// </para>
 /// </remarks>
 internal static class StudioScopeQuery
 {
     /// <summary>The query-string name of the database identity.</summary>
-    internal const string DatabaseIdParameter = "db";
+    internal const string DatabaseIdParameter = StudioPageRoutes.DatabaseIdParameter;
 
     /// <summary>The query-string name of the tenant id.</summary>
-    internal const string TenantIdParameter = "tenant";
+    internal const string TenantIdParameter = StudioPageRoutes.TenantIdParameter;
 
     /// <summary>
     /// The scope named by <paramref name="uri" />'s query string, each part <see langword="null" /> when
     /// it is absent or blank.
     /// </summary>
     /// <param name="uri">The URI to read.</param>
-    /// <param name="sourceParameter">The studio's source parameter (<see cref="StudioDescriptor.SourceQueryParameter" />).</param>
+    /// <param name="sourceParameter">The studio's source parameter (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />).</param>
     internal static (string? StoreKey, string? DatabaseId, string? TenantId) Read(string uri, string sourceParameter)
     {
         ArgumentNullException.ThrowIfNull(uri);
@@ -79,7 +79,7 @@ internal static class StudioScopeQuery
     /// </summary>
     /// <param name="navigation">The circuit's navigation manager.</param>
     /// <param name="scope">The scope to write, or <see langword="null" /> to remove all three.</param>
-    /// <param name="sourceParameter">The studio's source parameter (<see cref="StudioDescriptor.SourceQueryParameter" />).</param>
+    /// <param name="sourceParameter">The studio's source parameter (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />).</param>
     internal static string WithScope(NavigationManager navigation, StudioScope? scope, string sourceParameter)
     {
         ArgumentNullException.ThrowIfNull(navigation);
@@ -99,7 +99,7 @@ internal static class StudioScopeQuery
     /// </summary>
     /// <param name="url">The link, which may already carry a query string.</param>
     /// <param name="scope">The scope to carry, or <see langword="null" /> for none.</param>
-    /// <param name="sourceParameter">The studio's source parameter (<see cref="StudioDescriptor.SourceQueryParameter" />).</param>
+    /// <param name="sourceParameter">The studio's source parameter (<see cref="DiagnosticsDescriptor.SourceQueryParameter" />).</param>
     internal static string Append(string url, StudioScope? scope, string sourceParameter)
     {
         ArgumentNullException.ThrowIfNull(url);

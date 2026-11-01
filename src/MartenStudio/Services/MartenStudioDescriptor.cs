@@ -49,11 +49,13 @@ internal static class MartenStudioDescriptor
             new StudioPageAssembly(typeof(MartenStudioApp).Assembly, MartenStudioOptions.DefaultPath),
             new StudioPageAssembly(typeof(PostgresStudio.Components.Pages.StudioHome).Assembly, "/postgres"),
         ],
-        // The shared checks, PostgresStudio's, run against any source; MartenStudio's own read the store and only ever run
-        // against one. Every source MartenStudio has is a Marten store, so here both sets run against all of them.
+        // The shared checks, the diagnostics engine's and PostgresStudio's own (the studio-posture ones), run against any source;
+        // MartenStudio's own read the store and only ever run against one. Every source MartenStudio has is a Marten store, so
+        // here every set runs against all of them.
         HealthCheckAssemblies =
         [
             new StudioHealthCheckAssembly(typeof(HealthCheckRegistry).Assembly),
+            new StudioHealthCheckAssembly(typeof(StudioDescriptor).Assembly),
             new StudioHealthCheckAssembly(typeof(MartenStudioApp).Assembly, MartenStoreOnly),
         ],
         Navigation = Navigation(),

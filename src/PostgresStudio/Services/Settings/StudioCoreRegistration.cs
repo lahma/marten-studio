@@ -61,7 +61,19 @@ internal static class StudioCoreRegistration
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(settings);
 
+        // The engine's own marker first: a studio added beside AddPostgresDiagnostics() is refused before any marker or service of
+        // the studio is registered.
+        DiagnosticsRegistrationMarker.Claim(services, marker.RegisteredBy, byStudio: true);
         StudioRegistrationMarker.Claim(services, marker);
+
+        // The diagnostics engine, which a studio registers as part of itself: refused beside AddPostgresDiagnostics(), in
+        // either order. The one settings object the studio's registration builds answers the engine's interface too.
+        DiagnosticsCoreRegistration.Add(
+            services,
+            descriptor,
+            static provider => provider.GetRequiredService<IStudioSettings>(),
+            marker.RegisteredBy,
+            byStudio: true);
 
         services.TryAddSingleton(descriptor);
         services.TryAddSingleton(settings);
@@ -85,16 +97,9 @@ internal static class StudioCoreRegistration
         services.TryAddSingleton<StudioCapabilityGuard>();
         services.TryAddSingleton<StudioActionLogService>();
 
-        // DB-0: log hygiene
-        // One process-wide memory of which anomalies have already been reported, so a failure on a path
-        // every open page polls is a Warning once per source, database and exception type per ten minutes
-        // and Debug in between. The host's TimeProvider when it registered one, the system clock when not.
-        services.TryAddSingleton(static provider =>
-            new StudioLogThrottle(provider.GetService<TimeProvider>() ?? TimeProvider.System));
-
-        // Reads the database's catalog and caches what it said, keyed by database identity. A singleton
-        // because what it caches - a table's physical columns - changes only with a schema migration and is
-        // the same answer for every circuit; a per-circuit cache would ask the catalog once per visitor per page.
+        // Reads the database's catalog and caches what it said, keyed by database identity. A singleton because what it
+        // caches - a table's physical columns - changes only with a schema migration and is the same answer for every circuit;
+        // a per-circuit cache would ask the catalog once per visitor per page.
         services.TryAddSingleton<ColumnCatalog>();
 
         // Scoped, because all of these are about one circuit: what it is pointed at, who is driving it, and
@@ -105,9 +110,6 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<StudioSourceResolver>();
         services.TryAddScoped<StudioActionLog>();
         services.TryAddScoped<ToastService>();
-
-        // One snapshot per interval however many circuits are watching (D10).
-        services.TryAddSingleton<StudioSnapshotCache>();
 
         // A factory rather than the loop itself: StudioLiveUpdates is IAsyncDisposable, and a transient
         // registration would leave the circuit's container tracking one instance per page visit for the
@@ -135,24 +137,8 @@ internal static class StudioCoreRegistration
         // was opened from. Scoped, so it is one browser tab's and nobody else's.
         services.TryAddScoped<DatabaseBrowserState>();
 
-        // H1: the health advisor. The checks, their history and the one sweep per database per interval are
-        // process-wide singletons - a sweep's facts are about the database and the same for every circuit -
-        // and none of them runs anything on its own: no hosted service, no timer. A sweep happens when the
-        // Health page or the Overview asks. What a visitor is shown, what they muted and which Critical they
-        // have already been toasted about are that circuit's, so scoped.
-        services.TryAddSingleton<HealthCheckRegistry>();
-
-        // W5-API: one process-wide bound on the databases the advisor keeps state for (API design §3.5) - the history, the
-        // sweep cache and the statement texts each register with it and forget a database together.
-        services.TryAddSingleton<HealthDatabaseBound>();
-        services.TryAddSingleton<HealthHistory>();
-        services.TryAddSingleton<HealthSweeper>();
-        services.TryAddSingleton<HealthSweepCache>();
-
-        // H7: the statement checks' memory of the texts they have read, so a statement sweep whose statements are all
-        // known makes no text call - each one costs pg_stat_statements its whole query-text file.
-        services.TryAddSingleton<StatementTextCache>();
-
+        // H1: what a visitor is shown of the sweep, what they muted and which Critical they have already been toasted about
+        // are that circuit's, so scoped.
         // Wave 6 (SEC2): the protector a browser's mute key is kept under, created once per process from the host's Data
         // Protection - which AddRazorComponents() above has already registered - or, in a container without it, from an
         // in-memory provider this constructs and registers nowhere.
@@ -162,20 +148,14 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();
 
-        // W5-V1: the Maintenance page. Its facts are the regular sweep's own reads, the database's and every circuit's, and so
-        // is the one bloat measure per database at once; what a visitor is shown of them is the circuit's.
-        services.TryAddSingleton<IMaintenanceFacts, MaintenanceFactsReader>();
+        // W5-V1: the Maintenance page. Its facts are the engine's (the regular sweep's own reads); the one bloat measure per
+        // database at once is the process's, and what a visitor is shown of them is the circuit's.
         services.TryAddSingleton<BloatMeasureFlights>();
         services.TryAddScoped<IMaintenanceNameGate, DatabaseAccessNameGate>();
         services.TryAddScoped<IMaintenanceService, MaintenanceService>();
 
-        // H3: Database > Sessions and the connection checks. The pool observer is a singleton because a
-        // MeterListener is process-wide, and it listens only while a sweep or an open Sessions page holds a
-        // lease. The session snapshot is the database's, shared by every circuit for ten seconds; what a
-        // visitor is shown of it, and which first read this circuit has audited, are the circuit's.
-        services.TryAddSingleton<SessionPoolObserver>();
-        services.TryAddSingleton<ISessionActivityReader, SessionActivityReader>();
-        services.TryAddSingleton<SessionActivitySnapshots>();
+        // H3: Database > Sessions: what a visitor is shown of the engine's session snapshot, and which first read this circuit has
+        // audited, are the circuit's.
         services.TryAddScoped<SessionHolderNames>();
         services.TryAddScoped<ISessionActivityService, SessionActivityService>();
 
@@ -192,35 +172,20 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<RelationshipReads>();
         services.TryAddScoped<IRelationshipDataService, RelationshipDataService>();
 
-        // W5-CAP: Storage. The facts are the database's - one read per database per HealthInterval, single flight, the same
-        // for every circuit - and what a visitor is shown of them is the circuit's.
-        services.TryAddSingleton<IStorageFacts, StorageFactsReader>();
+        // W5-CAP: Storage. The facts are the engine's; what a visitor is shown of them is the circuit's.
         services.TryAddScoped<IStorageService, StorageService>();
 
-        // W5-R2: the Replication page. The facts are the database's, read once per HealthInterval for every circuit; what a
-        // visitor is shown of them, which names it has audited and its one tablespace measurement at a time are the circuit's.
-        services.TryAddSingleton<IReplicationFactsReader, ReplicationFactsReader>();
-        services.TryAddSingleton<ReplicationFactsCache>();
+        // W5-R2: the Replication page. The facts are the engine's; what a visitor is shown of them, which names it has
+        // audited and its one tablespace measurement at a time are the circuit's.
         services.TryAddScoped<IReplicationService, ReplicationService>();
 
-        // W5-S2: the Server page. The facts are the database's, read once per HealthInterval for every circuit; what a visitor
-        // is shown of them is the circuit's.
-        services.TryAddSingleton<IServerSettingsFactsReader, ServerSettingsFactsReader>();
-        services.TryAddSingleton<ServerSettingsFactsCache>();
+        // W5-S2: the Server page. The facts are the engine's; what a visitor is shown of them is the circuit's.
         services.TryAddScoped<IServerPageService, ServerPageService>();
 
-        // S07's update paths, remembered by database, extension and both versions across sweeps.
-        services.TryAddSingleton<ExtensionUpdatePaths>();
-        // W5-AUR: the host's capacity source, asked once per database and instance per HealthInterval for the whole process
-        // (issue #8 A8); and the Server page's Aurora section, whose facts are the database's and whose view is the circuit's.
-        services.TryAddSingleton<Aurora.CapacityReader>();
-        services.TryAddSingleton<Aurora.IAuroraFactsReader, Aurora.AuroraFactsReader>();
-        services.TryAddSingleton<Aurora.AuroraFactsCache>();
+        // W5-AUR: the Server page's Aurora section, whose facts are the engine's and whose view is the circuit's.
         services.TryAddScoped<Aurora.IAuroraService, Aurora.AuroraService>();
-        // W5-Q1: the Statements page. The facts are the statement sweep's own read - the database's, single flight, kept for five
-        // minutes for every circuit - grouped by the studio's IStatementClassifier, which each Add*Studio registers; what a
-        // visitor is shown of them, and which first read this circuit has audited, are the circuit's.
-        services.TryAddSingleton<IStatementFacts, StatementFactsReader>();
+        // W5-Q1: the Statements page. The facts are the engine's; what a visitor is shown of them, and which first read this
+        // circuit has audited, are the circuit's.
         // X1: the drill-in's planner - stateless, its plans the visitor's own, run as SqlConsoleRole on a connection of each
         // plan's own - and the per-visitor service it answers to.
         services.TryAddSingleton<StatementPlanReader>();

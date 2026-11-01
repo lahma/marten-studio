@@ -51,7 +51,9 @@ public class TableFindingsCarryGatedSchemasTests
 
         // Both studios keep Tables-area checks since the move - the shared ones over any database, MartenStudio's over a
         // store (T11's mt_hilo) - so a scan of either folder alone would judge part of the area.
-        foreach (string project in StudioProjects.Names)
+        // The shared studio's UI holds only the Configuration-area posture checks since the 0.11 split: the Tables ones are the
+        // engine's, PostgresStudio.Diagnostics.
+        foreach (string project in StudioProjects.Names.Where(static x => x != StudioProjects.Shared))
         {
             checks.Should().Contain(
                 x => StudioProjects.ProjectOf(SourceScanner.Relative(x)) == project,

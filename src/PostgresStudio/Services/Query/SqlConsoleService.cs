@@ -26,7 +26,7 @@ namespace PostgresStudio.Services.Query;
 /// nothing narrows a typed statement to a tenant - then <see cref="ReadOnlySqlGuard" /> for a nicer message, and only
 /// then the statement, inside <see cref="ReadOnlySqlSession" />'s read-only transaction, which is what actually makes
 /// it safe (D13): <c>SET TRANSACTION READ ONLY</c>, <c>statement_timeout</c> and, when the host set one,
-/// <c>SET LOCAL ROLE</c> to <see cref="IStudioSettings.SqlConsoleRole" />. The parser is a nicer error, not the
+/// <c>SET LOCAL ROLE</c> to <see cref="IDiagnosticsSettings.SqlConsoleRole" />. The parser is a nicer error, not the
 /// boundary. Every outcome is audited, failures included (hard rule 5), and logged as 9204 or 9205 with the whole
 /// statement.
 /// </para>

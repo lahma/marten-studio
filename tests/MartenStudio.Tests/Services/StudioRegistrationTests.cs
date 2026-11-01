@@ -64,6 +64,12 @@ public class StudioRegistrationTests
     private static readonly (Type Service, ServiceLifetime Lifetime, How How, Type Implementation)[] Expected =
     [
         (typeof(StudioRegistrationMarker), ServiceLifetime.Singleton, How.Instance, typeof(StudioRegistrationMarker)),
+
+        // 0.11-C: the diagnostics engine, registered by the studio as part of itself (DiagnosticsCoreRegistration): its marker,
+        // and the same descriptor and settings the studio's own services read, under the engine's own interfaces.
+        (typeof(DiagnosticsRegistrationMarker), ServiceLifetime.Singleton, How.Instance, typeof(DiagnosticsRegistrationMarker)),
+        (typeof(DiagnosticsDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
+        (typeof(IDiagnosticsSettings), ServiceLifetime.Singleton, How.Factory, typeof(IDiagnosticsSettings)),
         (typeof(StudioDescriptor), ServiceLifetime.Singleton, How.Instance, typeof(StudioDescriptor)),
         (typeof(IStudioSettings), ServiceLifetime.Singleton, How.Factory, typeof(IStudioSettings)),
         (typeof(StudioMappedEndpoints), ServiceLifetime.Singleton, How.Type, typeof(StudioMappedEndpoints)),
@@ -225,6 +231,7 @@ public class StudioRegistrationTests
     /// <summary>What each factory registration of the studio makes, by its concrete type.</summary>
     private static readonly Dictionary<Type, Type> FactoryResults = new()
     {
+        [typeof(IDiagnosticsSettings)] = typeof(MartenStudioSettings),
         [typeof(IStudioSettings)] = typeof(MartenStudioSettings),
         [typeof(StudioLogThrottle)] = typeof(StudioLogThrottle),
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
@@ -283,7 +290,7 @@ public class StudioRegistrationTests
     }
 
     private static readonly Assembly[] StudioAssemblies =
-        [.. new[] { typeof(MartenStudioOptions).Assembly, typeof(StudioCoreRegistration).Assembly }.Distinct()];
+        [.. new[] { typeof(MartenStudioOptions).Assembly, typeof(StudioCoreRegistration).Assembly, typeof(DiagnosticsCoreRegistration).Assembly }.Distinct()];
 
     private static (Type Service, ServiceLifetime Lifetime, How How, Type Implementation) Read(ServiceDescriptor descriptor) =>
         descriptor switch

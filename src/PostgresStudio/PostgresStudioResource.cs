@@ -29,7 +29,7 @@ namespace PostgresStudio;
 /// </remarks>
 /// <param name="SourceName">
 /// <c>default</c> for the application's own unkeyed <c>NpgsqlDataSource</c>, or the name given to
-/// <see cref="PostgresStudioOptions.AddDataSource" /> or <see cref="PostgresStudioOptions.AddDatabaseSource" />.
+/// <see cref="PostgresDiagnosticsOptions.AddDataSource" /> or <see cref="PostgresDiagnosticsOptions.AddDatabaseSource" />.
 /// </param>
 /// <param name="DatabaseIdentifier">
 /// The database's stable name, never a connection string: a data source's registration name, or the name a host's

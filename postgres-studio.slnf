@@ -2,6 +2,7 @@
   "solution": {
     "path": "marten-studio.slnx",
     "projects": [
+      "src\\PostgresStudio.Diagnostics\\PostgresStudio.Diagnostics.csproj",
       "src\\PostgresStudio\\PostgresStudio.csproj",
       "samples\\PostgresStudio.SampleData\\PostgresStudio.SampleData.csproj",
       "samples\\PostgresStudio.Sample\\PostgresStudio.Sample.csproj",

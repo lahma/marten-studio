@@ -53,7 +53,8 @@ internal static class MartenHealthContext
         /// The studio's settings, under the name MartenStudio's checks read them by - the interval and the document-type
         /// filter, which are all they read, live from <c>MartenStudioOptions</c>.
         /// </summary>
-        public IStudioSettings StudioOptions => context.Settings;
+        public IStudioSettings StudioOptions => context.Settings as IStudioSettings
+            ?? throw new InvalidOperationException("MartenStudio's checks run under AddMartenStudio(), whose one settings object is a studio's.");
     }
 
     extension(HealthEvaluation evaluation)
@@ -101,7 +102,7 @@ internal static class MartenHealthBridges
     extension(HealthLinks)
     {
         /// <summary>
-        /// <see cref="HealthLinks.ToPage(IStudioSettings, string, StudioScope?)" /> with MartenStudio's options and source
+        /// <see cref="HealthLinks.ToPage(IDiagnosticsSettings, string, StudioScope?)" /> with MartenStudio's options and source
         /// parameter. Caller: <c>Overview.razor</c>, MartenStudio's overview body.
         /// </summary>
         /// <param name="options">MartenStudio's options.</param>
@@ -110,7 +111,7 @@ internal static class MartenHealthBridges
             HealthLinks.ToPage(MartenStudioSettings.Of(options), MartenStudioDescriptor.SourceQueryParameter, scope);
 
         /// <summary>
-        /// <see cref="HealthLinks.ToFinding(IStudioSettings, string, StudioScope?, HealthReportFinding)" /> with
+        /// <see cref="HealthLinks.ToFinding(IDiagnosticsSettings, string, StudioScope?, HealthReportFinding)" /> with
         /// MartenStudio's options and source parameter. Callers: <c>Overview.razor</c>, <c>EventTypes.razor</c>,
         /// <c>Projections.razor</c> and <c>IndexesTab.razor</c>.
         /// </summary>
