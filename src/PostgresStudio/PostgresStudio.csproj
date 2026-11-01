@@ -30,7 +30,7 @@
   <!-- The diagnostics engine, with Npgsql and the Microsoft.Extensions.* abstractions it needs: Npgsql reaches this
        project through it (0.11-C), and PostgresStudio is packed with an exact dependency on its own build of it. -->
   <ItemGroup>
-    <ProjectReference Include="..\PostgresStudio.Diagnostics\PostgresStudio.Diagnostics.csproj" />
+    <ProjectReference Include="../PostgresStudio.Diagnostics/PostgresStudio.Diagnostics.csproj" />
   </ItemGroup>
 
   <ItemGroup>

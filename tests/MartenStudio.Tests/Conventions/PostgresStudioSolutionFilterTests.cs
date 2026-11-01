@@ -66,7 +66,11 @@ public class PostgresStudioSolutionFilterTests
             foreach (string reference in csproj.Descendants().Where(static x => x.Name.LocalName == "ProjectReference")
                 .Select(static x => (string) x.Attribute("Include")!))
             {
-                string target = Path.GetRelativePath(RepositoryRoot.FullPath, Path.GetFullPath(Path.Combine(directory, reference)))
+                // MSBuild accepts either separator in an Include, and '\\' is not one on Linux: normalize first, or
+                // GetFullPath leaves a "..\\" segment unresolved and the reference looks like it leaves the filter.
+                string target = Path.GetRelativePath(
+                        RepositoryRoot.FullPath,
+                        Path.GetFullPath(Path.Combine(directory, reference.Replace('\\', '/'))))
                     .Replace('\\', '/');
 
                 if (!filtered.Contains(target, StringComparer.Ordinal))
