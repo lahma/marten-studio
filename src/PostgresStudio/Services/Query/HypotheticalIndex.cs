@@ -277,6 +277,12 @@ internal sealed class WhatIfSource
 
     /// <summary>A line under the panel's lead: what the indexes are, for this surface.</summary>
     public string? Note { get; init; }
+
+    /// <summary>
+    /// 0.10-B: the surface draws the two plans itself - the Plan page's Compare section - so the panel says what the what-if came to
+    /// and does not draw them a second time.
+    /// </summary>
+    public bool InPlace { get; init; }
 }
 
 /// <summary>

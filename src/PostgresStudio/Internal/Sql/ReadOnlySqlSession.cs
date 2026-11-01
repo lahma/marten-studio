@@ -131,7 +131,7 @@ internal sealed record ReadOnlySqlOptions
 internal sealed class ReadOnlySqlSession
 {
     /// <summary>Sets a GUC for the current transaction. The name and the value are both parameters.</summary>
-    internal const string SetConfigSql = "select set_config(@name, @value, true)";
+    internal const string SetConfigSql = "select pg_catalog.set_config(@name, @value, true)";
 
     /// <summary>Makes the transaction read-only. No parameters, and no user input anywhere in it.</summary>
     internal const string ReadOnlySql = "set transaction read only";

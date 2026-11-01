@@ -173,6 +173,10 @@ public class CapabilityGatingMatrixTests
         // X2: a what-if plans a statement under a hypothetical index, behind the gate of the plan it accompanies - the
         // console's (RunSql), Mode A's (the console's again) and LINQ mode's (RunLinqQueries) - refused as a value, audited.
         new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.WhatIfAsync), StudioCapability.RunSql),
+
+        // 0.10-B: the Plan page's what-if in place - X2's gate and engine for the page's own statement, so the same three refusals as
+        // values, audited under RunSql.
+        new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.PlanWhatIfAsync), StudioCapability.RunSql),
         new(typeof(IQueryService), nameof(IQueryService.WhatIfAsync), StudioCapability.RunSql),
         new(typeof(ILinqQueryService), nameof(ILinqQueryService.WhatIfAsync), StudioCapability.RunLinqQueries),
         new(typeof(IDocumentDataService), nameof(IDocumentDataService.WhatIfAsync), StudioCapability.RunLinqQueries),
@@ -235,7 +239,7 @@ public class CapabilityGatingMatrixTests
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync", "WhatIfAsync"],
 
         // PS-1d: the console is the shared seam now, and its run is gated (Mutating); X2's what-if is a gated read.
-        [typeof(ISqlConsoleService)] = ["WhatIfAsync"],
+        [typeof(ISqlConsoleService)] = ["WhatIfAsync", "PlanWhatIfAsync"],
         [typeof(IPlanFactsService)] = [],
         [typeof(ILinqQueryService)] = ["DescribeAsync", "WhatIfAsync"],
         [typeof(IDatabaseObjectService)] =

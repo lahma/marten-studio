@@ -266,6 +266,21 @@ lookup without an index on its key, a write to another table, an audit insert - 
 STATEMENT`, with a transition table) can do it once for the whole statement. A foreign key is a trigger too: an unindexed
 referencing column makes every delete or update of the referenced row scan the referencing table.
 
+## P21 Generic plan far costlier than the custom plan
+
+**Warning**, from **Compare generic and custom** on Query › Plan - the one insight that judges a *pair* of plans, so it is evaluated
+only when the page has both and never on a single plan (a single plan has nothing to be judged against, so it is never listed as
+not judged either). The generic plan of the statement - planned with no values - has an estimated total cost of at least ten times
+the custom plan's, planned for the values typed in.
+
+A prepared statement runs on a custom plan for its first five executions and then on the generic plan, when Postgres judges the
+generic plan's cost not much above the custom plans' average. A generic plan ten times dearer is one a server on
+`plan_cache_mode = auto` would still avoid - and one `force_generic_plan` (which a driver or a pooler can impose) would not.
+
+**Remedy.** `plan_cache_mode = force_custom_plan` for the role or the session (`ALTER ROLE … SET plan_cache_mode`) plans every
+execution for its values; or give the planner what it lacks - an index, extended statistics, a statement that does not depend on
+one skewed value - so the generic plan is a good one.
+
 ## Query › Plan: the plan analyzer
 
 The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in Marten Studio) is the console's Explain buttons as a page of
@@ -321,6 +336,54 @@ pre-order, `[#3]`), and one sampled profile for each measure the plan has - *Sel
 own value, the same self time or cost the tree shows. The file is saved by the browser; there is no link to the viewer, which is
 opened by hand at speedscope.app (the file stays in the browser). A plan from Operations › Statements gets no export, as its
 masked form is not offered raw.
+
+## Comparing plans
+
+From 0.10 the Plan page keeps at most two plans, **Before** and **After**, and draws what changed between them. *Keep as Before*
+pins the plan on screen; the next plan - one this page runs, or one pasted - becomes After, and the **Compare** section opens
+under it. *Clear Before* returns to the page with one plan. Nothing is kept across circuits, and a plan is dropped when the
+database in the header changes.
+
+**The diff.** The two plans are lined up node by node by a pure function that reads nothing from a database - so a pasted plan
+compares as well as a run one. Nodes are paired by *path* first: the roots, and then two children at the same child index
+whenever they are alike (the same node kind, the same relation, function or CTE, or both joins - a `Nested Loop` that became a
+`Hash Join` is one node whose kind changed). The nodes still unpaired are lined up by a longest common subsequence over their
+(node type, target) pairs, so a subtree that moved or was wrapped in a new node still finds its scans; then any two nodes the
+sequence could not keep in order - siblings that swapped places - are paired with their equal; what is left is added or removed. For each pair the table shows the kind (and when it changed), the change of total cost, of inclusive time (when both plans
+were analyzed with timing) and of the planner's row estimate. At most 2,000 nodes of either plan are read, as the reader reads.
+
+**Four things fill Before and After for you:**
+
+- *What if? in place.* Where a plan suggests an index (P04's sequential scan, P05's nested loop, P10's filter that discards most of
+  what an index found), the panel under the insights offers it, and **What if?** plans the page's own statement, with its values,
+  before and after that one hypothetical index (hypopg, as [What if? A hypothetical index](#what-if-a-hypothetical-index) below) -
+  Before is the plan now, After the plan with the index. Only an index the studio's builder writes from a table and columns is
+  imagined, built again on the server; both plans are plain plans (a hypothetical index serves `EXPLAIN` alone, so *Explain analyze*
+  is planned plain here); `hypopg_reset()` runs on the same connection before it goes back to the pool. Without hypopg the panel
+  says so. P17's remedy - an expression index, or the parameter's type - is not an index the builder writes, so it is not offered here.
+- *Settings what-if.* A **Settings** panel lists the planner settings the server has from a fixed list - `work_mem`,
+  `hash_mem_multiplier`, `random_page_cost`, `effective_io_concurrency`, `jit`, `max_parallel_workers_per_gather` and the `enable_*`
+  family - never a name typed in. Pick up to eight and give each a value (checked here by the setting's type and range, and by
+  Postgres, which has the last word: a value it refuses is an ordinary error - but see the ceilings below); **Plan with these settings** keeps the plan on
+  screen as Before and plans the same statement again, with `select set_config(name, value, true)` - name and value both bound as
+  parameters - inside the same read-only transaction, before `EXPLAIN`, as After. The settings last for that transaction and are
+  rolled back with it. They are named in the audit entry of the run.
+  **Two memory settings have a ceiling, in every mode:** `work_mem` is at most **1 GB** and `hash_mem_multiplier` at most **8**.
+  Under *Explain analyze* a huge `work_mem` or multiplier lets a hash join or a sort that would have spilled to disk stay in memory,
+  and the server can run out of memory before the statement timeout stops it. A value above its ceiling is **refused before a
+  connection is opened**, with a message that names the ceiling - never silently reduced - and the page says it before anything is
+  sent. The studio reads a memory value as Postgres does - a whole number and an optional unit, `B`, `kB`, `MB`, `GB` or `TB` (the
+  units are case-sensitive; a bare number is kilobytes) - and a value it cannot read (`1.5GB`, `1gb`, a word, anything with a
+  statement in it) is refused rather than passed on to be read. The ceiling is the studio's, not Postgres's: nothing on this page
+  goes above it, and the same statement run in the SQL console is the console's own business.
+- *Compare generic and custom.* For a statement with `$1`, `$2` placeholders, one action plans it generically and for the values
+  typed in (two runs, two audit entries), with the generic plan as Before and the custom plan as After, and judges the pair with
+  [P21](#p21-generic-plan-far-costlier-than-the-custom-plan).
+- *Statement timeout.* A field beside the options takes seconds for **this run's** `statement_timeout`; it is clamped on the server
+  to the host's `QueryTimeout` and never above it, and empty means the host's own. The run says which timeout it held.
+
+None of this adds a capability or a connection: every plan on the page is one `RunSql` run through the console's gate, guard and
+read-only transaction, audited as one.
 
 ## Facts beside the plan
 

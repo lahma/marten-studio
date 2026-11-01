@@ -56,7 +56,7 @@ public class ReadOnlySqlSessionTests
     [Fact]
     public void Every_setting_is_applied_through_set_config_rather_than_a_SET_statement()
     {
-        ReadOnlySqlSession.SetConfigSql.Should().Be("select set_config(@name, @value, true)");
+        ReadOnlySqlSession.SetConfigSql.Should().Be("select pg_catalog.set_config(@name, @value, true)");
         ReadOnlySqlSession.ReadOnlySql.Should().Be("set transaction read only");
     }
 

@@ -1,0 +1,174 @@
+@using System.Globalization
+@using PostgresStudio.Internal.Sql
+@using PostgresStudio.Services.Query
+
+@*
+    0.10-B (issue #28): the settings what-if. The page plans the same statement again with a few planner settings changed for that one
+    plan, and sets the plan on screen against it. The list is the allow-list the service holds, narrowed to the names the server
+    has (PlanSettingsQueries.ReadAsync) - never a typed name - and each value is checked here by the setting's type and range
+    (PlanSettingValues), which is a convenience: the service refuses any name off the list before it opens a connection, and Postgres
+    reads each value as a parameter and has the last word. Every class is ms-plan-settings-what-if-, in studio.css's 0.10-B section.
+*@
+
+@if (offers.Count > 0)
+{
+    <section class="ms-plan-whatif-settings" aria-label="Settings what-if">
+        <h3 class="ms-plan-whatif-settings-title">Settings what-if</h3>
+        <p class="ms-plan-whatif-settings-lead">
+            Plan the same statement again with planner settings changed for that plan alone: up to @PlanSettingsQueries.MaxSettings.ToString(CultureInfo.InvariantCulture)
+            of the settings below, set inside the same read-only transaction before the plan is asked for and rolled back with it. The
+            plan on screen becomes Before and the new plan After.
+        </p>
+
+        <ul class="ms-plan-whatif-settings-list">
+            @foreach (PlanSettingRow offer in offers)
+            {
+                string name = offer.Name;
+                Choice choice = choices[name];
+                string id = "ms-plan-setting-" + name;
+
+                <li class="ms-plan-whatif-setting" @key="name">
+                    <label class="ms-plan-whatif-setting-pick">
+                        <input type="checkbox" checked="@choice.Chosen" disabled="@(Disabled || Running)" @onchange="(ChangeEventArgs args) => Pick(choice, args.Value is true)" />
+                        <code>@name</code>
+                    </label>
+                    <span class="ms-muted ms-plan-whatif-setting-now">now @offer.Setting@(offer.Unit is { } unit ? " " + unit : string.Empty)</span>
+                    <input id="@id"
+                           class="ms-input ms-input-mono ms-plan-whatif-setting-value"
+                           type="text"
+                           value="@choice.Value"
+                           placeholder="@PlanSettingValues.Hint(offer)"
+                           maxlength="@PlanSettingsQueries.MaxValueCharacters"
+                           aria-label="@("Value for " + name)"
+                           disabled="@(!choice.Chosen || Disabled || Running)"
+                           @onchange="(ChangeEventArgs args) => SetValue(choice, args.Value?.ToString() ?? string.Empty)" />
+                    @if (choice.Error is { } error)
+                    {
+                        <span class="ms-plan-whatif-setting-error" role="alert">@error</span>
+                    }
+                </li>
+            }
+        </ul>
+
+        @if (message is { } shown)
+        {
+            <p class="ms-alert ms-alert-warning ms-plan-whatif-settings-message" role="alert">@shown</p>
+        }
+
+        <p class="ms-plan-whatif-settings-actions">
+            <button type="button" class="ms-btn ms-plan-whatif-settings-run" disabled="@(Disabled || Running)" @onclick="PlanAsync">
+                @(Running ? "Planning…" : "Plan with these settings")
+            </button>
+        </p>
+    </section>
+}
+
+@code {
+    private sealed class Choice
+    {
+        public bool Chosen { get; set; }
+
+        public string Value { get; set; } = string.Empty;
+
+        public string? Error { get; set; }
+    }
+
+    private readonly Dictionary<string, Choice> choices = new(StringComparer.Ordinal);
+    private IReadOnlyList<PlanSettingRow> offers = [];
+    private object? offeredFor;
+    private string? message;
+
+    /// <summary>The settings the server has, a list of <c>PlanSettingRow</c> (<see cref="object" /> because the Razor SDK emits every component as public and a public parameter cannot have an internal type).</summary>
+    [Parameter]
+    public object? Offers { get; set; }
+
+    /// <summary>Whether a plan is being asked for.</summary>
+    [Parameter]
+    public bool Running { get; set; }
+
+    /// <summary>Whether the page may not plan: the gate answered no.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>Asks the page to plan with these name and value pairs, each already checked here.</summary>
+    [Parameter]
+    public EventCallback<List<KeyValuePair<string, string>>> OnPlan { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(Offers, offeredFor))
+        {
+            return;
+        }
+
+        offeredFor = Offers;
+        offers = Offers as IReadOnlyList<PlanSettingRow> ?? [];
+
+        // A new list is another server's: what was typed for the old one goes.
+        choices.Clear();
+
+        foreach (PlanSettingRow offer in offers)
+        {
+            choices[offer.Name] = new Choice();
+        }
+    }
+
+    private void Pick(Choice choice, bool chosen)
+    {
+        choice.Chosen = chosen;
+        choice.Error = null;
+        message = null;
+    }
+
+    private void SetValue(Choice choice, string value)
+    {
+        choice.Value = value;
+        choice.Error = null;
+    }
+
+    private async Task PlanAsync()
+    {
+        message = null;
+        List<KeyValuePair<string, string>> chosen = [];
+        bool valid = true;
+
+        foreach (PlanSettingRow offer in offers)
+        {
+            Choice choice = choices[offer.Name];
+            choice.Error = null;
+
+            if (!choice.Chosen)
+            {
+                continue;
+            }
+
+            if (PlanSettingValues.ValidateWithCeiling(offer, choice.Value) is { } error)
+            {
+                choice.Error = error;
+                valid = false;
+                continue;
+            }
+
+            chosen.Add(new KeyValuePair<string, string>(offer.Name, choice.Value.Trim()));
+        }
+
+        if (chosen.Count == 0 && valid)
+        {
+            message = "Pick at least one setting and give it a value.";
+            return;
+        }
+
+        if (chosen.Count > PlanSettingsQueries.MaxSettings)
+        {
+            message = "A plan changes at most " + PlanSettingsQueries.MaxSettings.ToString(CultureInfo.InvariantCulture) + " settings.";
+            return;
+        }
+
+        if (!valid)
+        {
+            return;
+        }
+
+        await OnPlan.InvokeAsync(chosen);
+    }
+}

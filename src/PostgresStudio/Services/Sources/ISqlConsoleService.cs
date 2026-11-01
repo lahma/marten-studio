@@ -64,4 +64,17 @@ internal interface ISqlConsoleService
     /// The write policy refused this scope for <c>RunSql</c>. Nothing is sent.
     /// </exception>
     Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 0.10-B (issue #28): the Plan page's "What if?" in place - the page's own statement, with its values, planned before and
+    /// after one hypothetical index hypopg imagines (X2's engine), behind the console's own gate (<c>RunSql</c>, the write policy for
+    /// the database as a whole, the statement guard), in its read-only transaction, audited as a <c>RunSql</c> run. Both plans are
+    /// plain plans: a hypothetical index serves <c>EXPLAIN</c> alone. Only an index the studio's builder writes is imagined - its
+    /// definition is built again here from its parts. Every refusal is a value; nothing is thrown but for cancellation.
+    /// </summary>
+    /// <param name="scope">The scope the console is pointed at; its tenant is ignored, never applied.</param>
+    /// <param name="request">The statement, the mode (never analyzed here) and the values; its settings and timeout are not applied.</param>
+    /// <param name="index">The index to imagine: one the plan suggested.</param>
+    /// <param name="cancellationToken">Cancels the what-if; never the reset that follows it.</param>
+    Task<WhatIfResult> PlanWhatIfAsync(StudioScope scope, PlanRunRequest request, HypotheticalIndex index, CancellationToken cancellationToken = default);
 }

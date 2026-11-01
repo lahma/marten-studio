@@ -76,16 +76,23 @@
                         <p class="ms-muted ms-whatif-name">The plan names the hypothetical index <code>@name</code>.</p>
                     }
 
-                    <div class="ms-whatif-compare">
-                        <div class="ms-whatif-side ms-whatif-before">
-                            <h4 class="ms-whatif-side-title">Now</h4>
-                            <PlanView Plan="shown.Before" Label="The plan now" />
+                    @if (source?.InPlace == true)
+                    {
+                        <p class="ms-muted ms-whatif-in-place">The two plans are in Compare below: Before is the plan now, After the plan with the index.</p>
+                    }
+                    else
+                    {
+                        <div class="ms-whatif-compare">
+                            <div class="ms-whatif-side ms-whatif-before">
+                                <h4 class="ms-whatif-side-title">Now</h4>
+                                <PlanView Plan="shown.Before" Label="The plan now" />
+                            </div>
+                            <div class="ms-whatif-side ms-whatif-after">
+                                <h4 class="ms-whatif-side-title">With the index</h4>
+                                <PlanView Plan="shown.After" Label="The plan with the hypothetical index" />
+                            </div>
                         </div>
-                        <div class="ms-whatif-side ms-whatif-after">
-                            <h4 class="ms-whatif-side-title">With the index</h4>
-                            <PlanView Plan="shown.After" Label="The plan with the hypothetical index" />
-                        </div>
-                    </div>
+                    }
 
                     <p class="ms-muted ms-whatif-caveat">@WhatIfResult.Caveat</p>
                 }
@@ -143,10 +150,17 @@
         running = true;
         runningFor = candidate;
         failure = null;
+        WhatIfSource asked = source;
 
         try
         {
-            result = await source.RunAsync(candidate, lifetime.Token);
+            WhatIfResult answered = await asked.RunAsync(candidate, lifetime.Token);
+
+            // An answer for a plan that has gone - a newer one is on screen, with a source of its own - is not this plan's.
+            if (ReferenceEquals(asked, source))
+            {
+                result = answered;
+            }
         }
         catch (OperationCanceledException)
         {

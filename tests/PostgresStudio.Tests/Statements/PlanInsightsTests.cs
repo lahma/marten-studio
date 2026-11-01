@@ -51,6 +51,7 @@ public class PlanInsightsTests
         ["P18"] = static _ => false,
         ["P19"] = static _ => false,
         ["P20"] = static _ => false,
+        ["P21"] = static _ => false,
     };
 
     public static TheoryData<string, string> EveryInsightOnEveryFixture()

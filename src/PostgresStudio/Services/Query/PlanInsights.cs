@@ -23,6 +23,12 @@ internal sealed record PlanInsightInfo(string Code, string Title, HealthSeverity
     /// </summary>
     public bool NeedsFacts { get; init; }
 
+    /// <summary>
+    /// 0.10-B: whether it judges a pair of plans - the Plan page's generic plan against its custom one - and so is evaluated by the
+    /// comparison alone, never on a single plan: it is not listed as not judged, because a single plan has nothing to be judged against.
+    /// </summary>
+    public bool ComparesPlans { get; init; }
+
     /// <summary>The heading's anchor, as GitHub derives it.</summary>
     public string DocsAnchor => HealthCheckInfo.Anchor(Code + " " + Title);
 
@@ -174,12 +180,16 @@ internal static partial class PlanInsights
     /// <summary>P20.</summary>
     public static readonly PlanInsightInfo TriggerTime = new("P20", "Triggers dominating the statement", HealthSeverity.Warning, true);
 
+    /// <summary>P21 - judges a pair of plans, so <see cref="Evaluate" /> never returns it: see <see cref="GenericVersusCustom" />.</summary>
+    public static readonly PlanInsightInfo GenericWorseThanCustom = new("P21", "Generic plan far costlier than the custom plan", HealthSeverity.Warning, false) { ComparesPlans = true };
+
     /// <summary>Every insight, by code.</summary>
     public static IReadOnlyList<PlanInsightInfo> All { get; } =
     [
         RowEstimate, Spill, LossyBitmap, SelectiveScan, LargeNestedLoop, LargeOffset, LeadingWildcard, ShortWorkers,
         HeapFetching, DiscardingFilter, HashBatched, CostlyJit, SlowPlanning, MissingMemoize,
         StaleStatistics, CorrelatedColumns, WrappedIndexedColumn, NoPartitionPruning, DefaultFunctionRows, TriggerTime,
+        GenericWorseThanCustom,
     ];
 
     /// <summary>P09's "fetching": heap fetches are at least this share of the rows the scan returned over its loops.</summary>
