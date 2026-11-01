@@ -35,6 +35,9 @@ internal sealed class FakeSchemaDataService : ISchemaDataService
     /// <summary>The database identity the apply dialog makes a person type.</summary>
     public string DatabaseIdentity { get; set; } = "localhost.marten";
 
+    /// <summary>What <see cref="SchemaNameNoticeAsync" /> answers.</summary>
+    public string? ApplyNotice { get; set; }
+
     /// <summary>What <see cref="ApplyAsync" /> throws, when a test is about a refusal.</summary>
     public Exception? ApplyFailure { get; set; }
 
@@ -105,4 +108,8 @@ internal sealed class FakeSchemaDataService : ISchemaDataService
 
     public Task<string> DatabaseIdentityAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(DatabaseIdentity);
+
+    /// <inheritdoc />
+    public Task<string?> SchemaNameNoticeAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        Task.FromResult(ApplyNotice);
 }

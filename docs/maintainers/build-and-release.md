@@ -86,15 +86,15 @@ Do not "update" it.
 tests, an exact version) are defined there once; `Marten`'s `PackageVersion` reads
 `$(MartenStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
 `--marten-version` (env `MARTEN_VERSION`) — `floor`, the default; `latest`; or an exact version such as
-`9.54.2`, never a range — in `OnBuildInitialized`, and passes the result as
+`9.56.0`, never a range — in `OnBuildInitialized`, and passes the result as
 `-p:MartenStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
 variable of that name cannot change what a run tests. Without Fallout, `dotnet test …
--p:MartenStudioMartenVersion=9.54.2` does the same. **`Pack` packs at the floor and refuses anything
+-p:MartenStudioMartenVersion=9.56.0` does the same. **`Pack` packs at the floor and refuses anything
 else**, twice: the Fallout target asserts it, and `MartenStudio.csproj` fails a bare `dotnet pack` before
 the nuspec is written unless both `MartenStudioMartenVersion` is the floor *and* `project.assets.json`
 holds the `"Marten/<floor>"` library — because NuGet writes the dependency range from the assets file,
-so `dotnet test … -p:MartenStudioMartenVersion=9.54.2` followed by `dotnet pack --no-restore` would
-otherwise pass a property check and still ship `Marten >= 9.54.2`. A missing assets file is a refusal,
+so `dotnet test … -p:MartenStudioMartenVersion=9.56.0` followed by `dotnet pack --no-restore` would
+otherwise pass a property check and still ship `Marten >= 9.56.0`. A missing assets file is a refusal,
 not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
 latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
 and fix or record every difference in the same pull request. Raising the floor is a *Package budget

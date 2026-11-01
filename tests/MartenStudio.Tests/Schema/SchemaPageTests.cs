@@ -178,6 +178,21 @@ public class SchemaPageTests
         page.FindAll(".ms-button-danger").Should().BeEmpty();
     }
 
+    /// <summary>K10: the sentence the finding carries is shown where the apply is, while the check would fire.</summary>
+    [Fact]
+    public void The_Apply_area_shows_K10s_sentence_when_the_service_has_one_and_otherwise_nothing()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema, capabilities: true);
+        schema.ApplyNotice = "The schema \"order\" needs quoting in PostgreSQL. Upgrade to Marten 9.55 or later, or rename the schema.";
+
+        var page = context.Render<SchemaPage>();
+
+        page.Find(".ms-schema-name-notice").TextContent.Should().Contain("\"order\"").And.Contain("Upgrade to Marten 9.55");
+
+        using var quiet = NewContext(out _, capabilities: true);
+        quiet.Render<SchemaPage>().FindAll(".ms-schema-name-notice").Should().BeEmpty();
+    }
+
     [Fact]
     public void Apply_is_present_but_does_nothing_until_a_migration_has_been_previewed()
     {

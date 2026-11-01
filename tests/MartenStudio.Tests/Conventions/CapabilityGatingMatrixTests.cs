@@ -225,7 +225,7 @@ public class CapabilityGatingMatrixTests
         [typeof(ISchemaDataService)] =
         [
             "CheckAsync", "DatabaseIdentityAsync", "DdlAsync", "FunctionsAsync", "IndexesAsync",
-            "PreviewAsync", "TablesAsync",
+            "PreviewAsync", "SchemaNameNoticeAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync", "WhatIfAsync"],
 

@@ -89,7 +89,7 @@ never removes an orphaned progression row (`ProgressionRowClassifier`, from `All
 store-global Rewind on a HotCold node whose distributor holds no lock (`DaemonLeadership`, M47). A tenant's database is
 found without asking a dynamic tenancy for a tenant it lacks (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating
 a dynamic tenancy's databases (`AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`, 9.50.1's
-`IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten through 9.54.2, and the studio, enumerating
+`IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten through 9.56.0, and the studio, enumerating
 on the first navigation, can be the first caller: a known limit, not a per-poll cost. Measurements, history and
 details: decision-notes.md, D27.
 **D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),

@@ -497,3 +497,53 @@ What changed between `V9.54.1` and `v9.54.2`, read from the source, and what the
   `Microsoft.AspNetCore.App.Internal.Assets` floor stay at 10.0.12.
 
 **Exit condition:** bump when a fix matters here, with both fast suites green three times at the floor.
+
+**2026-10-31 — the latest-tested Marten moves from `9.54.2` to `9.56.0`; the floor stays at `9.39.0`.** Marten 9.55.0
+(tagged `V9.55.0`) and 9.56.0 (`v9.56.0`) were released 2026-10-28 and 2026-10-31. Nothing in the studio needs either;
+this is the latest leg moving, and 0.10's V1 packet carries it.
+
+The gates, run by V1:
+- `dotnet restore marten-studio.slnx -p:MartenStudioMartenVersion=9.56.0`: zero NU messages.
+- `dotnet build marten-studio.slnx` at the floor and at 9.56.0: 0 warnings.
+- The fast suites at the floor: `MartenStudio.Tests` 7 379 passed with 121 skips, `PostgresStudio.Tests` 4 006 passed.
+  At 9.56.0: `MartenStudio.Tests` 7 498 passed with 2 skips, `PostgresStudio.Tests` 4 006 passed. `MartenRuntimeProbeTests`
+  now pins 9.56.0 and JasperFx 2.97.0. `PublicApiTest` (no baseline edit), `MartenLinqCommandTests`,
+  `JasperFxSourceGeneratorTests` and `AggregateSteppingTests` pass at both.
+- Both full live suites at 9.56.0 with `MARTENSTUDIO_PG_REUSE=false`: `PostgresStudio.Integration.Tests` 365 passed;
+  `MartenStudio.Integration.Tests` 1 224 passed, 12 skipped and 2 failed, both failures being K09's own new live tests
+  (they named a table after `Invoice`, which the sample store declares); fixed, and the class then passed 5 of 5 at 9.56.0
+  and at the floor. Nothing that existed before moved.
+
+The transitive graph at 9.56.0, compared with 9.54.2's: Marten itself, **JasperFx and JasperFx.Events 2.97.0** (from 2.95.1)
+and **Weasel.Core / Weasel.Postgresql / Weasel.Storage 9.47.1** (from 9.47.0). Nothing else moved. **No package is new**:
+`Patched.DistributedLock.*` and `System.Linq.Dynamic.Core`, which differ from the floor's graph, were already in 9.54.2's.
+
+What changed between `v9.54.2` and `v9.56.0`, read from the source and the 9.55.0 release notes, and what the studio does
+with each:
+- **Read before upgrading, culture (#5778, #5783).** Document aliases, `DdlTemplate` lookups and flat-table upsert function
+  names are lowered with the invariant culture. A host under `tr-TR` or `az-AZ` that had `mt_doc_ınvoice` gets
+  `mt_doc_invoice` from 9.55, created empty, so its documents appear missing until the tables and `mt_upsert_`,
+  `mt_insert_`, `mt_update_` and `mt_overwrite_` functions are renamed. The hazard is the upgrade, so **K09** (Configuration)
+  finds those objects at every Marten version, leaves out a name a known document type declares itself (a type called
+  `Kayıt` keeps its `ı`), and says in words to rename the tables and drop the functions for Marten to recreate; the studio runs nothing.
+- **Weasel 9.47.1, a schema name that needs quoting (weasel#750).** Index readback now works for a `DatabaseSchemaName` or
+  events schema that is a reserved word or contains upper case; below it every apply after the first fails with `42P07`.
+  **K10** fires only below Weasel 9.47.1, from the configuration alone, for any schema the store declares (a document type's included), and the
+  Schema screen's Apply area shows its sentence.
+- **#5773, `StoredDocument.Version` for projection documents.** The diagnostics writer's token becomes
+  `<mt_version>:<mt_last_modified as epoch microseconds>` for a mapping with `UseVersionFromMatchingStream`. The studio uses
+  neither `IDocumentStoreDiagnostics` nor its token (it writes through a session with `UpdateExpectedVersion`/`UpdateRevision`),
+  so nothing here changes; the 0.10 projection-edit packet reads the same mechanism.
+- **#5784, HiLo ids recover after an outage.** A failed first `Sequences` build is no longer cached. No studio code touches
+  it, and hard rule 14's "no `AllSchemaNames()`/`AllObjects()` on a read path" is unchanged.
+- **#5777, subclass queries use nested duplicated-field columns; #5772, verbose connection tracing emits an event on every
+  append route; #5776, `StreamPagedByCursor`; JasperFx 2.96.x/2.97.0.** None reaches a studio path. The LINQ mode's adapter
+  tests (`MartenLinqCommandTests`, `DynamicLinqAdapterTests`) pass unchanged.
+- **9.56.0's `IReadOnlyEventStore.QueryRawEvents(string? tenantId = null)` (marten#5794, jasperfx#1094)** is a default
+  interface member that returns `IQueryable<IEvent>`, and `EventQueryMapping` now registers `IEvent.TenantId` as a column.
+  0.10 does not use it. `EventsApiSurfaceTests.Query_raw_events_is_on_the_read_only_event_store_from_JasperFx_2_97_and_not_below`
+  pins its presence at 9.56.0 and absence at the floor, with no `RuntimeFeature` yet, so 0.11 starts from a pinned shape.
+- **Enumerating a dynamic tenancy's databases** is still not read-only through 9.56.0: no tenancy file changed, so D27's
+  known limit holds.
+
+**Exit condition:** unchanged.
