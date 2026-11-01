@@ -1,3 +1,69 @@
+# 0.10.0
+
+0.10 puts the database's facts beside a plan and lets two plans be compared (#28, phase 2), lets a host accept a
+health check for a reason (#35), and fixes a studio edit of a projection's document that made the daemon skip an event.
+
+- Query › Plan reads facts beside a plan it ran (issue #28, phase 2): per relation the planner's estimate, when it was
+  last analyzed and what has changed since, its indexes, its extended statistics and its partition parent; per column
+  the plan filters, joins or sorts on, `n_distinct`, nulls and correlation; and the planner settings. They are read once
+  after the plan, from the catalog by oid, locking nothing, in the console's read-only transaction. A relation in a
+  schema you may not see, or a partition whose root is one, is shown as `‹withheld›` with no facts and no name; most
+  common values and histograms need `BrowseDatabase` and the row gate, and are never shown for a Marten table. Shown in
+  a Facts panel, in a node-table column and in the selected node's detail. A pasted plan gets none. The Plan page now
+  asks for `VERBOSE` by default, which is what names each relation with its schema; untick it and the panel says the
+  facts need it.
+- Six plan insights, P15-P20: stale statistics behind a misestimate, correlated columns without extended statistics
+  (with a `CREATE STATISTICS` statement for your own migrations), a function or cast on an indexed column, no partition
+  pruning, the default row estimate on a function, and triggers dominating the statement. P15-P18 need the facts and are
+  listed as not judged without them.
+- Query › Plan compares two plans: Keep as Before pins the plan on screen, the next plan run or pasted becomes After,
+  and Compare draws the node-by-node diff (changed kind, target, cost, time and row estimate, nodes added and removed)
+  from a pure function that reads nothing from the database, so a pasted plan compares too (#28).
+- Settings what-if on Query › Plan: plan the same statement again with up to eight planner settings changed for that
+  plan alone, from a fixed list (`work_mem`, `hash_mem_multiplier`, `random_page_cost`, `effective_io_concurrency`,
+  `jit`, `max_parallel_workers_per_gather` and the `enable_*` family) the server has. A name off the list is refused
+  before a connection is opened; the name and value reach `set_config` as parameters inside the console's read-only
+  transaction, and the audit entry names them. `work_mem` is held to 1 GB and `hash_mem_multiplier` to 8 in every mode:
+  a larger value, or a memory value the studio cannot read, is refused before a connection is opened, never reduced.
+- Compare generic and custom plans of a statement with `$n` placeholders in one action, with new plan insight P21 (the
+  generic plan costs ten times the custom plan or more); P21 judges a pair, so it never fires on a single plan.
+- What if? in place on Query › Plan: P04's, P05's and P10's index is planned before and after through hypopg for the
+  page's own statement and values, and the two plans fill Compare. Both plans are plain, and only an index the studio's
+  builder writes is imagined.
+- A per-run statement timeout on Query › Plan, clamped on the server to the host's `QueryTimeout`.
+- Health: a host can accept a check with a reason (#35), `options.AcceptedChecks["K05"] = "Database roles are managed by
+  the platform team."`, in either studio's options. The check still runs and its finding is still shown - on the check's
+  row as "Accepted" with the reason, and in the diagnostics API as `PostgresFinding.Accepted` and `AcceptedReason`, and
+  in the snapshot JSON - but it is out of the Warning and Critical counts, the Overview tile, the navigation badge, the
+  banners and the Critical toast, and never makes the ASP.NET Core health check `Degraded` or `Unhealthy`, which counts
+  it under a separate `accepted` data key. Startup refuses a key that is not a check of that studio, a blank reason and
+  one over 500 characters. The Server page (both studios) and Marten Studio's Configuration page list the accepted
+  checks. The snapshot's `schemaVersion` stays 1.
+- The Health page's Snapshot › Download JSON now carries the `wal` section, read from the Replication page's own cached
+  facts at that page's gate, so a measurement baseline needs no host code (#36). A visitor the store policy refuses gets
+  a `withheld` entry for `wal` with the page's sentence; on Amazon Aurora, or a release without `pg_stat_wal`, the
+  section is `notApplicable` with its reason.
+- K09, document storage named under a Turkish or Azerbaijani culture (Marten checks, Configuration). Marten 9.55 lowers
+  document aliases, `DdlTemplate` lookups and flat-table function names with the invariant culture, so a host that ran
+  under `tr-TR` or `az-AZ` before it has `mt_doc_ınvoice` and, after upgrading, an empty `mt_doc_invoice`. K09 finds the
+  `mt_` tables and `mt_upsert_`/`mt_insert_`/`mt_update_`/`mt_overwrite_` functions named with a dotless `ı` at every
+  Marten version, as `dotless-only` (the documents will appear missing) or `both` (they are split between two tables). A
+  table a known document type names with a literal `ı` (`Kayıt`) is left out where Marten writes that name itself. The
+  remedy is text: rename the tables to the invariant name, drop the dotless functions and apply the schema so Marten
+  recreates them.
+- K10, a schema name that breaks every apply after the first. Below Weasel 9.47.1 (Marten 9.55), an index readback
+  failed for any schema the store declares (the document and events schemas, a document type's own, a flat table's) that
+  Postgres writes quoted, a reserved word or a name with a character outside `a` to `z`, digits and underscore, and
+  every apply after the first failed with `42P07`. K10 fires only on such a Weasel and such a name, from the
+  configuration alone, never names a schema only a hidden type declares, and the Schema screen's Apply area shows the
+  same sentence.
+- The latest-tested Marten is 9.56.0 (from 9.54.2); the floor stays at 9.39.0.
+- Editing a document a projection writes (a mapping with `UseVersionFromMatchingStream`, which is every single-stream
+  snapshot) is refused in the service and the Edit button says why. The save moved the document's numeric revision past
+  its stream, and an async fetch (`FetchLatest`, `FetchForWriting`) then skipped the next event (Marten #5773). Delete
+  and undelete are unchanged. The document page notes that a projection owns the document.
+- Maintainers: AGENTS.md is a short rulebook with a routing table; each rule's full text moved word for word to
+  `docs/maintainers/`.
 # 0.9.1
 
 A patch for three issues found on 0.9.0.
