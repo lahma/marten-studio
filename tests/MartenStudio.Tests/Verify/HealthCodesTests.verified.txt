@@ -59,6 +59,7 @@ P17 | Plans | - | plan node | both | since 0.10 | current
 P18 | Plans | - | plan node | both | since 0.10 | current
 P19 | Plans | - | plan node | both | since 0.10 | current
 P20 | Plans | - | plan node | both | since 0.10 | current
+P21 | Plans | - | plan node | both | since 0.10 | current
 R01 | Replication | near-limit, inactive, lost | - | both | since 0.4 | current
 R02 | Replication | failing, backlog | - | both | since 0.5 | current
 R03 | Replication | primary-view, standby-view, paused, aurora-reader | - | both | since 0.5 | current

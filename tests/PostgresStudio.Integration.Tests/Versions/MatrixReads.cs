@@ -232,7 +232,33 @@ internal static class MatrixReads
         // holds ACCESS EXCLUSIVE on among them: they resolve by name with no lock and read the catalog by oid with no size or deparse
         // function, so each returns behind the lock (issue #28; D27).
         new("plan facts: resolve, relations, indexes, extended statistics, columns and values", true, static (x, t) => PlanFactsReadAsync(x, t)),
+
+        // ---- 0.10-B: the Plan page's settings what-if - the one pg_settings read of the allow-list, and set_config of every setting it
+        // found to the value it has, in this read-only transaction as a role that is not a superuser (app, probe): the call the page's
+        // what-if makes before EXPLAIN, on every version, whose enable_* family grows from 14 to 18 --------------------------------
+        new("plan settings: the offered list, and set_config of each in a read-only transaction", true, static (x, t) => PlanSettingsReadAsync(x, t)),
     ];
+
+    /// <summary>
+    /// The settings what-if's read and its call (0.10-B): every row is on the allow-list, the settings every supported major has are
+    /// there, and each is set - for this transaction alone, by a role that holds no privilege - to the value it has now.
+    /// </summary>
+    private static async Task PlanSettingsReadAsync(MatrixReadContext x, CancellationToken token)
+    {
+        IReadOnlyList<PlanSettingRow> offered = await PlanSettingsQueries.ReadAsync(x.Connection, x.Transaction, x.Timeout, token);
+
+        string[] everywhere = ["work_mem", "hash_mem_multiplier", "random_page_cost", "effective_io_concurrency", "jit", "enable_seqscan", "enable_indexscan", "enable_hashjoin"];
+
+        if (offered.Any(static y => !PlanSettingsQueries.IsAllowed(y.Name)) || everywhere.Except(offered.Select(static y => y.Name)).Any())
+        {
+            throw new InvalidOperationException("The settings read answered " + string.Join(", ", offered.Select(static y => y.Name)) + ".");
+        }
+
+        foreach (PlanSettingRow setting in offered)
+        {
+            await PlanSettingsQueries.SetAsync(x.Connection, x.Transaction, setting.Name, setting.Setting, x.Timeout, token);
+        }
+    }
 
     /// <summary>
     /// The Plan page's facts reads (0.10-A), asked about the fixture's tables by the names a VERBOSE plan prints: a table, a list

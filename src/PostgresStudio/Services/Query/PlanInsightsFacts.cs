@@ -389,6 +389,44 @@ internal static partial class PlanInsights
                 + "One that returns a few rows or millions is planned for a thousand until it does. For a function of Postgres' or an extension's, put its result in a "
                 + "subquery or a CTE the planner can see through, or filter and join in a form that does not depend on the estimate."));
 
+    /// <summary>P21's ratio: the generic plan's total cost is at least this many times the custom plan's.</summary>
+    public const double GenericCostRatio = 10;
+
+    /// <summary>
+    /// P21 (0.10-B): the generic plan of a statement costs <see cref="GenericCostRatio" /> times what its custom plan does or more. A
+    /// prepared statement is planned for its first five runs with the actual values; from then on Postgres switches to the generic plan
+    /// when its cost is not much above the custom plans' average - so a generic plan this far above is one a server left to
+    /// <c>plan_cache_mode = auto</c> would still avoid, and one <c>force_generic_plan</c> (which a driver or a pooler can impose) would not.
+    /// It judges two plans of the same statement, which only the Plan page's comparison has: it is never part of <see cref="Evaluate" />.
+    /// </summary>
+    /// <param name="generic">The generic plan.</param>
+    /// <param name="custom">The custom plan, for the values the page was given.</param>
+    /// <returns>The finding, on the generic plan's root, or <see langword="null" />.</returns>
+    public static PlanInsightFinding? GenericVersusCustom(QueryPlan generic, QueryPlan custom)
+    {
+        ArgumentNullException.ThrowIfNull(generic);
+        ArgumentNullException.ThrowIfNull(custom);
+
+        if (generic.Root.TotalCost is not { } genericCost || custom.Root.TotalCost is not { } customCost || customCost <= 0
+            || genericCost < customCost * GenericCostRatio)
+        {
+            return null;
+        }
+
+        return Finding(
+            GenericWorseThanCustom,
+            generic.Root,
+            "The generic plan's estimated cost is " + CostText(genericCost) + " against " + CostText(customCost) + " for the custom plan: "
+            + Times(genericCost / customCost) + " as much. Planned without the values, Postgres could not see how selective they are.",
+            "A prepared statement runs on the generic plan once Postgres judges it no worse than the custom ones - the sessions of a pooler "
+            + "or a driver that prepares every statement get it, and a plan this far off is the slow query nobody can reproduce by typing the "
+            + "values in. Where it hurts, plan_cache_mode = force_custom_plan for the role or the session (ALTER ROLE … SET plan_cache_mode) plans "
+            + "each execution for its values; or give the planner what it lacks - an index, extended statistics, a statement that does not "
+            + "depend on one skewed value - so the generic plan is a good one.");
+    }
+
+    private static string CostText(double cost) => cost.ToString("#,0.00", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// P20: the triggers that fired took <see cref="TriggerShare" /> of the execution time or more: the statement spends its time
     /// in them, not in the plan the tree draws. Under <c>ANALYZE</c> only - a plain plan fires none.

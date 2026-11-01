@@ -13740,3 +13740,171 @@ a.ms-schema-health-mark:focus-visible {
 .ms-plan-node-facts .ms-plan-detail-value {
     overflow-wrap: anywhere;
 }
+
+/* ==========================================================================
+   0.10-B. Compare plans
+
+   Query › Plan, issue #28 phase 2: Before and After (the pin bar), the Compare section (PlanCompare), the settings what-if
+   (PlanSettingsPanel), the statement-timeout field and the What if? panel's in-place note. Every class is its own
+   (ms-plan-pin, ms-plan-compare-, ms-plan-diff-, ms-plan-whatif-setting, ms-plan-timeout) and every colour is a token the earlier sections
+   already define: the section adds no literal colour, so the dark theme needs no rules of its own (hard rule 3).
+   ========================================================================== */
+
+.ms-plan-pin {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+}
+
+.ms-plan-pin-label {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-params-compare {
+    margin: var(--ms-space-sm) 0 0;
+}
+
+.ms-plan-timeout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+}
+
+.ms-plan-timeout-label {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-plan-timeout-input {
+    width: 7ch;
+    font-family: var(--ms-font-mono);
+}
+
+.ms-plan-timeout-unit,
+.ms-plan-timeout-note {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-compare,
+.ms-plan-whatif-settings {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    padding: var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-plan-compare-title,
+.ms-plan-whatif-settings-title {
+    margin: 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-plan-compare-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-xs) var(--ms-space-lg);
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-compare-side {
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-compare-partial,
+.ms-plan-compare-same,
+.ms-plan-whatif-settings-lead,
+.ms-whatif-in-place {
+    max-width: 80ch;
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-compare-unchanged {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-diff-added {
+    background: var(--ms-color-success-bg);
+}
+
+.ms-plan-diff-removed {
+    background: var(--ms-color-danger-bg);
+}
+
+.ms-plan-diff-changed {
+    background: var(--ms-color-warning-bg);
+}
+
+.ms-plan-compare-node {
+    min-width: 24ch;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.ms-plan-compare-path {
+    display: inline-block;
+    margin-right: var(--ms-space-xs);
+    color: var(--ms-color-text-muted);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-plan-compare-number {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-plan-whatif-settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ms-plan-whatif-setting {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-md);
+}
+
+.ms-plan-whatif-setting-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    min-width: 32ch;
+}
+
+.ms-plan-whatif-setting-now {
+    min-width: 12ch;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-whatif-setting-value {
+    width: 16ch;
+}
+
+.ms-plan-whatif-setting-error {
+    color: var(--ms-color-danger);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-whatif-settings-actions {
+    margin: 0;
+}

@@ -140,10 +140,46 @@ internal sealed class FakeSqlConsole : ISqlConsoleService
     /// <summary>What the next plan returns, or <see langword="null" /> for a refusal that says the fake was not told what to answer.</summary>
     public PlanRunResult? NextPlan { get; set; }
 
-    public Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default)
+    /// <summary>Answers queued for the next plans, one each, before <see cref="NextPlan" /> answers every one (0.10-B: two plans in one action).</summary>
+    public Queue<PlanRunResult> QueuedPlans { get; } = new();
+
+    /// <summary>When set, a plan waits for it before answering - a run in flight a test can move the scope under. Ignores the token, as a slow service may.</summary>
+    public TaskCompletionSource? PlanGate { get; set; }
+
+    /// <summary>When set, a what-if in place waits for it before answering.</summary>
+    public TaskCompletionSource? WhatIfGate { get; set; }
+
+    public async Task<PlanRunResult> PlanAsync(StudioScope scope, PlanRunRequest request, CancellationToken cancellationToken = default)
     {
         Plans.Add((scope, request));
-        return Task.FromResult(NextPlan ?? PlanRunResult.Refused(new SqlRejection("Fake", "The fake console was not told what to answer.", null, -1), 0));
+
+        if (PlanGate is { } gate)
+        {
+            await gate.Task;
+        }
+
+        if (QueuedPlans.Count > 0)
+        {
+            return QueuedPlans.Dequeue();
+        }
+
+        return NextPlan ?? PlanRunResult.Refused(new SqlRejection("Fake", "The fake console was not told what to answer.", null, -1), 0);
+    }
+
+    /// <summary>Every what-if the Plan page asked for in place (0.10-B), with the request it was for.</summary>
+    public List<(PlanRunRequest Request, HypotheticalIndex Index)> PlanWhatIfs { get; } = [];
+
+    public async Task<WhatIfResult> PlanWhatIfAsync(StudioScope scope, PlanRunRequest request, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        PlanWhatIfs.Add((request, index));
+
+        if (WhatIfGate is { } gate)
+        {
+            await gate.Task;
+        }
+
+        return WhatIf?.Invoke(index)
+            ?? WhatIfResult.NotCompared(index, HypotheticalIndexAvailability.NotInstalledSentence, HypotheticalIndexState.NotInstalled);
     }
 
     /// <summary>Every what-if asked (X2), with the statement it was for.</summary>

@@ -1,0 +1,1 @@
+[{"Plan": {"Node Type": "Index Scan", "Parallel Aware": false, "Scan Direction": "Forward", "Index Name": "orders_customer_idx", "Relation Name": "orders", "Alias": "orders", "Startup Cost": 0.42, "Total Cost": 8.44, "Plan Rows": 1, "Plan Width": 24, "Index Cond": "(customer_id = 42)"}}]

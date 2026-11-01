@@ -1,0 +1,232 @@
+@using System.Globalization
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Query
+
+@*
+    0.10-B (issue #28): two plans compared - Before and After - as the Plan page keeps them. Everything here is PlanDiff's, a pure
+    function over the two plans the page already holds: nothing is read from a database, so a pasted plan compares as well as one the
+    page ran. The totals first, then P21 when the pair is the generic plan against the custom one, then every node that moved, in the
+    order the After plan draws them, in a labelled scroll region (D25). Every class is ms-plan-compare-, in studio.css's 0.10-B section.
+*@
+
+@if (comparison is not null)
+{
+    <section class="ms-plan-compare" aria-label="Compare plans">
+        <h3 class="ms-plan-compare-title">Compare</h3>
+
+        <p class="ms-plan-compare-labels">
+            <span class="ms-plan-compare-side">Before: <strong>@BeforeLabel</strong></span>
+            <span class="ms-plan-compare-side">After: <strong>@AfterLabel</strong></span>
+        </p>
+
+        <dl class="ms-plan-strip ms-plan-compare-totals">
+            <div class="ms-plan-strip-item">
+                <dt>Estimated cost</dt>
+                <dd>@Cost()</dd>
+            </div>
+            <div class="ms-plan-strip-item">
+                <dt>Execution time</dt>
+                <dd>@Time()</dd>
+            </div>
+            <div class="ms-plan-strip-item">
+                <dt>Changed</dt>
+                <dd>@comparison.Count(PlanDiffKind.Changed).ToString("N0", CultureInfo.InvariantCulture)</dd>
+            </div>
+            <div class="ms-plan-strip-item">
+                <dt>Added</dt>
+                <dd>@comparison.Count(PlanDiffKind.Added).ToString("N0", CultureInfo.InvariantCulture)</dd>
+            </div>
+            <div class="ms-plan-strip-item">
+                <dt>Removed</dt>
+                <dd>@comparison.Count(PlanDiffKind.Removed).ToString("N0", CultureInfo.InvariantCulture)</dd>
+            </div>
+            <div class="ms-plan-strip-item">
+                <dt>Unchanged</dt>
+                <dd>@comparison.Count(PlanDiffKind.Unchanged).ToString("N0", CultureInfo.InvariantCulture)</dd>
+            </div>
+        </dl>
+
+        @if (finding is not null)
+        {
+            <ul class="ms-plan-insight-list ms-plan-compare-insights">
+                <li class="ms-plan-insight ms-plan-insight-warning">
+                    <p class="ms-plan-insight-head">
+                        <a class="ms-plan-insight-code" href="@finding.Insight.DocsUrl" target="_blank" rel="noopener noreferrer">@finding.Insight.Code</a>
+                        <span class="ms-plan-insight-title">@finding.Insight.Title</span>
+                        <span class="ms-plan-insight-severity">@finding.Insight.Severity</span>
+                    </p>
+                    <p class="ms-plan-insight-message">@finding.Message</p>
+                    <p class="ms-plan-insight-remedy">@finding.Remedy</p>
+                </li>
+            </ul>
+        }
+
+        @if (comparison.Partial)
+        {
+            <p class="ms-muted ms-plan-compare-partial">A plan was read in part (the reader stops at @PlanDiff.MaxNodes.ToString("N0", CultureInfo.InvariantCulture) nodes), so what is compared is what was read.</p>
+        }
+
+        @if (!comparison.Differences.Any())
+        {
+            <p class="ms-muted ms-plan-compare-same">The two plans have the same shape and say the same: no node's kind, target, cost, time or row estimate moved.</p>
+        }
+
+        <label class="ms-plan-compare-unchanged">
+            <input type="checkbox" checked="@showUnchanged" @onchange="OnShowUnchanged" />
+            <span>Show the nodes that did not change</span>
+        </label>
+
+        @if (Rows().Count > 0)
+        {
+            <TableScroll Label="Plan differences">
+                <table class="ms-table ms-plan-compare-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Node</th>
+                            <th scope="col">What changed</th>
+                            <th scope="col">Cost</th>
+                            <th scope="col">Time</th>
+                            <th scope="col">Rows estimated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (PlanDiffEntry entry in Rows())
+                        {
+                            <tr class="ms-plan-compare-row ms-plan-diff-@Kind(entry)" @key="entry.Path + entry.Kind">
+                                <th scope="row" class="ms-plan-compare-node">
+                                    <span class="ms-plan-compare-path">@entry.Path</span>
+                                    @entry.Description
+                                </th>
+                                <td>@What(entry)</td>
+                                <td class="ms-plan-compare-number">@CostCell(entry)</td>
+                                <td class="ms-plan-compare-number">@TimeCell(entry)</td>
+                                <td class="ms-plan-compare-number">@RowsCell(entry)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+        }
+    </section>
+}
+
+@code {
+    private PlanComparison? comparison;
+    private PlanInsightFinding? finding;
+    private QueryPlan? comparedBefore;
+    private QueryPlan? comparedAfter;
+    private bool showUnchanged;
+
+    /// <summary>The plan as it was, a <c>QueryPlan</c> (<see cref="object" /> because the Razor SDK emits every component as public and a public parameter cannot have an internal type).</summary>
+    [Parameter]
+    public object? BeforePlan { get; set; }
+
+    /// <summary>The plan as it is, a <c>QueryPlan</c>.</summary>
+    [Parameter]
+    public object? AfterPlan { get; set; }
+
+    /// <summary>What the Before plan is, in words: <c>the plan before</c>, <c>the generic plan</c>.</summary>
+    [Parameter]
+    public string BeforeLabel { get; set; } = "the plan before";
+
+    /// <summary>What the After plan is, in words.</summary>
+    [Parameter]
+    public string AfterLabel { get; set; } = "the plan after";
+
+    /// <summary>A pair-only insight about these two plans (P21), a <c>PlanInsightFinding</c>, or <see langword="null" />.</summary>
+    [Parameter]
+    public object? Finding { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        finding = Finding as PlanInsightFinding;
+
+        if (BeforePlan is QueryPlan before && AfterPlan is QueryPlan after)
+        {
+            if (!ReferenceEquals(before, comparedBefore) || !ReferenceEquals(after, comparedAfter))
+            {
+                comparedBefore = before;
+                comparedAfter = after;
+                comparison = PlanDiff.Compare(before, after);
+            }
+        }
+        else
+        {
+            comparison = null;
+            comparedBefore = null;
+            comparedAfter = null;
+        }
+    }
+
+    private void OnShowUnchanged(ChangeEventArgs args) => showUnchanged = args.Value is true;
+
+    private IReadOnlyList<PlanDiffEntry> Rows() =>
+        comparison is null ? [] : [.. comparison.Entries.Where(x => showUnchanged || x.Kind != PlanDiffKind.Unchanged)];
+
+    private static string Kind(PlanDiffEntry entry) => entry.Kind.ToString().ToLowerInvariant();
+
+    private static string What(PlanDiffEntry entry)
+    {
+        switch (entry.Kind)
+        {
+            case PlanDiffKind.Added:
+                return "Only in After";
+            case PlanDiffKind.Removed:
+                return "Only in Before";
+            case PlanDiffKind.Unchanged:
+                return "Unchanged";
+        }
+
+        List<string> parts = [];
+
+        if (entry.TypeChanged)
+        {
+            parts.Add(entry.Before!.Label + " → " + entry.After!.Label);
+        }
+
+        if (entry.TargetChanged)
+        {
+            parts.Add("reads " + (PlanDiff.TargetOf(entry.After!) ?? "nothing") + " instead of " + (PlanDiff.TargetOf(entry.Before!) ?? "nothing"));
+        }
+
+        return parts.Count == 0 ? "Estimates moved" : string.Join("; ", parts);
+    }
+
+    private static string CostCell(PlanDiffEntry entry) =>
+        entry.Before?.TotalCost is { } before && entry.After?.TotalCost is { } after
+            ? Number(before) + " → " + Number(after) + Signed(after - before)
+            : (entry.After ?? entry.Before)?.TotalCost is { } only ? Number(only) : string.Empty;
+
+    private static string TimeCell(PlanDiffEntry entry) =>
+        entry.Before?.InclusiveMs is { } before && entry.After?.InclusiveMs is { } after
+            ? Milliseconds(before) + " → " + Milliseconds(after) + Signed(after - before, " ms")
+            : (entry.After ?? entry.Before)?.InclusiveMs is { } only ? Milliseconds(only) : string.Empty;
+
+    private static string RowsCell(PlanDiffEntry entry) =>
+        entry.Before?.PlanRows is { } before && entry.After?.PlanRows is { } after
+            ? Count(before) + (entry.RowsChanged ? " → " + Count(after) : string.Empty)
+            : (entry.After ?? entry.Before)?.PlanRows is { } only ? Count(only) : string.Empty;
+
+    private string Cost() =>
+        comparison?.CostBefore is { } before && comparison.CostAfter is { } after
+            ? Number(before) + " → " + Number(after) + (comparison.CostRatio is { } ratio ? " (×" + ratio.ToString("0.##", CultureInfo.InvariantCulture) + ")" : string.Empty)
+            : "-";
+
+    private string Time() =>
+        comparison?.ExecutionMsBefore is { } before && comparison.ExecutionMsAfter is { } after
+            ? Milliseconds(before) + " → " + Milliseconds(after) + (comparison.TimeRatio is { } ratio ? " (×" + ratio.ToString("0.##", CultureInfo.InvariantCulture) + ")" : string.Empty)
+            : "-";
+
+    private static string Number(double value) => value.ToString("#,0.00", CultureInfo.InvariantCulture);
+
+    private static string Count(double value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string Signed(double delta, string unit = "") =>
+        Math.Abs(delta) < 0.005 ? string.Empty : " (" + (delta > 0 ? "+" : "-") + Math.Abs(delta).ToString("#,0.##", CultureInfo.InvariantCulture) + unit + ")";
+
+    private static string Milliseconds(double ms) =>
+        ms < 1 ? ms.ToString("0.###", CultureInfo.InvariantCulture) + " ms"
+        : ms < 1000 ? ms.ToString("0.#", CultureInfo.InvariantCulture) + " ms"
+        : (ms / 1000).ToString("0.##", CultureInfo.InvariantCulture) + " s";
+}

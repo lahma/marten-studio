@@ -177,6 +177,25 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         HypotheticalIndexPlanner planner = new(
             (connection, transaction, token) => ExplainStatements.ReadPlanAsync(connection, transaction, sent, bind, commandTimeout, token));
 
+        return await ReadWhatIfAsync(resolved, sqlScope, index, planner, action, target, sent, user, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The what-if itself, after the gate: <see cref="HypotheticalIndexReader" /> plans with <paramref name="planner" /> before and
+    /// after the index, and the outcome is audited under <paramref name="action" /> and logged - the one tail the console's what-if
+    /// and the Plan page's (<see cref="PlanWhatIfAsync" />) share.
+    /// </summary>
+    private async Task<WhatIfResult> ReadWhatIfAsync(
+        ResolvedSource resolved,
+        StudioScope sqlScope,
+        HypotheticalIndex index,
+        HypotheticalIndexPlanner planner,
+        string action,
+        string target,
+        string sent,
+        string user,
+        CancellationToken cancellationToken)
+    {
         WhatIfResult result;
 
         try
@@ -191,6 +210,11 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         }
         catch (PostgresException exception)
         {
+            result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
+        }
+        catch (WhatIfPlanFailedException exception)
+        {
+            // The page's own statement was refused by Postgres in one of the two plans: its SQLSTATE, never its words.
             result = WhatIfResult.NotCompared(index, WhatIfResult.Failed(exception.SqlState), HypotheticalIndexState.Available);
         }
         catch (Exception exception) when (exception is NpgsqlException or SocketException or InvalidOperationException)
@@ -211,6 +235,102 @@ internal sealed class SqlConsoleService : ISqlConsoleService
         }
 
         return result;
+    }
+
+    /// <summary>Postgres refused the Plan page's statement while a what-if planned it; carries the SQLSTATE to <see cref="ReadWhatIfAsync" />.</summary>
+    private sealed class WhatIfPlanFailedException(string sqlState) : Exception("Postgres refused the statement the what-if planned.")
+    {
+        public string SqlState { get; } = sqlState;
+    }
+
+    /// <inheritdoc />
+    public async Task<WhatIfResult> PlanWhatIfAsync(StudioScope scope, PlanRunRequest request, HypotheticalIndex index, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(index);
+
+        string statement = request.Statement ?? string.Empty;
+        int placeholders = PlanStatements.Placeholders(statement);
+
+        // A hypothetical index serves EXPLAIN alone, never EXPLAIN ANALYZE: both plans are plain. The what-if changes no setting and
+        // keeps the host's own timeout - hypopg's reader holds it - whatever the request carried for its own plans.
+        PlanRunRequest plain = request with
+        {
+            Mode = request.Mode == PlanMode.Analyze ? PlanMode.Plan : request.Mode,
+            SessionSettings = [],
+            TimeoutSeconds = null,
+            OfferSettings = false,
+        };
+
+        string sent = PlanStatements.Build(statement, plain.Mode, plain.Options, placeholders, int.MaxValue).Described;
+        string target = Target(sent);
+        string user = UserName();
+        const string action = WhatIfAction;
+
+        // 1. The capability, before anything is resolved.
+        try
+        {
+            capabilities.Require(StudioCapability.RunSql);
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            audit.RecordCapabilityDenied(denied, action, target);
+            logger.SqlRejected(settings.Text.Product, user, scope.StoreKey, scope.DatabaseId, denied.Message, sent);
+            return WhatIfResult.Refused(index, capabilities.ReadOnly ? DatabaseRefusal.ReadOnly : DatabaseRefusal.CapabilityOff, denied.Message);
+        }
+
+        // 2. The write policy, for the database as a whole: nothing narrows a statement to a tenant.
+        StudioScope sqlScope = SqlScope(scope);
+        ResolvedSource resolved;
+
+        try
+        {
+            resolved = await resolver.ResolveAsync(sqlScope, nameof(StudioCapability.RunSql), cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioNotAuthorizedException denied)
+        {
+            audit.RecordScopeDenied(denied.Scope, WritePolicyName(), action, target, StudioCapability.RunSql);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, "not authorized for this database as a whole", sent);
+            return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, SqlRefusedMessage);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
+        {
+            audit.Record(action, target, succeeded: false, exception.Message, StudioCapability.RunSql, sqlScope);
+            return WhatIfResult.Refused(index, DatabaseRefusal.Unavailable, exception.Message);
+        }
+
+        // 3. The guard over the statement as typed, the request's own checks (values, placeholders), and an index only the
+        //    builder wrote - re-derived here from its parts, never taken from the page.
+        SqlGuardResult guard = ReadOnlySqlGuard.Check(statement);
+        string? refused = !guard.Allowed ? SqlRejection.FromGuard(guard).Message
+            : string.Equals(guard.Token, "explain", StringComparison.OrdinalIgnoreCase) ? AlreadyExplainMessage
+            : PlanRequests.Refusal(plain, placeholders)?.Message
+            ?? (!IsBuilt(index) ? NotBuiltMessage : null);
+
+        if (refused is not null)
+        {
+            audit.Record(action, target, succeeded: false, refused, StudioCapability.RunSql, sqlScope);
+            logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, refused, sent);
+            return WhatIfResult.NotCompared(index, refused);
+        }
+
+        int commandTimeout = (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
+        ReadOnlySqlSession cleanup = new(new ReadOnlySqlOptions { StatementTimeout = settings.QueryTimeout, Role = settings.SqlConsoleRole, MaxRows = 1 });
+
+        HypotheticalIndexPlanner planner = new(
+            async (connection, transaction, token) =>
+            {
+                PlanStatementSet statements = PlanStatements.Build(statement, plain.Mode, plain.Options, placeholders, connection.PostgreSqlVersion.Major * 10_000);
+                PlanQueryOutcome outcome = await PlanRunQueries.RunAsync(connection, transaction, statements, plain.Values, commandTimeout, token).ConfigureAwait(false);
+
+                // An error aborts the transaction: the reader resets hypopg in one of its own if it was asked, and AfterFailureAsync
+                // takes back a prepared statement the failed plan still held.
+                return outcome.Error is { } error ? throw new WhatIfPlanFailedException(error.SqlState) : outcome.Json;
+            },
+            AfterFailureAsync: connection => PlanRunner.ForgetAsync(connection, cleanup, commandTimeout, null));
+
+        return await ReadWhatIfAsync(resolved, sqlScope, index, planner, action, target, sent, user, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>What a what-if says of an index the studio's builder did not write.</summary>
@@ -468,14 +588,20 @@ internal sealed class SqlConsoleService : ISqlConsoleService
             }
         }
 
+        // 0.10-B: the run's own statement_timeout, never above the host's - the clamp is decided here, where the run is.
+        TimeSpan timeout = PlanRequests.EffectiveTimeout(request, settings.QueryTimeout);
+        TimeSpan? overridden = request.TimeoutSeconds is not null && timeout != settings.QueryTimeout ? timeout : null;
+        string changes = PlanRunner.Changes(request, overridden);
+        string changesForLog = PlanRunner.Changes(request, overridden, escape: false);
+
         var session = new ReadOnlySqlSession(new ReadOnlySqlOptions
         {
-            StatementTimeout = settings.QueryTimeout,
+            StatementTimeout = timeout,
             MaxRows = 1,
             Role = settings.SqlConsoleRole,
         });
 
-        int commandTimeout = (int) Math.Ceiling(settings.QueryTimeout.TotalSeconds) + 5;
+        int commandTimeout = (int) Math.Ceiling(timeout.TotalSeconds) + 5;
 
         await using NpgsqlConnection connection = admission.Resolved.Target.CreateConnection(StudioConnectionUsage.Read);
         connection.Notice += OnNotice;
@@ -496,17 +622,23 @@ internal sealed class SqlConsoleService : ISqlConsoleService
                     cancellationToken)
                 .ConfigureAwait(false);
 
+            result = result with { TimeoutSeconds = timeout.TotalSeconds };
+
+            // The settings a run changed are named in what is recorded, a value being what a visitor typed - and escaped once: the audit
+            // ring's text is escaped by Changes, the log's by SqlExecuted and SqlRejected, which escape the whole text they are given.
+            string recorded = changesForLog.Length == 0 ? sent : sent + "\n-- changed:" + changesForLog;
+
             if (result.Error is { } error)
             {
-                string reason = QuerySqlErrors.Summarize(error);
+                string summary = QuerySqlErrors.Summarize(error);
 
-                audit.Record(RunSqlAction, target, succeeded: false, reason, StudioCapability.RunSql, sqlScope);
-                logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, reason, sent);
+                audit.Record(RunSqlAction, target, succeeded: false, summary + changes, StudioCapability.RunSql, sqlScope);
+                logger.SqlRejected(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, summary + changesForLog, recorded);
             }
             else
             {
-                audit.Record(RunSqlAction, target, succeeded: true, PlanRunner.Outcome(request.Mode, result.Duration), StudioCapability.RunSql, sqlScope);
-                logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, (long) result.Duration.TotalMilliseconds, 1, sent);
+                audit.Record(RunSqlAction, target, succeeded: true, PlanRunner.Outcome(request.Mode, result.Duration, request, overridden), StudioCapability.RunSql, sqlScope);
+                logger.SqlExecuted(settings.Text.Product, user, sqlScope.StoreKey, sqlScope.DatabaseId, (long) result.Duration.TotalMilliseconds, 1, recorded);
             }
 
             return result;

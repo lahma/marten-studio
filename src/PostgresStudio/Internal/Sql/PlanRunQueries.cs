@@ -2,6 +2,8 @@ using Npgsql;
 
 using NpgsqlTypes;
 
+using PostgresStudio.Services.Query;
+
 namespace PostgresStudio.Internal.Sql;
 
 /// <summary>What one plan run read: the plan, or the error Postgres refused it with, and whether it took its prepared statement back.</summary>
@@ -17,7 +19,11 @@ internal sealed record PlanQueryOutcome(
     IReadOnlyList<string> ParameterTypes,
     SqlError? Error,
     int ErrorOffset,
-    bool Deallocated);
+    bool Deallocated)
+{
+    /// <summary>0.10-B: the allow-listed planner settings the server has, as read before the run's own were applied; empty unless asked.</summary>
+    public IReadOnlyList<PlanSettingRow> Offers { get; init; } = [];
+}
 
 /// <summary>
 /// Runs <see cref="PlanStatements" />' commands in the read-only transaction the caller opened (X3, issue #28): the second of
@@ -54,19 +60,27 @@ internal static class PlanRunQueries
     /// <param name="values">The values the custom plan binds, one for each placeholder, <see langword="null" /> for SQL <c>NULL</c>.</param>
     /// <param name="commandTimeoutSeconds">The client-side bound on each command, a little past the server's <c>statement_timeout</c>.</param>
     /// <param name="cancellationToken">The token.</param>
+    /// <param name="settings">
+    /// 0.10-B: planner settings to change for this transaction, each already on <see cref="PlanSettingsQueries.Allowed" />, applied before
+    /// anything else of the run's own and so for all of it.
+    /// </param>
+    /// <param name="offerSettings">0.10-B: also read which allow-listed settings the server has - before <paramref name="settings" /> change any.</param>
     public static async Task<PlanQueryOutcome> RunAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         PlanStatementSet statements,
         IReadOnlyList<string?> values,
         int commandTimeoutSeconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<PlanSetting>? settings = null,
+        bool offerSettings = false)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(statements);
         ArgumentNullException.ThrowIfNull(values);
 
         List<string> types = [];
+        IReadOnlyList<PlanSettingRow> offers = [];
         int offset = -1;
 
         // Whether the run's prepared statement is on the session: true from the prepare that worked to the deallocate that did.
@@ -74,6 +88,17 @@ internal static class PlanRunQueries
 
         try
         {
+            if (offerSettings)
+            {
+                offers = await PlanSettingsQueries.ReadAsync(connection, transaction, commandTimeoutSeconds, cancellationToken).ConfigureAwait(false);
+            }
+
+            foreach (PlanSetting setting in settings ?? [])
+            {
+                // A value Postgres refuses is an ordinary error, caught below: not in the typed text, so offset stays -1.
+                await PlanSettingsQueries.SetAsync(connection, transaction, setting.Name, setting.Value, commandTimeoutSeconds, cancellationToken).ConfigureAwait(false);
+            }
+
             if (statements.Prepare is { } prepare)
             {
                 offset = statements.PrepareOffset;
@@ -114,7 +139,7 @@ internal static class PlanRunQueries
                 prepared = false;
             }
 
-            return new PlanQueryOutcome(json, characters, types, null, -1, Deallocated: true);
+            return new PlanQueryOutcome(json, characters, types, null, -1, Deallocated: true) { Offers = offers };
         }
         catch (PostgresException exception)
         {
@@ -125,7 +150,10 @@ internal static class PlanRunQueries
                 types,
                 new SqlError(exception.SqlState, exception.MessageText, exception.Position, exception.Detail, exception.Hint),
                 offset,
-                Deallocated: !prepared);
+                Deallocated: !prepared)
+            {
+                Offers = offers,
+            };
         }
     }
 

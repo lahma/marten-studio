@@ -1,0 +1,1 @@
+[{"Plan": {"Node Type": "Seq Scan", "Parallel Aware": false, "Relation Name": "orders", "Alias": "orders", "Startup Cost": 0.0, "Total Cost": 60.0, "Plan Rows": 500, "Plan Width": 24, "Filter": "(customer_id = $1)"}}]
