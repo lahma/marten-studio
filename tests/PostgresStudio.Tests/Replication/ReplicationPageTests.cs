@@ -239,6 +239,8 @@ public class ReplicationPageTests
             return Task.FromResult(view);
         }
 
+        public Task<ReplicationView> GetNumbersAsync(StudioScope scope, CancellationToken cancellationToken = default) => Task.FromResult(view);
+
         public Task<TablespaceSize> MeasureTablespaceAsync(StudioScope scope, string tablespace, CancellationToken cancellationToken = default)
         {
             Measured.Add(tablespace);

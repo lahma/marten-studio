@@ -123,7 +123,10 @@ server's own, never Activity-grade and so never withheld:
   would pay on a large append-mostly table. Null while the catalog counts no pages for it.
 
 The studio's own download carries the checksum fields and the ratio too, as the visitor's Server and Storage pages hold
-them. It carries `wal: null`: that section is the API's.
+them, and `Wal`, as the Replication page holds it: so a baseline needs no code of yours, only **Health › Snapshot ›
+Download JSON**. It is read at that page's gate, the store policy over the database as a whole; a visitor short of it gets
+a `withheld` entry for `wal` with the page's own sentence, and on Amazon Aurora, or a release without the view, the
+section is `notApplicable` with its reason.
 
 A section that could not be read is still there, with its own `Outcome` and `Reason`: a privilege the role lacks or a
 statement timeout is `Unavailable` or `TimedOut`, anything else `Failed` with the SQLSTATE. The rest of the snapshot is

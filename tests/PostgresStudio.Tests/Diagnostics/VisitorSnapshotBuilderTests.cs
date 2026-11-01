@@ -4,6 +4,7 @@ using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 using PostgresStudio.Services.Statements;
@@ -125,6 +126,15 @@ public class VisitorSnapshotBuilderTests
         }
         : SessionActivityDetails.Refused(DatabaseRefusal.CapabilityOff, "Session details " + ActivitySentence + ".");
 
+    private const string WalSentence = "Not on this server: it needs PostgreSQL 14.";
+
+    private static ReplicationView Wal() => new()
+    {
+        MeasuredAt = At,
+        Wal = ReplicationSectionView<WalView>.Of(
+            new WalView(new WalStatistics(1000, 250, 64e6, 5, 12_345, 678, 14.6, 4_049.8, At.AddDays(-3)), null, null, null)),
+    };
+
     private static string Json(HealthReport report, StorageView storage, bool activity) =>
         VisitorSnapshotBuilder.Compose(
             new PostgresDatabaseRef("tenants", "acme"),
@@ -134,6 +144,7 @@ public class VisitorSnapshotBuilderTests
             Server(),
             Summary(),
             Details(activity),
+            Wal(),
             Registry,
             "PostgresStudio 0.5.0",
             At).ToJson();
@@ -230,6 +241,7 @@ public class VisitorSnapshotBuilderTests
             ServerPageView.Refused(ServerRefusal.StorePolicy, StorePolicySentence),
             Summary(),
             Details(open: true),
+            Wal(),
             Registry,
             "PostgresStudio 0.5.0",
             At);
@@ -243,7 +255,7 @@ public class VisitorSnapshotBuilderTests
     public void The_settings_are_the_server_pages_curated_rows()
     {
         PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
-            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server(), Summary(), Details(true), Registry, "p", At);
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server(), Summary(), Details(true), Wal(), Registry, "p", At);
 
         snapshot.Settings!.Settings.Should().ContainSingle().Which.Should().BeEquivalentTo(new
         {
@@ -257,7 +269,7 @@ public class VisitorSnapshotBuilderTests
     }
 
     [Fact]
-    public void The_download_carries_the_checksum_state_and_failures_and_the_all_visible_ratio_the_pages_already_hold_and_no_wal()
+    public void The_download_carries_the_checksum_state_and_failures_and_the_all_visible_ratio_the_pages_already_hold()
     {
         StorageView storage = new()
         {
@@ -278,17 +290,93 @@ public class VisitorSnapshotBuilderTests
         };
 
         PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
-            new PostgresDatabaseRef("tenants", "acme"), Report(), storage, Statements(true), server, Summary(), Details(true), Registry, "p", At);
+            new PostgresDatabaseRef("tenants", "acme"), Report(), storage, Statements(true), server, Summary(), Details(true), Wal(), Registry, "p", At);
 
         snapshot.Settings!.DataChecksums.Should().BeTrue();
         snapshot.Settings.ChecksumFailures.Should().Be(2);
         snapshot.Settings.LastChecksumFailure.Should().Be(At.AddHours(-3));
         snapshot.Storage!.LargestTables.Select(static x => x.AllVisibleRatio).Should().Equal(0.8, null);
-        snapshot.Wal.Should().BeNull("the Replication page's facts are not the download's; the API's snapshot carries them");
+
+        using JsonDocument document = JsonDocument.Parse(snapshot.ToJson());
+        document.RootElement.GetProperty("schemaVersion").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>Q36 (issue #36): the download carries the Replication page's WAL read, so a baseline needs no host code.</summary>
+    [Fact]
+    public void The_download_carries_the_wal_counters_the_replication_page_shows()
+    {
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server(), Summary(), Details(true), Wal(), Registry, "p", At);
+
+        PostgresWalSection wal = snapshot.Wal!;
+        wal.Outcome.Should().Be(PostgresReadOutcome.Read);
+        wal.Records.Should().Be(1000);
+        wal.FullPageImages.Should().Be(250);
+        wal.Bytes.Should().Be(64_000_000);
+        wal.Writes.Should().Be(12_345);
+        wal.Syncs.Should().Be(678);
+        wal.WriteTimeMs.Should().Be(14.6);
+        wal.SyncTimeMs.Should().Be(4_049.8);
+        wal.StatsReset.Should().Be(At.AddDays(-3));
+        wal.MeasuredAt.Should().Be(At);
+        snapshot.Withheld.Should().NotContainKey("wal");
+
+        using JsonDocument document = JsonDocument.Parse(snapshot.ToJson());
+        JsonElement json = document.RootElement.GetProperty("wal");
+        json.GetProperty("outcome").GetString().Should().Be("read");
+        json.GetProperty("records").GetInt64().Should().Be(1000);
+        json.GetProperty("syncs").GetInt64().Should().Be(678);
+    }
+
+    [Fact]
+    public void A_visitor_the_store_policy_refuses_gets_a_withheld_entry_with_the_replication_pages_own_sentence()
+    {
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server(), Summary(), Details(true),
+            ReplicationView.Refused(ReplicationRefusal.StorePolicy, StorePolicySentence), Registry, "p", At);
+
+        snapshot.Wal.Should().BeNull();
+        snapshot.Withheld.Should().Contain("wal", StorePolicySentence);
 
         using JsonDocument document = JsonDocument.Parse(snapshot.ToJson());
         document.RootElement.GetProperty("wal").ValueKind.Should().Be(JsonValueKind.Null, "the key is there, as every key always is");
-        document.RootElement.GetProperty("schemaVersion").GetInt32().Should().Be(1);
+        document.RootElement.GetProperty("withheld").GetProperty("wal").GetString().Should().Be(StorePolicySentence);
+    }
+
+    [Theory]
+    [InlineData("NotApplicable", "notApplicable")]
+    [InlineData("NeedsVersion", "notApplicable")]
+    [InlineData("Failed", "failed")]
+    public void A_wal_section_the_page_could_not_show_keeps_its_reason_and_is_not_applicable_where_the_platform_or_release_has_none(
+        string outcome,
+        string expected)
+    {
+        ReplicationView view = new()
+        {
+            MeasuredAt = At,
+            Wal = new ReplicationSectionView<WalView>(null, Enum.Parse<ReplicationReadOutcome>(outcome), WalSentence),
+        };
+
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server(), Summary(), Details(true), view, Registry, "p", At);
+
+        snapshot.Wal!.Reason.Should().Be(WalSentence);
+        snapshot.Withheld.Should().NotContainKey("wal");
+
+        using JsonDocument document = JsonDocument.Parse(snapshot.ToJson());
+        document.RootElement.GetProperty("wal").GetProperty("outcome").GetString().Should().Be(expected);
+    }
+
+    [Fact]
+    public void A_database_the_replication_page_could_not_reach_is_an_unavailable_section_not_a_withheld_one()
+    {
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server(), Summary(), Details(true),
+            ReplicationView.Refused(ReplicationRefusal.Unavailable, "Could not reach it."), Registry, "p", At);
+
+        snapshot.Wal!.Outcome.Should().Be(PostgresReadOutcome.Unavailable);
+        snapshot.Wal.Reason.Should().Be("Could not reach it.");
+        snapshot.Withheld.Should().NotContainKey("wal");
     }
 
     [Theory]
@@ -298,7 +386,7 @@ public class VisitorSnapshotBuilderTests
     public void The_checksum_setting_the_page_shows_is_a_bool_only_when_it_was_read(string shown, bool? expected)
     {
         PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
-            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server() with { DataChecksums = shown }, Summary(), Details(true), Registry, "p", At);
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), Statements(true), Server() with { DataChecksums = shown }, Summary(), Details(true), Wal(), Registry, "p", At);
 
         snapshot.Settings!.DataChecksums.Should().Be(expected);
     }

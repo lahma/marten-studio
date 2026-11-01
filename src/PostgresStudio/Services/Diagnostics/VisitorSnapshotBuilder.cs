@@ -3,6 +3,7 @@ using System.Text;
 
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Statements;
@@ -43,10 +44,12 @@ internal sealed record VisitorSnapshot(string Json, string FileName);
 /// whole object rather than a split no page makes. Compute is the Health page's server line, at the same gate.
 /// </para>
 /// <para>
-/// <b>What the download leaves null.</b> The <c>wal</c> section: it is the Replication page's facts, which this builder asks
-/// no service for and whose gate it would be a second one, so the visitor's file carries <c>wal: null</c> and the API's snapshot
-/// is where a baseline reads it. The checksum failures and the all-visible ratio are carried: the Server and Storage pages
-/// already hold them, at the gates those pages apply.
+/// <b>The write-ahead log section</b> is the Replication page's, at that page's gate: its WAL read, from the one cached facts
+/// read the page and the API share (<see cref="IReplicationService.GetNumbersAsync" />, which shows no names and records none as
+/// shown). The counters are cumulative server counts, never Activity-grade, so the gate is the page's ordinary one, the store
+/// policy over the whole database: a visitor short of it gets a <c>withheld</c> entry carrying the page's sentence, and on Aurora,
+/// or a release without the view, the section is <c>notApplicable</c> with the page's reason. The checksum failures and the
+/// all-visible ratio are carried too: the Server and Storage pages already hold them, at the gates those pages apply.
 /// </para>
 /// </remarks>
 internal sealed class VisitorSnapshotBuilder
@@ -56,6 +59,7 @@ internal sealed class VisitorSnapshotBuilder
     private readonly IStatementsService statements;
     private readonly IServerPageService server;
     private readonly ISessionActivityService sessions;
+    private readonly IReplicationService replication;
     private readonly HealthCheckRegistry registry;
     private readonly IStudioSettings settings;
     private readonly StudioDescriptor descriptor;
@@ -66,6 +70,7 @@ internal sealed class VisitorSnapshotBuilder
     /// <param name="statements">The Statements page's service.</param>
     /// <param name="server">The Server page's service.</param>
     /// <param name="sessions">Database › Sessions' service.</param>
+    /// <param name="replication">The Replication page's service, for its WAL read.</param>
     /// <param name="registry">The checks, for their variants.</param>
     /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio, for its key.</param>
@@ -76,6 +81,7 @@ internal sealed class VisitorSnapshotBuilder
         IStatementsService statements,
         IServerPageService server,
         ISessionActivityService sessions,
+        IReplicationService replication,
         HealthCheckRegistry registry,
         IStudioSettings settings,
         StudioDescriptor descriptor,
@@ -86,6 +92,7 @@ internal sealed class VisitorSnapshotBuilder
         this.statements = statements;
         this.server = server;
         this.sessions = sessions;
+        this.replication = replication;
         this.registry = registry;
         this.settings = settings;
         this.descriptor = descriptor;
@@ -112,6 +119,8 @@ internal sealed class VisitorSnapshotBuilder
             ? await sessions.GetDetailsAsync(scope, cancellationToken).ConfigureAwait(false)
             : NotAsked(summary);
 
+        ReplicationView replicationView = await replication.GetNumbersAsync(scope, cancellationToken).ConfigureAwait(false);
+
         DateTimeOffset now = timeProvider.GetUtcNow();
         PostgresDiagnosticsSnapshot snapshot = Compose(
             new PostgresDatabaseRef(scope.StoreKey, scope.DatabaseId),
@@ -121,6 +130,7 @@ internal sealed class VisitorSnapshotBuilder
             serverView,
             summary,
             details,
+            replicationView,
             registry,
             DiagnosticsJson.ProducerFor(settings.Text.Product),
             now);
@@ -175,6 +185,7 @@ internal sealed class VisitorSnapshotBuilder
         ServerPageView serverView,
         SessionActivitySummary summary,
         SessionActivityDetails details,
+        ReplicationView replicationView,
         HealthCheckRegistry registry,
         string producer,
         DateTimeOffset now)
@@ -186,6 +197,7 @@ internal sealed class VisitorSnapshotBuilder
         ArgumentNullException.ThrowIfNull(serverView);
         ArgumentNullException.ThrowIfNull(summary);
         ArgumentNullException.ThrowIfNull(details);
+        ArgumentNullException.ThrowIfNull(replicationView);
         ArgumentNullException.ThrowIfNull(registry);
 
         SortedDictionary<string, string> withheld = new(StringComparer.Ordinal);
@@ -241,8 +253,27 @@ internal sealed class VisitorSnapshotBuilder
             Statements = Statements(statementsView, withheld),
             Settings = settingsSection,
             Connections = Connections(summary, details, withheld),
+            Wal = Wal(replicationView, now, withheld),
             Withheld = withheld,
         };
+    }
+
+    private static PostgresWalSection? Wal(ReplicationView view, DateTimeOffset now, SortedDictionary<string, string> withheld)
+    {
+        switch (view.Refusal)
+        {
+            case ReplicationRefusal.StorePolicy:
+                // The Replication page's gate: the store policy over the whole database.
+                withheld["wal"] = view.Reason ?? "withheld";
+                return null;
+
+            case ReplicationRefusal.Unavailable:
+                return new PostgresWalSection { Outcome = PostgresReadOutcome.Unavailable, Reason = view.Reason, MeasuredAt = now };
+
+            default:
+                ReplicationSectionView<WalView> section = view.Wal;
+                return DiagnosticsMapper.Wal(section.Value?.Totals, section.Outcome, section.Note, view.MeasuredAt);
+        }
     }
 
     private static PostgresStorageSection? Storage(StorageView view, SortedDictionary<string, string> withheld)

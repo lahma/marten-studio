@@ -522,7 +522,8 @@ checksums are off (as the column is) and nought is a count. **`AllVisibleRatio`*
 `relallvisible / relpages` summed over a partitioned table's leaves in the Storage page's own table read, held to 0 to 1
 and null while `relpages = 0`; the heap's own count as of the last `VACUUM` or `ANALYZE`, never `pg_visibility`. The
 studio's own download (`VisitorSnapshotBuilder`) carries the checksum fields and the ratio, which the Server and Storage
-views now hold, and `wal: null`: the Replication facts are not a page that builder asks.
+views already hold, and (0.10, #36) `wal`: the Replication page's own WAL read at that page's gate, through
+`IReplicationService.GetNumbersAsync` and the one cached facts read the page shares.
 
 ## Testing, item 7
 

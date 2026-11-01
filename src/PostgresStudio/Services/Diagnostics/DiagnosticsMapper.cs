@@ -1,5 +1,6 @@
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 
@@ -341,4 +342,47 @@ internal static class DiagnosticsMapper
         int byCode = string.CompareOrdinal(a.Code, b.Code);
         return byCode != 0 ? byCode : string.CompareOrdinal(a.Key, b.Key);
     }
+
+    /// <summary>
+    /// The write-ahead log section from one read of <c>pg_stat_wal</c>, however it was reached - the Replication page's facts for
+    /// the API, that page's view for the studio's download. No value is <see cref="PostgresReadOutcome.NotApplicable" /> where
+    /// the platform or the release has no such view, with the page's own sentence.
+    /// </summary>
+    /// <param name="wal">The counters, or <see langword="null" /> when there are none.</param>
+    /// <param name="outcome">How the read came out.</param>
+    /// <param name="note">Why there is no value.</param>
+    /// <param name="readAt">When it was read.</param>
+    public static PostgresWalSection Wal(WalStatistics? wal, ReplicationReadOutcome outcome, string? note, DateTimeOffset readAt)
+    {
+        if (wal is null)
+        {
+            return new PostgresWalSection
+            {
+                Outcome = outcome switch
+                {
+                    ReplicationReadOutcome.NotApplicable or ReplicationReadOutcome.NeedsVersion => PostgresReadOutcome.NotApplicable,
+                    ReplicationReadOutcome.Failed => PostgresReadOutcome.Failed,
+                    _ => PostgresReadOutcome.Unavailable,
+                },
+                Reason = note ?? "pg_stat_wal returned no row.",
+                MeasuredAt = readAt,
+            };
+        }
+
+        return new PostgresWalSection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            MeasuredAt = readAt,
+            Records = wal.Records,
+            FullPageImages = wal.FullPageImages,
+            Bytes = double.IsFinite(wal.Bytes) ? (long) Math.Round(wal.Bytes) : null,
+            Writes = wal.Writes,
+            Syncs = wal.Syncs,
+            WriteTimeMs = Finite(wal.WriteTimeMs),
+            SyncTimeMs = Finite(wal.SyncTimeMs),
+            StatsReset = wal.StatsReset,
+        };
+    }
+
+    private static double? Finite(double? value) => value is { } number && double.IsFinite(number) ? number : null;
 }
