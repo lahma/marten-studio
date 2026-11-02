@@ -1,0 +1,11 @@
+HashAggregate  (cost=2584.00..2609.00 rows=2000 width=44) (actual time=17.268..17.575 rows=2000 loops=1)
+  Output: customer_id, count(*), sum(amount)
+  Group Key: orders.customer_id
+  Batches: 1  Memory Usage: 1137kB
+  Buffers: shared hit=834
+  ->  Seq Scan on public.orders  (cost=0.00..1834.00 rows=100000 width=8) (actual time=0.003..3.931 rows=100000 loops=1)
+        Output: id, customer_id, bucket, amount, placed, note
+        Buffers: shared hit=834
+Query Identifier: 8891981977064582251
+Planning Time: 0.029 ms
+Execution Time: 17.774 ms

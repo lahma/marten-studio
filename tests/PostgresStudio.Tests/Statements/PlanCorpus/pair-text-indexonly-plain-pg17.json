@@ -1,0 +1,27 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Index Only Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Scan Direction": "Forward",
+      "Index Name": "orders_pkey",
+      "Relation Name": "orders",
+      "Schema": "public",
+      "Alias": "orders",
+      "Startup Cost": 0.29,
+      "Total Cost": 29.09,
+      "Plan Rows": 960,
+      "Plan Width": 4,
+      "Output": ["id"],
+      "Index Cond": "(orders.id < 1000)"
+    },
+    "Settings": {
+    },
+    "Query Identifier": 4457749873936027703,
+    "Planning": {
+      "Memory Used": 13,
+      "Memory Allocated": 16
+    }
+  }
+]

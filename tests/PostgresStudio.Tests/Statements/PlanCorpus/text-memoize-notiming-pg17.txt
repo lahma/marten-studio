@@ -1,0 +1,24 @@
+Nested Loop  (cost=0.58..315.34 rows=4907 width=7) (actual rows=4999 loops=1)
+  Output: o.id, c.region
+  Inner Unique: true
+  Buffers: shared hit=117
+  ->  Index Scan using orders_pkey on public.orders o  (cost=0.29..186.16 rows=4907 width=8) (actual rows=4999 loops=1)
+        Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+        Index Cond: (o.id < 5000)
+        Buffers: shared hit=57
+  ->  Memoize  (cost=0.29..0.32 rows=1 width=7) (actual rows=1 loops=4999)
+        Output: c.region, c.id
+        Cache Key: (o.bucket + 1)
+        Cache Mode: logical
+        Hits: 4979  Misses: 20  Evictions: 0  Overflows: 0  Memory Usage: 3kB
+        Buffers: shared hit=60
+        ->  Index Scan using customers_pkey on public.customers c  (cost=0.28..0.31 rows=1 width=7) (actual rows=1 loops=20)
+              Output: c.region, c.id
+              Index Cond: (c.id = (o.bucket + 1))
+              Buffers: shared hit=60
+Settings: enable_hashjoin = 'off', enable_mergejoin = 'off'
+Query Identifier: -726486908991126822
+Planning:
+  Memory: used=28kB  allocated=32kB
+Planning Time: 0.055 ms
+Execution Time: 1.034 ms

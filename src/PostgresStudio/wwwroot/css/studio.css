@@ -13924,3 +13924,43 @@ a.ms-schema-health-mark:focus-visible {
 .ms-plan-node-facts dd {
     min-width: 0;
 }
+
+/* ==========================================================================
+   1.0-P3A. Text-format plans, paste for every visitor, static lint (issue #28)
+
+   Appended in D26 order, after UI-0.10. The static lint is a list of plan insights shown under the editor, with the place in
+   the statement each one names. A text plan's raw form is preformatted text in a scroll region of its own, which wraps
+   nowhere so a plan's indentation reads as Postgres printed it. The paste-only note and the unreadable-paste alert take the
+   page's existing notice and alert styles; they only need their own spacing.
+   ========================================================================== */
+
+.ms-plan-lint {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-plan-insight-node {
+    margin: var(--ms-space-xs) 0 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-raw-text {
+    max-height: 40rem;
+    margin: var(--ms-space-xs) 0 0;
+    padding: var(--ms-space-sm);
+    overflow: auto;
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    font-family: var(--ms-font-mono);
+    font-size: var(--ms-font-size-sm);
+    white-space: pre;
+}
+
+.ms-plan-paste-only,
+.ms-plan-paste-unreadable {
+    margin-top: var(--ms-space-sm);
+}

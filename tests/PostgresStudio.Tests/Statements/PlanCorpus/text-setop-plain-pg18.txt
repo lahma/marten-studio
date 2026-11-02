@@ -1,0 +1,11 @@
+HashSetOp Intersect  (cost=48.27..49.27 rows=399 width=4)
+  Output: customers.id
+  ->  Index Only Scan using customers_pkey on public.customers  (cost=0.28..20.26 rows=399 width=4)
+        Output: customers.id
+        Index Cond: (customers.id < 400)
+  ->  Index Scan using orders_pkey on public.orders  (cost=0.29..25.67 rows=536 width=4)
+        Output: orders.customer_id
+        Index Cond: (orders.id < 500)
+Query Identifier: -3702859081278484680
+Planning:
+  Memory: used=37kB  allocated=64kB

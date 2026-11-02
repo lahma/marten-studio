@@ -1,0 +1,9 @@
+Bitmap Heap Scan on public.orders  (cost=4.68..165.67 rows=50 width=30)
+  Output: id, customer_id, bucket, amount, placed, note
+  Recheck Cond: (orders.customer_id = 17)
+  ->  Bitmap Index Scan on orders_customer_idx  (cost=0.00..4.67 rows=50 width=0)
+        Index Cond: (orders.customer_id = 17)
+Settings: enable_indexscan = 'off'
+Query Identifier: 730648789563842047
+Planning:
+  Memory: used=14kB  allocated=16kB

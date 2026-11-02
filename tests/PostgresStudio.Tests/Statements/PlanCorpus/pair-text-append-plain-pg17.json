@@ -1,0 +1,81 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Append",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 51.56,
+      "Total Cost": 347.39,
+      "Plan Rows": 6771,
+      "Plan Width": 12,
+      "Subplans Removed": 0,
+      "Plans": [
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "readings_q1",
+          "Schema": "public",
+          "Alias": "readings_1",
+          "Startup Cost": 51.56,
+          "Total Cost": 158.17,
+          "Plan Rows": 3441,
+          "Plan Width": 12,
+          "Output": ["readings_1.id", "readings_1.day", "readings_1.v"],
+          "Recheck Cond": "((readings_1.day >= '2025-03-01'::date) AND (readings_1.day < '2025-05-01'::date))",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "readings_q1_day_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 50.70,
+              "Plan Rows": 3441,
+              "Plan Width": 0,
+              "Index Cond": "((readings_1.day >= '2025-03-01'::date) AND (readings_1.day < '2025-05-01'::date))"
+            }
+          ]
+        },
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "readings_q2",
+          "Schema": "public",
+          "Alias": "readings_2",
+          "Startup Cost": 50.42,
+          "Total Cost": 155.37,
+          "Plan Rows": 3330,
+          "Plan Width": 12,
+          "Output": ["readings_2.id", "readings_2.day", "readings_2.v"],
+          "Recheck Cond": "((readings_2.day >= '2025-03-01'::date) AND (readings_2.day < '2025-05-01'::date))",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "readings_q2_day_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 49.58,
+              "Plan Rows": 3330,
+              "Plan Width": 0,
+              "Index Cond": "((readings_2.day >= '2025-03-01'::date) AND (readings_2.day < '2025-05-01'::date))"
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": 1900317129412616876,
+    "Planning": {
+      "Memory Used": 44,
+      "Memory Allocated": 72
+    }
+  }
+]

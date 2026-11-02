@@ -1,0 +1,77 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Right",
+      "Startup Cost": 10.04,
+      "Total Cost": 20.17,
+      "Plan Rows": 49,
+      "Plan Width": 8,
+      "Disabled": false,
+      "Output": ["c.id", "o.id"],
+      "Inner Unique": true,
+      "Hash Cond": "(o.customer_id = c.id)",
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "orders_pkey",
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "o",
+          "Startup Cost": 0.29,
+          "Total Cost": 10.15,
+          "Plan Rows": 106,
+          "Plan Width": 8,
+          "Disabled": false,
+          "Output": ["o.id", "o.customer_id", "o.bucket", "o.amount", "o.placed", "o.note"],
+          "Index Cond": "(o.id < 100)"
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 9.13,
+          "Total Cost": 9.13,
+          "Plan Rows": 49,
+          "Plan Width": 4,
+          "Disabled": false,
+          "Output": ["c.id"],
+          "Plans": [
+            {
+              "Node Type": "Index Only Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "customers_pkey",
+              "Relation Name": "customers",
+              "Schema": "public",
+              "Alias": "c",
+              "Startup Cost": 0.28,
+              "Total Cost": 9.13,
+              "Plan Rows": 49,
+              "Plan Width": 4,
+              "Disabled": false,
+              "Output": ["c.id"],
+              "Index Cond": "(c.id < 50)"
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": -5092175904488561761,
+    "Planning": {
+      "Memory Used": 34,
+      "Memory Allocated": 64
+    }
+  }
+]

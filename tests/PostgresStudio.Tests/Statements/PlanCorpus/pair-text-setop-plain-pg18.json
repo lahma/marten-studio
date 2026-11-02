@@ -1,0 +1,62 @@
+[
+  {
+    "Plan": {
+      "Node Type": "SetOp",
+      "Strategy": "Hashed",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Command": "Intersect",
+      "Startup Cost": 48.27,
+      "Total Cost": 49.27,
+      "Plan Rows": 399,
+      "Plan Width": 4,
+      "Disabled": false,
+      "Output": ["customers.id"],
+      "Plans": [
+        {
+          "Node Type": "Index Only Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "customers_pkey",
+          "Relation Name": "customers",
+          "Schema": "public",
+          "Alias": "customers",
+          "Startup Cost": 0.28,
+          "Total Cost": 20.26,
+          "Plan Rows": 399,
+          "Plan Width": 4,
+          "Disabled": false,
+          "Output": ["customers.id"],
+          "Index Cond": "(customers.id < 400)"
+        },
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "orders_pkey",
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "orders",
+          "Startup Cost": 0.29,
+          "Total Cost": 25.67,
+          "Plan Rows": 536,
+          "Plan Width": 4,
+          "Disabled": false,
+          "Output": ["orders.customer_id"],
+          "Index Cond": "(orders.id < 500)"
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": -3702859081278484680,
+    "Planning": {
+      "Memory Used": 37,
+      "Memory Allocated": 64
+    }
+  }
+]

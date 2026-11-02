@@ -58,7 +58,7 @@ public class PlanPageTests
     // ---- The gate ------------------------------------------------------------------------------------------------------
 
     [Fact]
-    public async Task Without_RunSql_the_page_shows_the_consoles_disabled_state_naming_the_property_and_nothing_to_plan_with()
+    public async Task Without_RunSql_the_page_shows_the_consoles_disabled_state_naming_the_property_and_offers_only_the_paste_box()
     {
         await using PostgresStudioComponentContext context = await ReadyAsync(runSql: false);
 
@@ -66,8 +66,45 @@ public class PlanPageTests
 
         page.Find(".ms-capability-disabled").TextContent.Should().Contain("Planning a statement is not enabled").And.Contain("PostgresStudioOptions.Capabilities.RunSql");
         page.Find(".ms-query-sql-warning").TextContent.Should().Be(SqlConsolePanel.RunSqlWarning);
-        page.FindAll("#ms-plan-sql, .ms-plan-paste, .ms-plan-modes, .ms-plan-options").Should().BeEmpty("a pasted plan is behind the same gate");
+        page.Find(".ms-plan-paste-only").TextContent.Should().Be(PlanPage.PasteOnlyNote);
+        page.FindAll("#ms-plan-sql, .ms-plan-modes, .ms-plan-options").Should().BeEmpty("running a plan is the console's gate");
+        page.FindAll("#ms-plan-paste").Should().ContainSingle("pasting a plan reads nothing and is every visitor's (1.0-P3A)");
+        page.Find(".ms-plan-paste-draw").HasAttribute("disabled").Should().BeFalse();
         context.SqlConsole.Plans.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Without_RunSql_a_pasted_text_plan_is_drawn_and_nothing_is_run_or_audited()
+    {
+        await using PostgresStudioComponentContext context = await ReadyAsync(runSql: false);
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        string text = File.ReadAllText(MartenStudio.Tests.Conventions.RepositoryRoot.Combine("tests", "PostgresStudio.Tests", "Statements", "PlanCorpus", "text-hashjoin-analyze-pg17.txt"));
+        await PasteAsync(context, page, text);
+
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.Find(".ms-plan-caption").TextContent.Should().Be(PlanPage.PastedCaption + PlanPage.PastedTextCaption);
+        page.FindAll(".ms-plan-copy-json").Should().BeEmpty("a text plan has no JSON");
+        page.Find(".ms-plan-copy-text").TextContent.Should().Be("Copy text");
+        page.Find(".ms-plan-download").TextContent.Should().Be("Download plan.txt");
+        page.Find(".ms-plan-raw-text").TextContent.ReplaceLineEndings("\n").Should().Be(text.ReplaceLineEndings("\n"));
+
+        context.SqlConsole.Plans.Should().BeEmpty("a pasted plan reads nothing and runs nothing");
+        context.Services.GetRequiredService<PostgresStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a pasted plan is not audited");
+    }
+
+    [Fact]
+    public async Task Under_ReadOnly_the_paste_box_is_still_offered()
+    {
+        await using PostgresStudioComponentContext context = new();
+        context.WithAllCapabilities();
+        context.Options.ReadOnly = true;
+        await context.ReadyAsync();
+
+        IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
+
+        page.FindAll("#ms-plan-sql").Should().BeEmpty();
+        page.FindAll("#ms-plan-paste").Should().ContainSingle();
     }
 
     [Fact]
@@ -97,7 +134,7 @@ public class PlanPageTests
 
         page.WaitForAssertion(() => page.Find(".ms-write-refusal").TextContent.Should().NotBeEmpty());
         page.Find(".ms-query-run").HasAttribute("disabled").Should().BeTrue();
-        page.Find(".ms-plan-paste-draw").HasAttribute("disabled").Should().BeTrue("a pasted plan is behind the same gate");
+        page.Find(".ms-plan-paste-draw").HasAttribute("disabled").Should().BeFalse("pasting a plan reads nothing and is every visitor's (1.0-P3A)");
     }
 
     // ---- The editor, the modes and the options -------------------------------------------------------------------------
@@ -641,14 +678,14 @@ public class PlanPageTests
     }
 
     [Fact]
-    public async Task Text_that_is_not_a_plan_says_so_under_the_editor_and_draws_nothing()
+    public async Task Text_that_is_not_a_plan_says_so_under_the_paste_box_and_draws_nothing()
     {
         await using PostgresStudioComponentContext context = await ReadyAsync();
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         await PasteAsync(context, page, "[\"not a plan\"]");
 
-        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().StartWith(PlanPage.PasteUnreadable).And.Contain(QueryPlanReader.NotAPlan));
+        page.WaitForAssertion(() => page.Find(".ms-plan-paste-unreadable").TextContent.Should().StartWith(PlanPage.PasteUnreadable).And.Contain("Tried it as JSON").And.Contain(QueryPlanReader.NotAPlan));
         page.FindAll(".ms-plan-tree").Should().BeEmpty();
     }
 

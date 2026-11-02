@@ -1,0 +1,16 @@
+HashSetOp Intersect  (cost=0.28..59.30 rows=399 width=8)
+  Output: "*SELECT* 2".id, (1)
+  ->  Append  (cost=0.28..57.11 rows=878 width=8)
+        ->  Subquery Scan on "*SELECT* 2"  (cost=0.28..24.25 rows=399 width=8)
+              Output: "*SELECT* 2".id, 1
+              ->  Index Only Scan using customers_pkey on public.customers  (cost=0.28..20.26 rows=399 width=4)
+                    Output: customers.id
+                    Index Cond: (customers.id < 400)
+        ->  Subquery Scan on "*SELECT* 1"  (cost=0.29..28.46 rows=479 width=8)
+              Output: "*SELECT* 1".customer_id, 0
+              ->  Index Scan using orders_pkey on public.orders  (cost=0.29..23.68 rows=479 width=4)
+                    Output: orders.customer_id
+                    Index Cond: (orders.id < 500)
+Query Identifier: 5940977442177331547
+Planning:
+  Memory: used=32kB  allocated=64kB

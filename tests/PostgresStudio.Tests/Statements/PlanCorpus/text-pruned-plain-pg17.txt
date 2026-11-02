@@ -1,0 +1,27 @@
+Append  (cost=5.16..247.36 rows=444 width=12)
+  InitPlan 1
+    ->  Result  (cost=0.00..0.01 rows=1 width=4)
+          Output: '2025-05-10'::date
+  ->  Bitmap Heap Scan on public.readings_q1 readings_1  (cost=5.15..61.53 rows=111 width=12)
+        Output: readings_1.id, readings_1.day, readings_1.v
+        Recheck Cond: (readings_1.day = (InitPlan 1).col1)
+        ->  Bitmap Index Scan on readings_q1_day_idx  (cost=0.00..5.12 rows=111 width=0)
+              Index Cond: (readings_1.day = (InitPlan 1).col1)
+  ->  Bitmap Heap Scan on public.readings_q2 readings_2  (cost=5.15..61.53 rows=111 width=12)
+        Output: readings_2.id, readings_2.day, readings_2.v
+        Recheck Cond: (readings_2.day = (InitPlan 1).col1)
+        ->  Bitmap Index Scan on readings_q2_day_idx  (cost=0.00..5.12 rows=111 width=0)
+              Index Cond: (readings_2.day = (InitPlan 1).col1)
+  ->  Bitmap Heap Scan on public.readings_q3 readings_3  (cost=5.15..62.53 rows=111 width=12)
+        Output: readings_3.id, readings_3.day, readings_3.v
+        Recheck Cond: (readings_3.day = (InitPlan 1).col1)
+        ->  Bitmap Index Scan on readings_q3_day_idx  (cost=0.00..5.12 rows=111 width=0)
+              Index Cond: (readings_3.day = (InitPlan 1).col1)
+  ->  Bitmap Heap Scan on public.readings_q4 readings_4  (cost=5.15..59.53 rows=111 width=12)
+        Output: readings_4.id, readings_4.day, readings_4.v
+        Recheck Cond: (readings_4.day = (InitPlan 1).col1)
+        ->  Bitmap Index Scan on readings_q4_day_idx  (cost=0.00..5.12 rows=111 width=0)
+              Index Cond: (readings_4.day = (InitPlan 1).col1)
+Query Identifier: 2769618179236930345
+Planning:
+  Memory: used=64kB  allocated=72kB

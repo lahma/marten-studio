@@ -6,8 +6,9 @@
 @inject IJSRuntime JsRuntime
 
 @*
-    X3 (issue #28): a plan pasted in - the JSON of EXPLAIN (FORMAT JSON), from auto_explain, a log or another server - handed to
-    the page to draw. It reads nothing and runs nothing: the page parses it with QueryPlanReader and its own bounds.
+    X3 (issue #28): a plan pasted in - the JSON of EXPLAIN (FORMAT JSON), or since 1.0-P3A the default text format, from
+    auto_explain, a log or another server - handed to the page to draw. It reads nothing and runs nothing: the page parses it with
+    QueryPlanReader.ReadAny and its own bounds, and offers it to every visitor whatever the console's gate says.
 
     The textarea is deliberately not bound. A Blazor Server circuit accepts 32 KB a message by default (HubOptions.
     MaximumReceiveMessageSize), a plan of thirty nodes is more than that, and a change event carrying it would end the circuit - a
@@ -28,7 +29,7 @@
               autocapitalize="off"
               autocomplete="off"
               autocorrect="off"
-              placeholder='[ { "Plan": { "Node Type": "Seq Scan", … } } ]'
+              placeholder="Seq Scan on orders  (cost=0.00..1834.00 rows=100000 width=40) … or the JSON of EXPLAIN (FORMAT JSON)"
               aria-describedby="@(InputId + "-help")"></textarea>
 
     <div class="ms-plan-paste-actions">
@@ -36,8 +37,8 @@
     </div>
 
     <p id="@(InputId + "-help")" class="ms-muted ms-plan-paste-help">
-        The JSON of <code>EXPLAIN (FORMAT JSON)</code>, one plan or the array Postgres prints, from <code>auto_explain</code>, a log or another
-        server. It is drawn from the text alone: nothing is sent to the database and nothing is audited, so the database's own facts - its
+        What <code>EXPLAIN</code> printed - its default text format, or the JSON of <code>EXPLAIN (FORMAT JSON)</code> - from
+        <code>auto_explain</code>, a log, <code>psql</code> or another server. It is drawn from the text alone: nothing is sent to the database and nothing is audited, so the database's own facts - its
         statistics, indexes and settings - are not available for it. At most @QueryPlanReader.MaxNodes.ToString("N0", CultureInfo.InvariantCulture)
         nodes, @QueryPlanReader.MaxDepth.ToString(CultureInfo.InvariantCulture) levels and @(QueryPlanReader.MaxCharacters / (1024 * 1024)) MB are read.
     </p>
@@ -121,7 +122,7 @@
             }
             else if (length <= 0 || received.Length == 0)
             {
-                error = "There is nothing to draw: paste the JSON of an EXPLAIN (FORMAT JSON) first.";
+                error = "There is nothing to draw: paste a plan EXPLAIN printed first.";
             }
             else
             {

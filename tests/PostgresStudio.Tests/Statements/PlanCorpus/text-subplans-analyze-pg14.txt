@@ -1,0 +1,26 @@
+Index Scan using customers_pkey on public.customers c  (cost=8.57..348.59 rows=2 width=36) (actual time=0.058..0.108 rows=2 loops=1)
+  Output: c.id, (SubPlan 1)
+  Index Cond: (c.id <= 20)
+  Filter: (c.region = $1)
+  Rows Removed by Filter: 18
+  Buffers: shared hit=110
+  InitPlan 2 (returns $1)
+    ->  Index Scan using customers_pkey on public.customers  (cost=0.28..8.29 rows=1 width=3) (actual time=0.007..0.007 rows=1 loops=1)
+          Output: customers.region
+          Index Cond: (customers.id = 1)
+          Buffers: shared hit=3
+  SubPlan 1
+    ->  Aggregate  (cost=165.80..165.81 rows=1 width=32) (actual time=0.042..0.043 rows=1 loops=2)
+          Output: max(o.amount)
+          Buffers: shared hit=104
+          ->  Bitmap Heap Scan on public.orders o  (cost=4.68..165.67 rows=50 width=4) (actual time=0.014..0.031 rows=50 loops=2)
+                Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+                Recheck Cond: (o.customer_id = c.id)
+                Heap Blocks: exact=100
+                Buffers: shared hit=104
+                ->  Bitmap Index Scan on orders_customer_idx  (cost=0.00..4.67 rows=50 width=0) (actual time=0.011..0.011 rows=50 loops=2)
+                      Index Cond: (o.customer_id = c.id)
+                      Buffers: shared hit=4
+Query Identifier: 3625237984698534988
+Planning Time: 0.058 ms
+Execution Time: 0.181 ms

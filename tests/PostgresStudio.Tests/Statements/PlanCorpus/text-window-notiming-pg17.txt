@@ -1,0 +1,17 @@
+WindowAgg  (cost=284.47..343.09 rows=2932 width=16) (actual rows=2999 loops=1)
+  Output: id, row_number() OVER (?), customer_id
+  Buffers: shared hit=35
+  ->  Sort  (cost=284.45..291.78 rows=2932 width=8) (actual rows=2999 loops=1)
+        Output: id, customer_id
+        Sort Key: orders.customer_id, orders.id
+        Sort Method: quicksort  Memory: 167kB
+        Buffers: shared hit=35
+        ->  Index Scan using orders_pkey on public.orders  (cost=0.29..115.60 rows=2932 width=8) (actual rows=2999 loops=1)
+              Output: id, customer_id
+              Index Cond: (orders.id < 3000)
+              Buffers: shared hit=35
+Query Identifier: 8434218436549247901
+Planning:
+  Memory: used=19kB  allocated=32kB
+Planning Time: 0.027 ms
+Execution Time: 1.205 ms

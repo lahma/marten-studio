@@ -1,0 +1,25 @@
+HashSetOp Intersect  (cost=0.28..61.21 rows=399 width=8) (actual time=0.273..0.284 rows=398 loops=1)
+  Output: "*SELECT* 2".id, (1)
+  Buffers: shared hit=14
+  ->  Append  (cost=0.28..58.95 rows=904 width=8) (actual time=0.019..0.199 rows=898 loops=1)
+        Buffers: shared hit=14
+        ->  Subquery Scan on "*SELECT* 2"  (cost=0.28..24.25 rows=399 width=8) (actual time=0.019..0.082 rows=399 loops=1)
+              Output: "*SELECT* 2".id, 1
+              Buffers: shared hit=6
+              ->  Index Only Scan using customers_pkey on public.customers  (cost=0.28..20.26 rows=399 width=4) (actual time=0.018..0.054 rows=399 loops=1)
+                    Output: customers.id
+                    Index Cond: (customers.id < 400)
+                    Heap Fetches: 399
+                    Buffers: shared hit=6
+        ->  Subquery Scan on "*SELECT* 1"  (cost=0.29..30.18 rows=505 width=8) (actual time=0.011..0.075 rows=499 loops=1)
+              Output: "*SELECT* 1".customer_id, 0
+              Buffers: shared hit=8
+              ->  Index Scan using orders_pkey on public.orders  (cost=0.29..25.13 rows=505 width=4) (actual time=0.010..0.045 rows=499 loops=1)
+                    Output: orders.customer_id
+                    Index Cond: (orders.id < 500)
+                    Buffers: shared hit=8
+Query Identifier: 4843132099275705194
+Planning:
+  Buffers: shared hit=3
+Planning Time: 0.061 ms
+Execution Time: 0.328 ms

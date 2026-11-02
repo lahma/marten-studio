@@ -1,0 +1,6 @@
+Values Scan on "*VALUES*"  (cost=0.00..0.03 rows=1 width=36)
+  Output: "*VALUES*".column1, "*VALUES*".column2
+  Filter: ("*VALUES*".column1 > 1)
+Query Identifier: -5792405840993509210
+Planning:
+  Memory: used=12kB  allocated=16kB

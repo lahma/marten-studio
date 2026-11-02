@@ -1,0 +1,43 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Aggregate",
+      "Strategy": "Sorted",
+      "Partial Mode": "Simple",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 0.29,
+      "Total Cost": 2376.29,
+      "Plan Rows": 2000,
+      "Plan Width": 12,
+      "Output": ["customer_id", "count(*)"],
+      "Group Key": ["orders.customer_id"],
+      "Plans": [
+        {
+          "Node Type": "Index Only Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "orders_customer_idx",
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "orders",
+          "Startup Cost": 0.29,
+          "Total Cost": 1856.29,
+          "Plan Rows": 100000,
+          "Plan Width": 4,
+          "Output": ["customer_id"]
+        }
+      ]
+    },
+    "Settings": {
+      "enable_hashagg": "off"
+    },
+    "Query Identifier": 6956363017402388797,
+    "Planning": {
+      "Memory Used": 17,
+      "Memory Allocated": 32
+    }
+  }
+]

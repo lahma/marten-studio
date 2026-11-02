@@ -41,6 +41,7 @@
        names only PostgresStudio's and ASP.NET Core's types. -->
   <ItemGroup>
     <Compile Include="../MartenStudio.Tests/Support/TestAuthenticationStateProvider.cs" Link="Support/Linked/TestAuthenticationStateProvider.cs" />
+    <Compile Include="../PostgresStudio.Tests/Statements/PlanParity.cs" Link="Support/Linked/PlanParity.cs" />
   </ItemGroup>
 
 </Project>

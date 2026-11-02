@@ -1,0 +1,80 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Nested Loop",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Inner",
+      "Startup Cost": 0.58,
+      "Total Cost": 319.27,
+      "Plan Rows": 4976,
+      "Plan Width": 7,
+      "Disabled": false,
+      "Output": ["o.id", "c.region"],
+      "Inner Unique": true,
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "orders_pkey",
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "o",
+          "Startup Cost": 0.29,
+          "Total Cost": 188.37,
+          "Plan Rows": 4976,
+          "Plan Width": 8,
+          "Disabled": false,
+          "Output": ["o.id", "o.customer_id", "o.bucket", "o.amount", "o.placed", "o.note"],
+          "Index Cond": "(o.id < 5000)"
+        },
+        {
+          "Node Type": "Memoize",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.29,
+          "Total Cost": 0.32,
+          "Plan Rows": 1,
+          "Plan Width": 7,
+          "Disabled": false,
+          "Output": ["c.region", "c.id"],
+          "Cache Key": "(o.bucket + 1)",
+          "Cache Mode": "logical",
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "customers_pkey",
+              "Relation Name": "customers",
+              "Schema": "public",
+              "Alias": "c",
+              "Startup Cost": 0.28,
+              "Total Cost": 0.31,
+              "Plan Rows": 1,
+              "Plan Width": 7,
+              "Disabled": false,
+              "Output": ["c.region", "c.id"],
+              "Index Cond": "(c.id = (o.bucket + 1))"
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+      "enable_hashjoin": "off",
+      "enable_mergejoin": "off"
+    },
+    "Query Identifier": -1241354741477704244,
+    "Planning": {
+      "Memory Used": 28,
+      "Memory Allocated": 32
+    }
+  }
+]

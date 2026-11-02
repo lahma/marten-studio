@@ -1,0 +1,4 @@
+Seq Scan on public.orders  (cost=0.00..2084.00 rows=1 width=30)
+  Output: id, customer_id, bucket, amount, placed, note
+  Filter: (orders.note = 'note 5'::text)
+Query Identifier: -7154972159146259836

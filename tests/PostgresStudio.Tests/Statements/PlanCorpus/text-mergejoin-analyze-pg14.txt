@@ -1,0 +1,18 @@
+Merge Join  (cost=0.57..5610.63 rows=14950 width=8) (actual time=0.044..3.759 rows=14950 loops=1)
+  Output: c.id, o.id
+  Merge Cond: (c.id = o.customer_id)
+  Buffers: shared hit=14971
+  ->  Index Only Scan using customers_pkey on public.customers c  (cost=0.28..18.51 rows=299 width=4) (actual time=0.024..0.054 rows=299 loops=1)
+        Output: c.id
+        Index Cond: (c.id < 300)
+        Heap Fetches: 299
+        Buffers: shared hit=5
+  ->  Index Scan using orders_customer_idx on public.orders o  (cost=0.29..5191.87 rows=100000 width=8) (actual time=0.018..2.564 rows=14951 loops=1)
+        Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+        Buffers: shared hit=14966
+Settings: enable_hashjoin = 'off', enable_nestloop = 'off'
+Query Identifier: 8629685529878837854
+Planning:
+  Buffers: shared hit=14
+Planning Time: 0.155 ms
+Execution Time: 4.155 ms

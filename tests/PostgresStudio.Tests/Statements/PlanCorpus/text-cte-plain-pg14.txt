@@ -1,0 +1,10 @@
+CTE Scan on c  (cost=2376.29..2421.29 rows=667 width=12)
+  Output: c.customer_id, c.n
+  Filter: (c.n > 40)
+  CTE c
+    ->  GroupAggregate  (cost=0.29..2376.29 rows=2000 width=12)
+          Output: orders.customer_id, count(*)
+          Group Key: orders.customer_id
+          ->  Index Only Scan using orders_customer_idx on public.orders  (cost=0.29..1856.29 rows=100000 width=4)
+                Output: orders.customer_id
+Query Identifier: 2197266199345336229

@@ -1,0 +1,96 @@
+[
+  {
+    "Plan": {
+      "Node Type": "SetOp",
+      "Strategy": "Hashed",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Command": "Intersect",
+      "Startup Cost": 0.28,
+      "Total Cost": 61.21,
+      "Plan Rows": 399,
+      "Plan Width": 8,
+      "Output": ["\"*SELECT* 2\".id", "(1)"],
+      "Plans": [
+        {
+          "Node Type": "Append",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.28,
+          "Total Cost": 58.95,
+          "Plan Rows": 904,
+          "Plan Width": 8,
+          "Subplans Removed": 0,
+          "Plans": [
+            {
+              "Node Type": "Subquery Scan",
+              "Parent Relationship": "Member",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Alias": "*SELECT* 2",
+              "Startup Cost": 0.28,
+              "Total Cost": 24.25,
+              "Plan Rows": 399,
+              "Plan Width": 8,
+              "Output": ["\"*SELECT* 2\".id", "1"],
+              "Plans": [
+                {
+                  "Node Type": "Index Only Scan",
+                  "Parent Relationship": "Subquery",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Scan Direction": "Forward",
+                  "Index Name": "customers_pkey",
+                  "Relation Name": "customers",
+                  "Schema": "public",
+                  "Alias": "customers",
+                  "Startup Cost": 0.28,
+                  "Total Cost": 20.26,
+                  "Plan Rows": 399,
+                  "Plan Width": 4,
+                  "Output": ["customers.id"],
+                  "Index Cond": "(customers.id < 400)"
+                }
+              ]
+            },
+            {
+              "Node Type": "Subquery Scan",
+              "Parent Relationship": "Member",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Alias": "*SELECT* 1",
+              "Startup Cost": 0.29,
+              "Total Cost": 30.18,
+              "Plan Rows": 505,
+              "Plan Width": 8,
+              "Output": ["\"*SELECT* 1\".customer_id", "0"],
+              "Plans": [
+                {
+                  "Node Type": "Index Scan",
+                  "Parent Relationship": "Subquery",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Scan Direction": "Forward",
+                  "Index Name": "orders_pkey",
+                  "Relation Name": "orders",
+                  "Schema": "public",
+                  "Alias": "orders",
+                  "Startup Cost": 0.29,
+                  "Total Cost": 25.13,
+                  "Plan Rows": 505,
+                  "Plan Width": 4,
+                  "Output": ["orders.customer_id"],
+                  "Index Cond": "(orders.id < 500)"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": 4843132099275705194
+  }
+]

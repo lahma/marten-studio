@@ -1,0 +1,9 @@
+GroupAggregate  (cost=0.29..2376.29 rows=2000 width=12)
+  Output: customer_id, count(*)
+  Group Key: orders.customer_id
+  ->  Index Only Scan using orders_customer_idx on public.orders  (cost=0.29..1856.29 rows=100000 width=4)
+        Output: customer_id
+Settings: enable_hashagg = 'off'
+Query Identifier: -5278222923978818085
+Planning:
+  Memory: used=18kB  allocated=32kB

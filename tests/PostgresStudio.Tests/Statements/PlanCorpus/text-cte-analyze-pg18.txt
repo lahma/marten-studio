@@ -1,0 +1,20 @@
+CTE Scan on c  (cost=2376.29..2421.29 rows=667 width=12) (actual time=0.022..8.676 rows=2000.00 loops=1)
+  Output: c.customer_id, c.n
+  Filter: (c.n > 40)
+  Storage: Memory  Maximum Storage: 95kB
+  Buffers: shared hit=89
+  CTE c
+    ->  GroupAggregate  (cost=0.29..2376.29 rows=2000 width=12) (actual time=0.021..8.327 rows=2000.00 loops=1)
+          Output: orders.customer_id, count(*)
+          Group Key: orders.customer_id
+          Buffers: shared hit=89
+          ->  Index Only Scan using orders_customer_idx on public.orders  (cost=0.29..1856.29 rows=100000 width=4) (actual time=0.015..3.794 rows=100000.00 loops=1)
+                Output: orders.customer_id
+                Heap Fetches: 0
+                Index Searches: 1
+                Buffers: shared hit=89
+Query Identifier: 2878778726354140955
+Planning:
+  Memory: used=28kB  allocated=32kB
+Planning Time: 0.047 ms
+Execution Time: 8.768 ms

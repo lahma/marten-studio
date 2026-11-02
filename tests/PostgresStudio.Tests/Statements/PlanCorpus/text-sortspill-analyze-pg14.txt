@@ -1,0 +1,12 @@
+Sort  (cost=17320.82..17570.82 rows=100000 width=30) (actual time=55.558..68.907 rows=100000 loops=1)
+  Output: id, customer_id, bucket, amount, placed, note
+  Sort Key: orders.note
+  Sort Method: external merge  Disk: 4424kB
+  Buffers: shared hit=834, temp read=2034 written=2228
+  ->  Seq Scan on public.orders  (cost=0.00..1834.00 rows=100000 width=30) (actual time=0.005..4.030 rows=100000 loops=1)
+        Output: id, customer_id, bucket, amount, placed, note
+        Buffers: shared hit=834
+Settings: work_mem = '64kB'
+Query Identifier: 2177659032157434998
+Planning Time: 0.039 ms
+Execution Time: 72.018 ms

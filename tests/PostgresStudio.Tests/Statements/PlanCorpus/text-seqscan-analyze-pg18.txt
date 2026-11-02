@@ -1,0 +1,10 @@
+Seq Scan on public.orders  (cost=0.00..2084.00 rows=1 width=30) (actual time=0.006..3.507 rows=1.00 loops=1)
+  Output: id, customer_id, bucket, amount, placed, note
+  Filter: (orders.note = 'note 5'::text)
+  Rows Removed by Filter: 99999
+  Buffers: shared hit=834
+Query Identifier: 4257473406796104498
+Planning:
+  Memory: used=12kB  allocated=16kB
+Planning Time: 0.029 ms
+Execution Time: 3.514 ms

@@ -29,6 +29,12 @@ internal sealed record PlanInsightInfo(string Code, string Title, HealthSeverity
     /// </summary>
     public bool ComparesPlans { get; init; }
 
+    /// <summary>
+    /// 1.0-P3A: whether it judges the statement's text and not a plan (<see cref="PlanInsights.EvaluateText" />) - the static lint, which
+    /// reads nothing and is shown as the statement is written. It is never evaluated on a plan, so it is never listed as not judged.
+    /// </summary>
+    public bool FromText { get; init; }
+
     /// <summary>The heading's anchor, as GitHub derives it.</summary>
     public string DocsAnchor => HealthCheckInfo.Anchor(Code + " " + Title);
 
@@ -183,6 +189,18 @@ internal static partial class PlanInsights
     /// <summary>P21 - judges a pair of plans, so <see cref="Evaluate" /> never returns it: see <see cref="GenericVersusCustom" />.</summary>
     public static readonly PlanInsightInfo GenericWorseThanCustom = new("P21", "Generic plan far costlier than the custom plan", HealthSeverity.Warning, false) { ComparesPlans = true };
 
+    /// <summary>P22, the static lint (1.0-P3A): judged from the statement's text in <c>PlanStatementLint.cs</c>.</summary>
+    public static readonly PlanInsightInfo NotInSubquery = new("P22", "NOT IN over a subquery", HealthSeverity.Warning, false) { FromText = true };
+
+    /// <summary>P23.</summary>
+    public static readonly PlanInsightInfo LargeOffsetLiteralInText = new("P23", "Large literal OFFSET", HealthSeverity.Info, false) { FromText = true };
+
+    /// <summary>P24.</summary>
+    public static readonly PlanInsightInfo StarOverJoin = new("P24", "SELECT * over a join", HealthSeverity.Info, false) { FromText = true };
+
+    /// <summary>P25.</summary>
+    public static readonly PlanInsightInfo OrderByRandom = new("P25", "ORDER BY random()", HealthSeverity.Info, false) { FromText = true };
+
     /// <summary>Every insight, by code.</summary>
     public static IReadOnlyList<PlanInsightInfo> All { get; } =
     [
@@ -190,6 +208,7 @@ internal static partial class PlanInsights
         HeapFetching, DiscardingFilter, HashBatched, CostlyJit, SlowPlanning, MissingMemoize,
         StaleStatistics, CorrelatedColumns, WrappedIndexedColumn, NoPartitionPruning, DefaultFunctionRows, TriggerTime,
         GenericWorseThanCustom,
+        NotInSubquery, LargeOffsetLiteralInText, StarOverJoin, OrderByRandom,
     ];
 
     /// <summary>P09's "fetching": heap fetches are at least this share of the rows the scan returned over its loops.</summary>

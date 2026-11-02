@@ -1,0 +1,9 @@
+Values Scan on "*VALUES*"  (cost=0.00..0.03 rows=1 width=36) (actual time=0.001..0.001 rows=1 loops=1)
+  Output: "*VALUES*".column1, "*VALUES*".column2
+  Filter: ("*VALUES*".column1 > 1)
+  Rows Removed by Filter: 1
+Query Identifier: -5792405840993509210
+Planning:
+  Memory: used=12kB  allocated=16kB
+Planning Time: 0.010 ms
+Execution Time: 0.005 ms

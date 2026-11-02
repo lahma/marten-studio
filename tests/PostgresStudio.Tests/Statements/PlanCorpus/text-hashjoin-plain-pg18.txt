@@ -1,0 +1,16 @@
+Hash Join  (cost=151.70..1113.40 rows=8440 width=7)
+  Output: c.region, o.amount
+  Inner Unique: true
+  Hash Cond: (o.customer_id = c.id)
+  ->  Bitmap Heap Scan on public.orders o  (cost=97.70..1037.20 rows=8440 width=8)
+        Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+        Recheck Cond: (o.placed < '2025-02-01'::date)
+        ->  Bitmap Index Scan on orders_placed_idx  (cost=0.00..95.59 rows=8440 width=0)
+              Index Cond: (o.placed < '2025-02-01'::date)
+  ->  Hash  (cost=29.00..29.00 rows=2000 width=7)
+        Output: c.region, c.id
+        ->  Seq Scan on public.customers c  (cost=0.00..29.00 rows=2000 width=7)
+              Output: c.region, c.id
+Query Identifier: -3103496775205157795
+Planning:
+  Memory: used=35kB  allocated=64kB

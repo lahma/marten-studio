@@ -1,0 +1,5 @@
+Update on public.orders  (cost=0.29..8.31 rows=0 width=0)
+  ->  Index Scan using orders_pkey on public.orders  (cost=0.29..8.31 rows=1 width=38)
+        Output: 'x'::text, ctid
+        Index Cond: (orders.id = 5)
+Query Identifier: -4919642322211901929

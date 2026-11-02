@@ -1,0 +1,7 @@
+Function Scan on pg_catalog.generate_series g  (cost=0.00..1.50 rows=1 width=4)
+  Output: g
+  Function Call: generate_series(1, 100)
+  Filter: ((g.g % 7) = 0)
+Query Identifier: 1123987794920841596
+Planning:
+  Memory: used=8kB  allocated=8kB

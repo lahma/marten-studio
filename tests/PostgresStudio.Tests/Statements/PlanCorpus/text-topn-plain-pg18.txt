@@ -1,0 +1,10 @@
+Limit  (cost=3994.96..3994.99 rows=10 width=30)
+  Output: id, customer_id, bucket, amount, placed, note
+  ->  Sort  (cost=3994.96..4244.96 rows=100000 width=30)
+        Output: id, customer_id, bucket, amount, placed, note
+        Sort Key: orders.amount DESC, orders.id
+        ->  Seq Scan on public.orders  (cost=0.00..1834.00 rows=100000 width=30)
+              Output: id, customer_id, bucket, amount, placed, note
+Query Identifier: -3972234831435106665
+Planning:
+  Memory: used=16kB  allocated=16kB

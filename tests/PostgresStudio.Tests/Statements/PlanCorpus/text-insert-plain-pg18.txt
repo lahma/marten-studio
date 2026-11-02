@@ -1,0 +1,6 @@
+Insert on public.customers  (cost=0.00..0.01 rows=0 width=0)
+  ->  Result  (cost=0.00..0.01 rows=1 width=36)
+        Output: 5000, 'x'::text
+Query Identifier: -3218576258992713060
+Planning:
+  Memory: used=8kB  allocated=8kB

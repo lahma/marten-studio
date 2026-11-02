@@ -339,6 +339,7 @@ public class StudioLayoutTests
                 "Overview",
                 "Documents",
                 "Query",
+                "Plan",
                 "Tables",
                 "Relationships",
                 "Streams",
@@ -572,43 +573,23 @@ public class StudioLayoutTests
     }
 
     /// <summary>
-    /// Issue #37: Plan is a door to a page that runs SQL, so it is absent from the rail while <c>RunSql</c> is off. Query
-    /// stays: besides the SQL console it hosts Mode A and LINQ mode, which need no <c>RunSql</c>.
+    /// 1.0-P3A (issue #28): Plan is in the rail for every visitor, after Query, whatever <c>RunSql</c> and the master switch say -
+    /// pasting a plan reads nothing; running one keeps the console's gate on the page. Query stays too: it hosts Mode A and LINQ
+    /// mode, which need no <c>RunSql</c> (issue #37).
     /// </summary>
-    [Fact]
-    public void Plan_is_absent_from_the_rail_while_RunSql_is_off_and_Query_stays()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Plan_and_Query_are_in_the_rail_whatever_RunSql_and_ReadOnly_say(bool runSql, bool readOnly)
     {
-        using var context = new StudioComponentContext();
-        context.Options.Capabilities.RunSql.Should().BeFalse("the default is a read-only browser");
-
-        var layout = RenderLayout(context);
-
-        string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
-        links.Should().Contain("Query").And.NotContain("Plan");
-    }
-
-    [Fact]
-    public void Plan_joins_the_rail_with_RunSql_on_after_Query()
-    {
-        using var context = new StudioComponentContext();
-        context.Options.Capabilities.RunSql = true;
+        using var context = readOnly ? new StudioComponentContext().WithReadOnly() : new StudioComponentContext();
+        context.Options.Capabilities.RunSql = runSql;
 
         var layout = RenderLayout(context);
 
         string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
         links.Should().ContainInOrder("Query", "Plan", "Tables");
-    }
-
-    [Fact]
-    public void Plan_goes_with_the_master_switch_even_with_RunSql_set()
-    {
-        using var context = new StudioComponentContext().WithReadOnly();
-        context.Options.Capabilities.RunSql.Should().BeTrue("ReadOnly leaves the flags as the host set them and overrides them");
-
-        var layout = RenderLayout(context);
-
-        string[] links = [.. layout.TextOfAll("a.ms-nav-link .ms-nav-link-text")];
-        links.Should().Contain("Query").And.NotContain("Plan", "ReadOnly turns every capability off");
     }
 
     /// <summary>
@@ -624,7 +605,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(19, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included, and Plan (0.9) while RunSql is on");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(20, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included, and Plan (0.9; every visitor's since 1.0)");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

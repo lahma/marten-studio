@@ -52,6 +52,12 @@ public class PlanInsightsTests
         ["P19"] = static _ => false,
         ["P20"] = static _ => false,
         ["P21"] = static _ => false,
+
+        // 1.0-P3A's static lint is judged from the statement's text, never from a plan (PlanStatementLintTests).
+        ["P22"] = static _ => false,
+        ["P23"] = static _ => false,
+        ["P24"] = static _ => false,
+        ["P25"] = static _ => false,
     };
 
     public static TheoryData<string, string> EveryInsightOnEveryFixture()

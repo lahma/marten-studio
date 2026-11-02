@@ -1,0 +1,27 @@
+Hash Join  (cost=151.70..1113.40 rows=8440 width=7) (actual time=0.512..1.870 rows=8493.00 loops=1)
+  Output: c.region, o.amount
+  Inner Unique: true
+  Hash Cond: (o.customer_id = c.id)
+  Buffers: shared hit=360
+  ->  Bitmap Heap Scan on public.orders o  (cost=97.70..1037.20 rows=8440 width=8) (actual time=0.168..0.641 rows=8493.00 loops=1)
+        Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+        Recheck Cond: (o.placed < '2025-02-01'::date)
+        Heap Blocks: exact=342
+        Buffers: shared hit=351
+        ->  Bitmap Index Scan on orders_placed_idx  (cost=0.00..95.59 rows=8440 width=0) (actual time=0.135..0.135 rows=8493.00 loops=1)
+              Index Cond: (o.placed < '2025-02-01'::date)
+              Index Searches: 1
+              Buffers: shared hit=9
+  ->  Hash  (cost=29.00..29.00 rows=2000 width=7) (actual time=0.337..0.338 rows=2000.00 loops=1)
+        Output: c.region, c.id
+        Buckets: 2048  Batches: 1  Memory Usage: 95kB
+        Buffers: shared hit=9
+        ->  Seq Scan on public.customers c  (cost=0.00..29.00 rows=2000 width=7) (actual time=0.007..0.157 rows=2000.00 loops=1)
+              Output: c.region, c.id
+              Buffers: shared hit=9
+Query Identifier: -3103496775205157795
+Planning:
+  Buffers: shared hit=14
+  Memory: used=35kB  allocated=64kB
+Planning Time: 0.156 ms
+Execution Time: 2.175 ms

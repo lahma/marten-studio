@@ -129,16 +129,11 @@ public class StudioSpineTests
         deadLetters.IsShown(MartenSpine.Settings(new MartenStudioOptions { IsDocumentTypeVisible = static _ => false }))
             .Should().BeFalse("a hidden DeadLetterEvent takes its entry with it, failing closed (D27)");
 
-        // Issue #37: Plan needs RunSql; Query also hosts Mode A and LINQ mode, which do not, so it carries no condition.
+        // Issue #37: Query also hosts Mode A and LINQ mode, which need no RunSql, so it carries no condition; and since 1.0-P3A Plan
+        // carries none either - pasting a plan reads nothing, and running one keeps the console's gate on the page.
         StudioNavItem[] items = [.. descriptor.Navigation.SelectMany(static x => x.Items)];
         items.Single(static x => x.Label == "Query").IsShown.Should().BeNull();
-
-        StudioNavItem plan = items.Single(static x => x.Label == "Plan");
-        plan.IsShown.Should().NotBeNull();
-        plan.IsShown!(MartenSpine.Settings()).Should().BeFalse("RunSql is off by default");
-        plan.IsShown(MartenSpine.Settings(new MartenStudioOptions { Capabilities = { RunSql = true } })).Should().BeTrue();
-        plan.IsShown(MartenSpine.Settings(new MartenStudioOptions { Capabilities = { RunSql = true }, ReadOnly = true }))
-            .Should().BeFalse("the master switch turns every capability off");
+        items.Single(static x => x.Label == "Plan").IsShown.Should().BeNull();
     }
 
     // ---------------------------------------------------------------------------------------------
