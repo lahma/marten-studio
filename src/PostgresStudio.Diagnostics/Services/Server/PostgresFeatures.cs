@@ -223,6 +223,33 @@ internal enum PostgresFeature
     /// </summary>
     FastPathSlotsFromMaxLocks,
 
+    /// <summary>
+    /// <c>pg_attribute.attgenerated = 'v'</c>: a <em>virtual</em> generated column, computed when it is read and never stored
+    /// (18 release notes, "Add virtual generated columns"). Below 18 every generated column is <c>'s'</c>, stored. No catalog
+    /// read shows it without a column that is one, so the matrix proves it by creating one (<c>Pg18SurfacingLiveTests</c>).
+    /// </summary>
+    VirtualGeneratedColumns,
+
+    /// <summary>
+    /// <c>pg_constraint.conperiod</c>: a temporal key - <c>WITHOUT OVERLAPS</c> on a primary key or unique constraint,
+    /// <c>PERIOD</c> on a foreign key (18 release notes). Measured on <c>postgres:18.6-alpine</c>: the one column says both.
+    /// </summary>
+    TemporalConstraints,
+
+    /// <summary>
+    /// <c>pg_stat_get_backend_io(pid)</c>: one backend's own I/O statistics, per object and context, the columns of
+    /// <c>pg_stat_io</c> for one process (18 release notes). Measured on <c>postgres:18.6-alpine</c>.
+    /// </summary>
+    BackendIo,
+
+    /// <summary>
+    /// <c>pg_stat_statements</c> 1.12: <c>parallel_workers_to_launch</c>, <c>parallel_workers_launched</c> and
+    /// <c>wal_buffers_full</c> (and no other column: 18.6's 1.12 has no generic or custom plan counts). The installed
+    /// extension's version decides what is read (<c>StatementExtension.HasParallelWorkers</c>); this is the server release that
+    /// ships it.
+    /// </summary>
+    StatementsParallelWorkers,
+
     // ---- 19 (release notes as of 2026-10-09; the matrix runs its release candidate) --------------------------------
 
     /// <summary>
@@ -358,6 +385,10 @@ internal static class PostgresFeatures
         new(PostgresFeature.ChecksumsDefaultOn, 180000),
         new(PostgresFeature.TotalVacuumTime, 180000),
         new(PostgresFeature.FastPathSlotsFromMaxLocks, 180000),
+        new(PostgresFeature.VirtualGeneratedColumns, 180000),
+        new(PostgresFeature.TemporalConstraints, 180000),
+        new(PostgresFeature.BackendIo, 180000),
+        new(PostgresFeature.StatementsParallelWorkers, 180000),
 
         // 19
         new(PostgresFeature.StatsResetPerTable, 190000),

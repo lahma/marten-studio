@@ -200,6 +200,12 @@ internal sealed record CatalogForeignKey(
     string OnDelete,
     string OnUpdate)
 {
+    /// <summary>
+    /// Whether its last column on each side is a <c>PERIOD</c> (<c>conperiod</c>, PostgreSQL 18+): a temporal foreign key,
+    /// which references a <c>WITHOUT OVERLAPS</c> key. <see langword="false" /> below 18.
+    /// </summary>
+    public bool Period { get; init; }
+
     /// <summary>Its columns as attribute numbers of the pointing table (<c>conkey</c>), in key order (W5-B1).</summary>
     public IReadOnlyList<short> Attributes { get; init; } = [];
 
@@ -364,7 +370,7 @@ internal sealed record CatalogSequenceValue(bool CanReadValue, long? LastValue)
 /// <param name="NotNull"><c>attnotnull</c>.</param>
 /// <param name="Default">The default expression, or a generated column's expression.</param>
 /// <param name="Identity"><c>attidentity</c>: empty, <c>a</c> (always) or <c>d</c> (by default).</param>
-/// <param name="Generated"><c>attgenerated</c>: empty or <c>s</c> (stored).</param>
+/// <param name="Generated"><c>attgenerated</c>: empty, <c>s</c> (stored) or, from PostgreSQL 18, <c>v</c> (virtual: computed when read).</param>
 /// <param name="Sortable">Whether its type, or a domain's base type, has a default btree operator class.</param>
 /// <param name="Comment">The column comment.</param>
 /// <param name="TypeExtension">The extension that owns its type, or its domain's base type, from <c>pg_depend</c>.</param>
@@ -388,7 +394,11 @@ internal sealed record CatalogColumn(
 /// <param name="Name">The constraint name.</param>
 /// <param name="Kind"><c>contype</c>: <c>p</c>, <c>u</c>, <c>c</c>, <c>x</c> or <c>t</c>.</param>
 /// <param name="Definition"><c>pg_get_constraintdef</c>.</param>
-internal sealed record CatalogConstraint(string Name, string Kind, string Definition);
+/// <param name="Temporal">
+/// <c>conperiod</c> (PostgreSQL 18+): a primary key or unique constraint declared <c>WITHOUT OVERLAPS</c>. <see langword="false" />
+/// below 18, where the column does not exist.
+/// </param>
+internal sealed record CatalogConstraint(string Name, string Kind, string Definition, bool Temporal = false);
 
 /// <summary>One index of a relation.</summary>
 /// <param name="Name">The index name.</param>
@@ -991,7 +1001,8 @@ internal static class DatabaseCatalogQueries
                   from pg_catalog.pg_index x
                   join pg_catalog.pg_class ix on ix.oid = x.indexrelid
                   join pg_catalog.pg_am am on am.oid = ix.relam
-                  where x.indrelid = con.conrelid)::text
+                  where x.indrelid = con.conrelid)::text,
+               coalesce((pg_catalog.to_jsonb(con) ->> 'conperiod')::bool, false)
         from pg_catalog.pg_constraint con
         join pg_catalog.pg_class cl on cl.oid = con.conrelid
         join pg_catalog.pg_namespace ns on ns.oid = cl.relnamespace
@@ -1477,11 +1488,17 @@ internal static class DatabaseCatalogQueries
     /// PostgreSQL 18 stores each one in <c>pg_constraint</c> (<c>contype = 'n'</c>, B0 §3), which listed a
     /// <c>…_not_null</c> constraint of kind "Other" per NOT NULL column, beside the Columns tab that already says it.
     /// </summary>
+    /// <remarks>
+    /// The last column is <c>conperiod</c>, PostgreSQL 18's mark of a <c>WITHOUT OVERLAPS</c> key. It is read through
+    /// <c>to_jsonb</c>, as <c>last_idx_scan</c> is, so one statement runs on every version: below 18 the key is absent and the
+    /// answer is false - never an error, never a column the server lacks named in the text.
+    /// </remarks>
     internal const string ConstraintsSql =
         """
         select k.conname::text,
                k.contype::text,
-               pg_catalog.pg_get_constraintdef(k.oid, true)
+               pg_catalog.pg_get_constraintdef(k.oid, true),
+               coalesce((pg_catalog.to_jsonb(k) ->> 'conperiod')::bool, false)
         from pg_catalog.pg_constraint k
         where k.conrelid = @oid and k.contype not in ('f', 'n')
         order by case k.contype when 'p' then 0 when 'u' then 1 else 2 end, k.conname
@@ -2020,6 +2037,7 @@ internal static class DatabaseCatalogQueries
                 Attributes = reader.IsDBNull(10) ? [] : reader.GetFieldValue<short[]>(10),
                 PartitionKey = reader.IsDBNull(11) ? [] : reader.GetFieldValue<short[]>(11),
                 Indexes = reader.IsDBNull(12) ? [] : CatalogForeignKey.ParseIndexes(reader.GetString(12)),
+                Period = !reader.IsDBNull(13) && reader.GetBoolean(13),
             },
             schemas,
             cap,
@@ -2157,7 +2175,8 @@ internal static class DatabaseCatalogQueries
                 static reader => new CatalogConstraint(
                     reader.GetString(0),
                     reader.GetString(1),
-                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2)),
+                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    !reader.IsDBNull(3) && reader.GetBoolean(3)),
                 commandTimeoutSeconds,
                 cancellationToken)
             .ConfigureAwait(false);

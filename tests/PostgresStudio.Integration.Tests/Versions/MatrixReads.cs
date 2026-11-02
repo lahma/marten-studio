@@ -135,6 +135,54 @@ internal static class MatrixReads
                 throw new InvalidOperationException("A role in pg_read_all_stats was told a session's state is unknown.");
             }
         }),
+
+        // ---- 1.0-PG18: the snapshot's per-backend I/O is read from 18 (pg_stat_get_backend_io, one statement for every session) and
+        // absent below it, as every role: a role that may not read another's backend gets no row for it, and no error -----------
+        new("sessions: per-backend I/O", true, static async (x, t) =>
+        {
+            SessionSnapshot snapshot = await x.Services.GetRequiredService<ISessionActivityReader>().ReadAsync(x.Resolved, t);
+            LockTableRead blocking = snapshot.Blocking ?? throw new InvalidOperationException("The sessions snapshot read no lock table.");
+            bool expected = PostgresFeatures.Has(PostgresFeature.BackendIo, blocking.ServerVersion);
+
+            if (expected != (snapshot.BackendIo is not null))
+            {
+                throw new InvalidOperationException(
+                    "The per-backend I/O was " + (snapshot.BackendIo is null ? "absent" : "read") + " on server_version_num "
+                    + blocking.ServerVersion + ", where the gate says " + (expected ? "present" : "absent") + ".");
+            }
+
+            int ioStatements = snapshot.Statements.Count(static y => y.Label == "each session's I/O");
+
+            if (ioStatements > 1 || (!expected && ioStatements != 0) || (expected && snapshot.Sessions.Count > 0 && ioStatements != 1))
+            {
+                throw new InvalidOperationException("The sessions snapshot ran " + ioStatements + " per-backend I/O statements for " + snapshot.Sessions.Count + " sessions.");
+            }
+        }),
+
+        // ---- 1.0-PG18: the 1.12 statement counters (PostgresFeature.StatementsParallelWorkers' extension) are read from 1.12 and null below it ------------------------------
+        new("statements: 1.12 counters", false, static async (x, t) =>
+        {
+            PostgresStudio.Services.Statements.StatementFacts facts =
+                await x.Services.GetRequiredService<PostgresStudio.Services.Statements.IStatementFacts>().ReadAsync(x.Resolved, t);
+
+            if (facts.State != PostgresStudio.Services.Statements.StatementsState.Read || facts.Statements.Count == 0)
+            {
+                return;
+            }
+
+            bool expected = Version.TryParse(facts.ExtensionVersion, out Version? extension) && extension >= new Version(1, 12);
+
+            foreach (PostgresStudio.Services.Statements.StatementFact fact in facts.Statements)
+            {
+                if (expected != (fact.WalBuffersFull is not null && fact.ParallelWorkersToLaunch is not null && fact.ParallelWorkersLaunched is not null))
+                {
+                    throw new InvalidOperationException(
+                        "Statement " + fact.QueryId + " read its 1.12 counters as " + fact.WalBuffersFull + "/" + fact.ParallelWorkersToLaunch + "/"
+                        + fact.ParallelWorkersLaunched + " on pg_stat_statements " + facts.ExtensionVersion + ", where the extension's version says "
+                        + (expected ? "present" : "absent") + ".");
+                }
+            }
+        }),
         new("relationships: foreign keys", true, static (x, t) => RelationshipQueries.ReadForeignKeysTouchingAsync(
             x.Connection, x.Transaction, x.Schemas, RelationshipQueries.DefaultForeignKeyCap, x.Timeout, t)),
 

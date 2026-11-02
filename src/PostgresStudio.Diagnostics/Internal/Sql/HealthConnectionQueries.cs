@@ -547,6 +547,42 @@ internal static class HealthConnectionQueries
         [Integer("max_query", MaxQueryCharacters), Integer("limit", MaxSessions)]);
 
     /// <summary>
+    /// Database › Sessions, PostgreSQL 18+: the I/O each of these sessions' backends has done, from
+    /// <c>pg_stat_get_backend_io(pid)</c> - the columns of <c>pg_stat_io</c> for one process - summed over its objects and
+    /// contexts, one row a pid, in <b>one</b> statement for every pid on screen (never one call a row).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked of a server that has the function (<c>PostgresFeature.BackendIo</c>) and of the pids the sessions read returned,
+    /// at most <see cref="MaxSessions" /> of them, so it is bounded by the rows on screen. The function reads shared statistics
+    /// and locks nothing. A backend that has exited returns no rows, and so no row here. It checks no role - measured on 18.6
+    /// and 19rc1, a role in no monitoring role reads another role's backend, as <c>pg_stat_io</c> is readable by everyone - so
+    /// what keeps a process's I/O from a visitor is the page's activity gate (<c>ViewDatabaseActivity</c>), not the read.
+    /// </para>
+    /// <para>
+    /// The sums skip the nulls <c>pg_stat_io</c> uses for an operation a context does not do (the WAL rows have no reads, a
+    /// vacuum context no hits). The times are zero while <c>track_io_timing</c> is off.
+    /// </para>
+    /// </remarks>
+    /// <param name="processIds">The sessions' process ids.</param>
+    public static HealthQuery BackendIo(IReadOnlyCollection<int> processIds)
+    {
+        ArgumentNullException.ThrowIfNull(processIds);
+
+        return new(
+            "select p.pid,\n" +
+            "       sum(i.reads)::int8, sum(i.read_bytes)::float8, sum(i.read_time)::float8,\n" +
+            "       sum(i.writes)::int8, sum(i.write_bytes)::float8, sum(i.write_time)::float8,\n" +
+            "       sum(i.hits)::int8, sum(i.evictions)::int8, sum(i.extends)::int8\n" +
+            "  from pg_catalog.unnest(@pids) as p(pid)\n" +
+            " cross join lateral pg_catalog.pg_stat_get_backend_io(p.pid) i\n" +
+            " group by p.pid\n" +
+            " order by p.pid\n" +
+            " limit @limit",
+            [IntegerArray("pids", processIds), Integer("limit", MaxSessions)]);
+    }
+
+    /// <summary>
     /// Database › Sessions: the locks held and awaited by this database's sessions, waiters first, without
     /// each transaction's lock on its own virtual id (every transaction holds one, and it says nothing). A lock
     /// on a relation is returned as its owner and the part of it locked (<see cref="OwnersCte" />).

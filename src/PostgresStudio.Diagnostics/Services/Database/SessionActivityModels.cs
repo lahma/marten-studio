@@ -230,7 +230,39 @@ internal sealed record SessionSnapshot(
     /// not read it (a test's).
     /// </summary>
     public SessionServerHolders? Holders { get; init; }
+
+    /// <summary>
+    /// PostgreSQL 18's per-backend I/O (<c>pg_stat_get_backend_io</c>) of the sessions above, by process id - one statement for
+    /// all of them - or <see langword="null" /> below 18, where the function does not exist, and from a reader that did not
+    /// read it. A session the server answered nothing for (one that has ended since the sessions were read) has no entry. Never
+    /// shown as it is: it is a detail of a process, behind the activity gate.
+    /// </summary>
+    public IReadOnlyDictionary<int, SessionBackendIo>? BackendIo { get; init; }
 }
+
+/// <summary>
+/// One backend's I/O since its statistics began, summed over the objects and contexts of PostgreSQL 18's
+/// <c>pg_stat_get_backend_io</c> (<c>pg_stat_io</c> for one process).
+/// </summary>
+/// <param name="Reads">Blocks it read from outside shared buffers.</param>
+/// <param name="ReadBytes">The bytes of those reads.</param>
+/// <param name="ReadMilliseconds">Time spent reading, in milliseconds: zero while <c>track_io_timing</c> is off.</param>
+/// <param name="Writes">Blocks it wrote out.</param>
+/// <param name="WriteBytes">The bytes of those writes.</param>
+/// <param name="WriteMilliseconds">Time spent writing, in milliseconds: zero while <c>track_io_timing</c> is off.</param>
+/// <param name="Hits">Reads served from shared buffers.</param>
+/// <param name="Evictions">Buffers it evicted to make room.</param>
+/// <param name="Extends">Blocks it added to relations.</param>
+internal sealed record SessionBackendIo(
+    long Reads,
+    double ReadBytes,
+    double ReadMilliseconds,
+    long Writes,
+    double WriteBytes,
+    double WriteMilliseconds,
+    long Hits,
+    long Evictions,
+    long Extends);
 
 /// <summary>One row of PostgreSQL 19's <c>pg_stat_lock</c>: the whole server's counters for one lock type, since their reset.</summary>
 /// <param name="LockType"><c>relation</c>, <c>transactionid</c>, <c>advisory</c>…</param>
@@ -480,7 +512,14 @@ internal sealed record SessionDetailRow(
     TimeSpan? QueryAge,
     TimeSpan? StateAge,
     IReadOnlyList<int> BlockedBy,
-    SessionStatementText Statement);
+    SessionStatementText Statement)
+{
+    /// <summary>
+    /// This backend's I/O (PostgreSQL 18+), or <see langword="null" /> below 18 and for a session the server told nothing
+    /// about.
+    /// </summary>
+    public SessionBackendIo? BackendIo { get; init; }
+}
 
 /// <summary>One lock, past the activity gate.</summary>
 /// <param name="ProcessId">The session holding or awaiting it.</param>
@@ -518,6 +557,12 @@ internal sealed record SessionActivityDetails
 
     /// <summary>The sessions.</summary>
     public IReadOnlyList<SessionDetailRow> Sessions { get; init; } = [];
+
+    /// <summary>
+    /// Whether the sessions carry their backend's I/O at all (PostgreSQL 18+): the page draws its columns only then, so below
+    /// 18 they are absent rather than a column of dashes.
+    /// </summary>
+    public bool BackendIoRead { get; init; }
 
     /// <summary>The locks.</summary>
     public IReadOnlyList<LockDetailRow> Locks { get; init; } = [];

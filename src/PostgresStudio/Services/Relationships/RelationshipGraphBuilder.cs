@@ -209,19 +209,26 @@ internal static class RelationshipGraphBuilder
     /// <param name="linkedColumns">The referenced columns, in constraint order.</param>
     /// <param name="primaryKey">The pointing table's primary key, or <see langword="null" />.</param>
     /// <param name="linkedPrimaryKey">The referenced table's primary key, or <see langword="null" />.</param>
+    /// <param name="period">
+    /// Whether the key is a PostgreSQL 18 <c>PERIOD</c> key: its last column is spelled <c>PERIOD column</c>, as the key is
+    /// declared, and a one-to-one label says so too. The columns it is judged on are the same.
+    /// </param>
     internal static string LabelFor(
         IReadOnlyList<string> columns,
         IReadOnlyList<string> linkedColumns,
         IReadOnlyList<string>? primaryKey,
-        IReadOnlyList<string>? linkedPrimaryKey)
+        IReadOnlyList<string>? linkedPrimaryKey,
+        bool period = false)
     {
         ArgumentNullException.ThrowIfNull(columns);
         ArgumentNullException.ThrowIfNull(linkedColumns);
 
         if (IsWholeKey(columns, primaryKey) && IsWholeKey(linkedColumns, linkedPrimaryKey))
         {
-            return OneToOneLabel;
+            return period && columns.Count > 0 ? OneToOneLabel + ", PERIOD " + columns[^1] : OneToOneLabel;
         }
+
+        IReadOnlyList<string> shown = period && columns.Count > 0 ? PeriodColumns(columns) : columns;
 
         int shared = 0;
 
@@ -247,9 +254,13 @@ internal static class RelationshipGraphBuilder
         }
 
         return strip == 0 || strip >= columns.Count
-            ? string.Join(", ", columns)
-            : string.Join(", ", columns.Skip(strip));
+            ? string.Join(", ", shown)
+            : string.Join(", ", shown.Skip(strip));
     }
+
+    /// <summary><paramref name="columns" /> with the last one spelled <c>PERIOD column</c>, as a temporal key is declared.</summary>
+    internal static IReadOnlyList<string> PeriodColumns(IReadOnlyList<string> columns) =>
+        columns.Count == 0 ? columns : [.. columns.Take(columns.Count - 1), "PERIOD " + columns[^1]];
 
     /// <summary>The label of a key whose columns are both tables' whole primary keys: a one-to-one extension.</summary>
     internal const string OneToOneLabel = "primary key (1:1)";
@@ -659,7 +670,7 @@ internal static class RelationshipGraphBuilder
 
             var primary = PrimaryColumn(key.Columns);
             var label = toIsTable
-                ? LabelFor(key.Columns, key.LinkedColumns, key.PrimaryKey, key.LinkedPrimaryKey)
+                ? LabelFor(key.Columns, key.LinkedColumns, key.PrimaryKey, key.LinkedPrimaryKey, key.Period)
                 : primary;
 
             edges[edgeKey] = edges.TryGetValue(edgeKey, out RelationshipEdge? declared)
@@ -667,8 +678,8 @@ internal static class RelationshipGraphBuilder
                 {
                     Physical = true,
                     Column = toIsTable ? label : declared.Column,
-                    Columns = string.Join(", ", key.Columns),
-                    LinkedColumns = string.Join(", ", key.LinkedColumns),
+                    Columns = string.Join(", ", key.Period ? PeriodColumns(key.Columns) : key.Columns),
+                    LinkedColumns = string.Join(", ", key.Period ? PeriodColumns(key.LinkedColumns) : key.LinkedColumns),
                     Validated = key.Validated,
                 }
                 : new RelationshipEdge(
@@ -681,8 +692,8 @@ internal static class RelationshipGraphBuilder
                     key.OnDelete,
                     key.Name)
                 {
-                    Columns = string.Join(", ", key.Columns),
-                    LinkedColumns = string.Join(", ", key.LinkedColumns),
+                    Columns = string.Join(", ", key.Period ? PeriodColumns(key.Columns) : key.Columns),
+                    LinkedColumns = string.Join(", ", key.Period ? PeriodColumns(key.LinkedColumns) : key.LinkedColumns),
                     Validated = key.Validated,
                     ToIsTable = toIsTable,
                 };
@@ -698,15 +709,15 @@ internal static class RelationshipGraphBuilder
             edges[edgeKey] = new RelationshipEdge(
                 from.NodeKey!,
                 to.NodeKey!,
-                LabelFor(key.Columns, key.LinkedColumns, key.PrimaryKey, key.LinkedPrimaryKey),
+                LabelFor(key.Columns, key.LinkedColumns, key.PrimaryKey, key.LinkedPrimaryKey, key.Period),
                 Member: null,
                 Declared: false,
                 Physical: true,
                 key.OnDelete,
                 key.Name)
             {
-                Columns = string.Join(", ", key.Columns),
-                LinkedColumns = string.Join(", ", key.LinkedColumns),
+                Columns = string.Join(", ", key.Period ? PeriodColumns(key.Columns) : key.Columns),
+                LinkedColumns = string.Join(", ", key.Period ? PeriodColumns(key.LinkedColumns) : key.LinkedColumns),
                 Validated = key.Validated,
                 FromIsTable = true,
                 ToIsTable = to.Kind == EndKind.Table,

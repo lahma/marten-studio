@@ -149,6 +149,42 @@ public class SessionsPageTests
         page.FindAll(".ms-capability-disabled").Should().BeEmpty();
     }
 
+    /// <summary>1.0-PG18: a backend's reads, writes and cache hits are three columns from 18 - and absent, not dashes, below it.</summary>
+    [Fact]
+    public async Task The_per_backend_io_columns_are_drawn_from_18_and_absent_below_it()
+    {
+        await using Fixture older = await ReadyAsync(Open);
+        older.Sessions.Details = FakeSessionActivityService.DetailsFor();
+
+        var below = older.Context.Render<Sessions>();
+        below.WaitForAssertion(() => below.FindAll(".ms-sessions-statement code").Should().NotBeEmpty());
+        below.TextOfAll(".ms-sessions-table thead th").Should().NotContain("Reads").And.NotContain("Writes").And.NotContain("Cache hits");
+        below.FindAll(".ms-sessions-io").Should().BeEmpty();
+
+        await using Fixture from18 = await ReadyAsync(Open);
+        SessionActivityDetails details = FakeSessionActivityService.DetailsFor();
+        from18.Sessions.Details = details with
+        {
+            BackendIoRead = true,
+            Sessions =
+            [
+                details.Sessions[0] with { BackendIo = new SessionBackendIo(1_204, 9_863_168, 12.5, 3, 24_576, 0, 88_000, 4, 2) },
+                details.Sessions[0] with { ProcessId = 4243, BackendIo = null },
+            ],
+        };
+
+        var page = from18.Context.Render<Sessions>();
+        page.WaitForAssertion(() => page.FindAll(".ms-sessions-io").Should().HaveCount(6));
+
+        page.TextOfAll(".ms-sessions-table thead th").Should().Contain("Reads").And.Contain("Writes").And.Contain("Cache hits");
+
+        string[] cells = [.. page.FindAll(".ms-sessions-io").Select(static x => x.TextContent.Trim())];
+        cells[0].Should().StartWith("1,204 · ").And.Contain("MiB");
+        cells[1].Should().StartWith("3 · ");
+        cells[2].Should().Be("88,000");
+        cells[3..].Should().OnlyContain(static x => x == "–", "a session the server told nothing about shows a dash, in its own row");
+    }
+
     [Fact]
     public async Task A_write_policy_refusal_says_which_policy_and_asks_for_nothing_more()
     {

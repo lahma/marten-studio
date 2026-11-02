@@ -94,6 +94,12 @@ internal sealed record StatementFact
 
     /// <summary>Parallel workers it was given, since its counters began (PostgreSQL 18+); <see langword="null" /> below.</summary>
     public long? ParallelWorkersLaunched { get; init; }
+
+    /// <summary>
+    /// How often it had to write WAL because the WAL buffers were full, since its counters began (<c>pg_stat_statements</c>
+    /// 1.12, PostgreSQL 18+); <see langword="null" /> below.
+    /// </summary>
+    public long? WalBuffersFull { get; init; }
 }
 
 /// <summary>The page's own state of the read: <see cref="StatementReadState" />, and a read that failed for another reason.</summary>
@@ -316,6 +322,7 @@ internal sealed record StatementFacts
                 Tables = statement.Tables,
                 ParallelWorkersToLaunch = statement.Counters.ParallelWorkersToLaunch,
                 ParallelWorkersLaunched = statement.Counters.ParallelWorkersLaunched,
+                WalBuffersFull = statement.Counters.WalBuffersFull,
             });
         }
 

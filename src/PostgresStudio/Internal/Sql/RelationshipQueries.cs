@@ -30,6 +30,10 @@ namespace PostgresStudio.Internal.Sql;
 /// What the relationship graph strips a composite key's shared leading columns against.
 /// </param>
 /// <param name="LinkedPrimaryKey">The referenced table's primary-key columns, likewise.</param>
+/// <param name="Period">
+/// <c>conperiod</c> (PostgreSQL 18+): the last column on each side is a <c>PERIOD</c>, so the key is temporal and references a
+/// <c>WITHOUT OVERLAPS</c> key. <see langword="false" /> below 18, where the column does not exist.
+/// </param>
 internal sealed record PhysicalForeignKey(
     string Schema,
     string Table,
@@ -42,7 +46,8 @@ internal sealed record PhysicalForeignKey(
     string OnUpdate,
     bool Validated = true,
     IReadOnlyList<string>? PrimaryKey = null,
-    IReadOnlyList<string>? LinkedPrimaryKey = null);
+    IReadOnlyList<string>? LinkedPrimaryKey = null,
+    bool Period = false);
 
 /// <summary>A bounded foreign-key read: the keys, and whether the cap stopped it.</summary>
 /// <param name="Keys">The keys, at most the cap.</param>
@@ -163,7 +168,8 @@ internal static class RelationshipQueries
 
     /// <summary>
     /// The column list every foreign-key read shares: both ends by name, the columns in constraint order,
-    /// the two referential actions, <c>convalidated</c>, and both ends' primary keys.
+    /// the two referential actions, <c>convalidated</c>, both ends' primary keys, and - read through <c>to_jsonb</c>, so
+    /// the one statement runs below PostgreSQL 18 too, where false is the answer - <c>conperiod</c>, a <c>PERIOD</c> key.
     /// </summary>
     private const string ForeignKeysSelect =
         """
@@ -190,7 +196,8 @@ internal static class RelationshipQueries
                   from pg_catalog.pg_index i
                   cross join lateral pg_catalog.unnest(i.indkey::pg_catalog.int2[]) with ordinality as u(attnum, ord)
                   join pg_catalog.pg_attribute a on a.attrelid = i.indrelid and a.attnum = u.attnum
-                  where i.indrelid = con.confrelid and i.indisprimary and u.ord <= i.indnkeyatts)
+                  where i.indrelid = con.confrelid and i.indisprimary and u.ord <= i.indnkeyatts),
+               coalesce((pg_catalog.to_jsonb(con) ->> 'conperiod')::bool, false)
         from pg_catalog.pg_constraint con
         join pg_catalog.pg_class cl on cl.oid = con.conrelid
         join pg_catalog.pg_namespace ns on ns.oid = cl.relnamespace
@@ -330,7 +337,8 @@ internal static class RelationshipQueries
             CascadeAction(reader.IsDBNull(8) ? null : reader.GetString(8)),
             reader.IsDBNull(9) || reader.GetBoolean(9),
             reader.IsDBNull(10) ? null : reader.GetFieldValue<string[]>(10),
-            reader.IsDBNull(11) ? null : reader.GetFieldValue<string[]>(11));
+            reader.IsDBNull(11) ? null : reader.GetFieldValue<string[]>(11),
+            !reader.IsDBNull(12) && reader.GetBoolean(12));
 
     private static string[] Names(NpgsqlDataReader reader, int ordinal) =>
         reader.IsDBNull(ordinal) ? [] : reader.GetFieldValue<string[]>(ordinal);

@@ -61,7 +61,13 @@
                         @foreach (DatabaseConstraintInfo constraint in detail.Constraints)
                         {
                             <tr @key="constraint.Name">
-                                <td class="ms-db-cell-name"><span class="ms-db-name">@constraint.Name</span></td>
+                                <td class="ms-db-cell-name">
+                                    <span class="ms-db-name">@constraint.Name</span>
+                                    @if (constraint.Temporal)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-temporal" title="@TemporalTitle">WITHOUT OVERLAPS</span>
+                                    }
+                                </td>
                                 <td>@ConstraintKind(constraint.Kind)</td>
                                 <td class="ms-db-cell-sql"><SqlText Sql="@constraint.Definition" Label="@($"Definition of {constraint.Name}")" Wrap="true" ShowLineNumbers="false" /></td>
                             </tr>
@@ -164,6 +170,10 @@
                             <tr @key="key.Name">
                                 <td class="ms-db-cell-name">
                                     <span class="ms-db-name">@key.Name</span>
+                                    @if (key.Period)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-temporal" title="@PeriodTitle">PERIOD</span>
+                                    }
                                     @if (!key.Validated)
                                     {
                                         <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked, so a pointed-at row may be missing">NOT VALID</span>
@@ -173,12 +183,12 @@
                                         <span class="ms-db-badge ms-db-badge-warning ms-db-fk-uncovered" title="@UncoveredTitle">@UncoveredText</span>
                                     }
                                 </td>
-                                <td class="ms-db-cell-type">@string.Join(", ", key.Columns)</td>
+                                <td class="ms-db-cell-type">@key.ColumnText(key.Columns)</td>
                                 <td class="ms-db-cell-name">
                                     @if (key is { LinkedVisible: true, LinkedSchema: { } schema, LinkedTable: { } table })
                                     {
                                         <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, table)">@DatabaseLinks.QualifiedName(schema, table)</a>
-                                        <span class="ms-db-fk-columns">(@string.Join(", ", key.LinkedColumns))</span>
+                                        <span class="ms-db-fk-columns">(@key.ColumnText(key.LinkedColumns))</span>
                                         @if (key.OtherEndOwnership is { IsMarten: true } owner)
                                         {
                                             <DatabaseOwnerBadge Model="owner" />
@@ -224,6 +234,10 @@
                             <tr @key="key.Schema + '\u001f' + key.Table + '\u001f' + key.Name">
                                 <td class="ms-db-cell-name">
                                     <a class="ms-db-name" href="@DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, key.Schema, key.Table)" title="@key.Name">@DatabaseLinks.QualifiedName(key.Schema, key.Table)</a>
+                                    @if (key.Period)
+                                    {
+                                        <span class="ms-db-badge ms-db-badge-temporal" title="@PeriodTitle">PERIOD</span>
+                                    }
                                     @if (!key.Validated)
                                     {
                                         <span class="ms-db-badge ms-db-badge-warning" title="NOT VALID: rows that were there when it was added were never checked">NOT VALID</span>
@@ -233,8 +247,8 @@
                                         <span class="ms-db-badge ms-db-badge-warning ms-db-fk-uncovered" title="@UncoveredTitle">@UncoveredText</span>
                                     }
                                 </td>
-                                <td class="ms-db-cell-type">@string.Join(", ", key.Columns)</td>
-                                <td class="ms-db-cell-type">@string.Join(", ", key.LinkedColumns)</td>
+                                <td class="ms-db-cell-type">@key.ColumnText(key.Columns)</td>
+                                <td class="ms-db-cell-type">@key.ColumnText(key.LinkedColumns)</td>
                                 <td class="@ActionClass(key.OnDelete)" title="@(key.OnDelete == "cascade" ? "Deleting a row here deletes the rows that point at it" : null)">@key.OnDelete</td>
                                 <td class="@ActionClass(key.OnUpdate)">@key.OnUpdate</td>
                             </tr>
@@ -262,6 +276,16 @@
         + "references - and every update of that table's key - reads the whole pointing table to find the rows that point at "
         + "it. Postgres indexes a primary key and a unique constraint by itself, never a foreign key. Health's T15 says so once "
         + "the table is 8 MiB.";
+
+    /// <summary>What <c>WITHOUT OVERLAPS</c> means, in the badge's title (PostgreSQL 18).</summary>
+    internal const string TemporalTitle =
+        "WITHOUT OVERLAPS (PostgreSQL 18): a temporal key. Its last column is a range, and two rows with the same other "
+        + "columns may not have overlapping ranges. Postgres backs it with a GiST index.";
+
+    /// <summary>What <c>PERIOD</c> means, in the badge's title (PostgreSQL 18).</summary>
+    internal const string PeriodTitle =
+        "PERIOD (PostgreSQL 18): a temporal foreign key. Its last column is a range, and the referenced table must cover that "
+        + "whole range, by one row or several, for the same other columns.";
 
     private static string? ScansTitle(DatabaseIndexInfo index) =>
         index is { TuplesRead: { } read, TuplesFetched: { } fetched }
