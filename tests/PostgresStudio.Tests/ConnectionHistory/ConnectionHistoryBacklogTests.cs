@@ -400,6 +400,59 @@ public class ConnectionHistoryBacklogTests
                 : ValueTask.FromResult<IReadOnlyList<PostgresConnectionSample>>([.. stored.Where(x => x.At >= since)]);
     }
 
+    [Fact]
+    public async Task Stop_after_Dispose_does_not_throw()
+    {
+        await using Rig rig = new();
+        await rig.Sampler.SampleOnceAsync(Token);
+
+        rig.Sampler.Dispose();
+
+        Func<Task> stop = () => rig.Sampler.StopAsync(Token);
+        await stop.Should().NotThrowAsync("the semaphore is never disposed (issue #50)");
+        await rig.Sampler.StopAsync(Token);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_twice_does_not_throw_and_a_stop_after_it_does_not_either()
+    {
+        await using Rig rig = new();
+        rig.Store.Refusing = true;
+        await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        rig.Sampler.Pending(Server).Should().Be(1);
+
+        await rig.Sampler.DisposeAsync();
+        await rig.Sampler.DisposeAsync();
+
+        rig.Sampler.Pending(Server).Should().Be(0, "a disposed sampler has no next round to store the backlog in");
+        Func<Task> stop = () => rig.Sampler.StopAsync(Token);
+        await stop.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task A_round_in_flight_when_Dispose_runs_finishes_without_throwing()
+    {
+        TaskCompletionSource inRound = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource proceed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // ShouldSample is asked inside the round, after it took its semaphore: the round is in flight until the test lets it go.
+        await using Rig rig = new(shouldSample: async _ =>
+        {
+            inRound.TrySetResult();
+            await proceed.Task;
+            return true;
+        });
+
+        Task<int> round = rig.Sampler.SampleOnceAsync(Token);
+        await inRound.Task.WaitAsync(TimeSpan.FromSeconds(30), Token);
+
+        rig.Sampler.Dispose();
+        proceed.SetResult();
+
+        Func<Task> finished = () => round;
+        await finished.Should().NotThrowAsync("the round's release of its semaphore does not meet a disposed one (issue #50)");
+    }
+
     /// <summary>A logger that keeps what it was asked to write.</summary>
     private sealed class RecordingLogger<T> : ILogger<T>
     {

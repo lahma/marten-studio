@@ -108,6 +108,59 @@ public class ConnectionHistoryLiveTests(PostgresFixture postgres)
             .Should().ContainSingle();
     }
 
+    /// <summary>
+    /// Issue #50: a host that stops its sampler after disposing it (<c>WebApplicationFactory.DisposeAsync</c> does) must not fail in
+    /// teardown, and the kept connection must be closed even though nothing stopped the sampler first.
+    /// </summary>
+    [PostgresFact]
+    public async Task Stop_after_Dispose_does_not_throw_and_the_kept_connection_is_gone()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, ["ps_history_stop"], Token);
+        NpgsqlDataSource dataSource = NpgsqlDataSource.Create(owned[0]);
+
+        StudioHost host = StudioHost.Create(services =>
+        {
+            services.AddSingleton(dataSource);
+            services.AddPostgresConnectionHistory();
+        });
+
+        ConnectionHistorySampler sampler = host.Services.GetRequiredService<ConnectionHistorySampler>();
+        IPostgresConnectionHistoryStore store = host.Services.GetRequiredService<IPostgresConnectionHistoryStore>();
+        string server = ConnectionHistorySampler.ServerOf(dataSource.ConnectionString)!;
+
+        await sampler.StartAsync(Token);
+
+        // A round has run once the store holds a sample, and the sampler keeps its connection between rounds.
+        await WaitForAsync(
+            async () => (await store.ReadAsync(server, DateTimeOffset.UtcNow.AddHours(-1), Token)).Count > 0 && await HistorySessionsAsync(owned[0]) == 1,
+            "the sampler's first round to store a sample over its kept connection");
+
+        await host.DisposeAsync();
+
+        Func<Task> stop = () => sampler.StopAsync(Token);
+        await stop.Should().NotThrowAsync("the host stops a hosted service it has already disposed");
+
+        await WaitForAsync(async () => await HistorySessionsAsync(owned[0]) == 0, "the kept session to leave pg_stat_activity");
+    }
+
+    private static async Task WaitForAsync(Func<Task<bool>> condition, string what)
+    {
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        limit.CancelAfter(TimeSpan.FromSeconds(30));
+
+        while (!await condition())
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), limit.Token);
+            }
+            catch (OperationCanceledException) when (!Token.IsCancellationRequested)
+            {
+                throw new TimeoutException("Gave up waiting for " + what + ".");
+            }
+        }
+    }
+
     /// <summary>How many sessions on the database carry the connection history's name, read over a connection of the test's own.</summary>
     private static async Task<long> HistorySessionsAsync(string connectionString)
     {
