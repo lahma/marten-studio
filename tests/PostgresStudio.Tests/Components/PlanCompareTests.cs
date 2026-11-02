@@ -13,6 +13,12 @@ namespace PostgresStudio.Tests.Components;
 /// </summary>
 public class PlanCompareTests
 {
+    /// <summary>
+    /// How long a wait on a condition may take: the paste and the render go through the circuit's dispatcher, and bUnit's
+    /// one-second default failed once on a loaded machine. A ceiling, never a delay.
+    /// </summary>
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+
     private static async Task<PostgresStudioComponentContext> ReadyAsync()
     {
         PostgresStudioComponentContext context = new();
@@ -51,7 +57,7 @@ public class PlanCompareTests
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
         await RunAsync(page, statement);
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         return page;
     }
@@ -73,7 +79,7 @@ public class PlanCompareTests
         context.SqlConsole.NextPlan = Ran("seq-after");
         await RunAsync(page, "select * from orders where id = 1");
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
         page.Find(".ms-plan-compare-labels").TextContent.Should().Contain("Before:").And.Contain("After:");
         page.Find(".ms-plan-compare-totals").TextContent.Should().Contain("1,500.00 → 8.44");
         page.FindAll(".ms-plan-diff-changed").Should().ContainSingle().Which.TextContent.Should().Contain("Seq Scan → Index Scan");
@@ -91,13 +97,13 @@ public class PlanCompareTests
         context.SqlConsole.NextPlan = new PlanRunResult { Error = new SqlError("42P01", "relation does not exist", 0, null, null), ServerMajor = 17 };
         await RunAsync(page, "select * from nothing");
 
-        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("42P01"));
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("42P01"), Wait);
         page.FindAll(".ms-plan-pin-label").Should().ContainSingle("a run that failed leaves Before where it was");
         page.FindAll(".ms-plan-compare").Should().BeEmpty();
 
         context.SqlConsole.NextPlan = Ran("seq-after");
         await RunAsync(page, "select * from orders where id = 1");
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
 
         page.Find(".ms-plan-clear-before").Click();
 
@@ -124,7 +130,7 @@ public class PlanCompareTests
         };
         await RunAsync(page, "select pg_sleep(3)");
 
-        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("timed out after 1 s, the timeout set for this run"));
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("timed out after 1 s, the timeout set for this run"), Wait);
         page.Find(".ms-query-error-message").TextContent.Should().NotContain("QueryTimeout");
 
         page.Find("#ms-plan-timeout").Change(string.Empty);
@@ -135,7 +141,7 @@ public class PlanCompareTests
         };
         await RunAsync(page, "select pg_sleep(60)");
 
-        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("QueryTimeout is what sets that"));
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("QueryTimeout is what sets that"), Wait);
     }
 
     [Fact]
@@ -145,13 +151,15 @@ public class PlanCompareTests
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
         await PasteAsync(context, page, PlanFixtures.GetPair("seq-before"));
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         page.Find(".ms-plan-keep").Click();
-        page.Find(".ms-plan-pin-label").TextContent.Should().Contain("the pasted plan");
+
+        // The paste's own continuation may still hold the renderer's dispatcher when the click is queued behind it.
+        page.WaitForAssertion(() => page.Find(".ms-plan-pin-label").TextContent.Should().Contain("the pasted plan"), Wait);
 
         await PasteAsync(context, page, PlanFixtures.GetPair("seq-after"));
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
 
         context.SqlConsole.Plans.Should().BeEmpty("a pasted plan reads nothing, compared or not");
     }
@@ -165,7 +173,7 @@ public class PlanCompareTests
         page.Find(".ms-plan-keep").Click();
         context.SqlConsole.NextPlan = Ran("wrap-after");
         await RunAsync(page, "select * from orders order by total");
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
 
         page.FindAll(".ms-plan-compare-row").Should().OnlyContain(static x => !x.ClassList.Contains("ms-plan-diff-unchanged"));
         page.FindAll(".ms-plan-diff-added").Should().ContainSingle().Which.TextContent.Should().Contain("Limit").And.Contain("Only in After");
@@ -199,7 +207,7 @@ public class PlanCompareTests
         context.SqlConsole.NextPlan = Ran("seq-after");
         await page.InvokeAsync(() => page.Find(".ms-plan-whatif-settings-run").Click());
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
         context.SqlConsole.Plans.Should().HaveCount(2, "the plan on screen is Before, so only the changed plan is asked for");
         PlanRunRequest sent = context.SqlConsole.Plans[1].Request;
         sent.SessionSettings.Should().Equal(new PlanSetting("work_mem", "64MB"));
@@ -218,7 +226,7 @@ public class PlanCompareTests
         context.SqlConsole.Plans.Should().HaveCount(1);
 
         await PasteAsync(context, page, PlanFixtures.GetPair("seq-after"));
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-whatif-settings").Should().BeEmpty("a pasted plan has no statement to plan again"));
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-whatif-settings").Should().BeEmpty("a pasted plan has no statement to plan again"), Wait);
     }
 
     // ---- Generic against custom ----------------------------------------------------------------------------------------
@@ -236,7 +244,7 @@ public class PlanCompareTests
 
         await page.InvokeAsync(() => page.Find(".ms-plan-compare-generic").Click());
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
         context.SqlConsole.Plans.Select(static x => x.Request.Mode).Should().Equal(PlanMode.Generic, PlanMode.Plan);
         context.SqlConsole.Plans[0].Request.Values.Should().BeEmpty("the generic plan takes no values");
         context.SqlConsole.Plans[1].Request.Values.Should().Equal("42");
@@ -258,7 +266,7 @@ public class PlanCompareTests
 
         await page.InvokeAsync(() => page.Find(".ms-plan-compare-generic").Click());
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
         page.FindAll(".ms-plan-compare-insights").Should().BeEmpty();
     }
 
@@ -295,7 +303,7 @@ public class PlanCompareTests
 
         await page.InvokeAsync(() => page.Find(".ms-whatif-run").Click());
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-compare").Should().ContainSingle(), Wait);
         context.SqlConsole.PlanWhatIfs.Should().ContainSingle().Which.Request.Statement.Should().Be("select * from orders where customer_id = 42");
         context.SqlConsole.WhatIfs.Should().BeEmpty("the console's own what-if is not the page's");
         page.Find(".ms-whatif-in-place").TextContent.Should().Contain("Compare below");
@@ -311,7 +319,7 @@ public class PlanCompareTests
 
         await page.InvokeAsync(() => page.Find(".ms-whatif-run").Click());
 
-        page.WaitForAssertion(() => page.Find(".ms-whatif-reason").TextContent.Should().Contain("hypopg is not installed"));
+        page.WaitForAssertion(() => page.Find(".ms-whatif-reason").TextContent.Should().Contain("hypopg is not installed"), Wait);
         page.FindAll(".ms-plan-compare").Should().BeEmpty();
     }
 
@@ -340,7 +348,7 @@ public class PlanCompareTests
         page.Find(".ms-plan-keep").Click();
         context.SqlConsole.NextPlan = Ran("wrap-after");
         await RunAsync(page, "select * from orders order by total");
-        page.WaitForAssertion(() => page.Find(".ms-plan-compare-labels").TextContent.Should().Contain("Explain"));
+        page.WaitForAssertion(() => page.Find(".ms-plan-compare-labels").TextContent.Should().Contain("Explain"), Wait);
         string compare = page.Find(".ms-plan-compare").InnerHtml;
 
         // The late answer arrives, and what is drawn is not changed by it.
@@ -379,7 +387,7 @@ public class PlanCompareTests
         await page.InvokeAsync(() => { });
         await page.InvokeAsync(() => { });
 
-        page.WaitForAssertion(() => page.Markup.Should().Contain("Cancelled"));
+        page.WaitForAssertion(() => page.Markup.Should().Contain("Cancelled"), Wait);
         page.FindAll(".ms-plan-tree, .ms-plan-pin, .ms-plan-whatif-settings, .ms-plan-compare, .ms-plan-keep").Should().BeEmpty("nothing of the run that was started for the old database is written back");
     }
 
@@ -403,7 +411,7 @@ public class PlanCompareTests
 
         page.Find("#ms-plan-timeout").Change("soon");
         await RunAsync(page, "select 1");
-        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("whole seconds"));
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Contain("whole seconds"), Wait);
         context.SqlConsole.Plans.Should().HaveCount(2);
 
         page.Find("#ms-plan-timeout").Change("0");

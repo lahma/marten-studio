@@ -20,6 +20,12 @@ namespace PostgresStudio.Tests.Components;
 /// </summary>
 public class PlanPageTests
 {
+    /// <summary>
+    /// How long a wait on a condition may take: the paste and the render go through the circuit's dispatcher, and bUnit's
+    /// one-second default failed once on a loaded machine. A ceiling, never a delay.
+    /// </summary>
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+
     private const string Join = "analyzed-join";
 
     private static async Task<PostgresStudioComponentContext> ReadyAsync(bool runSql = true)
@@ -50,7 +56,7 @@ public class PlanPageTests
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
         page.Find("#ms-plan-sql").Change(statement);
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         return page;
     }
@@ -82,7 +88,7 @@ public class PlanPageTests
         string text = File.ReadAllText(MartenStudio.Tests.Conventions.RepositoryRoot.Combine("tests", "PostgresStudio.Tests", "Statements", "PlanCorpus", "text-hashjoin-analyze-pg17.txt"));
         await PasteAsync(context, page, text);
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
         page.Find(".ms-plan-caption").TextContent.Should().Be(PlanPage.PastedCaption + PlanPage.PastedTextCaption);
         page.FindAll(".ms-plan-copy-json").Should().BeEmpty("a text plan has no JSON");
         page.Find(".ms-plan-copy-text").TextContent.Should().Be("Copy text");
@@ -132,7 +138,7 @@ public class PlanPageTests
 
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
 
-        page.WaitForAssertion(() => page.Find(".ms-write-refusal").TextContent.Should().NotBeEmpty());
+        page.WaitForAssertion(() => page.Find(".ms-write-refusal").TextContent.Should().NotBeEmpty(), Wait);
         page.Find(".ms-query-run").HasAttribute("disabled").Should().BeTrue();
         page.Find(".ms-plan-paste-draw").HasAttribute("disabled").Should().BeFalse("pasting a plan reads nothing and is every visitor's (1.0-P3A)");
     }
@@ -213,7 +219,7 @@ public class PlanPageTests
         page.Find("#ms-plan-param-1").Change("42");
         page.Find("#ms-plan-param-2").Change("two");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => context.SqlConsole.Plans.Should().ContainSingle());
+        page.WaitForAssertion(() => context.SqlConsole.Plans.Should().ContainSingle(), Wait);
 
         PlanRunRequest request = context.SqlConsole.Plans[0].Request;
         request.Statement.Should().Be("select * from t where a = $1 and b = $2");
@@ -221,13 +227,13 @@ public class PlanPageTests
         request.Values.Should().Equal("42", "two");
 
         // What Postgres inferred is shown beside each box, once it said.
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-param-type").Select(static x => x.TextContent).Should().Equal("integer", "text"));
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-param-type").Select(static x => x.TextContent).Should().Equal("integer", "text"), Wait);
 
         // NULL is a value of its own, and not the text "NULL".
         page.FindAll(".ms-plan-param-null input")[1].Change(true);
         page.Find("#ms-plan-param-2").HasAttribute("disabled").Should().BeTrue();
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => context.SqlConsole.Plans.Should().HaveCount(2));
+        page.WaitForAssertion(() => context.SqlConsole.Plans.Should().HaveCount(2), Wait);
         context.SqlConsole.Plans[1].Request.Values.Should().Equal("42", null);
     }
 
@@ -246,7 +252,7 @@ public class PlanPageTests
         page.Find(".ms-plan-params-note").TextContent.Should().Contain("no values");
 
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => context.SqlConsole.Plans.Should().ContainSingle());
+        page.WaitForAssertion(() => context.SqlConsole.Plans.Should().ContainSingle(), Wait);
 
         context.SqlConsole.Plans[0].Request.Mode.Should().Be(PlanMode.Generic);
         context.SqlConsole.Plans[0].Request.Values.Should().BeEmpty();
@@ -299,7 +305,7 @@ public class PlanPageTests
         page.FindAll("input[name=ms-plan-mode]")[1].Change(true);
         page.Find("#ms-plan-option-wal").Change(true);
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         string uri = context.CurrentUri;
 
@@ -320,7 +326,7 @@ public class PlanPageTests
         page.Find("#ms-plan-sql").Change("select o.id from orders o");
         page.Find("#ms-plan-option-verbose").Change(false);
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         context.SqlConsole.Plans.Single().Request.Options.Verbose.Should().BeFalse();
         context.CurrentUri.Should().Contain("options=buffers%2Ctiming").And.NotContain("verbose");
@@ -391,7 +397,7 @@ public class PlanPageTests
         page.Find("#ms-plan-sql").Change("delete from t");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
 
-        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Be("The console only runs select."));
+        page.WaitForAssertion(() => page.Find(".ms-query-error-message").TextContent.Should().Be("The console only runs select."), Wait);
         page.FindAll(".ms-plan-tree").Should().BeEmpty();
     }
 
@@ -412,7 +418,7 @@ public class PlanPageTests
         page.Find("#ms-plan-sql").Change("select nope from t");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
 
-        page.WaitForAssertion(() => page.Find(".ms-query-caret").TextContent.Should().EndWith("       ^"));
+        page.WaitForAssertion(() => page.Find(".ms-query-caret").TextContent.Should().EndWith("       ^"), Wait);
     }
 
     [Fact]
@@ -426,7 +432,7 @@ public class PlanPageTests
         page.Find("#ms-plan-param-1").Change("x");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
 
-        page.WaitForAssertion(() => page.FindAll(".ms-query-error").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-query-error").Should().ContainSingle(), Wait);
         page.FindAll(".ms-query-caret").Should().BeEmpty();
     }
 
@@ -440,7 +446,7 @@ public class PlanPageTests
         page.Find("#ms-plan-sql").Change("select 1");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-unavailable").TextContent.Should().Contain("9,000,000 characters"));
+        page.WaitForAssertion(() => page.Find(".ms-plan-unavailable").TextContent.Should().Contain("9,000,000 characters"), Wait);
     }
 
     // ---- The two views, one selected node, and the rest of the toolbar ----------------------------------------------------
@@ -629,7 +635,7 @@ public class PlanPageTests
         context.SqlConsole.NextPlan = Ran("p10-fires");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-row").Should().HaveCount(1));
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-row").Should().HaveCount(1), Wait);
         page.FindAll(".ms-plan-node-detail, .ms-plan-row-selected").Should().BeEmpty();
     }
 
@@ -665,7 +671,7 @@ public class PlanPageTests
 
         await PasteAsync(context, page, plan);
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
         page.FindAll(".ms-plan-node").Should().HaveCount(5);
         page.Find(".ms-plan-strip").TextContent.Should().Contain("59.5 ms");
         page.Find(".ms-plan-caption").TextContent.Should().Be(PlanPage.PastedCaption).And.Contain("not available");
@@ -685,7 +691,7 @@ public class PlanPageTests
 
         await PasteAsync(context, page, "[\"not a plan\"]");
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-paste-unreadable").TextContent.Should().StartWith(PlanPage.PasteUnreadable).And.Contain("Tried it as JSON").And.Contain(QueryPlanReader.NotAPlan));
+        page.WaitForAssertion(() => page.Find(".ms-plan-paste-unreadable").TextContent.Should().StartWith(PlanPage.PasteUnreadable).And.Contain("Tried it as JSON").And.Contain(QueryPlanReader.NotAPlan), Wait);
         page.FindAll(".ms-plan-tree").Should().BeEmpty();
     }
 
@@ -698,7 +704,7 @@ public class PlanPageTests
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetResult(0);
         page.Find(".ms-plan-paste-draw").Click();
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-paste-error").TextContent.Should().Contain("nothing to draw"));
+        page.WaitForAssertion(() => page.Find(".ms-plan-paste-error").TextContent.Should().Contain("nothing to draw"), Wait);
     }
 
     [Fact]
@@ -710,7 +716,7 @@ public class PlanPageTests
         context.JSInterop.Setup<int>("martenStudio.query.sendInChunks", static _ => true).SetResult(PlanPaste.PastedTooLarge);
         page.Find(".ms-plan-paste-draw").Click();
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-paste-error").TextContent.Should().Contain("more than the 4,194,304 the studio draws"));
+        page.WaitForAssertion(() => page.Find(".ms-plan-paste-error").TextContent.Should().Contain("more than the 4,194,304 the studio draws"), Wait);
     }
 
     [Fact]
@@ -737,7 +743,7 @@ public class PlanPageTests
 
         page.Find(".ms-plan-copy-markdown").Click();
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-export-status").TextContent.Should().Be("Copied the plan as Markdown."));
+        page.WaitForAssertion(() => page.Find(".ms-plan-export-status").TextContent.Should().Be("Copied the plan as Markdown."), Wait);
 
         string copied = (string) context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single().Arguments[0]!;
 
@@ -756,7 +762,7 @@ public class PlanPageTests
         page.Find(".ms-plan-copy-json").Click();
         page.Find(".ms-plan-download").Click();
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-export-status").TextContent.Should().Be("Saved plan.json."));
+        page.WaitForAssertion(() => page.Find(".ms-plan-export-status").TextContent.Should().Be("Saved plan.json."), Wait);
 
         context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single().Arguments[0].Should().Be(PlanFixtures.Get(Join));
 
@@ -780,7 +786,7 @@ public class PlanPageTests
 
         page.Find(".ms-plan-download-speedscope").Click();
 
-        page.WaitForAssertion(() => page.Find(".ms-plan-export-status").TextContent.Should().Be("Saved plan.speedscope.json."));
+        page.WaitForAssertion(() => page.Find(".ms-plan-export-status").TextContent.Should().Be("Saved plan.speedscope.json."), Wait);
 
         IReadOnlyList<object?> download = context.JSInterop.Invocations["martenStudio.download.text"].Single().Arguments;
         download[0].Should().Be("plan.speedscope.json");
@@ -802,10 +808,10 @@ public class PlanPageTests
         context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
 
         await PasteAsync(context, page, PlanFixtures.Get(Join));
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         page.Find(".ms-plan-download-speedscope").Click();
-        page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.download.text"].Should().ContainSingle());
+        page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.download.text"].Should().ContainSingle(), Wait);
 
         JsonElement file = JsonDocument.Parse((string) context.JSInterop.Invocations["martenStudio.download.text"].Single().Arguments[2]!).RootElement;
         file.GetProperty("name").GetString().Should().Be("Pasted plan");
