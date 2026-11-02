@@ -585,10 +585,6 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         }
     }
 
-    /// <summary>
-    /// The write-ahead log section: the Replication page's facts - its one single-flight read per database per interval, with
-    /// the platform and release gates applied there - and <c>pg_stat_wal</c> from them. Never a read of its own.
-    /// </summary>
     /// <summary>The <see cref="PostgresDiagnosticsSnapshot.Withheld" /> key of the connection history's per-application peaks.</summary>
     internal const string ConnectionHistoryWithheldKey = "connectionHistory.byApplication";
 
@@ -624,7 +620,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             LogHistoryFailure(failure, resolved);
         }
 
-        return DiagnosticsSnapshotBuilder.ConnectionHistory(read, includeActivity);
+        return DiagnosticsSnapshotBuilder.ConnectionHistory(read, includeActivity, reader.ReaderOnly);
     }
 
     private void LogHistoryFailure(Exception exception, ResolvedSource resolved)
@@ -642,6 +638,10 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         LogSectionFailure("connectionHistory", exception, new PostgresDatabaseRef(resolved.Source.Key, resolved.Target.Identity));
     }
 
+    /// <summary>
+    /// The write-ahead log section: the Replication page's facts - its one single-flight read per database per interval, with
+    /// the platform and release gates applied there - and <c>pg_stat_wal</c> from them. Never a read of its own.
+    /// </summary>
     private async Task<PostgresWalSection> WalAsync(ResolvedSource resolved, IServiceProvider scope, CancellationToken cancellationToken)
     {
         ReplicationFactsCache replication = scope.GetRequiredService<ReplicationFactsCache>();

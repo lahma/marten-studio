@@ -301,13 +301,18 @@ internal static class DiagnosticsSnapshotBuilder
     /// <summary>What the section says while the window holds no sample.</summary>
     internal const string NoSamplesYet = "The connection history holds no sample of this server yet: the first is taken a moment after the application starts.";
 
+    /// <summary>What the section says while the window holds no sample and this process only reads the history (<c>AddPostgresConnectionHistoryReader()</c>).</summary>
+    internal const string NoSamplesYetReaderOnly =
+        "The connection history has no sample of this server yet. This process only reads it: another process fills it, and has sampled nothing of this server within the window.";
+
     /// <summary>
     /// The connection history section from one read of the history - the arithmetic is <see cref="ConnectionHistoryView" />'s, the
     /// same Holders shows. Per-application peaks only with the host gate's <c>IncludeActivity</c>.
     /// </summary>
     /// <param name="read">The lookup's answer.</param>
     /// <param name="includeActivity">The request's switch.</param>
-    public static PostgresConnectionHistorySection ConnectionHistory(ConnectionHistoryRead read, bool includeActivity)
+    /// <param name="readerOnly">Whether this process only reads the history, so that it never samples and the reason for an empty window says so.</param>
+    public static PostgresConnectionHistorySection ConnectionHistory(ConnectionHistoryRead read, bool includeActivity, bool readerOnly = false)
     {
         ArgumentNullException.ThrowIfNull(read);
 
@@ -337,7 +342,7 @@ internal static class DiagnosticsSnapshotBuilder
                 return new PostgresConnectionHistorySection
                 {
                     Outcome = PostgresReadOutcome.Unavailable,
-                    Reason = NoSamplesYet,
+                    Reason = readerOnly ? NoSamplesYetReaderOnly : NoSamplesYet,
                     Server = read.Server,
                     Window = read.Window,
                     PendingSamples = read.PendingSamples,
