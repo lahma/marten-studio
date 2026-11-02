@@ -618,6 +618,49 @@ container. The name is visible to every role on the server and in its logs, so i
 
 Runs in both studios, from the sweep's holders read.
 
+## C15 Connections came close to the limit
+
+**Warning** when the server's client connections peaked at **80% or more** of the client limit within the last 24 hours;
+**Critical** at **95% or more** - C03's own lines, applied to the highest sample of the connection history.
+
+C03 judges the connections *now*. A burst at 03:00 that came within a few connections of `max_connections` and was over by the
+time anyone looked is the most useful early warning a near-limit deployment gets, and C03 never saw it. The connection history
+(`AddPostgresConnectionHistory()`, 1.0) keeps what the sampler counted every minute; C15 reads the highest of the last 24 hours
+- or of the history's whole retention when that is shorter - and compares it with the client limit (`max_connections` less the
+reserved slots).
+
+- **The peak is judged against the limit as it is now.** The limit of the *latest* sample is the divisor, not the one at the
+  peak: a cluster resized after the peak - Aurora's maximum capacity raised, a larger instance - has room, and the finding
+  clears. When the two differ, the finding shows both. A latest sample that recorded no limit (zero) is no finding.
+- **Samples, not a trace.** A burst shorter than the sampling interval falls between two samples and is not seen, so the real
+  peak can be higher than the one found. The finding shows how many samples it judged and how many instance changes (a
+  failover or a restart) the window holds.
+- **Not applicable without a connection history**, and quiet when the history holds no sample of this server from the last 24
+  hours. Without `AddPostgresConnectionHistory()` the row reads "not applicable"; a history store that does not answer within
+  `QueryTimeout` makes it "not checked". The check never opens a connection of its own: it takes C03's memoized read of the server's
+  settings (so it fails when C03 does, and the sweep makes no extra statement) and reads the history through the same
+  30-second shared read Database › Sessions › Holders and the diagnostics API's `ConnectionHistory` section use, so the three
+  never disagree on a peak.
+- **Which applications held the most** - the three with the highest peaks in the window, with the time of each - is evidence
+  behind the activity gate (`ViewDatabaseActivity`; `IncludeActivity` in the API). The finding itself, and the peak, the limits,
+  the time, the samples and the instance changes, are at C03's gate: the count of the server's connections is the server's
+  own. A visitor short of the activity gate sees the application rows' labels with their values withheld.
+
+What to change is C03's remedy, because the limit is the same one: fewer connections (lower pool ceilings across the
+applications that share the server, or a pooler such as PgBouncer), or - on Aurora - the cluster's capacity. On Aurora Serverless
+v2 `max_connections` follows the cluster's *maximum* capacity (ACU), a minimum of 0.5 ACU or less caps it at 2,000, and 5,000 is
+Aurora's ceiling; with an `IPostgresCapacitySource` ([Aurora](../aurora.md)) the remedy names which applies. Database › Sessions
+› Holders shows the whole window and who held the connections at each peak.
+
+**Accepting it.** Like any check, with `AcceptedChecks` - it is still run and shown on its row, and is out of every count. A
+host that has reasons to run close to the limit accepts C15 and keeps C03.
+
+> [!NOTE]
+> C15 can make the opt-in ASP.NET Core health check report `Degraded` (Warning) or `Unhealthy` (Critical) on a host that runs
+> close to its limit and keeps a connection history. Accept the check with `AcceptedChecks` to keep the health check as it was.
+
+Runs in both studios, from the connection history and C03's own read of the server's settings.
+
 ## Database › Sessions
 
 `/marten/database/sessions`, linked from the Database rail: this database's sessions with their state, age, wait

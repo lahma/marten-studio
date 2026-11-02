@@ -42,6 +42,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [C12](connections.md#c12-head-of-a-blocking-chain) | Head of a blocking chain | Connections | `idle-head`, `long-chain` | - | both | 0.6 | - |
 | [C13](connections.md#c13-idle-connections-hoarded-near-the-limit) | Idle connections hoarded near the limit | Connections | - | - | both | 0.8 | - |
 | [C14](connections.md#c14-connections-with-no-application-name) | Connections with no application name | Connections | - | - | both | 0.8 | - |
+| [C15](connections.md#c15-connections-came-close-to-the-limit) | Connections came close to the limit | Connections | - | - | both | 1.0.1 | - |
 | [D01](daemon.md#d01-high-water-mark-pinned-behind-a-gap) | High-water mark pinned behind a gap | Daemon | - | - | Marten | 0.4 | - |
 | [D02](daemon.md#d02-async-projections-behind-and-nothing-runs-the-daemon) | Async projections behind, and nothing runs the daemon | Daemon | `no-daemon`, `lock-held-idle` | - | Marten | 0.4 | - |
 | [D03](daemon.md#d03-shard-alive-but-not-moving) | Shard alive but not moving | Daemon | - | shard | Marten | 0.4 | - |

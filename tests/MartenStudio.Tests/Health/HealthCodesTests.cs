@@ -34,7 +34,7 @@ public class HealthCodesTests
 
     private static readonly Regex Variant = new(@"\A`(?<name>[a-z]+(?:-[a-z]+)*)`\z", RegexOptions.CultureInvariant, RegexTimeout);
 
-    private static readonly Regex Release = new(@"\A[0-9]+\.[0-9]+\z", RegexOptions.CultureInvariant, RegexTimeout);
+    private static readonly Regex Release = new(@"\A[0-9]+\.[0-9]+(\.[0-9]+)?\z", RegexOptions.CultureInvariant, RegexTimeout);
 
     /// <summary>One row of the table, as written.</summary>
     internal sealed record CodeRow(
@@ -243,7 +243,7 @@ public class HealthCodesTests
 
             if (!Release.IsMatch(row.Since))
             {
-                problems.Add(row.Code + "'s Since is '" + row.Since + "', not a release such as 0.5.");
+                problems.Add(row.Code + "'s Since is '" + row.Since + "', not a release such as 0.5 or 1.0.1.");
             }
 
             if (row.Retired is { } retired && !Release.IsMatch(retired))

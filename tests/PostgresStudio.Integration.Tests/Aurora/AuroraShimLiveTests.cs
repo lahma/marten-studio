@@ -143,7 +143,10 @@ public class AuroraShimLiveTests(PostgresVersionMatrix matrix)
         results["R01"].Outcome.Should().Be(HealthCheckOutcome.Checked, "the slot read asks for a WAL position on Aurora only under logical WAL (W5-AUR-fix F2)");
         results["T14"].Outcome.Should().Be(HealthCheckOutcome.Checked, "T14 shares that read");
 
-        results.Values.Where(static x => x.Outcome == HealthCheckOutcome.NotApplicable).Select(static x => x.Check.Code)
+        // C15 (1.0.1) is not applicable on every platform, because this host keeps no connection history - not because of Aurora.
+        results["C15"].Outcome.Should().Be(HealthCheckOutcome.NotApplicable);
+
+        results.Values.Where(static x => x.Outcome == HealthCheckOutcome.NotApplicable && x.Check.Code != "C15").Select(static x => x.Check.Code)
             .Should().BeEquivalentTo(["R02", "R04", "S03"], "A2's review: these three and no other shared check stand down on Aurora");
     }
 
