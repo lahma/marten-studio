@@ -155,6 +155,45 @@ counted as withheld, and an accepted one is no exception.
 which. The studio never runs one. `ActionRequires` names what the remedy needs that this application lacks ("Marten
 9.47+"), when it does.
 
+#### A line per check
+
+A list of thirty redundant indexes should read as one line, "Redundant indexes (30)", not thirty. `FindingsByCheck()` on
+the snapshot groups the findings the way the Health page lists them, so a summary of your own needs no grouping code and
+stays in step as checks are added or renamed:
+
+```csharp
+foreach (PostgresFindingGroup group in snapshot.FindingsByCheck())
+{
+    // group.Count > 1: "Redundant indexes (30)"; group.Count == 1: the finding's own title, group.Subject and group.Detail.
+    Console.WriteLine($"{group.Severity}  {group.Title}{(group.Count > 1 ? $" ({group.Count})" : "")}");
+}
+```
+
+A `PostgresFindingGroup` is every unaccepted finding of one check (`Code`):
+
+- `Severity` is the worst in the group, and `Category` the check's area.
+- `Count` is how many findings it holds, and `Findings` they are, in the snapshot's order.
+- With one finding (`Count == 1`) the group carries that finding's own `Title`, `Subject` and `Detail`, and `StudioPath`
+  is the finding's card on the Health page. With more, `Title` is the check's title from `Checks`, `Subject` and `Detail`
+  are `null`, and `StudioPath` is the database's Health page (what `GetStudioPath(database, PostgresStudioPage.Health)`
+  returns), since no one card is the group's.
+- The groups are ordered by severity, worst first, and then by the order of the snapshot's `Checks`; a code `Checks` does
+  not list comes last, by code.
+- **Accepted findings are left out**, as they are of every count the studio shows, so a check whose findings were all
+  accepted has no group. `Findings` on the snapshot is unchanged and still holds them.
+- A snapshot that was not read (`Outcome` is not `Read`) or has no findings returns an empty list.
+
+`FindingsByCheck()` is a method, not a property: the snapshot's JSON is exactly what it was, and the groups are computed
+from `Findings` each time you call it. `StudioPath` is relative to the studio's mount path, as every path in this API is.
+
+#### The only database
+
+A host with a single database need not list them first. `GetSnapshotAsync(request)` (without a database) reads the one
+database `ListDatabasesAsync` lists and returns its snapshot. It throws an `InvalidOperationException` when the studio
+lists none or more than one, naming `ListDatabasesAsync` and `GetSnapshotAsync(database, request)` as the way to say which
+you mean; it asks the listing for at most two and stops there. It is a default interface member, so a test double of
+`IPostgresDiagnostics` keeps compiling and gets it for free.
+
 ## `IncludeActivity`
 
 Some of what the studio reads is about other programs' work, not the database as a whole: statement texts, application
@@ -218,7 +257,7 @@ await builder.Build().RunAsync();
 
 [`samples/PostgresStudio.Worker`](../samples/PostgresStudio.Worker) is this, complete: a generic host that references
 `PostgresStudio.Diagnostics` alone and logs a summary of every database at start and then every `Summary:Interval`
-(24 hours by default), with each finding's link when `Summary:StudioBaseUrl` is set. A real host sends the text where it
+(24 hours by default), a line per check (`FindingsByCheck()`) with its link when `Summary:StudioBaseUrl` is set. A real host sends the text where it
 already notifies - e-mail, a chat webhook - and keeps the loop.
 
 Code compiled against PostgresStudio 0.10 that uses the types that moved to this package - `IPostgresDiagnostics` and

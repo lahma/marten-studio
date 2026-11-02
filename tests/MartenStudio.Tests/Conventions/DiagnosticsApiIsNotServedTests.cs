@@ -100,7 +100,7 @@ public partial class DiagnosticsApiIsNotServedTests
         files.Should().NotBeEmpty("scanning nothing would pass for the wrong reason");
 
         string[] readModel = ReadModel();
-        readModel.Should().HaveCount(22, "the read model's twenty-two types are found, or the scan checks nothing")
+        readModel.Should().HaveCount(23, "the read model's twenty-three types are found, or the scan checks nothing")
             .And.Contain("PostgresDiagnosticsSnapshot");
 
         List<string> offences = [.. files.SelectMany(file => Offences(SourceScanner.Relative(file), File.ReadAllText(file), readModel))];

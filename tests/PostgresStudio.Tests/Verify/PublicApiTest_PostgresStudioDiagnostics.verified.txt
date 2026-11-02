@@ -12,6 +12,7 @@ namespace PostgresStudio
     public interface IPostgresDiagnostics
     {
         System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresCheck> Checks { get; }
+        System.Threading.Tasks.Task<PostgresStudio.PostgresDiagnosticsSnapshot> GetSnapshotAsync(PostgresStudio.PostgresDiagnosticsRequest request, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<PostgresStudio.PostgresDiagnosticsSnapshot> GetSnapshotAsync(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresDiagnosticsRequest request, System.Threading.CancellationToken cancellationToken = default);
         string GetStudioPath(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresStudioPage page);
         System.Collections.Generic.IAsyncEnumerable<PostgresStudio.PostgresDatabaseRef> ListDatabasesAsync(System.Threading.CancellationToken cancellationToken = default);
@@ -131,6 +132,7 @@ namespace PostgresStudio
         public PostgresStudio.PostgresStorageSection? Storage { get; init; }
         public PostgresStudio.PostgresWalSection? Wal { get; init; }
         public System.Collections.Generic.IReadOnlyDictionary<string, string> Withheld { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresFindingGroup> FindingsByCheck() { }
         public string ToJson() { }
     }
     public sealed record PostgresExtension : System.IEquatable<PostgresStudio.PostgresExtension>
@@ -176,6 +178,19 @@ namespace PostgresStudio
         Replication = 4,
         Server = 5,
         Configuration = 6,
+    }
+    public sealed record PostgresFindingGroup : System.IEquatable<PostgresStudio.PostgresFindingGroup>
+    {
+        public PostgresFindingGroup() { }
+        public PostgresStudio.PostgresFindingCategory Category { get; init; }
+        public string Code { get; init; }
+        public int Count { get; init; }
+        public string? Detail { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresFinding> Findings { get; init; }
+        public PostgresStudio.PostgresSeverity Severity { get; init; }
+        public string StudioPath { get; init; }
+        public string? Subject { get; init; }
+        public string Title { get; init; }
     }
     public enum PostgresPlatformKind
     {

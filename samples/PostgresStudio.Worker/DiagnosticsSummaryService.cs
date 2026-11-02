@@ -15,7 +15,7 @@ internal sealed class SummaryOptions
     /// <summary>
     /// Where Postgres Studio is mounted, when a host has one - <c>https://studio.example.com/postgres</c>. Each finding's
     /// studio path is a string relative to the mount (<c>health?store=default&amp;db=app</c>), which means nothing without a
-    /// UI; with this set the summary prints it joined to this base as the finding's link, and without it no link is printed.
+    /// UI; with this set the summary prints each line's path joined to this base as its link, and without it no link is printed.
     /// </summary>
     public string? StudioBaseUrl { get; set; }
 }
@@ -93,8 +93,9 @@ internal sealed partial class DiagnosticsSummaryService(
     }
 
     /// <summary>
-    /// The summary of every database the diagnostics list: its overall state, the finding counts by severity, and each
-    /// finding's code, severity and title - with its link when <paramref name="studioBaseUrl" /> is set.
+    /// The summary of every database the diagnostics list: its overall state, the finding counts by severity, and a line per
+    /// check (<see cref="PostgresDiagnosticsSnapshot.FindingsByCheck" />) with its severity and title - and its link when
+    /// <paramref name="studioBaseUrl" /> is set.
     /// </summary>
     /// <param name="diagnostics">The diagnostics API.</param>
     /// <param name="studioBaseUrl">Where a studio is mounted, or <see langword="null" /> for no links.</param>
@@ -122,23 +123,33 @@ internal sealed partial class DiagnosticsSummaryService(
                 continue;
             }
 
-            // An accepted finding (PostgresDiagnosticsOptions.AcceptedChecks) is out of every count and state.
-            PostgresFinding[] findings = [.. snapshot.Findings.Where(static x => !x.Accepted).OrderBy(static x => x.Severity).ThenBy(static x => x.Code, StringComparer.Ordinal)];
-            int critical = findings.Count(static x => x.Severity == PostgresSeverity.Critical);
-            int warning = findings.Count(static x => x.Severity == PostgresSeverity.Warning);
-            int info = findings.Count(static x => x.Severity == PostgresSeverity.Info);
+            // One line per check, as the Health page lists them: the snapshot groups them, worst first, and leaves out the
+            // findings the host accepted (PostgresDiagnosticsOptions.AcceptedChecks), which are out of every count and state.
+            IReadOnlyList<PostgresFindingGroup> groups = snapshot.FindingsByCheck();
+            int critical = groups.Sum(static x => x.Findings.Count(static f => f.Severity == PostgresSeverity.Critical));
+            int warning = groups.Sum(static x => x.Findings.Count(static f => f.Severity == PostgresSeverity.Warning));
+            int info = groups.Sum(static x => x.Findings.Count(static f => f.Severity == PostgresSeverity.Info));
             string state = critical > 0 ? "CRITICAL" : warning > 0 ? "WARNING" : "OK";
 
             text.Append(state).Append(" (").Append(critical).Append(" critical, ").Append(warning).Append(" warning, ")
                 .Append(info).AppendLine(" info)");
 
-            foreach (PostgresFinding finding in findings)
+            foreach (PostgresFindingGroup group in groups)
             {
-                text.Append("  ").Append(finding.Code).Append(' ').Append(finding.Severity).Append(": ").Append(finding.Title);
+                text.Append("  ").Append(group.Severity).Append("  ").Append(group.Title);
 
-                if (!string.IsNullOrWhiteSpace(studioBaseUrl) && finding.StudioPath.Length > 0)
+                if (group.Count > 1)
                 {
-                    text.Append(" - ").Append(studioBaseUrl.TrimEnd('/')).Append('/').Append(finding.StudioPath.TrimStart('/'));
+                    text.Append(" (").Append(group.Count).Append(')');
+                }
+                else if (!string.IsNullOrWhiteSpace(group.Subject))
+                {
+                    text.Append(": ").Append(group.Subject);
+                }
+
+                if (!string.IsNullOrWhiteSpace(studioBaseUrl) && group.StudioPath.Length > 0)
+                {
+                    text.Append(" - ").Append(studioBaseUrl.TrimEnd('/')).Append('/').Append(group.StudioPath.TrimStart('/'));
                 }
 
                 text.AppendLine();

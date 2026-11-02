@@ -39,7 +39,7 @@ public interface IPostgresDiagnostics
     /// logged.
     /// </summary>
     /// <param name="cancellationToken">Cancels the listing.</param>
-    /// <returns>The databases, each as a <see cref="PostgresDatabaseRef" /> that <see cref="GetSnapshotAsync" /> takes.</returns>
+    /// <returns>The databases, each as a <see cref="PostgresDatabaseRef" /> that <see cref="GetSnapshotAsync(PostgresDatabaseRef, PostgresDiagnosticsRequest, CancellationToken)" /> takes.</returns>
     IAsyncEnumerable<PostgresDatabaseRef> ListDatabasesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -59,6 +59,45 @@ public interface IPostgresDiagnostics
         PostgresDatabaseRef database,
         PostgresDiagnosticsRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The snapshot of the one database the studio lists, for a host with a single database: the sections
+    /// <paramref name="request" /> asks for, as the two-argument form reads them.
+    /// </summary>
+    /// <param name="request">Which sections, and whether Activity-grade data is included.</param>
+    /// <param name="cancellationToken">Cancels the listing and this caller's wait.</param>
+    /// <returns>The snapshot.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request" /> is null.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="ListDatabasesAsync" /> lists no database, or more than one: name the database with
+    /// <see cref="GetSnapshotAsync(PostgresDatabaseRef, PostgresDiagnosticsRequest, CancellationToken)" />.
+    /// </exception>
+    async Task<PostgresDiagnosticsSnapshot> GetSnapshotAsync(
+        PostgresDiagnosticsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Two are enough to know it is not one, so the listing stops there.
+        List<PostgresDatabaseRef> databases = [];
+
+        await foreach (PostgresDatabaseRef database in ListDatabasesAsync(cancellationToken).ConfigureAwait(false))
+        {
+            databases.Add(database);
+
+            if (databases.Count == 2)
+            {
+                break;
+            }
+        }
+
+        return databases.Count == 1
+            ? await GetSnapshotAsync(databases[0], request, cancellationToken).ConfigureAwait(false)
+            : throw new InvalidOperationException(
+                (databases.Count == 0 ? "0 databases are listed" : "2 or more databases are listed")
+                + ", so there is no single database to read. Call ListDatabasesAsync and pass the one you mean to "
+                + "GetSnapshotAsync(database, request, cancellationToken).");
+    }
 
     /// <summary>
     /// The path of <paramref name="page" /> for <paramref name="database" />, relative to the studio's mount path with no
