@@ -29,6 +29,15 @@ protocol parameter cannot reach `EXECUTE`, and a prepared statement only reads t
 `Analyzer` mode drawing it (unmasked: only `RunSql` output keeps every key of a node). A pasted plan reads nothing and goes
 over in chunks, since the circuit accepts 32 KB a message. P09 to P14 (0.9) and P15 to P20 (0.10) join the plan insight registry.
 
+**Paste for every visitor, text-format plans and the static lint (1.0, issue #28 phase 3).** The page's gate is split: running
+a plan keeps `RunSql`, the write policy and everything above, while pasting one - which reads nothing, runs nothing and is not
+audited - needs only what opening the studio needs, so Plan is in both studios' rails for every visitor and the paste box is
+drawn with `RunSql` off, under `ReadOnly` and when the write policy refuses running. `QueryPlanReader.ReadAny` reads a paste as
+JSON or as `EXPLAIN`'s default text format (`QueryPlanTextReader`: the same bounds, linear scans, never throws, unread lines kept
+verbatim and dropped under a mask) into the same `QueryPlan`, held to the JSON reader by `PlanTextParityLiveTests` on the whole
+matrix. P22 to P25 are insights judged from the statement's text (`PlanInsightInfo.FromText`, `PlanInsights.EvaluateText`, the
+studio's `SqlLexer`), shown under the editor before any run and never evaluated on a plan.
+
 **Facts beside the plan (0.10, issue #28).** After a plan the Plan page ran - never a pasted one, never on a poll - `PlanFactsService`
 reads what the database knows about the relations it names, in the console's read-only transaction as `SqlConsoleRole`, behind
 the console's own gate whole and then, in this order: each relation's schema and every table above it in `pg_inherits`, walked

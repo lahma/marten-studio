@@ -131,7 +131,7 @@ internal static class StudioNavConditions
 {
     /// <summary>
     /// Whether the SQL console's capability is effectively on: <c>RunSql</c> set and the master switch off. The entries that
-    /// are only a door to a page that runs SQL (Postgres Studio's Query, both studios' Plan) are absent otherwise, so an
+    /// are only a door to a page that runs SQL (Postgres Studio's Query) are absent otherwise, so an
     /// administrator is not offered a page whose one sentence is addressed to the developer who configures the host
     /// (issue #37). The page keeps its notice for anyone who reaches it by address.
     /// </summary>

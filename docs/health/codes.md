@@ -90,6 +90,10 @@ baseline, so editing or deleting a row is a reviewed change.
 | [P19](plans.md#p19-default-row-estimate-on-a-function) | Default row estimate on a function | Plans | - | plan node | both | 0.10 | - |
 | [P20](plans.md#p20-triggers-dominating-the-statement) | Triggers dominating the statement | Plans | - | plan node | both | 0.10 | - |
 | [P21](plans.md#p21-generic-plan-far-costlier-than-the-custom-plan) | Generic plan far costlier than the custom plan | Plans | - | plan node | both | 0.10 | - |
+| [P22](plans.md#p22-not-in-over-a-subquery) | NOT IN over a subquery | Plans | - | statement text | both | 1.0 | - |
+| [P23](plans.md#p23-large-literal-offset) | Large literal OFFSET | Plans | - | statement text | both | 1.0 | - |
+| [P24](plans.md#p24-select--over-a-join) | SELECT * over a join | Plans | - | statement text | both | 1.0 | - |
+| [P25](plans.md#p25-order-by-random) | ORDER BY random() | Plans | - | statement text | both | 1.0 | - |
 | [R01](replication.md#r01-replication-slot-retaining-wal) | Replication slot retaining WAL | Replication | `near-limit`, `inactive`, `lost` | - | both | 0.4 | - |
 | [R02](replication.md#r02-wal-archiving-failing) | WAL archiving failing | Replication | `failing`, `backlog` | - | both | 0.5 | - |
 | [R03](replication.md#r03-standby-lag) | Standby lag | Replication | `primary-view`, `standby-view`, `paused`, `aurora-reader` | - | both | 0.5 | - |

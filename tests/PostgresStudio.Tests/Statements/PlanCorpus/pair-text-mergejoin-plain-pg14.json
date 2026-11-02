@@ -1,0 +1,57 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Merge Join",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Inner",
+      "Startup Cost": 0.57,
+      "Total Cost": 5610.63,
+      "Plan Rows": 14950,
+      "Plan Width": 8,
+      "Output": ["c.id", "o.id"],
+      "Inner Unique": false,
+      "Merge Cond": "(c.id = o.customer_id)",
+      "Plans": [
+        {
+          "Node Type": "Index Only Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "customers_pkey",
+          "Relation Name": "customers",
+          "Schema": "public",
+          "Alias": "c",
+          "Startup Cost": 0.28,
+          "Total Cost": 18.51,
+          "Plan Rows": 299,
+          "Plan Width": 4,
+          "Output": ["c.id"],
+          "Index Cond": "(c.id < 300)"
+        },
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "orders_customer_idx",
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "o",
+          "Startup Cost": 0.29,
+          "Total Cost": 5191.87,
+          "Plan Rows": 100000,
+          "Plan Width": 8,
+          "Output": ["o.id", "o.customer_id", "o.bucket", "o.amount", "o.placed", "o.note"]
+        }
+      ]
+    },
+    "Settings": {
+      "enable_hashjoin": "off",
+      "enable_nestloop": "off"
+    },
+    "Query Identifier": 8629685529878837854
+  }
+]

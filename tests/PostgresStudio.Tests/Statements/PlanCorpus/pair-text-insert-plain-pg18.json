@@ -1,0 +1,39 @@
+[
+  {
+    "Plan": {
+      "Node Type": "ModifyTable",
+      "Operation": "Insert",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "customers",
+      "Schema": "public",
+      "Alias": "customers",
+      "Startup Cost": 0.00,
+      "Total Cost": 0.01,
+      "Plan Rows": 0,
+      "Plan Width": 0,
+      "Disabled": false,
+      "Plans": [
+        {
+          "Node Type": "Result",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.00,
+          "Total Cost": 0.01,
+          "Plan Rows": 1,
+          "Plan Width": 36,
+          "Disabled": false,
+          "Output": ["5000", "'x'::text"]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": -3218576258992713060,
+    "Planning": {
+      "Memory Used": 8,
+      "Memory Allocated": 8
+    }
+  }
+]

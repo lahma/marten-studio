@@ -1,0 +1,12 @@
+Finalize Aggregate  (cost=1366.42..1366.43 rows=1 width=8)
+  Output: count(*)
+  ->  Gather  (cost=1366.41..1366.42 rows=2 width=8)
+        Output: (PARTIAL count(*))
+        Workers Planned: 2
+        ->  Partial Aggregate  (cost=1366.41..1366.42 rows=1 width=8)
+              Output: PARTIAL count(*)
+              ->  Parallel Seq Scan on public.orders  (cost=0.00..1354.83 rows=4630 width=0)
+                    Output: id, customer_id, bucket, amount, placed, note
+                    Filter: (orders.note ~~ '%9'::text)
+Settings: min_parallel_table_scan_size = '0', parallel_setup_cost = '0', parallel_tuple_cost = '0'
+Query Identifier: -3850673398039057466

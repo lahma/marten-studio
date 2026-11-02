@@ -1,0 +1,161 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Append",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 5.16,
+      "Total Cost": 247.36,
+      "Plan Rows": 444,
+      "Plan Width": 12,
+      "Disabled": false,
+      "Subplans Removed": 0,
+      "Plans": [
+        {
+          "Node Type": "Result",
+          "Parent Relationship": "InitPlan",
+          "Subplan Name": "InitPlan 1",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.00,
+          "Total Cost": 0.01,
+          "Plan Rows": 1,
+          "Plan Width": 4,
+          "Disabled": false,
+          "Output": ["'2025-05-10'::date"]
+        },
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "readings_q1",
+          "Schema": "public",
+          "Alias": "readings_1",
+          "Startup Cost": 5.15,
+          "Total Cost": 61.53,
+          "Plan Rows": 111,
+          "Plan Width": 12,
+          "Disabled": false,
+          "Output": ["readings_1.id", "readings_1.day", "readings_1.v"],
+          "Recheck Cond": "(readings_1.day = (InitPlan 1).col1)",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "readings_q1_day_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 5.12,
+              "Plan Rows": 111,
+              "Plan Width": 0,
+              "Disabled": false,
+              "Index Cond": "(readings_1.day = (InitPlan 1).col1)"
+            }
+          ]
+        },
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "readings_q2",
+          "Schema": "public",
+          "Alias": "readings_2",
+          "Startup Cost": 5.15,
+          "Total Cost": 61.53,
+          "Plan Rows": 111,
+          "Plan Width": 12,
+          "Disabled": false,
+          "Output": ["readings_2.id", "readings_2.day", "readings_2.v"],
+          "Recheck Cond": "(readings_2.day = (InitPlan 1).col1)",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "readings_q2_day_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 5.12,
+              "Plan Rows": 111,
+              "Plan Width": 0,
+              "Disabled": false,
+              "Index Cond": "(readings_2.day = (InitPlan 1).col1)"
+            }
+          ]
+        },
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "readings_q3",
+          "Schema": "public",
+          "Alias": "readings_3",
+          "Startup Cost": 5.15,
+          "Total Cost": 62.53,
+          "Plan Rows": 111,
+          "Plan Width": 12,
+          "Disabled": false,
+          "Output": ["readings_3.id", "readings_3.day", "readings_3.v"],
+          "Recheck Cond": "(readings_3.day = (InitPlan 1).col1)",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "readings_q3_day_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 5.12,
+              "Plan Rows": 111,
+              "Plan Width": 0,
+              "Disabled": false,
+              "Index Cond": "(readings_3.day = (InitPlan 1).col1)"
+            }
+          ]
+        },
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "readings_q4",
+          "Schema": "public",
+          "Alias": "readings_4",
+          "Startup Cost": 5.15,
+          "Total Cost": 59.53,
+          "Plan Rows": 111,
+          "Plan Width": 12,
+          "Disabled": false,
+          "Output": ["readings_4.id", "readings_4.day", "readings_4.v"],
+          "Recheck Cond": "(readings_4.day = (InitPlan 1).col1)",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "readings_q4_day_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 5.12,
+              "Plan Rows": 111,
+              "Plan Width": 0,
+              "Disabled": false,
+              "Index Cond": "(readings_4.day = (InitPlan 1).col1)"
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": 1510775201230997332,
+    "Planning": {
+      "Memory Used": 65,
+      "Memory Allocated": 72
+    }
+  }
+]

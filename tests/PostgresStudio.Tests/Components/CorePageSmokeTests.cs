@@ -205,23 +205,24 @@ public class CorePageSmokeTests
 
         string[] links = [.. menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent)];
         links.Should().Equal(
-            "Overview", "Tables", "Sessions", "Relationships", "Health", "Statements", "Maintenance", "Storage", "Replication", "Server", "Activity");
+            "Overview", "Plan", "Tables", "Sessions", "Relationships", "Health", "Statements", "Maintenance", "Storage", "Replication", "Server", "Activity");
     }
 
     /// <summary>
-    /// Issue #37: Query and Plan are doors to pages that run SQL, so a host with <c>RunSql</c> off - the default, and most
-    /// hosts' choice - does not offer them to its administrators. A visitor who reaches either by address reads the notice.
+    /// Issue #37: Query is a door to the SQL console, so a host with <c>RunSql</c> off - the default, and most hosts' choice - does
+    /// not offer it to its administrators; a visitor who reaches it by address reads the notice. Plan stays (1.0-P3A): pasting a
+    /// plan reads nothing and is every visitor's.
     /// </summary>
     [Fact]
-    public async Task Query_and_Plan_are_absent_from_the_rail_while_RunSql_is_off()
+    public async Task Query_is_absent_from_the_rail_while_RunSql_is_off_and_Plan_stays()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
         context.Options.Capabilities.RunSql.Should().BeFalse();
 
         var menu = context.Render<NavMenu>();
 
-        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().NotContain(["query", "plan"]);
-        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain(["Query", "Plan"]);
+        menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().NotContain("query").And.Contain("plan");
+        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain("Query").And.StartWith(["Overview", "Plan", "Tables"]);
     }
 
     [Fact]
@@ -236,9 +237,9 @@ public class CorePageSmokeTests
         menu.FindAll("a.ms-nav-link").Select(static x => x.GetAttribute("href")).Should().Contain(["query", "plan"]);
     }
 
-    /// <summary>The master switch turns every capability off, so it takes the two entries with it whatever <c>RunSql</c> says.</summary>
+    /// <summary>The master switch turns every capability off, so it takes Query with it whatever <c>RunSql</c> says; Plan stays.</summary>
     [Fact]
-    public async Task Query_and_Plan_go_with_the_master_switch_even_with_RunSql_set()
+    public async Task Query_goes_with_the_master_switch_even_with_RunSql_set_and_Plan_stays()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
         context.Options.ReadOnly = true;
@@ -246,7 +247,7 @@ public class CorePageSmokeTests
 
         var menu = context.Render<NavMenu>();
 
-        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain(["Query", "Plan"]).And.Contain("Tables");
+        menu.FindAll(".ms-nav-link-text").Select(static x => x.TextContent).Should().NotContain("Query").And.Contain(["Plan", "Tables"]);
     }
 
     /// <summary>

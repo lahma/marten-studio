@@ -103,6 +103,36 @@ internal static class QueryPlanReader
         }
     }
 
+    /// <summary>
+    /// 1.0-P3A: reads whichever format a pasted plan is in - JSON when its first non-blank character is <c>[</c> or <c>{</c>, otherwise the
+    /// default text format of <c>EXPLAIN</c> (<see cref="QueryPlanTextReader" />) - into the same <see cref="QueryPlan" />, and says which
+    /// format it tried when it reads none. Never throws.
+    /// </summary>
+    /// <param name="text">What was pasted.</param>
+    /// <param name="mask">Applied to every name and condition read, or <see langword="null" /> for none.</param>
+    public static QueryPlanRead ReadAny(string? text, Func<string, string>? mask = null)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return QueryPlanRead.Failed("There is no plan.");
+        }
+
+        char first = text.AsSpan().TrimStart().IsEmpty ? ' ' : text.AsSpan().TrimStart()[0];
+
+        if (first is '[' or '{')
+        {
+            QueryPlanRead json = Read(text, mask);
+            return json.Plan is not null || json.Failure is null
+                ? json
+                : QueryPlanRead.Failed("Tried it as JSON, because it starts with “" + first + "”: " + json.Failure);
+        }
+
+        QueryPlanRead plain = QueryPlanTextReader.Read(text, mask);
+        return plain.Plan is not null || plain.Failure is null
+            ? plain
+            : QueryPlanRead.Failed("Tried it as the text format of EXPLAIN, because it does not start with “[” or “{”: " + plain.Failure);
+    }
+
     /// <summary>What a plan too large to read says.</summary>
     internal static string TooLarge(long characters) =>
         "The plan is " + characters.ToString("N0", CultureInfo.InvariantCulture) + " characters of JSON, more than the "
@@ -569,7 +599,7 @@ internal static class QueryPlanReader
         text.Length <= MaxPropertyCharacters ? text : text[..MaxPropertyCharacters] + "…";
 
     /// <summary>Each node's own cost and its share of the plan's: its total less its children's, never below zero.</summary>
-    private static void ComputeCosts(PlanNode root)
+    internal static void ComputeCosts(PlanNode root)
     {
         double sum = 0;
 
@@ -600,7 +630,7 @@ internal static class QueryPlanReader
     /// Each node's wall time, own time and share, under <c>ANALYZE</c> with timing: a per-loop average times its loops, divided
     /// by the processes that shared it when it ran below a <c>Gather</c> (its workers and the leader).
     /// </summary>
-    private static void ComputeTimes(PlanNode root)
+    internal static void ComputeTimes(PlanNode root)
     {
         if (root.ActualTotalMs is null || root.ActualLoops is null)
         {

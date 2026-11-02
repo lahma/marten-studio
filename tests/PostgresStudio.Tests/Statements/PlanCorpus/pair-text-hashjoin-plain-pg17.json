@@ -1,0 +1,82 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Inner",
+      "Startup Cost": 150.39,
+      "Total Cost": 1109.54,
+      "Plan Rows": 8271,
+      "Plan Width": 7,
+      "Output": ["c.region", "o.amount"],
+      "Inner Unique": true,
+      "Hash Cond": "(o.customer_id = c.id)",
+      "Plans": [
+        {
+          "Node Type": "Bitmap Heap Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "o",
+          "Startup Cost": 96.39,
+          "Total Cost": 1033.78,
+          "Plan Rows": 8271,
+          "Plan Width": 8,
+          "Output": ["o.id", "o.customer_id", "o.bucket", "o.amount", "o.placed", "o.note"],
+          "Recheck Cond": "(o.placed < '2025-02-01'::date)",
+          "Plans": [
+            {
+              "Node Type": "Bitmap Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Index Name": "orders_placed_idx",
+              "Startup Cost": 0.00,
+              "Total Cost": 94.33,
+              "Plan Rows": 8271,
+              "Plan Width": 0,
+              "Index Cond": "(o.placed < '2025-02-01'::date)"
+            }
+          ]
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 29.00,
+          "Total Cost": 29.00,
+          "Plan Rows": 2000,
+          "Plan Width": 7,
+          "Output": ["c.region", "c.id"],
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "customers",
+              "Schema": "public",
+              "Alias": "c",
+              "Startup Cost": 0.00,
+              "Total Cost": 29.00,
+              "Plan Rows": 2000,
+              "Plan Width": 7,
+              "Output": ["c.region", "c.id"]
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": -298088145163132034,
+    "Planning": {
+      "Memory Used": 34,
+      "Memory Allocated": 64
+    }
+  }
+]

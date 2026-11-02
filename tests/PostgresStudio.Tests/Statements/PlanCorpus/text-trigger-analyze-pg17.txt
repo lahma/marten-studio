@@ -1,0 +1,10 @@
+Insert on public.children  (cost=0.00..0.01 rows=0 width=0) (actual time=0.010..0.010 rows=0 loops=1)
+  Buffers: shared hit=4
+  ->  Result  (cost=0.00..0.01 rows=1 width=8) (actual time=0.001..0.001 rows=1 loops=1)
+        Output: 1, 5
+Query Identifier: -6777357705305809413
+Planning:
+  Memory: used=7kB  allocated=8kB
+Planning Time: 0.005 ms
+Trigger RI_ConstraintTrigger_c_16557 for constraint children_parent_id_fkey: time=0.050 calls=1
+Execution Time: 0.064 ms

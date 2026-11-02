@@ -1,0 +1,12 @@
+WindowAgg  (cost=298.17..359.87 rows=3086 width=16)
+  Output: id, row_number() OVER w1, customer_id
+  Window: w1 AS (PARTITION BY orders.customer_id ORDER BY orders.id ROWS UNBOUNDED PRECEDING)
+  ->  Sort  (cost=298.15..305.87 rows=3086 width=8)
+        Output: id, customer_id
+        Sort Key: orders.customer_id, orders.id
+        ->  Index Scan using orders_pkey on public.orders  (cost=0.29..119.30 rows=3086 width=8)
+              Output: id, customer_id
+              Index Cond: (orders.id < 3000)
+Query Identifier: -613852944878226799
+Planning:
+  Memory: used=19kB  allocated=32kB

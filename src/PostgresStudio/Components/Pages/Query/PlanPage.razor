@@ -21,8 +21,13 @@
     Query › Plan (X3, issue #28): write a statement, get its plan drawn every way PlanView draws one, and what to fix. The page is
     the SQL console's, in its own place: behind RunSql and the write policy, resolved against the database as a whole, run in the
     console's read-only transaction under its statement timeout, guarded and audited exactly as the console's Explain buttons are
-    (ISqlConsoleService.PlanAsync). With RunSql off the page shows the console's own disabled state, naming the property - a pasted
-    plan included, though pasting reads nothing: one gate for the page, as the console has one.
+    (ISqlConsoleService.PlanAsync). With RunSql off (or ReadOnly on) the page shows the console's own disabled state, naming the
+    property, in place of the editor.
+
+    1.0-P3A (issue #28): pasting a plan is every visitor's. It reads nothing and runs nothing - the text is read with
+    QueryPlanReader.ReadAny, JSON or EXPLAIN's default text format, and drawn - so it needs only what opening the studio needs, is
+    not audited, and stays offered when RunSql is off, under ReadOnly, when the write policy refuses running and when no database is
+    selected. Its insights are judged from the plan alone: no facts and no What if? are looked up for it.
 
     Three ways to plan: Explain (nothing runs), Explain analyze (the statement runs, in the read-only transaction, and rolls back),
     and the Generic plan of a statement with $1, $2 placeholders. A statement with placeholders is planned for values the visitor
@@ -54,13 +59,14 @@
     <p class="ms-plan-page-lead">
         Write a statement and see how Postgres plans it - as a tree, as a table of every node, with where the time went and what to
         change. Explain plans it and runs nothing; Explain analyze runs it, in the same read-only transaction and under the same
-        statement timeout as the SQL console, and rolls back.
+        statement timeout as the SQL console, and rolls back. Or paste a plan Postgres printed elsewhere, as JSON or as text.
     </p>
 
     @if (!SqlEnabled)
     {
         <CapabilityDisabled Capability="@nameof(StudioCapability.RunSql)" Action="Planning a statement" />
         <p class="ms-muted ms-query-sql-warning">@SqlConsolePanel.RunSqlWarning</p>
+        <p class="ms-muted ms-plan-paste-only">@PasteOnlyNote</p>
     }
     else if (!gateKnown)
     {
@@ -95,6 +101,29 @@
                          ShowSave="false"
                          OnRun="RunAsync"
                          OnCancel="CancelAsync" />
+
+            @* 1.0-P3A: the static lint, P22 to P25 - judged from the text as it is written, before any run; it reads nothing. *@
+            @if (Lint is { Count: > 0 } textFindings)
+            {
+                <section class="ms-plan-lint" aria-label="From the statement text">
+                    <h3 class="ms-plan-insights-title">From the statement text, not the plan</h3>
+                    <ul class="ms-plan-insight-list">
+                        @foreach (PlanInsightFinding finding in textFindings)
+                        {
+                            <li class="ms-plan-insight @LintClass(finding)">
+                                <p class="ms-plan-insight-head">
+                                    <a class="ms-plan-insight-code" href="@finding.Insight.DocsUrl" target="_blank" rel="noopener noreferrer">@finding.Insight.Code</a>
+                                    <span class="ms-plan-insight-title">@finding.Insight.Title</span>
+                                    <span class="ms-plan-insight-severity">@finding.Insight.Severity</span>
+                                </p>
+                                <p class="ms-plan-insight-node">@finding.Node</p>
+                                <p class="ms-plan-insight-message">@finding.Message</p>
+                                <p class="ms-plan-insight-remedy">@finding.Remedy</p>
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
 
             <div class="ms-plan-choices">
                 <fieldset class="ms-plan-modes">
@@ -210,7 +239,17 @@
             </p>
         </section>
 
-        <PlanPaste Disabled="@(!mayRunSql)" OnPasted="OnPastedAsync" />
+    }
+
+    @* 1.0-P3A: pasting reads nothing, so it is offered whatever the gate above says. *@
+    @if (!SqlEnabled || gateKnown)
+    {
+        <PlanPaste OnPasted="OnPastedAsync" />
+
+        @if (pasteError is not null)
+        {
+            <p class="ms-alert ms-alert-error ms-plan-paste-unreadable" role="alert">@pasteError</p>
+        }
 
         @if (current is not null || pinned is not null)
         {
@@ -240,6 +279,7 @@
             <section class="ms-plan-result" aria-label="Plan result">
                 <PlanView Analyzer="true"
                           Json="@current.Json"
+                          Text="@current.Text"
                           PlanFactsValue="@current.Facts"
                           Caption="@current.Caption"
                           Label="Query plan"
@@ -271,11 +311,20 @@
 @code {
     /// <summary>The caption of a pasted plan: what was done, and what cannot be said.</summary>
     internal const string PastedCaption =
-        "A pasted plan, drawn from its JSON alone. Nothing was sent to the database and nothing was audited, so the database's own "
-        + "facts - its statistics, indexes and settings - are not available for it.";
+        "A pasted plan, drawn from its text alone. Nothing was sent to the database and nothing was audited, so the database's own "
+        + "facts - its statistics, indexes and settings - are not available for it, and no What if? is offered.";
 
-    /// <summary>What the page says of a plan too large to read.</summary>
+    /// <summary>1.0-P3A: what a pasted text plan adds to <see cref="PastedCaption" />.</summary>
+    internal const string PastedTextCaption =
+        " It was read from EXPLAIN's text format, which names a relation's schema only under VERBOSE and prints fewer keys than JSON.";
+
+    /// <summary>What the page says of pasted text it cannot read.</summary>
     internal const string PasteUnreadable = "The pasted text is not a plan Postgres printed. ";
+
+    /// <summary>1.0-P3A: what the page says, with <c>RunSql</c> off, of what is still offered.</summary>
+    internal const string PasteOnlyNote =
+        "You can still paste a plan Postgres printed elsewhere - from auto_explain, a log or another server - below: it is drawn from "
+        + "the text alone, and nothing is sent to the database.";
 
     private sealed class ParamBox
     {
@@ -293,6 +342,30 @@
     private long elapsedMilliseconds;
 
     private string statement = string.Empty;
+    private string? lintedStatement;
+    private IReadOnlyList<PlanInsightFinding> lint = [];
+
+    /// <summary>1.0-P3A: the static lint's findings on the statement in the editor, judged again only when the text changes.</summary>
+    private IReadOnlyList<PlanInsightFinding> Lint
+    {
+        get
+        {
+            if (!string.Equals(lintedStatement, statement, StringComparison.Ordinal))
+            {
+                lintedStatement = statement;
+                lint = PlanInsights.EvaluateText(statement);
+            }
+
+            return lint;
+        }
+    }
+
+    private static string LintClass(PlanInsightFinding finding) => finding.Insight.Severity switch
+    {
+        PostgresStudio.Services.Health.HealthSeverity.Critical => "ms-plan-insight-critical",
+        PostgresStudio.Services.Health.HealthSeverity.Warning => "ms-plan-insight-warning",
+        _ => "ms-plan-insight-info",
+    };
     private PlanMode mode = PlanMode.Plan;
     private PlanOptions options = PlanOptions.PageDefault;
     private int placeholders;
@@ -301,6 +374,7 @@
     private bool gateKnown;
 
     private string? error;
+    private string? pasteError;
     private int errorPosition = -1;
     private string? status;
     private string? planUnavailable;
@@ -318,7 +392,11 @@
     private WhatIfSource? whatIf;
 
     /// <summary>One plan the page holds: as Postgres printed it (when it did), read, what it is in words, and what it was asked as.</summary>
-    private sealed record PlanShot(string? Json, QueryPlan Plan, string Label, string? Caption, PlanFacts? Facts, string? ExportStatement, PlanRunRequest? Request);
+    private sealed record PlanShot(string? Json, QueryPlan Plan, string Label, string? Caption, PlanFacts? Facts, string? ExportStatement, PlanRunRequest? Request)
+    {
+        /// <summary>1.0-P3A: the plan as EXPLAIN printed it in its default text format, for a pasted text plan; <see cref="Json" /> is null then.</summary>
+        public string? Text { get; init; }
+    }
 
     /// <summary>The two plans on show in Compare, and P21's finding about them when they are the generic plan and the custom one.</summary>
     private sealed record ComparePair(PlanShot Before, PlanShot After)
@@ -982,16 +1060,21 @@
     {
         ForgetResult();
 
-        QueryPlanRead read = QueryPlanReader.Read(text);
+        pasteError = null;
+
+        // 1.0-P3A: JSON or EXPLAIN's default text format, whichever the text is.
+        QueryPlanRead read = QueryPlanReader.ReadAny(text);
 
         if (read.Plan is null)
         {
-            error = PasteUnreadable + read.Failure;
+            pasteError = PasteUnreadable + read.Failure;
             return Task.CompletedTask;
         }
 
         // A pasted plan has no statement and no facts; it is Before or After like any other.
-        SetCurrent(new PlanShot(text, read.Plan, "the pasted plan", PastedCaption, null, null, null));
+        SetCurrent(read.Plan.FromText
+            ? new PlanShot(null, read.Plan, "the pasted plan", PastedCaption + PastedTextCaption, null, null, null) { Text = text }
+            : new PlanShot(text, read.Plan, "the pasted plan", PastedCaption, null, null, null));
         status = null;
         return Task.CompletedTask;
     }

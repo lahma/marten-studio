@@ -1,0 +1,26 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Seq Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "orders",
+      "Schema": "public",
+      "Alias": "orders",
+      "Startup Cost": 0.00,
+      "Total Cost": 2084.00,
+      "Plan Rows": 1,
+      "Plan Width": 30,
+      "Disabled": false,
+      "Output": ["id", "customer_id", "bucket", "amount", "placed", "note"],
+      "Filter": "(orders.note = 'note 5'::text)"
+    },
+    "Settings": {
+    },
+    "Query Identifier": 4257473406796104498,
+    "Planning": {
+      "Memory Used": 12,
+      "Memory Allocated": 16
+    }
+  }
+]

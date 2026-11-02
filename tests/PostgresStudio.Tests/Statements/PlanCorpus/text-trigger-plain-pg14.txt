@@ -1,0 +1,4 @@
+Insert on public.children  (cost=0.00..0.01 rows=0 width=0)
+  ->  Result  (cost=0.00..0.01 rows=1 width=8)
+        Output: 1, 5
+Query Identifier: 4662532881078605085

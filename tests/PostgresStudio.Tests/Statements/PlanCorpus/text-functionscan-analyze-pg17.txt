@@ -1,0 +1,10 @@
+Function Scan on pg_catalog.generate_series g  (cost=0.00..1.50 rows=1 width=4) (actual time=0.005..0.008 rows=14 loops=1)
+  Output: g
+  Function Call: generate_series(1, 100)
+  Filter: ((g.g % 7) = 0)
+  Rows Removed by Filter: 86
+Query Identifier: -5145261460910270693
+Planning:
+  Memory: used=8kB  allocated=8kB
+Planning Time: 0.010 ms
+Execution Time: 0.013 ms

@@ -1,0 +1,6 @@
+Index Only Scan using orders_pkey on public.orders  (cost=0.29..29.09 rows=960 width=4)
+  Output: id
+  Index Cond: (orders.id < 1000)
+Query Identifier: 4457749873936027703
+Planning:
+  Memory: used=13kB  allocated=16kB

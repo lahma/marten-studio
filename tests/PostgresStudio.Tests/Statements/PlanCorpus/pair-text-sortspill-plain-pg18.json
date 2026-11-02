@@ -1,0 +1,41 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Sort",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 17320.82,
+      "Total Cost": 17570.82,
+      "Plan Rows": 100000,
+      "Plan Width": 30,
+      "Disabled": false,
+      "Output": ["id", "customer_id", "bucket", "amount", "placed", "note"],
+      "Sort Key": ["orders.note"],
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "orders",
+          "Schema": "public",
+          "Alias": "orders",
+          "Startup Cost": 0.00,
+          "Total Cost": 1834.00,
+          "Plan Rows": 100000,
+          "Plan Width": 30,
+          "Disabled": false,
+          "Output": ["id", "customer_id", "bucket", "amount", "placed", "note"]
+        }
+      ]
+    },
+    "Settings": {
+      "work_mem": "64kB"
+    },
+    "Query Identifier": 7843263840634971304,
+    "Planning": {
+      "Memory Used": 14,
+      "Memory Allocated": 16
+    }
+  }
+]

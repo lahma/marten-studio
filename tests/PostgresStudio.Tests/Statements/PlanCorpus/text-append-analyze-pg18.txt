@@ -1,0 +1,25 @@
+Append  (cost=51.56..347.39 rows=6771 width=12) (actual time=0.060..0.776 rows=6771.00 loops=1)
+  Buffers: shared hit=118
+  ->  Bitmap Heap Scan on public.readings_q1 readings_1  (cost=51.56..158.17 rows=3441 width=12) (actual time=0.060..0.237 rows=3441.00 loops=1)
+        Output: readings_1.id, readings_1.day, readings_1.v
+        Recheck Cond: ((readings_1.day >= '2025-03-01'::date) AND (readings_1.day < '2025-05-01'::date))
+        Heap Blocks: exact=54
+        Buffers: shared hit=59
+        ->  Bitmap Index Scan on readings_q1_day_idx  (cost=0.00..50.70 rows=3441 width=0) (actual time=0.048..0.049 rows=3441.00 loops=1)
+              Index Cond: ((readings_1.day >= '2025-03-01'::date) AND (readings_1.day < '2025-05-01'::date))
+              Index Searches: 1
+              Buffers: shared hit=5
+  ->  Bitmap Heap Scan on public.readings_q2 readings_2  (cost=50.42..155.37 rows=3330 width=12) (actual time=0.052..0.211 rows=3330.00 loops=1)
+        Output: readings_2.id, readings_2.day, readings_2.v
+        Recheck Cond: ((readings_2.day >= '2025-03-01'::date) AND (readings_2.day < '2025-05-01'::date))
+        Heap Blocks: exact=55
+        Buffers: shared hit=59
+        ->  Bitmap Index Scan on readings_q2_day_idx  (cost=0.00..49.58 rows=3330 width=0) (actual time=0.045..0.045 rows=3330.00 loops=1)
+              Index Cond: ((readings_2.day >= '2025-03-01'::date) AND (readings_2.day < '2025-05-01'::date))
+              Index Searches: 1
+              Buffers: shared hit=4
+Query Identifier: 6869468871845193756
+Planning:
+  Memory: used=44kB  allocated=72kB
+Planning Time: 0.056 ms
+Execution Time: 1.000 ms

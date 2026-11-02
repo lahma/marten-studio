@@ -1,0 +1,50 @@
+[
+  {
+    "Plan": {
+      "Node Type": "WindowAgg",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Startup Cost": 298.82,
+      "Total Cost": 360.70,
+      "Plan Rows": 3094,
+      "Plan Width": 16,
+      "Output": ["id", "row_number() OVER (?)", "customer_id"],
+      "Plans": [
+        {
+          "Node Type": "Sort",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 298.82,
+          "Total Cost": 306.55,
+          "Plan Rows": 3094,
+          "Plan Width": 8,
+          "Output": ["id", "customer_id"],
+          "Sort Key": ["orders.customer_id", "orders.id"],
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "orders_pkey",
+              "Relation Name": "orders",
+              "Schema": "public",
+              "Alias": "orders",
+              "Startup Cost": 0.29,
+              "Total Cost": 119.44,
+              "Plan Rows": 3094,
+              "Plan Width": 8,
+              "Output": ["id", "customer_id"],
+              "Index Cond": "(orders.id < 3000)"
+            }
+          ]
+        }
+      ]
+    },
+    "Settings": {
+    },
+    "Query Identifier": -3682161957405883670
+  }
+]

@@ -1,0 +1,12 @@
+GroupAggregate  (cost=0.29..2376.29 rows=2000 width=12) (actual time=0.024..9.585 rows=2000 loops=1)
+  Output: customer_id, count(*)
+  Group Key: orders.customer_id
+  Buffers: shared hit=89
+  ->  Index Only Scan using orders_customer_idx on public.orders  (cost=0.29..1856.29 rows=100000 width=4) (actual time=0.017..4.462 rows=100000 loops=1)
+        Output: customer_id
+        Heap Fetches: 0
+        Buffers: shared hit=89
+Settings: enable_hashagg = 'off'
+Query Identifier: -3953979371872681879
+Planning Time: 0.024 ms
+Execution Time: 9.667 ms

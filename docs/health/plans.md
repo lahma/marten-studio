@@ -281,11 +281,53 @@ generic plan's cost not much above the custom plans' average. A generic plan ten
 execution for its values; or give the planner what it lacks - an index, extended statistics, a statement that does not depend on
 one skewed value - so the generic plan is a good one.
 
+## P22 NOT IN over a subquery
+
+**Warning**, from the statement's text (1.0). P22 to P25 are the **static lint**: they judge the statement as it is written in the
+Plan page's editor, not a plan, so they are shown under the editor as the statement is typed - before anything runs - and need no
+`ANALYZE` and no facts. Each is found with the studio's own lexer, so nothing inside a comment, a string, a quoted name or a
+dollar-quoted body counts, and each names the line and column it found. A pasted plan has no statement, and is not linted.
+
+P22 fires on `NOT IN (SELECT …)` (or `NOT IN (WITH …)`, `NOT IN (VALUES …)`). If the subquery returns a single `NULL`, `x NOT IN
+(…)` is never true, and the statement returns no rows - rarely what was meant. Because of that rule Postgres cannot turn it into an
+anti-join: it hashes the subquery when it fits in `work_mem`, and otherwise runs it again for every outer row.
+
+**Remedy.** `NOT EXISTS (SELECT 1 FROM … WHERE … = outer.column)` means what was intended when the subquery can return `NULL`, and
+is planned as an anti-join. A list of constants (`NOT IN (1, 2, 3)`) is not flagged.
+
+## P23 Large literal OFFSET
+
+**Info**, from the statement's text (1.0): `OFFSET` with an integer literal of 10,000 or more (PostgreSQL 16's `10_000` included).
+P06 judges the same thing in a plan - the rows a `Limit` actually threw away, which needs no literal and catches a parameter's
+value under `ANALYZE` - while P23 needs no plan and is shown while the statement is written.
+
+**Remedy.** As for P06: page by the last key seen (`WHERE (sort_key, id) > ($1, $2) ORDER BY sort_key, id LIMIT n`), which with an
+index on the sort key makes every page cost the same.
+
+## P24 SELECT * over a join
+
+**Info**, from the statement's text (1.0): a top-level `SELECT *` (or `SELECT DISTINCT *`) whose `FROM` joins - with `JOIN` or a
+comma. Every column of every joined table is read, carried through each join and sort, and sent, and an index-only scan is never
+possible. A qualified star (`SELECT o.* …`), `count(*)`, and a `SELECT *` inside a subquery or `EXISTS (SELECT * …)` - which costs
+nothing - are not flagged.
+
+**Remedy.** Name the columns the caller uses. Where a joined table only filters, `EXISTS` keeps its columns out of the result.
+
+## P25 ORDER BY random()
+
+**Info**, from the statement's text (1.0): `ORDER BY random()` (or `pg_catalog.random()`) as the first sort key. Postgres reads
+every row the rest of the statement keeps, gives each a random number and sorts them all, to return a few.
+
+**Remedy.** For a sample of a large table, `TABLESAMPLE SYSTEM (p)` or `BERNOULLI (p)`. For one random row, pick a random key
+between the table's least and greatest and take the first row at or above it, with an index on the key.
+
 ## Query › Plan: the plan analyzer
 
 The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in Marten Studio) is the console's Explain buttons as a page of
-its own. It is behind **`RunSql`** and the write policy, resolved against the database as a whole, exactly as the console is, a
-pasted plan included; with `RunSql` off it shows the console's own disabled state, naming the property.
+its own. Running a plan is behind **`RunSql`** and the write policy, resolved against the database as a whole, exactly as the
+console is; with `RunSql` off (or `ReadOnly` on) the page shows the console's own disabled state, naming the property, in place of
+the editor. **Pasting a plan is every visitor's** (1.0): it reads nothing and runs nothing, so it needs only what opening the
+studio needs, and the page - and its entry in the rail - is there for every visitor.
 
 **Three ways to plan.** *Explain* plans the statement and runs nothing. *Explain analyze* runs it, only through the console's
 guard, in its read-only transaction and under its statement timeout - a write is refused by the guard, and one the guard misses
@@ -306,11 +348,16 @@ The ones that count what a statement does while it runs - `BUFFERS`, `TIMING`, `
 disabled without it with a title that says why; a server older than 17 is told apart after its first plan, and `MEMORY` and
 `SERIALIZE` are left out of the statement - and named on the page - on it.
 
-**Paste a plan.** The JSON of `EXPLAIN (FORMAT JSON)`, one plan or the array Postgres prints, from `auto_explain`, a log or another
-server, is read by the same reader with its same bounds (2,000 nodes, 200 levels, 4 MB) and drawn with no database read: nothing
-is sent, nothing is audited, and the page says the database's own facts are not available for it. The text goes from the browser
-to the server in chunks, because a Blazor Server circuit accepts only 32 KB a message by default and a plan of thirty nodes is
-more than that. Text-format plans are not read.
+**Paste a plan.** What `EXPLAIN` printed, from `auto_explain`, a log, `psql` or another server: the JSON of `EXPLAIN (FORMAT
+JSON)` (one plan or the array Postgres prints), or since 1.0 its **default text format** - told apart by the first character that
+is not blank (`[` or `{` is JSON). Either is read with the same bounds (2,000 nodes, 200 levels, 4 MB) into the same plan, so every
+view, insight, export and comparison works on it, and drawn with no database read: nothing is sent, nothing is audited, the
+database's own facts are not available for it and no What if? is offered. The text reader takes a plan as `psql` frames it (the
+`QUERY PLAN` header, its rule, the leading space, the row count), with a log line or `auto_explain`'s `Query Text:` before it, and
+with CRLF line ends; it names a relation's schema only where `VERBOSE` printed it, and it keeps a line it does not understand
+verbatim, in the node's detail. It is held to the JSON reader by a test that explains a set of statements both ways on every
+supported PostgreSQL release and compares the two reads field by field. The text goes from the browser to the server in chunks,
+because a Blazor Server circuit accepts only 32 KB a message by default and a plan of thirty nodes is more than that.
 
 **The address** carries the statement, the mode and the options (`?sql=…&mode=analyze&options=buffers,timing,verbose`), so a link
 reopens the page with the editor filled - and never runs it: a run needs a click. The plan and the values of the placeholders are
@@ -329,7 +376,7 @@ selected node, grouped as the node, estimate, actual, buffers, I/O and WAL, work
 one-line explanation of what it means.
 
 **Export.** *Copy JSON*, *Copy as Markdown* (the summary, then the node table, as GitHub tables, for a pull request or an
-issue) and *Download plan.json*. *Download for speedscope* saves the plan as `plan.speedscope.json`, in
+issue) and *Download plan.json* - for a pasted text plan, *Copy text* and *Download plan.txt*. *Download for speedscope* saves the plan as `plan.speedscope.json`, in
 [speedscope](https://www.speedscope.app)'s file format: one frame for each node (named as the tree labels it, plus its index in
 pre-order, `[#3]`), and one sampled profile for each measure the plan has - *Self time* (analyzed with timing), *Self cost*,
 *Shared blocks read* and *Temp blocks written* (each when buffers were printed and not all zero) - the weight of a node being its

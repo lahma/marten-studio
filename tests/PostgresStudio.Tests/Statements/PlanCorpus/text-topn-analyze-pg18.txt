@@ -1,0 +1,16 @@
+Limit  (cost=3994.96..3994.99 rows=10 width=30) (actual time=9.390..9.392 rows=10.00 loops=1)
+  Output: id, customer_id, bucket, amount, placed, note
+  Buffers: shared hit=834
+  ->  Sort  (cost=3994.96..4244.96 rows=100000 width=30) (actual time=9.390..9.390 rows=10.00 loops=1)
+        Output: id, customer_id, bucket, amount, placed, note
+        Sort Key: orders.amount DESC, orders.id
+        Sort Method: top-N heapsort  Memory: 26kB
+        Buffers: shared hit=834
+        ->  Seq Scan on public.orders  (cost=0.00..1834.00 rows=100000 width=30) (actual time=0.004..3.078 rows=100000.00 loops=1)
+              Output: id, customer_id, bucket, amount, placed, note
+              Buffers: shared hit=834
+Query Identifier: -3972234831435106665
+Planning:
+  Memory: used=16kB  allocated=16kB
+Planning Time: 0.028 ms
+Execution Time: 9.410 ms

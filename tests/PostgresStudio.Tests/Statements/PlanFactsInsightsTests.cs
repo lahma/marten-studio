@@ -276,7 +276,7 @@ public class PlanFactsInsightsTests
     {
         PlanFixtures.Names.Should().Contain(["p15-fires", "p16-fires", "p16-quiet", "p17-fires", "p17-quiet", "p18-fires", "p18-quiet", "p19-fires", "p19-quiet", "p20-fires", "p20-quiet"]);
         PlanInsights.All.Where(static x => x.NeedsFacts).Select(static x => x.Code).Should().Equal("P15", "P16", "P17", "P18");
-        PlanInsights.All.Skip(14).Select(static x => x.Code).Should().Equal("P15", "P16", "P17", "P18", "P19", "P20", "P21");
+        PlanInsights.All.Skip(14).Take(7).Select(static x => x.Code).Should().Equal("P15", "P16", "P17", "P18", "P19", "P20", "P21");
     }
 
     [Fact]

@@ -1,0 +1,11 @@
+WindowAgg  (cost=284.47..343.09 rows=2932 width=16)
+  Output: id, row_number() OVER (?), customer_id
+  ->  Sort  (cost=284.45..291.78 rows=2932 width=8)
+        Output: id, customer_id
+        Sort Key: orders.customer_id, orders.id
+        ->  Index Scan using orders_pkey on public.orders  (cost=0.29..115.60 rows=2932 width=8)
+              Output: id, customer_id
+              Index Cond: (orders.id < 3000)
+Query Identifier: 8434218436549247901
+Planning:
+  Memory: used=19kB  allocated=32kB

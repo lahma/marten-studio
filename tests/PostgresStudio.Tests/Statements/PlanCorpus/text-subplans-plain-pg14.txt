@@ -1,0 +1,17 @@
+Index Scan using customers_pkey on public.customers c  (cost=8.57..348.59 rows=2 width=36)
+  Output: c.id, (SubPlan 1)
+  Index Cond: (c.id <= 20)
+  Filter: (c.region = $1)
+  InitPlan 2 (returns $1)
+    ->  Index Scan using customers_pkey on public.customers  (cost=0.28..8.29 rows=1 width=3)
+          Output: customers.region
+          Index Cond: (customers.id = 1)
+  SubPlan 1
+    ->  Aggregate  (cost=165.80..165.81 rows=1 width=32)
+          Output: max(o.amount)
+          ->  Bitmap Heap Scan on public.orders o  (cost=4.68..165.67 rows=50 width=4)
+                Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+                Recheck Cond: (o.customer_id = c.id)
+                ->  Bitmap Index Scan on orders_customer_idx  (cost=0.00..4.67 rows=50 width=0)
+                      Index Cond: (o.customer_id = c.id)
+Query Identifier: 3625237984698534988

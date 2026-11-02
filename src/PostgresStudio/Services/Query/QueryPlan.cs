@@ -266,6 +266,13 @@ internal sealed class PlanNode
     public IReadOnlyList<PlanNode> Children { get; init; } = [];
 
     /// <summary>
+    /// 1.0-P3A: the lines of a plan read from <c>EXPLAIN</c>'s text format that the reader did not understand, verbatim and in the
+    /// order they were printed, for the node detail ("Lines the studio did not read"). Always empty for a plan read from JSON, which
+    /// has no lines, and for one read with a mask.
+    /// </summary>
+    public IReadOnlyList<string> UnreadLines { get; init; } = [];
+
+    /// <summary>
     /// Every scalar key Postgres printed for this node, in the order it printed them, for the node detail - empty for a plan read
     /// with a mask, which keeps only what it masks (<see cref="QueryPlanReader.Read" />).
     /// </summary>
@@ -352,6 +359,19 @@ internal sealed class PlanNode
 /// <param name="Statements">How many statements Postgres planned: more than one under a rewrite rule, of which the first is read.</param>
 internal sealed record QueryPlan(PlanNode Root, int NodeCount, bool Truncated, int Statements)
 {
+    /// <summary>
+    /// 1.0-P3A: whether the plan was read from <c>EXPLAIN</c>'s default text format (<see cref="QueryPlanTextReader" />) and not from
+    /// JSON. A text plan names a relation only as <c>EXPLAIN</c> printed it - with its schema only under <c>VERBOSE</c> - and carries
+    /// the keys the text prints, which are fewer than JSON's.
+    /// </summary>
+    public bool FromText { get; init; }
+
+    /// <summary>
+    /// 1.0-P3A: the lines around a text plan - after the tree - that the reader did not understand, verbatim; empty for JSON and for a
+    /// masked read.
+    /// </summary>
+    public IReadOnlyList<string> UnreadLines { get; init; } = [];
+
     /// <summary>The planning time, in milliseconds, when Postgres printed it (<c>ANALYZE</c>, or <c>SUMMARY</c>).</summary>
     public double? PlanningMs { get; init; }
 

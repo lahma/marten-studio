@@ -1,0 +1,4 @@
+Insert on public.customers  (cost=0.00..0.01 rows=0 width=0)
+  ->  Result  (cost=0.00..0.01 rows=1 width=36)
+        Output: 5000, 'x'::text
+Query Identifier: -5128657986210469663

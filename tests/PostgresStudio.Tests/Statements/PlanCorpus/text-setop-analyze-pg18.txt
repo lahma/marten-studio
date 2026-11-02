@@ -1,0 +1,20 @@
+HashSetOp Intersect  (cost=48.27..49.27 rows=399 width=4) (actual time=0.230..0.241 rows=398.00 loops=1)
+  Output: customers.id
+  Buffers: shared hit=14
+  ->  Index Only Scan using customers_pkey on public.customers  (cost=0.28..20.26 rows=399 width=4) (actual time=0.024..0.059 rows=399.00 loops=1)
+        Output: customers.id
+        Index Cond: (customers.id < 400)
+        Heap Fetches: 399
+        Index Searches: 1
+        Buffers: shared hit=6
+  ->  Index Scan using orders_pkey on public.orders  (cost=0.29..25.67 rows=536 width=4) (actual time=0.019..0.060 rows=499.00 loops=1)
+        Output: orders.customer_id
+        Index Cond: (orders.id < 500)
+        Index Searches: 1
+        Buffers: shared hit=8
+Query Identifier: -3702859081278484680
+Planning:
+  Buffers: shared hit=3
+  Memory: used=37kB  allocated=64kB
+Planning Time: 0.102 ms
+Execution Time: 0.292 ms

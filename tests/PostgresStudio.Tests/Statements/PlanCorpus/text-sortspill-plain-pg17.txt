@@ -1,0 +1,9 @@
+Sort  (cost=17320.82..17570.82 rows=100000 width=30)
+  Output: id, customer_id, bucket, amount, placed, note
+  Sort Key: orders.note
+  ->  Seq Scan on public.orders  (cost=0.00..1834.00 rows=100000 width=30)
+        Output: id, customer_id, bucket, amount, placed, note
+Settings: work_mem = '64kB'
+Query Identifier: 2144874302225694012
+Planning:
+  Memory: used=14kB  allocated=16kB

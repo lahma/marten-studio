@@ -1,0 +1,8 @@
+Index Only Scan using orders_pkey on public.orders  (cost=0.29..29.98 rows=1011 width=4) (actual time=0.025..0.073 rows=999 loops=1)
+  Output: id
+  Index Cond: (orders.id < 1000)
+  Heap Fetches: 0
+  Buffers: shared hit=5
+Query Identifier: -4031389862733283207
+Planning Time: 0.024 ms
+Execution Time: 0.109 ms

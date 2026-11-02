@@ -1,0 +1,26 @@
+Hash Right Join  (cost=10.04..20.17 rows=49 width=8) (actual time=0.049..0.064 rows=49.00 loops=1)
+  Output: c.id, o.id
+  Inner Unique: true
+  Hash Cond: (o.customer_id = c.id)
+  Buffers: shared hit=7
+  ->  Index Scan using orders_pkey on public.orders o  (cost=0.29..10.15 rows=106 width=8) (actual time=0.011..0.017 rows=99.00 loops=1)
+        Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+        Index Cond: (o.id < 100)
+        Index Searches: 1
+        Buffers: shared hit=3
+  ->  Hash  (cost=9.13..9.13 rows=49 width=4) (actual time=0.033..0.033 rows=49.00 loops=1)
+        Output: c.id
+        Buckets: 1024  Batches: 1  Memory Usage: 10kB
+        Buffers: shared hit=4
+        ->  Index Only Scan using customers_pkey on public.customers c  (cost=0.28..9.13 rows=49 width=4) (actual time=0.018..0.023 rows=49.00 loops=1)
+              Output: c.id
+              Index Cond: (c.id < 50)
+              Heap Fetches: 49
+              Index Searches: 1
+              Buffers: shared hit=4
+Query Identifier: -5092175904488561761
+Planning:
+  Buffers: shared hit=17
+  Memory: used=34kB  allocated=64kB
+Planning Time: 0.185 ms
+Execution Time: 0.102 ms

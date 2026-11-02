@@ -223,7 +223,7 @@
 
         @if (Analyzer && Plan is null)
         {
-            <PlanExport Json="@Json" Plan="plan" FileName="@DownloadFileName" Statement="@ExportStatement" />
+            <PlanExport Json="@Json" Text="@Text" Plan="plan" FileName="@DownloadFileName" Statement="@ExportStatement" />
         }
     }
 
@@ -286,6 +286,13 @@
     public string? Json { get; set; }
 
     /// <summary>
+    /// 1.0-P3A: a plan as <c>EXPLAIN</c> printed it in its default text format - read here with <see cref="QueryPlanTextReader" />, and
+    /// offered whole as text - when there is no <see cref="Json" />. A pasted plan's, so read unmasked like a pasted JSON plan.
+    /// </summary>
+    [Parameter]
+    public string? Text { get; set; }
+
+    /// <summary>
     /// A plan a service already read, and masked for this visitor - the Statements drill-in's. <see cref="object" /> because the
     /// Razor SDK emits every component as public and a public parameter cannot have an internal type. Wins over
     /// <see cref="Json" />, and no raw JSON is offered for it.
@@ -336,11 +343,15 @@
             return;
         }
 
-        if (read is null || readPlan is not null || !string.Equals(Json, readJson, StringComparison.Ordinal))
+        // 1.0-P3A: JSON wins; a text plan is read when there is no JSON. readJson holds whichever source was read last.
+        bool fromText = string.IsNullOrEmpty(Json) && !string.IsNullOrEmpty(Text);
+        string? source = fromText ? Text : Json;
+
+        if (read is null || readPlan is not null || !string.Equals(source, readJson, StringComparison.Ordinal))
         {
             readPlan = null;
-            readJson = Json;
-            Evaluate(QueryPlanReader.Read(Json));
+            readJson = source;
+            Evaluate(fromText ? QueryPlanTextReader.Read(Text) : QueryPlanReader.Read(Json));
         }
     }
 

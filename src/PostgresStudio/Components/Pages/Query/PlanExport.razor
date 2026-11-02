@@ -14,15 +14,25 @@
 
     Every call is guarded by StudioLiveUpdates.IsInteropUnavailable (hard rule 15): a tab that closed between the click and the call
     is not an error anybody can act on. A copy or a download the browser refuses is said on screen, in a polite live region.
+
+    1.0-P3A: a plan pasted in EXPLAIN's text format has no JSON; it is offered as the text it was (Copy text, Download plan.txt),
+    with the same Markdown and speedscope exports, which are built from the plan read.
 *@
 
-@if (Json is { Length: > 0 })
+@if (Json is { Length: > 0 } || Text is { Length: > 0 })
 {
     <section class="ms-plan-export" aria-label="Raw plan and export">
         <div class="ms-plan-export-actions">
-            <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-json" @onclick="CopyJsonAsync">Copy JSON</button>
+            @if (Json is { Length: > 0 })
+            {
+                <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-json" @onclick="CopyJsonAsync">Copy JSON</button>
+            }
+            else
+            {
+                <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-text" @onclick="CopyTextAsync">Copy text</button>
+            }
             <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-markdown" disabled="@(plan is null)" @onclick="CopyMarkdownAsync">Copy as Markdown</button>
-            <button type="button" class="ms-btn ms-btn-sm ms-plan-download" @onclick="DownloadAsync">Download @FileName</button>
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-download" @onclick="DownloadAsync">Download @DownloadName</button>
             <button type="button" class="ms-btn ms-btn-sm ms-plan-download-speedscope" disabled="@(plan is null)" @onclick="DownloadSpeedscopeAsync">Download for speedscope</button>
             <span class="ms-plan-export-status" role="status" aria-live="polite">@message</span>
         </div>
@@ -30,8 +40,16 @@
         <p class="ms-muted ms-plan-export-note">Open it at speedscope.app (drag the file in; it stays in your browser).</p>
 
         <details class="ms-plan-raw">
-            <summary>The plan as Postgres printed it (JSON)</summary>
-            <JsonView Json="@Json" Label="Query plan JSON" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="@FileName" />
+            @if (Json is { Length: > 0 })
+            {
+                <summary>The plan as Postgres printed it (JSON)</summary>
+                <JsonView Json="@Json" Label="Query plan JSON" AutoExpandDepth="3" ShowSearch="false" DownloadFileName="@FileName" />
+            }
+            else
+            {
+                <summary>The plan as Postgres printed it (text)</summary>
+                <pre class="ms-plan-raw-text" tabindex="0" aria-label="Query plan text">@Text</pre>
+            }
         </details>
     </section>
 }
@@ -45,6 +63,10 @@
     /// <summary>The plan as <c>EXPLAIN (FORMAT JSON)</c> printed it.</summary>
     [Parameter]
     public string? Json { get; set; }
+
+    /// <summary>1.0-P3A: the plan as <c>EXPLAIN</c> printed it in its default text format, when there is no <see cref="Json" />.</summary>
+    [Parameter]
+    public string? Text { get; set; }
 
     /// <summary>The plan read from <see cref="Json" />, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type), for the Markdown.</summary>
     [Parameter]
@@ -74,6 +96,11 @@
 
     private async Task CopyJsonAsync() => await CopyAsync(Json ?? string.Empty, "Copied the plan's JSON.");
 
+    private async Task CopyTextAsync() => await CopyAsync(Text ?? string.Empty, "Copied the plan's text.");
+
+    /// <summary>The raw download's name: <see cref="FileName" /> for JSON, and the same stem with <c>.txt</c> for a text plan.</summary>
+    private string DownloadName => Json is { Length: > 0 } ? FileName : Path.ChangeExtension(FileName, ".txt");
+
     private async Task CopyMarkdownAsync()
     {
         if (plan is not null)
@@ -95,7 +122,8 @@
         }
     }
 
-    private async Task DownloadAsync() => await SaveAsync(FileName, Json ?? string.Empty);
+    private async Task DownloadAsync() =>
+        await (Json is { Length: > 0 } ? SaveAsync(FileName, Json) : SaveAsync(DownloadName, Text ?? string.Empty, "text/plain"));
 
     private async Task DownloadSpeedscopeAsync()
     {
@@ -107,11 +135,11 @@
         }
     }
 
-    private async Task SaveAsync(string fileName, string content)
+    private async Task SaveAsync(string fileName, string content, string mediaType = "application/json")
     {
         try
         {
-            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, fileName, "application/json", content);
+            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, fileName, mediaType, content);
             message = saved ? "Saved " + fileName + "." : "The browser did not save the file.";
         }
         catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))

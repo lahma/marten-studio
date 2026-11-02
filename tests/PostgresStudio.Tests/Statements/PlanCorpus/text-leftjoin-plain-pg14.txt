@@ -1,0 +1,13 @@
+Hash Right Join  (cost=10.04..20.05 rows=49 width=8)
+  Output: c.id, o.id
+  Inner Unique: true
+  Hash Cond: (o.customer_id = c.id)
+  ->  Index Scan using orders_pkey on public.orders o  (cost=0.29..10.04 rows=100 width=8)
+        Output: o.id, o.customer_id, o.bucket, o.amount, o.placed, o.note
+        Index Cond: (o.id < 100)
+  ->  Hash  (cost=9.13..9.13 rows=49 width=4)
+        Output: c.id
+        ->  Index Only Scan using customers_pkey on public.customers c  (cost=0.28..9.13 rows=49 width=4)
+              Output: c.id
+              Index Cond: (c.id < 50)
+Query Identifier: 108369743895512615

@@ -1,0 +1,30 @@
+Finalize Aggregate  (cost=1371.68..1371.69 rows=1 width=8) (actual rows=1 loops=1)
+  Output: count(*)
+  Buffers: shared hit=834
+  ->  Gather  (cost=1371.67..1371.68 rows=2 width=8) (actual rows=3 loops=1)
+        Output: (PARTIAL count(*))
+        Workers Planned: 2
+        Workers Launched: 2
+        Buffers: shared hit=834
+        ->  Partial Aggregate  (cost=1371.67..1371.68 rows=1 width=8) (actual rows=1 loops=3)
+              Output: PARTIAL count(*)
+              Buffers: shared hit=834
+              Worker 0:  actual rows=1 loops=1
+                Buffers: shared hit=126
+              Worker 1:  actual rows=1 loops=1
+                Buffers: shared hit=121
+              ->  Parallel Seq Scan on public.orders  (cost=0.00..1354.83 rows=6734 width=0) (actual rows=3333 loops=3)
+                    Output: id, customer_id, bucket, amount, placed, note
+                    Filter: (orders.note ~~ '%9'::text)
+                    Rows Removed by Filter: 30000
+                    Buffers: shared hit=834
+                    Worker 0:  actual rows=1503 loops=1
+                      Buffers: shared hit=126
+                    Worker 1:  actual rows=1452 loops=1
+                      Buffers: shared hit=121
+Settings: parallel_setup_cost = '0', parallel_tuple_cost = '0', min_parallel_table_scan_size = '0'
+Query Identifier: 1689461725049914120
+Planning:
+  Memory: used=16kB  allocated=32kB
+Planning Time: 0.030 ms
+Execution Time: 5.426 ms

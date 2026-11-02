@@ -511,6 +511,10 @@ read-only transaction and `statement_timeout`. A write the guard misses is refus
 nothing, and every run and refusal is audited as a `RunSql` run (9204, 9205). Mode A's plan, LINQ mode's and the
 Statements drill-in's are `EXPLAIN` without `ANALYZE`.
 
+Query › Plan's **paste a plan** (1.0) is every visitor's: the visitor's own text, JSON or `EXPLAIN`'s text format, is read
+and drawn on the server with no connection to any database, no lookup of facts and no What if?, so it is not audited and
+needs no capability. Running a plan on that page keeps the console's gate above.
+
 **What if?** (0.6) plans a statement again with one index imagined by hypopg. The studio never runs
 `CREATE EXTENSION`: whether hypopg is installed is the host's decision, and without it, or when the role the studio
 plans as may not use it, the page says which. The index is only one a builder wrote - read off the plan's sequential

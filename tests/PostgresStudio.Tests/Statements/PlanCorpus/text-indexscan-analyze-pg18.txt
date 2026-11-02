@@ -1,0 +1,10 @@
+Index Scan using orders_pkey on public.orders  (cost=0.29..8.31 rows=1 width=30) (actual time=0.011..0.012 rows=1.00 loops=1)
+  Output: id, customer_id, bucket, amount, placed, note
+  Index Cond: (orders.id = 500)
+  Index Searches: 1
+  Buffers: shared hit=3
+Query Identifier: -1467624519033176461
+Planning:
+  Memory: used=13kB  allocated=16kB
+Planning Time: 0.020 ms
+Execution Time: 0.023 ms

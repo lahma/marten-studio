@@ -19,9 +19,14 @@ public class PlanUiSweepStylesheetTests
         int start = css.IndexOf(Header, StringComparison.Ordinal);
 
         start.Should().BeGreaterThan(css.IndexOf("0.10-B. Compare plans", StringComparison.Ordinal), "D26: appended in cascade order");
-        css.IndexOf("/* ====", start, StringComparison.Ordinal).Should().Be(-1, "it is the last section");
+        int next = css.IndexOf("/* ====", start, StringComparison.Ordinal);
 
-        string section = css[start..];
+        if (next >= 0)
+        {
+            css.IndexOf("1.0-P3A.", next, StringComparison.Ordinal).Should().BeGreaterThan(next, "D26: 1.0's sections follow it, in cascade order");
+        }
+
+        string section = next < 0 ? css[start..] : css[start..next];
         section.Should().Contain(".ms-plan-node-facts .ms-plan-key-help {\n    overflow-wrap: anywhere;\n}");
         section.Should().Contain(".ms-plan-node-facts dd {\n    min-width: 0;\n}");
     }
