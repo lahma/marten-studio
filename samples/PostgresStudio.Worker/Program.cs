@@ -42,6 +42,11 @@ builder.Services.AddPostgresDiagnostics(options =>
     options.BrowsableSchemas.Add(RelationalDemoSchema.SampleSchemaName);
 });
 
+// The connection history (1.0, #43): a background service samples the server's connections every minute and keeps a week in
+// memory. The summary prints its peak against the client limit (the snapshot's ConnectionHistory section, 1.0.1) and the engine's
+// check C15 raises a peak near the limit. Keep it in a store of your own (IPostgresConnectionHistoryStore) to survive a restart.
+builder.Services.AddPostgresConnectionHistory();
+
 // Summary:Interval (default 24 hours) and Summary:StudioBaseUrl (no links unless a host has a studio mounted).
 builder.Services.Configure<SummaryOptions>(builder.Configuration.GetSection("Summary"));
 builder.Services.AddHostedService<DiagnosticsSummaryService>();

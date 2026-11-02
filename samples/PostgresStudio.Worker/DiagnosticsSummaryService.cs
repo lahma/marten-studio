@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 using Microsoft.Extensions.Hosting;
@@ -93,6 +94,35 @@ internal sealed partial class DiagnosticsSummaryService(
     }
 
     /// <summary>
+    /// The connection history's peak line, from the snapshot's <c>ConnectionHistory</c> section (1.0.1, issue #47): the peak
+    /// against the client limit now and when, over how many samples. <see langword="null" /> when no history is registered.
+    /// </summary>
+    /// <param name="history">The section, or <see langword="null" /> when the snapshot has none.</param>
+    internal static string? HistoryLine(PostgresConnectionHistorySection? history)
+    {
+        if (history is null || history.Outcome == PostgresReadOutcome.NotApplicable)
+        {
+            return null;
+        }
+
+        if (history.Outcome != PostgresReadOutcome.Read)
+        {
+            return "Connection history: " + history.Outcome + " - " + (history.Reason ?? "no reason given");
+        }
+
+        string share = history.ClientLimitNow > 0
+            ? " (" + ((double) history.Peak / history.ClientLimitNow * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%)"
+            : string.Empty;
+
+        return "Connection history: peak " + history.Peak.ToString("N0", CultureInfo.InvariantCulture) + " of "
+            + history.ClientLimitNow.ToString("N0", CultureInfo.InvariantCulture) + " client connections" + share
+            + " at " + history.PeakAt?.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            + ", " + history.Samples.ToString("N0", CultureInfo.InvariantCulture) + " samples since "
+            + history.Since?.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)
+            + (history.InstanceChanges > 0 ? ", " + history.InstanceChanges.ToString(CultureInfo.InvariantCulture) + " instance changes" : string.Empty);
+    }
+
+    /// <summary>
     /// The summary of every database the diagnostics list: its overall state, the finding counts by severity, and a line per
     /// check (<see cref="PostgresDiagnosticsSnapshot.FindingsByCheck" />) with its severity and title - and its link when
     /// <paramref name="studioBaseUrl" /> is set.
@@ -112,7 +142,7 @@ internal sealed partial class DiagnosticsSummaryService(
             databases++;
 
             PostgresDiagnosticsSnapshot snapshot = await diagnostics.GetSnapshotAsync(
-                database, PostgresDiagnosticsRequest.FindingsOnly, cancellationToken);
+                database, PostgresDiagnosticsRequest.FindingsOnly with { ConnectionHistory = true }, cancellationToken);
 
             text.AppendLine();
             text.Append(database.Source).Append(" / ").Append(database.Database).Append(": ");
@@ -133,6 +163,11 @@ internal sealed partial class DiagnosticsSummaryService(
 
             text.Append(state).Append(" (").Append(critical).Append(" critical, ").Append(warning).Append(" warning, ")
                 .Append(info).AppendLine(" info)");
+
+            if (HistoryLine(snapshot.ConnectionHistory) is { } history)
+            {
+                text.Append("  ").AppendLine(history);
+            }
 
             foreach (PostgresFindingGroup group in groups)
             {
