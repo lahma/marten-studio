@@ -213,12 +213,33 @@ internal static class StandbyLagLive
             TimeSpan.FromSeconds(60),
             "the standby to have replayed everything it received");
 
-        await using (StudioHost onStandby = ReplicationServer.HostOver(pair.StandbyConnectionString(MatrixRole.Probe), TimeProvider.System))
-        {
-            HealthReport report = await ReportAsync(onStandby);
+        // Even so, the standby keeps receiving with no client activity (a running-xacts record about every 15 s, checkpoints), so a
+        // record can arrive between that wait and the report's own read: the report is built again until its note says the standby
+        // is caught up - the condition the test asserts - and a finding must never appear, on any attempt. Each attempt has a host
+        // of its own: a host's regular sweep is cached for the health interval (60 s), so a retry on one host would be answered with
+        // the same cached report until it expired.
+        const string CaughtUp = "This server is a standby, 0 B behind what it has received";
+        string? note = null;
 
-            report.Findings.Should().NotContain(static x => x.Code == "R03");
-            report.Checks.Single(static x => x.Code == "R03").Note.Should().StartWith("This server is a standby, 0 B behind what it has received");
+        try
+        {
+            await ReplicationServer.UntilAsync(
+                async () =>
+                {
+                    await using StudioHost onStandby = ReplicationServer.HostOver(pair.StandbyConnectionString(MatrixRole.Probe), TimeProvider.System);
+                    HealthReport report = await ReportAsync(onStandby);
+
+                    report.Findings.Should().NotContain(static x => x.Code == "R03");
+                    note = report.Checks.Single(static x => x.Code == "R03").Note;
+
+                    return note?.StartsWith(CaughtUp, StringComparison.Ordinal) == true;
+                },
+                TimeSpan.FromSeconds(60),
+                "the standby's own report to say \"" + CaughtUp + "\"");
+        }
+        catch (TimeoutException e)
+        {
+            throw new TimeoutException(e.Message + " Its last note was \"" + note + "\".", e);
         }
     }
 

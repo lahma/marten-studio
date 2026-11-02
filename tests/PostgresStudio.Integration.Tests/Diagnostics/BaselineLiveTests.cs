@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
 
+using PostgresStudio.Integration.Tests.Storage;
 using PostgresStudio.Integration.Tests.Versions;
 
 namespace PostgresStudio.Integration.Tests.Diagnostics;
@@ -59,8 +60,13 @@ public class BaselineLiveTests(PostgresVersionMatrix matrix)
             + "insert into public.parts select 1 + g % 2, g from pg_catalog.generate_series(1, 20000) g;",
             database,
             Token);
-        await server.ExecuteAsync("vacuum public.events", database, Token);
-        await server.ExecuteAsync("vacuum public.parts", database, Token);
+        await VacuumUntilAllVisibleAsync(server, database, "public.events", "select relallvisible from pg_catalog.pg_class where oid = 'public.events'::regclass");
+        await VacuumUntilAllVisibleAsync(
+            server,
+            database,
+            "public.parts",
+            "select coalesce(sum(relallvisible), 0) from pg_catalog.pg_class "
+            + "where oid in (select inhrelid from pg_catalog.pg_inherits where inhparent = 'public.parts'::regclass)");
 
         // The WAL counters only grow, so the catalog's own answer before the snapshot and after it brackets the snapshot's.
         await using NpgsqlConnection catalog = await server.OpenAsync(MatrixRole.App, database, Token);
@@ -225,6 +231,37 @@ public class BaselineLiveTests(PostgresVersionMatrix matrix)
         }
 
         Report(server, problems);
+    }
+
+    /// <summary>
+    /// <c>VACUUM</c>s <paramref name="table" /> until the catalog counts a page of it all-visible (<paramref name="allVisiblePagesSql" />
+    /// is that count, summed over the leaves of a partitioned table). A page is marked only when every row on it is visible to every
+    /// snapshot, and a backend that holds an older one when the <c>VACUUM</c> runs (a concurrent matrix test's start-up, an
+    /// autovacuum worker listing the databases) leaves it unmarked: the <c>VACUUM</c> is repeated, and the test waits on the
+    /// condition it asserts. Fails with the last count it saw.
+    /// </summary>
+    private static async Task VacuumUntilAllVisibleAsync(MatrixServer server, string database, string table, string allVisiblePagesSql)
+    {
+        long last = -1;
+
+        try
+        {
+            await StorageLive.UntilAsync(
+                async () =>
+                {
+                    await server.ExecuteAsync("vacuum " + table, database, Token);
+
+                    await using NpgsqlConnection connection = await server.OpenAsync(MatrixRole.Superuser, database, Token);
+                    last = Convert.ToInt64(await ScalarAsync(connection, allVisiblePagesSql), CultureInfo.InvariantCulture);
+                    return last > 0;
+                },
+                TimeSpan.FromSeconds(15),
+                "a VACUUM of " + table + " to mark a page all-visible");
+        }
+        catch (TimeoutException e)
+        {
+            throw new TimeoutException(e.Message + " The catalog's relallvisible of " + table + " was " + last + " after the last VACUUM.", e);
+        }
     }
 
     /// <summary>The table's ratio is the catalog's, to the last digit: both are <c>relallvisible / relpages</c> in a double.</summary>
