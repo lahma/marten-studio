@@ -15,12 +15,11 @@ namespace MartenStudio.Tests.Health;
 /// D05's <c>ApplyEvent</c> remedy, per case. From JasperFx.Events 2.93 (Marten 9.52) a database error in projection code is
 /// attributed to its event and never dead-lettered, so <c>SkipApplyErrors</c> is not its remedy: dropped where the daemon
 /// here says the failure is one, kept as it was where it says it is not, kept with the exception named where nothing can
-/// say - and below 2.93 the remedy every version had.
+/// say.
 /// </summary>
 /// <remarks>
-/// Each case is judged against a made-up runtime, so all of them run at the floor and at the latest alike. Only the live
-/// classifier itself (<see cref="The_live_classifier_is_JasperFxs_own_and_answers_only_where_it_exists" />) depends on what
-/// this run resolved.
+/// Each case is judged against a made-up runtime. Only the live classifier itself
+/// (<see cref="The_live_classifier_is_JasperFxs_own" />) depends on what this run resolved.
 /// </remarks>
 public class ShardFailedOrPausedDatabaseErrorTests
 {
@@ -28,18 +27,11 @@ public class ShardFailedOrPausedDatabaseErrorTests
 
     private const string SkipApplyErrors = "opts.Projections.Errors.SkipApplyErrors = true;";
 
-    /// <summary>Marten 9.51.0 with what it brings: no systemic classification.</summary>
-    private static readonly MartenRuntime Below = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
-    {
-        [RuntimePackage.Marten] = "9.51.0",
-        [RuntimePackage.JasperFxEvents] = "2.91.0",
-    });
-
-    /// <summary>Marten 9.52.0 with what it brings: JasperFx.Events 2.93.1.</summary>
+    /// <summary>A Marten that classifies a database error in projection code as systemic: 9.52.0 and later.</summary>
     private static readonly MartenRuntime From = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
     {
-        [RuntimePackage.Marten] = "9.52.0",
-        [RuntimePackage.JasperFxEvents] = "2.93.1",
+        [RuntimePackage.Marten] = "9.57.0",
+        [RuntimePackage.JasperFxEvents] = "2.98.0",
     });
 
     private static HealthFinding Judge(MartenRuntime runtime, IReadOnlyList<DaemonShardRow>? rows, DaemonInProcess? inProcess = null) =>
@@ -61,27 +53,6 @@ public class ShardFailedOrPausedDatabaseErrorTests
             new DaemonAgentFact(Shard, "Paused", "ApplyEvent", "boom", Now - TimeSpan.FromSeconds(20), 40, 41, "item_added", systemic, root),
         ],
     };
-
-    [Fact]
-    public void Below_JasperFx_2_93_the_apply_error_remedy_is_the_one_every_version_had()
-    {
-        HealthFinding finding = Judge(Below, [PersistedApplyError()]);
-
-        finding.Remedy!.Code.Should().Be(SkipApplyErrors);
-        finding.Remedy.Explanation.Should().Be(ShardFailedOrPausedCheck.SkipApplyErrorsExplanation);
-        finding.Evidence.Should().NotContain(static x => x.Label == "Kind of failure");
-    }
-
-    /// <summary>Below 2.93 a database error never reached ApplyEvent, so even a fact that says one did changes nothing.</summary>
-    [Fact]
-    public void Below_JasperFx_2_93_a_classification_that_says_database_error_is_not_believed()
-    {
-        HealthFinding finding = Judge(Below, null, Hosted(systemic: true, "Npgsql.PostgresException"));
-
-        finding.Remedy!.Code.Should().Be(SkipApplyErrors);
-        finding.Remedy.Explanation.Should().Be(ShardFailedOrPausedCheck.SkipApplyErrorsExplanation);
-        finding.Evidence.Should().NotContain(static x => x.Label == "Kind of failure");
-    }
 
     /// <summary>A row read back from mt_event_progression keeps only a category and a text: the remedy names the exception.</summary>
     [Fact]
@@ -183,12 +154,6 @@ public class ShardFailedOrPausedDatabaseErrorTests
 
         permanent.RootExceptionType.Should().Be("Npgsql.PostgresException", "the root is the innermost exception, at every JasperFx");
 
-        if (!RuntimeFeature.SystemicDatabaseFailure.IsAvailable(MartenRuntime.Current))
-        {
-            DaemonLightUp.IsSystemicDatabaseFailure(permanent).Should().BeNull("below JasperFx.Events 2.93 nothing is classified");
-            return;
-        }
-
         DaemonLightUp.IsSystemicDatabaseFailure(permanent).Should().BeTrue("42703 is permanent, and its root is a DbException");
         DaemonLightUp.IsSystemicDatabaseFailure(transient).Should().BeFalse("a deadlock is transient, and a transient failure is not systemic");
         DaemonLightUp.IsSystemicDatabaseFailure(notDatabase).Should().BeNull(
@@ -207,26 +172,18 @@ public class ShardFailedOrPausedDatabaseErrorTests
     }
 
     /// <summary>
-    /// The live half is JasperFx's own <c>IsSystemicDatabaseFailure</c>, reached by reflection: it answers where this run's
-    /// JasperFx.Events has it (2.93+) and is <see langword="null" /> below - so at the floor nothing is classified.
+    /// The live half is JasperFx's own <c>IsSystemicDatabaseFailure</c> (JasperFx.Events 2.93+).
     /// </summary>
     [Fact]
-    public void The_live_classifier_is_JasperFxs_own_and_answers_only_where_it_exists()
+    public void The_live_classifier_is_JasperFxs_own()
     {
         var undefinedColumn = new PostgresException("column \"weight\" does not exist", "ERROR", "ERROR", PostgresErrorCodes.UndefinedColumn);
         var wrapped = new InvalidOperationException("the projection failed", undefinedColumn);
         var notDatabase = new InvalidOperationException("SKU 'POISON' cannot ship");
 
-        if (RuntimeFeature.SystemicDatabaseFailure.IsAvailable(MartenRuntime.Current))
-        {
-            DaemonLightUp.IsSystemicDatabaseFailure(undefinedColumn).Should().BeTrue("42703 is permanent: the next event fails the same way");
-            DaemonLightUp.IsSystemicDatabaseFailure(wrapped).Should().BeTrue("JasperFx walks the exception graph");
-            DaemonLightUp.IsSystemicDatabaseFailure(notDatabase).Should().BeFalse();
-        }
-        else
-        {
-            DaemonLightUp.IsSystemicDatabaseFailure(undefinedColumn).Should().BeNull("JasperFx.Events below 2.93 has no such classifier");
-            DaemonLightUp.IsSystemicDatabaseFailure((JasperFx.Events.Daemon.ShardFailure?) null).Should().BeNull();
-        }
+        DaemonLightUp.IsSystemicDatabaseFailure(undefinedColumn).Should().BeTrue("42703 is permanent: the next event fails the same way");
+        DaemonLightUp.IsSystemicDatabaseFailure(wrapped).Should().BeTrue("JasperFx walks the exception graph");
+        DaemonLightUp.IsSystemicDatabaseFailure(notDatabase).Should().BeFalse();
+        DaemonLightUp.IsSystemicDatabaseFailure((JasperFx.Events.Daemon.ShardFailure?) null).Should().BeNull();
     }
 }

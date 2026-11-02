@@ -2,7 +2,6 @@ using Marten;
 using Marten.Storage;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Support;
 
@@ -14,19 +13,12 @@ using PostgresStudio.Services;
 namespace MartenStudio.Tests.Events;
 
 /// <summary>
-/// SEC1-fix4: on a store whose events are numbered per tenant (<c>UseTenantPartitionedEvents</c>), below Marten 9.51 Skip
-/// event and Rewind subscription are refused in the service before anything is read, and audited - Marten skips by
-/// sequence alone, and the daemon rewinds to one sequence for every tenant. From 9.51 each is one tenant's, and is refused
-/// only without a tenant. On a store with one sequence, neither is refused that way at any version.
+/// SEC1-fix4: on a store whose events are numbered per tenant (<c>UseTenantPartitionedEvents</c>), Skip event and Rewind
+/// subscription are each one tenant's (Marten 9.51), and are refused in the service before anything is read, and audited,
+/// only without a tenant. On a store with one sequence, neither is refused that way.
 /// </summary>
 /// <remarks>
-/// <para>No database: each refusal happens before a connection would open, and this host does not resolve.</para>
-/// <para>
-/// <b>Version-aware, at both ends.</b> Which branch runs is the light-up probe's answer for the Marten this run resolved
-/// (<c>RuntimeFeature.TenantEventSkipping</c>, <c>TenantSubscriptionRewind</c>), and CI runs both: the floor proves the
-/// refusal stands where Marten would skip or rewind every tenant, the latest that a tenant's write gets past it and a
-/// tenant-less one does not.
-/// </para>
+/// No database: each refusal happens before a connection would open, and this host does not resolve.
 /// </remarks>
 public class PerTenantSequenceWritesTests
 {
@@ -35,45 +27,28 @@ public class PerTenantSequenceWritesTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static bool TenantSkipping => RuntimeFeature.TenantEventSkipping.Probe() == true;
-
-    private static bool TenantRewind => RuntimeFeature.TenantSubscriptionRewind.Probe() == true;
-
     [Fact]
-    public async Task Below_Marten_9_51_skip_is_refused_and_audited_on_a_store_that_numbers_events_per_tenant()
+    public async Task A_tenants_skip_gets_past_the_numbering_on_a_store_that_numbers_events_per_tenant()
     {
         await using Harness harness = await Harness.CreateAsync(perTenantSequences: true);
 
         Func<Task> skip = () => harness.Events.SkipEventAsync(harness.Scope with { TenantId = "acme" }, 42, Token);
 
-        if (TenantSkipping)
-        {
-            // 9.51+: the tenant's skip gets past every refusal the store's numbering makes, and fails only where this
-            // unreachable host makes it - at the connection the event's proof opens.
-            Exception refused = (await skip.Should().ThrowAsync<Exception>()).Which;
-            refused.Message.Should().NotBe(StreamCompactionRules.SkipNeedsOneSequence).And.NotBe(StreamCompactionRules.SkipNeedsTenant);
-            return;
-        }
-
-        (await skip.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-
-        StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
-        entry.Action.Should().Be(EventDataService.SkipEventAction);
-        entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-        entry.Capability.Should().Be(nameof(StudioCapability.ManageDeadLetters));
+        // The tenant's skip gets past every refusal the store's numbering makes, and fails only where this unreachable
+        // host makes it - at the connection the event's proof opens.
+        Exception refused = (await skip.Should().ThrowAsync<Exception>()).Which;
+        refused.Message.Should().NotBe(StreamCompactionRules.SkipNeedsTenant);
     }
 
     /// <summary>
-    /// Without a tenant the skip is refused at every version: below 9.51 for the numbering, from 9.51 because a sequence
-    /// alone names an event in every tenant - audited either way.
+    /// Without a tenant the skip is refused: a sequence alone names an event in every tenant - audited.
     /// </summary>
     [Fact]
-    public async Task Skip_with_no_tenant_is_refused_and_audited_at_every_version()
+    public async Task Skip_with_no_tenant_is_refused_and_audited()
     {
         await using Harness harness = await Harness.CreateAsync(perTenantSequences: true);
 
-        string expected = TenantSkipping ? StreamCompactionRules.SkipNeedsTenant : StreamCompactionRules.SkipNeedsOneSequence;
+        string expected = StreamCompactionRules.SkipNeedsTenant;
 
         Func<Task> skip = () => harness.Events.SkipEventAsync(harness.Scope, 42, Token);
 
@@ -86,38 +61,26 @@ public class PerTenantSequenceWritesTests
     }
 
     [Fact]
-    public async Task Below_Marten_9_51_rewind_is_refused_and_audited_on_a_store_that_numbers_events_per_tenant()
+    public async Task A_tenants_rewind_gets_past_the_numbering_on_a_store_that_numbers_events_per_tenant()
     {
         await using Harness harness = await Harness.CreateAsync(perTenantSequences: true);
 
         Func<Task> rewind = () => harness.Events.RewindSubscriptionAsync(harness.Scope with { TenantId = "acme" }, "Poison", 5, Token);
 
-        if (TenantRewind)
-        {
-            // 9.51+ with JasperFx 2.91: the tenant's rewind gets past the numbering's refusal, and is refused for what
-            // the store does not have - no async projection of that name - before any connection or daemon is asked.
-            (await rewind.Should().ThrowAsync<KeyNotFoundException>()).Which.Message.Should().Be(
-                EventDataService.UnknownAsyncProjection("Poison").Message);
-            harness.Ring.GetLatest().Should().ContainSingle().Which.Succeeded.Should().BeFalse();
-            return;
-        }
-
-        (await rewind.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
-
-        StudioActionLogEntry entry = harness.Ring.GetLatest().Should().ContainSingle().Subject;
-        entry.Action.Should().Be(EventDataService.RewindSubscriptionAction);
-        entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
-        entry.Capability.Should().Be(nameof(StudioCapability.ManageDeadLetters));
+        // With JasperFx 2.91: the tenant's rewind gets past the numbering's refusal, and is refused for what the store does
+        // not have - no async projection of that name - before any connection or daemon is asked.
+        (await rewind.Should().ThrowAsync<KeyNotFoundException>()).Which.Message.Should().Be(
+            EventDataService.UnknownAsyncProjection("Poison").Message);
+        harness.Ring.GetLatest().Should().ContainSingle().Which.Succeeded.Should().BeFalse();
     }
 
-    /// <summary>The store-global rewind - no tenant - is refused at every version, audited.</summary>
+    /// <summary>The store-global rewind - no tenant - is refused, audited.</summary>
     [Fact]
-    public async Task Rewind_with_no_tenant_is_refused_and_audited_at_every_version()
+    public async Task Rewind_with_no_tenant_is_refused_and_audited()
     {
         await using Harness harness = await Harness.CreateAsync(perTenantSequences: true);
 
-        string expected = TenantRewind ? StreamCompactionRules.RewindNeedsTenant : StreamCompactionRules.RewindNeedsOneSequence;
+        string expected = StreamCompactionRules.RewindNeedsTenant;
 
         Func<Task> rewind = () => harness.Events.RewindSubscriptionAsync(harness.Scope, "Poison", 5, Token);
 
@@ -132,17 +95,14 @@ public class PerTenantSequenceWritesTests
 
     /// <summary>
     /// A tenant id with a <c>:</c> in it is refused, audited, before the daemon is asked: its agents' identity does not read
-    /// back as its own, and from 9.51 the daemon would hard-stop them before Marten failed to parse it. Below 9.51 the
-    /// numbering's refusal comes first, as for every tenant.
+    /// back as its own, and the daemon would hard-stop them before Marten failed to parse it.
     /// </summary>
     [Fact]
     public async Task A_tenant_whose_agents_cannot_be_addressed_is_refused_before_the_daemon_is_asked()
     {
         await using Harness harness = await Harness.CreateAsync(perTenantSequences: true);
 
-        string expected = TenantRewind
-            ? StreamCompactionRules.RewindTenantNotAddressable("a:b")
-            : StreamCompactionRules.RewindNeedsOneSequence;
+        string expected = StreamCompactionRules.RewindTenantNotAddressable("a:b");
 
         Func<Task> rewind = () => harness.Events.RewindSubscriptionAsync(harness.Scope with { TenantId = "a:b" }, "Poison", 5, Token);
 
@@ -162,10 +122,8 @@ public class PerTenantSequenceWritesTests
         Func<Task> skip = () => harness.Events.SkipEventAsync(harness.Scope with { TenantId = "acme" }, 42, Token);
         Func<Task> rewind = () => harness.Events.RewindSubscriptionAsync(harness.Scope, "Poison", 5, Token);
 
-        (await skip.Should().ThrowAsync<Exception>()).Which.Message.Should().NotBe(StreamCompactionRules.SkipNeedsOneSequence)
-            .And.NotBe(StreamCompactionRules.SkipNeedsTenant);
-        (await rewind.Should().ThrowAsync<Exception>()).Which.Message.Should().NotBe(StreamCompactionRules.RewindNeedsOneSequence)
-            .And.NotBe(StreamCompactionRules.RewindNeedsTenant);
+        (await skip.Should().ThrowAsync<Exception>()).Which.Message.Should().NotBe(StreamCompactionRules.SkipNeedsTenant);
+        (await rewind.Should().ThrowAsync<Exception>()).Which.Message.Should().NotBe(StreamCompactionRules.RewindNeedsTenant);
     }
 
     /// <summary>A studio over a conjoined event store that is never connected to.</summary>

@@ -48,8 +48,8 @@ What a minor or patch release will not break:
 | | Supported | Tested |
 |---|---|---|
 | .NET | `net10.0` | .NET 10; a .NET 11 host (release candidate 3) runs both studios unchanged |
-| Marten (Marten Studio) | 9.x from 9.39.0 | 9.39.0 and 9.56.0 on every build |
-| Npgsql (Postgres Studio, Diagnostics) | from 8.0.3 | 8.0.3 and 10.0.3 |
+| Marten (Marten Studio) | 9.x from 9.57.0 | 9.57.0 on every build |
+| Npgsql (Postgres Studio, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
 | PostgreSQL | 14 to 18 | every major from 14 to 18, and 19's release candidate as a preview |
 
 PostgreSQL 14 reaches its upstream end of life on 2026-11-12. 1.x keeps it in the test matrix; a minor release may stop

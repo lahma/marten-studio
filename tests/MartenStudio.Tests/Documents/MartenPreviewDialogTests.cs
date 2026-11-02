@@ -95,11 +95,11 @@ public class MartenPreviewDialogTests
         section.TextContent.Should().Contain("Customer 03");
     }
 
-    /// <summary>Below 9.53 the section is one quiet line naming the Marten it needs, and nothing is held.</summary>
+    /// <summary>For a store that offers no preview the section is one quiet line, and nothing is held.</summary>
     [Fact]
-    public void Below_9_53_the_section_is_one_line_naming_the_Marten_it_needs_and_holds_nothing()
+    public void A_store_with_no_preview_gets_one_quiet_line_and_holds_nothing()
     {
-        const string line = "Marten's own preview of a save (PreviewDocumentJsonAsync) needs Marten 9.53+; this host runs Marten 9.39.0.";
+        const string line = "This store does not offer Marten's own preview of a save.";
 
         using DocumentsComponentContext context = Context(new MartenPreviewCheck
         {

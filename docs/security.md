@@ -68,7 +68,7 @@ confines people to their own tenant therefore refuses them the database browser 
 `RunSql`, the dead-letter rewind, the progression corrections, rebuilds and a schema apply are asked the
 same way, because each of them reaches every tenant in the database (the operations are narrowed to the
 tenant only when the database holds that tenant alone). One rewind is the exception: on a store with
-`Events.UseTenantPartitionedEvents`, from Marten 9.51 with JasperFx 2.91, the dead-letter rewind is the daemon's
+`Events.UseTenantPartitionedEvents`, since Marten 9.51 with JasperFx 2.91, the dead-letter rewind is the daemon's
 per-tenant one - it stops, rewinds and restarts only that tenant's agents and deletes only that tenant's dead
 letters - so it is asked about the dead letter's tenant, and it is offered only where the daemon in this process
 runs that tenant's agent. On such a store the database-wide rewind is never offered. One window remains, and
@@ -83,7 +83,7 @@ with a `:` in it is never rewound: its agents' identity does not read back as it
 them before Marten refused the rewind. Skip this group (0.6), on the dead-letter page's grouped view, reaches no
 further than Skip event: it is Skip event's own path - `ManageDeadLetters`, the write policy, every sequence proved to
 be the scope's, and Marten's `MarkEventsAsSkipped` (its tenant overload under `UseTenantPartitionedEvents`, in one
-tenant, and refused below Marten 9.51 as Skip event is) - over at most 1,000 of one group's events, audited once with
+tenant, and refused without a tenant as Skip event is) - over at most 1,000 of one group's events, audited once with
 the group and the count.
 
 The database-wide rewind has the same shape under HotCold: the daemon's `RewindSubscriptionAsync` restarts every agent
@@ -714,8 +714,8 @@ should not have been typed is on the record either way.
   its absence is a *value* — "not hosted in this process" — rather than an error.
 - **Never executes DDL on a read or navigation path.** Below Marten 9.50.3 `IMartenDatabase.AllSchemaNames()`
   and `AllObjects()` *apply migrations* — a single `AllSchemaNames()` call on an empty schema creates
-  `mt_hilo` and `mt_get_next_hi`, proven live at the floor — so the studio calls neither, at any version
-  (9.50.3 made them describe the HiLo feature without applying it, and the floor is older). Schema names, declared
+  `mt_hilo` and `mt_get_next_hi`, as proven live at the older floor — so the studio calls neither, at any version
+  (9.50.3 made them describe the HiLo feature without applying it, and the floor is past that; the rule stands). Schema names, declared
   indexes, managed tables and installed functions come from `IReadOnlyStoreOptions`, `IDocumentType` and
   the event store's own feature schema, and touch no connection. `Check`, `Preview` and `DDL` are behind
   buttons that say on the button what they may create. An apply is gated on `ApplySchemaChanges`, runs

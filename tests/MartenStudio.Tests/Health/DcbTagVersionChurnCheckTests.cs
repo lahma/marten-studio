@@ -1,5 +1,4 @@
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health.Checks;
 
 using static MartenStudio.Tests.Health.EventHealthFacts;
@@ -50,7 +49,7 @@ public class DcbTagVersionChurnCheckTests
     }
 
     [Fact]
-    public void Churn_is_a_warning_whose_remedy_needs_Marten_9_47()
+    public void Churn_is_a_warning_with_the_fillfactor_remedy()
     {
         HealthFinding finding = Evaluate(Facts()).Findings.Should().ContainSingle().Subject;
 
@@ -61,21 +60,7 @@ public class DcbTagVersionChurnCheckTests
         finding.Evidence.Should().Contain(new HealthEvidence("Table fillfactor", "100 (PostgreSQL's default)"));
 
         finding.Remedy!.Code.Should().Be("opts.Events.DcbTagVersionFillFactor = 70;");
-        finding.Remedy.Requires.Should().BeSameAs(RuntimeFeature.DcbTagVersionFillFactor);
-        RuntimeFeature.DcbTagVersionFillFactor.Requirement.Should().Be("Marten 9.47+");
-    }
-
-    /// <summary>The page prints "Marten 9.47+" and, on an older host, what it runs - decided by the feature, at both ends.</summary>
-    [Theory]
-    [InlineData("9.39.0", false)]
-    [InlineData("9.46.0", false)]
-    [InlineData("9.47.0", true)]
-    [InlineData("9.50.2", true)]
-    public void The_remedy_is_usable_from_Marten_9_47(string marten, bool usable)
-    {
-        MartenRuntime runtime = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = marten });
-
-        RuntimeFeature.DcbTagVersionFillFactor.IsAvailable(runtime).Should().Be(usable);
+        finding.Remedy.Requires.Should().BeNull("Events.DcbTagVersionFillFactor is in every Marten the studio supports (9.47+)");
     }
 
     [Fact]

@@ -49,13 +49,7 @@ public class DcbTagVersionLiveTests(PostgresFixture postgres)
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Finding.Remedy!.Code.Should().Be("opts.Events.DcbTagVersionFillFactor = 70;");
 
-        bool available = RuntimeFeature.DcbTagVersionFillFactor.IsAvailable(MartenRuntime.Current);
-        finding.RemedyAvailable.Should().Be(available, "the option exists from Marten 9.47, and this run resolved {0}", MartenRuntime.Current.Describe(RuntimePackage.Marten));
-
-        if (!available)
-        {
-            finding.HostRuns.Should().StartWith("Marten 9.", "an older host is told what it runs beside 'Marten 9.47+'");
-        }
+        finding.RemedyAvailable.Should().BeTrue("the option exists since Marten 9.47, and this run resolved {0}", MartenRuntime.Current.Describe(RuntimePackage.Marten));
     }
 
     [PostgresFact]

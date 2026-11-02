@@ -103,7 +103,7 @@ internal sealed record StudioConfiguration(
     public IReadOnlyList<RuntimeFeatureStatus> Features { get; init; } = [];
 }
 
-/// <summary>One light-up feature, as the Configuration page lists it.</summary>
+/// <summary>One light-up feature (a member newer than the floor), as the Configuration page lists it.</summary>
 /// <param name="Name">The feature's name.</param>
 /// <param name="Requirement">"Marten 9.47+".</param>
 /// <param name="Available">Whether this host has it - the probe's answer.</param>

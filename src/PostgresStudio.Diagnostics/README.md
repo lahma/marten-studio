@@ -15,7 +15,7 @@ them, at exactly their own version, and you need not reference it.
 dotnet add package PostgresStudio.Diagnostics
 ```
 
-It brings `Npgsql` (floor `8.0.3`) and the `Microsoft.Extensions.*` abstractions it registers into
+It brings `Npgsql` (floor `9.0.4`) and the `Microsoft.Extensions.*` abstractions it registers into
 (`DependencyInjection.Abstractions`, `Logging.Abstractions`, `Options`, `Diagnostics.HealthChecks`, floor `10.0.0`), and
 references no ASP.NET Core, Marten, JasperFx or Weasel package. Target framework: `net10.0`.
 

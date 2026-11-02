@@ -207,9 +207,6 @@ internal enum LinqAvailability
     /// <summary><see cref="MartenStudioOptions.ReadOnly" /> is on.</summary>
     ReadOnly,
 
-    /// <summary>The host's Marten is older than 9.48 (JasperFx 2.84), which brought <c>DynamicQuery</c>.</summary>
-    MartenTooOld,
-
     /// <summary>
     /// The JasperFx, Marten or System.Linq.Dynamic.Core this process loaded is not the shape the studio was
     /// verified against, so the mode fails closed rather than guessing.

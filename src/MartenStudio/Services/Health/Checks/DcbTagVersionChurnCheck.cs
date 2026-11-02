@@ -1,10 +1,8 @@
 using System.Globalization;
-using System.Reflection;
 
 using Marten.Events;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
@@ -13,8 +11,7 @@ namespace MartenStudio.Services.Health.Checks;
 /// <param name="TagTypes">How many DCB tag types the store registers.</param>
 /// <param name="Table">What the statistics collector says about <c>mt_dcb_tag_version</c>, or <see langword="null" /> with no tag types.</param>
 /// <param name="DeclaredFillFactor">
-/// <c>Events.DcbTagVersionFillFactor</c> as this host set it, on a Marten that has it (9.47+); <see langword="null" />
-/// for unset, or a Marten without it.
+/// <c>Events.DcbTagVersionFillFactor</c> as this host set it; <see langword="null" /> for unset.
 /// </param>
 internal sealed record DcbTagVersionFacts(int TagTypes, DcbTagVersionRow? Table, int? DeclaredFillFactor)
 {
@@ -57,8 +54,7 @@ internal sealed record DcbTagVersionFacts(int TagTypes, DcbTagVersionRow? Table,
 /// <para>
 /// Fires with tag types registered, more than <see cref="MinimumRows" /> rows, and a HOT share under
 /// <see cref="MinHotShare" /> over at least <see cref="MinimumUpdates" /> updates - measured over the advisor's own
-/// window once two samples exist, since the statistics were reset until then. The remedy needs Marten 9.47+
-/// (<see cref="RuntimeFeature.DcbTagVersionFillFactor" />), which the page says beside it on an older host.
+/// window once two samples exist, since the statistics were reset until then.
 /// </para>
 /// </remarks>
 [HealthCheck("E08", HealthArea.Events, HealthCostTier.Catalog, "DCB tag-version churn")]
@@ -82,10 +78,6 @@ internal sealed class DcbTagVersionChurnCheck : HealthCheck<DcbTagVersionFacts>
     /// <summary>The history series of its HOT update count.</summary>
     internal const string HotUpdatesSeries = "events.dcb-tag-version.hot-updates";
 
-    /// <summary><c>EventGraph.DcbTagVersionFillFactor</c>, on a Marten that has it.</summary>
-    private static readonly PropertyInfo? DeclaredFillFactorProperty =
-        typeof(EventGraph).GetProperty("DcbTagVersionFillFactor", BindingFlags.Public | BindingFlags.Instance);
-
     /// <inheritdoc />
     public override async Task<DcbTagVersionFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
     {
@@ -107,7 +99,7 @@ internal sealed class DcbTagVersionChurnCheck : HealthCheck<DcbTagVersionFacts>
             .QueryAsync(HealthEventQueries.DcbTagVersion(shape.Schema), HealthEventQueries.ReadDcbTagVersion, cancellationToken)
             .ConfigureAwait(false);
 
-        return new DcbTagVersionFacts(graph.TagTypes.Count, rows.Count == 0 ? null : rows[0], DeclaredFillFactor(graph));
+        return new DcbTagVersionFacts(graph.TagTypes.Count, rows.Count == 0 ? null : rows[0], graph.DcbTagVersionFillFactor);
     }
 
     /// <inheritdoc />
@@ -236,9 +228,8 @@ internal sealed class DcbTagVersionChurnCheck : HealthCheck<DcbTagVersionFacts>
                 "opts.Events.DcbTagVersionFillFactor = " + RecommendedFillFactor.ToString(CultureInfo.InvariantCulture) + ";",
                 "Leaves 30% of every page free for in-place updates, which #5622 measured at 100% HOT and 45% more disk. The schema "
                 + "delta then shows a pending ALTER TABLE ... SET (fillfactor = 70); it does not rewrite existing pages, so the "
-                + "benefit arrives as pages are rewritten. The option arrived in Marten 9.47 (#5622); an older Marten has no way to "
-                + "declare it, and a fillfactor set on the table by hand is schema the configuration does not know about.",
-                RuntimeFeature.DcbTagVersionFillFactor),
+                + "benefit arrives as pages are rewritten (#5622). A fillfactor set on the table by hand is schema the "
+                + "configuration does not know about."),
         });
     }
 
@@ -275,15 +266,4 @@ internal sealed class DcbTagVersionChurnCheck : HealthCheck<DcbTagVersionFacts>
         + (table.StatsReset is { } reset ? "; the database's statistics were last reset at " + EventHealth.Time(reset) : string.Empty)
         + ". A share over a long window can hide a recent change, and a reset starts it again.";
 
-    private static int? DeclaredFillFactor(EventGraph graph)
-    {
-        try
-        {
-            return DeclaredFillFactorProperty?.GetValue(graph) as int?;
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            return null;
-        }
-    }
 }

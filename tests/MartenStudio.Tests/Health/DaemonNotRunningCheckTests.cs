@@ -30,11 +30,8 @@ public class DaemonNotRunningCheckTests
         new DaemonShardRow("ShipmentTracker:All", 500, Now - TimeSpan.FromHours(1)),
     ];
 
-    private static readonly MartenRuntime Before943 =
-        MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.42.0" });
-
     private static readonly MartenRuntime From943 =
-        MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.43.0" });
+        MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.57.0" });
 
     private static HealthVerdict Evaluate(
         HighWaterReading reading,
@@ -44,7 +41,7 @@ public class DaemonNotRunningCheckTests
         MartenRuntime? runtime = null) =>
         new DaemonNotRunningCheck().Evaluate(
             new DaemonNotRunningFacts(DaemonConfiguration(), reading, shards ?? Behind, inProcess ?? DaemonInProcess.NotHosted, holders ?? []),
-            HealthEvaluation.At(Now, runtime ?? Before943));
+            HealthEvaluation.At(Now, runtime ?? From943));
 
     [Fact]
     public void Work_no_lock_holder_and_a_silent_table_is_critical()
@@ -163,18 +160,8 @@ public class DaemonNotRunningCheckTests
         LatestWrite = Now - (markRowAge ?? TimeSpan.FromHours(1)),
     };
 
-    /// <summary>Below Marten 9.43 a daemon pinned behind a gap writes nothing at all: its silence is D01's, not D02's.</summary>
-    [Fact]
-    public void Below_9_43_a_mark_pinned_behind_a_gap_stands_D02_down()
-    {
-        HealthVerdict verdict = Evaluate(PinnedQuiet(), runtime: Before943);
-
-        verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("D01").And.Contain("Below Marten 9.43");
-    }
-
     /// <summary>
-    /// From 9.43 a running daemon restamps the mark's row even while pinned (#5541): a pin whose row has gone quiet is a
+    /// A running daemon restamps the mark's row even while pinned (#5541): a pin whose row has gone quiet is a
     /// daemon that died pinned, and D02 says so - otherwise D01 stays Critical for ever and nothing says why.
     /// </summary>
     [Fact]

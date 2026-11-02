@@ -2,46 +2,37 @@ using System.Globalization;
 
 using JasperFx.Events.Projections;
 
-using MartenStudio.Services.Configuration;
-
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Projections;
 
 /// <summary>
-/// What the Advance high water mark button and its confirm dialog say the advance does, for the Marten this host runs -
-/// pure text, so each version's words are a unit test.
+/// What the Advance high water mark button and its confirm dialog say the advance does - pure text, so the words are a
+/// unit test.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What it does at every version</b> (v9.51.0 <c>HighWaterDetector.AdvanceHighWaterMarkToLatest</c>, V9.54.1
+/// <b>What it does</b> (v9.51.0 <c>HighWaterDetector.AdvanceHighWaterMarkToLatest</c>, V9.54.1
 /// <c>AdvanceToCommittedCeilingAsync</c>): the mark moves to the highest <em>committed</em> <c>seq_id</c> (#4953), and
 /// every sequence number below it with no committed event - a gap, or an append still in flight that commits later - is
 /// skipped for good by every async projection on that mark. Events that are committed and not yet processed are still
 /// processed: the shards' own progress does not move.
 /// </para>
 /// <para>
-/// <b>What changes from Marten 9.52</b> (#5738, <see cref="RuntimeFeature.PerDatabaseHighWaterAdvance" />): the advance
-/// opens with <c>EnsureStorageExistsAsync(typeof(IEvent))</c>, so under the database's <c>AutoCreate</c> the first press in
-/// a process may create or migrate the event store's tables; and under <c>UseTenantPartitionedEvents</c> it moves each
-/// tenant's own mark - the selected tenant's, or every managed tenant's - where below 9.52 it moved only the store-global
-/// <c>HighWaterMark</c> row, which the daemon does not read on such a store.
+/// <b>Since Marten 9.52</b> (#5738): the advance opens with <c>EnsureStorageExistsAsync(typeof(IEvent))</c>, so under the
+/// database's <c>AutoCreate</c> the first press in a process may create or migrate the event store's tables; and under
+/// <c>UseTenantPartitionedEvents</c> it moves each tenant's own mark - the selected tenant's, or every managed tenant's.
 /// </para>
 /// </remarks>
 internal static class HighWaterAdvanceWording
 {
     /// <summary>The confirm dialog's message, before the sentence about which databases it reaches.</summary>
-    /// <param name="runtime">The Marten this host runs.</param>
     /// <param name="tenantPartitionedEvents"><c>Events.UseTenantPartitionedEvents</c>.</param>
     /// <param name="tenantId">The tenant the scope selector is on, or <see langword="null" />.</param>
     /// <param name="autoCreate">The resolved database's <c>AutoCreate</c>, by name, or <see langword="null" /> when not read.</param>
-    public static string Message(MartenRuntime runtime, bool tenantPartitionedEvents, string? tenantId, string? autoCreate)
+    public static string Message(bool tenantPartitionedEvents, string? tenantId, string? autoCreate)
     {
-        ArgumentNullException.ThrowIfNull(runtime);
-
-        bool from952 = RuntimeFeature.PerDatabaseHighWaterAdvance.IsAvailable(runtime);
-
         string what =
             "This moves the high water mark to the highest committed event sequence. Every sequence number below the new "
             + "mark that has no committed event is skipped for good by every async projection - an append still in flight "
@@ -50,56 +41,38 @@ internal static class HighWaterAdvanceWording
 
         string marks = !tenantPartitionedEvents
             ? string.Empty
-            : !from952
-                ? " This store numbers its events per tenant (UseTenantPartitionedEvents), and below Marten 9.52 the advance "
-                  + "writes only the store-global mark, which the daemon does not read on such a store: no tenant's mark moves."
-                : tenantId is { Length: > 0 } tenant
-                    ? " This store numbers its events per tenant (UseTenantPartitionedEvents): Marten moves tenant "
-                      + tenant + "'s own mark, and no other tenant's."
-                    : " This store numbers its events per tenant (UseTenantPartitionedEvents): Marten moves every tenant's own "
-                      + "mark, in every database it reaches.";
+            : tenantId is { Length: > 0 } tenant
+                ? " This store numbers its events per tenant (UseTenantPartitionedEvents): Marten moves tenant "
+                  + tenant + "'s own mark, and no other tenant's."
+                : " This store numbers its events per tenant (UseTenantPartitionedEvents): Marten moves every tenant's own "
+                  + "mark, in every database it reaches.";
 
-        return what + marks + (from952 ? StorageSentence(autoCreate, tenantId) : string.Empty);
+        return what + marks + StorageSentence(autoCreate, tenantId);
     }
 
-    /// <summary>
-    /// What the enabled button's hover text says it may create, or the empty string below Marten 9.52, where the advance
-    /// ensures nothing.
-    /// </summary>
-    /// <param name="runtime">The Marten this host runs.</param>
+    /// <summary>What the enabled button's hover text says it may create.</summary>
     /// <param name="autoCreate">The resolved database's <c>AutoCreate</c>, by name.</param>
     /// <param name="tenantId">The tenant the scope selector is on, or <see langword="null" />: without one the advance reaches every database.</param>
-    public static string ButtonNote(MartenRuntime runtime, string? autoCreate, string? tenantId = null)
-    {
-        ArgumentNullException.ThrowIfNull(runtime);
-
-        return RuntimeFeature.PerDatabaseHighWaterAdvance.IsAvailable(runtime)
-            ? StorageSentence(autoCreate, tenantId).TrimStart()
-            : string.Empty;
-    }
+    public static string ButtonNote(string? autoCreate, string? tenantId = null) =>
+        StorageSentence(autoCreate, tenantId).TrimStart();
 
     /// <summary>
-    /// The reach sentence for an advance with a tenant selected on a store that numbers its events per tenant, from Marten
-    /// 9.52 - where it moves that tenant's mark alone - or <see langword="null" />, where the shared progression-correction
-    /// sentence applies.
+    /// The reach sentence for an advance with a tenant selected on a store that numbers its events per tenant - where it
+    /// moves that tenant's mark alone - or <see langword="null" />, where the shared progression-correction sentence
+    /// applies.
     /// </summary>
-    /// <param name="runtime">The Marten this host runs.</param>
     /// <param name="tenantPartitionedEvents"><c>Events.UseTenantPartitionedEvents</c>.</param>
     /// <param name="tenantId">The tenant the scope selector is on, or <see langword="null" />.</param>
     /// <remarks>
     /// The authorization does not narrow with it: the service still asks about the tenant's database as a whole, as for
     /// every correction (D27), and a per-tenant authorization for the advance is 0.6's, with the per-database overload.
     /// </remarks>
-    public static string? TenantReach(MartenRuntime runtime, bool tenantPartitionedEvents, string? tenantId)
-    {
-        ArgumentNullException.ThrowIfNull(runtime);
-
-        return tenantPartitionedEvents && tenantId is { Length: > 0 } tenant && RuntimeFeature.PerDatabaseHighWaterAdvance.IsAvailable(runtime)
+    public static string? TenantReach(bool tenantPartitionedEvents, string? tenantId) =>
+        tenantPartitionedEvents && tenantId is { Length: > 0 } tenant
             ? " With tenant " + tenant + " selected, Marten does this in that tenant's database and moves only that "
               + "tenant's own mark. It is still refused unless you may change that database as a whole, or it holds this "
               + "tenant and no other."
             : null;
-    }
 
     /// <summary>
     /// What the advance's storage check may do. With a tenant selected it runs in that tenant's database alone, under
@@ -1000,9 +973,8 @@ internal sealed record RebuildScope(
     TimeSpan ShardTimeout)
 {
     /// <summary>
-    /// What the rebuild replays from, on a Marten that replays from start floors (9.52+,
-    /// <c>RuntimeFeature.ProjectionStartFloors</c>); <see langword="null" /> below it, where every rebuild replays from
-    /// the first event.
+    /// What the rebuild replays from: Marten replays from start floors, and the service always reads them. Null only for
+    /// a dialog not yet loaded.
     /// </summary>
     public RebuildFloor? Floor { get; init; }
 }
@@ -1027,7 +999,7 @@ internal sealed record RebuildScope(
 /// none is stored.
 /// </param>
 /// <param name="TableExists">
-/// Whether <c>mt_event_projection_floors</c> exists in this database. A store migrated below 9.52 has none, so it stores no
+/// Whether <c>mt_event_projection_floors</c> exists in this database. A store migrated by Marten below 9.52 has none, so it stores no
 /// floor - and the first start of a <c>SubscribeFromFirstRun</c> projection there fails with <c>42P01</c>.
 /// </param>
 /// <param name="TenantFloorCount">How many tenants have a floor of their own (under <c>UseTenantPartitionedEvents</c>).</param>
@@ -1079,13 +1051,13 @@ internal sealed record RebuildFloor(
 /// read, so each Marten's wording is a unit test rather than a render.
 /// </summary>
 /// <remarks>
-/// Below Marten 9.52 there is no floor and the words are the ones the dialog always had: "from the beginning", and no
-/// row or note of its own.
+/// With no floor read yet the words are the ones the dialog always had: "from the beginning", and no row or note of its
+/// own.
 /// </remarks>
 internal static class RebuildWording
 {
     /// <summary>How the dialog's one-sentence summary ends: where the replay starts.</summary>
-    /// <param name="floor">The floor, or <see langword="null" /> below 9.52.</param>
+    /// <param name="floor">The floor, or <see langword="null" /> when none was read.</param>
     public static string ReplayPhrase(RebuildFloor? floor) => floor switch
     {
         null => "from the beginning",
@@ -1094,7 +1066,7 @@ internal static class RebuildWording
         _ => "from the beginning, unless its code configures a start floor",
     };
 
-    /// <summary>The "Replays from" row, or <see langword="null" /> below 9.52, where the dialog has none.</summary>
+    /// <summary>The "Replays from" row, or <see langword="null" /> when no floor was read, where the dialog has none.</summary>
     /// <param name="floor">The floor, or <see langword="null" />.</param>
     public static string? ReplaysFrom(RebuildFloor? floor) => floor switch
     {
@@ -1112,7 +1084,7 @@ internal static class RebuildWording
         _ => "the first event, unless its code configures a start floor",
     };
 
-    /// <summary>What a floor does to the projection's documents, or <see langword="null" /> below 9.52.</summary>
+    /// <summary>What a floor does to the projection's documents, or <see langword="null" /> when no floor was read.</summary>
     /// <param name="floor">The floor, or <see langword="null" />.</param>
     public static string? FloorNote(RebuildFloor? floor) => floor switch
     {

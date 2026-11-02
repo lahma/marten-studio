@@ -36,8 +36,8 @@ that read it (Show SQL - parameter names, never values), a caveat that says how 
 For a table a Marten store declares, a remedy is always a `StoreOptions` line for the host's own registration,
 never DDL. An index, a storage parameter or a setting the studio created itself would be schema the host's
 configuration does not know about, and the next `CreateOrUpdate` would take it away again. A remedy that needs a
-Marten newer than the studio's floor says so ("Marten 9.47+") and, on a host that runs an older one, what that host
-runs. For any other table - the host's own relational tables, in either studio - the remedy is migration SQL, shown
+Marten newer than the studio's floor would say so ("Marten 9.99+") and, on a host that runs an older one, what that host
+runs; none does at 1.1, whose floor is the latest release. For any other table - the host's own relational tables, in either studio - the remedy is migration SQL, shown
 under "For your own migrations - the studio never runs this", with every name quoted and no statement at all for a
 name that cannot be quoted safely; a recognised library's table (Quartz.NET, Wolverine, EF Core's and FluentMigrator's
 history) is left out of the index-design rules, and its other remedies say the library's design is left alone. A

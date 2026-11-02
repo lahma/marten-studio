@@ -127,8 +127,9 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
     write nothing, as `FirstNavigationLiveTests` in `PostgresStudio.Integration.Tests` proves for every core page.)
     Below Marten 9.50.3 the first two *apply migrations*, under the database's own `AutoCreate`, when a document type
     has a numeric or HiLo id: **a single `AllSchemaNames()` call on an empty schema creates `mt_hilo` and
-    `mt_get_next_hi`**. From 9.50.3 (#5665) the enumeration is offline (`RuntimeFeature.OfflineSchemaEnumeration`); the
-    rule stands at every version because the floor has the hazard, and `SchemaNoDdlLiveTests` pins both ends. The last
+    `mt_get_next_hi`**. From 9.50.3 (#5665) the enumeration is offline, and since the 1.1 floor of 9.57 no supported Marten
+    has the hazard; the rule stands at every version all the same (a numeric id's runtime `Sequences` still provisions the
+    HiLo objects on first use), and `SchemaNoDdlLiveTests` pins that Marten's enumeration creates nothing. The last
     two are slow, connection-hungry and still connect. **Nor does a read path run a Marten LINQ terminal**
     (`ToListAsync`, `CountAsync`, `FirstOrDefaultAsync` and the rest), `ToCommand`, `ExplainAsync`, `ToPreviewCommand`,
     `LoadAsync`, `LoadManyAsync` or a `session.Events` read such as `FetchStreamAsync` or `AggregateStreamAsync`: each

@@ -19,8 +19,8 @@ namespace MartenStudio.Services.Schema;
 /// which walk <c>IMartenDatabase.AllObjects()</c> - and below Marten 9.50.3 that builds Marten's feature
 /// schemas through the lazy HiLo <c>Sequences</c> feature, whose initialiser applies a migration under the
 /// database's own <c>AutoCreate</c>. There they can create Marten's own bookkeeping objects (<c>mt_hilo</c>,
-/// <c>mt_get_next_hi</c>) on a schema that did not have them; from 9.50.3 (#5665) the enumeration describes
-/// them without applying anything (<c>RuntimeFeature.OfflineSchemaEnumeration</c>). Every one of them is
+/// <c>mt_get_next_hi</c>) on a schema that did not have them; since 9.50.3 (#5665) the enumeration describes
+/// them without applying anything. Every one of them is
 /// still connection-hungry, is behind a button that says what it may do on this host's Marten, and may not
 /// be called on navigation.
 /// </para>

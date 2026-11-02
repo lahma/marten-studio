@@ -1,4 +1,3 @@
-using MartenStudio.Services.Configuration;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -21,7 +20,7 @@ public class HealthSweeperTests
 
         HealthSweep sweep = await harness.SweepAsync();
 
-        sweep.Results.Select(static x => x.Check.Code).Should().BeEquivalentTo(["K90", "K91", "T90", "C90", "D90"]);
+        sweep.Results.Select(static x => x.Check.Code).Should().BeEquivalentTo(["K90", "K91", "T90", "C90"]);
         harness.Script.Runs.Should().NotContainKey("E90", "tier 2 runs only behind Run deeper checks");
     }
 
@@ -238,22 +237,23 @@ public class HealthSweeperTests
 
     /// <summary>
     /// A check whose feature this host's Marten lacks is listed as not applicable, and never run - asked of a made-up
-    /// host on the floor, Marten 9.39.0 with JasperFx.Events 2.74.0, so the answer is the same whichever Marten this run
-    /// resolved: D90's classifier is in every Marten from 9.50.3, the latest tested among them.
+    /// host and a made-up feature (<see cref="ScriptedStudioRuntime" />: the probe table is empty at 1.1.0), so the answer
+    /// is the same whichever Marten this run resolved.
     /// </summary>
     [Fact]
     public async Task A_check_that_needs_a_newer_Marten_is_not_applicable_and_never_runs()
     {
-        await using HealthHarness harness = HealthHarness.Create(runtime: FloorHost);
+        await using HealthHarness harness = HealthHarness.Create(
+            checks: [typeof(ScriptedConfigurationCheck), typeof(ScriptedLightUpCheck)],
+            runtime: ScriptedStudioRuntime.HostWithout,
+            studioRuntime: new ScriptedStudioRuntime(ScriptedStudioRuntime.HostWithout));
 
         HealthSweep sweep = await harness.SweepAsync();
 
         HealthCheckResult result = sweep.Results.Single(static x => x.Check.Code == "D90");
         result.Outcome.Should().Be(HealthCheckOutcome.NotApplicable);
-        result.Note.Should().Contain("Needs Marten 9.50.3+",
-            "the classifier is JasperFx.Events 2.89's, and the first Marten that brings it is a patch release, named in full");
-        result.Note.Should().Contain("this host runs Marten 9.39.0 (JasperFx.Events 2.74.0)",
-            "review item 9: the host's Marten first, the package the feature is in after it");
+        result.Note.Should().Contain("Needs Marten 9.99+", "the requirement is printed as the feature spells it");
+        result.Note.Should().Contain("this host runs Marten 9.57.0", "review item 9: the host's Marten first");
         harness.Script.Runs.Should().NotContainKey("D90");
     }
 
@@ -261,25 +261,16 @@ public class HealthSweeperTests
     [Fact]
     public async Task A_check_whose_feature_the_host_has_runs()
     {
-        await using HealthHarness harness = HealthHarness.Create(runtime: MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
-        {
-            [RuntimePackage.Marten] = "9.50.3",
-            [RuntimePackage.JasperFxEvents] = "2.90.1",
-        }));
+        await using HealthHarness harness = HealthHarness.Create(
+            checks: [typeof(ScriptedConfigurationCheck), typeof(ScriptedLightUpCheck)],
+            runtime: ScriptedStudioRuntime.HostWithIt,
+            studioRuntime: new ScriptedStudioRuntime(ScriptedStudioRuntime.HostWithIt));
 
         HealthSweep sweep = await harness.SweepAsync();
 
         sweep.Results.Single(static x => x.Check.Code == "D90").Outcome.Should().Be(HealthCheckOutcome.Checked);
         harness.Script.Runs.Should().ContainKey("D90");
     }
-
-    /// <summary>A host on the floor, as a made-up runtime: every light-up absent.</summary>
-    private static MartenRuntime FloorHost => MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
-    {
-        [RuntimePackage.Marten] = "9.39.0",
-        [RuntimePackage.JasperFx] = "2.74.0",
-        [RuntimePackage.JasperFxEvents] = "2.74.0",
-    });
 
     /// <summary>
     /// Review item 4: two findings under one key would be two elements under one Blazor @key. H1-fix item 5: the
@@ -370,11 +361,10 @@ public class HealthSweeperTests
     [Fact]
     public async Task A_check_whose_turn_comes_after_the_sweep_budget_is_not_started()
     {
-        await using HealthHarness harness = HealthHarness.Create(runtime: FloorHost);
+        await using HealthHarness harness = HealthHarness.Create();
         harness.Sweeper.SweepBudget = TimeSpan.FromMilliseconds(300);
 
-        // Tier by tier (H10): the in-process K90 and K91 first, then the catalog's D90 (not applicable on the floor host
-        // this harness is told it runs, at every Marten the suite runs at), T90 and C90.
+        // Tier by tier (H10): the in-process K90 and K91 first, then the catalog's T90 and C90.
         // T90 outlives the budget, so C90 - whose turn comes after it - is the one not started.
         harness.Script.Gather["T90"] = static async (_, token) =>
         {

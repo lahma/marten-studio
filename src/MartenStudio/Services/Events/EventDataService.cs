@@ -1,7 +1,6 @@
 using System.Data;
 using System.Globalization;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
 
 using JasperFx.Events;
 using JasperFx.Events.Daemon;
@@ -13,7 +12,6 @@ using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.Logging;
@@ -155,8 +153,6 @@ internal sealed partial class EventDataService : IEventDataService
                 HasTenantId = table.HasTenantId,
                 EventsConjoined = resolved.Store.Options.Events.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined,
                 PerTenantSequences = resolved.Store.Options.Events.UseTenantPartitionedEvents,
-                TenantSkipping = resolved.Store.Options.Events.UseTenantPartitionedEvents && TenantSkipAvailable,
-                TenantRewind = resolved.Store.Options.Events.UseTenantPartitionedEvents && TenantRewindAvailable,
                 HasIsArchived = table.HasIsArchived,
                 HasIsSkipped = table.HasIsSkipped,
                 HasBinaryData = table.HasBinaryData,
@@ -1634,12 +1630,10 @@ internal sealed partial class EventDataService : IEventDataService
             sequence.ToString(CultureInfo.InvariantCulture),
             async (resolved, token) =>
             {
-                // First, before anything is read: below Marten 9.51 MarkEventsAsSkipped is `update mt_events set
-                // is_skipped = TRUE where seq_id = ANY(:sequences)` with no tenant predicate (MartenDatabase.EventStorage.cs,
-                // read at V9.39.0 and V9.50.2), and under UseTenantPartitionedEvents every tenant numbers seq_id on its own -
-                // so skipping acme's #42 skipped every tenant's #42, whatever the proof below found (SEC1-fix4). Refused, and
-                // audited as failed; the page disables the button with the same sentence. From 9.51 (#5698) Marten has a
-                // tenant overload that adds `and tenant_id = :tenant_id` on a conjoined event store - which
+                // First, before anything is read: under UseTenantPartitionedEvents every tenant numbers seq_id on its own, so
+                // the tenant-less MarkEventsAsSkipped (`update mt_events set is_skipped = TRUE where seq_id = ANY(:sequences)`,
+                // no tenant predicate) would skip every tenant's #42 when acme's was meant (SEC1-fix4). Marten's tenant
+                // overload (#5698) adds `and tenant_id = :tenant_id` on a conjoined event store - which
                 // UseTenantPartitionedEvents requires - so there the skip is one tenant's, and needs one (the page pins
                 // the dead letter's own). The reach is that tenant's events and nothing else, so the scope the write policy
                 // was asked about, (store, database, tenant), is the whole of it (SEC1-fix4's rule, kept).
@@ -1673,19 +1667,14 @@ internal sealed partial class EventDataService : IEventDataService
 
     /// <summary>
     /// The numbering check both skips make first, before anything is read: under <c>UseTenantPartitionedEvents</c> a skip
-    /// needs Marten's tenant overload (9.51) and a tenant to hand it.
+    /// needs Marten's tenant overload and a tenant to hand it.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The store numbers events per tenant and this Marten, or this scope, cannot skip one tenant's.</exception>
+    /// <exception cref="InvalidOperationException">The store numbers events per tenant and this scope cannot skip one tenant's.</exception>
     private static void RequireSkippableNumbering(ResolvedScope resolved)
     {
         if (!resolved.Store.Options.Events.UseTenantPartitionedEvents)
         {
             return;
-        }
-
-        if (!TenantSkipAvailable)
-        {
-            throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
         }
 
         if (resolved.TenantId is null)
@@ -1709,7 +1698,7 @@ internal sealed partial class EventDataService : IEventDataService
     /// </summary>
     /// <remarks>
     /// <c>IMartenDatabase.MarkEventsAsSkipped</c> writes <c>update mt_events set is_skipped = true where seq_id =
-    /// any(...)</c> with no tenant predicate below 9.51 - and from 9.51 its tenant overload narrows only a conjoined store -
+    /// any(...)</c> with no tenant predicate - and its tenant overload narrows only a conjoined store -
     /// so on a store whose events carry <c>tenant_id</c> a sequence, which a dead letter hands over as a number, has to be
     /// proved to be this scope's before the write. The statement is <see cref="EventQueryBuilder.BuildSequencesInScope" />,
     /// the dead-letter expansion's own predicate over every sequence at once. With no tenant in the scope there is nothing
@@ -1750,7 +1739,7 @@ internal sealed partial class EventDataService : IEventDataService
     /// <summary>
     /// The one Marten call both skips end in, past every check, on a token of the operation's own (<see cref="CommitAsync(Func{CancellationToken, Task})" />):
     /// <c>MarkEventsAsSkipped(sequences)</c>, or under <c>UseTenantPartitionedEvents</c> its tenant overload for the scope's
-    /// tenant (<see cref="MarkTenantEventsAsSkippedAsync" />). A page that goes away now has not decided to abandon it, and
+    /// tenant. A page that goes away now has not decided to abandon it, and
     /// the audit entry has to say how it ended.
     /// </summary>
     private async Task CommitSkipAsync(ResolvedScope resolved, long[] sequences)
@@ -1759,7 +1748,7 @@ internal sealed partial class EventDataService : IEventDataService
         {
             if (resolved.Store.Options.Events.UseTenantPartitionedEvents)
             {
-                await CommitAsync(committing => MarkTenantEventsAsSkippedAsync(resolved.Database, resolved.TenantId!, sequences, committing))
+                await CommitAsync(committing => resolved.Database.MarkEventsAsSkipped(resolved.TenantId!, sequences, committing))
                     .ConfigureAwait(false);
                 return;
             }
@@ -1770,55 +1759,6 @@ internal sealed partial class EventDataService : IEventDataService
         {
             // A group's skipped count changed - or may have, if the call failed part-way.
             groups.InvalidateDatabase(resolved);
-        }
-    }
-
-    /// <summary>
-    /// Whether this Marten skips one tenant's event (<see cref="RuntimeFeature.TenantEventSkipping" />, 9.51+) - asked of
-    /// this process's own runtime, so the probe answers for the assemblies actually loaded.
-    /// </summary>
-    private static bool TenantSkipAvailable => RuntimeFeature.TenantEventSkipping.IsAvailable(MartenRuntime.Current);
-
-    /// <summary>
-    /// Whether this process's JasperFx and Marten rewind one tenant's agents (<see cref="RuntimeFeature.TenantSubscriptionRewind" />,
-    /// 9.51+).
-    /// </summary>
-    private static bool TenantRewindAvailable => RuntimeFeature.TenantSubscriptionRewind.IsAvailable(MartenRuntime.Current);
-
-    /// <summary>
-    /// <c>IMartenDatabase.MarkEventsAsSkipped(tenantId, sequences, token)</c>, Marten 9.51's tenant overload, reached by
-    /// reflection because the floor the studio compiles against has no such member.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The one call of it, so the argument order is chosen once, reached only from <see cref="CommitSkipAsync" />. Invoked
-    /// through the interface's declaration, which dispatches to <c>MartenDatabase</c>'s implementation - the probe has
-    /// already said there is one rather than the interface's throwing default - and a missing member is a refusal in the
-    /// floor's words rather than a call that fails half-way. Like the tenant-less overload it opens with
-    /// <c>EnsureStorageExistsAsync(typeof(IEvent))</c>, and is a capability-gated, audited write for the same reason;
-    /// <c>StorageEnsuringCallTests</c> cannot see a reflected call, and lists that among the shapes it does not see.
-    /// </para>
-    /// </remarks>
-    internal static Task MarkTenantEventsAsSkippedAsync(IMartenDatabase database, string tenantId, long[] sequences, CancellationToken token)
-    {
-        ArgumentNullException.ThrowIfNull(database);
-        ArgumentException.ThrowIfNullOrEmpty(tenantId);
-        ArgumentNullException.ThrowIfNull(sequences);
-
-        if (RuntimeFeature.TenantSkipMethod() is not { } method)
-        {
-            throw new InvalidOperationException(StreamCompactionRules.SkipNeedsOneSequence);
-        }
-
-        try
-        {
-            return method.Invoke(database, [tenantId, sequences, token]) as Task
-                ?? throw new InvalidOperationException("Marten's MarkEventsAsSkipped(tenantId, sequences) returned no task.");
-        }
-        catch (TargetInvocationException wrapped) when (wrapped.InnerException is { } inner)
-        {
-            ExceptionDispatchInfo.Capture(inner).Throw();
-            throw;
         }
     }
 
@@ -1972,14 +1912,14 @@ internal sealed partial class EventDataService : IEventDataService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Only from Marten 9.51 with JasperFx 2.91</b> (<see cref="RuntimeFeature.TenantSubscriptionRewind" />). There the
+    /// <b>Since Marten 9.51 with JasperFx 2.91.</b> The
     /// daemon's per-tenant <c>RewindSubscriptionAsync(name, tenantId, token, floor)</c> (jasperfx#1025) stops that
     /// tenant's agents of the subscription and no others, has Marten rewrite each of that tenant's shard rows through the
     /// tenant agent's own identity, <c>{Name}:{ShardKey}:{tenant}</c> - which Marten 9.51 resolves (#5700,
     /// <c>findTenantShard</c>) where 9.50 threw "Unknown subscription name" - and restarts them against that tenant's own
     /// high-water mark. Marten deletes only the dead letters with that projection, that shard key, that tenant and a
-    /// sequence at or above the floor (<c>DocumentStore.EventStore.cs</c> at v9.51.0). Below either, the floor's refusal
-    /// (SEC1-fix4) stands.
+    /// sequence at or above the floor (<c>DocumentStore.EventStore.cs</c> at v9.51.0). The store-global form is refused
+    /// on such a store (SEC1-fix4).
     /// </para>
     /// <para>
     /// <b>Reach is the tenant.</b> The progression rows, the dead letters and the agents it touches are all that
@@ -2017,11 +1957,6 @@ internal sealed partial class EventDataService : IEventDataService
         long eventSequence,
         CancellationToken token)
     {
-        if (!TenantRewindAvailable)
-        {
-            throw new InvalidOperationException(StreamCompactionRules.RewindNeedsOneSequence);
-        }
-
         if (resolved.TenantId is not { } tenantId)
         {
             throw new InvalidOperationException(StreamCompactionRules.RewindNeedsTenant);

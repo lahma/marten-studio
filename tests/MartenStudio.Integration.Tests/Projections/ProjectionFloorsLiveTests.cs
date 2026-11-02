@@ -1,4 +1,3 @@
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 
 using Npgsql;
@@ -21,8 +20,6 @@ public class ProjectionFloorsLiveTests(PostgresFixture postgres)
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static bool FloorsApply => RuntimeFeature.ProjectionStartFloors.IsAvailable(MartenRuntime.Current);
-
     [PostgresFact]
     public async Task A_stored_floor_is_where_the_rebuild_dialog_says_the_replay_starts_and_what_it_takes_off()
     {
@@ -32,13 +29,6 @@ public class ProjectionFloorsLiveTests(PostgresFixture postgres)
         RebuildScope before = await fixture.UseAsync(service => service.DescribeRebuildAsync(fixture.Scope, DailySales, Token));
         long highWater = before.EventsToReplay;
         highWater.Should().BeGreaterThan(10, "the premise: the seeded events are there to replay");
-
-        if (!FloorsApply)
-        {
-            before.Floor.Should().BeNull("below Marten 9.52 every rebuild replays from the first event, and nothing is read");
-            (await TableExistsAsync(fixture.EventSchema)).Should().BeFalse("and nothing declares the table");
-            return;
-        }
 
         before.Floor.Should().Be(RebuildFloor.None, "the table is there and holds no floor for the projection");
 
@@ -68,16 +58,9 @@ public class ProjectionFloorsLiveTests(PostgresFixture postgres)
 
         RebuildScope scope = await fixture.UseAsync(service => service.DescribeRebuildAsync(fixture.Scope, DailySales, Token));
 
-        if (FloorsApply)
-        {
-            scope.Floor.Should().NotBeNull();
-            scope.Floor!.TableExists.Should().BeFalse();
-            scope.Floor.Stored.Should().BeNull();
-        }
-        else
-        {
-            scope.Floor.Should().BeNull();
-        }
+        scope.Floor.Should().NotBeNull();
+        scope.Floor!.TableExists.Should().BeFalse();
+        scope.Floor.Stored.Should().BeNull();
 
         (await TableExistsAsync(fixture.EventSchema)).Should().BeFalse("a read path creates nothing");
     }

@@ -134,7 +134,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
 
     [PostgresFact]
     [HealthFires("T06")]
-    public async Task Updates_on_full_pages_with_no_blocking_index_are_a_T06_FillFactor_warning_worded_for_this_Marten()
+    public async Task Updates_on_full_pages_with_no_blocking_index_are_a_T06_FillFactor_warning()
     {
         ManualClock clock = new(Covering);
         await using HealthLiveHost host = await HostAsync(postgres, "health_t06_fires", clock, static o => o.Schema.For<HealthScanThing>());
@@ -153,10 +153,9 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthScanThing>().FillFactor(80);");
 
-        // The version half, at whichever Marten built this run: below 9.47 the page says what this host runs.
-        bool available = RuntimeFeature.DocumentFillFactor.IsAvailable(MartenRuntime.Current);
-        finding.RemedyAvailable.Should().Be(available);
-        finding.HostRuns.Should().Be(available ? null : MartenRuntime.Current.Describe(RuntimePackage.Marten));
+        // FillFactor is in every Marten the studio supports (9.47+): the remedy is usable and names no host.
+        finding.RemedyAvailable.Should().BeTrue();
+        finding.HostRuns.Should().BeNull();
     }
 
     [PostgresFact]
@@ -200,7 +199,7 @@ public class TableHealthFiresLiveTests(PostgresFixture postgres)
         finding.Finding.Subject.Should().Be(KeyOf<HealthScanThing>(host.Store));
         finding.Finding.WhyItMatters.Should().Contain("switched off for this table");
         finding.Finding.Remedy!.Code.Should().Contain("StorageParameter(\"autovacuum_enabled\", true)");
-        finding.Finding.Remedy.Requires.Should().BeSameAs(RuntimeFeature.DocumentStorageParameter);
+        finding.Finding.Remedy.Requires.Should().BeNull("StorageParameter is in every Marten the studio supports (9.47+)");
     }
 
     [PostgresFact]

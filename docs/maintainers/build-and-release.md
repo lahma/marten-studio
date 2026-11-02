@@ -4,10 +4,10 @@ This is the full text of D3, D21, the *Package budget changes* and *Held deliber
 
 ## D3
 
-**D3 — Few dependencies a package, and no upper bound on any: MartenStudio (`Marten`, floor `9.39.0`, and PostgresStudio
+**D3 — Few dependencies a package, and no upper bound on any: MartenStudio (`Marten`, floor `9.57.0`, and PostgresStudio
 at exactly its own version), PostgresStudio (PostgresStudio.Diagnostics at exactly its own version, and
 `Microsoft.AspNetCore.App.Internal.Assets`, floor `10.0.12`) - each plus `FrameworkReference
-Microsoft.AspNetCore.App` - and PostgresStudio.Diagnostics (`Npgsql`, floor `8.0.3`, and four `Microsoft.Extensions.*`
+Microsoft.AspNetCore.App` - and PostgresStudio.Diagnostics (`Npgsql`, floor `9.0.4`, and four `Microsoft.Extensions.*`
 abstractions, floor `10.0.0`), with no framework reference at all.** Everything else either RCL needs (Blazor, SignalR,
 authorization, endpoint routing) is in the shared framework, so neither pins an ASP.NET Core patch onto its host; nor does
 the assets pack, three `.js` files and an MSBuild target with no `lib/`, no `ref/` and no runtime assembly (D22); and the
@@ -15,8 +15,8 @@ engine, which a worker host takes alone, needs no ASP.NET Core at all (hard rule
 ETag'd HTTP JSON writers generic over `T`, and the studio only ever has a runtime `Type`. MartenStudio has no direct
 `Npgsql`, which arrives through `Weasel.Postgresql` and must not drift from it; PostgresStudio.Diagnostics, with no Marten
 to bring it, references `Npgsql` directly, and PostgresStudio takes it through that reference (*Build*; since 0.11-C, with
-the engine in a package of its own - *Package budget changes* 2026-11-01). The Marten floor is a *security* floor (*Package budget changes*), tested
-and packed as *Build* says. The studio compiles without the JasperFx source generator Marten bundles, so its public API
+the engine in a package of its own - *Package budget changes* 2026-11-01). The floors follow the latest releases (*Package budget changes*, 2026-11-03: the user's policy of
+2026-11-02 is that consumers keep up with Marten and Npgsql), tested and packed as *Build* says. The studio compiles without the JasperFx source generator Marten bundles, so its public API
 is the same whichever Marten built it.
 
 ## D21
@@ -36,18 +36,26 @@ floor move was, what it replaced, what was measured and its exit condition. A re
 <date>" names an entry there. Hard rule 1's decision is a new entry in that file, and so is every floor or
 latest-tested move; read a package's entries before changing its row. What they settled:
 
-- **Marten's floor, 9.39.0, is a security floor** (GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5, 2026-10-15). The code
-  needs nothing above 9.31.0 (2026-09-19), and the walls below that are recorded there: GHSA-rfx3-98h7-v3xp up to
-  9.12.0, `ShardFailure` from 9.20.0, `ShardName.HighWaterMarkFor` from 9.22.4, the generator's dispatcher from 9.24.0
-  and the extended progression columns from 9.31.0. Each latest-tested bump's entry records every behavioural
-  difference and every light-up.
-- **PostgresStudio's Npgsql floor is 8.0.3** (2026-10-26, PS-7). 7.x has no pool instruments, and 8.0.0–8.0.2 carry
-  CVE-2024-32655.
+- **Marten's floor is 9.57.0, and the floors follow the latest releases** (2026-11-03; the user's policy of 2026-11-02:
+  "we can also target and require newer npgsql and marten if that helps, we can expect consumers to keep up with latest
+  development"). 9.57.0 fixes #5797 (compacting a stream that folds to null replaced its whole history with an empty
+  snapshot), which the studio's `CompactStreams` exposed on every host below it; every run-time light-up from 9.31 to 9.53
+  became unconditional. History, all recorded in the entries: the 9.39.0 security floor (GHSA-q4xm-rhx9-xjm4 and
+  GHSA-frqq-p5g3-8jq5, 2026-10-15), the code's own need of 9.31.0 (2026-09-19), and the walls below that
+  (GHSA-rfx3-98h7-v3xp up to 9.12.0, `ShardFailure` from 9.20.0, `ShardName.HighWaterMarkFor` from 9.22.4, the
+  generator's dispatcher from 9.24.0 and the extended progression columns from 9.31.0). Each latest-tested bump's entry
+  records every behavioural difference and every light-up.
+- **PostgresStudio's Npgsql floor is 9.0.4** (2026-11-03), the Npgsql Marten 9.57.0 itself references, so a Marten host is
+  never moved off Marten's own (`NpgsqlVersionTests`). It was 8.0.3 (2026-10-26, PS-7: 7.x has no pool instruments, and
+  8.0.0–8.0.2 carry CVE-2024-32655).
 - **The JasperFx source generator is removed from MartenStudio's compilation by a target**, because `ExcludeAssets`
   does nothing for analyzers in SDK 10.0.402 (2026-10-15).
-- **The exit condition is the same for every floor.** Raise a floor when a member the studio needs is absent below the
-  new value, or when a published advisory makes restore at the floor fail (`NU1901`-`NU1904`), and say which in a new
-  entry. Bump a latest-tested version in a pull request of its own, with the suites it covers green at it.
+- **The rule for floors, since 2026-11-03.** Floors follow the latest releases: at a minor release the Marten and Npgsql
+  floors may move to the latest tested versions (user, 2026-11-02), and a floor must still rise when a member the studio
+  needs is absent below the new value or a published advisory makes restore at the floor fail (`NU1901`-`NU1904`). Say
+  which in a new entry. Keep a Marten host on Marten's own Npgsql (`NpgsqlVersionTests`). Bump a latest-tested version in
+  a pull request of its own, with the suites it covers green at it; between releases it equals the floor, and the
+  `RuntimeFeature` table is empty until a bump past the floor puts a feature in it.
 
 **Held deliberately, and not stale.**
 
@@ -89,22 +97,22 @@ Do not "update" it.
 tests, an exact version) are defined there once; `Marten`'s `PackageVersion` reads
 `$(MartenStudioMartenVersion)`, which defaults to the floor. `build/Build.Marten.cs` resolves
 `--marten-version` (env `MARTEN_VERSION`) — `floor`, the default; `latest`; or an exact version such as
-`9.56.0`, never a range — in `OnBuildInitialized`, and passes the result as
+`9.57.0`, never a range — in `OnBuildInitialized`, and passes the result as
 `-p:MartenStudioMartenVersion=` to Restore, Compile and Test, the floor included, so an environment
 variable of that name cannot change what a run tests. Without Fallout, `dotnet test …
--p:MartenStudioMartenVersion=9.56.0` does the same. **`Pack` packs at the floor and refuses anything
+-p:MartenStudioMartenVersion=9.57.0` does the same. **`Pack` packs at the floor and refuses anything
 else**, twice: the Fallout target asserts it, and `MartenStudio.csproj` fails a bare `dotnet pack` before
 the nuspec is written unless both `MartenStudioMartenVersion` is the floor *and* `project.assets.json`
 holds the `"Marten/<floor>"` library — because NuGet writes the dependency range from the assets file,
-so `dotnet test … -p:MartenStudioMartenVersion=9.56.0` followed by `dotnet pack --no-restore` would
-otherwise pass a property check and still ship `Marten >= 9.56.0`. A missing assets file is a refusal,
+so `dotnet test … -p:MartenStudioMartenVersion=9.57.0` followed by `dotnet pack --no-restore` would
+otherwise pass a property check and still ship `Marten >= 9.57.0`. A missing assets file is a refusal,
 not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
 latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
 and fix or record every difference in the same pull request. Raising the floor is a *Package budget
 changes* entry, never a side effect.
 
 **PostgresStudio's Npgsql is `Directory.Packages.props`'s too, and anything but its floor gets a pass of its own.**
-`PostgresStudioNpgsqlFloor` (8.0.3, what the PostgresStudio package depends on; never above the Npgsql that Marten's
+`PostgresStudioNpgsqlFloor` (9.0.4, what the PostgresStudio package depends on; never above the Npgsql that Marten's
 own packages already require at the Marten floor, which `NpgsqlVersionTests` reads from MartenStudio's restore) and
 `PostgresStudioNpgsqlLatest` (10.0.3) are defined there once, and the `Npgsql` row reads `$(PostgresStudioNpgsqlVersion)`
 only for a project that sets `PostgresStudioPinsNpgsql`. `build/Build.Npgsql.cs` resolves `--npgsql-version` (env

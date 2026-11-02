@@ -183,10 +183,10 @@ public class StorageEnsuringCallTests
             ["DiscardDeadLetterAsync"],
             "DiscardDeadLetterAsync: whether a missed id belongs to another tenant, so the refusal is a refusal"),
         new("src/MartenStudio/Services/Events/EventDataService.cs", "MarkEventsAsSkipped",
-            ["CommitSkipAsync"],
-            "CommitSkipAsync, the one commit of SkipEventAsync and SkipDeadLetterGroupAsync (ManageDeadLetters), audited; "
-            + "NoSchemaBuildingCallTests allows it too. Its 9.51 tenant overload is reached by reflection from the same commit "
-            + "(see the shapes neither layer sees)"),
+            ["CommitSkipAsync", "CommitSkipAsync"],
+            "CommitSkipAsync, the one commit of SkipEventAsync and SkipDeadLetterGroupAsync (ManageDeadLetters), audited, "
+            + "which makes both calls: the tenant-less one and, under UseTenantPartitionedEvents, Marten 9.51's tenant overload; "
+            + "NoSchemaBuildingCallTests allows it too"),
         new("src/MartenStudio/Services/Events/StreamCompactionInvoker.cs", "CompactStreamAsync",
             ["CompactAndSaveAsync", "CompactAndSaveAsync"],
             "the compaction (CompactStreams), Guid and string ids, audited by EventDataService.CompactStreamAsync"),
@@ -214,9 +214,17 @@ public class StorageEnsuringCallTests
     /// 2.74 and later) and <c>IDocumentStoreDiagnosticsWriter</c> (later) - as <c>"Type: Member"</c> with what each needs.
     /// None: Marten implements them for CritterWatch, and its implementations reach LINQ, <c>LoadAsync</c> or
     /// <c>FetchStreamAsync</c> (<c>DocumentStore.DocumentDiagnostics*.cs</c> at <c>V9.54.1</c>), each of which ensures
-    /// storage, where the studio has its own reads of the same things.
+    /// storage, where the studio has its own reads of the same things. The one exception is the write preview,
+    /// <c>PreviewDocumentJsonAsync</c>: read at <c>V9.57.0</c> it deserializes the edit and serializes it back, opens no
+    /// session and no connection (<c>DocumentStore.DocumentDiagnosticsWriter.cs</c>), which <c>MartenEditPreviewTests</c>
+    /// holds against a store whose host does not resolve.
     /// </summary>
-    private static readonly (string Call, string Needs)[] AllowedDocumentDiagnosticsCalls = [];
+    private static readonly (string Call, string Needs)[] AllowedDocumentDiagnosticsCalls =
+    [
+        ("MartenStudio.Services.Documents.MartenEditPreview: PreviewDocumentJsonAsync",
+            "nothing: it opens no session and no connection, so it ensures no storage and needs no capability of its own "
+            + "(the edit preview is behind EditDocuments, and is advisory)"),
+    ];
 
     [Fact]
     public void Every_storage_ensuring_call_in_src_is_one_of_todays_sites()
@@ -236,30 +244,6 @@ public class StorageEnsuringCallTests
             + "under the database's AutoCreate the first time the process asks. A read reads with the studio's own SQL "
             + "(Internal/Sql); a write behind a capability goes on AllowedSites with what it needs. Offenders: "
             + string.Join(", ", offenders));
-    }
-
-    /// <summary>
-    /// The reflected call neither layer above sees - Marten 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which
-    /// ensures the event storage - is reached through exactly one studio method, and that method is called from exactly
-    /// one place: <c>CommitSkipAsync</c>, the one commit both skips end in, where the listed tenant-less call is made too.
-    /// </summary>
-    [Fact]
-    public void The_reflected_tenant_skip_is_reached_only_from_the_skips_one_commit()
-    {
-        MethodInfo helper = typeof(MartenStudio.Services.Events.EventDataService).GetMethod(
-            nameof(MartenStudio.Services.Events.EventDataService.MarkTenantEventsAsSkippedAsync),
-            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Static)!;
-
-        helper.Should().NotBeNull("the one method that makes the reflected call");
-
-        IlScan.Result scan = IlScan.Scan(typeof(MartenStudioOptions).Assembly, target => target == helper);
-
-        scan.Unresolved.Should().BeEmpty();
-        scan.Calls.Should().ContainSingle("only EventDataService calls it").Which.Key.Should().Be(
-            (typeof(MartenStudio.Services.Events.EventDataService).FullName!, helper.Name));
-        scan.Calls.Single().Value.Should().Equal(
-            ["CommitSkipAsync"],
-            "a second caller would be a second path into a storage-ensuring Marten write that the allow-list above cannot see");
     }
 
     /// <summary>
@@ -539,16 +523,10 @@ public class StorageEnsuringCallTests
     /// <list type="bullet">
     /// <item><description>A call made through <b>reflection</b> names the member as a string - <c>DocumentWriteService</c>
     /// builds its typed <c>Delete</c> and <c>UndoDeleteWhere</c> calls that way, and they queue operations that only its
-    /// <c>SaveChangesAsync</c> (on the list) runs. So does <c>EventDataService.MarkTenantEventsAsSkippedAsync</c>: Marten
-    /// 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which ensures the event storage like the tenant-less one on
-    /// the list, and is reached by reflection because the floor has no such member to compile against. It is made only
-    /// from <c>CommitSkipAsync</c> - the same commit as the listed site, reached only from the two capability-gated,
-    /// audited skips, which <see cref="The_reflected_tenant_skip_is_reached_only_from_the_skips_one_commit" /> and
-    /// <see cref="The_skips_one_commit_is_reached_only_from_the_two_skips" /> pin - and its declaration is
-    /// looked up by name in <c>RuntimeFeature.TenantSkipMethod</c>, a string this scanner blanks. <c>MartenEditPreview</c>
-    /// reaches Marten 9.53's <c>PreviewDocumentJsonAsync</c> the same way (<c>RuntimeFeature.EditPreviewMethod</c>), and is
-    /// not on the list because it ensures nothing: read at v9.53.0 and v9.54.2, it opens no session and no connection - which
-    /// <c>MartenEditPreviewTests</c> holds against a store whose host does not resolve.</description></item>
+    /// <c>SaveChangesAsync</c> (on the list) runs. (Marten 9.51's tenant overload of <c>MarkEventsAsSkipped</c>, which
+    /// ensures the event storage like the tenant-less one, used to be reached that way; it is a direct call now, made only
+    /// from <c>CommitSkipAsync</c> and listed above, and <see cref="The_skips_one_commit_is_reached_only_from_the_two_skips" />
+    /// pins its callers.)</description></item>
     /// <item><description>A call inside an <b>interpolation hole</b> is blanked with its string by the source layer; the
     /// compiled layer still sees it.</description></item>
     /// <item><description>A member named in an <b>expression tree</b> is an <c>ldtoken</c>, not a call, and is not counted:

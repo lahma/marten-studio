@@ -85,13 +85,14 @@ the same way; a missing or older one fails when `AddPostgresStudio()` is first c
 dotnet add package MartenStudio
 ```
 
-One package reference. The studio brings `Marten` (floor `9.39.0`, the first release with the fixes for
-two critical LINQ injection advisories) and `PostgresStudio` at exactly its own version, which brings
-`Npgsql` (floor `8.0.3`) and `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files and an
+One package reference. The studio brings `Marten` (floor `9.57.0`: the floors follow the latest releases, and
+9.57.0 is the first with the fix for compacting a stream that folds to nothing) and `PostgresStudio` at exactly
+its own version, which brings `Npgsql` (floor `9.0.4`, the one Marten 9.57.0 itself uses) and
+`Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files and an
 MSBuild target, no runtime assembly), and it takes everything else — Blazor, SignalR, authorization, endpoint
 routing — from the shared framework, so it pins no ASP.NET Core patch onto your application. Target framework:
 `net10.0`. Your application's Npgsql stays the one Marten brings, which is never below Postgres Studio's floor;
-Marten Studio is tested at the Marten floor and at Marten 9.56.0, and not on Npgsql 10, which no tested Marten brings.
+Marten Studio is tested at Marten 9.57.0, the floor, and not on Npgsql 10, which no tested Marten brings.
 
 **PostgreSQL 14 to 18** are supported, and every release is tested on each. 14 reaches the community's end of life on
 2026-11-12, and 19 is supported from its general availability. Below 14 the studio still reads the server, with no
@@ -360,7 +361,7 @@ mapped studio is a read-only browser of Marten's own data.
 | `ViewDefinitions` | Read the definitions alone - a view's or materialized view's query, a function's or procedure's body, a trigger's definition, a type's description - of the non-Marten objects in the schemas `BrowsableSchemas` names *exactly*, and see those schemas' structure; never a row, never a sequence's current value (data, so `BrowseDatabase`'s), and never a schema only `"*"` admits. For a host that keeps rows off the screen and still wants the SQL its own migrations wrote. A read, authorized like `BrowseDatabase` as a write (the write policy asked with this name, always with `TenantId = null`). Off by default, in `All()` |
 | `ViewDatabaseActivity` | See who and what is using the database: other sessions' process ids, roles, client addresses, application names and statements, on the Health page, on Database › Sessions and in the Projections screen's high-water Explain, and run the health advisor's statement checks over `pg_stat_statements`. Without it the counts, ages and states are still shown. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Off by default, in `All()` |
 | `CompactStreams` | Compact an event stream from Stream detail: Marten's own `CompactStreamAsync<T>` replaces its events up to a version with a snapshot of its aggregate, and the folded events are deleted. Authorized for the scope as selected, tenant included - and, on an event store that is not conjoined, for the database as a whole when the stream also holds an event another tenant's session appended. Off by default, in `All()` — see [`docs/compaction.md`](docs/compaction.md) |
-| `RunLinqQueries` | Run LINQ mode on the Query page (Marten 9.48+): a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
+| `RunLinqQueries` | Run LINQ mode on the Query page: a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
 
 ```csharp
 options.Capabilities = MartenStudioCapabilities.All();   // everything: the one-line, greppable opt-in
@@ -514,7 +515,7 @@ deserialized into the CLR type and serialized back, and any property the type do
 the dialog lists dropped, changed and added properties and refuses the save until you acknowledge the
 drops. Saves are optimistically concurrent (`UpdateExpectedVersion` / `UpdateRevision`); a row that
 moved comes back as a conflict with nothing written. A save whose JSON carries another id than the document's own is
-refused, naming both, and from Marten 9.53 the dialog also shows what Marten's own preview of the save
+refused, naming both, and the dialog also shows what Marten's own preview of the save
 (`PreviewDocumentJsonAsync`) would keep, and holds a save Marten keeps differently or refuses. An **Order** control
 lists a collection newest first by last modified, created or revision, where its table has the column. With
 `DeleteDocuments` you get delete (soft where
@@ -571,7 +572,7 @@ read-only SQL against the whole database, is gated on `RunSql`, and is limited b
 `QueryTimeout`, a 3-second lock timeout, a 60-second idle-in-transaction timeout and an optional
 `SqlConsoleRole` — inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK`. The row cap stops the reader;
 it never appends a `LIMIT` to your statement. See [Security model and limits](#security-model-and-limits).
-*LINQ mode* ([`docs/linq-mode.md`](docs/linq-mode.md)), on Marten 9.48+ and gated on `RunLinqQueries`,
+*LINQ mode* ([`docs/linq-mode.md`](docs/linq-mode.md)), gated on `RunLinqQueries`,
 takes the predicate your code would write (`Status == "Open" && Total > 100`) and an ordering, parses them
 with JasperFx's Dynamic LINQ under its allow-list and the studio's own, and applies them to Marten's own
 `Query<T>()` on a session pinned to the scope, so tenancy, soft deletes and hierarchies are Marten's. It
@@ -643,12 +644,12 @@ the page says so — that is a value, not an error, and the studio never starts 
 shard also shows when it last progressed and a small chart of its position against the high water, drawn from the
 screen's own samples, with a stalled colouring, a trend arrow and an estimated catch-up — and, while it is rebuilt,
 when the rebuild should finish, measured from the rebuild's own samples; a rebuild in progress is a state on its row,
-Pause, Stop and Rebuild quote the store's `StopAndDrainTimeout`, and below Marten 9.50 Start warns that a rebuild
-started outside the studio cannot be seen.
+Pause, Stop and Rebuild quote the store's `StopAndDrainTimeout`, and Start is refused during a rebuild started outside
+the studio, which the daemon says it is running.
 
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
 *Tables* shows each table's TOAST size, dead and HOT percentages, last autovacuum and storage parameters
-(with drift against the configuration on Marten 9.47+), and names each pgvector column with its
+(with drift against the configuration), and names each pgvector column with its
 dimensions; *Indexes* marks invalid, redundant and unused indexes from the health advisor's last check and
 says what an HNSW or IVFFlat index's operator class and parameters mean. Nothing here executes DDL on a
 read path: schema names, declared indexes, managed tables and installed functions come from `StoreOptions`
@@ -987,28 +988,22 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   every tenant's rows.
 - **A mapping made after the host has started is never checked** by the startup guard — from a hosted
   service, or a lazily built `EndpointDataSource`. Map the studio while the application is being built.
-- **Some of the studio needs a newer Marten than its floor.** The package depends on Marten 9.39.0 and
-  works there; what later releases add lights up at run time, and the Configuration page's Runtime card says
-  which of it this host has. LINQ mode needs Marten 9.48+ (JasperFx 2.84) and is absent below it. The
-  `FillFactor` and `StorageParameter` remedies, the Schema screen's storage-parameter drift and E08's
-  `DcbTagVersionFillFactor` need 9.47+. D03 reads the high-water agent's own liveness stamp from 9.43; below
-  it, an old stamp says nothing and D03 says it cannot tell. Telling that a projection is being rebuilt by
-  something other than Marten Studio needs 9.50 (JasperFx 2.86): below it, Start cannot see such a rebuild and
-  warns that it cannot, and a start during one runs a second agent beside the replay. On a store that numbers
-  events per tenant (`UseTenantPartitionedEvents`), Skip event and Rewind subscription on the dead-letter page
-  need 9.51: from it each acts on one tenant, and a rewind is offered only for a tenant whose agent the daemon
-  in this process runs; below it both are refused, because Marten skips and rewinds by a number every tenant
-  has. Compacting a stream whose folded events carry DCB tags needs 9.51 too; below it Postgres refuses the
-  delete and nothing changes. The Schema screen's Check, Preview and Generate script buttons create
-  Marten's HiLo objects (`mt_hilo`, `mt_get_next_hi`) below 9.50.3 and nothing from it, and each says which.
-  From 9.52 a rebuild replays from the projection's start floor rather than from the first event, so the
-  rebuild dialog names the floor stored for it in `mt_event_projection_floors` (read with the studio's own SQL)
-  and says that a floor set in code may apply; D05 stops offering `SkipApplyErrors` for a database error in
-  projection code, which from 9.52 pauses the shard at any setting and is never dead-lettered; and the
-  Advance high water mark dialog says that the advance first ensures the event store's storage - with no tenant
-  selected in every database of the store, each under its own `AutoCreate` - and, on a store that numbers events per
-  tenant, which tenants' marks it moves. The edit dialog shows Marten's own preview of a save from 9.53.
-- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.56.0.
+- **The studio needs Marten 9.57.0 or later, and uses what 9.57 has without asking.** Since 1.1 the floor is the
+  latest release, so nothing here is conditional on the host's Marten: LINQ mode (JasperFx 2.84, Marten 9.48), the
+  `FillFactor` and `StorageParameter` remedies and the Schema screen's storage-parameter drift (9.47), D03's reading of
+  the high-water agent's own liveness stamp (9.43), the daemon's own word that a projection is being rebuilt by
+  something other than Marten Studio (9.50), and, on a store that numbers events per tenant
+  (`UseTenantPartitionedEvents`), Skip event and Rewind subscription acting on one tenant (9.51; a rewind is offered
+  only for a tenant whose agent the daemon in this process runs). A stream whose folded events carry DCB tags compacts,
+  and its tag rows go with them (9.51). The Schema screen's Check, Preview and Generate script buttons create nothing
+  (9.50.3). A rebuild replays from the projection's start floor rather than from the first event, so the rebuild dialog
+  names the floor stored for it in `mt_event_projection_floors` (read with the studio's own SQL) and says that a floor
+  set in code may apply; D05 does not offer `SkipApplyErrors` for a database error in projection code, which pauses the
+  shard at any setting and is never dead-lettered (9.52); and the Advance high water mark dialog says that the advance
+  first ensures the event store's storage - with no tenant selected in every database of the store, each under its own
+  `AutoCreate` - and, on a store that numbers events per tenant, which tenants' marks it moves. The edit dialog shows
+  Marten's own preview of a save (9.53). Compacting a stream that folds to nothing leaves it alone (9.57, #5797).
+- **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.57.0.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,
   and a single-server tenancy creates every configured database that does not exist yet. The lookup table's

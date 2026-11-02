@@ -526,15 +526,10 @@ internal sealed partial class ProjectionDataService
             + "started; the projections screen shows it as rebuilding until the daemon says it has finished.";
     }
 
-    /// <summary>The registered projections the daemon here says it is rebuilding (JasperFx 2.86+; empty below).</summary>
+    /// <summary>The registered projections the daemon here says it is rebuilding.</summary>
     private static List<string> RebuildingProjectionsOf(IProjectionDaemon daemon, IDocumentStore store)
     {
         List<string> rebuilding = [];
-
-        if (!DaemonLightUp.CanTellRebuilding)
-        {
-            return rebuilding;
-        }
 
         foreach (ISubscriptionSource source in store.Options.Events.Projections())
         {

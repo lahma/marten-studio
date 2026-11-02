@@ -7,7 +7,6 @@ using Marten;
 using MartenStudio.Integration.Tests.Documents;
 using MartenStudio.Integration.Tests.Logging;
 using MartenStudio.Services;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Authorization;
@@ -186,21 +185,18 @@ public sealed class PerTenantSkipFixture(PostgresFixture postgres) : IAsyncLifet
 }
 
 /// <summary>
-/// SEC1-fix4 item 1, live: below Marten 9.51 <c>MarkEventsAsSkipped</c> is <c>where seq_id = ANY(:sequences)</c> with no
-/// tenant, so on this store skipping acme's #N would skip globex's #N as well. The studio refuses the skip there, audited,
-/// and neither tenant's event moves - which, without the refusal, globex's does. From 9.51 (#5698, L1) Marten's tenant
-/// overload adds <c>and tenant_id = :tenant_id</c>, and the studio skips acme's #N and nothing else.
+/// SEC1-fix4 item 1, live: Marten's tenant-less <c>MarkEventsAsSkipped</c> is <c>where seq_id = ANY(:sequences)</c> with no
+/// tenant, so on this store skipping acme's #N through it would skip globex's #N as well. Since 9.51 (#5698, L1) Marten's
+/// tenant overload adds <c>and tenant_id = :tenant_id</c>, and the studio skips acme's #N and nothing else - with no
+/// tenant in the scope it refuses, audited, and neither tenant's event moves.
 /// </summary>
 /// <remarks>
-/// Which half runs is the light-up probe's answer for the Marten this run resolved (<c>RuntimeFeature.TenantEventSkipping</c>):
-/// the floor and the latest-tested CI legs each prove theirs, and the one assertion both share - globex's event of the same
-/// number never moves - is the one the refusal and the light-up both exist for.
+/// The assertion everything shares - globex's event of the same number never moves - is the one the refusal and the tenant
+/// overload both exist for.
 /// </remarks>
 public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixture<PerTenantSkipFixture>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private static bool TenantSkipping => RuntimeFeature.TenantEventSkipping.Probe() == true;
 
     [PostgresFact]
     public async Task Skipping_a_tenants_event_never_skips_another_tenants_event_of_that_number()
@@ -219,28 +215,17 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
         StudioActionLogEntry entry = fixture.Audit.GetLatest()
             .First(x => x.Action == EventDataService.SkipEventAction && x.Target == acme.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-        if (TenantSkipping)
-        {
-            refused.Should().BeNull("Marten 9.51 skips one tenant's event");
-            (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeTrue("acme's event is the one that was asked for");
+        refused.Should().BeNull("Marten 9.51 skips one tenant's event");
+        (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeTrue("acme's event is the one that was asked for");
 
-            entry.Succeeded.Should().BeTrue();
-            entry.Message.Should().Be("marked as skipped in tenant " + PerTenantSkipFixture.Acme);
-            entry.Capability.Should().Be(nameof(StudioCapability.ManageDeadLetters));
-            return;
-        }
-
-        (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeFalse("and nothing was written at all");
-
-        refused.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-
-        entry.Succeeded.Should().BeFalse();
-        entry.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
+        entry.Succeeded.Should().BeTrue();
+        entry.Message.Should().Be("marked as skipped in tenant " + PerTenantSkipFixture.Acme);
+        entry.Capability.Should().Be(nameof(StudioCapability.ManageDeadLetters));
     }
 
     /// <summary>
-    /// With no tenant in the scope the skip is refused at every version - below 9.51 for the numbering, from 9.51 because a
-    /// sequence names an event in every tenant - and neither tenant's event moves.
+    /// With no tenant in the scope the skip is refused because a sequence names an event in every tenant, and neither
+    /// tenant's event moves.
     /// </summary>
     [PostgresFact]
     public async Task Skipping_with_no_tenant_is_refused_and_moves_no_event()
@@ -255,14 +240,12 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
         (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeFalse();
         (await fixture.IsSkippedAsync(PerTenantSkipFixture.Globex, globex)).Should().BeFalse();
 
-        refused.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(
-            TenantSkipping ? StreamCompactionRules.SkipNeedsTenant : StreamCompactionRules.SkipNeedsOneSequence);
+        refused.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.SkipNeedsTenant);
     }
 
     /// <summary>
-    /// Reach, with policies: a visitor the store and write policies allow only <c>(db, acme)</c> skips acme's #N - from
-    /// 9.51 it goes through without the whole database ever being asked about, below it the numbering's refusal stands -
-    /// and globex's #N never moves.
+    /// Reach, with policies: a visitor the store and write policies allow only <c>(db, acme)</c> skips acme's #N - it goes
+    /// through without the whole database ever being asked about - and globex's #N never moves.
     /// </summary>
     [PostgresFact]
     public async Task A_visitor_allowed_only_acme_skips_acmes_event_and_never_globexs()
@@ -283,16 +266,8 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
 
             (await fixture.IsSkippedAsync(PerTenantSkipFixture.Globex, globex)).Should().BeFalse();
 
-            if (TenantSkipping)
-            {
-                outcome.Should().BeNull();
-                (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeTrue();
-            }
-            else
-            {
-                outcome.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-                (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeFalse();
-            }
+            outcome.Should().BeNull();
+            (await fixture.IsSkippedAsync(PerTenantSkipFixture.Acme, acme)).Should().BeTrue();
         }
         finally
         {
@@ -337,7 +312,7 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
     }
 
     /// <summary>
-    /// From 9.51 the tenant proof still stands in front of the skip: a sequence acme's scope cannot see - a number past
+    /// The tenant proof still stands in front of the skip: a sequence acme's scope cannot see - a number past
     /// acme's last event that globex has - is refused as a scope denial, and globex's event does not move.
     /// </summary>
     [PostgresFact]
@@ -358,10 +333,6 @@ public class PerTenantSkipLiveTests(PerTenantSkipFixture fixture) : IClassFixtur
 
         (await fixture.IsSkippedAsync(PerTenantSkipFixture.Globex, globexOnly)).Should().BeFalse();
 
-        refused.Should().NotBeNull();
-        if (TenantSkipping)
-        {
-            refused.Should().BeOfType<StudioNotAuthorizedException>("acme's scope cannot see that event");
-        }
+        refused.Should().BeOfType<StudioNotAuthorizedException>("acme's scope cannot see that event");
     }
 }

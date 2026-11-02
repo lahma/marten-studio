@@ -70,19 +70,19 @@ public class LinqQueryPanelTests
     }
 
     [Fact]
-    public void An_older_Marten_says_which_Marten_the_mode_needs()
+    public void A_JasperFx_the_studio_does_not_recognise_says_so()
     {
         var linq = new FakeLinqQueryService
         {
-            Status = new LinqModeStatus(LinqAvailability.MartenTooOld,
-                "LINQ mode needs Marten 9.48+; this host runs Marten 9.39.0 (JasperFx 2.74.0).", []),
+            Status = new LinqModeStatus(LinqAvailability.Unrecognised,
+                "LINQ mode is not available: the JasperFx DynamicQuery or System.Linq.Dynamic.Core this host loaded (JasperFx 2.98.0) is not one the studio recognises.", []),
         };
 
         using StudioComponentContext context = CreateContext(linq);
 
         var panel = context.Render<LinqQueryPanel>();
 
-        panel.Find(".ms-query-linq-unavailable").TextContent.Should().Contain("Marten 9.48+").And.Contain("this host runs Marten 9.39.0");
+        panel.Find(".ms-query-linq-unavailable").TextContent.Should().Contain("not one the studio recognises").And.Contain("JasperFx 2.98.0");
         panel.FindAll("#ms-query-linq-where").Should().BeEmpty();
     }
 

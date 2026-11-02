@@ -62,8 +62,8 @@ internal static class SchemaTableAssembler
     /// </param>
     /// <param name="declaredParameters">
     /// The storage parameters each of this store's visible document tables declares, keyed by
-    /// <see cref="SchemaKey.For(string, string)" />; a <see langword="null" /> value is a Marten that cannot
-    /// declare them (below 9.47), which is "unknown", never "none".
+    /// <see cref="SchemaKey.For(string, string)" />; a <see langword="null" /> value is a document type that
+    /// is not a mapping that can declare them, which is "unknown", never "none".
     /// </param>
     public static IReadOnlyList<TableStats> Assemble(
         IReadOnlyList<TableStatsRow> rows,

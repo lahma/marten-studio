@@ -9,7 +9,6 @@ using Marten;
 
 using MartenStudio.Integration.Tests.Documents;
 using MartenStudio.Services;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Authorization;
@@ -202,19 +201,13 @@ public sealed class PerTenantGroupSkipFixture(PostgresFixture postgres) : IAsync
 
 /// <summary>
 /// M3 on a store that numbers events per tenant: the group is grouped across tenants by <c>(seq_id, tenant_id)</c>, and
-/// "Skip this group" is single Skip's tenant overload - from Marten 9.51 one tenant's events and no other's, below it
-/// refused as single Skip is (SEC1-fix4), and with no tenant refused at every version.
+/// "Skip this group" is single Skip's tenant overload - one tenant's events and no other's (Marten 9.51), and with no
+/// tenant refused (SEC1-fix4). The assertion everything shares - globex's event of the same number never moves - is the
+/// one the refusal and the tenant overload both exist for.
 /// </summary>
-/// <remarks>
-/// Which half runs is the light-up probe's answer for the Marten this run resolved (<c>RuntimeFeature.TenantEventSkipping</c>),
-/// as <c>PerTenantSkipLiveTests</c> does: the floor and the latest-tested legs each prove theirs, and the assertion both
-/// share - globex's event of the same number never moves - is the one the refusal and the light-up both exist for.
-/// </remarks>
 public class PerTenantGroupSkipLiveTests(PerTenantGroupSkipFixture fixture) : IClassFixture<PerTenantGroupSkipFixture>
 {
     private static CancellationToken Token => TestContext.Current.CancellationToken;
-
-    private static bool TenantSkipping => RuntimeFeature.TenantEventSkipping.Probe() == true;
 
     private static StudioScope Scope(string? tenant) => new(MartenStoreRegistry.DefaultStoreKey, string.Empty, tenant);
 
@@ -237,12 +230,11 @@ public class PerTenantGroupSkipLiveTests(PerTenantGroupSkipFixture fixture) : IC
     }
 
     /// <summary>
-    /// From acme's scope - with a visitor the policies allow only acme - the group skips acme's #N alone from 9.51, without
-    /// the database as a whole ever being asked about; below 9.51 it is refused with single Skip's sentence. Globex's #N
-    /// never moves.
+    /// From acme's scope - with a visitor the policies allow only acme - the group skips acme's #N alone, without the
+    /// database as a whole ever being asked about. Globex's #N never moves.
     /// </summary>
     [PostgresFact]
-    public async Task A_tenants_skip_of_the_group_skips_only_that_tenants_event_and_is_refused_at_the_floor()
+    public async Task A_tenants_skip_of_the_group_skips_only_that_tenants_event()
     {
         long sequence = await fixture.SeedGroupAsync("TenantProjection");
         StudioScope acme = Scope(PerTenantGroupSkipFixture.Acme);
@@ -268,19 +260,10 @@ public class PerTenantGroupSkipLiveTests(PerTenantGroupSkipFixture fixture) : IC
             entry.Action.Should().Be(EventDataService.SkipGroupAction);
             entry.TenantId.Should().Be(PerTenantGroupSkipFixture.Acme);
 
-            if (TenantSkipping)
-            {
-                outcome.Should().BeNull();
-                (await fixture.IsSkippedAsync(PerTenantGroupSkipFixture.Acme, sequence)).Should().BeTrue();
-                entry.Succeeded.Should().BeTrue();
-                entry.Message.Should().Be("1 event marked as skipped in tenant " + PerTenantGroupSkipFixture.Acme);
-                return;
-            }
-
-            outcome.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-            (await fixture.IsSkippedAsync(PerTenantGroupSkipFixture.Acme, sequence)).Should().BeFalse("and nothing was written at all");
-            entry.Succeeded.Should().BeFalse();
-            entry.Message.Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
+            outcome.Should().BeNull();
+            (await fixture.IsSkippedAsync(PerTenantGroupSkipFixture.Acme, sequence)).Should().BeTrue();
+            entry.Succeeded.Should().BeTrue();
+            entry.Message.Should().Be("1 event marked as skipped in tenant " + PerTenantGroupSkipFixture.Acme);
         }
         finally
         {
@@ -288,7 +271,7 @@ public class PerTenantGroupSkipLiveTests(PerTenantGroupSkipFixture fixture) : IC
         }
     }
 
-    /// <summary>With no tenant in scope the group's skip is refused at every version, as single Skip's is, and neither event moves.</summary>
+    /// <summary>With no tenant in scope the group's skip is refused, as single Skip's is, and neither event moves.</summary>
     [PostgresFact]
     public async Task With_no_tenant_the_groups_skip_is_refused_and_moves_no_event()
     {
@@ -299,13 +282,12 @@ public class PerTenantGroupSkipLiveTests(PerTenantGroupSkipFixture fixture) : IC
 
         Exception? refused = await Record.ExceptionAsync(() => fixture.Events.SkipDeadLetterGroupAsync(Scope(null), group.Key, "2", Token));
 
-        refused.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(
-            TenantSkipping ? StreamCompactionRules.SkipNeedsTenant : StreamCompactionRules.SkipNeedsOneSequence);
+        refused.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.SkipNeedsTenant);
         (await fixture.IsSkippedAsync(PerTenantGroupSkipFixture.Acme, sequence)).Should().BeFalse();
         (await fixture.IsSkippedAsync(PerTenantGroupSkipFixture.Globex, sequence)).Should().BeFalse();
 
         (await fixture.Events.DescribeDeadLetterGroupSkipAsync(Scope(null), group.Key, Token)).Refusal.Should().Be(
-            TenantSkipping ? StreamCompactionRules.SkipNeedsTenant : StreamCompactionRules.SkipNeedsOneSequence,
+            StreamCompactionRules.SkipNeedsTenant,
             "the dialog is told what the skip would be refused with");
     }
 }

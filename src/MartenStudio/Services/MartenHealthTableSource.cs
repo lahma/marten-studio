@@ -1,7 +1,6 @@
 using System.Globalization;
 
 using MartenStudio.Internal;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using PostgresStudio.Services.Database;
@@ -194,8 +193,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
         return table.TypeName is { } type
             ? new HealthRemedy(
                 "opts.Schema.For<" + type + ">().StorageParameter(\"" + parameter + "\", " + value + ");",
-                explanation,
-                RuntimeFeature.DocumentStorageParameter)
+                explanation)
             : null;
     }
 
@@ -351,8 +349,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
             ? new HealthRemedy(
                 "opts.Schema.For<" + type + ">().FillFactor(" + fillFactor.ToString(CultureInfo.InvariantCulture) + ");",
                 "Leaves a fifth of each page free for an update to stay on. It costs about a quarter more heap, and - in Marten's own "
-                + "words - affects only pages written after the change: existing rows are not repacked until the table is rewritten.",
-                RuntimeFeature.DocumentFillFactor)
+                + "words - affects only pages written after the change: existing rows are not repacked until the table is rewritten.")
             : null;
     }
 
@@ -390,8 +387,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
             ? new HealthRemedy(
                 "opts.Schema.For<" + type + ">().StorageParameter(\"autovacuum_enabled\", true);",
                 "Autovacuum is switched off for this table (its autovacuum_enabled storage parameter is false). Declaring it true "
-                + "lets Marten's next apply switch it back on; Marten manages only the storage parameters it declares.",
-                RuntimeFeature.DocumentStorageParameter)
+                + "lets Marten's next apply switch it back on; Marten manages only the storage parameters it declares.")
             : null;
     }
 
@@ -411,9 +407,7 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
             table,
             parameter,
             value,
-            explanation + " Below Marten 9.47 the same setting is a DBA's ALTER TABLE ... SET (" + parameter + " = " + value
-            + ") on the table, which no Marten apply resets unless the apply rebuilds the table (a changed partition scheme "
-            + "copies it out and back): Marten manages only the storage parameters it declares.");
+            explanation + " Marten manages only the storage parameters it declares.");
     }
 
     // ---- W5-V1 ---------------------------------------------------------------------------------------------------------

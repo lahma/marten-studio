@@ -5,7 +5,6 @@ using Bunit;
 using PostgresStudio.Components.Layout;
 using MartenStudio.Components.Pages;
 using PostgresStudio.Components.Pages.Health;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Database;
 using PostgresStudio.Internal.Sql;
@@ -99,18 +98,18 @@ public class HealthPageTests
 
         HealthFinding finding = FakeHealthService.Finding("T06", HealthSeverity.Warning, "Low HOT ratio", HealthArea.Tables) with
         {
-            Remedy = new HealthRemedy("opts.Schema.For<Order>().FillFactor(80);", requires: RuntimeFeature.DocumentFillFactor),
+            Remedy = new HealthRemedy("opts.Schema.For<Order>().FillFactor(80);", requires: ScriptedStudioRuntime.Feature),
         };
 
         context.Health.Report = context.Health.Report with
         {
-            Findings = [new HealthReportFinding(finding, finding.Evidence, "default|localhost.marten|T06", "https://example.invalid", false, "Marten 9.31.0")],
+            Findings = [new HealthReportFinding(finding, finding.Evidence, "default|localhost.marten|T06", "https://example.invalid", false, "Marten 9.57.0")],
         };
 
         var page = context.Render<HealthPage>();
 
         page.WaitForAssertion(() => page.Find(".ms-health-requirement").TextContent.Trim()
-            .Should().Be("Marten 9.47+; this host runs Marten 9.31.0"));
+            .Should().Be("Marten 9.99+; this host runs Marten 9.57.0"));
         page.Find(".ms-health-requirement").ClassList.Should().Contain("ms-health-requirement-missing");
     }
 

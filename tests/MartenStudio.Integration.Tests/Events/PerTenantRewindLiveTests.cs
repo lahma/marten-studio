@@ -11,7 +11,6 @@ using Marten;
 using MartenStudio.Integration.Tests.Documents;
 using MartenStudio.Integration.Tests.Logging;
 using MartenStudio.Services;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Authorization;
@@ -32,17 +31,12 @@ namespace MartenStudio.Integration.Tests.Events;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>From Marten 9.51 with JasperFx 2.91</b> (<c>RuntimeFeature.TenantSubscriptionRewind</c>) the studio rewinds one
-/// tenant's agents: the daemon's per-tenant <c>RewindSubscriptionAsync</c> stops acme's agent and no other, Marten
+/// <b>Since Marten 9.51 with JasperFx 2.91</b> the studio rewinds one tenant's agents: the daemon's per-tenant <c>RewindSubscriptionAsync</c> stops acme's agent and no other, Marten
 /// rewrites acme's shard row through the tenant agent's identity and deletes acme's dead letters of the projection at or
 /// above the floor, and the agent restarts against acme's own high-water mark. What is asserted is what that promises
 /// and the store-global rewind broke: acme's poison event is re-applied (a new dead letter at the same sequence), and
 /// globex's dead letter and progression row are exactly as they were. The authorization is the tenant's - the write
 /// policy asked about (store, database, acme) - because nothing else is reached.
-/// </para>
-/// <para>
-/// <b>Below either</b> the refusal SEC1-fix4 put in stands, unchanged, and nothing moves. CI runs both: the floor proves
-/// the refusal, the latest-tested leg the light-up.
 /// </para>
 /// <para>
 /// Every wait is on a condition with a deadline, never a fixed delay.
@@ -69,8 +63,6 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
     private string Schema { get; } = "events_rewind_tenant";
-
-    private static bool TenantRewind => RuntimeFeature.TenantSubscriptionRewind.Probe() == true;
 
     public async ValueTask InitializeAsync()
     {
@@ -195,8 +187,7 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
         letters.Count > 0 ? letters.Max(static x => x.EventSequence) : 2;
 
     /// <summary>
-    /// From 9.51: acme's rewind re-applies acme's poison event and leaves globex's dead letter and progression alone.
-    /// Below it: refused, audited, and nothing moves.
+    /// Acme's rewind re-applies acme's poison event and leaves globex's dead letter and progression alone.
     /// </summary>
     [PostgresFact]
     public async Task A_tenants_rewind_re_applies_that_tenants_event_and_leaves_the_other_tenant_alone()
@@ -216,18 +207,6 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
 
         StudioActionLogEntry entry = host.Services.GetRequiredService<StudioActionLogService>().GetLatest()
             .First(static x => x.Action == EventDataService.RewindSubscriptionAction);
-
-        if (!TenantRewind)
-        {
-            outcome.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
-            entry.Succeeded.Should().BeFalse();
-            entry.Message.Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
-
-            (await LettersAsync(Acme)).Select(static x => x.Id).Should().BeEquivalentTo(acmeBefore.Select(static x => x.Id), "nothing ran");
-            (await LettersAsync(Globex)).Select(static x => x.Id).Should().BeEquivalentTo(globexBefore.Select(static x => x.Id));
-            (await ProgressAsync($"{Projection}:All:{Globex}")).Should().Be(globexProgress);
-            return;
-        }
 
         DeadLetterEvent letter = acmeBefore.Single(x => x.EventSequence == sequence);
 
@@ -252,11 +231,11 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
     }
 
     /// <summary>
-    /// The store-global form - no tenant in the scope - is refused at every version: below 9.51 for the numbering, from
-    /// 9.51 because the floor is a position in one tenant's events. Nothing moves.
+    /// The store-global form - no tenant in the scope - is refused because the floor is a position in one tenant's events.
+    /// Nothing moves.
     /// </summary>
     [PostgresFact]
-    public async Task A_rewind_with_no_tenant_is_refused_at_every_version()
+    public async Task A_rewind_with_no_tenant_is_refused()
     {
         using IServiceScope scope = host!.Services.CreateScope();
         IEventDataService events = scope.ServiceProvider.GetRequiredService<IEventDataService>();
@@ -269,19 +248,18 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
 
         Func<Task> rewinding = () => events.RewindSubscriptionAsync(everyone, Projection, sequence, Token);
 
-        (await rewinding.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(
-            TenantRewind ? StreamCompactionRules.RewindNeedsTenant : StreamCompactionRules.RewindNeedsOneSequence);
+        (await rewinding.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Be(StreamCompactionRules.RewindNeedsTenant);
 
-        // The fixture waited for a dead letter in each tenant at both ends, and the refusal came before anything was asked
+        // The fixture waited for a dead letter in each tenant, and the refusal came before anything was asked
         // of the daemon: both tenants' dead letters are exactly the ones there were.
         (await LettersAsync(Acme)).Select(static x => x.Id).Should().BeEquivalentTo(acmeBefore.Select(static x => x.Id));
         (await LettersAsync(Globex)).Select(static x => x.Id).Should().BeEquivalentTo(globexBefore.Select(static x => x.Id));
     }
 
     /// <summary>
-    /// Reach, with policies: a visitor the store and write policies allow only <c>(db, acme)</c>. From 9.51 the rewind of
-    /// acme goes through - the whole-database question is never asked, because nothing beyond acme is reached - and
-    /// globex's dead letter and progression row do not move. Below 9.51 the numbering's refusal stands.
+    /// Reach, with policies: a visitor the store and write policies allow only <c>(db, acme)</c>. The rewind of acme goes
+    /// through - the whole-database question is never asked, because nothing beyond acme is reached - and globex's dead
+    /// letter and progression row do not move.
     /// </summary>
     [PostgresFact]
     public async Task A_visitor_allowed_only_acme_rewinds_acme_and_globex_does_not_move()
@@ -305,19 +283,12 @@ public class PerTenantRewindLiveTests(PostgresFixture postgres) : IAsyncLifetime
             static x => x.Resource.TenantId == null && x.Resource.Capability == nameof(StudioCapability.ManageDeadLetters),
             "the per-tenant rewind reaches acme alone, so the database as a whole is never asked about");
 
-        if (!TenantRewind)
-        {
-            outcome.Should().BeOfType<InvalidOperationException>().Which.Message.Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
-        }
-        else
-        {
-            outcome.Should().BeNull("the policy allows acme, and acme is all the rewind reaches");
+        outcome.Should().BeNull("the policy allows acme, and acme is all the rewind reaches");
 
-            DeadLetterEvent letter = acmeBefore.Single(x => x.EventSequence == sequence);
-            await WaitForAsync(
-                async () => (await LettersAsync(Acme)).Any(x => x.EventSequence == letter.EventSequence && x.Id != letter.Id),
-                "acme's agent to re-apply its poison event and record a new dead letter");
-        }
+        DeadLetterEvent letter = acmeBefore.Single(x => x.EventSequence == sequence);
+        await WaitForAsync(
+            async () => (await LettersAsync(Acme)).Any(x => x.EventSequence == letter.EventSequence && x.Id != letter.Id),
+            "acme's agent to re-apply its poison event and record a new dead letter");
 
         (await LettersAsync(Globex)).Select(static x => x.Id).Should().BeEquivalentTo(globexBefore.Select(static x => x.Id));
         (await ProgressAsync($"{Projection}:All:{Globex}")).Should().Be(globexProgress);

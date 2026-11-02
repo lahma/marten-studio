@@ -268,23 +268,13 @@ else
     private bool loading = true;
 
     /// <summary>
-    /// The end of the note's sentence about storage parameters: compared with the declarations on a Marten that
-    /// can declare them, shown as they are on one that cannot.
+    /// The end of the note's sentence about storage parameters: compared with the declarations of a document mapping.
     /// </summary>
-    /// <remarks>
-    /// Decided by the host's Marten (the probe), not by the rows: a page of tables none of which is a document
-    /// table of this store says nothing about whether the mappings could declare parameters.
-    /// </remarks>
-    private static string StorageParameterNote =>
-        MartenStudio.Services.Configuration.RuntimeFeature.DeclaredStorageParameters.IsAvailable(
-            MartenStudio.Services.Configuration.MartenRuntime.Current)
-            ? ", each beside what a document mapping declares: a declared one the table differs from is drift, which the " +
-              "next apply sets; one set outside Marten is left alone by Marten's delta - unless an apply rebuilds the table, " +
-              "as a changed partition scheme does - because Marten manages only the storage parameters a mapping declares. " +
-              "A partitioned table has none of its own: its partitions' are shown where they all agree."
-            : ", as they are. A mapping can declare them (FillFactor, StorageParameter) from Marten 9.47, and this host runs " +
-              MartenStudio.Services.Configuration.MartenRuntime.Current.Describe(MartenStudio.Services.Configuration.RuntimePackage.Marten) +
-              ", so there is nothing to compare them with.";
+    private const string StorageParameterNote =
+        ", each beside what a document mapping declares: a declared one the table differs from is drift, which the " +
+        "next apply sets; one set outside Marten is left alone by Marten's delta - unless an apply rebuilds the table, " +
+        "as a changed partition scheme does - because Marten manages only the storage parameters a mapping declares. " +
+        "A partitioned table has none of its own: its partitions' are shown where they all agree.";
 
     private static string Share(double? share) =>
         share is { } value

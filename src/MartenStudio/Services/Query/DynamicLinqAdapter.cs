@@ -23,10 +23,9 @@ internal sealed record DynamicLinqApplied<T>(IQueryable<T>? Query, LinqRefusal? 
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why reflection.</b> <c>DynamicQuery</c> first ships in JasperFx 2.84.0, which first ships in Marten 9.48.0,
-/// and the studio compiles against its floor, Marten 9.39.0 (JasperFx 2.74.0), where none of these types exist.
-/// The mode lights up only where the F1 probe (<see cref="RuntimeFeature.DynamicLinqQuery" />) finds the type, and
-/// this adapter then resolves every member it needs by name and signature, once. A member that is missing or has
+/// <b>Why reflection.</b> <c>DynamicQuery</c> first shipped in JasperFx 2.84.0 (Marten 9.48.0), and the mode is a
+/// security surface (D28) that fails closed: this adapter resolves every member it needs by name and signature,
+/// once, and checks its shape rather than trusting that a newer JasperFx kept it. A member that is missing or has
 /// changed shape makes the whole adapter absent - the mode says it does not recognise this JasperFx - rather than
 /// a call that fails half-way. Read at JasperFx <c>V2.84.0</c> and <c>V2.87.1</c> (identical in
 /// <c>src/JasperFx/Linq</c>, and still so at <c>V2.89.0</c>), and again at <c>v2.91.0</c>, where only
@@ -199,13 +198,6 @@ internal sealed class DynamicLinqAdapter
         {
             return (LinqAvailability.NoDynamicCode,
                 "LINQ mode needs run-time code generation, which this process does not have (Native AOT).");
-        }
-
-        if (!RuntimeFeature.DynamicLinqQuery.IsAvailable(runtime))
-        {
-            return (LinqAvailability.MartenTooOld,
-                "LINQ mode needs " + RuntimeFeature.DynamicLinqQuery.Requirement + "; this host runs " +
-                runtime.Describe(RuntimePackage.Marten) + " (" + runtime.Describe(RuntimePackage.JasperFx) + ").");
         }
 
         if (Current is null)

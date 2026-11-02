@@ -13,14 +13,12 @@
     Nothing here runs on navigation, and the reason is stronger than "it is slow".
 
     Both buttons reach Weasel through IMartenDatabase, which builds every feature schema in the store to
-    get there - and below Marten 9.50.3 Marten's feature list includes the lazy HiLo Sequences feature,
-    whose initialiser applies a migration under the database's own AutoCreate. So there asking either
-    question can create Marten's own bookkeeping objects (mt_hilo, mt_get_next_hi) in a schema that did
-    not have them. That is a fine thing to do on purpose and an indefensible thing to do because somebody
-    opened a tab, so the tab arrives with two buttons that say what pressing them may do (packet P7-fix,
-    finding B1). From 9.50.3 (#5665) the enumeration describes the HiLo feature without applying it, and
-    the wording below says so for the Marten this host runs (RuntimeFeature.OfflineSchemaEnumeration).
-    The buttons stay buttons: both still connect, and the floor still has the hazard.
+    get there - and below Marten 9.50.3 Marten's feature list included the lazy HiLo Sequences feature,
+    whose initialiser applied a migration under the database's own AutoCreate. That is a fine thing to do
+    on purpose and an indefensible thing to do because somebody opened a tab, so the tab arrives with two
+    buttons (packet P7-fix, finding B1; hard rule 14 stands at every version). Since 9.50.3 (#5665) the
+    enumeration describes the HiLo feature without applying it, and the wording below says so. The buttons
+    stay buttons: both still connect.
 
     And both answers span the whole database - every tenant's partition by name, every document type's
     table, the hidden ones included - so the service gives them only to a visitor who may see all of it
@@ -61,27 +59,12 @@
             <strong>Preview migration</strong> renders the SQL that would bring it into line, without
             running any of it.
         </p>
-        @if (MigrationRisk.FeatureSchemasMayCreateHilo(MartenRuntime.Current))
-        {
-            <p class="ms-empty-description ms-schema-caution">
-                Both ask Marten to build its feature schemas, and on this host's Marten
-                (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) that step can create Marten's own
-                bookkeeping objects - the HiLo sequence table <code>mt_hilo</code> and
-                <code>mt_get_next_hi</code> - in a schema that does not have them yet. Neither applies
-                anything else, and nothing on this page runs until you press a button.
-                (@RuntimeFeature.OfflineSchemaEnumeration.Requirement builds them without creating anything.)
-            </p>
-        }
-        else
-        {
-            <p class="ms-empty-description ms-schema-note">
-                Both ask Marten to build its feature schemas, which this host's Marten
-                (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) does without creating anything - its HiLo
-                objects, <code>mt_hilo</code> and <code>mt_get_next_hi</code>, are described, not created. Neither
-                applies anything, and nothing on this page runs until you press a button. (Below Marten 9.50.3
-                that step could create them in a schema that did not have them yet.)
-            </p>
-        }
+        <p class="ms-empty-description ms-schema-note">
+            Both ask Marten to build its feature schemas, which this host's Marten
+            (@MartenRuntime.Current.Describe(RuntimePackage.Marten)) does without creating anything - its HiLo
+            objects, <code>mt_hilo</code> and <code>mt_get_next_hi</code>, are described, not created. Neither
+            applies anything, and nothing on this page runs until you press a button.
+        </p>
     </div>
 }
 

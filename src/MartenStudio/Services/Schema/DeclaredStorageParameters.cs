@@ -1,9 +1,7 @@
 using System.Collections;
-using System.Reflection;
 
 using Marten.Schema;
 
-using MartenStudio.Services.Configuration;
 using PostgresStudio.Services.Schema;
 
 namespace MartenStudio.Services.Schema;
@@ -13,52 +11,34 @@ namespace MartenStudio.Services.Schema;
 /// which compares them with a table's own.
 /// </summary>
 /// <remarks>
-/// <c>Schema.For&lt;T&gt;().FillFactor(n)</c> and <c>.StorageParameter(name, value)</c> arrived in Marten 9.47
-/// (<see cref="RuntimeFeature.DeclaredStorageParameters" />). Below it a document mapping declares none, so there is
-/// nothing to compare against. Above it the declared set is read by reflection off <c>DocumentMapping.StorageParameters</c>,
-/// a non-generic <c>OrderedDictionary</c> keyed by the parameter's name.
+/// <c>Schema.For&lt;T&gt;().FillFactor(n)</c> and <c>.StorageParameter(name, value)</c> arrived in Marten 9.47. The
+/// declared set is <c>DocumentMapping.StorageParameters</c>, an ordered dictionary keyed by the parameter's name.
 /// </remarks>
 internal static class DeclaredStorageParameters
 {
     /// <summary>
-    /// The storage parameters <paramref name="documentType" /> declares, or <see langword="null" /> when this
-    /// Marten cannot declare any - which is "unknown", never "none".
+    /// The storage parameters <paramref name="documentType" /> declares, or <see langword="null" /> when it is not a
+    /// mapping that can declare any - which is "unknown", never "none".
     /// </summary>
     /// <param name="documentType">The document type.</param>
-    /// <param name="runtime">The Marten this host runs.</param>
-    public static IReadOnlyList<KeyValuePair<string, string>>? Of(IDocumentType documentType, MartenRuntime runtime)
+    public static IReadOnlyList<KeyValuePair<string, string>>? Of(IDocumentType documentType)
     {
         ArgumentNullException.ThrowIfNull(documentType);
-        ArgumentNullException.ThrowIfNull(runtime);
 
-        if (!RuntimeFeature.DeclaredStorageParameters.IsAvailable(runtime) || documentType is not DocumentMapping mapping)
+        if (documentType is not DocumentMapping mapping || mapping.StorageParameters is not IDictionary declared)
         {
             return null;
         }
 
-        try
+        List<KeyValuePair<string, string>> parameters = [];
+        foreach (DictionaryEntry entry in declared)
         {
-            if (typeof(DocumentMapping).GetProperty("StorageParameters", BindingFlags.Public | BindingFlags.Instance)?.GetValue(mapping)
-                is not IDictionary declared)
+            if (entry.Key?.ToString() is { Length: > 0 } name)
             {
-                return null;
+                parameters.Add(new KeyValuePair<string, string>(name.ToLowerInvariant(), StorageParameters.Format(entry.Value)));
             }
-
-            List<KeyValuePair<string, string>> parameters = [];
-            foreach (DictionaryEntry entry in declared)
-            {
-                if (entry.Key?.ToString() is { Length: > 0 } name)
-                {
-                    parameters.Add(new KeyValuePair<string, string>(name.ToLowerInvariant(), StorageParameters.Format(entry.Value)));
-                }
-            }
-
-            return parameters;
         }
-        catch (Exception exception) when (exception is TargetInvocationException or InvalidCastException or MemberAccessException)
-        {
-            // A light-up read that cannot be made is "unknown", the same as a Marten that has no such member.
-            return null;
-        }
+
+        return parameters;
     }
 }

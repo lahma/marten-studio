@@ -403,8 +403,8 @@ internal sealed class LinqQueryService : ILinqQueryService
             }
         }
 
-        // 5. Whether this process can do it at all: Marten 9.48+, a DynamicQuery and a Marten LINQ builder the studio
-        //    recognises, and run-time code generation.
+        // 5. Whether this process can do it at all: a DynamicQuery and a Marten LINQ builder the studio recognises, and
+        //    run-time code generation.
         (LinqAvailability availability, string? unavailable) = DynamicLinqAdapter.Availability(MartenRuntime.Current);
 
         if (availability != LinqAvailability.Available || DynamicLinqAdapter.Current is not { } adapter)

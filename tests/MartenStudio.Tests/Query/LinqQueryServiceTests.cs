@@ -1,6 +1,5 @@
 using Marten;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Support;
 
@@ -69,30 +68,6 @@ public class LinqQueryServiceTests
 
         harness.Policies.Calls.Should().Contain(static x => x.Policy == WritePolicy && x.Resource.Capability == nameof(StudioCapability.RunLinqQueries));
         harness.Ring.GetLatest()[0].Succeeded.Should().BeFalse();
-    }
-
-    // ------------------------------------------------------------------------------------------------
-    // The version line, at the floor
-    // ------------------------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task At_a_Marten_older_than_9_48_the_mode_is_absent_and_says_which_Marten_it_needs()
-    {
-        Assert.SkipWhen(DynamicLinqAvailability.IsAvailable, "This run resolved a Marten with DynamicQuery; the absent case is the floor's.");
-
-        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
-
-        LinqModeStatus status = await harness.Linq.DescribeAsync(Scope, Token);
-
-        status.Availability.Should().Be(LinqAvailability.MartenTooOld);
-        status.Types.Should().BeEmpty();
-        status.Message.Should().Contain("Marten 9.48+").And.Contain("this host runs " + MartenRuntime.Current.Describe(RuntimePackage.Marten));
-
-        LinqQueryResult result = await harness.Linq.RunAsync(Scope, new LinqQueryRequest("linqorder", "Name == \"a\""), Token);
-
-        result.Refusal!.Stage.Should().Be(LinqStage.Unavailable);
-        result.Refusal.Message.Should().Contain("Marten 9.48+");
-        harness.Ring.GetLatest()[0].Succeeded.Should().BeFalse("an unavailable mode is still a refused request, and recorded as one");
     }
 
     [Fact]

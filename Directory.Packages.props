@@ -11,14 +11,11 @@
     The Marten version, defined once and tested at both ends.
 
     MartenStudioMartenFloor is the version the shipped package depends on (`Marten >= floor` in its
-    nuspec) and the one every build, test and pack uses unless told otherwise. 9.39.0 is a SECURITY
-    floor, not an API one: it fixes GHSA-q4xm-rhx9-xjm4 (GroupBy HAVING operand, critical, affects
-    9.13.0 - 9.38.0) and GHSA-frqq-p5g3-8jq5 (full-text regConfig on the ranking path, critical,
-    affects 9.31.0 - 9.38.0). Neither was in the GitHub advisory database on 2026-10-15, and the day
-    one is, restore at any lower floor fails with NU1904 under TreatWarningsAsErrors - the same wall
-    as GHSA-rfx3-98h7-v3xp at <= 9.12.0. Nothing the studio calls is missing at 9.31.0; the floor
-    moved so that it cannot break CI from outside, and so that the package never asks a host to stay
-    on an injectable Marten. Full record in AGENTS.md, *Package budget changes*, 2026-10-15.
+    nuspec) and the one every build, test and pack uses unless told otherwise. Since 2026-11-03 the
+    floors follow the latest releases (the user's policy of 2026-11-02: consumers keep up). 9.57.0
+    fixes #5797, where compacting a stream that folds to null replaced its whole history with an
+    empty snapshot, and brings JasperFx 2.98.0, Weasel 9.48.0 and Npgsql 9.0.4. Full record in
+    AGENTS.md, *Package budget changes*, 2026-11-03.
 
     MartenStudioMartenLatest is the newest 9.x CI tests: the marten-latest workflow runs
     `dotnet fallout Test` with MARTEN_VERSION=latest, the Fallout parameter `marten-version`. It is an
@@ -37,8 +34,8 @@
     malformed Directory.Packages.props with NU1015 on every project rather than with a parse error.)
   -->
   <PropertyGroup Label="Marten version">
-    <MartenStudioMartenFloor>9.39.0</MartenStudioMartenFloor>
-    <MartenStudioMartenLatest>9.56.0</MartenStudioMartenLatest>
+    <MartenStudioMartenFloor>9.57.0</MartenStudioMartenFloor>
+    <MartenStudioMartenLatest>9.57.0</MartenStudioMartenLatest>
     <MartenStudioMartenVersion Condition="'$(MartenStudioMartenVersion)' == ''">$(MartenStudioMartenFloor)</MartenStudioMartenVersion>
   </PropertyGroup>
 
@@ -48,15 +45,9 @@
          package from pinning an ASP.NET Core patch on its host. Floor, not exact pin: a consumer
          on a newer Marten 9.x must not be forced down. Npgsql arrives transitively via Weasel.Postgresql.
 
-         The floor is 9.39.0 for the two advisories above. Below it, the 2026-09-19 bisection still
-         holds as the record of what the code itself needs: 9.31.0 is the lowest stable 9.x this
-         repository restores, compiles and passes both suites on. 9.30.0 fails: Marten gated
-         EventProgressionTable's extended columns on Events.EnableExtendedProgressionTracking until
-         9.31.0 (#5309), so ExtendedProgressionLiveTests cannot even write its row
-         ("42703: column heartbeat of relation mt_event_progression does not exist"). Below that,
-         9.22.4 is the first with ShardName.HighWaterMarkFor, 9.20.0 the first with
-         JasperFx.Events.Daemon.ShardFailure, and everything <= 9.12.0 fails restore outright with
-         NU1904 for GHSA-rfx3-98h7-v3xp. Full record in AGENTS.md, *Package budget changes*. -->
+         The floor is 9.57.0 (2026-11-03): the newest release, which removes the compaction hazard
+         of #5797 instead of guarding it. Older bisections (9.31.0 for the code, 9.39.0 for the
+         advisories) are history in AGENTS.md, *Package budget changes*. -->
     <PackageVersion Include="Marten" Version="$(MartenStudioMartenVersion)" />
     <!--
       blazor.web.js. As of .NET 10 it is not in the shared framework and not embedded in any ASP.NET
@@ -139,9 +130,9 @@
     PostgresStudioNpgsqlFloor is what the PostgresStudio package depends on (`Npgsql >= floor` in its
     nuspec). It must never be above the Npgsql the Marten floor resolves, or PostgresStudio would raise
     every MartenStudio host's Npgsql through the ProjectReference (NpgsqlVersionTests reads
-    src/MartenStudio's restore to check). 9.0.4 is that Npgsql. 8.0.3 is the lowest the shared studio
-    passes at, measured by PS-7 (AGENTS.md, Package budget changes, 2026-10-26): 8.0.0-8.0.2 carry
-    CVE-2024-32655, and 7.x has no db.client.connections.* pool instruments, which C01 and Sessions read.
+    src/MartenStudio's restore to check). 9.0.4 is that Npgsql: the one Marten 9.57.0 itself
+    references. Since 2026-11-03 nothing older is supported (AGENTS.md, Package budget changes);
+    the 8.0.3 floor of PS-7 is history.
 
     PostgresStudioNpgsqlLatest is the newest Npgsql CI tests PostgresStudio at: the marten-latest
     workflow sets NPGSQL_VERSION=latest, the Fallout parameter `npgsql-version`. It applies ONLY to the
@@ -155,7 +146,7 @@
     both refuse anything else.
   -->
   <PropertyGroup Label="PostgresStudio Npgsql version">
-    <PostgresStudioNpgsqlFloor>8.0.3</PostgresStudioNpgsqlFloor>
+    <PostgresStudioNpgsqlFloor>9.0.4</PostgresStudioNpgsqlFloor>
     <PostgresStudioNpgsqlLatest>10.0.3</PostgresStudioNpgsqlLatest>
     <PostgresStudioNpgsqlVersion Condition="'$(PostgresStudioNpgsqlVersion)' == ''">$(PostgresStudioNpgsqlFloor)</PostgresStudioNpgsqlVersion>
   </PropertyGroup>

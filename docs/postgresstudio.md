@@ -20,7 +20,7 @@ dotnet add package PostgresStudio
 ```
 
 The package references `PostgresStudio.Diagnostics` at exactly its own version - the diagnostics engine, which brings
-`Npgsql` (floor 8.0.3; tested at 8.0.3 and 10.0.3) and the `Microsoft.Extensions.*` abstractions, and which you can take
+`Npgsql` (floor 9.0.4; tested at 9.0.4 and 10.0.3) and the `Microsoft.Extensions.*` abstractions, and which you can take
 alone when you have no UI to mount ([diagnostics.md](diagnostics.md#without-the-ui)) - and
 `Microsoft.AspNetCore.App.Internal.Assets` (floor 10.0.12, which puts `_framework/blazor.web.js` in your application's
 own static web assets), takes everything else from the shared framework, and references no Marten, JasperFx or Weasel
@@ -346,9 +346,10 @@ Every value a visitor could shape reaches a log line escaped and bounded.
 
 ## Npgsql
 
-The package depends on Npgsql 8.0.3 or later: 7.x reports no pool instruments, which C01 and Sessions' pool panel read,
-and 8.0.0 to 8.0.2 carry CVE-2024-32655. It is tested at 8.0.3 and at 10.0.3, whose renamed pool instruments
-(`db.client.connection.count` and `.max`) it reads as well as 8's and 9's.
+The package depends on Npgsql 9.0.4 or later (1.1; it was 8.0.3): 9.0.4 is the Npgsql Marten 9.57.0 itself uses, so a host
+that runs both studios never has two. A host on Npgsql 8 moves to 9.0.4 or later ([upgrading.md](upgrading.md)). It is
+tested at 9.0.4 and at 10.0.3, whose renamed pool instruments (`db.client.connection.count` and `.max`) it reads as well
+as 9's (`db.client.connections.*`).
 
 ## Limits
 

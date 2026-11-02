@@ -5,7 +5,6 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -461,13 +460,9 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         CompactionPlan plan = await PlanAsync(events,Everyone, id.ToString(), Token);
         plan.IsOffered.Should().BeTrue(plan.Explanation);
         plan.EventsToFold.Should().Be(3);
-        // This store keeps one tag type in a tag table: below Marten 9.51 a tagged stream's delete may be refused, from
-        // 9.51 the folded events' tag rows go with them (L3) - one or the other, as this run's Marten does it.
-        bool martenDeletesTagRows = RuntimeFeature.TaggedStreamCompaction.Probe() == true;
-        martenDeletesTagRows.Should().Be(MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 51, 0),
-            "plan and expectation both read the probe, so the probe is held to the version here as well");
-        plan.TagTablesMayRefuse.Should().Be(!martenDeletesTagRows);
-        plan.TagRowsFoldWithEvents.Should().Be(martenDeletesTagRows);
+        // This store keeps one tag type in a tag table: since Marten 9.51 the folded events' tag rows go with them (L3).
+        plan.TagTablesMayRefuse.Should().BeFalse();
+        plan.TagRowsFoldWithEvents.Should().BeTrue();
 
         plan.StreamTenantId.Should().BeNull("this store is single-tenanted, and its *DEFAULT* narrows nothing");
         string.Join(" ", StreamCompactionRules.WhatHappens(plan)).Should().NotContain("Only tenant").And.NotContain("*DEFAULT*");
@@ -895,11 +890,11 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
     /// statement, the stream compacts, and the snapshot keeps the last event's tag row.
     /// </summary>
     /// <remarks>
-    /// The last event carries a tag too, so the 9.51 half proves both things the dialog says - the folded tags go, the
-    /// snapshot's stays - and the floor half is refused by the second event's tag, as before.
+    /// The last event carries a tag too, so this proves both things the dialog says - the folded tags go, the snapshot's
+    /// stays (Marten 9.51 and later).
     /// </remarks>
     [PostgresFact]
-    public async Task A_stream_whose_folded_events_carry_tags_is_refused_below_9_51_and_compacts_with_its_tags_from_it()
+    public async Task A_stream_whose_folded_events_carry_tags_compacts_with_its_tags()
     {
         IServiceProvider studio = fixture.Studio(fixture.Plain, capabilities: true);
         IEventDataService events = studio.GetRequiredService<IEventDataService>();
@@ -917,27 +912,6 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
 
         Func<Task> compact = () => events.CompactStreamAsync(Everyone, id.ToString(), id.ToString(), plan.Version, Token);
         StudioActionLogEntry entry;
-
-        // Which half runs is the version's, and the probe has to agree with it: with the probe's first anchor gone (marten#5720,
-        // 9.52) this test expected a refusal from a Marten that compacts.
-        bool martenDeletesTagRows = MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 51, 0);
-        RuntimeFeature.TaggedStreamCompaction.Probe().Should().Be(martenDeletesTagRows);
-
-        if (!martenDeletesTagRows)
-        {
-            plan.TagTablesMayRefuse.Should().BeTrue();
-            plan.TagRowsFoldWithEvents.Should().BeFalse();
-
-            await compact.Should().ThrowAsync<InvalidOperationException>().WithMessage("*mt_event_tag_compaction_customer*");
-            (await fixture.EventsAsync(fixture.PlainSchema, id)).Should().HaveCount(4, "the whole SaveChanges rolled back");
-            (await fixture.CompactedVersionAsync(fixture.PlainSchema, id)).Should().Be(0);
-            (await fixture.TaggedSequencesAsync(sequences)).Should().Equal([sequences[1], sequences[3]], "and the tag rows with it");
-
-            entry = Latest(studio);
-            entry.Succeeded.Should().BeFalse();
-            entry.Message.Should().Contain("Nothing was changed");
-            return;
-        }
 
         plan.TagTablesMayRefuse.Should().BeFalse("Marten 9.51 deletes the folded events' tag rows with them");
         plan.TagRowsFoldWithEvents.Should().BeTrue();

@@ -3,7 +3,6 @@ using JasperFx.MultiTenancy;
 using Marten;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 
 using Npgsql;
 using PostgresStudio.Services;
@@ -221,7 +220,7 @@ internal sealed partial class EventDataService
             resolved.TenantId,
             EventTagModel.From(storeOptions).Storage,
             storeOptions.Events.EnableEventSkippingInProjectionsOrSubscriptions,
-            RuntimeFeature.TaggedStreamCompaction.IsAvailable(MartenRuntime.Current));
+            martenDeletesTagRows: true);
 
         return (plan, plan.IsOffered ? aggregate : null);
     }

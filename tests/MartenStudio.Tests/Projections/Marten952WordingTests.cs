@@ -3,7 +3,6 @@ using AngleSharp.Dom;
 using Bunit;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Components;
 
@@ -67,30 +66,17 @@ public sealed partial class SoloProjection : global::Marten.Events.Aggregation.S
 }
 
 /// <summary>
-/// What the projections screen says from Marten 9.52 about two operations whose behaviour moved: a rebuild that replays
+/// What the projections screen says about two operations whose behaviour moved in Marten 9.52: a rebuild that replays
 /// from the projection's start floor (JasperFx.Events 2.93, #5740), and a high-water advance that ensures the event
-/// store's storage and, under per-tenant partitioning, moves each tenant's own mark (#5738). Each version's words are
-/// judged against a made-up runtime, so both ends run at the floor and at the latest alike.
+/// store's storage and, under per-tenant partitioning, moves each tenant's own mark (#5738).
 /// </summary>
 public class Marten952WordingTests
 {
-    private static readonly MartenRuntime Below = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
-    {
-        [RuntimePackage.Marten] = "9.51.0",
-        [RuntimePackage.JasperFxEvents] = "2.91.0",
-    });
-
-    private static readonly MartenRuntime From = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
-    {
-        [RuntimePackage.Marten] = "9.52.0",
-        [RuntimePackage.JasperFxEvents] = "2.93.1",
-    });
-
     // ---- The rebuild: start floors ---------------------------------------------------------------------------------
 
     /// <summary>Below 9.52 there is no floor, and the dialog's words are the ones it always had.</summary>
     [Fact]
-    public void Below_9_52_a_rebuild_replays_from_the_beginning_with_no_row_or_note_of_its_own()
+    public void With_no_floor_read_a_rebuild_replays_from_the_beginning_with_no_row_or_note_of_its_own()
     {
         RebuildWording.ReplayPhrase(null).Should().Be("from the beginning");
         RebuildWording.ReplaysFrom(null).Should().BeNull();
@@ -290,27 +276,17 @@ public class Marten952WordingTests
     // ---- The high-water advance ----------------------------------------------------------------------------------
 
     /// <summary>
-    /// At every version: the mark moves to the highest committed sequence, and what is lost is the sequence numbers below
-    /// it with no committed event - not the events a projection has still to process.
+    /// The mark moves to the highest committed sequence, and what is lost is the sequence numbers below it with no committed
+    /// event - not the events a projection has still to process.
     /// </summary>
     [Fact]
-    public void The_advance_says_what_it_skips_at_every_version()
+    public void The_advance_says_what_it_skips()
     {
-        foreach (MartenRuntime runtime in new[] { Below, From })
-        {
-            string message = HighWaterAdvanceWording.Message(runtime, tenantPartitionedEvents: false, tenantId: null, "CreateOrUpdate");
+        string message = HighWaterAdvanceWording.Message(tenantPartitionedEvents: false, tenantId: null, "CreateOrUpdate");
 
-            message.Should().StartWith("This moves the high water mark to the highest committed event sequence.");
-            message.Should().Contain("no committed event is skipped for good").And.Contain("in flight");
-            message.Should().NotContain("treats the events it has not processed as already gone");
-        }
-    }
-
-    [Fact]
-    public void Below_9_52_the_advance_creates_nothing_and_says_nothing_about_storage()
-    {
-        HighWaterAdvanceWording.Message(Below, false, null, "CreateOrUpdate").Should().NotContain("ensures");
-        HighWaterAdvanceWording.ButtonNote(Below, "CreateOrUpdate").Should().BeEmpty();
+        message.Should().StartWith("This moves the high water mark to the highest committed event sequence.");
+        message.Should().Contain("no committed event is skipped for good").And.Contain("in flight");
+        message.Should().NotContain("treats the events it has not processed as already gone");
     }
 
     /// <summary>
@@ -318,17 +294,17 @@ public class Marten952WordingTests
     /// applies, and under None it creates nothing.
     /// </summary>
     [Fact]
-    public void From_9_52_a_tenants_advance_says_it_may_create_or_migrate_under_this_databases_AutoCreate()
+    public void A_tenants_advance_says_it_may_create_or_migrate_under_this_databases_AutoCreate()
     {
-        string message = HighWaterAdvanceWording.Message(From, false, "acme", "CreateOrUpdate");
+        string message = HighWaterAdvanceWording.Message(false, "acme", "CreateOrUpdate");
 
         message.Should().Contain("Marten first ensures the event store's storage under this database's AutoCreate (CreateOrUpdate)");
         message.Should().Contain("may create the event store's tables, or migrate them");
         message.Should().NotContainEquivalentOf("additive", "hard rule 14: nothing may call CreateOrUpdate additive");
 
-        HighWaterAdvanceWording.ButtonNote(From, "All", "acme").Should().StartWith("Marten first ensures").And.Contain("(All)");
-        HighWaterAdvanceWording.ButtonNote(From, "None", "acme").Should().Contain("creates nothing");
-        HighWaterAdvanceWording.Message(From, false, "acme", "None").Should().Contain("(None) creates nothing");
+        HighWaterAdvanceWording.ButtonNote("All", "acme").Should().StartWith("Marten first ensures").And.Contain("(All)");
+        HighWaterAdvanceWording.ButtonNote("None", "acme").Should().Contain("creates nothing");
+        HighWaterAdvanceWording.Message(false, "acme", "None").Should().Contain("(None) creates nothing");
     }
 
     /// <summary>
@@ -336,46 +312,38 @@ public class Marten952WordingTests
     /// selected database's mode is quoted as this one's, and "creates nothing" is never said for all of them.
     /// </summary>
     [Fact]
-    public void From_9_52_a_tenantless_advance_says_each_database_ensures_under_its_own_AutoCreate()
+    public void A_tenantless_advance_says_each_database_ensures_under_its_own_AutoCreate()
     {
         foreach (string mode in new[] { "CreateOrUpdate", "None" })
         {
-            string message = HighWaterAdvanceWording.Message(From, false, null, mode);
+            string message = HighWaterAdvanceWording.Message(false, null, mode);
 
             message.Should().Contain("in each database it reaches, under each database's own AutoCreate (this one's is " + mode + ")");
             message.Should().Contain("wherever that is not None, it may create the event store's tables, or migrate them");
             message.Should().NotContain("creates nothing", "another database of the store may not be None");
             message.Should().NotContainEquivalentOf("additive");
 
-            HighWaterAdvanceWording.ButtonNote(From, mode).Should().StartWith("Marten first ensures the event store's storage in each database");
+            HighWaterAdvanceWording.ButtonNote(mode).Should().StartWith("Marten first ensures the event store's storage in each database");
         }
     }
 
     [Fact]
-    public void Below_9_52_an_advance_on_a_partitioned_store_moves_no_tenants_mark()
+    public void An_advance_on_a_partitioned_store_moves_the_selected_tenants_mark_or_every_tenants()
     {
-        HighWaterAdvanceWording.Message(Below, tenantPartitionedEvents: true, "acme", "CreateOrUpdate")
-            .Should().Contain("no tenant's mark moves");
-        HighWaterAdvanceWording.TenantReach(Below, true, "acme").Should().BeNull("below 9.52 the shared correction sentence applies");
-    }
+        HighWaterAdvanceWording.Message(true, "acme", "CreateOrUpdate").Should().Contain("moves tenant acme's own mark, and no other tenant's");
+        HighWaterAdvanceWording.Message(true, null, "CreateOrUpdate").Should().Contain("moves every tenant's own mark");
 
-    [Fact]
-    public void From_9_52_an_advance_on_a_partitioned_store_moves_the_selected_tenants_mark_or_every_tenants()
-    {
-        HighWaterAdvanceWording.Message(From, true, "acme", "CreateOrUpdate").Should().Contain("moves tenant acme's own mark, and no other tenant's");
-        HighWaterAdvanceWording.Message(From, true, null, "CreateOrUpdate").Should().Contain("moves every tenant's own mark");
-
-        string reach = HighWaterAdvanceWording.TenantReach(From, true, "acme")!;
+        string reach = HighWaterAdvanceWording.TenantReach(true, "acme")!;
         reach.Should().Contain("moves only that tenant's own mark");
         reach.Should().Contain("refused unless you may change that database as a whole", "the authorization does not narrow with it");
 
-        HighWaterAdvanceWording.TenantReach(From, false, "acme").Should().BeNull("one mark per database: every tenant's");
-        HighWaterAdvanceWording.TenantReach(From, true, null).Should().BeNull();
+        HighWaterAdvanceWording.TenantReach(false, "acme").Should().BeNull("one mark per database: every tenant's");
+        HighWaterAdvanceWording.TenantReach(true, null).Should().BeNull();
     }
 
-    /// <summary>The page, at whichever Marten this run resolved: the storage sentence is there exactly from 9.52.</summary>
+    /// <summary>The page: the storage sentence is in the button's title and the dialog.</summary>
     [Fact]
-    public async Task The_advance_dialog_words_the_storage_check_for_the_Marten_this_host_runs()
+    public async Task The_advance_dialog_words_the_storage_check()
     {
         await using var context = new StudioComponentContext().WithAllCapabilities();
         context.ProjectionData.WithProjection("DailySales");
@@ -383,15 +351,13 @@ public class Marten952WordingTests
 
         var page = context.Render<Page>();
         IElement button = page.Find(".ms-daemon-advance-high-water");
-        bool from952 = RuntimeFeature.PerDatabaseHighWaterAdvance.IsAvailable(MartenRuntime.Current);
 
-        (button.GetAttribute("title") ?? string.Empty).Contains("ensures the event store's storage", StringComparison.Ordinal)
-            .Should().Be(from952);
+        (button.GetAttribute("title") ?? string.Empty).Should().Contain("ensures the event store's storage");
 
         button.Click();
         string text = page.WaitForElement(".ms-confirm-dialog").TextContent;
 
         text.Should().Contain("highest committed event sequence");
-        text.Contains("Marten first ensures the event store's storage", StringComparison.Ordinal).Should().Be(from952);
+        text.Should().Contain("Marten first ensures the event store's storage");
     }
 }

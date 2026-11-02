@@ -72,10 +72,10 @@ outright when those cannot be read.
 
 What to do: end the transaction that holds it - Explain names it - or use **Advance high water mark** on the
 projections screen (`CorrectProgression`), which moves the mark to the latest committed event; anything that later
-commits inside the gap is then never projected. From Marten 9.52 (#5738) the advance first ensures the event store's
+commits inside the gap is then never projected. Since Marten 9.52 (#5738) the advance first ensures the event store's
 storage, so under each database's `AutoCreate` - every database of the store when no tenant is selected - the first
-press in a process may create or migrate the event store's tables; and on a store that numbers events per tenant it moves the selected tenant's own mark, or every tenant's,
-where below 9.52 it wrote only a store-global mark the daemon does not read there. The dialog says which. To bound
+press in a process may create or migrate the event store's tables; and on a store that numbers events per tenant it
+moves the selected tenant's own mark, or every tenant's. The dialog says which. To bound
 future stalls, at the same cost:
 
 ```csharp
@@ -97,13 +97,12 @@ The leadership locks, pinned per distributor at JasperFx `V2.74.0` and `V2.87.1`
 byte-identical): **HotCold over one database** takes one advisory lock per shard,
 `ProjectionLockIds.Compute(eventSchema, shard, DaemonLockId)`; **HotCold over several databases** takes
 `DaemonLockId` in each; **Solo takes none**. Weasel takes each as one 64-bit key, so `pg_locks` shows it with
-`objsubid = 1`, transaction-scoped at Marten 9.39 and session-scoped from 9.41 (#5526) - the same row either way.
+`objsubid = 1`, session-scoped by default since 9.41 (#5526; transaction-scoped before) - the same row either way.
 So for Solo the lock says nothing and the progression table carries the argument: a running daemon writes it, each
-shard as it advances, the allocation fence on every high-water poll while caught up (#5108), and from Marten 9.43
-the `HighWaterMark` row on every poll (#5541). The one running state that writes nothing below 9.43 is a mark
-pinned behind a gap, and below 9.43 D02 stands down while the pin holds. From 9.43 a running daemon restamps the
-mark's row even while it is pinned, so D02 stands down on a pin only while that row is fresh: a daemon that died
-pinned is reported, where otherwise D01 would stay Critical with nothing saying why.
+shard as it advances, the allocation fence on every high-water poll while caught up (#5108), and since Marten 9.43
+the `HighWaterMark` row on every poll (#5541). A running daemon restamps the mark's row even while it is pinned behind a
+gap, so D02 stands down on a pin only while that row is fresh: a daemon that died pinned is reported, where otherwise D01
+would stay Critical with nothing saying why.
 
 A second finding of the same check, **Warning**: a session *holds* a leadership lock while nothing has been
 written for that long - a hung daemon, or a lock that outlived the process. Who holds it (pid, role, application,
@@ -145,15 +144,15 @@ A shard's `last_updated` is stamped on every progress write (#4981): it is when 
 its agent is alive. "Not moving" alone is a shard on an idle store, so D03 also needs the daemon to be alive and the
 mark to have been ahead of the shard for the whole window, which a mark that moved a second ago is not.
 
-**The 9.43 rule** changes what is believed, not only what is said. From Marten 9.43 the high-water agent restamps
-its own row on every poll (#5541, `HighWaterMarkLivenessStamp` in the probe table), so that row's age says whether
+**The 9.43 rule** changes what is believed, not only what is said. Since Marten 9.43 the high-water agent restamps
+its own row on every poll (#5541), so that row's age says whether
 the high-water agent's loop is alive: fresh is running, old is stopped - D02's question, not D03's - whatever the
 allocation fence or the advisor's history of the mark say, because those are only older news from the same agent.
 It is a heartbeat of that one agent, and like any heartbeat it says the loop runs, not that anything moves: not that
-a shard advances, and not that this shard's own agent is running. Below 9.43 that row is the mark's last move and
-freezes on a caught-up idle store, so an old one says nothing: the daemon is believed to be running if it is hosted
-here and says so, its row or allocation fence was written within `2 x SlowPollingTime + 1 min`, or its mark moved
-while the advisor watched - and without any of them D03 says it cannot tell instead of reporting a stall.
+a shard advances, and not that this shard's own agent is running. (Before 9.43 that row was the mark's last move and
+froze on a caught-up idle store, so an old one said nothing and D03 had to say it could not tell; the floor is past that.)
+The daemon is believed to be running if it is hosted here and says so, or its row was written within
+`2 x SlowPollingTime + 1 min`.
 
 **Not a heartbeat.** The extended tracking's `heartbeat` column is written when a shard's status changes, as JasperFx
 documents it, and is never read as a sign of life (K02 reads it the same way). Even made periodic with
@@ -255,15 +254,15 @@ the shard pauses instead. Fix the schema or the grant it ran into, then start th
 this process says the failure is one - its live exception, through JasperFx's own classifier, or its classified failure
 (permanent, with a database exception at its root) - D05 offers no `SkipApplyErrors` line and says what to fix; where it
 says it is not, the line stands as it is; and where nothing can say - every failure read back from
-`mt_event_progression`, which keeps only the category and the text - the line carries that exception. Below 9.52 such
-an error escaped unwrapped, the shard paused as `Other`, and none of this applies.
+`mt_event_progression`, which keeps only the category and the text - the line carries that exception. (Before 9.52 such
+an error escaped unwrapped and the shard paused as `Other`; the floor is past that.)
 
-**Starting a shard during a rebuild.** From Marten 9.50 (JasperFx 2.86) the daemon refuses a continuous start while
-the shard's projection is being rebuilt, and Marten Studio says it was refused and records why. Below 9.50 a rebuild
-started outside Marten Studio is invisible to it, nothing refuses the start, and the continuous agent it starts writes
-the shard's progression row beside the replay: whichever inserts second fails on `pk_mt_event_progression` (23505),
-and the rebuild can be the one that fails (measured at 9.39). The Start button says so on those versions; make sure no
-rebuild is running before pressing it. A rebuild Marten Studio itself is running refuses the start at every version.
+**Starting a shard during a rebuild.** Since Marten 9.50 (JasperFx 2.86) the daemon refuses a continuous start while
+the shard's projection is being rebuilt, and Marten Studio says it was refused and records why. (Before 9.50 a rebuild
+started outside Marten Studio was invisible, nothing refused the start, and the continuous agent it started wrote the
+shard's progression row beside the replay: whichever inserted second failed on `pk_mt_event_progression` (23505), and
+the rebuild could be the one that failed - measured at 9.39. The floor is past that.) A rebuild Marten Studio itself is
+running refuses the start too.
 
 **Stopping.** Pause, Stop and Rebuild give each agent `Projections.StopAndDrainTimeout` (5 s by default) to finish
 the page it is processing, and cancel what is still running then. JasperFx applies that bound only when it is greater
@@ -354,7 +353,7 @@ Marten release writes it. `ShardMode.rebuilding` is stamped only on the in-memor
 
 What it watches instead is the position itself, sampled into the advisor's history at every regular sweep. A fall
 between two samples is explained away when this process's studio rebuilt or rewound that projection around then, or
-when this process is rebuilding it now - its tracker's latest state says so, or, on Marten 9.50+,
+when this process is rebuilding it now - its tracker's latest state says so, or
 `IProjectionDaemon.IsRebuilding` does (a daemon that does not track rebuilds answers `false`, which proves nothing,
 so that answer only ever explains a finding away). A fall is also explained away when the store-global high-water
 mark, sampled beside the shards, fell in the same interval: Marten's `TryCorrectProgressInDatabaseAsync` - the

@@ -215,16 +215,22 @@ public class HealthSeamTests
     [Fact]
     public void MartenStudios_runtime_judges_its_own_probe_table_and_no_runtime_claims_nothing()
     {
-        MartenStudioRuntime floor = new(Floor);
+        // The probe table is empty at 1.1.0, so the made-up feature (ScriptedStudioRuntime.Feature, Marten 9.99) is judged
+        // through a runtime that adds it to the table.
+        MartenStudioRuntime floor = new(ScriptedStudioRuntime.HostWithout);
+        MartenStudioRuntime ahead = new(ScriptedStudioRuntime.HostWithIt);
+        RuntimeFeature feature = ScriptedStudioRuntime.Feature;
 
-        floor.FindFeature(nameof(RuntimeFeature.DocumentFillFactor)).Should().BeSameAs(RuntimeFeature.DocumentFillFactor);
+        floor.FindFeature(ScriptedStudioRuntime.FeatureName).Should().BeNull("the probe table is empty");
         floor.FindFeature("TimeTravel").Should().BeNull();
-        floor.IsAvailable(RuntimeFeature.DocumentFillFactor).Should().BeFalse("FillFactor arrived in Marten 9.47");
-        floor.DescribeHost(RuntimeFeature.DocumentFillFactor).Should().Be(Floor.DescribeHost(RuntimePackage.Marten));
-        RuntimeFeature.DocumentFillFactor.Needs.Should().Be(RuntimeFeature.DocumentFillFactor.Requirement);
+        new ScriptedStudioRuntime(ScriptedStudioRuntime.HostWithout).FindFeature(ScriptedStudioRuntime.FeatureName).Should().BeSameAs(feature);
+        floor.IsAvailable(feature).Should().BeFalse("the feature is Marten 9.99's");
+        ahead.IsAvailable(feature).Should().BeTrue();
+        floor.DescribeHost(feature).Should().Be(ScriptedStudioRuntime.HostWithout.Describe(RuntimePackage.Marten));
+        feature.Needs.Should().Be(feature.Requirement).And.Be("Marten 9.99+");
 
-        NoStudioRuntime.Instance.FindFeature(nameof(RuntimeFeature.DocumentFillFactor)).Should().BeNull();
-        NoStudioRuntime.Instance.IsAvailable(RuntimeFeature.DocumentFillFactor).Should().BeFalse();
+        NoStudioRuntime.Instance.FindFeature(ScriptedStudioRuntime.FeatureName).Should().BeNull();
+        NoStudioRuntime.Instance.IsAvailable(feature).Should().BeFalse();
     }
 
     [Fact]
@@ -238,8 +244,8 @@ public class HealthSeamTests
             "the studio ships 81 checks: 0.4's 49, W5's D09 and C11, W5-V1's T16 and T24, W5-R2's R02-R04, W5-S2's S04-S10 and K05-K08, "
             + "W5-B1's T15, T17, T19, T20, T25 and T26, 0.6's C12 (X3), T18 (X4) and D10 (M4), 0.8's C13 and C14 (#20), 0.10's K09 and K10 (V1), and 1.0.1's C15 (#47)");
 
-        HealthCheckRegistry.Describe(typeof(ScriptedLightUpCheck), MartenStudioRuntime.Current).Requires
-            .Should().BeSameAs(RuntimeFeature.TransientFailureClassifier);
+        HealthCheckRegistry.Describe(typeof(ScriptedLightUpCheck), new ScriptedStudioRuntime(MartenRuntime.Current)).Requires
+            .Should().BeSameAs(ScriptedStudioRuntime.Feature);
         HealthCheckRegistry.Problems([typeof(ScriptedLightUpCheck)]).Should().ContainSingle()
             .Which.Should().Contain("not in the probe table", "a registry with no runtime refuses a check that requires a feature");
     }

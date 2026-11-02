@@ -1,4 +1,3 @@
-using MartenStudio.Services.Configuration;
 
 using PostgresStudio.Internal.Sql;
 
@@ -24,7 +23,7 @@ public class MaintenanceChecksTests
         new([table], indexes, new DatabaseStatistics(Now.AddDays(-30), true, 2));
 
     [Fact]
-    public void Few_HOT_updates_on_a_table_no_index_blocks_is_a_FillFactor_warning_that_needs_Marten_9_47()
+    public void Few_HOT_updates_on_a_table_no_index_blocks_is_a_FillFactor_warning()
     {
         MartenTable orders = Document<HealthOrderDoc>();
 
@@ -37,8 +36,7 @@ public class MaintenanceChecksTests
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().Contain("10%");
         finding.Remedy!.Code.Should().Be("opts.Schema.For<HealthOrderDoc>().FillFactor(80);");
-        finding.Remedy.Requires.Should().BeSameAs(RuntimeFeature.DocumentFillFactor);
-        RuntimeFeature.DocumentFillFactor.Requirement.Should().Be("Marten 9.47+", "the page prints this beside the line");
+        finding.Remedy.Requires.Should().BeNull("FillFactor is in every Marten the studio supports (9.47+)");
     }
 
     [Fact]

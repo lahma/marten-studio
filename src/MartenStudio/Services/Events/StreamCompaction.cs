@@ -5,8 +5,6 @@ using JasperFx.Events;
 using Marten;
 using Marten.Events;
 
-using MartenStudio.Services.Configuration;
-
 namespace MartenStudio.Services.Events;
 
 /// <summary>Why a stream is not offered for compaction.</summary>
@@ -344,28 +342,6 @@ internal static class StreamCompactionRules
     /// <param name="read">What cannot be read, as the sentence names it: "the feed".</param>
     public static string ReadNeedsTenant(string read) =>
         "This store numbers events per tenant (UseTenantPartitionedEvents): choose a tenant to read " + read + ".";
-
-    /// <summary>
-    /// Why Skip event is refused on a store whose events are numbered per tenant (<c>UseTenantPartitionedEvents</c>)
-    /// by a Marten without the tenant overload of <c>MarkEventsAsSkipped</c> - below 9.51 Marten skips by sequence alone
-    /// (SEC1-fix4). The service's refusal and the disabled button's title, word for word.
-    /// </summary>
-    public static readonly string SkipNeedsOneSequence =
-        "This host's Marten marks events skipped by sequence alone, and this store numbers events per tenant "
-        + "(UseTenantPartitionedEvents): skipping this event would skip every tenant's event with the same number, "
-        + "so Marten Studio does not skip events on this store. Skipping one tenant's event needs "
-        + RuntimeFeature.TenantEventSkipping.Requirement + ".";
-
-    /// <summary>
-    /// Why Rewind subscription is refused on such a store by a Marten without the per-tenant rewind - below 9.51 the
-    /// daemon rewinds to one sequence for every tenant (SEC1-fix4). The service's refusal and the disabled button's
-    /// title, word for word.
-    /// </summary>
-    public static readonly string RewindNeedsOneSequence =
-        "This host's Marten rewinds a subscription to one sequence for every tenant, and this store numbers events per "
-        + "tenant (UseTenantPartitionedEvents): the floor would name a different event in each tenant, so Marten Studio "
-        + "does not rewind subscriptions on this store. Rewinding one tenant's agents needs "
-        + RuntimeFeature.TenantSubscriptionRewind.Requirement + ".";
 
     /// <summary>
     /// Why Skip event is refused on such a store when the scope names no tenant: from Marten 9.51 the skip is one

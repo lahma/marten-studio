@@ -61,18 +61,12 @@ namespace MartenStudio.Tests.Marten;
 /// <c>Directory.Packages.props</c> floor for this file to compile at all.
 /// </para>
 /// <para>
-/// <b>The floor is <c>Marten</c> 9.39.0</b>, and it is a <em>security</em> floor (docs/maintainers/
-/// package-budget-changes.md, 2026-10-15): 9.39.0 fixes GHSA-q4xm-rhx9-xjm4 and
-/// GHSA-frqq-p5g3-8jq5, and nothing asserted here is missing at 9.31.0, the lowest version the code itself
-/// needs (bisected 2026-09-19). This file is half of why that one is where it is: below 9.22.4 it does not
-/// compile, because <c>ShardName.HighWaterMarkFor</c> - the member
-/// <see cref="ShardName_identities_tell_a_bookkeeping_row_from_a_real_shard" /> uses to tell a bookkeeping
-/// progression row from a real shard - does not exist. <c>Marten</c> is a floor rather than an exact pin,
-/// so this test really is the contract; when the floor moves for an API reason, it moves because
-/// something asserted here (or in the live suite) is absent below the new value. The file also compiles
-/// and runs at the pinned latest-tested version (<c>MartenStudioMartenLatest</c>, the
-/// <c>marten-latest</c> workflow), so a member that moves upstream fails here on that leg before any host
-/// meets it.
+/// <b>The floor is <c>Marten</c> 9.57.0</b> since 2026-11-03 (docs/maintainers/package-budget-changes.md): the floors
+/// follow the latest releases, and 9.57.0 fixes #5797 (compacting a stream that folds to null). Older floors were 9.39.0,
+/// a <em>security</em> floor (GHSA-q4xm-rhx9-xjm4, GHSA-frqq-p5g3-8jq5), and before that 9.31.0, the lowest version the
+/// code itself needed (bisected 2026-09-19). <c>Marten</c> is a floor rather than an exact pin, so this test really is
+/// the contract: a member that moves upstream fails here on the pinned latest-tested leg
+/// (<c>MartenStudioMartenLatest</c>, the <c>marten-latest</c> workflow) before any host meets it.
 /// </para>
 /// </remarks>
 public class MartenApiSurfaceTest
@@ -697,8 +691,8 @@ public class MartenApiSurfaceTest
     /// <b>The per-database form arrived somewhere else.</b> Marten 9.52 (#5738, jasperfx#1031) implements
     /// <c>IEventStore.AdvanceHighWaterMarkToLatestAsync(IEventDatabase, string?, long?, CancellationToken)</c> on
     /// <c>DocumentStore</c> - a compare-and-set advance of the one database it is handed - so the lists below stay whole
-    /// while the signal they were written to raise has fired. The last assertion says where it lives
-    /// (<c>RuntimeFeature.PerDatabaseHighWaterAdvance</c>); calling it, and asking <c>(store, database, null)</c> instead
+    /// while the signal they were written to raise has fired. The last assertion says where it lives;
+    /// calling it, and asking <c>(store, database, null)</c> instead
     /// of every database, is 0.6's.
     /// </para>
     /// </remarks>
@@ -728,14 +722,10 @@ public class MartenApiSurfaceTest
             .ReturnType.Should().Be<string>();
 
         // Where the per-database form lives: on JasperFx's IEventStore, declared from JasperFx.Events 2.92 and implemented
-        // by DocumentStore from Marten 9.52 - present exactly when the probe says so.
-        bool perDatabase = MartenStudio.Services.Configuration.RuntimeFeature.PerDatabaseAdvanceMethod() is not null;
-        perDatabase.Should().Be(
-            MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.JasperFxEvents)
-                >= new Version(2, 92, 0));
-        MartenStudio.Services.Configuration.RuntimeFeature.PerDatabaseHighWaterAdvance.Probe().Should().Be(
-            MartenStudio.Services.Configuration.MartenRuntime.Current.VersionOf(MartenStudio.Services.Configuration.RuntimePackage.Marten)
-                >= new Version(9, 52, 0));
+        // by DocumentStore from Marten 9.52 - at the floor, so it is simply there.
+        typeof(JasperFx.Events.IEventStore).GetMethods(MemberFlags)
+            .Where(static x => x.Name == "AdvanceHighWaterMarkToLatestAsync" && x.GetParameters().Length == 4)
+            .Should().ContainSingle("the per-database compare-and-set form (JasperFx.Events 2.92, Marten 9.52)");
     }
 
     /// <summary>

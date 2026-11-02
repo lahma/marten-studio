@@ -4,7 +4,6 @@ using JasperFx.Events.Projections;
 using Marten;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Projections;
 
@@ -49,11 +48,11 @@ internal sealed record StudioRewind(string Projection, DateTimeOffset At);
 /// <param name="StudioRebuilds">The rebuilds this process's studio remembers, against this database.</param>
 /// <param name="StudioRewinds">The rewinds this process's studio ran against this database.</param>
 /// <param name="RebuildingHere">
-/// The shards this process is rebuilding right now: the tracker's latest state says so, or - Marten 9.50+ -
+/// The shards this process is rebuilding right now: the tracker's latest state says so, or
 /// <c>IProjectionDaemon.IsRebuilding</c> does. A daemon that does not track rebuilds answers <see langword="false" />,
 /// which proves nothing, so this only ever explains a finding away.
 /// </param>
-/// <param name="AskedDaemon">Whether <c>IsRebuilding</c> was asked at all - Marten 9.50+, with the daemon in this process.</param>
+/// <param name="AskedDaemon">Whether <c>IsRebuilding</c> was asked at all: only with the daemon in this process.</param>
 internal sealed record RebuildFacts(
     bool HasAsyncWork,
     IReadOnlyList<ShardProgressReading> Shards,
@@ -555,7 +554,7 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
 
     private static string InProcessCaveat(RebuildFacts facts) =>
         "'This process' is the studio's own: its rebuild and rewind operations, and the in-process daemon's own states"
-        + (facts.AskedDaemon ? " and IsRebuilding." : " (IsRebuilding needs Marten 9.50+ and the daemon in this process).")
+        + (facts.AskedDaemon ? " and IsRebuilding." : " (IsRebuilding needs the daemon in this process).")
         + " A daemon in another process publishes nothing here.";
 
     private static bool Same(string left, string right) => string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
@@ -588,12 +587,11 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
     }
 
     /// <summary>
-    /// Asks the in-process daemon whether it is rebuilding the shards that are behind - Marten 9.50+ only, and only for
-    /// those, so a caught-up store asks nothing.
+    /// Asks the in-process daemon whether it is rebuilding the shards that are behind - and only those, so a caught-up
+    /// store asks nothing.
     /// </summary>
     /// <remarks>
-    /// Through <see cref="DaemonLightUp" />, the one place <c>IsRebuilding</c> is reached by reflection, as
-    /// <c>DaemonCheckFacts</c> reaches it: a JasperFx that lacks it, or a daemon that throws from it, answers
+    /// Through <see cref="DaemonLightUp" />, as <c>DaemonCheckFacts</c> reaches it: a daemon that throws from it answers
     /// <see langword="false" />, which here proves nothing either way.
     /// </remarks>
     private static async Task<bool> AskDaemonAsync(
@@ -603,9 +601,7 @@ internal sealed class RebuiltElsewhereCheck : HealthCheck<RebuildFacts>
         HashSet<string> rebuilding,
         CancellationToken cancellationToken)
     {
-        if (!DaemonLightUp.CanTellRebuilding
-            || !RuntimeFeature.DaemonIsRebuilding.IsAvailable(context.Runtime)
-            || context.Services.GetService<DaemonAccessor>() is not { } accessor)
+        if (context.Services.GetService<DaemonAccessor>() is not { } accessor)
         {
             return false;
         }

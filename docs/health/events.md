@@ -222,9 +222,8 @@ free space appears as pages are rewritten, and fully only after the table is rew
 opts.Events.DcbTagVersionFillFactor = 70;
 ```
 
-The option arrived in **Marten 9.47** (#5622); on an older host the page prints the version this host runs beside
-it. An older Marten has no way to declare it, and a fillfactor set on the table by hand is schema the configuration
-does not know about.
+The option arrived in **Marten 9.47** (#5622), and the floor is past it. A fillfactor set on the table by hand is schema
+the configuration does not know about.
 
 ## Not covered
 

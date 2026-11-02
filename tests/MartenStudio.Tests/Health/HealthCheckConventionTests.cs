@@ -231,7 +231,7 @@ public class HealthCheckConventionTests
         typeof(RuntimeFeature).GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
             .Should().OnlyContain(static x => x.IsPrivate, "a non-private constructor would let a remedy claim a version the probe does not check");
 
-        RuntimeFeature.All.Should().NotBeEmpty();
+        // The table is empty at 1.1.0 (every light-up became unconditional); the rules below hold for whatever it holds.
         RuntimeFeature.All.Select(static x => x.Name).Should().OnlyHaveUniqueItems();
 
         IEnumerable<string> fields = typeof(RuntimeFeature)

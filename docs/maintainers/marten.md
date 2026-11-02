@@ -19,7 +19,7 @@ an edited document means deserializing into the CLR type and serializing it back
 does not have is *gone*. The dialog lists dropped, changed and added properties before the save happens.
 Making the loss visible is the honest answer; silently dropping data is not, and refusing to edit at all
 would make the feature useless for the schemas that need it most. An edit keeps its document's id: preview and save
-refuse a JSON id that differs from the row's. From Marten 9.53 (`RuntimeFeature.DocumentEditPreview`) the dialog lays
+refuse a JSON id that differs from the row's. Since Marten 9.53 (unconditional since the 1.1 floor of 9.57) the dialog lays
 Marten's own `PreviewDocumentJsonAsync` beside the round trip - no session, no connection - and holds a save it
 disputes.
 
@@ -39,7 +39,8 @@ a lexical screen in front of the parse and the studio's own walk of the parsed t
 nothing to evaluate but literals. The statement comes from `BuildLinqParser()` and `BuildDiagnosticCommand`,
 never `ToCommand`, which runs `EnsureStorageExists` - DDL on a read path (hard rule 14); a Marten that moves
 those internals makes the mode absent, never a fallback. And 9.48 (JasperFx 2.84, the first with
-`DynamicQuery`) is a light-up, not a floor: nothing else needs it, and a host on 9.39-9.47 must not be
-dragged forward for one mode, so the adapter is reached by reflection behind the `DynamicLinqQuery` probe,
-pinned at both ends by `MartenRuntimeProbeTests` and `MartenLinqCommandTests`, and its absence is a line
-naming the Marten it needs. `docs/linq-mode.md` is the threat model.
+`DynamicQuery`) was a light-up, not a floor, while the floor was 9.39: a host on 9.39-9.47 was not dragged forward for
+one mode. Since the floor moved to 9.57 (1.1, *Package budget changes* 2026-11-03) the `DynamicLinqQuery` probe is gone
+and the mode is unconditional; the adapter is still reached by reflection and still fails closed, pinned by
+`DynamicLinqAdapterTests` and `MartenLinqCommandTests`, and its absence is now only a JasperFx whose shape the studio
+does not recognise. `docs/linq-mode.md` is the threat model.

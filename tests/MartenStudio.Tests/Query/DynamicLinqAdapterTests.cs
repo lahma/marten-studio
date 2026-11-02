@@ -7,68 +7,36 @@ using MartenStudio.Services.Query;
 namespace MartenStudio.Tests.Query;
 
 /// <summary>
-/// JasperFx's DynamicQuery, reached by reflection: present exactly where the F1 probe says it is, and configured as the
-/// strictest policy the feature can live with.
+/// JasperFx's DynamicQuery, reached by reflection, and configured as the strictest policy the feature can live with.
 /// </summary>
 /// <remarks>
-/// The first test runs at every Marten, and is the one that would catch a JasperFx that renamed a member: the probe
-/// would still find <c>DynamicQuery</c>, and the adapter - which resolves every member it needs - would not.
+/// The first test is the one that would catch a JasperFx that renamed a member: the adapter resolves every member it needs
+/// by name and signature, and is absent otherwise.
 /// </remarks>
 public class DynamicLinqAdapterTests
 {
     [Fact]
-    public void The_adapter_resolves_exactly_when_the_probe_finds_DynamicQuery()
+    public void The_adapter_resolves_against_the_JasperFx_this_run_resolved()
     {
-        bool probed = RuntimeFeature.DynamicLinqQuery.IsAvailable(MartenRuntime.Current);
-
-        (DynamicLinqAdapter.Current is not null).Should().Be(probed,
-            "every member the adapter needs is in JasperFx 2.84.0 to 2.91.0, and none is below it");
+        DynamicLinqAdapter.Current.Should().NotBeNull(
+            "every member the adapter needs is in JasperFx 2.84.0 and later, and the floor's JasperFx is {0}",
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx));
     }
 
     /// <summary>
-    /// L6: the studio's date correction is on exactly where this JasperFx reads an offset-less date in the server's zone -
-    /// JasperFx 2.84.0 to 2.90.2, on a server that is not on UTC - and off from 2.91.0 (jasperfx#1024), on every server.
+    /// L6: the studio's date correction is idle: JasperFx reads an offset-less date as UTC itself (jasperfx#1024, 2.91.0),
+    /// on every server - so the assertion is zone-free and holds on a UTC CI runner too. A JasperFx that read server time
+    /// again, on any server east or west of Greenwich, fails it - and so does a probe that stopped being able to read its
+    /// date at all, which answers "true" on every server.
     /// </summary>
-    /// <remarks>
-    /// At 2.91.0 and later the assertion is zone-free, so it holds on a UTC CI runner too: a JasperFx that read server
-    /// time again, on any server east or west of Greenwich, fails it - and so does a probe that stopped being able to read
-    /// its date at all, which answers "true" on every server. Below 2.91.0 it is the measurement itself, checked against
-    /// this server's own offsets on the two probe dates.
-    /// </remarks>
     [DynamicLinqFact]
-    public void The_date_correction_is_on_exactly_where_this_JasperFx_reads_dates_in_server_time()
+    public void The_date_correction_is_idle_because_this_JasperFx_reads_dates_as_UTC()
     {
         DynamicLinqAdapter adapter = DynamicLinqAdapter.Current!;
-        Version jasperFx = MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx)!;
 
-        bool serverOffUtc = new[] { new DateTime(2000, 1, 15), new DateTime(2000, 7, 15) }
-            .Any(static x => TimeZoneInfo.Local.GetUtcOffset(x) != TimeSpan.Zero);
-
-        if (jasperFx >= new Version(2, 91, 0))
-        {
-            adapter.ReadsDatesInServerTime.Should().BeFalse(
-                "JasperFx {0} reads an offset-less date as UTC itself, so the studio's correction must be idle", jasperFx);
-        }
-        else
-        {
-            adapter.ReadsDatesInServerTime.Should().Be(serverOffUtc,
-                "JasperFx {0} reads an offset-less date in the server's zone, which moves it exactly when that zone is not UTC", jasperFx);
-        }
-    }
-
-    [Fact]
-    public void Below_9_48_the_availability_names_the_Marten_it_needs()
-    {
-        MartenRuntime old = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string>
-        {
-            [RuntimePackage.Marten] = "9.39.0",
-            [RuntimePackage.JasperFx] = "2.74.0",
-        });
-
-        (LinqAvailability availability, string? message) = DynamicLinqAdapter.Availability(old);
-
-        availability.Should().Be(LinqAvailability.MartenTooOld);
-        message.Should().Be("LINQ mode needs Marten 9.48+; this host runs Marten 9.39.0 (JasperFx 2.74.0).");
+        adapter.ReadsDatesInServerTime.Should().BeFalse(
+            "JasperFx {0} reads an offset-less date as UTC itself, so the studio's correction must be idle",
+            MartenRuntime.Current.VersionOf(RuntimePackage.JasperFx));
     }
 
     [DynamicLinqFact]

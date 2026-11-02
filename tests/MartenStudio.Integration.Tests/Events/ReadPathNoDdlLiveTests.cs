@@ -41,9 +41,9 @@ namespace MartenStudio.Integration.Tests.Events;
 /// the two tables that matter by name. Tests in a class run one after another, so the snapshot is the running test's
 /// alone. One database rather than one per test, because dropping a database forces an immediate checkpoint (Postgres
 /// 15 and later), which is load every other class on the shared container pays for.
-/// <see cref="Martens_own_read_on_the_same_database_really_does_write_DDL" /> is the anti-vacuity theory: the very Marten
-/// call each read replaced, on the same setup, creates <c>mt_hilo</c> below Marten 9.50.3 - and from 9.50.3, where that
-/// setup's hazard is gone (#5665), creates its storage on the empty database.
+/// <see cref="Martens_own_read_creates_nothing_on_the_seeded_database_and_the_storage_on_an_empty_one" /> is the
+/// anti-vacuity theory: the very Marten call each read replaced creates nothing on the same setup, where the hazard is gone
+/// (#5665, Marten 9.50.3), and creates its storage on the empty database.
 /// </para>
 /// </remarks>
 public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
@@ -277,26 +277,23 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Version-aware (L5).</b> On the seeded setup - the schema applied by another store, the studio's store never having
-    /// read - the DDL Marten's read wrote was the HiLo feature's: the first ensure in the process runs <c>AllObjects()</c>,
-    /// which below Marten 9.50.3 applies it. From 9.50.3 (#5665) <c>AllObjects()</c> describes it and applies nothing, and
-    /// on that setup Marten's read writes no DDL at all - asserted, so the change is recorded rather than silent. The
-    /// seeded tests above then prove their point at the floor, which still has the hazard.
+    /// On the seeded setup - the schema applied by another store, the studio's store never having read - the DDL Marten's
+    /// read once wrote was the HiLo feature's: the first ensure in the process runs <c>AllObjects()</c>, which below Marten
+    /// 9.50.3 applied it. Since 9.50.3 (#5665) <c>AllObjects()</c> describes it and applies nothing, and on that setup
+    /// Marten's read writes no DDL at all - asserted, so the change is recorded rather than silent (hard rule 14 stands at
+    /// every version all the same).
     /// </para>
     /// <para>
-    /// From 9.50.3 the theory's proof moves to the empty database the first test above reads: there Marten's read creates
-    /// the storage it ensures at every version, so that test is never an assertion that nothing happened where nothing
-    /// could have.
+    /// The theory's proof is the empty database the first test above reads: there Marten's read creates the storage it
+    /// ensures, so that test is never an assertion that nothing happened where nothing could have.
     /// </para>
     /// </remarks>
     [PostgresTheory]
     [InlineData("list")]
     [InlineData("replay")]
     [InlineData("state")]
-    public async Task Martens_own_read_on_the_same_database_really_does_write_DDL(string read)
+    public async Task Martens_own_read_creates_nothing_on_the_seeded_database_and_the_storage_on_an_empty_one(string read)
     {
-        bool offline = MartenStudio.Services.Configuration.RuntimeFeature.OfflineSchemaEnumeration.Probe() == true;
-
         await using (Host host = await Host.StartAsync(fixture))
         {
             Guid stream = await host.SeedAsync(withDeadLetters: true);
@@ -306,23 +303,13 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
 
             await MartensOwnReadAsync(host, read, stream);
 
-            if (!offline)
-            {
-                (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeTrue(
-                    "{0} ensures storage first, and below Marten 9.50.3 the first ensure in the process runs AllObjects(), which "
-                    + "applies the HiLo feature - if this no longer happens, the tests above prove nothing",
-                    read);
-                (await host.SnapshotAsync()).Objects.Should().NotEqual(before.Objects);
-                return;
-            }
-
             (await host.ExistsAsync(DocumentSchema, "mt_hilo")).Should().BeFalse(
-                "from Marten 9.50.3 AllObjects() describes the HiLo feature and applies nothing");
+                "since Marten 9.50.3 AllObjects() describes the HiLo feature and applies nothing");
             (await host.SnapshotAsync()).Objects.Should().Equal(before.Objects,
-                "on this setup the HiLo feature was the whole of the DDL Marten's {0} wrote, and from 9.50.3 it writes none", read);
+                "on this setup the HiLo feature was the whole of the DDL Marten's {0} wrote, and since 9.50.3 it writes none", read);
         }
 
-        // From 9.50.3: the empty database, where Marten's read still creates what it ensures.
+        // The empty database, where Marten's read still creates what it ensures.
         await using (Host empty = await Host.StartAsync(fixture))
         {
             ServerSnapshot before = await empty.SnapshotAsync();

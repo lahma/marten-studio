@@ -3,7 +3,6 @@ using System.Globalization;
 using JasperFx.Events.Daemon;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 using PostgresStudio.Services.Health;
 
@@ -209,21 +208,14 @@ internal sealed class DaemonNotRunningCheck : HealthCheck<DaemonNotRunningFacts>
 
         if (reading.IsPinnedBehindGap)
         {
-            if (!RuntimeFeature.HighWaterMarkLivenessStamp.IsAvailable(evaluation.Runtime))
-            {
-                return HealthVerdict.Quiet(
-                    "The high-water mark is held behind a gap (D01). Below Marten 9.43 a daemon in that state writes nothing to the "
-                    + "progression table, so its silence is not evidence that nothing runs it.");
-            }
-
             if (reading.SinceMarkUpdated is { } stamped && stamped <= window)
             {
                 return HealthVerdict.Quiet(
                     "The high-water mark is held behind a gap (D01), and the high-water agent restamped it "
-                    + DaemonCheckConfiguration.Format(stamped) + " ago - which from Marten 9.43 a running one does on every poll.");
+                    + DaemonCheckConfiguration.Format(stamped) + " ago - which a running one does on every poll.");
             }
 
-            // From 9.43 a running daemon restamps the mark's row even while it is pinned (#5541), so a pin whose row has
+            // A running daemon restamps the mark's row even while it is pinned (#5541), so a pin whose row has
             // gone quiet is a daemon that died pinned: D01 alone would stay Critical and say nothing about that.
         }
 

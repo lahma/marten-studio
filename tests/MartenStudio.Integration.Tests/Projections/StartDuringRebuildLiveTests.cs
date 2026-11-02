@@ -1,20 +1,16 @@
-using Marten.Exceptions;
-
 using MartenStudio.Integration.Tests.Health;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using Npgsql;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Integration.Tests.Projections;
 
 /// <summary>
-/// H2 criterion 4: a start the daemon refuses during a rebuild is audited and shown as refused - where JasperFx says so
-/// (2.86, Marten 9.50) and, for a rebuild Marten Studio started, at every version. At the floor a rebuild somebody else
-/// started is invisible to the studio and to JasperFx 2.74, and the start goes through: recorded here, not hidden.
+/// H2 criterion 4: a start the daemon refuses during a rebuild is audited and shown as refused - for a rebuild somebody
+/// else started, where JasperFx says so (2.86, Marten 9.50), and for a rebuild Marten Studio started, from its own
+/// operation tracker.
 /// </summary>
 /// <remarks>
 /// The replay is held inside <see cref="GatedProjection" /> on a closed gate, and each test waits until a page is really
@@ -27,11 +23,8 @@ public class StartDuringRebuildLiveTests(PostgresFixture postgres)
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static bool DaemonTracksRebuilds =>
-        RuntimeFeature.DaemonIsRebuilding.IsAvailable(MartenRuntime.Current);
-
     [PostgresFact]
-    public async Task A_start_during_a_rebuild_somebody_else_started_is_refused_where_the_daemon_can_say_and_recorded_where_it_cannot()
+    public async Task A_start_during_a_rebuild_somebody_else_started_is_refused()
     {
         const string gate = "h2-start-external";
 
@@ -59,45 +52,25 @@ public class StartDuringRebuildLiveTests(PostgresFixture postgres)
             StudioActionLogEntry audited = host.Services.GetRequiredService<StudioActionLogService>().GetLatest()
                 .First(x => x.Action == "StartAgent" && x.Target == Shard);
 
-            if (DaemonTracksRebuilds)
-            {
-                result.Applied.Should().BeFalse("JasperFx 2.86 refuses a continuous start while the shard is rebuilt");
-                result.Reason.Should().Contain("being rebuilt on this daemon");
-                audited.Succeeded.Should().BeFalse("a start that did not happen is not audited as one");
-                audited.Message.Should().Be(result.Reason);
+            result.Applied.Should().BeFalse("JasperFx 2.86 refuses a continuous start while the shard is rebuilt");
+            result.Reason.Should().Contain("being rebuilt on this daemon");
+            audited.Succeeded.Should().BeFalse("a start that did not happen is not audited as one");
+            audited.Message.Should().Be(result.Reason);
 
-                host.Services.GetRequiredService<DaemonControlState>().StartRefusals(host.Scope.StoreKey, host.Scope.DatabaseId)
-                    .Should().ContainKey(Shard).WhoseValue.Reason.Should().Be("Rebuilding");
-            }
-            else
-            {
-                // The floor's JasperFx 2.74 has no rebuild registry: the start goes through and a continuous agent runs
-                // beside the replay. Recorded as the old behaviour - the studio cannot see a rebuild it did not start.
-                result.Applied.Should().BeTrue("JasperFx 2.74 has no guard, and nothing tells the studio a rebuild is running");
-                audited.Succeeded.Should().BeTrue();
-            }
+            host.Services.GetRequiredService<DaemonControlState>().StartRefusals(host.Scope.StoreKey, host.Scope.DatabaseId)
+                .Should().ContainKey(Shard).WhoseValue.Reason.Should().Be("Rebuilding");
         }
         finally
         {
             GatedProjection.Open(gate);
 
-            try
-            {
-                await rebuild.WaitAsync(TimeSpan.FromMinutes(2), Token);
-            }
-            catch (MartenCommandException e) when (!DaemonTracksRebuilds && e.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
-            {
-                // The rest of the floor's old behaviour, measured: the continuous agent nothing refused writes the
-                // shard's progression row beside the replay, and whichever inserts second loses on
-                // pk_mt_event_progression - so the rebuild somebody else started can fail because of the start.
-                // Which writer wins is a race; that the two collide is not.
-            }
+            await rebuild.WaitAsync(TimeSpan.FromMinutes(2), Token);
         }
     }
 
-    /// <summary>A rebuild Marten Studio is running is known at every version, from its own operation tracker.</summary>
+    /// <summary>A rebuild Marten Studio is running is known from its own operation tracker.</summary>
     [PostgresFact]
-    public async Task A_start_during_a_rebuild_the_studio_started_is_refused_at_every_version()
+    public async Task A_start_during_a_rebuild_the_studio_started_is_refused()
     {
         const string gate = "h2-start-studio";
 
@@ -130,10 +103,7 @@ public class StartDuringRebuildLiveTests(PostgresFixture postgres)
             IReadOnlyList<StudioOperation> running = await host.ProjectionsAsync(x => x.RunningOperationsAsync(host.Scope, Token));
             running.Should().Contain(x => x.Kind == "Rebuild" && x.Target == GatedProjection.ProjectionName);
 
-            if (DaemonTracksRebuilds)
-            {
-                view.Daemon.IsRebuildingHere(GatedProjection.ProjectionName).Should().BeTrue("the daemon says so from JasperFx 2.86");
-            }
+            view.Daemon.IsRebuildingHere(GatedProjection.ProjectionName).Should().BeTrue("the daemon says so (JasperFx 2.86 and later)");
 
             // And a second rebuild is answered with the running one, never started twice.
             OperationStart again = await host.ProjectionsAsync(x => x.RebuildAsync(host.Scope, GatedProjection.ProjectionName, Token));

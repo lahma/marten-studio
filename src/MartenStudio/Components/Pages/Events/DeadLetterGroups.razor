@@ -350,11 +350,6 @@
             return WritePolicyRefusal.For(StudioCapability.ManageDeadLetters);
         }
 
-        if (PerTenantSequences && shape is not { TenantSkipping: true })
-        {
-            return StreamCompactionRules.SkipNeedsOneSequence;
-        }
-
         if (list is not { RecordsSkips: true })
         {
             return EventDataService.NoSkipColumnMessage;

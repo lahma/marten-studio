@@ -299,29 +299,15 @@ public class DeadLetterGroupsTests
         skip.GetAttribute("title").Should().Be(DeadLetterGroupText.NothingLeft);
     }
 
-    /// <summary>Per-tenant sequences below Marten 9.51: refused, with single Skip's own sentence.</summary>
-    [Fact]
-    public async Task Per_tenant_sequences_on_a_Marten_that_skips_by_number_alone_disable_the_skip()
-    {
-        using StudioComponentContext context = await ContextAsync();
-        context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = true, TenantSkipping = false };
-        context.EventData.Groups = FakeEventDataService.GroupList(FakeEventDataService.Group(tenantNames: ["acme"]));
-
-        IElement skip = Render(context, GroupedUri).Find(".ms-dl-group-skip");
-
-        skip.HasAttribute("disabled").Should().BeTrue();
-        skip.GetAttribute("title").Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-    }
-
     /// <summary>
-    /// Per-tenant sequences from 9.51, "All tenants" selected: a group of one tenant is skipped in that tenant (single
+    /// Per-tenant sequences, "All tenants" selected: a group of one tenant is skipped in that tenant (single
     /// Skip's rule), and a group of several asks for a tenant.
     /// </summary>
     [Fact]
     public async Task Per_tenant_sequences_with_all_tenants_skip_a_one_tenant_group_in_its_tenant_and_ask_for_one_otherwise()
     {
         using StudioComponentContext context = await ContextAsync();
-        context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = true, TenantSkipping = true };
+        context.EventData.Shape = context.EventData.Shape with { PerTenantSequences = true };
         context.EventData.Groups = FakeEventDataService.GroupList(
             FakeEventDataService.Group(projection: "One", tenantCount: 1, tenantNames: ["acme"]),
             FakeEventDataService.Group(projection: "Two", tenantCount: 2, tenantNames: ["acme", "globex"]));

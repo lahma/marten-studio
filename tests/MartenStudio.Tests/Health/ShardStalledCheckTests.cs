@@ -17,11 +17,8 @@ public class ShardStalledCheckTests
 {
     private const string Shard = "DailySales:All";
 
-    private static readonly MartenRuntime Before943 =
-        MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.42.0" });
-
     private static readonly MartenRuntime From943 =
-        MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.43.0" });
+        MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.57.0" });
 
     private static readonly DaemonInProcess HealthyHere =
         DaemonInProcess.NotHosted with { Hosting = DaemonHostingState.Hosted, IsRunning = true };
@@ -218,74 +215,45 @@ public class ShardStalledCheckTests
         inProcess: DaemonInProcess.NotHosted,
         runtime: runtime);
 
-    /// <summary>From 9.43 the agent restamps its row on every poll (#5541): an old row is a stopped agent - D02's question.</summary>
+    /// <summary>The agent restamps its row on every poll (#5541): an old row is a stopped agent - D02's question.</summary>
     [Fact]
-    public void From_9_43_an_old_mark_row_means_the_agent_stopped_and_D03_leaves_it_to_D02()
+    public void An_old_mark_row_means_the_agent_stopped_and_D03_leaves_it_to_D02()
     {
         HealthVerdict verdict = WithAStaleMarkRow(From943);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("from Marten 9.43 a running one does on every poll").And.Contain("D02");
-    }
-
-    /// <summary>Below 9.43 the row freezes on an idle store: an old one says nothing, and the check says it cannot tell.</summary>
-    [Fact]
-    public void Below_9_43_an_old_mark_row_says_nothing_and_the_check_says_it_cannot_tell()
-    {
-        HealthVerdict verdict = WithAStaleMarkRow(Before943);
-
-        verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("below 9.43").And.Contain("cannot tell");
+        verdict.Note.Should().Contain("a running one does on every poll").And.Contain("D02");
     }
 
     /// <summary>
     /// The rule changes what is believed, not only the wording (H2 review): an old mark row beside a fresh fence and a
-    /// mark the advisor saw move is a dead agent from 9.43 - the fence and the history are older news from it - and a
-    /// live one below, where the fence and the history are all the evidence there is.
+    /// mark the advisor saw move is a dead agent - the fence and the history are older news from it.
     /// </summary>
-    [Theory]
-    [InlineData("9.42.0", true)]
-    [InlineData("9.43.0", false)]
-    public void An_old_mark_row_beside_a_fresh_fence_is_believed_alive_only_below_9_43(string marten, bool fires)
+    [Fact]
+    public void An_old_mark_row_beside_a_fresh_fence_is_not_believed_alive()
     {
-        MartenRuntime runtime = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = marten });
-
         HealthVerdict verdict = Evaluate(
             Reading(TimeSpan.FromMinutes(30), fenceAge: TimeSpan.FromSeconds(3)),
             StillSince(TimeSpan.FromMinutes(10)),
             [SampleAt(TimeSpan.FromMinutes(7), 100, 120), AheadSixMinutesAgo, Current()],
-            inProcess: DaemonInProcess.NotHosted,
-            runtime: runtime);
+            inProcess: DaemonInProcess.NotHosted);
 
-        if (fires)
-        {
-            verdict.Findings.Single().Evidence.Should().Contain(x => x.Label == "Daemon alive because" && x.Value.Contains("allocation fence", StringComparison.Ordinal));
-        }
-        else
-        {
-            verdict.Findings.Should().BeEmpty();
-            verdict.Note.Should().Contain("has not restamped its mark");
-        }
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("has not restamped its mark");
     }
 
-    /// <summary>A recent write of the mark's row is a live agent at both sides of 9.43.</summary>
-    [Theory]
-    [InlineData("9.42.0")]
-    [InlineData("9.43.0")]
-    public void A_recently_written_mark_row_is_a_live_agent_at_both_sides(string marten)
+    /// <summary>A recent write of the mark's row is a live agent.</summary>
+    [Fact]
+    public void A_recently_written_mark_row_is_a_live_agent()
     {
-        MartenRuntime runtime = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = marten });
-
         HealthFinding finding = Evaluate(
                 Reading(TimeSpan.FromSeconds(5)),
                 StillSince(TimeSpan.FromMinutes(10)),
                 [AheadSixMinutesAgo, Current()],
-                inProcess: DaemonInProcess.NotHosted,
-                runtime: runtime)
+                inProcess: DaemonInProcess.NotHosted)
             .Findings.Single();
 
         finding.Evidence.Should().Contain(x => x.Label == "Daemon alive because" && x.Value.StartsWith("the high-water agent", StringComparison.Ordinal));
-        finding.Caveat.Should().Match(marten == "9.42.0" ? "*Below Marten 9.43*this host runs Marten 9.42.0*" : "*");
     }
 
     // ---- Not a heartbeat --------------------------------------------------------------------------------------------

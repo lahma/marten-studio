@@ -688,8 +688,8 @@ internal sealed record DaemonShardRow(
 /// <param name="FailureEventType">That event's type.</param>
 /// <param name="SystemicDatabaseFailure">
 /// Whether its failure is a database error in projection code that JasperFx never dead-letters (JasperFx.Events 2.93,
-/// Marten 9.52 - <c>DaemonLightUp.IsSystemicDatabaseFailure</c>): <see langword="null" /> when that cannot be told, which
-/// below 2.93 is always.
+/// Marten 9.52 - <c>DaemonLightUp.IsSystemicDatabaseFailure</c>): <see langword="null" /> when that cannot be told (a permanent
+/// failure whose root is not a database exception).
 /// </param>
 /// <param name="FailureRootExceptionType">The failure's innermost exception type (<c>ShardFailure.RootExceptionType</c>).</param>
 internal sealed record DaemonAgentFact(

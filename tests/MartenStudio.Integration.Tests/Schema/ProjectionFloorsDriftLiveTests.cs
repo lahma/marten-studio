@@ -2,7 +2,6 @@ using System.Security.Claims;
 
 using Marten;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Schema;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -63,11 +62,8 @@ public class ProjectionFloorsDriftLiveTests(PostgresFixture postgres)
         IDocumentStore store = provider.GetRequiredService<IDocumentStore>();
         await store.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
 
-        bool declared = MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 52, 0);
-        RuntimeFeature.ProjectionStartFloors.Probe().Should().Be(declared, "the floors and their table are both Marten 9.52's (#5740)");
-
-        // The premise, each end's: from 9.52 the table exists once the schema is applied; below it, nothing declares it.
-        (await TableExistsAsync()).Should().Be(declared);
+        // The premise: the floors and their table are Marten 9.52's (#5740), so the table exists once the schema is applied.
+        (await TableExistsAsync()).Should().BeTrue();
 
         // An upgrade's starting point: the event store as a Marten below 9.52 built it.
         await DropTableAsync();
@@ -81,12 +77,6 @@ public class ProjectionFloorsDriftLiveTests(PostgresFixture postgres)
         preview.Withheld.Should().BeNull();
         preview.IsDestructive.Should().BeFalse("building a new table removes nothing");
         preview.DestructiveStatements.Should().BeEmpty();
-
-        if (!declared)
-        {
-            preview.Sql.Should().NotContain(FloorsTable, "below 9.52 the table is not declared, so nothing is missing");
-            return;
-        }
 
         preview.Sql.Should().Contain(FloorsTable).And.ContainEquivalentOf("create table");
         preview.Notes.Should().NotContain(static x => x.Statement.Contains(FloorsTable, StringComparison.Ordinal),

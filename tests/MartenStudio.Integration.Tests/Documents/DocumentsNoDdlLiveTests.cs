@@ -132,10 +132,9 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
     }
 
     /// <summary>
-    /// M5: Marten's own preview of a save (9.53+) opens no session and no connection - here on schemas with nothing in them,
+    /// M5: Marten's own preview of a save opens no session and no connection - here on schemas with nothing in them,
     /// where a preview that ensured the type's storage would leave its table behind, and then through the studio's edit
-    /// preview on a deployed table. Below 9.53 the answer is the line naming the Marten it needs, and nothing is created
-    /// either.
+    /// preview on a deployed table.
     /// </summary>
     [PostgresFact]
     public async Task Martens_own_edit_preview_creates_nothing()
@@ -145,15 +144,12 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
             static options => options.Capabilities.EditDocuments = true);
 
         IDocumentStore store = host.Services.GetRequiredService<IDocumentStore>();
-        bool available = MartenStudio.Services.Configuration.RuntimeFeature.DocumentEditPreview.IsAvailable(
-            MartenStudio.Services.Configuration.MartenRuntime.Current);
-
         const string json = """{"Id":1,"Name":"one"}""";
         string roundTrip = store.Options.Serializer().ToJson(new NumberedThing { Id = 1, Name = "one" });
         MartenPreviewCheck direct = await MartenEditPreview.CheckAsync(
             store, typeof(NumberedThing), "1", json, roundTrip, TestContext.Current.CancellationToken);
 
-        direct.Verdict.Should().Be(available ? MartenPreviewVerdict.Agrees : MartenPreviewVerdict.Unavailable, direct.Reason);
+        direct.Verdict.Should().Be(MartenPreviewVerdict.Agrees, direct.Reason);
         (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty, "Marten's preview resolves the type in memory and reads nothing");
 
         await host.ApplyAsync();
@@ -168,14 +164,7 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
 
         preview.Status.Should().Be(WritePreviewStatus.Ready, preview.Reason);
         preview.MartenCheck.Should().NotBeNull();
-        preview.MartenCheck!.Verdict.Should().Be(
-            available ? MartenPreviewVerdict.Agrees : MartenPreviewVerdict.Unavailable,
-            preview.MartenCheck.Reason);
-
-        if (!available)
-        {
-            preview.MartenCheck.Reason.Should().Contain("needs Marten 9.53+", "below 9.53 the line says which Marten it needs");
-        }
+        preview.MartenCheck!.Verdict.Should().Be(MartenPreviewVerdict.Agrees, preview.MartenCheck.Reason);
 
         (await host.ReadObjectsAsync()).Should().Be(before, "previewing an edit, Marten's half included, creates nothing");
     }
@@ -193,24 +182,20 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Without it, a Marten release that stopped applying migrations from <c>DocumentTables()</c> would
-    /// turn both tests into assertions that nothing happens when nothing could have happened. This calls
-    /// the two methods the documents browser refuses to call and asserts that, below Marten 9.50.3, they really
-    /// do create Marten's HiLo objects on a schema that did not have them.
+    /// Without it, a Marten release that stopped applying migrations would turn both tests into assertions that nothing
+    /// happens when nothing could have happened. Since Marten 9.50.3 (#5665) <c>AllObjects()</c> describes the HiLo feature
+    /// and applies nothing, so <c>DocumentTables()</c> and <c>Functions()</c> create nothing - asserted, so the change is
+    /// recorded rather than silent (hard rule 14 stands at every version all the same).
     /// </para>
     /// <para>
-    /// <b>Version-aware (L5).</b> One release did stop: from 9.50.3 (#5665) <c>AllObjects()</c> describes the HiLo
-    /// feature and applies nothing, so <c>DocumentTables()</c> and <c>Functions()</c> create nothing - asserted, so the
-    /// change is recorded rather than silent, and the second test above proves its point at the floor, which still has
-    /// the hazard. From 9.50.3 the proof that the first test is not vacuous moves to the read the documents list and
-    /// detail replaced: Marten's own <c>LoadAsync</c>, on the same empty schemas, still ensures - and so creates - the
-    /// document's storage at every version.
+    /// The proof that the first test is not vacuous is the read the documents list and detail replaced: Marten's own
+    /// <c>LoadAsync</c>, on the same empty schemas, still ensures - and so creates - the document's storage.
     /// </para>
     /// </remarks>
     [PostgresFact]
-    public async Task Martens_own_DocumentTables_and_Functions_really_do_create_the_HiLo_objects()
+    public async Task Martens_own_DocumentTables_and_Functions_create_nothing_but_its_own_load_still_does()
     {
-        await using Host host = await StartAsync(nameof(Martens_own_DocumentTables_and_Functions_really_do_create_the_HiLo_objects));
+        await using Host host = await StartAsync(nameof(Martens_own_DocumentTables_and_Functions_create_nothing_but_its_own_load_still_does));
 
         (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty);
 
@@ -223,20 +208,11 @@ public class DocumentsNoDdlLiveTests(PostgresFixture fixture)
 
         SchemaObjects after = await host.ReadObjectsAsync();
 
-        if (MartenStudio.Services.Configuration.RuntimeFeature.OfflineSchemaEnumeration.Probe() != true)
-        {
-            after.Tables.Should().Contain("mt_hilo",
-                "this is the DDL a read path used to run - if Marten has stopped doing it, the two tests " +
-                "above no longer prove anything and this one is where that is noticed");
-            after.Routines.Should().Contain("mt_get_next_hi");
-            return;
-        }
-
         after.Should().Be(SchemaObjects.Empty,
-            "from Marten 9.50.3 DocumentTables() and Functions() describe the HiLo feature and apply nothing");
+            "since Marten 9.50.3 DocumentTables() and Functions() describe the HiLo feature and apply nothing");
 
         // The read the documents list and detail replaced: Marten's own load ensures the document's storage first, which
-        // on these empty schemas creates it - at every version, and so from 9.50.3 too.
+        // on these empty schemas creates it - at every version.
         await using (IQuerySession session = store.QuerySession())
         {
             (await session.LoadAsync<NumberedThing>(1L)).Should().BeNull();

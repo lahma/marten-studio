@@ -1077,7 +1077,7 @@
     /// </summary>
     private string AdvanceTitle => CorrectTitle is { Length: > 0 } refused
         ? refused
-        : HighWaterAdvanceWording.ButtonNote(MartenRuntime.Current, view?.DatabaseAutoCreate, State.ActiveScope?.TenantId);
+        : HighWaterAdvanceWording.ButtonNote(view?.DatabaseAutoCreate, State.ActiveScope?.TenantId);
 
     /// <summary>
     /// Whether this projection may be rebuilt right now.
@@ -1102,7 +1102,7 @@
 
     /// <summary>
     /// Whether this projection is being rebuilt: by Marten Studio, anywhere in this process - or, where the daemon here
-    /// can say so (JasperFx 2.86+), by anything. A daemon that says nothing proves nothing, so "no" is "not known to be".
+    /// can say so, by anything. A daemon that says nothing proves nothing, so "no" is "not known to be".
     /// </summary>
     private bool IsRebuilding(string projectionName) =>
         IsRebuildingByStudio(projectionName) || view?.Daemon.IsRebuildingHere(projectionName) == true;
@@ -1139,7 +1139,7 @@
             return topology;
         }
 
-        return DaemonLightUp.CanTellRebuilding ? string.Empty : StartBlindToRebuilds;
+        return string.Empty;
     }
 
     /// <summary>The hover text of a shard's Stop: the controls' own refusal, then a stop that would stop nothing here, then the drain.</summary>
@@ -1160,20 +1160,9 @@
         AgentControlEnabled && view is not null ? DaemonTopologyWording.StopRefusal(view.Daemon, shard.ShardName) : null;
 
     /// <summary>
-    /// What Start says on a Marten whose daemon cannot tell anybody it is rebuilding (below 9.50, JasperFx 2.86): a
-    /// rebuild started outside Marten Studio is invisible to the studio, nothing refuses the start, and the continuous
-    /// agent it starts writes the shard's progression row beside the replay - measured: whichever inserts second fails on
-    /// <c>pk_mt_event_progression</c> (23505), and the rebuild can be the one that fails.
-    /// </summary>
-    internal const string StartBlindToRebuilds =
-        "On this Marten version the daemon cannot say whether this projection is being rebuilt by something other than "
-        + "Marten Studio. Starting it during such a rebuild runs a second agent beside the replay, and the two can collide on "
-        + "the shard's progression row - which can fail the rebuild. Make sure no rebuild is running first.";
-
-    /// <summary>
-    /// What stopping an agent does, at both ends of the supported Marten range: it gets <c>StopAndDrainTimeout</c> to
+    /// What stopping an agent does: it gets <c>StopAndDrainTimeout</c> to
     /// finish what it is processing, and whatever is still running then is cancelled and processed again at the next
-    /// start (from Marten 9.47 the page in flight is also rolled back). Said on Pause, Stop and Rebuild, because the
+    /// start (the page in flight is also rolled back). Said on Pause, Stop and Rebuild, because the
     /// screen must not promise a clean finish Marten does not make.
     /// </summary>
     private string DrainSentence
@@ -1690,8 +1679,8 @@
             + "while it was paused goes back to whatever the coordinator decides.",
         PendingAction.AdvanceHighWaterMark =>
             HighWaterAdvanceWording.Message(
-                MartenRuntime.Current, view?.TenantPartitionedEvents == true, State.ActiveScope?.TenantId, view?.DatabaseAutoCreate)
-            + (HighWaterAdvanceWording.TenantReach(MartenRuntime.Current, view?.TenantPartitionedEvents == true, State.ActiveScope?.TenantId)
+                view?.TenantPartitionedEvents == true, State.ActiveScope?.TenantId, view?.DatabaseAutoCreate)
+            + (HighWaterAdvanceWording.TenantReach(view?.TenantPartitionedEvents == true, State.ActiveScope?.TenantId)
                 ?? CorrectionReach),
         PendingAction.CorrectProgression =>
             "This pulls the high water mark and every shard's progression back to the highest real event "

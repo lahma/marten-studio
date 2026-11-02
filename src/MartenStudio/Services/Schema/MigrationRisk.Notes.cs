@@ -1,4 +1,3 @@
-using MartenStudio.Services.Configuration;
 
 namespace MartenStudio.Services.Schema;
 
@@ -75,14 +74,6 @@ internal static partial class MigrationRisk
 
         return notes;
     }
-
-    /// <summary>
-    /// Whether building Marten's feature schemas - what Check schema, Preview migration and Generate script all ask for -
-    /// can create Marten's HiLo objects (<c>mt_hilo</c>, <c>mt_get_next_hi</c>) on <paramref name="runtime" />'s Marten:
-    /// below 9.50.3, where the enumeration reaches the HiLo feature's applying lazy (hard rule 14).
-    /// </summary>
-    public static bool FeatureSchemasMayCreateHilo(MartenRuntime runtime) =>
-        !RuntimeFeature.OfflineSchemaEnumeration.IsAvailable(runtime);
 
     /// <summary>
     /// Whether line <paramref name="index" /> is the drop of Weasel 9.46's partition-index resume: <c>DROP INDEX

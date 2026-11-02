@@ -1,3 +1,22 @@
+# Upgrading to 1.1
+
+## 1.0 → 1.1: the floors moved
+
+1.1 needs **Marten 9.57.0 or later** and **Npgsql 9.0.4 or later**. Move all three packages to 1.1.0 together, as for any
+release, and move the two dependencies first if your application is below either floor.
+
+- **Why Marten 9.57.0.** Marten 9.57.0 fixes stream compaction replacing the whole history of a stream that folds to
+  nothing with an empty snapshot (#5797), which Marten Studio's Compact stream exposed on every host below it. Raising the
+  floor removes the hazard instead of guarding it. The floors now follow the latest releases, on the expectation that
+  consumers keep up; a Marten 9.x above 9.57.0 is fine, and the package still states no upper bound. Because the floor has
+  everything the studio ever lit up at run time (Marten 9.31 to 9.53), the Configuration page's "Newer than the studio's
+  floor" table is empty and the screens no longer say "needs Marten 9.xx" or "this host runs ...".
+- **Why Npgsql 9.0.4.** It is the Npgsql Marten 9.57.0 itself references, so a Marten Studio host never has two. A
+  **Postgres Studio host that registers its own `NpgsqlDataSource` on Npgsql 8 must move to 9.0.4 or later**; Npgsql 9 keeps
+  the connection string keywords and the pool metrics Postgres Studio reads (`db.client.connections.*`; Npgsql 10 renamed
+  them and is read too), and from 9.0 its `Connection Lifetime` defaults to 3600 seconds.
+- **Nothing else changes for you.** No public API moved.
+
 # Upgrading to 1.0
 
 1.0 is the first release with a stability promise ([stability.md](stability.md)); the API it ships is 0.11's, extended.

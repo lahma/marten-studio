@@ -4,7 +4,6 @@ using System.Reflection;
 using JasperFx.Events.Daemon;
 using JasperFx.Events.Projections;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -89,20 +88,18 @@ internal sealed record ShardFailedOrPausedFacts(
 /// </para>
 /// <para>
 /// <b>Classified where JasperFx classifies.</b> A start the studio asked for and the daemon refused carries
-/// <c>ShardStartException.Reason</c> and whether it is transient (JasperFx 2.76+, F1); a live failure is classified as
-/// transient or permanent by <c>TransientFailures.IsTransient</c> where that exists (JasperFx 2.89, first in Marten
-/// 9.50.3). A shard of one tenant names that tenant, so its finding is shown only through the activity gate and only to a
+/// <c>ShardStartException.Reason</c> and whether it is transient; a live failure is classified as transient or permanent
+/// by <c>TransientFailures.IsTransient</c>. A shard of one tenant names that tenant, so its finding is shown only through the activity gate and only to a
 /// visitor the store policy lets see the tenant.
 /// </para>
 /// <para>
-/// <b>A database error is not an apply error's remedy.</b> From JasperFx.Events 2.93 (Marten 9.52, jasperfx#1029/#1064 and
+/// <b>A database error is not an apply error's remedy.</b> Since JasperFx.Events 2.93 (Marten 9.52, jasperfx#1029/#1064 and
 /// #5741) a non-transient database exception in projection code - a missing column or table, a permission - is attributed
 /// to its event as <c>ApplyEvent</c> and is never dead-lettered, even under <c>SkipApplyErrors</c>: the shard pauses
-/// instead (<see cref="RuntimeFeature.SystemicDatabaseFailure" />). So the <c>SkipApplyErrors</c> remedy is dropped where
-/// the daemon here says the failure is one - the live exception through JasperFx's own classifier, or its classified failure
-/// (permanent, with a database exception at its root) - kept as it was where it says it is not, and kept with that case
-/// named where nothing can say, which is every failure read back from <c>mt_event_progression</c>. Below 2.93 such an error
-/// escaped unwrapped as <c>Other</c>, and the remedy stands as it always did.
+/// instead. So the <c>SkipApplyErrors</c> remedy is dropped where the daemon here says the failure is one - the live
+/// exception through JasperFx's own classifier, or its classified failure (permanent, with a database exception at its
+/// root) - kept as it was where it says it is not, and kept with that case named where nothing can say, which is every
+/// failure read back from <c>mt_event_progression</c>.
 /// </para>
 /// </remarks>
 [HealthCheck("D05", HealthArea.Daemon, HealthCostTier.Catalog, "Shard failed or paused")]
@@ -289,7 +286,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
                 ? problem with { Restarted = EarlierAttempt(problem, evaluation, memory) }
                 : problem;
 
-            findings.Add(Finding(judged, inProcess, memory, RuntimeFeature.SystemicDatabaseFailure.IsAvailable(evaluation.Runtime))
+            findings.Add(Finding(judged, inProcess, memory)
                 with { DocumentTypes = facts.Configuration.PublishedTypesOf(judged.Shard) });
         }
 
@@ -437,7 +434,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
             seen.At < evaluation.Now && seen.PausedAt is { } earlier && earlier < pausedAt && position <= seen.Position);
     }
 
-    private static HealthFinding Finding(Problem problem, DaemonInProcess inProcess, TimeSpan memory, bool databaseErrorsPause)
+    private static HealthFinding Finding(Problem problem, DaemonInProcess inProcess, TimeSpan memory)
     {
         string? tenant = ShardName.TryParse(problem.Shard, out ShardName? name) ? name?.TenantId : null;
         bool paused = problem.IsPaused;
@@ -487,19 +484,17 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
 
         Exception? live = inProcess.LiveExceptions?.GetValueOrDefault(problem.Shard);
 
-        if (live is not null && DaemonLightUp.IsTransient(live) is { } transient)
+        if (live is not null)
         {
-            evidence.Add(new HealthEvidence("Transient or permanent", transient
+            evidence.Add(new HealthEvidence("Transient or permanent", DaemonLightUp.IsTransient(live)
                 ? "transient: JasperFx expects a retry to succeed"
                 : "permanent: a retry will fail the same way until the cause is fixed"));
         }
 
-        // JasperFx.Events 2.93 / Marten 9.52: a database error in projection code pauses the shard at any setting and is
-        // never dead-lettered - the live exception, where a page watches the tracker, says so exactly; otherwise the
-        // daemon's classified failure, where it can.
-        bool? systemic = databaseErrorsPause
-            ? (live is not null ? DaemonLightUp.IsSystemicDatabaseFailure(live) : null) ?? problem.SystemicDatabaseFailure
-            : null;
+        // A database error in projection code pauses the shard at any setting and is never dead-lettered - the live
+        // exception, where a page watches the tracker, says so exactly; otherwise the daemon's classified failure, where
+        // it can.
+        bool? systemic = live is not null ? DaemonLightUp.IsSystemicDatabaseFailure(live) : problem.SystemicDatabaseFailure;
 
         if (systemic == true && IsApplyEvent(problem.FailureCategory))
         {
@@ -553,7 +548,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
                       + "coming back is a shard failing on every attempt.",
             Evidence = evidence,
             Caveat = CaveatOf(problem, paused, memory),
-            Remedy = RemedyFor(problem.FailureCategory, databaseErrorsPause, systemic),
+            Remedy = RemedyFor(problem.FailureCategory, systemic),
         };
     }
 
@@ -598,7 +593,7 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
         + "projection then never reflects that event: fix the code and rebuild it, or rewind from the dead letter.";
 
     /// <summary>
-    /// What the remedy adds from Marten 9.52 (JasperFx.Events 2.93, <see cref="RuntimeFeature.SystemicDatabaseFailure" />)
+    /// What the remedy adds (a systemic database failure is never dead-lettered, JasperFx.Events 2.93)
     /// when nothing says whether this failure was a database error - a persisted row carries only a category and a text.
     /// </summary>
     internal const string DatabaseErrorExclusion =
@@ -610,20 +605,18 @@ internal sealed class ShardFailedOrPausedCheck : HealthCheck<ShardFailedOrPaused
     /// The <c>StoreOptions</c> switch that turns a failure of this category into a dead letter, when there is one.
     /// </summary>
     /// <param name="category">The failure's category.</param>
-    /// <param name="databaseErrorsPause">
-    /// JasperFx.Events 2.93+ (Marten 9.52+): a systemic database failure is never dead-lettered, so for an
-    /// <c>ApplyEvent</c> failure <c>SkipApplyErrors</c> is the remedy only when the failure is not one.
-    /// </param>
     /// <param name="systemic">
-    /// Whether this failure is one - <see langword="true" />: no switch helps, and the evidence says what does;
-    /// <see langword="false" />: the switch, as it always was; <see langword="null" />: the switch, with the exception named.
+    /// Whether this failure is a systemic database failure, which is never dead-lettered, so for an <c>ApplyEvent</c>
+    /// failure <c>SkipApplyErrors</c> is the remedy only when it is not one - <see langword="true" />: no switch helps, and
+    /// the evidence says what does; <see langword="false" />: the switch; <see langword="null" />: the switch, with the
+    /// exception named.
     /// </param>
-    private static HealthRemedy? RemedyFor(string? category, bool databaseErrorsPause, bool? systemic) => category switch
+    private static HealthRemedy? RemedyFor(string? category, bool? systemic) => category switch
     {
-        nameof(ShardFailureCategory.ApplyEvent) when databaseErrorsPause && systemic == true => null,
+        nameof(ShardFailureCategory.ApplyEvent) when systemic == true => null,
         nameof(ShardFailureCategory.ApplyEvent) => new HealthRemedy(
             "opts.Projections.Errors.SkipApplyErrors = true;",
-            SkipApplyErrorsExplanation + (databaseErrorsPause && systemic is null ? DatabaseErrorExclusion : string.Empty)),
+            SkipApplyErrorsExplanation + (systemic is null ? DatabaseErrorExclusion : string.Empty)),
         nameof(ShardFailureCategory.EventSerialization) => new HealthRemedy(
             "opts.Projections.Errors.SkipSerializationErrors = true;",
             "An event that cannot be deserialized becomes a dead letter instead of stopping the shard - usually an event type whose "

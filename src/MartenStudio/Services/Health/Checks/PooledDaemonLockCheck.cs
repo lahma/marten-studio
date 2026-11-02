@@ -16,9 +16,6 @@ namespace MartenStudio.Services.Health.Checks;
 /// <param name="Endpoints">Where the database's data source connects, or <see langword="null" /> when it cannot be read.</param>
 internal sealed record DaemonLockPooling(DaemonMode AsyncMode, bool TransactionScopedLock, DataSourceEndpoints? Endpoints)
 {
-    /// <summary>The first Marten on which the HotCold leadership lock is session-scoped by default (#5526).</summary>
-    public static readonly Version SessionLockDefaultSince = new(9, 41, 0);
-
     /// <summary>
     /// Whether this process runs a HotCold daemon whose leadership lock is session-scoped - the one configuration a
     /// transaction-mode pooler breaks.
@@ -56,14 +53,13 @@ internal sealed record DaemonLockPooling(DaemonMode AsyncMode, bool TransactionS
 
     /// <summary>
     /// <c>UseAdvisoryLockTransaction</c>'s value, and whether it is Marten's default for the Marten this host runs: false
-    /// is the default from 9.41, and on 9.39 and 9.40 true is.
+    /// (the default since 9.41).
     /// </summary>
     public string DescribeLockSetting(MartenRuntime runtime)
     {
         ArgumentNullException.ThrowIfNull(runtime);
 
-        Version? marten = runtime.VersionOf(RuntimePackage.Marten);
-        bool defaultValue = marten is not null && marten < SessionLockDefaultSince;
+        const bool defaultValue = false;
         string host = runtime.Describe(RuntimePackage.Marten);
 
         return TransactionScopedLock == defaultValue

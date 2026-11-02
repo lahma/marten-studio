@@ -1,7 +1,4 @@
-using System.Reflection;
-
 using MartenStudio.Integration.Tests.Health;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Schema;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -48,30 +45,17 @@ public class SchemaHealthColumnsLiveTests(PostgresFixture postgres)
         stats.StorageParameters.Should().ContainSingle(static x => x.Name == "autovacuum_enabled")
             .Which.Should().Be(new StorageParameterState("autovacuum_enabled", null, "false", StorageParameterStatus.SetOutsideMarten),
                 "set by hand and not declared: an apply does not reset it unless the apply rebuilds the table");
-        stats.DeclaredParametersKnown.Should().Be(RuntimeFeature.DeclaredStorageParameters.IsAvailable(MartenRuntime.Current));
+        stats.DeclaredParametersKnown.Should().BeTrue("a document mapping declares its storage parameters since Marten 9.47");
     }
 
     /// <summary>
-    /// The version half: from Marten 9.47 a mapping declares a storage parameter, and a table that differs from
-    /// the declaration is drift. The declaration is made by reflection so this compiles - and says so - at the
-    /// floor, where there is nothing to declare and nothing is called drift.
+    /// A mapping declares a storage parameter (Marten 9.47), and a table that differs from the declaration is drift.
     /// </summary>
     [PostgresFact]
-    public async Task A_declared_fillfactor_the_table_differs_from_is_drift_on_a_Marten_that_can_declare_it()
+    public async Task A_declared_fillfactor_the_table_differs_from_is_drift()
     {
-        bool canDeclare = RuntimeFeature.DocumentStorageParameter.IsAvailable(MartenRuntime.Current);
-
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "f6_drift", store: options =>
-        {
-            object expression = options.Schema.For<HealthIndexedThing>();
-
-            if (canDeclare)
-            {
-                expression.GetType()
-                    .GetMethod("StorageParameter", BindingFlags.Public | BindingFlags.Instance, [typeof(string), typeof(object)])!
-                    .Invoke(expression, ["fillfactor", 80]);
-            }
-        });
+        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "f6_drift", store: static options =>
+            options.Schema.For<HealthIndexedThing>().StorageParameter("fillfactor", 80));
         await ApplyAsync(host.Store);
 
         string table = TableOf<HealthIndexedThing>(host.Store);
@@ -82,24 +66,19 @@ public class SchemaHealthColumnsLiveTests(PostgresFixture postgres)
         StorageParameterState fillfactor = tables.Tables.Single(static x => x.Table == "mt_doc_healthindexedthing")
             .StorageParameters.Single(static x => x.Name == "fillfactor");
 
-        fillfactor.Should().Be(canDeclare
-            ? new StorageParameterState("fillfactor", "80", "70", StorageParameterStatus.Drift)
-            : new StorageParameterState("fillfactor", null, "70", StorageParameterStatus.SetOutsideMarten));
+        fillfactor.Should().Be(new StorageParameterState("fillfactor", "80", "70", StorageParameterStatus.Drift));
     }
 
     /// <summary>
     /// A partitioned table has no storage parameters of its own - Postgres keeps none on the parent, and Weasel
     /// writes and compares a declared one per partition - so the Tables tab compares the declaration with what its
-    /// partitions agree on. On a Marten that can declare it, <c>FillFactor(80)</c> on a tenant-partitioned type is a
-    /// match, never drift; a partition a DBA changed makes it "partitions differ", naming no partition. At the
-    /// floor there is no declaration, and nothing is called drift.
+    /// partitions agree on. <c>FillFactor(80)</c> on a tenant-partitioned type is a match, never drift; a partition a DBA
+    /// changed makes it "partitions differ", naming no partition.
     /// </summary>
     [PostgresFact]
     public async Task A_partitioned_table_s_declared_fillfactor_is_compared_with_what_its_partitions_agree_on()
     {
-        bool canDeclare = RuntimeFeature.DocumentStorageParameter.IsAvailable(MartenRuntime.Current);
-
-        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "f6_partitioned", store: options =>
+        await using HealthLiveHost host = await HealthLiveHost.CreateAsync(postgres, "f6_partitioned", store: static options =>
         {
             var expression = options.Schema.For<HealthTenantThing>();
             expression.MultiTenantedWithPartitioning(static x =>
@@ -109,27 +88,15 @@ public class SchemaHealthColumnsLiveTests(PostgresFixture postgres)
                 list.AddPartition("blue", "blue");
             });
 
-            if (canDeclare)
-            {
-                expression.GetType()
-                    .GetMethod("StorageParameter", BindingFlags.Public | BindingFlags.Instance, [typeof(string), typeof(object)])!
-                    .Invoke(expression, ["fillfactor", 80]);
-            }
+            expression.StorageParameter("fillfactor", 80);
         });
         await ApplyAsync(host.Store);
 
         TableStats partitioned = (await TablesAsync(host)).Tables.Single(static x => x.Table == "mt_doc_healthtenantthing");
 
-        if (canDeclare)
-        {
-            partitioned.StorageParameters.Should().ContainSingle(static x => x.Name == "fillfactor")
-                .Which.Should().Be(new StorageParameterState("fillfactor", "80", "80", StorageParameterStatus.Matches),
-                    "every partition has the declared value, which is all the storage a partitioned table has");
-        }
-        else
-        {
-            partitioned.StorageParameters.Should().NotContain(static x => x.Status == StorageParameterStatus.Drift);
-        }
+        partitioned.StorageParameters.Should().ContainSingle(static x => x.Name == "fillfactor")
+            .Which.Should().Be(new StorageParameterState("fillfactor", "80", "80", StorageParameterStatus.Matches),
+                "every partition has the declared value, which is all the storage a partitioned table has");
 
         var name = host.Store.Options.FindOrResolveDocumentType(typeof(HealthTenantThing)).TableName;
         await ExecuteAsync(postgres, "alter table " + SqlIdentifier.Qualify(name.Schema, name.Name + "_red") + " set (fillfactor = 70)");
@@ -137,7 +104,7 @@ public class SchemaHealthColumnsLiveTests(PostgresFixture postgres)
         TableStats differing = (await TablesAsync(host)).Tables.Single(static x => x.Table == "mt_doc_healthtenantthing");
         StorageParameterState fillfactor = differing.StorageParameters.Single(static x => x.Name == "fillfactor");
 
-        fillfactor.Should().Be(new StorageParameterState("fillfactor", canDeclare ? "80" : null, null, StorageParameterStatus.PartitionsDiffer),
+        fillfactor.Should().Be(new StorageParameterState("fillfactor", "80", null, StorageParameterStatus.PartitionsDiffer),
             "one partition differs from the others, and the state names the parameter, never the partition");
         differing.StorageParameters.Should().NotContain(static x => x.Name.Contains("red", StringComparison.Ordinal));
     }

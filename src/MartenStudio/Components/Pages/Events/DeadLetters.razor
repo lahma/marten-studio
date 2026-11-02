@@ -234,7 +234,7 @@
 
                                                 <button type="button"
                                                         class="ms-button ms-dead-letter-skip"
-                                                        disabled="@(working || !SupportsSkipping || !mayManage || SkipRefusedForNumbering)"
+                                                        disabled="@(working || !SupportsSkipping || !mayManage)"
                                                         title="@SkipTitle(row)"
                                                         @onclick="() => OpenSkipAsync(row)">
                                                     Skip event
@@ -503,28 +503,21 @@
 
     private string SkipTitle(DeadLetterRow row) => !mayManage
         ? ManageRefusal
-        : SkipRefusedForNumbering
-            ? StreamCompactionRules.SkipNeedsOneSequence
-            : !SupportsSkipping
-                ? "This store has no mt_events.is_skipped column: the host did not enable event skipping"
-                : PerTenantSequences
-                    ? $"Marks tenant {row.TenantId}'s event skipped so the daemon steps over it; no other tenant's event of that number moves"
-                    : "Marks the event skipped so the daemon steps over it";
+        : !SupportsSkipping
+            ? "This store has no mt_events.is_skipped column: the host did not enable event skipping"
+            : PerTenantSequences
+                ? $"Marks tenant {row.TenantId}'s event skipped so the daemon steps over it; no other tenant's event of that number moves"
+                : "Marks the event skipped so the daemon steps over it";
 
     /// <summary>
-    /// Whether this store numbers events per tenant (<c>UseTenantPartitionedEvents</c>), where below Marten 9.51 the skip
-    /// and the rewind reach every tenant's event of a number: there both are refused by the service and disabled here
-    /// with its sentence (SEC1-fix4), and an event is looked up in its dead letter's own tenant. From 9.51 each is one
-    /// tenant's (<see cref="EventStoreShape.TenantSkipping" />, <see cref="EventStoreShape.TenantRewind" />), asked in the
-    /// dead letter's own tenant.
+    /// Whether this store numbers events per tenant (<c>UseTenantPartitionedEvents</c>), where a number names one event in
+    /// each tenant: the skip and the rewind are each one tenant's (SEC1-fix4), asked in the dead letter's own tenant, and
+    /// an event is looked up in its dead letter's own tenant.
     /// </summary>
     private bool PerTenantSequences => shape is { PerTenantSequences: true };
 
-    /// <summary>Whether Skip is refused for the store's numbering: per-tenant sequences and a Marten that skips by number alone.</summary>
-    private bool SkipRefusedForNumbering => PerTenantSequences && shape is not { TenantSkipping: true };
-
-    /// <summary>Whether a rewind from this page is one tenant's: per-tenant sequences and a Marten that rewinds one tenant.</summary>
-    private bool RewindsOneTenant => PerTenantSequences && shape is { TenantRewind: true };
+    /// <summary>Whether a rewind from this page is one tenant's: per-tenant sequences.</summary>
+    private bool RewindsOneTenant => PerTenantSequences;
 
     /// <summary>
     /// The scope a write about <paramref name="rowTenantId" />'s dead letter is asked in: under per-tenant sequences, with
@@ -586,11 +579,6 @@
         if (!mayManage)
         {
             return ManageRefusal;
-        }
-
-        if (PerTenantSequences && !RewindsOneTenant)
-        {
-            return StreamCompactionRules.RewindNeedsOneSequence;
         }
 
         if (projections is null)

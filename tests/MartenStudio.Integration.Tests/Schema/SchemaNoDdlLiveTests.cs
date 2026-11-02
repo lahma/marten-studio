@@ -3,7 +3,6 @@ using System.Security.Claims;
 using Marten;
 using Marten.Schema;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Schema;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -78,10 +77,9 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
     /// anything, and what they may create is Marten's own bookkeeping - which is what their wording says.
     /// </summary>
     /// <remarks>
-    /// <b>Version-aware, at both ends (L5).</b> Below Marten 9.50.3 building the script creates the HiLo objects and
-    /// nothing else; from 9.50.3 (#5665) it creates nothing at all, and still describes them - which is what keeps the
-    /// "nothing" from being vacuous: the HiLo feature was enumerated, it simply was not applied. Which half runs is
-    /// <c>RuntimeFeature.OfflineSchemaEnumeration</c>'s answer, and the DDL tab words its button from the same probe.
+    /// Below Marten 9.50.3 building the script created the HiLo objects and nothing else; since 9.50.3 (#5665) it creates
+    /// nothing at all, and still describes them - which is what keeps the "nothing" from being vacuous: the HiLo feature
+    /// was enumerated, it simply was not applied.
     /// </remarks>
     [PostgresFact]
     public async Task Only_the_explicit_DDL_action_may_create_Martens_own_bookkeeping_objects()
@@ -91,8 +89,8 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
         await host.SchemaAsync(x => x.TablesAsync(Scope));
         (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty);
 
-        // The button-gated action. Below 9.50.3 it is allowed to create the HiLo objects; nothing else may appear,
-        // because the script is written to a string rather than executed.
+        // The button-gated action. The script is written to a string rather than executed, and since 9.50.3 describing
+        // the HiLo feature applies nothing.
         DdlScript script = await host.SchemaAsync(x => x.DdlAsync(Scope));
         script.Reason.Should().BeNull(script.Reason);
 
@@ -101,32 +99,19 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
         script.Text.Should().Contain("mt_doc_numbered", "the script describes the table it did not create");
         script.Text.Should().Contain("mt_hilo", "and the HiLo feature, which it enumerated - applied or not");
 
-        if (OfflineEnumeration)
-        {
-            after.Should().Be(SchemaObjects.Empty,
-                "from Marten 9.50.3 the enumeration describes the HiLo feature without applying it - which is what the "
-                + "DDL tab's button says on this Marten");
-            MigrationRisk.FeatureSchemasMayCreateHilo(MartenRuntime.Current).Should().BeFalse();
-            return;
-        }
-
-        after.Tables.Should().Equal(["mt_hilo"],
-            "building the script builds Marten's feature schemas, and below 9.50.3 the HiLo feature applies itself - " +
-            "which is exactly what the DDL tab's button says it may do, and why it is a button");
-        after.Routines.Should().Equal(["mt_get_next_hi"]);
-        after.Sequences.Should().BeEmpty(
-            "nothing in the script itself is executed - the tables and functions it describes are not there");
-        MigrationRisk.FeatureSchemasMayCreateHilo(MartenRuntime.Current).Should().BeTrue();
+        after.Should().Be(SchemaObjects.Empty,
+            "since Marten 9.50.3 the enumeration describes the HiLo feature without applying it - which is what the "
+            + "DDL tab's button says");
     }
 
     /// <summary>
-    /// The Drift tab's two buttons, measured the same way: below 9.50.3 Check schema and Preview migration create at most
-    /// Marten's HiLo objects, and from 9.50.3 nothing at all - the two sentences that tab words from the probe.
+    /// The Drift tab's two buttons, measured the same way: since 9.50.3 Check schema and Preview migration create nothing
+    /// at all.
     /// </summary>
     [PostgresFact]
-    public async Task The_drift_tabs_buttons_create_at_most_the_HiLo_objects_and_from_9_50_3_nothing()
+    public async Task The_drift_tabs_buttons_create_nothing()
     {
-        await using Host host = await StartAsync(nameof(The_drift_tabs_buttons_create_at_most_the_HiLo_objects_and_from_9_50_3_nothing));
+        await using Host host = await StartAsync(nameof(The_drift_tabs_buttons_create_nothing));
 
         (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty);
 
@@ -139,44 +124,28 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
 
         SchemaObjects after = await host.ReadObjectsAsync();
 
-        if (OfflineEnumeration)
-        {
-            after.Should().Be(SchemaObjects.Empty, "from Marten 9.50.3 neither button creates anything");
-            return;
-        }
-
-        after.Tables.Should().BeSubsetOf(["mt_hilo"], "below 9.50.3 the most either button creates is Marten's HiLo table");
-        after.Routines.Should().BeSubsetOf(["mt_get_next_hi"]);
-        after.Sequences.Should().BeEmpty();
+        after.Should().Be(SchemaObjects.Empty, "since Marten 9.50.3 neither button creates anything");
     }
 
     /// <summary>
-    /// The anti-vacuity theory: the danger the tests above measure is real on this Marten - and from 9.50.3, where
-    /// <c>AllSchemaNames()</c> no longer has it, that the store still could create the objects, so "it did not" means
-    /// something.
+    /// The anti-vacuity theory: since 9.50.3 <c>AllSchemaNames()</c> no longer applies the HiLo feature, and the store
+    /// still could create the objects, so "it did not" means something.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Without this, a Marten release that stopped applying migrations from <c>AllSchemaNames()</c>
-    /// would turn the tests above into assertions that nothing happens when nothing could have happened, and
-    /// they would go on passing while quietly proving less and less. This calls the method the studio
-    /// refuses to call and asserts that, below 9.50.3, it really does create Marten's HiLo objects on a schema that did
-    /// not have them - so a change in Marten shows up here as a failure, with a name that says what
-    /// changed, rather than as silence. One did change: #5665 (9.50.3) made the enumeration offline, and this test then
-    /// went red, as it should have.
-    /// </para>
-    /// <para>
-    /// From 9.50.3 it asserts the opposite of the call - nothing - and then that the hazard has only moved: the
-    /// runtime <c>Sequences</c> property, which hands out a HiLo id, still applies the feature the first time it is
-    /// touched. So the store is still one whose objects can appear, and the empty schema after
-    /// <c>AllSchemaNames()</c> is Marten's change and not a quiet store. Hard rule 14 stays, because the floor
-    /// still has the hazard.
+    /// Without this, a Marten release that stopped applying migrations would turn the tests above into assertions that
+    /// nothing happens when nothing could have happened, and they would go on passing while quietly proving less and less.
+    /// This calls the method the studio refuses to call and asserts that it creates nothing - one release changed that,
+    /// #5665 (9.50.3), which made the enumeration offline - and then that the hazard has only moved: the runtime
+    /// <c>Sequences</c> property, which hands out a HiLo id, still applies the feature the first time it is touched. So the
+    /// store is still one whose objects can appear, and the empty schema after <c>AllSchemaNames()</c> is Marten's change
+    /// and not a quiet store. Hard rule 14 stays all the same: it holds at every version.
     /// </para>
     /// </remarks>
     [PostgresFact]
-    public async Task Martens_own_AllSchemaNames_creates_the_HiLo_objects_exactly_below_9_50_3()
+    public async Task Martens_own_AllSchemaNames_creates_nothing_but_the_runtime_Sequences_still_provisions_the_HiLo_objects()
     {
-        await using Host host = await StartAsync(nameof(Martens_own_AllSchemaNames_creates_the_HiLo_objects_exactly_below_9_50_3));
+        await using Host host = await StartAsync(nameof(Martens_own_AllSchemaNames_creates_nothing_but_the_runtime_Sequences_still_provisions_the_HiLo_objects));
 
         (await host.ReadObjectsAsync()).Should().Be(SchemaObjects.Empty);
 
@@ -188,16 +157,7 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
 
         SchemaObjects after = await host.ReadObjectsAsync();
 
-        if (!OfflineEnumeration)
-        {
-            after.Tables.Should().Contain("mt_hilo",
-                "this is the DDL a read path used to run - if Marten has stopped doing it, the tests " +
-                "above no longer prove anything and this one is where that is noticed");
-            after.Routines.Should().Contain("mt_get_next_hi");
-            return;
-        }
-
-        after.Should().Be(SchemaObjects.Empty, "from Marten 9.50.3 AllSchemaNames() describes the HiLo feature and applies nothing");
+        after.Should().Be(SchemaObjects.Empty, "since Marten 9.50.3 AllSchemaNames() describes the HiLo feature and applies nothing");
 
         // The hazard moved rather than went: the id path still provisions the HiLo objects on first use.
         databases[0].Sequences.Should().NotBeNull();
@@ -208,9 +168,6 @@ public class SchemaNoDdlLiveTests(PostgresFixture fixture)
             + "schema above is Marten's change, not a store that never could");
         provisioned.Routines.Should().Contain("mt_get_next_hi");
     }
-
-    /// <summary>Whether this run's Marten enumerates its feature schemas offline (9.50.3+, #5665).</summary>
-    private static bool OfflineEnumeration => RuntimeFeature.OfflineSchemaEnumeration.Probe() == true;
 
     private async Task<Host> StartAsync(string name)
     {

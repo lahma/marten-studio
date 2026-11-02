@@ -129,25 +129,13 @@ public class TableHealthHelpersTests
         StorageParameters.Format(true).Should().Be("true");
     }
 
-    /// <summary>
-    /// Light-up, pinned at both ends: the floor cannot declare storage parameters (unknown, never "none");
-    /// from 9.47 a mapping's declarations are read.
-    /// </summary>
+    /// <summary>A mapping's declarations are read: nothing declared is nothing, never "unknown".</summary>
     [Fact]
-    public void Declared_parameters_are_read_only_where_this_Marten_can_declare_them()
+    public void Declared_parameters_are_read_from_the_mapping()
     {
         var plain = SqlTestStore.DocumentType<HealthOrderDoc>();
 
-        DeclaredStorageParameters.Of(plain, Floor).Should().BeNull("Marten 9.39 has no DocumentMapping.StorageParameters");
-
-        if (RuntimeFeature.DeclaredStorageParameters.IsAvailable(MartenRuntime.Current))
-        {
-            DeclaredStorageParameters.Of(plain, MartenRuntime.Current).Should().BeEmpty("nothing declared is nothing, on a Marten that can declare");
-        }
-        else
-        {
-            DeclaredStorageParameters.Of(plain, MartenRuntime.Current).Should().BeNull();
-        }
+        DeclaredStorageParameters.Of(plain).Should().BeEmpty("nothing declared is nothing, on a Marten that can declare");
     }
 
     // -----------------------------------------------------------------------------------------------

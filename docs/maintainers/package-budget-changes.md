@@ -622,3 +622,41 @@ as a dependency of `Microsoft.Extensions.Diagnostics.HealthChecks/10.0.0`, befor
 
 **Exit condition:** if `Microsoft.Extensions.Diagnostics.HealthChecks` ever stops bringing it, it becomes a sixth row of the
 conditional `PostgresStudioDiagnosticsPinsExtensions` group, with an entry here first (hard rule 1).
+
+**2026-11-03 — Marten floor `9.39.0` → `9.57.0` (latest tested `9.56.0` → `9.57.0`); PostgresStudio.Diagnostics' `Npgsql` floor
+`8.0.3` → `9.0.4` (latest tested stays `10.0.3`).** The user changed the policy on 2026-11-02 ("we can also target and require
+newer npgsql and marten if that helps, we can expect consumers to keep up with latest development"), superseding the
+lowest-floor rule of 2026-09-19.
+
+Marten 9.57.0 fixes stream compaction replacing the whole history of a stream that folds to null with an empty snapshot
+(#5797), which the studio's `CompactStreams` exposed on every host below it. Raising the floor removes the hazard instead of
+guarding it, and makes the run-time light-ups from 9.31 to 9.53 unconditional.
+
+Npgsql 9.0.4 is the version Marten 9.57.0 itself references, so a Marten host is never moved off Marten's own Npgsql
+(`NpgsqlVersionTests`). From 9.0, Npgsql's `Connection Lifetime` defaults to 3600 s, and the 8.x keyword and environment
+differences are gone.
+
+Transitively at the floor: JasperFx and JasperFx.Events 2.98.0, Weasel.* 9.48.0. Marten 9.56.0 → 9.57.0 changes five files of
+`src/Marten` (stream compaction leaves a stream that folds to no aggregate alone and accepts an archiver closed over
+`IDocumentSession`; `AutoDiscoverTagTypes`; the usage description gains `TenancyStyle`; data masking), none of them in
+storage, tenancy or the daemon.
+
+**What the move deleted.** Every `RuntimeFeature` the table held (twenty features, Marten 9.41 to 9.53 and the JasperFx
+packages behind them) and its probe, with their fallbacks and the tests of the fallbacks; the mechanism (`RuntimeFeature`,
+`MartenRuntime`, the Configuration page's "Newer than the studio's floor" table, `StudioFeatureRequirement`) stays, empty, for
+the next latest-tested bump, and its engine path is tested through a made-up feature (`ScriptedStudioRuntime`). Where a probe
+guarded a hard-rule-14 safety (Marten below 9.50.3 applying the HiLo feature when its schemas are enumerated) the rule and its
+tests stay; only the dead version branch went.
+
+**Measured.** `dotnet restore marten-studio.slnx` at the new floors: no `NU` code; `obj/project.assets.json` of `src/MartenStudio`
+resolves Marten 9.57.0, JasperFx and JasperFx.Events 2.98.0, Weasel.Core, Weasel.Postgresql and Weasel.Storage 9.48.0, Npgsql
+9.0.4; `src/PostgresStudio` and `src/PostgresStudio.Diagnostics` resolve Npgsql 9.0.4. `dotnet build marten-studio.slnx`: 0
+warnings, 0 errors. `MartenStudio.Tests` 7,590 passed; `PostgresStudio.Tests` 6,114 passed, and again at
+`-p:PostgresStudioNpgsqlVersion=10.0.3` (6,114 passed, restored at `Npgsql/10.0.3`). Live, `MARTENSTUDIO_PG_REUSE=false`:
+`MartenStudio.Integration.Tests` 1,238 passed, 11 skipped (the opt-in large-data, screenshot and timeout classes, as before);
+`PostgresStudio.Integration.Tests` 453 passed. No public API baseline moved. `dotnet fallout Pack`: `MartenStudio` depends on
+`Marten 9.57.0` and `PostgresStudio [1.0.1]`; `PostgresStudio` and `PostgresStudio.Diagnostics` on `Npgsql 9.0.4` and the exact pin
+one level down.
+
+**Exit condition:** as the policy: at a minor release the floors may move to the latest tested versions; a floor still rises when
+a member the studio needs is absent below it or an advisory makes restore fail.

@@ -27,7 +27,7 @@ dotnet add package PostgresStudio
 ```
 
 One package reference. It brings [`PostgresStudio.Diagnostics`](https://www.nuget.org/packages/PostgresStudio.Diagnostics)
-at exactly its own version (the diagnostics engine, with `Npgsql` - floor `8.0.3`, tested at 8.0.3 and 10.0.3 - and the
+at exactly its own version (the diagnostics engine, with `Npgsql` - floor `9.0.4`, tested at 9.0.4 and 10.0.3 - and the
 `Microsoft.Extensions.*` abstractions) and `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files
 and an MSBuild target, no runtime assembly), and takes everything else from the shared framework. It references no Marten,
 JasperFx or Weasel package.

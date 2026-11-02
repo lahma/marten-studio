@@ -308,21 +308,14 @@ public class ProjectionsHealthPageTests
     }
 
     [Fact]
-    public async Task On_a_marten_that_cannot_see_a_rebuild_start_says_so()
+    public async Task A_start_is_not_blind_to_a_rebuild_started_outside_the_studio()
     {
         await using StudioComponentContext context = await ReadyAsync(new CachedHealth(), static data => data.WithStudioPause());
 
         IRenderedComponent<Page> page = context.Render<Page>();
         string? title = page.Find("[data-shard='DailySales:All'] .ms-shard-start").GetAttribute("title");
 
-        if (DaemonLightUp.CanTellRebuilding)
-        {
-            (title ?? string.Empty).Should().NotContain("cannot say whether this projection is being rebuilt");
-        }
-        else
-        {
-            title.Should().Be(Page.StartBlindToRebuilds, "below Marten 9.50 nothing can see a rebuild started outside the studio");
-        }
+        (title ?? string.Empty).Should().NotContain("cannot say whether this projection is being rebuilt");
     }
 
     [Fact]

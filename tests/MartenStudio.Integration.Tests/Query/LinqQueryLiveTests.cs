@@ -1,4 +1,3 @@
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Query;
 
 using Npgsql;
@@ -46,21 +45,6 @@ public class LinqQueryLiveTests(PostgresFixture fixture) : IAsyncLifetime
         harness.Linq.RunAsync(scope, new LinqQueryRequest(alias, where, orderBy, pageSize, offset, deleted), Token);
 
     private static IEnumerable<Guid> Ids(LinqQueryResult result) => result.Rows.Select(static x => Guid.Parse(x.Id));
-
-    // ------------------------------------------------------------------------------------------------
-    // Criterion 3: absent at the floor, with the version line
-    // ------------------------------------------------------------------------------------------------
-
-    [PostgresFact]
-    public async Task At_the_floor_the_mode_is_absent_and_names_the_Marten_it_needs()
-    {
-        Assert.SkipWhen(DynamicLinqAdapter.Current is not null, "This run resolved a Marten with DynamicQuery.");
-
-        LinqModeStatus status = await harness.Linq.DescribeAsync(LinqQueryHarness.AllTenants, Token);
-
-        status.Availability.Should().Be(LinqAvailability.MartenTooOld);
-        status.Message.Should().Contain("Marten 9.48+").And.Contain(MartenRuntime.Current.Describe(RuntimePackage.Marten));
-    }
 
     // ------------------------------------------------------------------------------------------------
     // Criterion 2: the tenant, soft deletes, hierarchies

@@ -10,8 +10,8 @@ others. Security fixes are made in the latest release line only.
 | 1.x (latest minor) | Yes |
 | 0.x | No: upgrade to 1.x ([docs/upgrading.md](docs/upgrading.md)) |
 
-Marten Studio's own floor on Marten (9.39.0) is a security floor: it is the first Marten 9 release with the fixes for
-GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5.
+Marten Studio's floor on Marten (9.57.0 since 1.1) follows the latest release. It is well past the first Marten 9
+release with the fixes for GHSA-q4xm-rhx9-xjm4 and GHSA-frqq-p5g3-8jq5 (9.39.0), which was the floor before.
 
 ## Reporting a vulnerability
 

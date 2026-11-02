@@ -1,26 +1,18 @@
 using Marten;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Documents;
 
 namespace MartenStudio.Tests.Documents;
 
 /// <summary>
-/// M5: Marten's own preview of a save (<c>PreviewDocumentJsonAsync</c>, 9.53+) laid beside the studio's round trip, with no
+/// M5: Marten's own preview of a save (<c>PreviewDocumentJsonAsync</c>) laid beside the studio's round trip, with no
 /// database.
 /// </summary>
 /// <remarks>
-/// <para>
 /// The store points at a host that does not resolve. Marten's preview opens no session and no connection (read at
-/// v9.53.0 and v9.54.2), so every answer here that is not a refusal is also the proof of that: a preview that tried to
+/// v9.53.0 and v9.57.0), so every answer here that is not a refusal is also the proof of that: a preview that tried to
 /// connect would come back <see cref="MartenPreviewVerdict.Refused" /> with a socket error, never
 /// <see cref="MartenPreviewVerdict.Agrees" />.
-/// </para>
-/// <para>
-/// <b>Both ends.</b> At the floor every call is <see cref="MartenPreviewVerdict.Unavailable" /> with the line that names the
-/// Marten it needs; from 9.53 the other verdicts apply. Each test skips at the end it does not describe, as the LINQ
-/// mode's do.
-/// </para>
 /// </remarks>
 public class MartenEditPreviewTests
 {
@@ -31,32 +23,9 @@ public class MartenEditPreviewTests
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    private static bool Available => RuntimeFeature.DocumentEditPreview.IsAvailable(MartenRuntime.Current);
-
     [Fact]
-    public async Task Below_9_53_there_is_no_preview_and_the_line_names_the_Marten_it_needs()
+    public async Task An_edit_Marten_keeps_as_the_round_trip_does_agrees()
     {
-        Assert.SkipWhen(Available, "This run resolved a Marten with its own preview; the absent case is the floor's.");
-
-        using DocumentStore store = Store();
-
-        MartenPreviewCheck check = await MartenEditPreview.CheckAsync(
-            store, typeof(PreviewedThing), Id, Json(Id, "a"), Json(Id, "a"), Token);
-
-        check.Verdict.Should().Be(MartenPreviewVerdict.Unavailable);
-        check.IsDisagreement.Should().BeFalse("no answer is not a disagreement, and must not hold a save at the dialog");
-        check.MartenJson.Should().BeNull();
-        check.Reason.Should().Be(
-            "Marten's own preview of a save (PreviewDocumentJsonAsync) needs Marten 9.53+; this host runs "
-            + MartenRuntime.Current.Describe(RuntimePackage.Marten) + ".");
-        MartenEditPreview.IsAvailable.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task From_9_53_an_edit_Marten_keeps_as_the_round_trip_does_agrees()
-    {
-        Assert.SkipUnless(Available, "This run resolved a Marten without its own preview (below 9.53).");
-
         using DocumentStore store = Store();
         string edited = Json(Id, "renamed");
         string roundTrip = store.Options.Serializer().ToJson(new PreviewedThing { Id = Guid.Parse(Id), Name = "renamed" });
@@ -73,10 +42,8 @@ public class MartenEditPreviewTests
     /// preview confirms rather than contradicts.
     /// </summary>
     [Fact]
-    public async Task From_9_53_a_property_the_type_does_not_have_is_dropped_by_both()
+    public async Task A_property_the_type_does_not_have_is_dropped_by_both()
     {
-        Assert.SkipUnless(Available, "This run resolved a Marten without its own preview (below 9.53).");
-
         using DocumentStore store = Store();
         string edited = $$"""{"Id":"{{Id}}","Name":"a","Legacy":42}""";
         string roundTrip = store.Options.Serializer().ToJson(new PreviewedThing { Id = Guid.Parse(Id), Name = "a" });
@@ -92,10 +59,8 @@ public class MartenEditPreviewTests
     /// preview refuses it first, at every Marten - <c>DocumentIdChangeLiveTests</c>; this holds the invoker's refusal path.)
     /// </summary>
     [Fact]
-    public async Task From_9_53_an_edit_that_changes_the_id_is_refused_and_flagged()
+    public async Task An_edit_that_changes_the_id_is_refused_and_flagged()
     {
-        Assert.SkipUnless(Available, "This run resolved a Marten without its own preview (below 9.53).");
-
         using DocumentStore store = Store();
         string other = Guid.NewGuid().ToString();
         string edited = Json(other, "a");
@@ -112,10 +77,8 @@ public class MartenEditPreviewTests
     /// differences named.
     /// </summary>
     [Fact]
-    public async Task From_9_53_a_round_trip_that_differs_from_Martens_disagrees_and_says_where()
+    public async Task A_round_trip_that_differs_from_Martens_disagrees_and_says_where()
     {
-        Assert.SkipUnless(Available, "This run resolved a Marten without its own preview (below 9.53).");
-
         using DocumentStore store = Store();
         string edited = Json(Id, "a");
         string notWhatMartenKeeps = $$"""{"Id":"{{Id}}","Name":"b"}""";
@@ -129,10 +92,8 @@ public class MartenEditPreviewTests
     }
 
     [Fact]
-    public async Task From_9_53_JSON_the_serializer_rejects_is_a_refusal_not_an_exception()
+    public async Task JSON_the_serializer_rejects_is_a_refusal_not_an_exception()
     {
-        Assert.SkipUnless(Available, "This run resolved a Marten without its own preview (below 9.53).");
-
         using DocumentStore store = Store();
         string edited = $$$"""{"Id":"{{{Id}}}","Name":{"not":"a string"}}""";
 

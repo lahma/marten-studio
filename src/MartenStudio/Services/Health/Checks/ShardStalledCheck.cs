@@ -1,6 +1,5 @@
 using System.Globalization;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 using PostgresStudio.Services.Health;
 
@@ -32,13 +31,10 @@ internal sealed record ShardStalledFacts(
 /// mark moved while the advisor watched.
 /// </para>
 /// <para>
-/// <b>The 9.43 rule</b> (<see cref="RuntimeFeature.HighWaterMarkLivenessStamp" />), which changes what is believed,
-/// not only what is said. From Marten 9.43 the high-water agent restamps its row on every poll (#5541), so the row's
-/// age <em>is</em> the agent's liveness: fresh is alive, old is stopped - D02's question - whatever the fence or the
-/// advisor's history of the mark say, because those can only be older news from the same agent. Below 9.43 the row
-/// is the mark's last move and freezes on an idle store, so an old row means nothing; a fresh row, a fresh allocation
-/// fence or a mark the advisor saw move is all the evidence there is, and without any of them the check says it cannot
-/// tell rather than reporting a stall.
+/// <b>The 9.43 rule</b>, which changes what is believed, not only what is said. Since Marten 9.43 the high-water agent
+/// restamps its row on every poll (#5541), so the row's age <em>is</em> the agent's liveness: fresh is alive, old is
+/// stopped - D02's question - whatever the fence or the advisor's history of the mark say, because those can only be older
+/// news from the same agent.
 /// </para>
 /// <para>
 /// <b>How long is too long</b> is the shard's own: at least five minutes (and five <c>SlowPollingTime</c>s), and three
@@ -126,8 +122,7 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
         }
 
         TimeSpan livenessWindow = DaemonThresholds.DaemonQuiet(configuration.SlowPollingTime);
-        bool stampIsLiveness = RuntimeFeature.HighWaterMarkLivenessStamp.IsAvailable(evaluation.Runtime);
-        Liveness liveness = AliveEvidence(facts, evaluation, livenessWindow, stampIsLiveness);
+        Liveness liveness = AliveEvidence(facts, livenessWindow);
 
         List<HealthFinding> findings = [];
         List<string> watching = [];
@@ -198,11 +193,7 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
                 ],
                 Caveat =
                     "Progress is measured in the database server's time; that the mark has been ahead of the shard for the whole window "
-                    + "comes from the advisor's own samples, which exist only while the Health page or the Overview is open. "
-                    + (stampIsLiveness
-                        ? string.Empty
-                        : "Below Marten 9.43 the HighWaterMark row does not say whether the daemon is alive; this host runs "
-                          + evaluation.Runtime.Describe(RuntimePackage.Marten) + ". "),
+                    + "comes from the advisor's own samples, which exist only while the Health page or the Overview is open. ",
                 Remedy = null,
             });
         }
@@ -227,7 +218,7 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
     /// <summary>Why the daemon is believed alive, or why it cannot be.</summary>
     private sealed record Liveness(bool Alive, string Because);
 
-    private static Liveness AliveEvidence(ShardStalledFacts facts, HealthEvaluation evaluation, TimeSpan window, bool stampIsLiveness)
+    private static Liveness AliveEvidence(ShardStalledFacts facts, TimeSpan window)
     {
         HighWaterReading reading = facts.Reading;
 
@@ -238,35 +229,15 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
 
         if (reading.SinceMarkUpdated is { } mark && mark <= window)
         {
-            return new Liveness(true, stampIsLiveness
-                ? "the high-water agent restamped its mark " + DaemonCheckConfiguration.Format(mark) + " ago, which from Marten 9.43 it does on every poll"
-                : "the high-water agent wrote its mark " + DaemonCheckConfiguration.Format(mark) + " ago");
+            return new Liveness(true,
+                "the high-water agent restamped its mark " + DaemonCheckConfiguration.Format(mark) + " ago, which it does on every poll");
         }
 
-        if (stampIsLiveness)
-        {
-            // From 9.43 the row is the agent's own pulse: the fence and the advisor's history are older news from the same
-            // agent, and cannot outvote it.
-            return new Liveness(false,
-                "The high-water agent has not restamped its mark within " + DaemonCheckConfiguration.Format(window)
-                + "; from Marten 9.43 a running one does on every poll, so whether anything runs the daemon is D02's question.");
-        }
-
-        if (reading.SinceFenceUpdated is { } fence && fence <= window)
-        {
-            return new Liveness(true, "the high-water agent restamped its allocation fence " + DaemonCheckConfiguration.Format(fence) + " ago");
-        }
-
-        HealthTrend marks = evaluation.History.Trend(DaemonSeries.HighWaterMark);
-        if (marks.Points.Count >= 2 && marks.Points[^1].Value > marks.Points[0].Value
-            && evaluation.Now - marks.Points[0].At <= DaemonThresholds.TrendWindow)
-        {
-            return new Liveness(true, "the high-water mark moved while the advisor watched");
-        }
-
+        // The row is the agent's own pulse: the fence and the advisor's history are older news from the same agent, and
+        // cannot outvote it.
         return new Liveness(false,
-            "Marten below 9.43 writes the HighWaterMark row only when the mark moves, and the mark has not moved recently, so the "
-            + "advisor cannot tell an idle daemon from a stopped one and reports no stall.");
+            "The high-water agent has not restamped its mark within " + DaemonCheckConfiguration.Format(window)
+            + "; a running one does on every poll, so whether anything runs the daemon is D02's question.");
     }
 
     /// <summary>

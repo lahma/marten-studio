@@ -205,9 +205,8 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
 
     /// <summary>
     /// D02's 9.43 pin rule, live (H2 re-review): a studio beside a daemon running elsewhere, the mark pinned behind a gap
-    /// with work waiting, every row put ten minutes into the past. From Marten 9.43 the running daemon restamps its mark's
-    /// row even while pinned, and that restamp is what keeps D02 quiet; below 9.43 a pinned daemon writes nothing, and D02
-    /// stands down on the pin itself. Asserted per version.
+    /// with work waiting, every row put ten minutes into the past. The running daemon restamps its mark's row even while
+    /// pinned, and that restamp is what keeps D02 quiet.
     /// </summary>
     [PostgresFact]
     [HealthQuiet("D02")]
@@ -237,25 +236,19 @@ public class DaemonHealthLiveTests(PostgresFixture postgres)
 
         await WaitForPinAsync(daemon);
 
-        bool stampIsLiveness = MartenStudio.Services.Configuration.RuntimeFeature.HighWaterMarkLivenessStamp
-            .IsAvailable(MartenStudio.Services.Configuration.MartenRuntime.Current);
-
         DateTimeOffset backdatedAt = await daemon.BackdateAllButTheFenceAsync(TimeSpan.FromMinutes(10), postgres);
 
-        if (stampIsLiveness)
-        {
-            await Projections.ProjectionsFixture.WaitForAsync(
-                async () => await daemon.StampedAsync(HealthDaemonQueries.HighWaterMarkRow, postgres) is { } stamped && stamped > backdatedAt,
-                "the pinned daemon to restamp its mark's row",
-                TimeSpan.FromSeconds(60),
-                Token);
-        }
+        await Projections.ProjectionsFixture.WaitForAsync(
+            async () => await daemon.StampedAsync(HealthDaemonQueries.HighWaterMarkRow, postgres) is { } stamped && stamped > backdatedAt,
+            "the pinned daemon to restamp its mark's row",
+            TimeSpan.FromSeconds(60),
+            Token);
 
         HealthCheckResult d02 = Result(await studio.SweepAsync(), "D02");
 
         d02.Outcome.Should().Be(HealthCheckOutcome.Checked, d02.Problem?.Reason);
         d02.Findings.Should().BeEmpty("a daemon pinned behind a gap is alive, and is D01's");
-        d02.Note.Should().Contain(stampIsLiveness ? "the high-water agent restamped it" : "Below Marten 9.43");
+        d02.Note.Should().Contain("the high-water agent restamped it");
 
         await transaction.RollbackAsync(Token);
     }

@@ -76,12 +76,12 @@ restart, a store-global agent, cancelling a rebuild, the dead-letter "Rewind sub
 authorized as `(store, database, null)` unless the database is exclusively the selected tenant's, never on a sharded
 tenancy, which pools tenants; the SQL console, the Mode A subquery lift and `EXPLAIN` are always asked with
 `TenantId = null`, as nothing narrows a typed statement to a tenant. The one exception is the dead-letter rewind under
-`UseTenantPartitionedEvents` from Marten 9.51 with JasperFx 2.91 (`RuntimeFeature.TenantSubscriptionRewind`), whose
+`UseTenantPartitionedEvents` since Marten 9.51 with JasperFx 2.91, whose
 per-tenant overload touches only that tenant's agents and dead letters (#5700, jasperfx#1025): it is authorized as
 `(store, database, tenant)` and made only for an agent this process's daemon runs, with that agent's own names, as the
 overload starts the tenant's agents wherever it is asked. There the store-global rewind is never made, and Skip event is
-`MarkEventsAsSkipped`'s tenant overload (#5698), asked about the tenant; below either version both stay refused
-(SEC1-fix4). Skip this group (M3) is Skip event's path over one dead-letter group, at most 1,000 events an action: its
+`MarkEventsAsSkipped`'s tenant overload (#5698), asked about the tenant; without a tenant both are refused
+(SEC1-fix4; below Marten 9.51 both were refused whole, and the floor is past that). Skip this group (M3) is Skip event's path over one dead-letter group, at most 1,000 events an action: its
 checks in order, one statement proving every sequence in scope (`EventQueryBuilder.BuildSequencesInScope`), its
 commit (`CommitSkipAsync`, which `StorageEnsuringCallTests` holds to those two callers) and one audit entry naming the
 group and the count; under `UseTenantPartitionedEvents` it runs in one tenant, never a loop over several. The studio
@@ -89,7 +89,7 @@ never removes an orphaned progression row (`ProgressionRowClassifier`, from `All
 store-global Rewind on a HotCold node whose distributor holds no lock (`DaemonLeadership`, M47). A tenant's database is
 found without asking a dynamic tenancy for a tenant it lacks (`DatabaseReach.FindTenantDatabaseAsync`). Enumerating
 a dynamic tenancy's databases (`AllDatabases()`, `Tenancy.DescribeDatabasesAsync()`, 9.50.1's
-`IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten through 9.56.0, and the studio, enumerating
+`IEventStore.TryDescribeDatabasesAsync()`) is not read-only at any Marten through 9.57.0, and the studio, enumerating
 on the first navigation, can be the first caller: a known limit, not a per-poll cost. Measurements, history and
 details: decision-notes.md, D27.
 **D27 in PostgresStudio.** The gate is reused with the source policy and `PostgresStudioResource` (D5),

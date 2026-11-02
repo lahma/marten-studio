@@ -14,9 +14,9 @@ public class PooledDaemonLockCheckTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 17, 9, 0, 0, TimeSpan.Zero);
 
-    private static readonly MartenRuntime Floor = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.39.0" });
+    private static readonly MartenRuntime Floor = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.57.0" });
 
-    private static readonly MartenRuntime Latest = MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = "9.50.2" });
+    private static readonly MartenRuntime Latest = Floor;
 
     private static DataSourceEndpoints At(string host, int port) => new([(host, port)], Multiplexing: false);
 
@@ -74,7 +74,7 @@ public class PooledDaemonLockCheckTests
         finding.Severity.Should().Be(HealthSeverity.Warning);
         finding.Title.Should().Contain("looks like it goes through a transaction-mode pooler");
         finding.Evidence.Should().Contain(new HealthEvidence("Async mode", "HotCold"));
-        finding.Evidence.Should().Contain(new HealthEvidence("UseAdvisoryLockTransaction", "false - the default on Marten 9.50.2"));
+        finding.Evidence.Should().Contain(new HealthEvidence("UseAdvisoryLockTransaction", "false - the default on Marten 9.57.0"));
         finding.Evidence.Should().Contain(static x => x.Label == "Looks pooled" && x.Value.Contains("-pooler", StringComparison.Ordinal));
 
         // The host and port are the database list's, which the Configuration page shows at the database-wide gate; the
@@ -86,21 +86,20 @@ public class PooledDaemonLockCheckTests
         finding.Caveat.Should().Contain("not a proof").And.Contain("C10");
     }
 
-    /// <summary>At the floor the lock is transaction-scoped by default, so a host on 9.39 that sees K04 turned it off.</summary>
+    /// <summary>The lock is session-scoped by default, so a host that sees K04 left it so.</summary>
     [Fact]
-    public void At_the_floor_a_session_lock_is_one_the_host_chose_and_the_evidence_says_so()
+    public void A_session_lock_is_Martens_default_and_the_evidence_says_so()
     {
         HealthFinding finding = K04(HotCold(At("pgbouncer.internal", 6432)), Floor).Findings.Single();
 
-        finding.Evidence.Should().Contain(new HealthEvidence("UseAdvisoryLockTransaction", "false - set by the host; the default on Marten 9.39.0 is true"));
+        finding.Evidence.Should().Contain(new HealthEvidence("UseAdvisoryLockTransaction", "false - the default on Marten 9.57.0"));
     }
 
     [Fact]
     public void The_lock_setting_is_worded_against_the_hosts_own_default()
     {
-        HotCold(null, transactionScoped: true).DescribeLockSetting(Floor).Should().Be("true - the default on Marten 9.39.0");
-        HotCold(null, transactionScoped: true).DescribeLockSetting(Latest).Should().Be("true - set by the host; the default on Marten 9.50.2 is false");
-        HotCold(null).DescribeLockSetting(Latest).Should().Be("false - the default on Marten 9.50.2");
+        HotCold(null, transactionScoped: true).DescribeLockSetting(Floor).Should().Be("true - set by the host; the default on Marten 9.57.0 is false");
+        HotCold(null).DescribeLockSetting(Floor).Should().Be("false - the default on Marten 9.57.0");
     }
 
     [Theory]
@@ -188,16 +187,14 @@ public class PooledDaemonLockCheckTests
     // ---------------------------------------------------------------------------------------------------
 
     /// <summary>
-    /// What the wording claims about Marten's default is what this Marten does: false from 9.41, true on 9.39 and 9.40.
-    /// Run at both ends of what CI tests, this is the probe that the 9.41 change is where the docs say it is.
+    /// What the wording claims about Marten's default is what this Marten does: false (the default since 9.41).
     /// </summary>
     [Fact]
     public void Marten_s_own_default_is_the_one_the_wording_names_for_the_Marten_this_process_runs()
     {
         bool defaultValue = new StoreOptions().Events.UseAdvisoryLockTransaction;
-        Version marten = MartenRuntime.Current.VersionOf(RuntimePackage.Marten)!;
 
-        defaultValue.Should().Be(marten < DaemonLockPooling.SessionLockDefaultSince, "Marten {0}", marten);
+        defaultValue.Should().BeFalse("Marten {0}", MartenRuntime.Current.VersionOf(RuntimePackage.Marten));
         new DaemonLockPooling(DaemonMode.HotCold, defaultValue, null).DescribeLockSetting(MartenRuntime.Current).Should().Contain("the default on");
     }
 

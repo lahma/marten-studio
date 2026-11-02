@@ -1,7 +1,6 @@
 using Bunit;
 
 using MartenStudio.Services;
-using MartenStudio.Services.Configuration;
 using PostgresStudio.Services.Database;
 using MartenStudio.Services.Schema;
 using MartenStudio.Tests.Components;
@@ -102,15 +101,8 @@ public class SchemaHealthColumnsPageTests
         context.Navigate("/marten/schema?tab=tables");
         var page = context.Render<SchemaPage>();
 
-        if (RuntimeFeature.DeclaredStorageParameters.IsAvailable(MartenRuntime.Current))
-        {
-            page.Markup.Should().Contain("each beside what a document mapping declares").And.NotContain("nothing to compare",
-                "this Marten can declare them, whatever the rows on this page happen to be");
-        }
-        else
-        {
-            page.Markup.Should().Contain("from Marten 9.47").And.Contain("nothing to compare");
-        }
+        page.Markup.Should().Contain("each beside what a document mapping declares").And.NotContain("nothing to compare",
+            "this Marten can declare them, whatever the rows on this page happen to be");
 
         page.FindAll(".ms-schema-parameter-drift").Should().BeEmpty();
     }

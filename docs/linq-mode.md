@@ -28,8 +28,8 @@ builder.Services.AddMartenStudio(options =>
 });
 ```
 
-- **It needs Marten 9.48 or later**, which brings JasperFx 2.84 and its `DynamicQuery`. On an older Marten the mode
-  is absent, and the page says which Marten it needs and which one the host runs.
+- **It needs JasperFx 2.84 and its `DynamicQuery`** (Marten 9.48), which every supported Marten brings. If the JasperFx
+  a host loads is not a shape the studio recognises, the mode is absent and the page says so.
 - **`ReadOnly` turns it off** with every other capability.
 - **It is authorized like a write** (D13). `WriteAuthorizationPolicy` is asked with `RunLinqQueries` on the
   resource, after the store policy. See [Who may run what](#who-may-run-what).
@@ -209,7 +209,7 @@ The pipeline, in order. Everything above Marten's translation happens before Mar
 | Stage | What it does | Closes |
 |---|---|---|
 | Gate | Capability, then the store and write policies, then reach, all before any text is looked at | 5 |
-| Availability | Marten 9.48+, a `DynamicQuery` and a Marten LINQ builder the studio recognises, run-time code generation, and System.Linq.Dynamic.Core 1.7.4 or later. Anything else is absent, never guessed at | 1, 2 |
+| Availability | A `DynamicQuery` and a Marten LINQ builder the studio recognises, run-time code generation, and System.Linq.Dynamic.Core 1.7.4 or later. Anything else is absent, never guessed at | 1, 2 |
 | **Screen** | A lexical pass over the text, before any parser (below) | 1, 2, 4 |
 | **Parse** | JasperFx's `DynamicQuery` under the strictest policy the feature can live with (below). The studio's guard is the policy's *first* shape rule | 1, 4 |
 | **Guard** | The studio's own walk of the whole composed expression, independent of JasperFx (below) | 1, 5 |

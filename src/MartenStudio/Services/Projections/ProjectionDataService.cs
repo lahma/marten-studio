@@ -7,7 +7,6 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using PostgresStudio.Services.Database;
 using MartenStudio.Services.Live;
 
@@ -366,20 +365,18 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         long highWaterMark = await ReadHighWaterMarkAsync(resolved, connection, cancellationToken)
             .ConfigureAwait(false) ?? 0;
 
-        // From Marten 9.52 a rebuild replays from the projection's start floor, not from the first event. The stored
-        // floors are read with the studio's own SQL, never through IEventDatabase.FetchProjectionFloorAsync, which
-        // ensures the event storage first (hard rule 14); below 9.52 nothing reads them, and nothing here does either.
-        RebuildFloor? floor = RuntimeFeature.ProjectionStartFloors.IsAvailable(MartenRuntime.Current)
-            ? RebuildFloor.From(
-                await ProjectionProgressQueries
-                    .ReadProjectionFloorsAsync(connection, catalog, EventSchemaOf(resolved), source.Name, CommandTimeout, cancellationToken)
-                    .ConfigureAwait(false),
-                resolved.Store.Options.Events.UseTenantPartitionedEvents)
-            : null;
+        // A rebuild replays from the projection's start floor, not from the first event. The stored floors are read
+        // with the studio's own SQL, never through IEventDatabase.FetchProjectionFloorAsync, which ensures the event
+        // storage first (hard rule 14).
+        RebuildFloor floor = RebuildFloor.From(
+            await ProjectionProgressQueries
+                .ReadProjectionFloorsAsync(connection, catalog, EventSchemaOf(resolved), source.Name, CommandTimeout, cancellationToken)
+                .ConfigureAwait(false),
+            resolved.Store.Options.Events.UseTenantPartitionedEvents);
 
         return new RebuildScope(
             source.Name,
-            floor?.EventsToReplay(highWaterMark) ?? highWaterMark,
+            floor.EventsToReplay(highWaterMark),
             [.. ShardIdentities(source)],
             TablesFor(resolved.Store, source),
             source.Lifecycle,

@@ -132,13 +132,53 @@ internal sealed class ScriptedActivityCheck : ScriptedCheck;
 internal sealed class ScriptedDeeperCheck : ScriptedCheck;
 
 /// <summary>
-/// A check that lights up on JasperFx.Events 2.89's classifier - first in Marten 9.50.3, so present at the latest the
-/// suite runs at and absent at the floor. A test that needs it absent (or present) says so with the harness's made-up
-/// runtime rather than relying on which Marten this run resolved.
+/// A check that lights up on a feature of a Marten that does not exist yet (<see cref="ScriptedStudioRuntime.Feature" />,
+/// Marten 9.99): the probe table is empty at 1.1.0, so the engine's <c>RequiresFeature</c> path is exercised through a
+/// runtime that adds this one feature to it. A test that uses it passes <c>studioRuntime:</c> to the harness, with a
+/// made-up Marten that has the feature or lacks it.
 /// </summary>
 [HealthCheck("D90", HealthArea.Daemon, HealthCostTier.Catalog, "Scripted light-up",
-    RequiresFeature = nameof(MartenStudio.Services.Configuration.RuntimeFeature.TransientFailureClassifier))]
+    RequiresFeature = ScriptedStudioRuntime.FeatureName)]
 internal sealed class ScriptedLightUpCheck : ScriptedCheck;
+
+/// <summary>
+/// MartenStudio's runtime plus one made-up feature, found by name - so a check can require a feature while the real probe
+/// table is empty. Everything else is MartenStudio's own runtime's answer.
+/// </summary>
+internal sealed class ScriptedStudioRuntime(MartenStudio.Services.Configuration.MartenRuntime runtime) : IStudioRuntime
+{
+    public const string FeatureName = "ScriptedFeature";
+
+    private readonly MartenStudio.Services.Configuration.MartenStudioRuntime inner = new(runtime);
+
+    /// <summary>A feature of Marten 9.99, built over the probe table's private constructor.</summary>
+    public static MartenStudio.Services.Configuration.RuntimeFeature Feature { get; } =
+        (MartenStudio.Services.Configuration.RuntimeFeature) typeof(MartenStudio.Services.Configuration.RuntimeFeature)
+            .GetConstructors(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .Single()
+            .Invoke([FeatureName, MartenStudio.Services.Configuration.RuntimePackage.Marten, "9.99.0", "9.99.0", "A feature of a Marten that is not out yet.", null]);
+
+    /// <summary>A Marten that has it.</summary>
+    public static MartenStudio.Services.Configuration.MartenRuntime HostWithIt { get; } =
+        MartenStudio.Services.Configuration.MartenRuntime.ForVersions(new Dictionary<MartenStudio.Services.Configuration.RuntimePackage, string>
+        {
+            [MartenStudio.Services.Configuration.RuntimePackage.Marten] = "9.99.0",
+        });
+
+    /// <summary>A Marten that lacks it.</summary>
+    public static MartenStudio.Services.Configuration.MartenRuntime HostWithout { get; } =
+        MartenStudio.Services.Configuration.MartenRuntime.ForVersions(new Dictionary<MartenStudio.Services.Configuration.RuntimePackage, string>
+        {
+            [MartenStudio.Services.Configuration.RuntimePackage.Marten] = "9.57.0",
+        });
+
+    public StudioFeatureRequirement? FindFeature(string name) =>
+        string.Equals(name, FeatureName, StringComparison.Ordinal) ? Feature : inner.FindFeature(name);
+
+    public bool IsAvailable(StudioFeatureRequirement feature) => inner.IsAvailable(feature);
+
+    public string DescribeHost(StudioFeatureRequirement feature) => inner.DescribeHost(feature);
+}
 
 /// <summary>A document type a test hides with <c>IsDocumentTypeVisible</c>.</summary>
 public sealed class HiddenHealthThing
@@ -181,7 +221,6 @@ internal sealed class HealthHarness : IAsyncDisposable
         typeof(ScriptedCatalogCheck),
         typeof(ScriptedActivityCheck),
         typeof(ScriptedDeeperCheck),
-        typeof(ScriptedLightUpCheck),
     ];
 
     private readonly ServiceProvider provider;
@@ -251,6 +290,10 @@ internal sealed class HealthHarness : IAsyncDisposable
     /// Registrations a test makes before <c>AddMartenStudio()</c>, whose <c>TryAdd</c> then keeps them - a seam's
     /// stand-in, say.
     /// </param>
+    /// <param name="studioRuntime">
+    /// A runtime that answers for the checks' features instead of MartenStudio's own (see <see cref="ScriptedStudioRuntime" />),
+    /// or <see langword="null" />.
+    /// </param>
     public static HealthHarness Create(
         IEnumerable<Type>? checks = null,
         Action<MartenStudioOptions>? studio = null,
@@ -259,7 +302,8 @@ internal sealed class HealthHarness : IAsyncDisposable
         bool policies = false,
         MartenStudio.Services.Configuration.MartenRuntime? runtime = null,
         Func<Type, IReadOnlySet<StudioSourceKind>?>? sourceKinds = null,
-        Action<IServiceCollection>? before = null)
+        Action<IServiceCollection>? before = null,
+        IStudioRuntime? studioRuntime = null)
     {
         FakeTimeProvider clock = new(new DateTimeOffset(2026, 10, 15, 9, 0, 0, TimeSpan.Zero));
         CapturingLoggerProvider logs = new();
@@ -282,9 +326,14 @@ internal sealed class HealthHarness : IAsyncDisposable
             // HealthSweeper and HealthService take an optional MartenRuntime; registered, it is the one they ask.
             services.AddSingleton(runtime);
         }
+        if (studioRuntime is not null)
+        {
+            services.AddSingleton(studioRuntime);
+        }
+
         services.AddSingleton(HealthCheckRegistry.ForTypes(
             (checks ?? ScriptedChecks).Select(type => (type, sourceKinds?.Invoke(type))),
-            MartenStudio.Services.Configuration.MartenStudioRuntime.Current));
+            studioRuntime ?? MartenStudio.Services.Configuration.MartenStudioRuntime.Current));
 
         if (environment is not null)
         {

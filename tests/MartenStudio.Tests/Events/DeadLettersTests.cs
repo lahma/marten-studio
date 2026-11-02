@@ -684,32 +684,7 @@ public class DeadLettersTests
     }
 
     /// <summary>
-    /// SEC1-fix4: on a store that numbers events per tenant, below Marten 9.51 Skip and Rewind reach every tenant's event
-    /// of a number, so both are disabled with the service's own sentences - the shape saying the Marten has neither
-    /// per-tenant form, whatever Marten this test runs at.
-    /// </summary>
-    [Fact]
-    public async Task Under_per_tenant_sequences_skip_and_rewind_are_disabled_with_the_services_sentences()
-    {
-        using StudioComponentContext context = await RewindableAsync();
-        context.EventData.Shape = context.EventData.Shape with
-        {
-            HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true, TenantSkipping = false, TenantRewind = false,
-        };
-
-        IRenderedComponent<DeadLetters> page = await ExpandAsync(context);
-
-        AngleSharp.Dom.IElement skip = SkipButton(page);
-        skip.HasAttribute("disabled").Should().BeTrue();
-        skip.GetAttribute("title").Should().Be(StreamCompactionRules.SkipNeedsOneSequence);
-
-        AngleSharp.Dom.IElement rewind = RewindButton(page);
-        rewind.HasAttribute("disabled").Should().BeTrue();
-        rewind.GetAttribute("title").Should().Be(StreamCompactionRules.RewindNeedsOneSequence);
-    }
-
-    /// <summary>
-    /// L1, from Marten 9.51: the skip is one tenant's, so it is offered, says so, and is asked in the dead letter's own
+    /// L1: the skip is one tenant's, so it is offered, says so, and is asked in the dead letter's own
     /// tenant when "All tenants" is selected - the service skips that tenant's #N and no other.
     /// </summary>
     [Fact]
@@ -718,7 +693,7 @@ public class DeadLettersTests
         using StudioComponentContext context = await RewindableAsync();
         context.EventData.Shape = context.EventData.Shape with
         {
-            HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true, HasTenantId = true, TenantSkipping = true,
+            HasIsSkipped = true, PerTenantSequences = true, EventsConjoined = true, HasTenantId = true,
         };
         context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId, sequence: 77) with { TenantId = "acme" }], false);
 
@@ -820,7 +795,7 @@ public class DeadLettersTests
         StudioComponentContext context = await RewindableAsync();
         context.EventData.Shape = context.EventData.Shape with
         {
-            PerTenantSequences = true, EventsConjoined = true, HasTenantId = true, TenantRewind = true,
+            PerTenantSequences = true, EventsConjoined = true, HasTenantId = true,
         };
         context.EventData.DeadLetters = new DeadLetterPage([FakeEventDataService.DeadLetter(LetterId) with { TenantId = "acme" }], false);
         context.ProjectionData.Daemon = context.ProjectionData.Daemon with

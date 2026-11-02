@@ -688,7 +688,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
 
     /// <summary>
     /// Builds the preview for a row that is there, once its concrete type is settled, and lays Marten's own preview of
-    /// the same save beside a ready one (<see cref="MartenEditPreview" />: 9.53+, no connection, nothing written).
+    /// the same save beside a ready one (<see cref="MartenEditPreview" />: no connection, nothing written).
     /// </summary>
     private static async Task<WritePreview> PreviewRowAsync(
         WriteTarget writeTarget,

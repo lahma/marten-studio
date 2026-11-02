@@ -2,7 +2,6 @@ using System.Security.Claims;
 
 using Marten;
 
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Schema;
 
 using Microsoft.AspNetCore.Components.Authorization;
@@ -78,16 +77,8 @@ public class TagIndexDriftLiveTests(PostgresFixture postgres)
         IDocumentStore store = provider.GetRequiredService<IDocumentStore>();
         await store.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
 
-        bool declared = RuntimeFeature.TaggedStreamCompaction.Probe() == true;
-
-        // The probe against the version, not only against itself: its first anchor (a private method marten#5720 moved in
-        // 9.52) answered "absent" at every Marten after it, and this test then asserted the floor's half on a store that
-        // has the index.
-        declared.Should().Be(MartenRuntime.Current.VersionOf(RuntimePackage.Marten) >= new Version(9, 51, 0),
-            "#5694 declares the index from Marten 9.51.0, and the probe has to say so at every Marten from it");
-
-        // The premise, each end's: from 9.51 the index exists once the schema is applied; below it, it is never declared.
-        (await IndexExistsAsync()).Should().Be(declared, "Marten 9.51 (#5694) declares the tag table's seq_id index, and below it nothing does");
+        // The premise: Marten 9.51 (#5694) declares the tag table's seq_id index, so it exists once the schema is applied.
+        (await IndexExistsAsync()).Should().BeTrue("Marten 9.51 (#5694) declares the tag table's seq_id index");
 
         // An upgrade's starting point: the tag table as a store below 9.51 built it.
         await DropIndexAsync();
@@ -101,12 +92,6 @@ public class TagIndexDriftLiveTests(PostgresFixture postgres)
         preview.Withheld.Should().BeNull();
         preview.IsDestructive.Should().BeFalse("an index build removes nothing");
 
-        if (!declared)
-        {
-            preview.Sql.Should().NotContain(TagIndex, "below 9.51 the index is not declared, so nothing is missing");
-            preview.Notes.Should().NotContain(static x => x.Kind == MigrationRisk.BlockingTagIndexBuildKind);
-            return;
-        }
 
         preview.Sql.Should().Contain(TagIndex);
 
