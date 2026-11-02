@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using PostgresStudio.Services;
 using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Postgres;
+using PostgresStudio.Services.Sources;
 using PostgresStudio.Tests.Support;
 
 namespace PostgresStudio.Tests.ConnectionHistory;
@@ -26,7 +27,9 @@ public class ConnectionHistoryBacklogTests
 
     private sealed class Rig : IAsyncDisposable
     {
-        private readonly ServiceProvider provider = new ServiceCollection().BuildServiceProvider();
+        private readonly ServiceProvider provider = new ServiceCollection()
+            .AddSingleton<IStudioSourceProvider>(new NoSources())
+            .BuildServiceProvider();
 
         public Rig(TimeSpan? interval = null, Func<CancellationToken, ValueTask<bool>>? shouldSample = null)
         {
@@ -171,6 +174,24 @@ public class ConnectionHistoryBacklogTests
     }
 
     [Fact]
+    public async Task A_server_that_left_the_list_still_has_its_backlog_offered_to_the_store_at_the_next_round()
+    {
+        await using Rig rig = new();
+
+        rig.Store.Refusing = true;
+        await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(2), Token);
+        rig.Store.Refusing = false;
+
+        // The round's list is empty: the server is not in it, and the backlog is written all the same.
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(2);
+
+        rig.Store.Stored.Select(static x => x.Connections).Should().Equal([1L, 2L]);
+        rig.Sampler.Pending(Server).Should().Be(0);
+        rig.Logs.Of(9463).Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task Servers_are_held_apart_and_matched_ignoring_case()
     {
         await using Rig rig = new();
@@ -198,8 +219,9 @@ public class ConnectionHistoryBacklogTests
         await using Rig rig = new(interval: TimeSpan.FromSeconds(15));
         rig.Store.Refusing = true;
         using CancellationTokenSource stop = new();
+        TaskCompletionSource started = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        Task reader = Task.Run(
+        Task<int> reader = Task.Run(
             () =>
             {
                 int reads = 0;
@@ -209,12 +231,16 @@ public class ConnectionHistoryBacklogTests
                     rig.Sampler.PendingSamples(Server).Count.Should().BeLessThanOrEqualTo(240);
                     rig.Sampler.Pending(Server);
                     reads++;
+                    started.TrySetResult();
                     Thread.Yield();
                 }
 
                 return reads;
             },
             Token);
+
+        // The writer starts only once the reader has made its first pass, so the two really overlap.
+        await started.Task.WaitAsync(Token);
 
         for (int i = 0; i < 400; i++)
         {
@@ -223,7 +249,7 @@ public class ConnectionHistoryBacklogTests
         }
 
         await stop.CancelAsync();
-        await reader;
+        (await reader).Should().BePositive("the reader ran while the rounds changed the backlog");
     }
 
     [Fact]
@@ -251,6 +277,29 @@ public class ConnectionHistoryBacklogTests
 
         Func<Task> none = () => reader.ReadWithPendingAsync(Server, [], Token);
         await none.Should().ThrowAsync<InvalidOperationException>("with nothing held there is nothing to show in the store's place");
+    }
+
+    /// <summary>A source provider that lists no source: every round's list of servers is empty.</summary>
+    private sealed class NoSources : IStudioSourceProvider
+    {
+        public long Generation => 0;
+
+        public IReadOnlyList<StudioSourceRegistration> Registrations() => [];
+
+        public StudioSourceRegistration? Find(string? key) => null;
+
+        public StoreAvailability TryResolve(StudioSourceRegistration registration, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out IStudioSource? source) =>
+            throw new NotSupportedException("There is no source to resolve.");
+
+        public void Invalidate()
+        {
+        }
+
+        public IAsyncEnumerable<StudioListedDatabase> ListUnattendedAsync(CancellationToken cancellationToken) =>
+            throw new NotSupportedException("The sampler lists through the sources, never unattended.");
+
+        public ValueTask<StudioUnattendedResolution> ResolveUnattendedAsync(string sourceKey, string databaseId, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("The sampler lists through the sources, never unattended.");
     }
 
     private static ConnectionHistoryReader Reader(out FlakyStore store)
