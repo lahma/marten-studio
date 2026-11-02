@@ -388,8 +388,11 @@ digits, never reused, renamed or moved to another area, and a variant is frozen 
 drawn through `QueryPlanReader` and `PlanView`; plan insights are pure evaluators with stable `P` codes in `codes.md`,
 never a health check; `EXPLAIN ANALYZE` runs only under `RunSql`, for a statement the guard accepts, in the read-only
 transaction; a plan reading a withheld schema is not shown. The facts Query › Plan reads beside a plan it ran (0.10)
-pass each relation's schema and every ancestor's, then the row gate for values, which are never a Marten table's. Full
-text: [plan-analyzer.md](docs/maintainers/plan-analyzer.md).
+pass each relation's schema and every ancestor's, then the row gate for values, which are never a Marten table's. Marten
+Studio's own insights (1.0, P26 to P28) come through an internal seam, `IPlanInsightContributor`, that PostgresStudio runs
+and MartenStudio registers: pure evaluators over (plan, facts, the tables the store declares from `StoreOptions`, never a
+storage-ensuring call), for visible document types only, whose remedies are `StoreOptions` lines. Full text:
+[plan-analyzer.md](docs/maintainers/plan-analyzer.md).
 
 ## Package budget
 
