@@ -230,7 +230,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && timer.IsCancellationRequested)
         {
-            throw new TimeoutException(
+            throw new StudioSourceTimeoutException(
                 "The database source '" + key + "' did not hand over database '" + StudioLogValue.Cap(name) + "' within "
                 + timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s.",
                 exception);
@@ -353,14 +353,20 @@ internal sealed class PostgresHostSource : IStudioSource
         {
             dataSource = await provider.OpenAsync(host, Registration.Key, database.Identity, cancellationToken).ConfigureAwait(false);
         }
+        catch (StudioSourceTimeoutException timeout)
+        {
+            // The studio's own sentence: the key, a bounded name and the limit.
+            throw new StudioStoreUnavailableException(Registration.Key, timeout.Message, "data source", timeout);
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // The name is the host's list's and the reason the host's exception's: neither is the studio's text, and the
-            // message is logged and rendered whole, so both go in escaped and bounded (H1).
+            // The name is the host's list's, so it goes in escaped and bounded (H1); the reason under H1b's rule
+            // (StudioHostFailure), and the exception travels as the inner exception, which the resolver logs once (1.0-HARD).
             throw new StudioStoreUnavailableException(
                 Registration.Key,
-                "its database '" + StudioLogValue.Cap(database.Identity) + "' could not be opened: " + StudioLogValue.CapText(exception.Message),
-                "data source");
+                "its database '" + StudioLogValue.Cap(database.Identity) + "' could not be opened: " + StudioHostFailure.Words(exception),
+                "data source",
+                exception);
         }
 
         if (dataSource is null)

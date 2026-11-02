@@ -70,6 +70,9 @@ internal sealed class RelationshipReads
     /// <summary>The studio whose words the relationship reads' log lines are in.</summary>
     internal StudioProduct Product => settings.Text.Product;
 
+    /// <summary>1.0-HARD: the studio's own words, for the sentences the graph builder writes.</summary>
+    internal StudioText Text => settings.Text;
+
     /// <summary>
     /// A little past the server-side <c>statement_timeout</c>, which is what should fire: it produces 57014 with a
     /// message, where a client-side timeout only breaks the connection.
@@ -286,6 +289,9 @@ internal sealed class RelationshipReads
     /// </summary>
     internal static string Describe(Exception exception, DatabaseGate? gate)
     {
+        // 1.0-HARD: the resolver wraps what a host's source threw; it is described as it was thrown (H1b).
+        exception = StudioHostFailure.Unwrap(exception);
+
         if (gate is null && exception is PostgresException withheld)
         {
             return withheld.SqlState + ": Postgres refused a read. Its own words are withheld: the schemas they may name "

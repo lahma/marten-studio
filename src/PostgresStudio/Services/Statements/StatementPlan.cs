@@ -173,6 +173,12 @@ internal sealed class StatementPlanReader
             },
             PrepareAsync: async (connection, transaction, token) =>
             {
+                // 1.0-HARD: as ReadAsync - nothing is planned of a text that reaches into a withheld schema through a visible name.
+                if (await StatementCrossing.ReachesWithheldAsync(connection, transaction, text, withheld, commandTimeout, token).ConfigureAwait(false))
+                {
+                    throw new StatementCrossingException();
+                }
+
                 IReadOnlyList<string> path = await StatementPlanQueries.ReadSearchPathAsync(connection, transaction, commandTimeout, token).ConfigureAwait(false);
                 await StatementPlanQueries
                     .SetSearchPathAsync(connection, transaction, StatementPlanQueries.SearchPath(path.Where(x => !withheld.Contains(x))), commandTimeout, token)
@@ -187,6 +193,10 @@ internal sealed class StatementPlanReader
             try
             {
                 return (await hypothetical.ReadAsync(database, index, planner, cancellationToken).ConfigureAwait(false), null);
+            }
+            catch (StatementCrossingException)
+            {
+                return (null, StatementsService.ReachesWithheldSchema);
             }
             catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.DuplicatePreparedStatement && attempt == 0)
             {
@@ -262,10 +272,17 @@ internal sealed class StatementPlanReader
         {
             try
             {
-                (string? json, long? characters) = await session.InTransactionAsync(
+                (string? json, long? characters, bool crosses) = await session.InTransactionAsync(
                         connection,
                         async (transaction, token) =>
                         {
+                            // 1.0-HARD: a text naming a visible view or SQL function through which the plan would expand or inline
+                            // a withheld schema's definitions is never prepared (StatementCrossing).
+                            if (await StatementCrossing.ReachesWithheldAsync(connection, transaction, text, withheld, commandTimeout, token).ConfigureAwait(false))
+                            {
+                                return ((string?) null, (long?) null, true);
+                            }
+
                             IReadOnlyList<string> path = await StatementPlanQueries
                                 .ReadSearchPathAsync(connection, transaction, commandTimeout, token)
                                 .ConfigureAwait(false);
@@ -283,10 +300,15 @@ internal sealed class StatementPlanReader
                                 await observer.ObserveAsync(connection.ProcessID, shown[2], token).ConfigureAwait(false);
                             }
 
-                            return plan;
+                            return (plan.Json, plan.Characters, false);
                         },
                         cancellationToken)
                     .ConfigureAwait(false);
+
+                if (crosses)
+                {
+                    return new StatementPlanRead { NotPlanned = StatementsService.ReachesWithheldSchema, Statements = shown };
+                }
 
                 return new StatementPlanRead
                 {
@@ -373,5 +395,15 @@ internal sealed class StatementPlanReader
                     HealthStatementQueries.PlanStatementName);
             }
         }
+    }
+}
+
+/// <summary>1.0-HARD: thrown inside a what-if's transaction when its text reaches into a withheld schema; caught by the reader.</summary>
+internal sealed class StatementCrossingException : Exception
+{
+    /// <summary>The one message: the reader answers <see cref="StatementsService.ReachesWithheldSchema" /> in its place.</summary>
+    public StatementCrossingException()
+        : base(StatementsService.ReachesWithheldSchema)
+    {
     }
 }

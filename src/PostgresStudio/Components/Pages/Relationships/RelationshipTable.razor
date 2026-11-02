@@ -30,7 +30,10 @@
                 <th scope="col">From</th>
                 <th scope="col">Points at</th>
                 <th scope="col">Column</th>
-                <th scope="col">Member</th>
+                @if (ShowMember)
+                {
+                    <th scope="col">Member</th>
+                }
                 <th scope="col">State</th>
                 <th scope="col">On delete</th>
             </tr>
@@ -65,7 +68,10 @@
                     {
                         <td class="ms-table-cell ms-table-cell-mono">@edge.Column</td>
                     }
-                    <td class="ms-table-cell ms-table-cell-mono">@(edge.Member ?? "-")</td>
+                    @if (ShowMember)
+                    {
+                        <td class="ms-table-cell ms-table-cell-mono">@(edge.Member ?? "-")</td>
+                    }
                     <td class="ms-table-cell">
                         <span class="ms-badge @BadgeClass(edge)" title="@StateTitle(edge)">@edge.State</span>
                     </td>
@@ -92,6 +98,12 @@
     /// <summary>The tighter layout the object detail page's neighbourhood uses.</summary>
     [Parameter]
     public bool Compact { get; set; }
+
+    /// <summary>
+    /// 1.0-HARD: whether the Member column is drawn - only when an edge has a member to name. A studio over plain data sources has
+    /// no document member behind a key, and a column of dashes told nobody anything.
+    /// </summary>
+    private bool ShowMember => Graph.Edges.Any(static x => x.Member is not null);
 
     private GraphModel Graph => ComponentModel.Read(Model, GraphModel.None);
 

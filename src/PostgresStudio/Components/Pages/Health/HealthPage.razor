@@ -7,6 +7,7 @@
 @implements IAsyncDisposable
 @inject IHealthService HealthData
 @inject HealthMutes Mutes
+@inject HealthAlerts Alerts
 @inject StudioState State
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
@@ -523,7 +524,14 @@
 
         try
         {
-            await Mutes.SetAsync(JsRuntime, finding.MuteKey, !Mutes.IsMuted(finding.MuteKey), lifetime.Token);
+            bool unmuting = Mutes.IsMuted(finding.MuteKey);
+            await Mutes.SetAsync(JsRuntime, finding.MuteKey, !unmuting, lifetime.Token);
+
+            // 1.0-HARD: a finding the visitor just unmuted is on their screen; the next poll must not toast it as new.
+            if (unmuting)
+            {
+                Alerts.Acknowledge(finding.MuteKey);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -610,9 +618,14 @@
                 </p>
             }
 
-            @foreach (HealthStatement statement in finding.Finding.Statements)
+            @* 1.0-HARD: a finding with several statements says which each is - by what it reads, or by its place - never two
+               identical "Show SQL" labels. *@
+            @for (int s = 0; s < finding.Finding.Statements.Count; s++)
             {
-                <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" />
+                HealthStatement statement = finding.Finding.Statements[s];
+                <SqlDisclosure Sql="@statement.Sql"
+                               ParameterNames="statement.ParameterNames"
+                               Reads="@StatementLabel(statement, s, finding.Finding.Statements.Count)" />
             }
 
             <footer class="ms-health-finding-footer">
@@ -625,6 +638,12 @@
     };
 
     /// <summary>What the empty state says: muted, withheld, both, or genuinely nothing.</summary>
+    /// <summary>What a finding's statement's "Show SQL" names: what it reads, or - for one of several that nobody named - its place.</summary>
+    private static string? StatementLabel(HealthStatement statement, int index, int count) =>
+        statement.Label ?? (count > 1
+            ? "statement " + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) + " of " + count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : null);
+
     private string EmptyDescription(HealthReport shown) => (shown.WithheldCount > 0, MutedFindings.Count > 0) switch
     {
         (true, true) => "Every finding you may see is muted in this browser, and the findings counted above are not shown to you.",

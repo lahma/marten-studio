@@ -140,6 +140,8 @@ internal static class PostgresStudioText
         RelationshipIsolatedLabel = "Tables with no foreign key",
         RelationshipUnmatchedNote =
             "These foreign keys have an end in a table this studio does not draw, so there is nothing to draw them between.",
+        RelationshipUnplacedTarget = "It points at a table this studio does not draw.",
+        RelationshipUnplacedSource = "It is on a table this studio does not draw.",
         RelationshipNeighbourhoodUnmatched = "an end in a table this studio does not draw, so there is nothing to draw them between.",
         RelationshipTablesUnavailable = "No table is drawn:",
 

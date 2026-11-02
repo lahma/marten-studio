@@ -61,15 +61,18 @@ else
 {
     <div class="ms-schema-summary">
         <span><strong>@tables.Tables.Count</strong> tables</span>
-        <span><strong>@SchemaFormat.Bytes(TotalBytes)</strong> in this store's schemas</span>
+        <span><strong>@SchemaFormat.EstimatedBytes(TotalBytes)</strong> in this store's schemas</span>
         <span><strong>@SchemaFormat.Bytes(tables.DatabaseBytes)</strong> in the whole database</span>
         <span class="ms-mono">@string.Join(", ", tables.Schemas)</span>
     </div>
 
     <p class="ms-schema-note">
         Row counts are <code>pg_class.reltuples</code> estimates (D8) and the scan counters come from
-        <code>pg_stat_user_tables</code>, which <code>pg_stat_reset()</code> and a crash both zero. Owners
-        are the database browser's: a table this store does not declare is "not Marten", wherever it lives.
+        <code>pg_stat_user_tables</code>, which <code>pg_stat_reset()</code> and a crash both zero. Sizes are
+        estimates too, marked <strong>~</strong>: the catalog's page counts times the block size, as of the last
+        <code>VACUUM</code>, <code>ANALYZE</code> or index build - a size function would wait behind any migration
+        holding a lock on the table. Owners are the database browser's: a table this store does not declare is
+        "not Marten", wherever it lives.
     </p>
 
     <p class="ms-schema-note ms-schema-health-note">
@@ -85,8 +88,7 @@ else
             {
                 <text>
                     A partitioned table is one row. Its partitions are never listed - a per-tenant partition is
-                    named after its tenant - and their sizes, row estimates and counters are added into it, the
-                    sizes from the catalog's page counts, which <code>VACUUM</code> and <code>ANALYZE</code> refresh.
+                    named after its tenant - and their sizes, row estimates and counters are added into it.
                 </text>
             }
             @if (tables.PartitionCountsWithheld is { Length: > 0 } withheld)
@@ -190,10 +192,10 @@ else
                                 }
                             </span>
                         </td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.TotalBytes)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.HeapBytes)</td>
-                        <td class="ms-table-cell ms-num ms-schema-toast">@SchemaFormat.Bytes(table.ToastBytes)</td>
-                        <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(table.IndexBytes)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.EstimatedBytes(table.TotalBytes)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.EstimatedBytes(table.HeapBytes)</td>
+                        <td class="ms-table-cell ms-num ms-schema-toast">@SchemaFormat.EstimatedBytes(table.ToastBytes)</td>
+                        <td class="ms-table-cell ms-num">@SchemaFormat.EstimatedBytes(table.IndexBytes)</td>
                         @if (table.FiguresWithheld)
                         {
                             for (int withheldCell = 0; withheldCell < WithheldFigureColumns; withheldCell++)

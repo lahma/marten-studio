@@ -1,6 +1,8 @@
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
 
+using PostgresStudio.Services.Settings;
+
 namespace PostgresStudio.Services.Relationships;
 
 /// <summary>
@@ -87,18 +89,23 @@ internal static class RelationshipGraphBuilder
     /// <param name="database">
     /// The visitor's gate and the relations it admits, or <see langword="null" /> for the source's own nodes only.
     /// </param>
+    /// <param name="text">
+    /// The studio's words for a key it cannot draw (1.0-HARD): Marten Studio's, which name document types, unless a studio over
+    /// plain data sources says otherwise.
+    /// </param>
     public static RelationshipGraph Build(
         RelationshipNodeSet nodes,
         IReadOnlyList<RelationshipDeclaredKey> declared,
         IReadOnlyList<PhysicalForeignKey> physicalKeys,
         DateTimeOffset readAt,
-        RelationshipDatabaseView? database = null)
+        RelationshipDatabaseView? database = null,
+        StudioText? text = null)
     {
         ArgumentNullException.ThrowIfNull(nodes);
         ArgumentNullException.ThrowIfNull(declared);
         ArgumentNullException.ThrowIfNull(physicalKeys);
 
-        var builder = new Builder(nodes, database);
+        var builder = new Builder(nodes, database, text ?? StudioText.Marten);
 
         builder.RegisterTables(physicalKeys);
         builder.AddDeclared(declared);
@@ -312,6 +319,7 @@ internal static class RelationshipGraphBuilder
     {
         private readonly RelationshipNodeSet nodes;
         private readonly RelationshipDatabaseView? database;
+        private readonly StudioText text;
         private readonly Func<string, bool> canSee;
         private readonly IReadOnlyList<string> visibleSchemas;
 
@@ -326,10 +334,11 @@ internal static class RelationshipGraphBuilder
         private readonly List<UnmatchedForeignKey> unmatched = [];
         private readonly List<WithheldForeignKey> withheld = [];
 
-        public Builder(RelationshipNodeSet nodes, RelationshipDatabaseView? database)
+        public Builder(RelationshipNodeSet nodes, RelationshipDatabaseView? database, StudioText text)
         {
             this.nodes = nodes;
             this.database = database;
+            this.text = text;
 
             if (database is null)
             {
@@ -506,7 +515,7 @@ internal static class RelationshipGraphBuilder
                     Physical: false,
                     end.Kind == EndKind.Table
                         ? "It points at a table the studio does not find in the database."
-                        : "It points at a table no document type of this store maps.")
+                        : text.RelationshipUnplacedTarget)
                 {
                     FromSchema = source.Schema,
                     FromTable = source.Table,
@@ -568,8 +577,8 @@ internal static class RelationshipGraphBuilder
                         Declared: false,
                         Physical: true,
                         from.Kind == EndKind.Unplaced
-                            ? "It is on a table no document type of this store maps."
-                            : "It points at a table no document type of this store maps.")
+                            ? text.RelationshipUnplacedSource
+                            : text.RelationshipUnplacedTarget)
                     {
                         FromSchema = key.Schema,
                         FromTable = key.Table,

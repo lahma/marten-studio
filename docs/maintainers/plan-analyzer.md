@@ -14,9 +14,10 @@ drill-in plans a `pg_stat_statements` text as its generic plan by `prepare` + `f
 `search_path` less withheld schemas, and never plans a write, a withheld text, or a text
 that names a withheld schema (`StatementsService.TextNamesWithheld`: one the visitor's mask changes, or a `U&"` name
 while anything is withheld; asked again by the reader before any `prepare`), because a qualified view or `LANGUAGE
-sql` function is expanded or inlined into visible tables and a `plpgsql` call prints its defaults. Known limit: a view
-or SQL function in a visible schema that reads a withheld one is expanded like any other. A plan reading a withheld
-schema is not
+sql` function is expanded or inlined into visible tables and a `plpgsql` call prints its defaults. Nor (1.0) one that
+names a view or SQL function in a visible schema that reaches a withheld schema's view or function
+(`StatementCrossing`: a `pg_depend` walk from visible views and SQL-standard bodies, string-bodied SQL functions lexed,
+to a fixed point, bounded, failing closed; matched by whole word). A plan reading a withheld schema is not
 shown; the rest is masked like the text, and each plan is audited by `queryid`. Console and Mode A plans are `RunSql`
 output, unmasked (D27). What if? (X2) imagines one index with hypopg behind the gate of the plan it accompanies, only
 one a builder writes (`MigrationSqlText`, or Marten's own `ToDDL`), re-derived on the server. Read-only; never

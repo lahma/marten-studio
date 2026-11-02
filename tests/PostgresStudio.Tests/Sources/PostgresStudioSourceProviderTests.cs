@@ -779,11 +779,119 @@ public class PostgresStudioSourceProviderTests
     }
 
     /// <summary>The shared resolver over the harness's provider, a test policy and no signed-in visitor.</summary>
-    private static StudioSourceResolver Resolver(Harness harness, PostgresStudioOptions options, IAuthorizationService policy)
+    private static StudioSourceResolver Resolver(
+        Harness harness,
+        PostgresStudioOptions options,
+        IAuthorizationService policy,
+        ILogger<StudioSourceResolver>? logger = null,
+        StudioLogThrottle? throttle = null)
     {
         IStudioSettings settings = PostgresStudioSettings.Of(options);
         StudioAuthorization authorization = new(settings, PostgresStudioDescriptor.Instance, policy, new TestAuthenticationStateProvider());
-        return new StudioSourceResolver(harness.Provider, authorization, PostgresStudioDescriptor.Instance);
+        return new StudioSourceResolver(harness.Provider, authorization, PostgresStudioDescriptor.Instance, logger, throttle, settings);
+    }
+
+    // 1.0-HARD, item 1: a host's source code never reaches a page raw
+
+    /// <summary>
+    /// A host's list that throws a <see cref="KeyNotFoundException" /> - the one type a page treats as "no such scope" -
+    /// or anything else reaches the caller as the studio's own <see cref="StudioStoreUnavailableException" />: it names the
+    /// source, says the host's words escaped and bounded (H1b), keeps the original as the inner exception, and the original is
+    /// logged once at Warning (9213) and at Debug after that.
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(KeyNotFoundException))]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task A_host_list_that_throws_is_wrapped_names_the_source_and_logs_the_original_once(Type thrown)
+    {
+        const string HostWords = "tenant registry unreachable at 10.0.0.7";
+        CapturingLoggerProvider logs = new();
+        using ILoggerFactory factory = logs.CreateFactory();
+        ServiceCollection services = new();
+        FakeDatabaseSource tenants = new("acme") { ListFailure = (Exception) Activator.CreateInstance(thrown, HostWords)! };
+
+        PostgresStudioOptions options = new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants);
+        await using Harness harness = new(services, options);
+        StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService(), factory.CreateLogger<StudioSourceResolver>(), new StudioLogThrottle());
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            Func<Task> resolve = async () => await resolver.ResolveAsync(new StudioScope("tenants", "acme", null), cancellationToken: Token);
+            StudioStoreUnavailableException wrapped = (await resolve.Should().ThrowAsync<StudioStoreUnavailableException>()).Which;
+
+            wrapped.Message.Should().Contain("tenants").And.Contain(StudioLogValue.CapText(HostWords));
+            wrapped.InnerException.Should().BeOfType(thrown);
+            harness.Provider.Invalidate();
+        }
+
+        CapturedLogEntry[] listed = [.. logs.Entries.Where(static x => x.EventId.Id == 9213)];
+        listed.Should().HaveCount(2);
+        listed.Select(static x => x.Level).Should().Equal(LogLevel.Warning, LogLevel.Debug);
+    }
+
+    /// <summary>The host's own <c>TimeoutException</c> is not the studio's: only the studio's sentence about its limit is shown.</summary>
+    [Fact]
+    public async Task A_host_list_that_runs_out_of_the_studios_limit_says_so_in_the_studios_words()
+    {
+        ServiceCollection services = new();
+        FakeDatabaseSource tenants = new("acme") { HangListing = true };
+        ManualTimeProvider time = new();
+        PostgresStudioOptions options = new PostgresStudioOptions { QueryTimeout = TimeSpan.FromSeconds(5) }.AddDatabaseSource("tenants", _ => tenants);
+        await using Harness harness = new(services, options, time);
+        StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService());
+
+        Task<ResolvedSource> resolving = resolver.ResolveAsync(new StudioScope("tenants", "acme", null), cancellationToken: Token).AsTask();
+        await tenants.ListingStarted.Task.WaitAsync(TimeSpan.FromSeconds(30), Token);
+        time.Advance(TimeSpan.FromSeconds(6));
+
+        Func<Task> wait = async () => await resolving;
+        (await wait.Should().ThrowAsync<StudioStoreUnavailableException>()).WithMessage("*did not list its databases within 5 s*");
+    }
+
+    /// <summary>A host that throws while handing a database over: wrapped, its words escaped and bounded, the original logged once (9219).</summary>
+    [Theory]
+    [InlineData(typeof(KeyNotFoundException))]
+    [InlineData(typeof(InvalidOperationException))]
+    public async Task A_host_that_throws_opening_a_database_is_wrapped_and_logged_once(Type thrown)
+    {
+        const string HostWords = "vault said no for pg-secret-7";
+        CapturingLoggerProvider logs = new();
+        using ILoggerFactory factory = logs.CreateFactory();
+        ServiceCollection services = new();
+        FakeDatabaseSource tenants = new("acme") { OpenFailures = { ["acme"] = (Exception) Activator.CreateInstance(thrown, HostWords)! } };
+
+        PostgresStudioOptions options = new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants);
+        await using Harness harness = new(services, options);
+        StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService(), factory.CreateLogger<StudioSourceResolver>(), new StudioLogThrottle());
+
+        Func<Task> resolve = async () => await resolver.ResolveAsync(new StudioScope("tenants", "acme", null), cancellationToken: Token);
+        StudioStoreUnavailableException wrapped = (await resolve.Should().ThrowAsync<StudioStoreUnavailableException>()).Which;
+
+        wrapped.Message.Should().Contain("tenants").And.Contain("acme").And.Contain(StudioLogValue.CapText(HostWords));
+        wrapped.InnerException.Should().BeOfType(thrown);
+
+        logs.Entries.Where(static x => x.EventId.Id == 9219).Should().ContainSingle()
+            .Which.Level.Should().Be(LogLevel.Warning);
+    }
+
+    /// <summary>The caller's own cancellation is not the host's failure and passes through as it is.</summary>
+    [Fact]
+    public async Task A_cancelled_caller_is_not_a_host_failure()
+    {
+        ServiceCollection services = new();
+        FakeDatabaseSource tenants = new("acme") { HangListing = true };
+        PostgresStudioOptions options = new PostgresStudioOptions().AddDatabaseSource("tenants", _ => tenants);
+        await using Harness harness = new(services, options);
+        StudioSourceResolver resolver = Resolver(harness, options, new TestSourceAuthorizationService());
+
+        using CancellationTokenSource caller = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        Task<ResolvedSource> resolving = resolver.ResolveAsync(new StudioScope("tenants", "acme", null), cancellationToken: caller.Token).AsTask();
+        await tenants.ListingStarted.Task.WaitAsync(TimeSpan.FromSeconds(30), Token);
+        await caller.CancelAsync();
+
+        Func<Task> wait = async () => await resolving;
+        await wait.Should().ThrowAsync<OperationCanceledException>();
     }
 
     /// <summary>A service the root provider must refuse (scope validation is on in the harness).</summary>

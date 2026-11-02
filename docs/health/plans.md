@@ -527,10 +527,14 @@ statement's text is (`‹withheld›` for a withheld schema), and the transactio
 less every schema you may not see, so a name the plan prints from such a schema carries its schema and is masked too. A
 statement that names a table only through one of those schemas then fails to plan, and says so.
 
-**Known limit.** A view or a `LANGUAGE sql` function in a schema you *may* see, that itself reads or calls into one you may
-not, is expanded or inlined like any other: a plan of a statement that names it shows its conditions, and a scan of a
-withheld schema's table among them still hides the whole plan. The database browser refuses such a view's query, so a host
-whose views cross schemas this way should keep `ViewDatabaseActivity` for people who may read both.
+**Through a name you may see** (1.0). A view or a SQL function in a schema you *may* see that itself calls into, or reads a
+view of, one you may not would be inlined or expanded too - a withheld `LANGUAGE sql` function becomes a plain condition over a
+table you may see, with no withheld table in the plan to hide it by. So a text that names such a view or function is not planned
+either. The studio finds them before anything is prepared: it walks `pg_depend` from every view and SQL-standard-body function
+in the schemas you may see, reads the bodies of the string-bodied SQL functions there (which record no dependencies) with the
+same check as the text, follows what reaches what to a fixed point, and refuses a text that names any of them as a word - in a
+literal or a comment too, which costs a plan, never a leak. A view that only reads a withheld schema's *table* is still planned,
+and its plan is not shown, as above.
 
 **Audited.** Each plan is an Activity entry, "Plan database statement", naming the `queryid` and never the text.
 

@@ -85,6 +85,19 @@ internal sealed partial class EventDataService
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(group);
 
+        // 1.0-HARD: the preview of a write its capability does not allow is refused before anything is resolved or read. The
+        // dialog opens only under ManageDeadLetters, so a visitor without it has no reason to ask, and a hand-made call learns
+        // nothing. The switch alone is asked, not the write policy: a describe is not a write and, like DescribeRebuildAsync,
+        // is not audited; the skip asks both and is (hard rule 5).
+        try
+        {
+            capabilities.Require(StudioCapability.ManageDeadLetters);
+        }
+        catch (StudioCapabilityDeniedException denied)
+        {
+            return DeadLetterGroupSkipPlan.Refused(denied.Message);
+        }
+
         try
         {
             ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);

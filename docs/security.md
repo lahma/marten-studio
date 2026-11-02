@@ -268,9 +268,10 @@ and deallocates what it prepared. A text withheld from the visitor, one that nam
 (wherever their masked
 text shows `‹withheld›`, or, while any schema is withheld, a `U&"…"` name the mask cannot read), a write, a locking read
 and a cut text are never planned, and no What if? is asked of them: a schema-qualified view or `LANGUAGE sql` function
-would be expanded or inlined into the tables it reads, and `VERBOSE` would print its definition. A view or SQL function
-in a visible schema that reads a withheld one is expanded like any other (a known limit, `docs/health/plans.md`). A plan
-that reads a schema the visitor may not see is not shown; every other plan is masked as the text is.
+would be expanded or inlined into the tables it reads, and `VERBOSE` would print its definition. Since 1.0 neither is a
+text that names a view or SQL function in a visible schema that itself reaches a withheld schema's view or function - the
+plan would inline or expand that definition with no withheld table in it to hide it by. A plan that reads a schema the
+visitor may not see is not shown; every other plan is masked as the text is.
 Each plan is audited by `queryid` ("Plan database statement"), and so is each What if? there ("What-if database
 statement").
 

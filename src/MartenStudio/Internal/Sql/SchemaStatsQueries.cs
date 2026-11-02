@@ -12,11 +12,12 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="Schema">The schema the table lives in.</param>
 /// <param name="Table">The table name.</param>
 /// <param name="TotalBytes">
-/// <c>pg_total_relation_size</c> — heap, indexes, toast — plus, for a partitioned table, its partitions'
-/// catalog page counts (see <see cref="SchemaStatsQueries.TableStatsSql" />).
+/// Heap, indexes and TOAST, from the catalog's page counts (<c>relpages</c> times the block size) - an estimate as of the
+/// last <c>VACUUM</c>, <c>ANALYZE</c> or index build - plus, for a partitioned table, its partitions' (see
+/// <see cref="SchemaStatsQueries.TableStatsSql" />, 1.0: no size function, which would wait behind a migration's lock).
 /// </param>
-/// <param name="HeapBytes"><c>pg_relation_size</c> — the main fork alone — plus the partitions' heap pages.</param>
-/// <param name="IndexBytes"><c>pg_indexes_size</c>, plus the partitions' index pages.</param>
+/// <param name="HeapBytes">The table's own pages - plus the partitions' heap pages - times the block size. An estimate.</param>
+/// <param name="IndexBytes">Its indexes' pages, plus the partitions' index pages, times the block size. An estimate.</param>
 /// <param name="EstimatedRows">
 /// <c>pg_class.reltuples</c> cast to <c>bigint</c>, which is an estimate and is <c>-1</c> before the
 /// first analyze — the same shape <see cref="CountEstimator" /> reads, so the two agree. For a partitioned
@@ -34,8 +35,8 @@ namespace MartenStudio.Internal.Sql;
 /// <param name="HotUpdates"><c>n_tup_hot_upd</c>, over the partitions too, or <see langword="null" />.</param>
 /// <param name="LastAutovacuum"><c>last_autovacuum</c> alone - over the partitions too.</param>
 /// <param name="ToastBytes">
-/// The TOAST table and its index: <c>pg_total_relation_size</c> of the listed table's own TOAST relation, plus
-/// its partitions' TOAST pages.
+/// The TOAST table and its index, from their page counts, plus its partitions' TOAST pages, times the block size. An
+/// estimate.
 /// </param>
 /// <param name="StorageOptions">
 /// <c>reloptions</c>: the storage parameters set on the table, as <c>name=value</c>. For a partitioned table -
@@ -76,7 +77,7 @@ internal sealed record TableStatsRow(
 /// <param name="Table">The table it is on.</param>
 /// <param name="Name">The index name.</param>
 /// <param name="Definition">The <c>create index</c> statement Postgres reports for it.</param>
-/// <param name="Bytes"><c>pg_relation_size</c> of the index.</param>
+/// <param name="Bytes">The index's pages (<c>relpages</c>) times the block size - an estimate, as of its last build, <c>VACUUM</c> or <c>ANALYZE</c>.</param>
 /// <param name="Scans"><c>idx_scan</c>, or <see langword="null" /> when the collector has nothing.</param>
 /// <param name="TuplesRead"><c>idx_tup_read</c>, or <see langword="null" />.</param>
 /// <param name="IsPrimaryKey">Whether the index backs the table's primary key.</param>
@@ -194,23 +195,41 @@ internal static class SchemaStatsQueries
     /// <c>find_all_inheritors</c> with <c>AccessShareLock</c> and holds one lock per partition until the
     /// transaction ends - which on a table with thousands of tenant partitions exhausts the lock table - and
     /// neither is any size function over a partition, which queues behind any migration holding a lock on
-    /// one. The size functions still run on the listed tables themselves, as they always have; they
-    /// release their lock on the spot. The partitions' sizes are therefore <c>relpages</c> estimates, which
-    /// <c>VACUUM</c> and <c>ANALYZE</c> refresh, and the tab says so. <c>SchemaAlignmentLiveTests</c>
-    /// measures it: a read over a parent whose partition another session holds in
-    /// <c>ACCESS EXCLUSIVE</c> mode finishes, and holds no partition lock afterwards.
+    /// one. Since 1.0 (D27: a list locks nothing it lists) no size function runs on the listed tables either:
+    /// <c>pg_relation_size</c> releases its lock on the spot, but it still waits behind a migration's
+    /// <c>ACCESS EXCLUSIVE</c> lock, so the Schema screen hung for as long as a migration of a store table
+    /// ran. Every size is therefore a <c>relpages</c> estimate - the table's, its TOAST table's and every
+    /// index's, the TOAST table's own included - which <c>VACUUM</c>, <c>ANALYZE</c> and an index build
+    /// refresh, and the tab says so. <c>SchemaAlignmentLiveTests</c> measures it: a read over a parent whose
+    /// partition another session holds in <c>ACCESS EXCLUSIVE</c> mode finishes, and holds no partition lock
+    /// afterwards - and, since 1.0, that a read while a listed table is held that way finishes too, and holds no
+    /// lock on any relation of the schema. <see cref="IndexStatsSql" /> still prints each definition with
+    /// <c>pg_get_indexdef</c>, which takes the table's lock for the moment it runs (measured on 17) and keeps none:
+    /// that read gives up at the session's <c>lock_timeout</c> while a migration holds the table, and the service
+    /// says so.
     /// </para>
     /// <para>
-    /// <c>pg_total_relation_size</c> of a partitioned parent is the parent's own forks only (none), so
-    /// adding the partitions in double-counts nothing.
+    /// A partitioned parent has no storage of its own (<c>relpages</c> 0), so adding the partitions in
+    /// double-counts nothing.
     /// </para>
     /// </remarks>
     internal const string TableStatsSql =
         """
         with recursive listed as (
-            select c.oid, n.nspname, c.relname, c.relkind, c.reltuples, c.reltoastrelid, c.reloptions
+            select c.oid, n.nspname, c.relname, c.relkind, c.reltuples, c.reltoastrelid, c.reloptions,
+                   c.relpages::bigint as heap_pages,
+                   coalesce(toast.relpages, 0)::bigint
+                       + (select coalesce(pg_catalog.sum(tic.relpages::bigint), 0)
+                          from pg_catalog.pg_index tx
+                          join pg_catalog.pg_class tic on tic.oid = tx.indexrelid
+                          where tx.indrelid = c.reltoastrelid) as toast_pages,
+                   (select coalesce(pg_catalog.sum(ic.relpages::bigint), 0)
+                    from pg_catalog.pg_index x
+                    join pg_catalog.pg_class ic on ic.oid = x.indexrelid
+                    where x.indrelid = c.oid) as index_pages
             from pg_catalog.pg_class c
             join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+            left join pg_catalog.pg_class toast on toast.oid = nullif(c.reltoastrelid, 0::pg_catalog.oid)
             where c.relkind in ('r', 'p')
               and not c.relispartition
               and n.nspname = any(@schemas)
@@ -281,13 +300,10 @@ internal static class SchemaStatsQueries
         )
         select l.nspname::text as schema_name,
                l.relname::text as table_name,
-               pg_catalog.pg_total_relation_size(l.oid)
-                   + coalesce(r.heap_pages + r.toast_pages + r.index_pages, 0)
-                     * pg_catalog.current_setting('block_size')::bigint as total_bytes,
-               pg_catalog.pg_relation_size(l.oid)
-                   + coalesce(r.heap_pages, 0) * pg_catalog.current_setting('block_size')::bigint,
-               pg_catalog.pg_indexes_size(l.oid)
-                   + coalesce(r.index_pages, 0) * pg_catalog.current_setting('block_size')::bigint,
+               (l.heap_pages + l.toast_pages + l.index_pages + coalesce(r.heap_pages + r.toast_pages + r.index_pages, 0))
+                   * pg_catalog.current_setting('block_size')::bigint as total_bytes,
+               (l.heap_pages + coalesce(r.heap_pages, 0)) * pg_catalog.current_setting('block_size')::bigint,
+               (l.index_pages + coalesce(r.index_pages, 0)) * pg_catalog.current_setting('block_size')::bigint,
                case
                    when l.relkind <> 'p' then l.reltuples::bigint
                    when coalesce(r.unanalyzed, true) then -1
@@ -307,8 +323,7 @@ internal static class SchemaStatsQueries
                case when l.relkind = 'p' then r.upd::bigint else s.n_tup_upd end,
                case when l.relkind = 'p' then r.hot::bigint else s.n_tup_hot_upd end,
                greatest(s.last_autovacuum, r.autovacuumed),
-               coalesce(pg_catalog.pg_total_relation_size(nullif(l.reltoastrelid, 0::pg_catalog.oid)), 0)
-                   + coalesce(r.toast_pages, 0) * pg_catalog.current_setting('block_size')::bigint,
+               (l.toast_pages + coalesce(r.toast_pages, 0)) * pg_catalog.current_setting('block_size')::bigint,
                case
                    when l.relkind = 'p' then coalesce(orl.agreed, '{}'::text[])
                    else coalesce(l.reloptions, '{}'::text[])
@@ -348,6 +363,7 @@ internal static class SchemaStatsQueries
                    i.indnkeyatts,
                    i.indclass,
                    c.reloptions,
+                   c.relpages::bigint as pages,
                    am.oid as am_oid,
                    am.amname
             from pg_catalog.pg_index i
@@ -382,8 +398,7 @@ internal static class SchemaStatsQueries
                l.table_name::text,
                l.index_name::text,
                pg_catalog.pg_get_indexdef(l.oid),
-               pg_catalog.pg_relation_size(l.oid)
-                   + coalesce(r.pages, 0) * pg_catalog.current_setting('block_size')::bigint,
+               (l.pages + coalesce(r.pages, 0)) * pg_catalog.current_setting('block_size')::bigint,
                case when l.relkind = 'I' then r.scans::bigint else s.idx_scan end,
                case when l.relkind = 'I' then r.tuples::bigint else s.idx_tup_read end,
                l.indisprimary,

@@ -43,6 +43,28 @@ public class HealthAlertsTests
         return new HealthAlerts(toasts, MartenStudioSettings.Of(options));
     }
 
+    /// <summary>
+    /// 1.0-HARD: a muted finding is not in the glance, so a Critical the visitor unmutes after it was muted longer than the cool-down
+    /// used to toast at once as "new" - about a finding on the visitor's screen. Unmuting acknowledges it: no toast on the next
+    /// poll, while another Critical appearing on that same poll still is toasted.
+    /// </summary>
+    [Fact]
+    public async Task A_Critical_the_visitor_unmutes_is_not_toasted_as_new_but_another_that_appears_is()
+    {
+        ToastService toasts = new();
+        HealthAlerts alerts = Alerts(toasts);
+
+        // D01 muted for an hour: absent from every glance.
+        await alerts.ObserveAsync(Scope, Glance(0));
+        await alerts.ObserveAsync(Scope, Glance(60));
+
+        alerts.Acknowledge(Scope.StoreKey + "|" + Scope.DatabaseId + "|D01");
+        await alerts.ObserveAsync(Scope, Glance(61, "D01", "C03"));
+
+        toasts.Messages.Should().ContainSingle("the unmuted D01 is the visitor's own doing; C03 is news")
+            .Which.Message.Should().Contain("C03 is broken");
+    }
+
     [Fact]
     public async Task What_is_already_Critical_at_the_first_look_is_not_toasted()
     {
