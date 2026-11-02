@@ -18,6 +18,12 @@ namespace PostgresStudio.Tests.Components;
 /// </summary>
 public class PlanFactsPanelTests
 {
+    /// <summary>
+    /// How long a wait on a condition may take: the paste and the render go through the circuit's dispatcher, and bUnit's
+    /// one-second default failed once on a loaded machine. A ceiling, never a delay.
+    /// </summary>
+    private static readonly TimeSpan Wait = TimeSpan.FromSeconds(10);
+
     private static readonly DateTimeOffset Now = new(2026, 11, 1, 12, 0, 0, TimeSpan.Zero);
 
     private static async Task<PostgresStudioComponentContext> ContextAsync() => await new PostgresStudioComponentContext().WithAllCapabilities().ReadyAsync();
@@ -261,7 +267,7 @@ public class PlanFactsPanelTests
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
         page.Find("#ms-plan-sql").Change("select * from orders where status = 'open'");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-dbfacts").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-dbfacts").Should().ContainSingle(), Wait);
 
         context.PlanFacts.Reads.Should().ContainSingle().Which.Plan.Nodes.Should().ContainSingle(static x => x.RelationName == "orders");
         context.PlanFacts.Reads[0].Scope.TenantId.Should().BeNull();
@@ -282,7 +288,7 @@ public class PlanFactsPanelTests
         await page.InvokeAsync(() => paste.PasteChunk(text));
         sending.SetResult(text.Length);
 
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         context.PlanFacts.Reads.Should().BeEmpty("facts are read only for plans this page ran");
         page.FindAll(".ms-plan-dbfacts").Should().BeEmpty();
@@ -305,7 +311,7 @@ public class PlanFactsPanelTests
         IRenderedComponent<PlanPage> page = context.Render<PlanPage>();
         page.Find("#ms-plan-sql").Change("select * from orders");
         await page.InvokeAsync(() => page.Find(".ms-query-run").Click());
-        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle(), Wait);
 
         page.Find(".ms-plan-dbfacts-failure").TextContent.Should().NotBeEmpty();
         page.FindAll(".ms-plan-insight-code").Select(static x => x.TextContent).Should().NotContain("P15");
