@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 using MartenStudio.Services;
+using MartenStudio.Services.Query;
 using MartenStudio.Tests.Conventions;
 
 using PostgresStudio.Services.Health;
@@ -78,7 +79,9 @@ public class HealthCodesTests
                 HealthCheckInfo.AreaFileName(x.Area) + "#" + x.DocsAnchor));
 
         IEnumerable<RegisteredCode> insights = PlanInsights.All.Select(static x => new RegisteredCode(
-            x.Code, x.Title, PlanInsights.Area, [], "both", PlanInsights.DocsFileName + "#" + x.DocsAnchor));
+                x.Code, x.Title, PlanInsights.Area, [], "both", PlanInsights.DocsFileName + "#" + x.DocsAnchor))
+            .Concat(MartenPlanInsights.All.Select(static x => new RegisteredCode(
+                x.Code, x.Title, PlanInsights.Area, [], "Marten", PlanInsights.DocsFileName + "#" + x.DocsAnchor)));
 
         return [.. checks.Concat(insights).OrderBy(static x => x.Code, StringComparer.Ordinal)];
     }
@@ -311,7 +314,7 @@ public class HealthCodesTests
         IReadOnlyList<CodeRow> rows = Table();
 
         rows.Where(static x => x.Area == PlanInsights.Area).Select(static x => x.Code)
-            .Should().Equal(PlanInsights.All.Select(static x => x.Code), "every plan insight has its row, in code order");
+            .Should().Equal(PlanInsights.All.Concat(MartenPlanInsights.All).Select(static x => x.Code), "every plan insight has its row, in code order");
         rows.Where(static x => x.Area == PlanInsights.Area).Should().OnlyContain(static x => x.Link.StartsWith("plans.md#", StringComparison.Ordinal));
         HealthCheckRegistry.AreaOf(PlanInsights.Letter).Should().BeNull("a health check never takes a P code");
     }

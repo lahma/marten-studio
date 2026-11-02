@@ -11,6 +11,7 @@ using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
+using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -132,6 +133,9 @@ public static partial class MartenStudioServiceCollectionExtensions
             new MartenStudioRuntime(provider.GetService<MartenRuntime>() ?? MartenRuntime.Current));
         services.TryAddScoped<IRelationshipNodeSource, MartenRelationshipNodeSource>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<INavIndicatorContributor, MartenNavIndicatorContributor>());
+
+        // 1.0-P3C: Marten Studio's plan insights (P26 to P28), judged against the document tables the store in scope declares.
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IPlanInsightContributor, MartenPlanInsightContributor>());
 
         // Reads a table's indexes for the Mode A index verdict and caches what it said, keyed by database
         // identity, for the same reason as the shared column catalog.

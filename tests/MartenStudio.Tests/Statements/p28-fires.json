@@ -1,0 +1,29 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Index Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Scan Direction": "Forward",
+      "Index Name": "mt_doc_tenantplandoc_idx_color",
+      "Relation Name": "mt_doc_tenantplandoc",
+      "Schema": "studio_sql",
+      "Alias": "d",
+      "Startup Cost": 0.42,
+      "Total Cost": 9120.55,
+      "Plan Rows": 90,
+      "Plan Width": 96,
+      "Actual Startup Time": 0.052,
+      "Actual Total Time": 41.318,
+      "Actual Rows": 100.00,
+      "Actual Loops": 1,
+      "Output": ["data", "id"],
+      "Index Cond": "((d.data ->> 'Color'::text) = 'red'::text)",
+      "Filter": "(d.tenant_id = 'acme'::text)",
+      "Rows Removed by Filter": 49900
+    },
+    "Planning Time": 0.142,
+    "Triggers": [],
+    "Execution Time": 41.77
+  }
+]

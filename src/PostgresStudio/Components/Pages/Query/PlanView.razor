@@ -10,6 +10,7 @@
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
 @inject StudioState State
+@inject IEnumerable<IPlanInsightContributor> Contributors
 
 @*
     X1: a plan as a hand-rolled tree, and under it X1b's insights - for every place the studio shows a plan: the SQL
@@ -210,6 +211,14 @@
                 </p>
             }
 
+            @if (notJudgedHere.Count > 0)
+            {
+                <p class="ms-plan-not-judged ms-plan-not-judged-here">
+                    Not judged on this plan:
+                    @string.Join(", ", notJudgedHere.Select(static x => x.Code + " " + x.Title)).
+                </p>
+            }
+
             @if (notJudgedWithoutFacts.Count > 0)
             {
                 <p class="ms-plan-not-judged ms-plan-not-judged-facts">
@@ -259,6 +268,15 @@
     private IReadOnlyList<PlanInsightFinding> insights = [];
     private IReadOnlyList<PlanInsightInfo> notJudged = [];
     private IReadOnlyList<PlanInsightInfo> notJudgedWithoutFacts = [];
+
+    // 1.0-P3C: what the studio's own contributors (MartenStudio's document-table insights) made of the plan on screen - found
+    // asynchronously, since learning what the visitor's scope declares is authorized - and the plan, facts and scope it was made for.
+    private IReadOnlyList<PlanInsightFinding> contributed = [];
+    private IReadOnlyList<PlanInsightInfo> contributedUnjudged = [];
+    private IReadOnlyList<PlanInsightInfo> notJudgedHere = [];
+    private QueryPlan? contributedFor;
+    private PlanFacts? contributedFacts;
+    private StudioScope? contributedScope;
     private PlanFacts? facts;
     private Dictionary<int, List<string>> flags = [];
     private string? readJson;
@@ -399,6 +417,7 @@
         {
             insights = [];
             notJudged = [];
+            notJudgedHere = [];
             notJudgedWithoutFacts = [];
             flags = [];
             criticalIds = [];
@@ -406,10 +425,67 @@
         }
     }
 
+    /// <summary>
+    /// 1.0-P3C: asks the registered contributors about the plan on screen once per plan, set of facts and scope, and judges the
+    /// insights again with what they found. A contributor that throws contributes nothing: the plan's own insights are never lost to it.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Contributors.Any() || read?.Plan is not { } plan)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        if (ReferenceEquals(contributedFor, plan) && ReferenceEquals(contributedFacts, facts) && Equals(contributedScope, scope))
+        {
+            return;
+        }
+
+        PlanInsightContext context = new(scope, facts);
+        List<PlanInsightFinding> findings = [];
+        List<PlanInsightInfo> unjudged = [];
+
+        foreach (IPlanInsightContributor contributor in Contributors)
+        {
+            try
+            {
+                PlanContribution made = await contributor.ContributeAsync(plan, context, CancellationToken.None);
+                findings.AddRange(made.Findings);
+                unjudged.AddRange(made.NotJudged);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // A contributor's failure is its own: the insights every studio has stand, and its own are listed as not judged.
+                unjudged.AddRange(contributor.Insights);
+            }
+        }
+
+        // The plan may have been replaced while the contributors worked; theirs would then be another plan's.
+        if (!ReferenceEquals(read?.Plan, plan))
+        {
+            return;
+        }
+
+        contributed = findings;
+        contributedUnjudged = unjudged;
+        contributedFor = plan;
+        contributedFacts = facts;
+        contributedScope = scope;
+        EvaluateInsights(plan);
+    }
+
     private void EvaluateInsights(QueryPlan plan)
     {
-        insights = PlanInsights.Evaluate(plan, Settings.Text, facts);
-        notJudged = PlanInsights.NotJudged(plan);
+        bool current = ReferenceEquals(contributedFor, plan) && ReferenceEquals(contributedFacts, facts);
+        insights = current
+            ? [.. PlanInsights.Evaluate(plan, Settings.Text, facts), .. contributed]
+            : PlanInsights.Evaluate(plan, Settings.Text, facts);
+        notJudgedHere = current ? contributedUnjudged : [];
+        notJudged = plan.Analyzed
+            ? PlanInsights.NotJudged(plan)
+            : [.. PlanInsights.NotJudged(plan), .. Contributors.SelectMany(static x => x.Insights).Where(static x => x.NeedsAnalyze)];
 
         // Only the Plan page reads facts, so only it names what their absence leaves unjudged.
         notJudgedWithoutFacts = Analyzer ? PlanInsights.NotJudgedWithoutFacts(plan, facts) : [];

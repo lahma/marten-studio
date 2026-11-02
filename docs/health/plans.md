@@ -321,6 +321,89 @@ every row the rest of the statement keeps, gives each a random number and sorts 
 **Remedy.** For a sample of a large table, `TABLESAMPLE SYSTEM (p)` or `BERNOULLI (p)`. For one random row, pick a random key
 between the table's least and greatest and take the first row at or above it, with an index on the key.
 
+## P26 JSON filter on a document table with no usable index
+
+**Warning**, Marten Studio only (1.0). A plan reads a Marten document table (`mt_doc_*`) of a document type the studio shows, with a
+**sequential scan** - or, under `ANALYZE`, an index, index-only or bitmap heap scan whose filter threw away P10's share of what the
+index found (ten times the rows it kept, and ten thousand or more) - and the filter tests the document's JSON: a member
+(`data ->> 'Color'`, `data -> 'Address' ->> 'City'`, `data #>> '{Address,City}'`), containment (`data @> …`) or key existence
+(`data ? 'Color'`) - and **no index the store declares serves it**. Every document is read and its JSON parsed to find the few
+that match. A sequential scan is sometimes the right plan for a small table; the insight cannot tell the table will grow, only that
+nothing is declared for when it does.
+
+**Judged against what the store declares, not what the database has.** It reads `StoreOptions` and the document type's mapping and
+touches no connection: a duplicated field with its index, a computed index over the member, or (for containment) a GIN index on
+`data` serves the filter. An index somebody made by hand serves nothing here, because Marten's next schema apply drops an index its
+configuration does not declare - `AutoCreate.CreateOrUpdate` is not additive - so the remedy is always a line to declare.
+
+**Remedy.** The `StoreOptions` line, with the member mapped back from the JSON key through the document type and the store's
+serializer casing (`UseSystemTextJsonForSerialization(casing: …)`, `[JsonPropertyName]`, Newtonsoft's `[JsonProperty]`):
+
+```csharp
+// an equality or a range on one member: copies it into a column of its own, with an index
+options.Schema.For<Order>().Duplicate(x => x.Customer.Name);
+
+// a pattern, or anything a column cannot take: a computed index over the member
+options.Schema.For<Order>().Index(x => x.Customer.Name);
+
+// containment (@>): a GIN index on data
+options.Schema.For<Order>().GinIndexJsonData();
+```
+
+`GinIndexJsonData()` declares the index with the `jsonb_path_ops` operator class, which serves `@>` and not the key-existence tests
+(`?`, `?|`, `?&`): for those the remedy says so instead of naming a line that would not help. When a JSON key is not exactly one
+member of the type - two members written under one key, none, a path through a collection, or a key in a casing the store's
+serializer does not write - the finding names the JSON path and says it could not map it, and offers no line: a guess would index
+another member or be rejected by Marten.
+
+**Only a document type you can see, and only a table the plan names whole.** A hidden type (`IsDocumentTypeVisible`) is never
+judged or named: its table is any table. A relation is matched by the schema and name the plan printed, so a plan run without
+`VERBOSE`, or a pasted one without schemas, is listed as not judged - with no word about the store - and so is a plan whose
+relation the Plan page's facts withhold. The store is the one in the scope on screen, and a scope you may not have is not judged
+either.
+
+## P27 GIN index on data not used for a containment filter
+
+**Info**, Marten Studio only (1.0). A **sequential scan** of a document table whose filter tests containment (`data @> …`), although
+the document type declares a GIN index on `data` (`GinIndexJsonData()`), or the Plan page's facts list a GIN index with `data` as its
+column. Postgres read the whole table when an index was there for the filter.
+
+There is no line to declare: the index is declared. The finding says why the planner may have skipped it, and which is likely:
+
+- **It expects the containment to match a large share of the table, or the table is small.** Then reading it all costs less than the
+  index, and nothing is wrong. The finding gives the rows the planner expected.
+- **The operator class.** `GinIndexJsonData()` uses `jsonb_path_ops`, which serves `@>` and not `?`, `?|` or `?&`; a filter that also
+  tests those is not served by it.
+- **The value was a parameter** and the statement was planned without it (a generic plan, [P21](#p21-generic-plan-far-costlier-than-the-custom-plan)).
+- **Stale statistics** ([P15](#p15-stale-statistics-behind-a-misestimate)), or **an index not yet applied**: the store declares it,
+  but the database may not have it until Schema › Apply creates it.
+
+Planning the statement again after `ANALYZE` on the table shows whether the index is used.
+
+## P28 Tenant or soft-delete predicate filtered after the index
+
+**Warning**, Marten Studio only (1.0), under `ANALYZE`. An index scan, index-only scan or bitmap heap scan of a document table whose
+**filter** - not its index condition - tests `tenant_id` (a conjoined-tenant type) or `mt_deleted` (a soft-deleted one), and threw away
+P10's share and number of rows (ten times what it kept, and ten thousand or more). Marten adds these predicates to every query on
+such a type; when the index cannot narrow by them, it finds the rows of every tenant, or the deleted ones, and the filter rejects
+them after the table has been visited for each. The other tests in the same filter are in that count too, which the finding says.
+
+**Remedy.** Declare an index that includes the predicate; the line depends on the index the plan used:
+
+```csharp
+// the index used is a computed one: lead every computed index of the type with tenant_id
+options.Schema.For<Order>().StartIndexesByTenantId();
+
+// any other index: an index on tenant_id itself
+options.Schema.For<Order>().IndexTenantId();
+
+// soft delete: a partial index that leaves deleted documents out, for the member the index used is on
+options.Schema.For<Order>().Index(x => x.Customer.Name, i => i.Predicate = "mt_deleted = false");
+```
+
+All of these exist from Marten 9.39. As in P26 the remedy is something to declare, never to create by hand, and it is never run.
+Plain plans are listed as not judged (the filter's discards are printed only by `ANALYZE`).
+
 ## Query › Plan: the plan analyzer
 
 The **Plan** page (`plan`, below Query in the rail; `/marten/plan` in Marten Studio) is the console's Explain buttons as a page of

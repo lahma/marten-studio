@@ -155,6 +155,9 @@ public class StudioRegistrationTests
         (typeof(IPlanFactsService), ServiceLifetime.Scoped, How.Type, typeof(PlanFactsService)),
         (typeof(IRelationshipNodeSource), ServiceLifetime.Scoped, How.Type, typeof(MartenRelationshipNodeSource)),
         (typeof(INavIndicatorContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenNavIndicatorContributor)),
+
+        // 1.0-P3C: Marten Studio's plan insights P26 to P28, the one registration the packet adds.
+        (typeof(IPlanInsightContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenPlanInsightContributor)),
         (typeof(IndexCatalog), ServiceLifetime.Singleton, How.Type, typeof(IndexCatalog)),
         (typeof(StudioScopeResolver), ServiceLifetime.Scoped, How.Type, typeof(StudioScopeResolver)),
         (typeof(TenantDiscovery), ServiceLifetime.Scoped, How.Type, typeof(TenantDiscovery)),
