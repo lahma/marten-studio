@@ -72,6 +72,10 @@ shows what PostgreSQL 18 adds.
   conditions over tables the visitor may see, with no withheld table in the plan to hide it by (the known limit of 0.6).
   The studio walks `pg_depend` from views and SQL-standard bodies and reads string-bodied SQL functions before anything is
   prepared, locking nothing.
+- The drill-in's refusal also follows operators whose function is withheld, parameter defaults, row-level-security
+  policies and PostgreSQL 18 virtual generated columns, matches names as Postgres keeps them (`""`, 63 bytes), refuses
+  when its walk is cut or still growing at its bound, and reads the catalog in milliseconds where a recursive walk took
+  seconds on a database with thousands of views and functions.
 - A host's database source or tenancy whose own code throws while the studio resolves a scope - listing its databases,
   completing the scope, opening one - no longer reaches a page as an unhandled exception of whatever type it threw: it is
   the studio's "could not be built" failure, saying the host's words escaped and bounded and Postgres' own withheld, and
