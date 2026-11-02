@@ -43,6 +43,7 @@ public static class PostgresConnectionHistoryServiceCollectionExtensions
         options.ValidateOnStart();
 
         services.TryAddSingleton<IPostgresConnectionHistoryStore, InMemoryConnectionHistoryStore>();
+        services.TryAddSingleton<ConnectionHistoryReader>();
         services.TryAddSingleton(static provider =>
             provider.GetService<PostgresStudio.Services.Settings.IDiagnosticsSettings>() is null
                 ? throw new InvalidOperationException(

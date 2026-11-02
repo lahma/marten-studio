@@ -234,7 +234,7 @@ internal sealed class AuroraFactsReader : IAuroraFactsReader
         }
 
         return PostgresFailure.IsConnectionFailure(exception)
-            ? "The studio could not connect to this database."
+            ? PostgresFailure.CouldNotConnect(exception)
             : "This could not be read" + (postgres is null ? " (" + exception.GetType().Name + ")." : " (SQLSTATE " + postgres.SqlState + ").");
     }
 }

@@ -444,7 +444,7 @@ internal sealed class ServerPageService : IServerPageService
         }
 
         return PostgresFailure.IsConnectionFailure(exception)
-            ? "The studio could not connect to this database."
+            ? PostgresFailure.CouldNotConnect(exception)
             : "The server's version and platform could not be read" + (postgres is null ? " (" + exception.GetType().Name + ")." : " (SQLSTATE " + postgres.SqlState + ").");
     }
 }

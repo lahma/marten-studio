@@ -319,10 +319,14 @@ reserved slots), and the applications with the most sessions, each with its acti
 counts. The read is the one Holders makes, in a read-only transaction under `QueryTimeout` and `SqlConsoleRole`: a role
 without `pg_read_all_stats` counts what it cannot see into as state unknown.
 
-**Where it is kept.** By default in memory, for `Retention`, and gone after a restart. To keep it, register your own
-`IPostgresConnectionHistoryStore` - before or after `AddPostgresConnectionHistory()`; yours is the one resolved. It has two
-members, `AppendAsync` and `ReadAsync(server, since)`; a table of your own, a time-series database or a log sink all fit.
-The sampler calls `AppendAsync` once per server per interval and never reads; Holders calls `ReadAsync` when the page loads.
+**Where it is kept.** By default in memory, for `Retention`, at most 20,160 samples a server (two weeks at a minute; the
+oldest go first), and gone after a restart. To keep it, register your own `IPostgresConnectionHistoryStore` - before or after
+`AddPostgresConnectionHistory()`; yours is the one resolved. It has two members, `AppendAsync` and `ReadAsync(server, since)`;
+a table of your own, a time-series database or a log sink all fit. The sampler calls `AppendAsync` once per server per
+interval and never reads. The studio's pages call `ReadAsync` at most once every 30 seconds a server, however many visitors
+have Database › Sessions open, and the samples are shared between them (the gate is applied to each visitor afterwards).
+Each call is cut off at the studio's `QueryTimeout`: a store that hangs leaves Holders without its history for that poll,
+and a round without its sample, and slows neither.
 
 **Which servers.** Every server a registered source names, through the first of its databases with a data source - each once,
 however many databases it holds, and at most 50. The list is read again every ten minutes. A source whose databases are
@@ -331,9 +335,11 @@ enumerating such a tenancy is not read-only; its servers are sampled only where 
 
 **The kept connection.** A sampler that opened a connection to sample would count nothing at the one moment that matters:
 when the server refuses new ones. So each server gets one connection from the application's own data source, opened once
-and kept, named like the studio's own sessions with "history" after the product (`orders-api (Postgres Studio history)`). It
-is **outside `MaxStudioConnections`**: count it in the application's pool size. A connection that breaks is opened again at
-the next round; while `ShouldSample` answers no, every kept connection is closed.
+and kept, named like the studio's own sessions with "history" after the product (`orders-api (Postgres Studio history)`, or
+your `StudioApplicationName` with " (history)" after it) for as long as it is kept, idle between samples too, and given its
+own name back before it is closed. It is **outside `MaxStudioConnections`**: count it in the application's pool size. Its
+time is not the studio's on the Health page's cost line - a session kept for a week is not a week of the studio's work. A
+connection that breaks is opened again at the next round; while `ShouldSample` answers no, every kept connection is closed.
 
 **What a visitor sees.** On Holders, anybody the source policy passes sees the counts: the window, the peak against the client
 limit and when, how many samples, and how many instance changes. The applications' own peaks need `ViewDatabaseActivity`, as

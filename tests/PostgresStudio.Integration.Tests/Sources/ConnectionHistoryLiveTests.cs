@@ -46,6 +46,7 @@ public class ConnectionHistoryLiveTests(PostgresFixture postgres)
             ConnectionHistorySampler sampler = host.Services.GetRequiredService<ConnectionHistorySampler>();
             (await sampler.SampleOnceAsync(Token)).Should().Be(1, "one server, sampled once");
             (await sampler.SampleOnceAsync(Token)).Should().Be(1, "the kept connection serves the next round");
+            (await HistorySessionsAsync(owned[0])).Should().Be(1, "the kept session is named as the history's between samples too");
 
             string server = ConnectionHistorySampler.ServerOf(dataSource.ConnectionString)!;
             IReadOnlyList<PostgresConnectionSample> samples = await host.Services.GetRequiredService<IPostgresConnectionHistoryStore>()
@@ -95,12 +96,26 @@ public class ConnectionHistoryLiveTests(PostgresFixture postgres)
         ConnectionHistorySampler sampler = host.Services.GetRequiredService<ConnectionHistorySampler>();
         (await sampler.SampleOnceAsync(Token)).Should().Be(1);
 
+        (await HistorySessionsAsync(owned[0])).Should().Be(1);
+
         leader = false;
         (await sampler.SampleOnceAsync(Token)).Should().Be(0, "another process samples");
+        (await HistorySessionsAsync(owned[0])).Should().Be(0, "a follower keeps no connection, and the one it kept went back to the pool with its own name");
 
         string server = ConnectionHistorySampler.ServerOf(dataSource.ConnectionString)!;
         (await host.Services.GetRequiredService<IPostgresConnectionHistoryStore>().ReadAsync(server, DateTimeOffset.UtcNow.AddHours(-1), Token))
             .Should().ContainSingle();
+    }
+
+    /// <summary>How many sessions on the database carry the connection history's name, read over a connection of the test's own.</summary>
+    private static async Task<long> HistorySessionsAsync(string connectionString)
+    {
+        await using NpgsqlConnection probe = new(new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false, ApplicationName = "probe" }.ConnectionString);
+        await probe.OpenAsync(Token);
+        await using NpgsqlCommand command = new(
+            "select count(*) from pg_stat_activity where datname = current_database() and application_name = @name", probe);
+        command.Parameters.AddWithValue("name", ConnectionHistorySampler.HistoryName(null, connectionString, "Postgres Studio")!);
+        return (long) (await command.ExecuteScalarAsync(Token))!;
     }
 
     [PostgresFact]

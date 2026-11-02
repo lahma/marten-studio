@@ -139,4 +139,43 @@ internal static class PostgresFailure
         && ((exception is PostgresException postgres && string.Equals(postgres.SqlState, QueryCanceled, StringComparison.Ordinal))
             || exception is TimeoutException
             || (exception is NpgsqlException npgsql && npgsql.InnerException is TimeoutException));
+
+    /// <summary>
+    /// Whether <paramref name="exception" /> - or one it wraps - is the studio's own share of the pool being all in use
+    /// (<c>MaxStudioConnections</c>, issue #44): the host's cap at work, not the database's state.
+    /// </summary>
+    /// <param name="exception">What was thrown.</param>
+    public static bool IsStudioBusy(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is StudioConnectionsBusyException)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// What a page says of a read that could not get a connection: that the studio could not connect, or - when the studio's own
+    /// share of the pool was all in use (<see cref="IsStudioBusy" />) - that, with the option that sets it. A clause, lower case and
+    /// without a full stop, for a sentence of the caller's; <see cref="CouldNotConnect" /> is the whole sentence.
+    /// </summary>
+    /// <param name="exception">The failure, one <see cref="IsConnectionFailure" /> answered for.</param>
+    public static string CouldNotConnectClause(Exception exception) =>
+        IsStudioBusy(exception)
+            ? "the studio's connections to this database were all in use (MaxStudioConnections); try again in a moment"
+            : "the studio could not connect to this database";
+
+    /// <summary>The whole sentence of <see cref="CouldNotConnectClause" />.</summary>
+    /// <param name="exception">The failure, one <see cref="IsConnectionFailure" /> answered for.</param>
+    public static string CouldNotConnect(Exception exception)
+    {
+        string clause = CouldNotConnectClause(exception);
+        return char.ToUpperInvariant(clause[0]) + clause[1..] + ".";
+    }
 }
