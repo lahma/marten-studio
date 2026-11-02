@@ -163,6 +163,58 @@ public class StudioConnectionsLiveTests(PostgresFixture postgres)
         }
     }
 
+    /// <summary>
+    /// Issue #49: a data source of <c>Max Pool Size=1</c> with <c>MaxStudioConnections = 2</c> is held to one by the studio's own
+    /// queue - the second read fails there, with the sentence that names the option, not as Npgsql's pool-exhaustion timeout.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_data_source_with_a_pool_of_one_holds_the_studio_to_one_whatever_the_option_says()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, ["ps_conn_poolsize"], Token);
+        NpgsqlDataSource dataSource = NpgsqlDataSource.Create(owned[0] + ";Maximum Pool Size=1");
+
+        await using StudioHost host = StudioHost.Create(
+            services => services.AddSingleton(dataSource),
+            static o =>
+            {
+                o.Capabilities.RunSql = true;
+                o.MaxStudioConnections = 2;
+                o.QueryTimeout = TimeSpan.FromSeconds(1);
+            });
+        await using StudioCircuit circuit = host.Circuit();
+
+        // A first read, so the studio has registered this data source's share under its own settings.
+        (await circuit.Get<ISqlConsoleService>().RunSqlAsync(Scope, new SqlConsoleRequest("select 1"), Token)).Succeeded.Should().BeTrue();
+
+        StudioConnectionPool pool = await PoolAsync(dataSource);
+        pool.Max.Should().Be(1, "the data source's pool holds one connection");
+        pool.Configured.Should().Be(2);
+        pool.PoolSize.Should().Be(1);
+
+        // One studio read holds the one connection (the statement timeout is the wait's, so a held slot stands in for a long read).
+        StudioConnectionLease held = await pool.AcquireAsync(new StudioConnectionLease(pool, reentrant: false), Token);
+
+        try
+        {
+            // The studio's own queue refuses a second read - Npgsql's pool, which would take its own 15 s timeout, is never reached.
+            await using NpgsqlConnection extra = StudioConnectionMeter.Attach(dataSource.CreateConnection(), pool: pool);
+            Func<Task> open = () => extra.OpenStudioAsync(Token);
+            (await open.Should().ThrowAsync<StudioConnectionsBusyException>()).Which.Message
+                .Should().Contain("MaxStudioConnections, held to the data source's Max Pool Size of 1");
+
+            SqlConsoleResult result = await circuit.Get<ISqlConsoleService>().RunSqlAsync(Scope, new SqlConsoleRequest("select 1"), Token);
+
+            result.Succeeded.Should().BeFalse();
+            result.Error!.MessageText.Should().Contain("MaxStudioConnections");
+        }
+        finally
+        {
+            held.Release();
+        }
+
+        (await circuit.Get<ISqlConsoleService>().RunSqlAsync(Scope, new SqlConsoleRequest("select 1"), Token)).Succeeded.Should().BeTrue("the slot came free");
+    }
+
     [PostgresFact]
     public async Task A_whole_health_sweep_runs_under_a_cap_of_one()
     {

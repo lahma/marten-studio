@@ -15,7 +15,8 @@ namespace PostgresStudio.Internal.Sql;
 /// <para>
 /// <b>Per pool, set once per process.</b> A studio reads through the application's own data sources, so every connection it opens
 /// is one the application's pool lends it. The cap is per data source instance - the pool the connection is lent from - and its
-/// value, like the session name, is the one the studio in this process configured (D30: one studio per process); it is set when a
+/// value, like the session name, is the one the studio in this process configured (D30: one studio per process), held to the data
+/// source's own <c>Max Pool Size</c> (issue #49); it is set when a
 /// studio's source provider is first built (<see cref="Configure" />). A data source no studio has configured is never capped and
 /// never named, so a connection a test builds by hand behaves as it always did.
 /// </para>
@@ -73,10 +74,7 @@ internal static class StudioConnectionPools
         ArgumentNullException.ThrowIfNull(dataSource);
         ArgumentException.ThrowIfNullOrEmpty(product);
 
-        return GetOrCreate(dataSource, source => new StudioConnectionPool(
-            Math.Clamp(max, 1, MaxAllowed),
-            ApplicationNameFor(applicationName, source.ConnectionString, product),
-            timeout));
+        return GetOrCreate(dataSource, source => CreatePool(source, Math.Clamp(max, 1, MaxAllowed), applicationName, product, timeout));
     }
 
     /// <summary>
@@ -104,10 +102,45 @@ internal static class StudioConnectionPools
 
         return configuration is null
             ? null
-            : GetOrCreate(dataSource, source => new StudioConnectionPool(
-                configuration.Max,
-                ApplicationNameFor(configuration.ApplicationName, source.ConnectionString, configuration.Product),
-                configuration.Timeout));
+            : GetOrCreate(dataSource, source => CreatePool(source, configuration.Max, configuration.ApplicationName, configuration.Product, configuration.Timeout));
+    }
+
+    /// <summary>A pool for <paramref name="source" />, held to the smaller of <paramref name="configured" /> and its own <c>Max Pool Size</c> (issue #49).</summary>
+    private static StudioConnectionPool CreatePool(NpgsqlDataSource source, int configured, string? applicationName, string product, TimeSpan timeout)
+    {
+        int effective = EffectiveMax(source.ConnectionString, configured);
+
+        return new StudioConnectionPool(
+            effective,
+            ApplicationNameFor(applicationName, source.ConnectionString, product),
+            timeout,
+            configured,
+            poolSize: effective < configured ? effective : null);
+    }
+
+    /// <summary>
+    /// Issue #49: the cap for a data source - <paramref name="configured" /> (<c>MaxStudioConnections</c>), never above the data
+    /// source's own <c>Max Pool Size</c> (Npgsql's 100 when it sets none), and never below one. A data source with <c>Pooling</c> off
+    /// has no pool to be held to, and a connection string Npgsql cannot read is held to the option alone. A multi-host connection
+    /// string's size applies to each host, so the same rule holds.
+    /// </summary>
+    /// <param name="connectionString">The data source's connection string.</param>
+    /// <param name="configured">The option's value.</param>
+    internal static int EffectiveMax(string? connectionString, int configured)
+    {
+        int max = Math.Max(configured, 1);
+
+        try
+        {
+            NpgsqlConnectionStringBuilder builder = new(connectionString ?? string.Empty);
+
+            return builder.Pooling ? Math.Max(Math.Min(max, builder.MaxPoolSize), 1) : max;
+        }
+        catch (Exception e) when (e is ArgumentException or KeyNotFoundException or FormatException)
+        {
+            // A connection string Npgsql cannot read (a keyword it does not know, a value it cannot parse) has no pool size to be held to.
+            return max;
+        }
     }
 
     /// <summary>The pool registered for <paramref name="dataSource" />, created by <paramref name="create" /> the first time.</summary>
@@ -203,16 +236,29 @@ internal sealed class StudioConnectionPool
     private readonly SemaphoreSlim slots;
     private int waiting;
 
-    public StudioConnectionPool(int max, string? applicationName, TimeSpan timeout)
+    /// <param name="max">The most connections the studio holds of this pool at a time: the effective cap.</param>
+    /// <param name="applicationName">The name its sessions carry, or <see langword="null" /> for none.</param>
+    /// <param name="timeout">How long an open waits for a slot.</param>
+    /// <param name="configured">The option's value (<c>MaxStudioConnections</c>) when it differs from <paramref name="max" />; <paramref name="max" /> otherwise.</param>
+    /// <param name="poolSize">The data source's <c>Max Pool Size</c> when it was what held the cap below <paramref name="configured" />.</param>
+    public StudioConnectionPool(int max, string? applicationName, TimeSpan timeout, int? configured = null, int? poolSize = null)
     {
         Max = max;
         ApplicationName = applicationName;
         Timeout = timeout;
+        Configured = configured ?? max;
+        PoolSize = poolSize;
         slots = new SemaphoreSlim(max, max);
     }
 
-    /// <summary>The most connections the studio holds of this pool at a time.</summary>
+    /// <summary>The most connections the studio holds of this pool at a time: <c>MaxStudioConnections</c>, never above the data source's <c>Max Pool Size</c> (issue #49).</summary>
     public int Max { get; }
+
+    /// <summary>What <c>MaxStudioConnections</c> was set to.</summary>
+    public int Configured { get; }
+
+    /// <summary>The data source's <c>Max Pool Size</c>, when it held <see cref="Max" /> below <see cref="Configured" />; <see langword="null" /> when the option was the bound.</summary>
+    public int? PoolSize { get; }
 
     /// <summary>The <c>application_name</c> the studio's transactions on this pool set, or <see langword="null" /> for none.</summary>
     public string? ApplicationName { get; }
@@ -236,7 +282,7 @@ internal sealed class StudioConnectionPool
             if (!await slots.WaitAsync(Timeout, cancellationToken).ConfigureAwait(false))
             {
                 lease.Abandon();
-                throw new StudioConnectionsBusyException(Max, Timeout);
+                throw new StudioConnectionsBusyException(Max, Timeout, PoolSize);
             }
         }
         catch
@@ -291,10 +337,13 @@ internal sealed class StudioConnectionLease(StudioConnectionPool pool, bool reen
 /// </summary>
 internal sealed class StudioConnectionsBusyException : NpgsqlException
 {
-    public StudioConnectionsBusyException(int max, TimeSpan timeout)
+    public StudioConnectionsBusyException(int max, TimeSpan timeout, int? poolSize = null)
         : base(
             "The studio's connections to this database are all in use (" + max.ToString(CultureInfo.InvariantCulture) + " at most, "
-            + "MaxStudioConnections), and none came free within " + timeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)
+            + (poolSize is { } size
+                ? "MaxStudioConnections, held to the data source's Max Pool Size of " + size.ToString(CultureInfo.InvariantCulture)
+                : "MaxStudioConnections")
+            + "), and none came free within " + timeout.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)
             + " s. Try again in a moment.",
             new TimeoutException())
     {
