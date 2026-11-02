@@ -35,6 +35,12 @@ internal sealed record PoolFacts(
     /// </summary>
     public (int InUse, int Max)? Studio { get; init; }
 
+    /// <summary>
+    /// Issue #49: the data source's <c>Maximum Pool Size</c> when it, and not <c>MaxStudioConnections</c>, held the studio's cap
+    /// (<see cref="Studio" />'s <c>Max</c>); otherwise <see langword="null" />.
+    /// </summary>
+    public int? StudioPoolSize { get; init; }
+
     /// <summary>The ceiling the pool is judged against.</summary>
     public int Max => ReportedMax is > 0 ? ReportedMax.Value : ConfiguredMax;
 
@@ -110,6 +116,7 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
         {
             Instruments = mine.Instruments,
             Studio = Internal.Sql.StudioConnectionPools.Of(context.Target.DataSource) is { } share ? (share.InUse, share.Max) : null,
+            StudioPoolSize = Internal.Sql.StudioConnectionPools.Of(context.Target.DataSource)?.PoolSize,
         });
     }
 
@@ -186,7 +193,11 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
             evidence.Add(new HealthEvidence(
                 "Held by the studio",
                 studio.InUse.ToString(CultureInfo.InvariantCulture) + " of them (it holds at most " + studio.Max.ToString(CultureInfo.InvariantCulture)
-                + ", MaxStudioConnections)"));
+                + ", MaxStudioConnections"
+                + (facts.StudioPoolSize is { } poolSize
+                    ? ", held to the data source's Maximum Pool Size of " + poolSize.ToString(CultureInfo.InvariantCulture)
+                    : string.Empty)
+                + ")"));
         }
 
         if (facts.Saturated)

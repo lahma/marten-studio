@@ -68,6 +68,18 @@ public class PoolChecksTests
             .Findings.Single().Evidence.Should().NotContain(static x => x.Label == "Held by the studio");
     }
 
+    /// <summary>Issue #49: when the data source's pool size set the studio's cap, C01 says so, so the remedy is not to raise the option.</summary>
+    [Fact]
+    public void C01_says_when_the_data_sources_pool_size_held_the_studios_cap()
+    {
+        HealthFinding held = new PoolSaturationCheck()
+            .Evaluate(new PoolFacts(true, 1, 1, 0, 1, 1, Now) { Studio = (1, 1), StudioPoolSize = 1 }, At())
+            .Findings.Should().ContainSingle().Subject;
+
+        held.Evidence.Should().Contain(new HealthEvidence(
+            "Held by the studio", "1 of them (it holds at most 1, MaxStudioConnections, held to the data source's Maximum Pool Size of 1)"));
+    }
+
     [Fact]
     public void C01_at_exactly_eighty_percent_is_quiet()
     {

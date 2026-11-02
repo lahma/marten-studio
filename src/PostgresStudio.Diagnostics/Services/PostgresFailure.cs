@@ -145,19 +145,22 @@ internal static class PostgresFailure
     /// (<c>MaxStudioConnections</c>, issue #44): the host's cap at work, not the database's state.
     /// </summary>
     /// <param name="exception">What was thrown.</param>
-    public static bool IsStudioBusy(Exception exception)
+    public static bool IsStudioBusy(Exception exception) => StudioBusy(exception) is not null;
+
+    /// <summary>The studio's busy exception <paramref name="exception" /> is or wraps, or <see langword="null" />.</summary>
+    private static StudioConnectionsBusyException? StudioBusy(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
 
         for (Exception? current = exception; current is not null; current = current.InnerException)
         {
-            if (current is StudioConnectionsBusyException)
+            if (current is StudioConnectionsBusyException busy)
             {
-                return true;
+                return busy;
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
@@ -167,8 +170,12 @@ internal static class PostgresFailure
     /// </summary>
     /// <param name="exception">The failure, one <see cref="IsConnectionFailure" /> answered for.</param>
     public static string CouldNotConnectClause(Exception exception) =>
-        IsStudioBusy(exception)
-            ? "the studio's connections to this database were all in use (MaxStudioConnections); try again in a moment"
+        StudioBusy(exception) is { } busy
+            ? "the studio's connections to this database were all in use (MaxStudioConnections"
+                + (busy.PoolSize is { } poolSize
+                    ? ", held to the data source's Maximum Pool Size of " + poolSize.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : string.Empty)
+                + "); try again in a moment"
             : "the studio could not connect to this database";
 
     /// <summary>The whole sentence of <see cref="CouldNotConnectClause" />.</summary>
