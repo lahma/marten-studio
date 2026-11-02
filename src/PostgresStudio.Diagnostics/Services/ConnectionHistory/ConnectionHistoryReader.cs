@@ -73,4 +73,40 @@ internal sealed class ConnectionHistoryReader
             },
             cancellationToken);
     }
+
+    /// <summary>
+    /// Issue #46: <see cref="ReadAsync" />'s samples merged with <paramref name="pending" /> - the samples this process holds because
+    /// the store refused their append - ordered by time. A sample the store holds too (an append that timed out here but landed) is
+    /// counted once. When the store cannot be read, or took longer than <c>QueryTimeout</c>, and <paramref name="pending" /> is not
+    /// empty, those alone are answered: the page shows what the process knows, not nothing.
+    /// </summary>
+    /// <param name="server">The server, <c>host:port</c> as the connection history keys it.</param>
+    /// <param name="pending">The sampler's backlog of that server, oldest first; none when this process does not sample.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait, never the shared read.</param>
+    public async Task<IReadOnlyList<PostgresConnectionSample>> ReadWithPendingAsync(
+        string server,
+        IReadOnlyList<PostgresConnectionSample> pending,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(pending);
+
+        if (pending.Count == 0)
+        {
+            return await ReadAsync(server, cancellationToken).ConfigureAwait(false);
+        }
+
+        DateTimeOffset since = time.GetUtcNow() - Window;
+        IEnumerable<PostgresConnectionSample> held = pending.Where(x => x.At >= since);
+
+        try
+        {
+            IReadOnlyList<PostgresConnectionSample> stored = await ReadAsync(server, cancellationToken).ConfigureAwait(false);
+            HashSet<DateTimeOffset> known = [.. stored.Select(static x => x.At)];
+            return [.. stored.Concat(held.Where(x => !known.Contains(x.At))).OrderBy(static x => x.At)];
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return [.. held.OrderBy(static x => x.At)];
+        }
+    }
 }

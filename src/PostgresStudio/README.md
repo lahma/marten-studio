@@ -260,7 +260,10 @@ background sampler counts the server's client sessions by application every minu
 purpose, into a store you can replace with your own (`IPostgresConnectionHistoryStore`; the default keeps seven days in
 memory). Holders then says the peak against the client limit and when it happened, and, behind `ViewDatabaseActivity`, each
 application's own peak. Only one process of a scaled-out application needs to sample: `ShouldSample` is asked before every
-round. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
+round. A sample the store refuses - a table in the sampled database needs a connection from your pool, which is exhausted
+at the moment that matters - is not lost: the sampling process holds up to an hour of samples per server, writes them oldest
+first before the next one, drops the oldest past that hour, and loses them only if it stops; Holders says how many are
+waiting. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
 
 **Reader only (1.0.1).** A process that must never sample - the web application whose studio pool has no connection to spare -
 reads a history another process fills. The worker samples and appends to a store both processes share; the web application

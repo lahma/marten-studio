@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging;
 
 namespace PostgresStudio.Services;
 
-// 1.0-C43's events, 9460-9462: the opt-in connection history's sampler (issue #43). In a file of their own; the class's own
+// 1.0-C43's events, 9460-9464: the opt-in connection history's sampler (issue #43). In a file of their own; the class's own
 // documentation is StudioLog.cs's, and Postgres Studio's wording of each is in PostgresStudioLog.ConnectionHistory.cs, under the
 // same id.
 internal static partial class StudioLog
@@ -28,4 +28,18 @@ internal static partial class StudioLog
     /// </remarks>
     [LoggerMessage(EventId = 9462, Level = LogLevel.Debug, Message = "Marten Studio's connection history could not list the databases of store {StoreKey}")]
     public static partial void ConnectionHistorySourceUnreadable(this ILogger logger, Exception exception, string storeKey);
+
+    /// <remarks>
+    /// The sampler's backlog (issue #46) emptied: samples whose append failed were held and are now stored. Once per drain, at
+    /// Information - a recovery, not an anomaly, and never polled.
+    /// </remarks>
+    [LoggerMessage(EventId = 9463, Level = LogLevel.Information, Message = "Marten Studio's connection history stored {Count} samples of server {Server} it had held since {Since}")]
+    public static partial void ConnectionHistoryBacklogStored(this ILogger logger, int count, string server, DateTimeOffset since);
+
+    /// <remarks>
+    /// The sampler's backlog (issue #46) outgrew its hour and dropped its oldest samples: the store has refused them all that
+    /// time. Every round that drops says so, so the level comes from <see cref="StudioLogThrottle" />, per server.
+    /// </remarks>
+    [LoggerMessage(EventId = 9464, Message = "Marten Studio's connection history dropped {Count} of the oldest samples of server {Server} it was holding; the store has refused them since {Since}")]
+    public static partial void ConnectionHistoryBacklogDropped(this ILogger logger, LogLevel level, int count, string server, DateTimeOffset since);
 }

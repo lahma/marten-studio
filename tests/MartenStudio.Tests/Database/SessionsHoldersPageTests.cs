@@ -326,4 +326,37 @@ public class SessionsHoldersPageTests
                 rows[0].QuerySelectorAll("td")[1].TextContent.Trim().Should().Be("70");
                 return Task.CompletedTask;
             });
+
+    [Theory]
+    [InlineData(12, "12 samples are waiting to be stored: the history store refused them; they are written when it answers again.")]
+    [InlineData(1, "1 sample is waiting to be stored: the history store refused it; it is written when it answers again.")]
+    public async Task Samples_the_store_refused_are_counted_with_no_name_under_the_pages_own_gate(int pending, string sentence)
+    {
+        (StudioComponentContext context, SessionPoolObserver pools) = await ReadyAsync(
+            Summary(Closed) with { ConnectionHistoryKept = true, ConnectionHistory = ConnectionHistoryView.Of(Samples, names: false), ConnectionHistoryPending = pending },
+            Details());
+
+        try
+        {
+            context.Navigate("marten/database/sessions?view=holders");
+            var page = context.Render<Sessions>();
+            page.WaitForAssertion(() => page.FindAll(".ms-holders-table").Should().NotBeEmpty());
+
+            System.Text.RegularExpressions.Regex.Replace(page.Find(".ms-holders-history-pending").TextContent, @"\s+", " ").Trim().Should().Be(sentence);
+            page.Markup.Should().NotContain("orders-api", "a count names nothing");
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            pools.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task With_no_sample_waiting_the_page_says_nothing_of_a_backlog() =>
+        await HistoryAsync(Closed, kept: true, ConnectionHistoryView.Of(Samples, names: false), null, static page =>
+        {
+            page.FindAll(".ms-holders-history-pending").Should().BeEmpty();
+            return Task.CompletedTask;
+        });
 }
