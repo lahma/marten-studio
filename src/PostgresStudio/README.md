@@ -255,6 +255,13 @@ and the rest together as "Other databases"; the applications, roles and addresse
 `ViewDatabaseActivity`. C13 names the application that holds a tenth of the server's client limit idle while the server is 80%
 used, and C14 the connections that set no `Application Name` (Info), both behind that capability.
 
+**Connection history** (1.0). Holders is the server's connections *now*. Register `AddPostgresConnectionHistory()` and a
+background sampler counts the server's client sessions by application every minute, over one connection it keeps open for the
+purpose, into a store you can replace with your own (`IPostgresConnectionHistoryStore`; the default keeps seven days in
+memory). Holders then says the peak against the client limit and when it happened, and, behind `ViewDatabaseActivity`, each
+application's own peak. Only one process of a scaled-out application needs to sample: `ShouldSample` is asked before every
+round. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
+
 ## The diagnostics API
 
 `IPostgresDiagnostics`, registered by `AddPostgresStudio()`, gives your own code what the studio reads: the databases it

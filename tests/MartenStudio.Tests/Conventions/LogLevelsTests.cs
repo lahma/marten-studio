@@ -166,6 +166,14 @@ public class LogLevelsTests
             "A row read failed by connection or an unexpected SQLSTATE; a timeout, privilege, RLS or unrefreshed view is Debug, and page turns repeat it."),
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Sessions.cs : 9246 SessionActivityReadFailed"] = (Verdict.Throttled,
             "A read of a database's sessions failed by connection or an unexpected SQLSTATE; privilege and timeouts are Debug, and the Sessions page re-reads every HealthInterval."),
+        ["src/PostgresStudio.Diagnostics/Services/StudioLog.ConnectionHistory.cs : 9460 ConnectionHistoryRoundFailed"] = (Verdict.Throttled,
+            "A round of the opt-in connection history (#43) failed as a whole; the sampler tries again every Interval."),
+        ["src/PostgresStudio.Diagnostics/Services/StudioLog.ConnectionHistory.cs : 9461 ConnectionHistorySampleFailed"] = (Verdict.Throttled,
+            "One server could not be sampled or its sample kept; its connection is opened again at the next round, every Interval."),
+        ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9460 PostgresStudioConnectionHistoryRoundFailed"] = (Verdict.Throttled,
+            "9460 in Postgres Studio's words: a round of the connection history failed, tried again every Interval."),
+        ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9461 PostgresStudioConnectionHistorySampleFailed"] = (Verdict.Throttled,
+            "9461 in Postgres Studio's words: one server could not be sampled, tried again every Interval."),
         ["src/PostgresStudio.Diagnostics/Services/Postgres/PostgresLog.cs : 9301 DatabaseNamesSkipped"] = (Verdict.Throttled,
             "A host's database source listed names PostgresStudio left out (invalid, duplicate, another source's, past the cap); the list is read again every minute in every circuit that looks."),
         // ---- PostgresStudioLog: the same shared events in Postgres Studio's words, filed as StudioLog's are -----------
@@ -451,7 +459,7 @@ public class LogLevelsTests
 
     /// <summary>
     /// The events the rule is about are exactly the ones the roster files as throttled in the event files - 9210,
-    /// 9212-9222 and 9237 in the main ones, and the partials' 9246, 9270, 9410, 9430, 9440, 9451, 9500 and 9501 - so
+    /// 9212-9222 and 9237 in the main ones, and the partials' 9246, 9270, 9410, 9430, 9440, 9451, 9460, 9461, 9500 and 9501 - so
     /// neither list can drift from the other.
     /// </summary>
     [Fact]

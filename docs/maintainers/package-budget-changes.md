@@ -607,3 +607,18 @@ their own `Microsoft.Extensions.*` unpinned. A floor, not an exact pin, at `10.0
 worker runs against a throwaway Postgres and prints its summary.
 
 **Exit condition:** as the four rows: raise them with the `net10.0` floor of the host runtime the library supports.
+
+**2026-11-02 — no new package: `Microsoft.Extensions.Hosting.Abstractions` `10.0.0` is used directly by
+`src/PostgresStudio.Diagnostics`, where it already arrived transitively.** Packet 1.0-C43 (issue #43) adds the opt-in
+connection history, whose sampler is a `BackgroundService` registered as an `IHostedService`. Both types are
+`Microsoft.Extensions.Hosting.Abstractions`', which the engine has always restored through `Microsoft.Extensions.Diagnostics.HealthChecks`
+`10.0.0` (its `HealthCheckPublisherHostedService` needs it): the restore graph, the nuspec and the shipped dependency set are
+unchanged, and no `PackageReference` or central row is added. Nothing else could host a timer loop that a host's own
+`IHost` starts and stops: a timer of the engine's own would need a lifetime the engine does not have.
+
+**Measured.** `src/PostgresStudio.Diagnostics/obj/project.assets.json` lists `Microsoft.Extensions.Hosting.Abstractions/10.0.0`
+as a dependency of `Microsoft.Extensions.Diagnostics.HealthChecks/10.0.0`, before and after the packet. The fence tests
+(`PostgresStudioFenceTests`: no ASP.NET Core in the engine) pass: the package is a `Microsoft.Extensions.*` abstraction.
+
+**Exit condition:** if `Microsoft.Extensions.Diagnostics.HealthChecks` ever stops bringing it, it becomes a sixth row of the
+conditional `PostgresStudioDiagnosticsPinsExtensions` group, with an entry here first (hard rule 1).

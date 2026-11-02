@@ -109,7 +109,7 @@ public class PublicApiShapeTests
     }
 
     [Fact]
-    public void The_three_interfaces_abstract_members_are_the_0_5_set()
+    public void The_interfaces_abstract_members_are_the_set_each_shipped_with()
     {
         // A member added later must have a body - a default interface member - so that a host's implementation of the
         // interface, in its own tests or its own database source, keeps compiling. Add it to this list only if it has one.
@@ -117,8 +117,11 @@ public class PublicApiShapeTests
         Abstract(typeof(IPostgresDatabaseSource)).Should().Equal("GetDataSourceAsync", "ListAsync");
         Abstract(typeof(IPostgresCapacitySource)).Should().Equal("GetCapacityAsync");
 
+        // 1.0 (issue #43): the connection history's store, which a host implements to keep the history durably.
+        Abstract(typeof(IPostgresConnectionHistoryStore)).Should().Equal("AppendAsync", "ReadAsync");
+
         Exported().Where(static x => x.IsInterface).Select(static x => x.Name)
-            .Should().BeEquivalentTo(["IPostgresDiagnostics", "IPostgresDatabaseSource", "IPostgresCapacitySource"]);
+            .Should().BeEquivalentTo(["IPostgresDiagnostics", "IPostgresDatabaseSource", "IPostgresCapacitySource", "IPostgresConnectionHistoryStore"]);
 
         static string[] Abstract(Type type) =>
         [

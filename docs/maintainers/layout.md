@@ -301,4 +301,9 @@ tests/PostgresStudio.Integration.Tests/Diagnostics/  Live: G9 by application as 
                                          the statements section on a pg_stat_statements server
 tests/MartenStudio.Integration.Tests/Diagnostics/  Live: the API over a conjoined store (a tenant's finding needs
                                          IncludeActivity) and a master-table tenancy that lists nothing
+src/PostgresStudio.Diagnostics/Services/ConnectionHistory/  The opt-in connection history (1.0, issue #43): the sampler and its
+                                         kept connection per server, the in-memory store and the Holders page's view of a history;
+                                         the public options, store seam and sample are at the project's root, beside the registration
+tests/PostgresStudio.Tests/ConnectionHistory/  A sample from a holders reading, the server a connection string names, the in-memory
+                                         store's window, the page's view and the registration - no database
 ```

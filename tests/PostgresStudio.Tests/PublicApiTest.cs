@@ -93,12 +93,16 @@ public class PublicApiTest
 
         Exported(typeof(PostgresDiagnosticsOptions).Assembly).Should().Equal(
             "PostgresStudio.IPostgresCapacitySource",
+            "PostgresStudio.IPostgresConnectionHistoryStore",
             "PostgresStudio.IPostgresDatabaseSource",
             "PostgresStudio.IPostgresDiagnostics",
             "PostgresStudio.PostgresActionKind",
             "PostgresStudio.PostgresCheck",
             "PostgresStudio.PostgresComputeCapacity",
             "PostgresStudio.PostgresConnectionCounts",
+            "PostgresStudio.PostgresConnectionHistoryOptions",
+            "PostgresStudio.PostgresConnectionHistoryServiceCollectionExtensions",
+            "PostgresStudio.PostgresConnectionSample",
             "PostgresStudio.PostgresConnectionsSection",
             "PostgresStudio.PostgresDatabaseRef",
             "PostgresStudio.PostgresDiagnosticsOptions",

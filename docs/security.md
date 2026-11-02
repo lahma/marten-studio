@@ -466,6 +466,13 @@ Postgres Studio has the same three layers, the same switches and the same startu
   so a pooled connection goes back to the application with its own name whatever `No Reset On Close` says. The short
   single-statement reads outside such a transaction (Marten Studio's document and event lists) keep the application's
   name for their milliseconds.
+- **The connection history's own connection** (1.0, #43). Only when the host registers `AddPostgresConnectionHistory()`:
+  one connection per server from the application's own data source, kept open and outside `MaxStudioConnections` - it is
+  the one that must be there when the server refuses new ones - named with "history" after the product. Its read is
+  Holders' own, read-only, under `QueryTimeout` and `SqlConsoleRole`. What it stores is counts by application name and the
+  server's `host:port`, never a statement, a user, a client address or a credential; a store the host supplies keeps it
+  wherever the host chooses. On the page the counts are under the source policy and the application names under
+  `ViewDatabaseActivity`.
 
 ## The SQL console
 

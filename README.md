@@ -465,7 +465,9 @@ database on it, not only this one - by database, application, role and client ad
 judges: the counts per database for anybody the store policy passes (a database named only where that policy admits them to
 it, the rest together as "Other databases"), the applications, roles and addresses, and every database's name, behind the
 activity gate. C13 (an application holding a tenth of the client limit idle while the server is 80% used) and C14 (connections
-that set no `Application Name`, Info) are the checks over it. The Health page's **Snapshot** menu views, copies or downloads what your
+that set no `Application Name`, Info) are the checks over it. With `AddPostgresConnectionHistory()` (1.0) Holders also says what
+the server's connections peaked at before now, and when - each application's own peak behind the activity gate - from a
+sample a minute that the host keeps where it likes ([docs/diagnostics.md](docs/diagnostics.md#connection-history)). The Health page's **Snapshot** menu views, copies or downloads what your
 pages show of the database as JSON, built from your own view of each page.
 
 **Statements** (Operations, `/marten/statements`) — where the database's time goes, statement by statement, grouped
@@ -936,6 +938,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9430, 9431 | `ReplicationReadFailed`, `TablespaceSizeFailed` | A Replication section could not be read; a tablespace size a visitor asked for failed (always `Warning`, one line per click) |
   | 9440 | `ServerFactsReadFailed` | A section of the Server page could not be read |
   | 9451 | `StatementsReadFailed` | The Statements page could not read `pg_stat_statements` for a reason nobody chose |
+  | 9460, 9461 | `ConnectionHistoryRoundFailed`, `ConnectionHistorySampleFailed` | The opt-in connection history could not finish a round, or sample one server; it tries again at the next interval |
   | 9500, 9501 | `CapacitySourceFailed`, `AuroraReadFailed` | The host's `IPostgresCapacitySource` threw or timed out; one of Aurora's own reads failed |
 
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation path

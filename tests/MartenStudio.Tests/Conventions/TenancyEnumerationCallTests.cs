@@ -93,6 +93,11 @@ public class TenancyEnumerationCallTests
             "names, matched to the Postgres names of the databases the server has sessions in, to decide which one the source "
             + "policy lets a visitor be told: asked only of a source whose cardinality is Single or StaticMultiple - a "
             + "DynamicMultiple source is never enumerated - and only when a database other than the page's own has sessions"),
+        // Issue #43: the opt-in connection history finds the servers to sample, in the background, every ten minutes.
+        new("src/PostgresStudio.Diagnostics/Services/ConnectionHistory/ConnectionHistorySampler.cs", "DatabasesAsync", 1,
+            "the data sources, grouped by the server their connection string names, to sample each server once: asked only of a "
+            + "source whose cardinality is Single or StaticMultiple - a DynamicMultiple source is never enumerated, so the "
+            + "background loop never builds a tenancy's databases - and read again only every ConnectionHistorySampler.ServersFor"),
         new("src/MartenStudio/Services/StoreInfoService.cs", "AllDatabases", 1,
             "names, for the Overview's cards - one enumeration per store per load (F8-D3 C3)"),
         new("src/MartenStudio/Services/TenantDiscovery.cs", "DescribeDatabasesAsync", 1,

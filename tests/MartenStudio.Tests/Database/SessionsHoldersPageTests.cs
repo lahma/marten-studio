@@ -2,7 +2,9 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using PostgresStudio;
 using PostgresStudio.Components.Pages.Database;
+using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Database;
 using MartenStudio.Tests.Components;
 
@@ -223,4 +225,94 @@ public class SessionsHoldersPageTests
             pools.Dispose();
         }
     }
+
+    // ---- Issue #43: the connection history -------------------------------------------------------------------------------------
+
+    private static readonly DateTimeOffset HistoryStart = new(2026, 11, 2, 6, 0, 0, TimeSpan.Zero);
+
+    private static readonly PostgresConnectionSample[] Samples =
+    [
+        new() { At = HistoryStart, Server = "db:5432", Instance = "a", Connections = 10, ClientLimit = 95, ByApplication = [new() { ApplicationName = "orders-api", Total = 8 }] },
+        new()
+        {
+            At = HistoryStart.AddMinutes(1),
+            Server = "db:5432",
+            Instance = "b",
+            Connections = 90,
+            ClientLimit = 95,
+            ByApplication = [new() { ApplicationName = "orders-api", Total = 70 }, new() { ApplicationName = null, Total = 20 }],
+        },
+    ];
+
+    private static async Task HistoryAsync(SessionDetailsAccess access, bool kept, ConnectionHistoryView? counts, ConnectionHistoryView? named, Func<Bunit.IRenderedComponent<Sessions>, Task> check)
+    {
+        (StudioComponentContext context, SessionPoolObserver pools) = await ReadyAsync(
+            Summary(access) with { ConnectionHistoryKept = kept, ConnectionHistory = counts },
+            Details() with { ConnectionHistory = named });
+
+        try
+        {
+            context.Navigate("marten/database/sessions?view=holders");
+            var page = context.Render<Sessions>();
+            page.WaitForAssertion(() => page.FindAll(".ms-holders-table").Should().NotBeEmpty());
+            await check(page);
+        }
+        finally
+        {
+            await context.DisposeAsync();
+            pools.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Without_the_registration_Holders_says_how_to_keep_a_history() =>
+        await HistoryAsync(Open, kept: false, null, null, static page =>
+        {
+            page.Find(".ms-holders-history-off").TextContent.Should().Contain("AddPostgresConnectionHistory()");
+            page.FindAll(".ms-holders-history").Should().BeEmpty();
+            page.FindAll(".ms-holders-history-none").Should().BeEmpty();
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public async Task A_kept_history_with_no_sample_of_this_server_says_so() =>
+        await HistoryAsync(Open, kept: true, null, null, static page =>
+        {
+            page.Find(".ms-holders-history-none").TextContent.Should().Contain("no sample of this server yet");
+            page.FindAll(".ms-holders-history-off").Should().BeEmpty("the host registered it");
+            return Task.CompletedTask;
+        });
+
+    [Fact]
+    public async Task Without_the_gate_the_history_is_counts_and_names_no_application() =>
+        await HistoryAsync(
+            Closed,
+            kept: true,
+            ConnectionHistoryView.Of(Samples, names: false),
+            ConnectionHistoryView.Of(Samples, names: true),
+            static page =>
+            {
+                string said = page.Find(".ms-holders-history").TextContent;
+                said.Should().Contain("90").And.Contain("95").And.Contain("2 samples").And.Contain("1 change of the answering instance");
+                page.FindAll(".ms-holders-history-table").Should().BeEmpty("an application is named only past the activity gate");
+                page.Markup.Should().NotContain("orders-api", "neither the history nor the groups name an application below the gate");
+                return Task.CompletedTask;
+            });
+
+    [Fact]
+    public async Task Through_the_gate_each_applications_own_peak_is_drawn_in_its_own_scroll_region() =>
+        await HistoryAsync(
+            Open,
+            kept: true,
+            ConnectionHistoryView.Of(Samples, names: false),
+            ConnectionHistoryView.Of(Samples, names: true),
+            static page =>
+            {
+                var table = page.Find(".ms-holders-history-table");
+                table.ParentElement!.ClassList.Should().Contain("ms-table-scroll", "D25: every table in its own labelled scroll region");
+                var rows = table.QuerySelectorAll("tbody tr");
+                rows.Select(static x => x.QuerySelector("td")!.TextContent.Trim()).Should().Equal("orders-api", "(none set)");
+                rows[0].QuerySelectorAll("td")[1].TextContent.Trim().Should().Be("70");
+                return Task.CompletedTask;
+            });
 }

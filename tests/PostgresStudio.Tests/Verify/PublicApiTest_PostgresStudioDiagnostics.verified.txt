@@ -4,6 +4,11 @@ namespace PostgresStudio
     {
         System.Threading.Tasks.ValueTask<PostgresStudio.PostgresComputeCapacity?> GetCapacityAsync(PostgresStudio.PostgresDatabaseRef database, PostgresStudio.PostgresServerInfo server, System.Threading.CancellationToken cancellationToken);
     }
+    public interface IPostgresConnectionHistoryStore
+    {
+        System.Threading.Tasks.ValueTask AppendAsync(PostgresStudio.PostgresConnectionSample sample, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresConnectionSample>> ReadAsync(string server, System.DateTimeOffset since, System.Threading.CancellationToken cancellationToken);
+    }
     public interface IPostgresDatabaseSource
     {
         System.Threading.Tasks.ValueTask<Npgsql.NpgsqlDataSource?> GetDataSourceAsync(string name, System.Threading.CancellationToken cancellationToken);
@@ -61,6 +66,28 @@ namespace PostgresStudio
         public int StateUnknown { get; init; }
         public int Total { get; init; }
         public int Waiting { get; init; }
+    }
+    public sealed class PostgresConnectionHistoryOptions
+    {
+        public PostgresConnectionHistoryOptions() { }
+        public System.TimeSpan Interval { get; set; }
+        public int MaxApplications { get; set; }
+        public System.TimeSpan Retention { get; set; }
+        public System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>? ShouldSample { get; set; }
+    }
+    public static class PostgresConnectionHistoryServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresConnectionHistory(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresConnectionHistoryOptions>? configure = null) { }
+    }
+    public sealed record PostgresConnectionSample : System.IEquatable<PostgresStudio.PostgresConnectionSample>
+    {
+        public PostgresConnectionSample() { }
+        public System.DateTimeOffset At { get; init; }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresConnectionCounts> ByApplication { get; init; }
+        public int ClientLimit { get; init; }
+        public long Connections { get; init; }
+        public string? Instance { get; init; }
+        public string Server { get; init; }
     }
     public sealed record PostgresConnectionsSection : System.IEquatable<PostgresStudio.PostgresConnectionsSection>
     {

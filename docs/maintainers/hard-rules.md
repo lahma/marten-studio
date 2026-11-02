@@ -71,7 +71,11 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    type `PostgresDiagnosticsServiceCollectionExtensions` (`AddPostgresDiagnostics`),
    `PostgresStudioHealthChecksBuilderExtensions`, `PostgresDiagnosticsOptions`, the six inbound types
    (`IPostgresDatabaseSource`, `IPostgresCapacitySource`, `PostgresComputeCapacity`, `PostgresDatabaseRef`,
-   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records) and the D31 read model.
+   `PostgresServerInfo`, `PostgresPlatformKind`: two interfaces and their records), the D31 read model and, since 1.0
+   (issue #43), the connection history's four: `PostgresConnectionHistoryServiceCollectionExtensions`
+   (`AddPostgresConnectionHistory`), `PostgresConnectionHistoryOptions`, `IPostgresConnectionHistoryStore` - an interface a
+   host implements, so a member added later needs a default body (`PublicApiShapeTests`) - and `PostgresConnectionSample`,
+   whose `ByApplication` reuses the read model's `PostgresConnectionCounts`.
    Anything else that appears in any baseline is a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request
    what moved and why, then accept the baseline. The read model is extend-only (D31), and `PublicApiShapeTests` holds

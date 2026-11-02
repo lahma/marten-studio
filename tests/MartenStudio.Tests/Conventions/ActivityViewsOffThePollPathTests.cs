@@ -94,6 +94,13 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string ApplicationsBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ConnectionsByApplicationQueries.cs";
 
+    /// <summary>
+    /// The connection history's builder (issue #43): it runs the server holders read for the opt-in sampler, once per
+    /// <c>PostgresConnectionHistoryOptions.Interval</c> (fifteen seconds at the least, a minute by default) over the one connection the sampler keeps per
+    /// server - its own cadence, in the background, never a page's poll.
+    /// </summary>
+    private const string HistoryBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ConnectionHistoryQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -150,7 +157,8 @@ public class ActivityViewsOffThePollPathTests
     /// <summary>
     /// Issue #20: the one statement that groups the whole server's sessions - other databases' applications, roles and addresses -
     /// is called by the Sessions reader, as the snapshot's sixth statement behind its ten-second floor, and by the sweep's one
-    /// shared read, which only the two activity checks C13 and C14 ask for: nothing else, so nothing reads it on a poll.
+    /// shared read, which only the two activity checks C13 and C14 ask for, and since 1.0 by the opt-in connection history's
+    /// builder on its own cadence (<see cref="HistoryBuilder" />): nothing else, so nothing reads it on a poll.
     /// </summary>
     [Fact]
     public void The_holders_read_is_called_only_by_the_sessions_reader_and_the_sweeps_one_shared_read()
@@ -164,8 +172,8 @@ public class ActivityViewsOffThePollPathTests
         ];
 
         callers.Should().BeEquivalentTo(
-            ["src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs", "src/PostgresStudio.Diagnostics/Services/Health/Checks/ServerConnectionHolders.cs"],
-            "the holders are the Sessions snapshot's and the sweep's one shared read - which C13 and C14 alone ask for");
+            ["src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs", "src/PostgresStudio.Diagnostics/Services/Health/Checks/ServerConnectionHolders.cs", HistoryBuilder],
+            "the holders are the Sessions snapshot's and the sweep's one shared read - which C13 and C14 alone ask for - and the opt-in connection history's, on its own cadence");
 
         List<string> askers =
         [
@@ -326,8 +334,9 @@ public class ActivityViewsOffThePollPathTests
             static x => StudioProjects.IsUnder(x, "Services", "Health", "Checks")
                 || x == "src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs"
                 || x == HorizonBuilder
-                || x == ApplicationsBuilder,
-            "every other caller would be a new path to the process array and the lock table; the horizon and applications builders take only H3's session predicate");
+                || x == ApplicationsBuilder
+                || x == HistoryBuilder,
+            "every other caller would be a new path to the process array and the lock table; the horizon and applications builders take only H3's session predicate, and the opt-in connection history (#43) reads the holders on its own cadence over its own kept connection");
     }
 
     [Fact]

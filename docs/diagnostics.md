@@ -295,6 +295,53 @@ builder.Services.AddHealthChecks().AddPostgresStudio(tags: ["postgres"]);
 
 It reports codes, outcomes, severities and counts, never a name, as in the studio's ([Security](#security)).
 
+## Connection history
+
+Database › Sessions › Holders shows who holds the server's connections *now*. The question after an outage is who held them
+*then*. `AddPostgresConnectionHistory()` (1.0, issue #43) keeps the answer: a background service samples each server the studio
+reads, every `Interval`, and appends what it counted to a store.
+
+```csharp
+builder.Services.AddPostgresStudio();              // or AddMartenStudio(), or AddPostgresDiagnostics()
+builder.Services.AddPostgresConnectionHistory(o =>
+{
+    o.Interval = TimeSpan.FromMinutes(1);          // 15 seconds to 1 hour; a minute by default
+    o.Retention = TimeSpan.FromDays(7);            // what the in-memory store keeps, and how far back Holders reads; 1 hour to 90 days
+    o.MaxApplications = 20;                        // applications a sample names, most connections first; 1 to 100
+    o.ShouldSample = ct => leader.IsLeaderAsync(ct); // optional: only the process that answers yes samples
+});
+```
+
+**What a sample is.** A `PostgresConnectionSample`: when, the server (`host:port`, as the connection string names it - never a
+database, a user or a password), which instance answered (its address and start time, so a failover or a restart shows as a
+break), the server's client sessions less the sampler's own, the client limit C03 judges against (`max_connections` less the
+reserved slots), and the applications with the most sessions, each with its active, idle, idle-in-transaction and unknown
+counts. The read is the one Holders makes, in a read-only transaction under `QueryTimeout` and `SqlConsoleRole`: a role
+without `pg_read_all_stats` counts what it cannot see into as state unknown.
+
+**Where it is kept.** By default in memory, for `Retention`, and gone after a restart. To keep it, register your own
+`IPostgresConnectionHistoryStore` - before or after `AddPostgresConnectionHistory()`; yours is the one resolved. It has two
+members, `AppendAsync` and `ReadAsync(server, since)`; a table of your own, a time-series database or a log sink all fit.
+The sampler calls `AppendAsync` once per server per interval and never reads; Holders calls `ReadAsync` when the page loads.
+
+**Which servers.** Every server a registered source names, through the first of its databases with a data source - each once,
+however many databases it holds, and at most 50. The list is read again every ten minutes. A source whose databases are
+dynamic (a host database source of tenant databases, a Marten tenancy that builds its databases) is never enumerated, because
+enumerating such a tenancy is not read-only; its servers are sampled only where another source names them.
+
+**The kept connection.** A sampler that opened a connection to sample would count nothing at the one moment that matters:
+when the server refuses new ones. So each server gets one connection from the application's own data source, opened once
+and kept, named like the studio's own sessions with "history" after the product (`orders-api (Postgres Studio history)`). It
+is **outside `MaxStudioConnections`**: count it in the application's pool size. A connection that breaks is opened again at
+the next round; while `ShouldSample` answers no, every kept connection is closed.
+
+**What a visitor sees.** On Holders, anybody the source policy passes sees the counts: the window, the peak against the client
+limit and when, how many samples, and how many instance changes. The applications' own peaks need `ViewDatabaseActivity`, as
+Holders' applications do. Without the registration, Holders says how to turn it on.
+
+**Failures.** A round or a server that fails is logged as event 9460 or 9461, throttled like the studio's polled reads, and
+tried again at the next interval; nothing a page shows fails with it.
+
 ## Security
 
 **It answers your code, not a visitor.** No authorization policy, capability or `ReadOnly` is asked: those decide what
