@@ -108,6 +108,7 @@ public class PublicApiTest
             "PostgresStudio.PostgresExtension",
             "PostgresStudio.PostgresFinding",
             "PostgresStudio.PostgresFindingCategory",
+            "PostgresStudio.PostgresFindingGroup",
             "PostgresStudio.PostgresPlatformKind",
             "PostgresStudio.PostgresReadOutcome",
             "PostgresStudio.PostgresServerInfo",

@@ -79,4 +79,17 @@ public sealed record PostgresDiagnosticsSnapshot
     /// </summary>
     /// <returns>The JSON text, indented.</returns>
     public string ToJson() => DiagnosticsJson.Write(this);
+
+    /// <summary>
+    /// The findings as the studio's Health page lists them, a line per check: grouped by <see cref="PostgresFinding.Code" />,
+    /// worst severity first and then in the order of <see cref="Checks" /> (a code that is not among them last, by code).
+    /// Findings the host accepted (<see cref="PostgresFinding.Accepted" />) are left out, as they are of every count the studio
+    /// shows. A snapshot that was not read (<see cref="Outcome" />) or has no findings returns an empty list.
+    /// </summary>
+    /// <remarks>
+    /// A method, not a property, so <see cref="ToJson" /> and the shape of the snapshot stay as they were: the groups are
+    /// computed from <see cref="Findings" />, which stay the whole picture.
+    /// </remarks>
+    /// <returns>The groups, in that order.</returns>
+    public IReadOnlyList<PostgresFindingGroup> FindingsByCheck() => FindingGroups.Of(this);
 }
