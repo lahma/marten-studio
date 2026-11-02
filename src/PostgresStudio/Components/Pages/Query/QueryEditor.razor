@@ -1,3 +1,4 @@
+@using PostgresStudio.Services.Query
 @using PostgresStudio.Services.Live
 @implements IAsyncDisposable
 @inject IJSRuntime JsRuntime
@@ -355,7 +356,7 @@
             start = 0;
         }
 
-        CaretSource = end < 0 ? normalized[start..] : normalized[start..end];
-        CaretLine = new string(' ', Math.Clamp(position - start, 0, CaretSource.Length)) + "^";
+        // 1.0-HARD: a long line is cut to a window around the caret, so the caret is on screen at any width.
+        (CaretSource, CaretLine) = QueryCaret.Window(end < 0 ? normalized[start..] : normalized[start..end], position - start);
     }
 }

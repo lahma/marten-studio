@@ -57,7 +57,7 @@ public class SchemaHealthColumnsPageTests
         page.Find(".ms-schema-dead").ClassList.Should().Contain("ms-schema-share-high", "past T07's 20% over 10,000 dead rows");
         page.Find(".ms-schema-hot").TextContent.Trim().Should().Be("10%");
         page.Find(".ms-schema-hot").ClassList.Should().Contain("ms-schema-share-high", "under T06's half over 10,000 updates");
-        page.Find(".ms-schema-toast").TextContent.Trim().Should().Be("3.0 MiB");
+        page.Find(".ms-schema-toast").TextContent.Trim().Should().Be("~3.0 MiB", "a size from the catalog's page counts is an estimate (1.0-HARD, D8)");
         page.Find(".ms-schema-autovacuum").TextContent.Should().Contain("2026-10-14");
         page.TextOfAll("th").Should().Contain(["TOAST", "Dead %", "HOT %", "Last autovacuum", "Storage parameters"]);
     }

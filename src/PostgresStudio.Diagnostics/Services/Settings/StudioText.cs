@@ -216,6 +216,12 @@ internal sealed class StudioText
     /// <summary>The Relationships screen's note above the foreign keys it cannot draw.</summary>
     public required string RelationshipUnmatchedNote { get; init; }
 
+    /// <summary>1.0-HARD: why a foreign key that points at a table the studio does not draw is not drawn.</summary>
+    public required string RelationshipUnplacedTarget { get; init; }
+
+    /// <summary>1.0-HARD: why a foreign key on a table the studio does not draw is not drawn.</summary>
+    public required string RelationshipUnplacedSource { get; init; }
+
     /// <summary>
     /// The object detail's Relationships tab on the foreign keys it cannot draw, after "Its foreign keys have" or "These
     /// foreign keys have".
@@ -557,6 +563,8 @@ internal sealed class StudioText
         RelationshipIsolatedLabel = "Document types and tables with no foreign key",
         RelationshipUnmatchedNote =
             "These foreign keys have an end that is not a document type of this store, so there is nothing to draw them between.",
+        RelationshipUnplacedTarget = "It points at a table no document type of this store maps.",
+        RelationshipUnplacedSource = "It is on a table no document type of this store maps.",
         RelationshipNeighbourhoodUnmatched =
             "an end that is not a document type of this store or a table the studio can place, so there is nothing to draw them "
             + "between.",

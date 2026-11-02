@@ -316,7 +316,7 @@ internal sealed class PostgresSourceRegistry
         {
             // The host's listing ran out of time: a failure of the source, said as one - never a cancellation, which
             // every caller would read as its own page going away.
-            throw new TimeoutException(
+            throw new StudioSourceTimeoutException(
                 "The database source '" + key + "' did not list its databases within " + timeout.TotalSeconds.ToString(CultureInfo.InvariantCulture) + " s.",
                 exception);
         }

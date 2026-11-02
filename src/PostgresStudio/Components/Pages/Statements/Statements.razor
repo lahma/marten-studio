@@ -73,7 +73,7 @@
     }
     else if (view.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly)
     {
-        <CapabilityDisabled Capability="ViewDatabaseActivity" Action="Statements" />
+        <CapabilityDisabled Capability="@nameof(StudioCapability.ViewDatabaseActivity)" Action="Statements" />
         <p class="ms-muted ms-stmts-gate">
             Statements are other programs' source text and the work of other sessions, so this page is shown only with
             ViewDatabaseActivity on and the write policy allowing it for this database - as Database › Sessions' details are.

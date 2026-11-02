@@ -908,6 +908,9 @@ internal sealed class DatabaseObjectService : IDatabaseObjectService
     {
         ArgumentNullException.ThrowIfNull(exception);
 
+        // 1.0-HARD: the resolver wraps what a host's source threw; it is described as it was thrown (H1b).
+        exception = StudioHostFailure.Unwrap(exception);
+
         return exception is PostgresException postgres
             ? "The scope could not be resolved: Postgres refused a read (" + postgres.SqlState + "). Its own words are withheld: "
               + "the schemas they may name could not be checked for you."

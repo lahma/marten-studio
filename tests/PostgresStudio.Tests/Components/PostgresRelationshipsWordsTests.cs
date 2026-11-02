@@ -39,6 +39,26 @@ public class PostgresRelationshipsWordsTests
         ShouldNameNoDocumentType(page.Markup);
     }
 
+    /// <summary>
+    /// 1.0-HARD: the table names no Member column - a key between plain tables has no document member - and a key the graph
+    /// cannot draw is explained in the studio's own words, which never say "document type".
+    /// </summary>
+    [Fact]
+    public async Task The_table_draws_no_member_column_and_the_unplaced_key_sentences_are_the_studios_own()
+    {
+        await using PostgresStudioComponentContext context = await NewContextAsync(FakeRelationshipDataService.PlainTables());
+
+        var page = context.Render<Relationships>();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-graph-row").Should().HaveCount(3));
+        page.FindAll("table.ms-graph-table th").Select(static x => x.TextContent).Should().NotContain("Member");
+        page.FindAll(".ms-graph-row").Should().OnlyContain(static x => x.QuerySelectorAll("td").Length == 5);
+
+        PostgresStudioText.Instance.RelationshipUnplacedTarget.Should().Be("It points at a table this studio does not draw.");
+        PostgresStudioText.Instance.RelationshipUnplacedSource.Should().Be("It is on a table this studio does not draw.");
+        ShouldNameNoDocumentType(PostgresStudioText.Instance.RelationshipUnplacedTarget + PostgresStudioText.Instance.RelationshipUnplacedSource);
+    }
+
     [Fact]
     public async Task A_documents_view_in_the_url_draws_every_table_rather_than_nothing()
     {

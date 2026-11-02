@@ -38,6 +38,12 @@ internal static class SchemaFormat
         return formatted + " " + Units[unit];
     }
 
+    /// <summary>
+    /// 1.0-HARD: a size read from the catalog's page counts (<c>relpages</c> times the block size) rather than measured, prefixed with
+    /// <c>~</c> as every estimate is (D8).
+    /// </summary>
+    public static string EstimatedBytes(long bytes) => bytes < 0 ? Bytes(bytes) : "~" + Bytes(bytes);
+
     /// <summary>A counter the statistics collector may have nothing for.</summary>
     public static string Count(long? value) =>
         value.HasValue ? value.Value.ToString("N0", CultureInfo.InvariantCulture) : "n/a";

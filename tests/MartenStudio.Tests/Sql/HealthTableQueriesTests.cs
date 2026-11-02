@@ -62,12 +62,26 @@ public partial class HealthTableQueriesTests
         WritesOrHides().IsMatch(sql).Should().BeFalse();
     }
 
+    /// <summary>
+    /// 1.0-HARD: the Schema tab's two lists hold to the same rule - since 1.0 their sizes are the catalog's page counts, never a
+    /// size function, which waits behind a migration's lock on the table it is handed.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(SchemaStatsQueries.TableStatsSql))]
+    [InlineData(nameof(SchemaStatsQueries.IndexStatsSql))]
+    public void The_Schema_tabs_lists_call_no_function_that_locks_what_they_list(string name)
+    {
+        string sql = name == nameof(SchemaStatsQueries.TableStatsSql) ? SchemaStatsQueries.TableStatsSql : SchemaStatsQueries.IndexStatsSql;
+
+        LockingFunction().IsMatch(sql).Should().BeFalse("D27: a list reads the catalog and locks nothing it lists");
+        sql.Should().Contain("pg_catalog.current_setting('block_size')::bigint", "sizes are relpages times the block size");
+    }
+
     /// <summary>The anti-vacuity half: the scan sees a statement that does lock what it lists.</summary>
     [Fact]
-    public void The_scan_catches_the_Schema_tabs_own_size_functions()
+    public void The_scan_catches_a_size_function_and_the_partition_tree()
     {
-        LockingFunction().IsMatch(SchemaStatsQueries.TableStatsSql).Should().BeTrue(
-            "the Schema tab sizes its listed tables with pg_total_relation_size, which a health list may not");
+        LockingFunction().IsMatch("select pg_catalog.pg_total_relation_size(c.oid) from pg_catalog.pg_class c").Should().BeTrue();
         LockingFunction().IsMatch("select pg_catalog.pg_partition_tree('x'::regclass)").Should().BeTrue();
         WritesOrHides().IsMatch("select * from pg_catalog.pg_class").Should().BeTrue();
     }

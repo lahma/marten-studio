@@ -623,7 +623,7 @@
 
         if (access.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly)
         {
-            <CapabilityDisabled Capability="ViewDatabaseActivity" Action="Session details" />
+            <CapabilityDisabled Capability="@nameof(StudioCapability.ViewDatabaseActivity)" Action="Session details" />
             <p class="ms-muted ms-sessions-gate">
                 Without it this page shows counts, ages, states, wait classes, lock modes and what Marten object is locked -
                 never process ids, roles, client addresses, application names or statements, which are other applications'

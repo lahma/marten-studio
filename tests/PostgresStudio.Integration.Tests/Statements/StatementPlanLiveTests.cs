@@ -262,4 +262,76 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
             }
         }
     }
+
+    /// <summary>
+    /// 1.0-HARD (the 0.6 known limit): a view in a schema the visitor may see that calls a <c>LANGUAGE sql</c> function in a
+    /// withheld one plans with the function inlined - no withheld relation in the plan, only its body's condition over a table the
+    /// visitor may see - so the withheld function's definition would be shown. Such a text is not planned for a visitor who may
+    /// not see <c>hr</c>, whether it names the view, a plain-string SQL function that calls through it, or a view that reads
+    /// another view in <c>hr</c>; for one who may, it is planned and shows exactly the condition the other visitor's would have.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_visible_view_or_function_that_reaches_into_a_withheld_schema_is_not_planned_for_a_visitor_who_may_not_see_it()
+    {
+        (_, _, string app) = await SeedAsync(matrix, 18, "hard_crossing");
+
+        await StatementsLive.ExecuteAsync(app,
+            "alter table public.orders add column tier text; "
+            + "update public.orders set tier = case when id % 5 = 0 then 'vip' else 'std' end; "
+            + "create schema hr; "
+            + "create function hr.is_vip(t text) returns boolean language sql immutable as $$ select t = 'vip' $$; "
+            + "create view public.v_vips as select o.id, o.note from public.orders o where hr.is_vip(o.tier); "
+            + "create function public.vipness(t text) returns boolean language sql immutable as $$ select t is not null and hr.is_vip(t) $$; "
+            + "create view hr.v_gold as select o.id, o.note from public.orders o where o.tier = 'gold'; "
+            + "create view public.v_golden as select g.id, g.note from hr.v_gold g");
+
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), v.note from public.v_vips v where v.id = @id", 20);
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), o.note from public.orders o where o.id = @id and public.vipness(o.tier)", 20);
+        await StatementsLive.RepeatAsync(app, "select pg_catalog.pg_sleep(0.02), g.note from public.v_golden g where g.id = @id", 20);
+
+        (string Marker, string Definition)[] cases =
+        [
+            ("v_vips", "'vip'::text"),
+            ("vipness", "'vip'::text"),
+            ("v_golden", "'gold'::text"),
+        ];
+
+        await using (StudioHost withheld = StatementsLive.Host(app))
+        {
+            await using StudioCircuit circuit = withheld.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+
+            StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
+            view.State.Should().Be(StatementsState.Read, StatementsLive.Describe(view));
+
+            foreach ((string marker, string definition) in cases)
+            {
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, Row(view, marker).QueryId, Token);
+
+                plan.Plan.Should().BeNull("a plan of {0} would show {1}, from hr", marker, definition);
+                plan.NoPlan.Should().Be(StatementsService.ReachesWithheldSchema, marker);
+            }
+        }
+
+        await using (StudioHost admitted = StatementsLive.Host(app, studio: static o =>
+        {
+            o.BrowsableSchemas.Add("public");
+            o.BrowsableSchemas.Add("hr");
+        }))
+        {
+            await using StudioCircuit circuit = admitted.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+
+            StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
+
+            foreach ((string marker, string definition) in cases)
+            {
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, Row(view, marker).QueryId, Token);
+
+                plan.NoPlan.Should().BeNull(marker);
+                string.Join(" | ", plan.Plan!.Nodes.Select(static x => x.Filter + " " + x.IndexCondition))
+                    .Should().Contain(definition, "the plan of {0} carries the definition behind the name", marker);
+            }
+        }
+    }
 }

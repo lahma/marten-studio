@@ -148,36 +148,62 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
     /// the Tables and Indexes reads are run here inside a transaction, over a parent one of whose
     /// partitions another session holds in <c>ACCESS EXCLUSIVE</c> mode, with a short
     /// <c>lock_timeout</c>. They must finish, and <c>pg_locks</c> must show this backend holding no lock on
-    /// any partition afterwards.
+    /// any partition afterwards. Since 1.0 (D27) the Tables read takes no lock on the listed tables either - their
+    /// sizes are page counts - so it finishes while a migration holds a listed table in <c>ACCESS EXCLUSIVE</c>
+    /// mode. The Indexes read still prints each index's definition with <c>pg_get_indexdef</c>, which takes the
+    /// table's lock for the moment it runs (measured on 17): it gives up at the <c>lock_timeout</c> while the
+    /// migration holds the table, which the service says as "locked by a migration", and holds nothing afterwards.
     /// </summary>
     [PostgresFact]
-    public async Task The_tables_and_indexes_reads_take_no_lock_on_any_partition()
+    public async Task The_tables_read_takes_no_lock_on_any_table_it_lists_and_neither_read_holds_one()
     {
         await using Host host = await StartAsync("db7_locks");
         string[] schemas = [host.Schema, host.EventSchema];
 
-        await using NpgsqlConnection migration = await fixture.OpenAsync(Token);
-        await using NpgsqlTransaction holding = await migration.BeginTransactionAsync(Token);
-        await ExecuteAsync(migration, $"lock table {host.Schema}.{Partitioned}_{Tenants[0]} in access exclusive mode");
-
         await using NpgsqlConnection reader = await fixture.OpenAsync(Token);
-        await using NpgsqlTransaction reading = await reader.BeginTransactionAsync(Token);
-        await ExecuteAsync(reader, "set local lock_timeout = '2s'");
 
-        IReadOnlyList<TableStatsRow> tables = await SchemaStatsQueries.ReadTablesAsync(reader, reading, schemas, 30, Token);
-        IReadOnlyList<IndexStatsRow> indexes = await SchemaStatsQueries.ReadIndexesAsync(reader, reading, schemas, 30, Token);
+        await using (NpgsqlConnection migration = await fixture.OpenAsync(Token))
+        {
+            await using NpgsqlTransaction holding = await migration.BeginTransactionAsync(Token);
+            await ExecuteAsync(migration, $"lock table {host.Schema}.{Partitioned}_{Tenants[0]} in access exclusive mode");
+            await ExecuteAsync(migration, $"lock table only {host.Schema}.{Partitioned} in access exclusive mode");
 
-        tables.Should().Contain(x => x.Table == Partitioned && x.IsPartitioned && x.PartitionCount == Tenants.Length);
-        tables.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal));
-        indexes.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal),
+            await using (NpgsqlTransaction reading = await reader.BeginTransactionAsync(Token))
+            {
+                await ExecuteAsync(reader, "set local lock_timeout = '2s'");
+
+                IReadOnlyList<TableStatsRow> tables = await SchemaStatsQueries.ReadTablesAsync(reader, reading, schemas, 30, Token);
+
+                tables.Should().Contain(x => x.Table == Partitioned && x.IsPartitioned && x.PartitionCount == Tenants.Length);
+                tables.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal));
+                tables.Should().OnlyContain(static x => x.TotalBytes >= 0 && x.HeapBytes >= 0 && x.IndexBytes >= 0);
+                (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
+                    "since 1.0 no size function opens a listed table: the sizes are the catalog's page counts");
+
+                Func<Task> indexes = () => SchemaStatsQueries.ReadIndexesAsync(reader, reading, schemas, 30, Token);
+                (await indexes.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("55P03",
+                    "pg_get_indexdef waits for the table a migration holds, and gives up at the lock_timeout");
+
+                await reading.RollbackAsync(Token);
+            }
+
+            await holding.RollbackAsync(Token);
+        }
+
+        await using NpgsqlTransaction again = await reader.BeginTransactionAsync(Token);
+        IReadOnlyList<IndexStatsRow> read = await SchemaStatsQueries.ReadIndexesAsync(reader, again, schemas, 30, Token);
+
+        read.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal),
             "an index on a partition is named after the partition");
-        indexes.Should().Contain(x => x.Table == Partitioned, "the partitioned parent's own indexes are listed");
+        read.Should().Contain(x => x.Table == Partitioned, "the partitioned parent's own indexes are listed");
+        read.Should().OnlyContain(static x => x.Bytes >= 0 && x.Definition.StartsWith("CREATE", StringComparison.Ordinal));
 
         (await PartitionLocksAsync(reader, host.Schema)).Should().BeEmpty(
             "the reads walk pg_inherits and catalog columns and never open a partition");
+        (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
+            "pg_get_indexdef takes the table's lock for the moment it runs and keeps none");
 
-        await reading.RollbackAsync(Token);
-        await holding.RollbackAsync(Token);
+        await again.RollbackAsync(Token);
     }
 
     /// <summary>
@@ -505,6 +531,33 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
     }
 
     /// <summary>Every lock this connection's backend holds on a partition in <paramref name="schema" />.</summary>
+    /// <summary>Every relation lock this backend holds on a relation of <paramref name="schema" />.</summary>
+    private static async Task<IReadOnlyList<string>> SchemaLocksAsync(NpgsqlConnection connection, string schema)
+    {
+        await using var command = new NpgsqlCommand(
+            """
+            select c.relname || ' ' || l.mode
+            from pg_locks l
+            join pg_class c on c.oid = l.relation
+            join pg_namespace n on n.oid = c.relnamespace
+            where l.pid = pg_backend_pid()
+              and n.nspname = @schema
+            order by 1
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("schema", schema);
+
+        List<string> locks = [];
+        await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(Token);
+        while (await reader.ReadAsync(Token))
+        {
+            locks.Add(reader.GetString(0));
+        }
+
+        return locks;
+    }
+
     private static async Task<IReadOnlyList<string>> PartitionLocksAsync(NpgsqlConnection connection, string schema)
     {
         await using var command = new NpgsqlCommand(

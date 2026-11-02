@@ -137,7 +137,7 @@
             }
             else
             {
-                <CapabilityDisabled Capability="ViewDatabaseActivity" Action="Standby and slot names" />
+                <CapabilityDisabled Capability="@nameof(StudioCapability.ViewDatabaseActivity)" Action="Standby and slot names" />
                 <p class="ms-muted ms-repl-gate">
                     Without it this page shows every count, size, lag and state - never a standby's application name, client
                     address or role, a slot's name, or the archive command.

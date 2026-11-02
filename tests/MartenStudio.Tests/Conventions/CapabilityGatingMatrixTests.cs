@@ -217,7 +217,9 @@ public class CapabilityGatingMatrixTests
             // scope, no capability. It runs the projection's own code exactly as AggregateAtVersionAsync does.
             "FindNextChangeAsync", "StepAsync",
 
-            // M3: the grouped view and what its bulk skip would do - reads; the skip itself is Mutating.
+            // M3: the grouped view and what its bulk skip would do - reads; the skip itself is Mutating. Since 1.0-HARD the
+            // preview answers the ManageDeadLetters switch first (a refusal sentence, nothing resolved or read), but asks no
+            // write policy and audits nothing: it is not a read authorized like a write (The_bulk_skip_preview_...).
             "DescribeDeadLetterGroupSkipAsync", "ListDeadLetterGroupsAsync",
         ],
         [typeof(IProjectionDataService)] =
@@ -467,6 +469,32 @@ public class CapabilityGatingMatrixTests
     // -------------------------------------------------------------------------------------------------
     // The three refusals, for every gated read
     // -------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// 1.0-HARD: the bulk skip's preview is refused with <c>ManageDeadLetters</c> off - or under <c>ReadOnly</c> - before anything is
+    /// resolved or read: no policy is asked, no connection is opened (the store's host does not resolve), and nothing is audited,
+    /// because it is not a write. The sentence names the property a host would set.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task The_bulk_skip_preview_is_refused_by_the_ManageDeadLetters_switch_before_anything_is_asked_or_read(bool readOnly)
+    {
+        await using Harness harness = Harness.Create(options =>
+        {
+            options.Capabilities = readOnly ? MartenStudioCapabilities.All() : new MartenStudioCapabilities();
+            options.ReadOnly = readOnly;
+        });
+
+        IEventDataService events = (IEventDataService) harness.Resolve(typeof(IEventDataService));
+        DeadLetterGroupSkipPlan plan = await events.DescribeDeadLetterGroupSkipAsync(
+            Scope, new DeadLetterGroupKey("Orders", "Orders:All", "order_placed", "System.InvalidOperationException", "fp"), TestContext.Current.CancellationToken);
+
+        plan.Refusal.Should().Contain(readOnly ? "ReadOnly" : "Capabilities.ManageDeadLetters");
+        plan.ToSkip.Should().Be(0);
+        harness.Policies.Calls.Should().BeEmpty("the switch is answered before anybody is asked who is asking");
+        harness.Ring.GetLatest().Should().BeEmpty("a preview is not a write and is not audited");
+    }
 
     [Fact]
     public async Task A_capability_that_is_off_refuses_every_gated_read_as_a_value_and_audits_it()

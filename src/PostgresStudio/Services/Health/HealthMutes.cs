@@ -594,6 +594,22 @@ internal sealed class HealthAlerts
     }
 
     /// <summary>
+    /// 1.0-HARD: notes that the visitor has just unmuted <paramref name="muteKey" />. A muted finding is not in the glance, so
+    /// without this the next poll would find a Critical that "just appeared" and toast it - about a finding the visitor is looking
+    /// at, because they just unmuted it. A key leaving the mute list is taken as already seen: present on the last look.
+    /// </summary>
+    /// <param name="muteKey">The finding's mute key.</param>
+    public void Acknowledge(string muteKey)
+    {
+        ArgumentNullException.ThrowIfNull(muteKey);
+
+        lock (gate)
+        {
+            present.Add(muteKey);
+        }
+    }
+
+    /// <summary>
     /// Notes that every key in <paramref name="now" /> was Critical at <paramref name="at" />, and forgets the keys last
     /// seen a whole cool-down ago - their return toasts whether they are remembered or not, so a long-lived circuit does
     /// not keep them.

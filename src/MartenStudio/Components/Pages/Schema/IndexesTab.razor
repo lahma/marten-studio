@@ -238,7 +238,7 @@ else
                                     <a class="@MarkClass(mark)" href="@mark.Link" title="@mark.Title" data-code="@mark.Code" @key="mark.Code">@mark.Label</a>
                                 }
                             </td>
-                            <td class="ms-table-cell ms-num">@SchemaFormat.Bytes(index.Bytes)</td>
+                            <td class="ms-table-cell ms-num">@SchemaFormat.EstimatedBytes(index.Bytes)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.Scans)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
                             <td class="ms-table-cell">

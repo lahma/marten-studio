@@ -307,6 +307,14 @@ internal sealed class StatementsService : IStatementsService
     internal const string PlanReadsWithheldSchema =
         "Not shown: its plan reads a table in a schema you may not see - through a view, or a function with a SQL-standard body.";
 
+    /// <summary>
+    /// 1.0-HARD: what the drill-in says of a text that names a view or a SQL function, in a schema the visitor may see, that reaches
+    /// into one they may not - a function there the planner would inline, a view there it would expand (<c>StatementPlanReader</c>).
+    /// </summary>
+    internal const string ReachesWithheldSchema =
+        "Not planned: it names a view or a SQL function that reads into a schema you may not see, and its plan would show what "
+        + "that schema's views and functions are made of.";
+
     /// <summary>What the drill-in says of a text that names a schema the visitor may not see (<see cref="TextNamesWithheld" />).</summary>
     internal const string NamesWithheldSchema =
         "Not planned: it names a schema you may not see, and its plan would show what that schema's views and SQL functions are made of.";

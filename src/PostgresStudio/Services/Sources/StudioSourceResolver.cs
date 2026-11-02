@@ -1,3 +1,6 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 using PostgresStudio.Services.Settings;
 
 namespace PostgresStudio.Services.Sources;
@@ -36,18 +39,39 @@ namespace PostgresStudio.Services.Sources;
 /// enumeration step 1 exists to keep behind the policy; answering "not found" for the refusal would leave a refused write
 /// unaudited as one. A policy that compares names ignoring case, as the resolver matches them, does not have it (H1b).
 /// </para>
+/// <para>
+/// <b>The host's code is called in two places, and neither may reach a page raw.</b> The source's list of databases (step 4)
+/// and its completing the scope (steps 6-7) are the host's own - a database source, a tenancy - and whatever they throw, a
+/// <see cref="KeyNotFoundException" /> or any other type, is wrapped in a <see cref="StudioStoreUnavailableException" /> carrying
+/// it, whose message says it under H1b's rule (<see cref="StudioHostFailure" />): Postgres' words withheld, the host's own escaped
+/// and bounded. The original is logged once at Warning, through
+/// the <see cref="StudioLogThrottle" /> cap (events 9213 and 9219, as the picker logs the same failures); a cancellation of
+/// the caller's own token passes through as it is, and so do the studio's own refusals.
+/// </para>
 /// </remarks>
 internal sealed class StudioSourceResolver
 {
     private readonly IStudioSourceProvider provider;
     private readonly StudioAuthorization authorization;
     private readonly StudioDescriptor descriptor;
+    private readonly ILogger logger;
+    private readonly StudioLogThrottle? throttle;
+    private readonly StudioProduct product;
 
-    public StudioSourceResolver(IStudioSourceProvider provider, StudioAuthorization authorization, StudioDescriptor descriptor)
+    public StudioSourceResolver(
+        IStudioSourceProvider provider,
+        StudioAuthorization authorization,
+        StudioDescriptor descriptor,
+        ILogger<StudioSourceResolver>? logger = null,
+        StudioLogThrottle? throttle = null,
+        IStudioSettings? settings = null)
     {
         this.provider = provider;
         this.authorization = authorization;
         this.descriptor = descriptor;
+        this.logger = logger ?? NullLogger<StudioSourceResolver>.Instance;
+        this.throttle = throttle;
+        product = StudioText.Of(settings).Product;
     }
 
     /// <summary>
@@ -64,7 +88,9 @@ internal sealed class StudioSourceResolver
     /// the exception carries the latter, the scope that was refused.
     /// </exception>
     /// <exception cref="KeyNotFoundException">No such source, no such database in it, or no such tenant of it.</exception>
-    /// <exception cref="StudioStoreUnavailableException">The source is registered but will not build.</exception>
+    /// <exception cref="StudioStoreUnavailableException">
+    /// The source is registered but will not build, or its own code - listing its databases, completing the scope - threw.
+    /// </exception>
     public async ValueTask<ResolvedSource> ResolveAsync(
         StudioScope scope,
         string? capability = null,
@@ -83,12 +109,16 @@ internal sealed class StudioSourceResolver
         StoreAvailability availability = provider.TryResolve(registration, out IStudioSource? source);
         if (!availability.IsAvailable || source is null)
         {
-            throw new StudioStoreUnavailableException(registration.Key, availability.Message ?? "unknown reason", descriptor.SourceNoun);
+            // The reason is a host's exception's message: bounded and escaped, since this one is logged and audited whole.
+            throw new StudioStoreUnavailableException(
+                registration.Key,
+                StudioLogValue.CapText(availability.Message ?? "unknown reason"),
+                descriptor.SourceNoun);
         }
 
         // 4. The database, matched against what the source already knows. The visitor's spelling goes into the message
         //    escaped and bounded (StudioLogValue.Cap): a message like this one is logged and audited whole.
-        IReadOnlyList<IStudioDatabase> databases = await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<IStudioDatabase> databases = await ListDatabasesAsync(registration, source, cancellationToken).ConfigureAwait(false);
         IStudioDatabase database = Match(databases, scope.DatabaseId)
             ?? throw new KeyNotFoundException(
                 $"{descriptor.SourceNoun} '{registration.Key}' has no database with identity '{StudioLogValue.Cap(scope.DatabaseId)}'.");
@@ -104,8 +134,95 @@ internal sealed class StudioSourceResolver
         }
 
         // 6-7. The tenant and the instance it was built from - the source's own steps, asked with the list just read.
-        return await source.CompleteAsync(scope, database, databases, cancellationToken).ConfigureAwait(false);
+        return await CompleteScopeAsync(registration, source, scope, database, databases, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>The source's databases, with whatever its code throws wrapped (event 9213).</summary>
+    private async ValueTask<IReadOnlyList<IStudioDatabase>> ListDatabasesAsync(
+        StudioSourceRegistration registration,
+        IStudioSource source,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await source.DatabasesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (!IsOwnCancellation(exception, cancellationToken))
+        {
+            LogLevel level = StudioLogThrottle.LevelOrWarning(
+                throttle, "Store.Databases", registration.Key, null, StudioLogThrottle.KindOf(exception));
+
+            if (product == StudioProduct.PostgresStudio)
+            {
+                logger.PostgresStudioStoreDatabasesUnreadable(level, exception, registration.Key);
+            }
+            else
+            {
+                logger.StoreDatabasesUnreadable(level, exception, registration.Key);
+            }
+
+            throw new StudioStoreUnavailableException(
+                registration.Key,
+                "its databases could not be listed: " + StudioHostFailure.Words(exception),
+                descriptor.SourceNoun,
+                exception);
+        }
+    }
+
+    /// <summary>The source completing the scope, with whatever its code throws wrapped (event 9219).</summary>
+    /// <remarks>
+    /// The studio's own refusals pass through: a tenant the source does not have is a <see cref="KeyNotFoundException" /> by
+    /// design, and a source that already wrapped its host's failure has said so as a
+    /// <see cref="StudioStoreUnavailableException" /> carrying it - which is logged here, once.
+    /// </remarks>
+    private async ValueTask<ResolvedSource> CompleteScopeAsync(
+        StudioSourceRegistration registration,
+        IStudioSource source,
+        StudioScope scope,
+        IStudioDatabase database,
+        IReadOnlyList<IStudioDatabase> databases,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await source.CompleteAsync(scope, database, databases, cancellationToken).ConfigureAwait(false);
+        }
+        catch (StudioStoreUnavailableException wrapped) when (wrapped.InnerException is { } inner)
+        {
+            LogCompletionFailure(registration, inner);
+            throw;
+        }
+        catch (Exception exception) when (exception is not (KeyNotFoundException or StudioStoreUnavailableException or StudioNotAuthorizedException)
+                                          && !IsOwnCancellation(exception, cancellationToken))
+        {
+            LogCompletionFailure(registration, exception);
+
+            throw new StudioStoreUnavailableException(
+                registration.Key,
+                "its scope could not be completed: " + StudioHostFailure.Words(exception),
+                descriptor.SourceNoun,
+                exception);
+        }
+    }
+
+    private void LogCompletionFailure(StudioSourceRegistration registration, Exception exception)
+    {
+        LogLevel level = StudioLogThrottle.LevelOrWarning(
+            throttle, "Store.Tenants", registration.Key, null, StudioLogThrottle.KindOf(exception));
+
+        if (product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioTenantDiscoveryFailed(level, exception, registration.Key);
+        }
+        else
+        {
+            logger.TenantDiscoveryFailed(level, exception, registration.Key);
+        }
+    }
+
+    /// <summary>Whether <paramref name="exception" /> is the caller's own token being cancelled: the one thing that is not the host's failure.</summary>
+    private static bool IsOwnCancellation(Exception exception, CancellationToken cancellationToken) =>
+        exception is OperationCanceledException && cancellationToken.IsCancellationRequested;
 
     /// <summary>
     /// <paramref name="scope" /> by the registered key and the matched identity - or <paramref name="scope" /> itself,
