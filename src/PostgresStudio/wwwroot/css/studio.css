@@ -13964,3 +13964,119 @@ a.ms-schema-health-mark:focus-visible {
 .ms-plan-paste-unreadable {
     margin-top: var(--ms-space-sm);
 }
+
+/* ==========================================================================
+   1.0-P3B. The icicle view (issue #28, phase 3)
+
+   Appended in D26 order. A plan drawn as hand-made SVG frames (hard rule 3), root on top, each as wide as its inclusive time or cost,
+   in a TableScroll region (D25). Colour is the page's heat, whose fills are the existing four tokens; the ink on each is its own
+   token so the label keeps WCAG AA (4.5:1) on it in both themes - against #ca8a04 and #ea580c the dark ink, against #dc2626 and
+   #991b1b white in the light theme, and the dark ink on the lighter dark-theme steps. Never colour alone: every frame has a title and
+   an accessible name with its value and share, and a bar along its foot is its own part. The selected frame has a heavy outline in
+   the text colour; the focused one has the primary outline, so both show on every fill.
+   ========================================================================== */
+
+:root {
+    --ms-icicle-ink-1: #0f172a;
+    --ms-icicle-ink-2: #0f172a;
+    --ms-icicle-ink-3: #ffffff;
+    --ms-icicle-ink-4: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ms-icicle-ink-3: #0f172a;
+        --ms-icicle-ink-4: #0f172a;
+    }
+}
+
+.ms-studio[data-theme="light"] {
+    --ms-icicle-ink-3: #ffffff;
+    --ms-icicle-ink-4: #ffffff;
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-icicle-ink-3: #0f172a;
+    --ms-icicle-ink-4: #0f172a;
+}
+
+.ms-plan-icicle {
+    display: block;
+    min-width: 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-plan-icicle-frame {
+    cursor: pointer;
+    outline: none;
+}
+
+.ms-plan-icicle-frame rect:first-of-type {
+    fill: var(--ms-color-surface-hover);
+    stroke: var(--ms-color-border-strong);
+    stroke-width: 1;
+}
+
+.ms-plan-icicle-frame text {
+    fill: var(--ms-color-text);
+    pointer-events: none;
+}
+
+.ms-plan-icicle-frame .ms-plan-icicle-own {
+    fill: var(--ms-color-text);
+    stroke: none;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.ms-plan-icicle-frame.ms-plan-heat-1 rect:first-of-type { fill: var(--ms-plan-heat-1); }
+.ms-plan-icicle-frame.ms-plan-heat-2 rect:first-of-type { fill: var(--ms-plan-heat-2); }
+.ms-plan-icicle-frame.ms-plan-heat-3 rect:first-of-type { fill: var(--ms-plan-heat-3); }
+.ms-plan-icicle-frame.ms-plan-heat-4 rect:first-of-type { fill: var(--ms-plan-heat-4); }
+
+.ms-plan-icicle-frame.ms-plan-heat-1 text { fill: var(--ms-icicle-ink-1); }
+.ms-plan-icicle-frame.ms-plan-heat-2 text { fill: var(--ms-icicle-ink-2); }
+.ms-plan-icicle-frame.ms-plan-heat-3 text { fill: var(--ms-icicle-ink-3); }
+.ms-plan-icicle-frame.ms-plan-heat-4 text { fill: var(--ms-icicle-ink-4); }
+
+.ms-plan-icicle-frame.ms-plan-heat-1 .ms-plan-icicle-own { fill: var(--ms-icicle-ink-1); }
+.ms-plan-icicle-frame.ms-plan-heat-2 .ms-plan-icicle-own { fill: var(--ms-icicle-ink-2); }
+.ms-plan-icicle-frame.ms-plan-heat-3 .ms-plan-icicle-own { fill: var(--ms-icicle-ink-3); }
+.ms-plan-icicle-frame.ms-plan-heat-4 .ms-plan-icicle-own { fill: var(--ms-icicle-ink-4); }
+
+.ms-plan-icicle-frame:hover:not(.ms-plan-icicle-selected):not(:focus-visible) rect:first-of-type {
+    stroke: var(--ms-color-text-secondary);
+}
+
+.ms-plan-icicle-merged {
+    cursor: default;
+}
+
+.ms-plan-icicle-merged rect:first-of-type {
+    stroke-dasharray: 3 2;
+}
+
+.ms-plan-icicle-selected rect:first-of-type {
+    stroke: var(--ms-color-text);
+    stroke-width: 3;
+}
+
+.ms-plan-icicle-frame:focus-visible rect:first-of-type {
+    stroke: var(--ms-color-primary);
+    stroke-width: 3;
+}
+
+.ms-plan-icicle-selected:focus-visible rect:first-of-type {
+    stroke: var(--ms-color-primary);
+    stroke-width: 4;
+}
+
+.ms-plan-icicle-empty {
+    margin: var(--ms-space-sm) 0 0;
+}
+
+@media (max-width: 640px) {
+    .ms-plan-icicle-frame text {
+        display: none;
+    }
+}

@@ -39,6 +39,18 @@ verbatim and dropped under a mask) into the same `QueryPlan`, held to the JSON r
 matrix. P22 to P25 are insights judged from the statement's text (`PlanInsightInfo.FromText`, `PlanInsights.EvaluateText`, the
 studio's `SqlLexer`), shown under the editor before any run and never evaluated on a plan.
 
+**The icicle view and the drill-in's exports (1.0, issue #28 phase 3, part B).** `PlanIcicleLayout` is a pure layout over `QueryPlan`:
+a frame's width is the node's inclusive value (the sum of the `ExclusiveMs`, or `ExclusiveCost` for a plan that is not timed, over
+its subtree) and its own part is that node's own value, read through `PlanSpeedscope.Clamp` - the same computation the speedscope
+profiles use over the same `PlanNode.Exclusive*` the tree's bars and the node table show, never a second one. A node whose own
+value is zero is still as wide as what is below it; frames narrower than `PlanIcicleLayout.MinWidth` (0.002 of the root) are one
+merged frame for their parent, with a negative id and no selection. `PlanIcicle` draws it as hand-made SVG (hard rule 3) in
+percentages inside a `TableScroll` (D25), shares the Plan page's one selected node and heat, and gives every frame a focusable
+`g` with the arrow-key moves; `studio.js`'s `icicleKeys` listener only keeps the browser from scrolling under those keys. The
+Statements drill-in's `PlanView` takes `MaskedExport`: its `PlanExport` then offers Markdown and speedscope built from the masked
+`QueryPlan` it draws (`PlanTable.Markdown`, `PlanSpeedscope.Build`), and never a JSON or text export, because there is no masked
+`EXPLAIN` JSON and a JSON of the studio's own masked tree could be mistaken for one. A refused or planless drill-in offers none.
+
 **Facts beside the plan (0.10, issue #28).** After a plan the Plan page ran - never a pasted one, never on a poll - `PlanFactsService`
 reads what the database knows about the relations it names, in the console's read-only transaction as `SqlConsoleRole`, behind
 the console's own gate whole and then, in this order: each relation's schema and every table above it in `pg_inherits`, walked

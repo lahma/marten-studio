@@ -528,7 +528,7 @@
 
                 @if (shown.Plan is { } tree)
                 {
-                    <PlanView Plan="tree" Caption="@shown.Caveat" Label="@("The generic plan of statement " + id)" WhatIf="@WhatIfFor(shown)" />
+                    <PlanView Plan="tree" MaskedExport="true" Caption="@shown.Caveat" Label="@("The generic plan of statement " + id)" WhatIf="@WhatIfFor(shown)" />
                 }
                 else if (shown.NoPlan is { Length: > 0 } why)
                 {

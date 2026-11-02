@@ -201,7 +201,11 @@ internal static class PlanSpeedscope
         return [.. paths];
     }
 
-    private static double Clamp(double? value) => value is { } number && double.IsFinite(number) ? Math.Max(0, number) : 0;
+    /// <summary>
+    /// A node's own value as every view weighs it - the speedscope profiles and the icicle (1.0-P3B) alike: a number that is not
+    /// finite, or is negative, or is absent, is zero.
+    /// </summary>
+    internal static double Clamp(double? value) => value is { } number && double.IsFinite(number) ? Math.Max(0, number) : 0;
 
     private sealed record Profile(string Name, string Unit, double[] Weights);
 }

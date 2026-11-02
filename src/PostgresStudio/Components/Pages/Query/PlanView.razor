@@ -75,8 +75,9 @@
         {
             <div class="ms-plan-controls">
                 <div class="ms-plan-view-switch" role="group" aria-label="Plan view">
-                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-tree" aria-pressed="@(table ? "false" : "true")" @onclick="() => ShowTable(false)">Tree</button>
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-tree" aria-pressed="@(table || icicle ? "false" : "true")" @onclick="() => ShowTable(false)">Tree</button>
                     <button type="button" class="ms-btn ms-btn-sm ms-plan-view-table" aria-pressed="@(table ? "true" : "false")" @onclick="() => ShowTable(true)">Node table</button>
+                    <button type="button" class="ms-btn ms-btn-sm ms-plan-view-icicle" aria-pressed="@(icicle ? "true" : "false")" @onclick="ShowIcicle">Icicle</button>
                 </div>
 
                 <label class="ms-plan-heat-label">
@@ -116,7 +117,16 @@
             @(plan.Analyzed ? " Rows are per loop, as Postgres counts them." : " Rows are the planner's estimates.")
         </p>
 
-        @if (Analyzer && table)
+        @if (Analyzer && icicle)
+        {
+            @* 1.0-P3B: the icicle view, the tree's selection shared. *@
+            <PlanIcicle Plan="plan"
+                        HeatCells="@heatCells"
+                        SelectedId="selectedId"
+                        OnSelect="SelectAsync"
+                        Label="@(Label + " as an icicle")" />
+        }
+        else if (Analyzer && table)
         {
             <PlanNodeTable Plan="plan"
                            SelectedId="selectedId"
@@ -225,6 +235,11 @@
         {
             <PlanExport Json="@Json" Text="@Text" Plan="plan" FileName="@DownloadFileName" Statement="@ExportStatement" />
         }
+        else if (MaskedExport && Plan is not null)
+        {
+            @* 1.0-P3B: the Statements drill-in's exports, built from the masked plan it draws - never anything unmasked. *@
+            <PlanExport Plan="plan" MaskedOnly="true" />
+        }
     }
 
     @if (Plan is null && !string.IsNullOrWhiteSpace(Json) && !(Analyzer && read?.Plan is not null))
@@ -252,6 +267,7 @@
     // X3: the analyzer's view state, one for the tree and the table both - what is selected, which view, the heat, the path.
     private int? selectedId;
     private bool table;
+    private bool icicle;
     private PlanHeat heat;
     private bool critical;
     private HashSet<int> criticalIds = [];
@@ -299,6 +315,13 @@
     /// </summary>
     [Parameter]
     public object? Plan { get; set; }
+
+    /// <summary>
+    /// 1.0-P3B: whether a <see cref="Plan" /> given read and masked - the Statements drill-in's - is offered as Markdown and for
+    /// speedscope, built from that masked plan alone. No raw form is offered for it.
+    /// </summary>
+    [Parameter]
+    public bool MaskedExport { get; set; }
 
     /// <summary>A line under the summary: what kind of plan this is, and what it can and cannot say.</summary>
     [Parameter]
@@ -407,7 +430,18 @@
         return Task.CompletedTask;
     }
 
-    private void ShowTable(bool value) => table = value;
+    private void ShowTable(bool value)
+    {
+        table = value;
+        icicle = false;
+    }
+
+    /// <summary>1.0-P3B: the icicle view, in the tree's and the table's place.</summary>
+    private void ShowIcicle()
+    {
+        icicle = true;
+        table = false;
+    }
 
     private void OnHeatChanged(ChangeEventArgs args)
     {

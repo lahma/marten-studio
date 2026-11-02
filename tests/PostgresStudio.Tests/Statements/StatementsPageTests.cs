@@ -300,6 +300,60 @@ public class StatementsPageTests
         page.FindAll(".ms-plan-tree").Should().BeEmpty();
     }
 
+    /// <summary>1.0-P3B: a drill-in whose plan was read masked - a literal replaced - offers Markdown and speedscope built from that plan, and no JSON.</summary>
+    [Fact]
+    public async Task The_drill_in_offers_Markdown_and_speedscope_of_the_masked_plan_and_no_JSON()
+    {
+        const string literal = "hunter2";
+        string json = "[{\"Plan\": {\"Node Type\": \"Seq Scan\", \"Relation Name\": \"orders\", \"Total Cost\": 42, \"Filter\": \"(note = '" + literal + "'::text)\"}}]";
+
+        (PostgresStudioComponentContext context, _) = await ContextAsync(
+            Shown(ThreeStatements()),
+            id => Planned(id) with { Plan = QueryPlanReader.Read(json, static x => x.Replace(literal, "[masked]", StringComparison.Ordinal)).Plan },
+            "postgres/statements?queryid=1");
+        await using PostgresStudioComponentContext owned = context;
+        context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
+        context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
+
+        var page = context.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-plan-tree").Should().ContainSingle());
+
+        page.Find(".ms-plan-copy-markdown").TextContent.Should().Be("Copy as Markdown");
+        page.Find(".ms-plan-download-speedscope").TextContent.Should().Be("Download for speedscope");
+        page.FindAll(".ms-plan-copy-json, .ms-plan-copy-text, .ms-plan-download, .ms-plan-raw").Should().BeEmpty("the drill-in has no masked EXPLAIN JSON, and a JSON of the studio's own tree could be mistaken for one");
+
+        page.Find(".ms-plan-copy-markdown").Click();
+        page.Find(".ms-plan-download-speedscope").Click();
+        page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.download.text"].Should().ContainSingle());
+
+        string markdown = (string) context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single().Arguments[0]!;
+        string speedscope = (string) context.JSInterop.Invocations["martenStudio.download.text"].Single().Arguments[2]!;
+
+        markdown.Should().Contain("Seq Scan").And.NotContain(literal);
+        speedscope.Should().Contain("Seq Scan").And.NotContain(literal);
+        context.JSInterop.Invocations["martenStudio.download.text"].Single().Arguments[0].Should().Be("plan.speedscope.json");
+    }
+
+    [Fact]
+    public async Task A_drill_in_with_no_plan_or_a_refusal_offers_no_export()
+    {
+        (PostgresStudioComponentContext none, _) = await ContextAsync(
+            Shown(ThreeStatements()), id => new StatementPlanView { QueryId = id, NoPlan = "nothing" }, "postgres/statements?queryid=2");
+        await using PostgresStudioComponentContext ownedNone = none;
+        var planless = none.Render<StatementsPage>();
+        planless.WaitForAssertion(() => planless.Find(".ms-plan-drill-none"));
+        planless.FindAll(".ms-plan-export").Should().BeEmpty();
+
+        (PostgresStudioComponentContext refused, _) = await ContextAsync(
+            Shown(ThreeStatements()),
+            id => StatementPlanView.Refused(id, DatabaseRefusal.WritePolicy, PostgresStudioText.Instance.StatementsWritePolicyDenial),
+            "postgres/statements?queryid=1");
+        await using PostgresStudioComponentContext ownedRefused = refused;
+        var page = refused.Render<StatementsPage>();
+        page.WaitForAssertion(() => page.Find(".ms-plan-drill-refusal"));
+        page.FindAll(".ms-plan-export, .ms-plan-copy-markdown, .ms-plan-download-speedscope").Should().BeEmpty();
+    }
+
     [Theory]
     [InlineData("postgres/statements?queryid=abc")]
     [InlineData("postgres/statements?queryid=")]

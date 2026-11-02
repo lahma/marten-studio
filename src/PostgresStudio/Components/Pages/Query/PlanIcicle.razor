@@ -1,0 +1,193 @@
+@using System.Globalization
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Query
+
+@*
+    1.0-P3B (issue #28): the icicle view - root on top, each node a frame as wide as its inclusive time (or cost), its own part being
+    the self value the tree's bars and the speedscope export use (PlanIcicleLayout). Hand-drawn SVG (hard rule 3), in percentages of
+    the region's width so text is never stretched, inside a labelled scroll region (D25). Every frame is focusable: Enter or Space
+    selects it - the same selected node as the tree's and the node table's - and the arrow keys move between parent, child and
+    siblings. Colour is the page's heat, and never alone: every frame's accessible name and title say its value and share, and a bar along its foot is its own part.
+*@
+
+@if (frames.Count == 0)
+{
+    <p class="ms-muted ms-plan-icicle-empty">This plan has no @PlanIcicleLayout.Measure(plan!) to draw: every node's own share is zero.</p>
+}
+else
+{
+    <p class="ms-plan-legend ms-plan-icicle-legend">
+        Each frame is as wide as its @PlanIcicleLayout.Measure(plan!) with what is below it, and its own part is what the tree's bar shows.
+        The root is on top. Choose a frame to select its node; with the keyboard, the arrow keys go to the parent, the first child and the
+        siblings. Nodes too narrow to draw are one dashed frame for their parent, which selects nothing; a node with nothing of its own and
+        nothing below it has no width, and is not drawn.
+    </p>
+
+    <TableScroll Label="@Label">
+        <svg class="ms-plan-icicle" width="100%" height="@Height" role="group" aria-label="@Label">
+            @foreach (IcicleFrame frame in frames)
+            {
+                string name = Name(frame);
+                bool selected = frame.Id == SelectedId;
+                bool labelled = frame.Width >= LabelWidth;
+                string clip = "ms-icicle-" + instance.ToString(CultureInfo.InvariantCulture) + (frame.Id < 0 ? "-m" + (-frame.Id).ToString(CultureInfo.InvariantCulture) : "-n" + frame.Id.ToString(CultureInfo.InvariantCulture));
+
+                <g class="@FrameClass(frame, selected)"
+                   tabindex="0"
+                   role="button"
+                   aria-label="@name"
+                   aria-pressed="@(frame.Merged > 0 ? null : selected ? "true" : "false")"
+                   aria-disabled="@(frame.Merged > 0 ? "true" : null)"
+                   data-node="@frame.Id.ToString(CultureInfo.InvariantCulture)"
+                   @key="frame.Id"
+                   @ref="refs[frame.Id]"
+                   @onclick="() => SelectAsync(frame)"
+                   @onkeydown="(KeyboardEventArgs e) => KeyAsync(frame, e)">
+                    <title>@name</title>
+                    <rect x="@Percent(frame.X)" y="@Y(frame)" width="@Percent(frame.Width)" height="@(RowHeight - 2)" rx="2" />
+                    @if (frame.Merged == 0 && frame.Inclusive > 0 && frame.Own > 0)
+                    {
+                        @* Its own part: the share of the frame that is not below it, as a bar along the foot. *@
+                        <rect class="ms-plan-icicle-own" x="@Percent(frame.X)" y="@(Y(frame) + RowHeight - 6)" width="@Percent(frame.Width * frame.Own / frame.Inclusive)" height="4" />
+                    }
+                    @if (labelled)
+                    {
+                        <clipPath id="@clip">
+                            <rect x="@Percent(frame.X)" y="@Y(frame)" width="@Percent(frame.Width)" height="@(RowHeight - 2)" />
+                        </clipPath>
+                        <!text x="@Percent(frame.X + 0.003)" y="@(Y(frame) + 15)" clip-path="@("url(#" + clip + ")")">@frame.Label</!text>
+                    }
+                </g>
+            }
+        </svg>
+    </TableScroll>
+}
+
+@code {
+    /// <summary>One row's height, in pixels.</summary>
+    internal const int RowHeight = 24;
+
+    /// <summary>A frame at least this share of the root's width is labelled; narrower, only its accessible name and title say what it is.</summary>
+    internal const double LabelWidth = 0.06;
+
+    private static int counter;
+    private readonly int instance = Interlocked.Increment(ref counter);
+    private readonly Dictionary<int, ElementReference> refs = [];
+    private QueryPlan? plan;
+    private IReadOnlyList<IcicleFrame> frames = [];
+    private Dictionary<int, IcicleFrame> byId = [];
+    private IReadOnlyDictionary<int, PlanHeatCell> heatCells = new Dictionary<int, PlanHeatCell>();
+
+    /// <summary>The plan, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type).</summary>
+    [Parameter]
+    public object? Plan { get; set; }
+
+    /// <summary>The page's heat, as <c>PlanAnalysis.HeatMap</c> gave it, an <c>IReadOnlyDictionary&lt;int, PlanHeatCell&gt;</c>.</summary>
+    [Parameter]
+    public object? HeatCells { get; set; }
+
+    /// <summary>The node selected in the tree and the node table.</summary>
+    [Parameter]
+    public int? SelectedId { get; set; }
+
+    /// <summary>Raised with the node a frame was selected for.</summary>
+    [Parameter]
+    public EventCallback<int> OnSelect { get; set; }
+
+    /// <summary>The region's accessible name.</summary>
+    [Parameter]
+    public string Label { get; set; } = "Query plan as an icicle";
+
+    /// <summary>Each drawn frame's element reference by node id: what the arrow keys ask the browser to focus (the tests' view of it).</summary>
+    internal IReadOnlyDictionary<int, ElementReference> FrameReferences => refs;
+
+    private int Height => (frames.Count == 0 ? 0 : frames.Max(static x => x.Depth) + 1) * RowHeight;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(Plan, plan) && Plan is QueryPlan given)
+        {
+            plan = given;
+            frames = PlanIcicleLayout.Of(given);
+            byId = frames.ToDictionary(static x => x.Id);
+            refs.Clear();
+        }
+
+        heatCells = HeatCells as IReadOnlyDictionary<int, PlanHeatCell> ?? new Dictionary<int, PlanHeatCell>();
+    }
+
+    private string Name(IcicleFrame frame)
+    {
+        double total = frames.Count > 0 ? frames[0].Inclusive : 0;
+        string share = total > 0 ? ((int) Math.Round(frame.Inclusive / total * 100)).ToString(CultureInfo.InvariantCulture) + "%" : "0%";
+
+        return frame.Label + ": " + PlanIcicleLayout.Value(frame.Inclusive, plan!.Timed) + " with what is below it (" + share + " of the plan), "
+            + PlanIcicleLayout.Value(frame.Own, plan.Timed) + " its own";
+    }
+
+    private string FrameClass(IcicleFrame frame, bool selected)
+    {
+        string css = "ms-plan-icicle-frame";
+
+        if (frame.Merged > 0)
+        {
+            css += " ms-plan-icicle-merged";
+        }
+
+        if (frame.Merged == 0 && heatCells.TryGetValue(frame.Id, out PlanHeatCell? cell) && cell.Level > 0)
+        {
+            css += " ms-plan-heat-" + cell.Level.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return selected ? css + " ms-plan-icicle-selected" : css;
+    }
+
+    private static int Y(IcicleFrame frame) => frame.Depth * RowHeight;
+
+    private static string Percent(double share) => (share * 100).ToString("0.###", CultureInfo.InvariantCulture) + "%";
+
+    private async Task SelectAsync(IcicleFrame frame)
+    {
+        if (frame.Merged == 0)
+        {
+            await OnSelect.InvokeAsync(frame.Id);
+        }
+    }
+
+    private async Task KeyAsync(IcicleFrame frame, KeyboardEventArgs e)
+    {
+        IcicleFrame? target = e.Key switch
+        {
+            "ArrowUp" => frame.ParentId is { } parent ? byId.GetValueOrDefault(parent) : null,
+            "ArrowDown" => frames.FirstOrDefault(x => x.ParentId == frame.Id),
+            "ArrowLeft" => Sibling(frame, -1),
+            "ArrowRight" => Sibling(frame, 1),
+            _ => null,
+        };
+
+        if (e.Key is "Enter" or " ")
+        {
+            await SelectAsync(frame);
+            return;
+        }
+
+        if (target is not null && refs.TryGetValue(target.Id, out ElementReference element))
+        {
+            try
+            {
+                await element.FocusAsync();
+            }
+            catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+            {
+                // The tab went away between the key and the focus.
+            }
+        }
+    }
+
+    private IcicleFrame? Sibling(IcicleFrame frame, int step)
+    {
+        List<IcicleFrame> siblings = [.. frames.Where(x => x.ParentId == frame.ParentId && x.Depth == frame.Depth)];
+        int at = siblings.IndexOf(frame) + step;
+        return at >= 0 && at < siblings.Count ? siblings[at] : null;
+    }
+}
