@@ -80,7 +80,8 @@ internal sealed class ConnectionNearMissCheck : HealthCheck<ConnectionNearMissFa
         TimeSpan judged = reader.Window < ConnectionThresholds.NearMissWindow ? reader.Window : ConnectionThresholds.NearMissWindow;
 
         // Names are in the facts and gated in the evidence, as C13's holders are: the sweep is the database's, the gate is per visitor.
-        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, server, names: true, context.Now - judged, cancellationToken).ConfigureAwait(false);
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(
+            reader, context.Services.GetService<ConnectionHistorySampler>(), server, names: true, context.Now - judged, cancellationToken).ConfigureAwait(false);
 
         if (read.Outcome == PostgresReadOutcome.TimedOut)
         {

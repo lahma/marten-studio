@@ -48,8 +48,28 @@ internal static class ConnectionHistoryLookup
     /// <param name="names">Whether applications may be named: the activity gate passed.</param>
     /// <param name="since">Only the samples from this time on, or <see langword="null" /> for the whole window.</param>
     /// <param name="cancellationToken">The caller's.</param>
+    public static Task<ConnectionHistoryRead> ReadAsync(
+        ConnectionHistoryReader reader,
+        string server,
+        bool names,
+        DateTimeOffset? since,
+        CancellationToken cancellationToken) =>
+        ReadAsync(reader, null, server, names, since, cancellationToken);
+
+    /// <summary>
+    /// Reads the history of <paramref name="server" /> through the shared cache, with the samples <paramref name="sampler" /> holds
+    /// because the store refused them (issue #46), and summarizes it. Never throws for the store's failure - it is a value - but for
+    /// the caller's own cancellation; when the store cannot be read and the sampler holds samples, those alone are summarized.
+    /// </summary>
+    /// <param name="reader">The reader every page shares (the 30-second cache).</param>
+    /// <param name="sampler">This process's sampler, or <see langword="null" /> where it samples nothing (a reader-only registration).</param>
+    /// <param name="server">The server, <c>host:port</c>.</param>
+    /// <param name="names">Whether applications may be named: the activity gate passed.</param>
+    /// <param name="since">Only the samples from this time on, or <see langword="null" /> for the whole window.</param>
+    /// <param name="cancellationToken">The caller's.</param>
     public static async Task<ConnectionHistoryRead> ReadAsync(
         ConnectionHistoryReader reader,
+        ConnectionHistorySampler? sampler,
         string server,
         bool names,
         DateTimeOffset? since,
@@ -60,11 +80,11 @@ internal static class ConnectionHistoryLookup
 
         try
         {
-            IReadOnlyList<PostgresConnectionSample> samples = await reader.ReadAsync(server, cancellationToken).ConfigureAwait(false);
-
-            // P46: the samples this process took and could not append (its per-server backlog, ConnectionHistorySampler.PendingSamples)
-            // join `samples` here, before the view is made, and `pending` is their count.
-            int pending = 0;
+            // Issue #46: the samples this process took and could not append join what the store holds, before the view is made
+            // (ConnectionHistoryReader.ReadWithPendingAsync: ordered, each counted once, and alone when the store cannot be read).
+            IReadOnlyList<PostgresConnectionSample> held = sampler?.PendingSamples(server) ?? [];
+            IReadOnlyList<PostgresConnectionSample> samples = await reader.ReadWithPendingAsync(server, held, cancellationToken).ConfigureAwait(false);
+            int pending = held.Count;
 
             if (since is { } from)
             {

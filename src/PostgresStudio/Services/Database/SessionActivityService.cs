@@ -156,7 +156,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         }
 
         // The one arithmetic Holders and the diagnostics API share (issue #47).
-        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(history, server, names, null, cancellationToken).ConfigureAwait(false);
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(history, sampler, server, names, null, cancellationToken).ConfigureAwait(false);
 
         // A store that failed or took longer than QueryTimeout: the page shows now alone for this poll.
         if (read.Failure is { } failure && logger.IsEnabled(LogLevel.Debug))
