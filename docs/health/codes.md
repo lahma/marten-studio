@@ -94,6 +94,9 @@ baseline, so editing or deleting a row is a reviewed change.
 | [P23](plans.md#p23-large-literal-offset) | Large literal OFFSET | Plans | - | statement text | both | 1.0 | - |
 | [P24](plans.md#p24-select--over-a-join) | SELECT * over a join | Plans | - | statement text | both | 1.0 | - |
 | [P25](plans.md#p25-order-by-random) | ORDER BY random() | Plans | - | statement text | both | 1.0 | - |
+| [P26](plans.md#p26-json-filter-on-a-document-table-with-no-usable-index) | JSON filter on a document table with no usable index | Plans | - | plan node | Marten | 1.0 | - |
+| [P27](plans.md#p27-gin-index-on-data-not-used-for-a-containment-filter) | GIN index on data not used for a containment filter | Plans | - | plan node | Marten | 1.0 | - |
+| [P28](plans.md#p28-tenant-or-soft-delete-predicate-filtered-after-the-index) | Tenant or soft-delete predicate filtered after the index | Plans | - | plan node | Marten | 1.0 | - |
 | [R01](replication.md#r01-replication-slot-retaining-wal) | Replication slot retaining WAL | Replication | `near-limit`, `inactive`, `lost` | - | both | 0.4 | - |
 | [R02](replication.md#r02-wal-archiving-failing) | WAL archiving failing | Replication | `failing`, `backlog` | - | both | 0.5 | - |
 | [R03](replication.md#r03-standby-lag) | Standby lag | Replication | `primary-view`, `standby-view`, `paused`, `aurora-reader` | - | both | 0.5 | - |

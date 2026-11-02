@@ -137,6 +137,9 @@ internal sealed class QueryHarness : IAsyncDisposable
     public PostgresStudio.Services.Sources.ISqlConsoleService Console =>
         scope.ServiceProvider.GetRequiredService<PostgresStudio.Services.Sources.ISqlConsoleService>();
 
+    /// <summary>The container's services for this harness's one circuit, for a test that resolves a registered seam.</summary>
+    public IServiceProvider Services => scope.ServiceProvider;
+
     /// <summary>The audit ring, for asserting what was recorded.</summary>
     public StudioActionLog Audit => scope.ServiceProvider.GetRequiredService<StudioActionLog>();
 
@@ -149,10 +152,12 @@ internal sealed class QueryHarness : IAsyncDisposable
     /// <param name="fixture">The shared Postgres.</param>
     /// <param name="schema">The schema to own, dropped and recreated.</param>
     /// <param name="configure">Studio options - by default <c>RunSql</c> is on, the way these tests need it.</param>
+    /// <param name="configureStore">More of the store's configuration, applied after the harness's own.</param>
     public static async Task<QueryHarness> CreateAsync(
         PostgresFixture fixture,
         string schema,
-        Action<MartenStudioOptions>? configure = null)
+        Action<MartenStudioOptions>? configure = null,
+        Action<StoreOptions>? configureStore = null)
     {
         await fixture.CreateSchemaAsync(schema);
 
@@ -177,6 +182,7 @@ internal sealed class QueryHarness : IAsyncDisposable
             options.Schema.For<QueryPerson>().Duplicate(x => x.Name);
             options.RegisterDocumentType<QueryTag>();
             options.Schema.For<QueryTicket>().MultiTenanted().SoftDeleted();
+            configureStore?.Invoke(options);
         });
 
         services.AddMartenStudio(options =>

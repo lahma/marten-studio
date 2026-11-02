@@ -1,0 +1,26 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Seq Scan",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Relation Name": "mt_doc_gindoc",
+      "Schema": "studio_sql",
+      "Alias": "d",
+      "Startup Cost": 0.00,
+      "Total Cost": 1210.00,
+      "Plan Rows": 40000,
+      "Plan Width": 96,
+      "Actual Startup Time": 0.052,
+      "Actual Total Time": 21.318,
+      "Actual Rows": 39000.00,
+      "Actual Loops": 1,
+      "Output": ["data", "id"],
+      "Filter": "(d.data @> '{\"Color\": \"red\"}'::jsonb)",
+      "Rows Removed by Filter": 11000
+    },
+    "Planning Time": 0.101,
+    "Triggers": [],
+    "Execution Time": 24.402
+  }
+]
