@@ -50,7 +50,8 @@ namespace PostgresStudio.Services.ConnectionHistory;
 /// it answers no, every kept connection is closed.
 /// </para>
 /// </remarks>
-internal sealed class ConnectionHistorySampler : BackgroundService
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA1001:Types that own disposable fields should be disposable", Justification = "The round semaphore is never disposed on purpose (issue #50): its wait handle is never created, so it holds nothing unmanaged, and a Stop or an in-flight round after Dispose must still be able to wait on and release it.")]
+internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDisposable
 {
     /// <summary>The most servers sampled; past it the rest are left out.</summary>
     internal const int MaxServers = 50;
@@ -66,7 +67,15 @@ internal sealed class ConnectionHistorySampler : BackgroundService
     private readonly StudioLogThrottle throttle;
     private readonly TimeProvider time;
     private readonly Dictionary<string, NpgsqlConnection> kept = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// One round at a time, and a stop after it. Never disposed (issue #50): a <see cref="SemaphoreSlim" /> whose wait handle is never
+    /// asked for holds nothing unmanaged, and disposing it made a <see cref="StopAsync" /> after the dispose, and the release of a round
+    /// still in flight, throw <see cref="ObjectDisposedException" />.
+    /// </summary>
     private readonly SemaphoreSlim round = new(1, 1);
+
+    private int disposed;
 
     /// <summary>
     /// Issue #46: the samples whose append failed, per server, oldest first. Mutated only inside <see cref="round" />, and each
@@ -163,11 +172,58 @@ internal sealed class ConnectionHistorySampler : BackgroundService
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Cancels the stopping token, as <see cref="BackgroundService" /> does, and nothing else: a synchronous dispose must not block on
+    /// the I/O that closes the kept connections, so it releases none. <see cref="DisposeAsync" /> does - the container's async dispose
+    /// reaches it - and <see cref="StopAsync" /> still works afterwards (issue #50).
+    /// </summary>
     public override void Dispose()
     {
         base.Dispose();
-        round.Dispose();
+    }
+
+    /// <summary>
+    /// Issue #50: cancels the stopping token, waits for a round in flight for at most the studio's <c>QueryTimeout</c> (and goes on
+    /// regardless when it runs out, as <see cref="StopAsync" /> does when the host's budget does), closes the kept connections and
+    /// clears the backlog - so they are released even when <see cref="StopAsync" /> never ran. Idempotent.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
+        base.Dispose();
+        bool entered = false;
+
+        try
+        {
+            using CancellationTokenSource limit = new(settings.QueryTimeout, time);
+            await round.WaitAsync(limit.Token).ConfigureAwait(false);
+            entered = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // A round that outlives QueryTimeout: the connections are closed under it, as a stop does.
+        }
+
+        try
+        {
+            await ReleaseAsync().ConfigureAwait(false);
+
+            lock (backlogGate)
+            {
+                backlogs.Clear();
+            }
+        }
+        finally
+        {
+            if (entered)
+            {
+                round.Release();
+            }
+        }
     }
 
     /// <summary>
