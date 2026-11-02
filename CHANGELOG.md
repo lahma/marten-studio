@@ -1,8 +1,9 @@
 # 1.0.1
 
-1.0.1 handles the four issues opened after 1.0.0. The studio's share of a pool never exceeds the pool itself (#49), the
+1.0.1 handles the six issues opened after 1.0.0. The studio's share of a pool never exceeds the pool itself (#49), the
 connection history keeps the samples its store refused (#46), a process can read the history another process fills
-(#48), and the diagnostics API reports the history, which a new check, C15, judges (#47).
+(#48), the diagnostics API reports the history, which a new check, C15, judges (#47), the sampler survives a stop after
+its dispose (#50), and Holders reads the history incrementally (#51).
 
 - `MaxStudioConnections` is never above the data source's own `Maximum Pool Size` (#49). The studio holds the smaller of
   the two of each pool (the option alone where `Pooling` is off), so a dedicated pool of one makes a second read fail
@@ -31,6 +32,12 @@ connection history keeps the samples its store refused (#46), a process can read
   capacity remedy included; the applications that held the most are behind the activity gate. Not applicable without a
   connection history. C15 can make the opt-in health check report `Degraded` (or `Unhealthy` at Critical) on a host that
   keeps a history and runs close to its limit: accept it with `AcceptedChecks` to keep the health check as it was.
+- The connection history sampler no longer throws `ObjectDisposedException` when the host stops it after disposing it
+  (`WebApplicationFactory.DisposeAsync` does): the round semaphore is never disposed, and the sampler's async dispose
+  closes the kept connections even when `StopAsync` never ran (#50).
+- Database › Sessions › Holders reads the connection history incrementally: after the first read of a server the studio
+  asks the store only for the samples since its last read, less five minutes, with a full read every ten minutes, so a
+  store kept in the monitored database is no longer asked for the whole window twice a minute (#51).
 
 # 1.0.0
 
