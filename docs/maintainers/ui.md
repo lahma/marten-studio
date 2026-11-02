@@ -81,3 +81,27 @@ no specificity, so any rule that names a link wins over it. Earlier releases' se
 0.10.0 appended `0.10-Q35` (accepted checks) `0.10-A` (the plan facts panel, tested in `PlanFactsStylesheetTests`) and `0.10-B` (Compare and the settings what-if,
 tested in `PlanCompareStylesheetTests`) and `UI-0.10` (the sweep's wrap for a node's values, tested in
 `PlanUiSweepStylesheetTests`), in that order.
+1.0.0 appended `1.0-UIFIX` (menus and the rail's credit), described next.
+
+## Menus and the rail (1.0-UIFIX)
+
+**A popover is placed by its own anchor, never by the user agent.** A `popover` is a top-layer element, and an unplaced one is
+centred in the viewport over whatever is there: the Health page's Snapshot menu (a `MenuButton` with only `.ms-menu-popover`)
+and the JSON viewer's copy menu (`.ms-copy-menu`) opened that way, because neither class had a `:popover-open` rule. So
+`MenuButton` itself gives its button `anchor-name` and its popover `position-anchor`, inline, by a name made from the button's
+id (`--<id>-button`), and the stylesheet's placement rules (`.ms-menu-popover`, `.ms-doc-copy-popover`, `.ms-db-copy-popover`)
+anchor to that name and flip when there is no room; a new class given to `MenuButton` needs no rule of its own to be placed,
+and two menus on a page never share a name. The JSON viewer has one menu for every row, so `studio.js` gives
+`--ms-menu-invoker` to the key button that asked for it (or, from the keyboard, to the focused row's key) and
+`.ms-copy-menu:popover-open` anchors to that. A popover in the top layer still needs a Playwright check: where it lands is the
+browser's layout, and no bUnit test sees it (`PostgresStudioMenuScenarioTests` measures each menu against its button). The
+item detail of the Snapshot menu is prose and takes the UI font; a copy menu's details are values (names, statements) and
+stay in the code font.
+
+**The rail's own column sticks to the window.** `NavMenu` wraps its brand, list and credit in `.ms-sidebar-inner`, which is
+`position: sticky`, as tall as the window and scrolls inside itself; the `aside` round it keeps the page's full height for the
+rail's background and border and is therefore `overflow: visible` (a scroll container would be what the column stuck inside).
+The credit is the column's last child with `margin-top: auto`: at the foot when the list is shorter than the window, after the
+list when it is longer, and never over it. It is three `.ms-rail-credit-line` blocks (product and version, licence, author).
+On the 56 px rail (at 1024 px and below) it is clipped out of sight the way the entries' names are, and stays in the
+accessibility tree.

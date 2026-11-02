@@ -14078,5 +14078,100 @@ a.ms-schema-health-mark:focus-visible {
 @media (max-width: 640px) {
     .ms-plan-icicle-frame text {
         display: none;
+
+   1.0-UIFIX. Menus open at their button; the credit line at the rail's foot
+
+   Appended in D26 order; later wins on purpose. A popover is a top-layer element, and the user agent centres an unplaced
+   one in the viewport: the Health page's Snapshot menu (a MenuButton with only `.ms-menu-popover`) and the JSON viewer's
+   copy menu (`.ms-copy-menu`) had no placement rule and opened in the middle of the window, over the page. MenuButton now
+   gives its button an anchor of its own and its popover that anchor, inline, so every menu built on it is placed by one
+   rule here, and the two copy menus' own rules keep working with the same instance anchor. The JSON viewer's one menu is
+   shared by every row and is anchored to the row's key button that opened it (studio.js names it). Each places the menu below its anchor, with its right edge on the anchor's, and flips where there is no room.
+   ========================================================================== */
+
+@supports (anchor-name: --ms-supported) {
+    .ms-menu-popover:popover-open {
+        position: fixed;
+        inset: auto;
+        margin: 0;
+        top: anchor(bottom);
+        right: anchor(right);
+        margin-top: var(--ms-space-xs);
+        position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+    }
+
+    .ms-doc-copy-popover:popover-open,
+    .ms-db-copy-popover:popover-open {
+        position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+    }
+
+    /* One menu for every row of the viewer, so no name of its own: studio.js gives `--ms-menu-invoker` to the key button
+       that asked for it. Left edge on that button, where the row's text begins, and the right edge where the button is
+       too near the window's right. */
+    .ms-copy-menu:popover-open {
+        position-anchor: --ms-menu-invoker;
+        position: fixed;
+        inset: auto;
+        margin: 0;
+        top: anchor(bottom);
+        left: anchor(left);
+        margin-top: var(--ms-space-xs);
+        position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline;
+    }
+}
+
+/* The Snapshot menu's second lines say what an item does, in words: the UI's own font, not the code font a copy menu's
+   second lines (a name, a statement) are in. */
+.ms-snapshot-menu-popover .ms-menu-item-detail {
+    font-family: var(--ms-font-family);
+}
+
+/* The rail: its own column sticks to the window and is as tall as it, so the credit stands at the foot of what is on
+   screen on a page of any length; a rail longer than the window scrolls inside itself. The aside keeps the page's full
+   height for the rail's background and border, so it must not be the scroll container the column sticks inside. */
+.ms-sidebar {
+    overflow: visible;
+}
+
+.ms-sidebar-inner {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/* Three lines, pinned to the foot when the list is shorter than the rail and after the list when it is longer: the
+   auto top margin takes whatever room is left, and none when there is none. */
+.ms-rail-credit {
+    margin: auto 0 0;
+    padding: var(--ms-space-md);
+    border-top: 1px solid var(--ms-color-border);
+    line-height: 1.5;
+}
+
+.ms-rail-credit-line {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The 56 px rail has no room for words. The credit stays in the accessibility tree, as the rail's names do, and is only
+   taken out of sight, so it can never cover an icon. */
+@media (max-width: 1024px) {
+    .ms-rail-credit {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border-width: 0;
     }
 }

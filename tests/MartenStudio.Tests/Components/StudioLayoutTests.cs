@@ -97,7 +97,11 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         var credit = layout.Find(".ms-rail-credit");
-        credit.TextContent.Should().Contain("Marten Studio").And.Contain("MIT licensed").And.Contain("Marko Lahma");
+        var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
+        lines.Should().HaveCount(3, "the product and its version, the licence and the author, a line each");
+        lines[0].Should().StartWith("Marten Studio ").And.NotContain("MIT").And.NotContain("Marko");
+        lines[1].Should().Be("MIT licensed");
+        lines[2].Should().Be("by Marko Lahma");
         credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
             "https://github.com/lahma/marten-studio/blob/main/LICENSE");
     }

@@ -156,14 +156,14 @@ internal sealed class StudioPage : IAsyncDisposable
     /// <c>/login?error=1</c>, which does not say it, so it still fails, naming this step.
     /// </para>
     /// </remarks>
-    internal static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user, TimeSpan timeout)
+    internal static async Task<StudioPage> SignInAsync(IBrowser browser, SampleHost host, string user, TimeSpan timeout, int viewportWidth = ViewportWidth)
     {
         ArgumentNullException.ThrowIfNull(browser);
         ArgumentNullException.ThrowIfNull(host);
 
         IBrowserContext context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
-            ViewportSize = new ViewportSize { Width = ViewportWidth, Height = ViewportHeight },
+            ViewportSize = new ViewportSize { Width = viewportWidth, Height = ViewportHeight },
             BaseURL = host.BaseAddress.AbsoluteUri,
             ColorScheme = ColorScheme.Light,
             TimezoneId = "UTC",
@@ -266,7 +266,7 @@ internal sealed class StudioPage : IAsyncDisposable
     /// <para>
     /// The condition is read in the page by the driver, not with <c>WaitForURLAsync</c>: that call follows the
     /// URL match with a client-side load-state wait that checks and then subscribes, and can miss an event raised
-    /// between the two (see <see cref="SignInAsync(IBrowser, SampleHost, string, TimeSpan)" />).
+    /// between the two (see <see cref="SignInAsync(IBrowser, SampleHost, string, TimeSpan, int)" />).
     /// </para>
     /// </remarks>
     public Task WaitForScopeInUrlAsync() =>

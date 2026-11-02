@@ -10,8 +10,14 @@
 
     The mechanism is the platform's own popover, the same one JsonCopyMenu and CapabilityBanner use: no
     positioning library and no third-party menu component (AGENTS.md hard rule 3), and light dismiss and
-    Escape for free. The caller names the classes, so each menu keeps its own anchor and placement rules in
-    the stylesheet.
+    Escape for free. The caller names the classes, so each menu keeps its own look in the stylesheet.
+
+    Where the menu opens is decided here, once. The button is the anchor of its own popover, by a name that is
+    this instance's own (inline: `anchor-name` on the button, `position-anchor` on the popover, both inside the
+    one wrapper). A popover is a top-layer element and the user agent places an unanchored one in the middle of
+    the viewport, over whatever is there - which is where the Health page's Snapshot menu opened. The
+    stylesheet's placement rules name no anchor of their own, so a caller's classes cannot leave a menu unplaced
+    and two menus on one page never share an anchor.
 
     role="menu" is a promise about the keyboard rather than a label. A menu is one tab stop, and inside it
     the arrow keys, Home and End move a roving tabindex between the items, through the shared focus helper.
@@ -31,6 +37,7 @@
             aria-controls="@PopoverId"
             aria-haspopup="menu"
             aria-expanded="@(open ? "true" : "false")"
+            style="anchor-name: @AnchorName"
             title="@Title">
         <span>@Text</span>
         @Chevron
@@ -42,6 +49,7 @@
     <div id="@PopoverId"
          popover="auto"
          class="@PopoverClass"
+         style="position-anchor: @AnchorName"
          role="menu"
          aria-label="@Label"
          @ontoggle="OnToggledAsync"
@@ -123,6 +131,12 @@
     private string PopoverId => string.IsNullOrWhiteSpace(ElementId) ? generatedId : ElementId;
 
     private string ButtonId => PopoverId + "-button";
+
+    /// <summary>
+    /// The CSS dashed identifier the button and its popover share: the button's id, with anything a dashed identifier
+    /// cannot hold turned into a hyphen.
+    /// </summary>
+    private string AnchorName => "--" + string.Concat(ButtonId.Select(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '-'));
 
     protected override void OnParametersSet()
     {

@@ -135,9 +135,9 @@ public sealed class BrowserSuiteFixture(PostgresFixture postgres) : IAsyncLifeti
 internal static class BrowserScenario
 {
     /// <summary>Runs one scenario, leaving evidence behind when it fails.</summary>
-    public static async Task RunAsync(IBrowser browser, string name, SampleHost host, string user, Func<StudioPage, Task> body)
+    public static async Task RunAsync(IBrowser browser, string name, SampleHost host, string user, Func<StudioPage, Task> body, int viewportWidth = StudioPage.ViewportWidth)
     {
-        await using StudioPage studio = await StudioPage.SignInAsync(browser, host, user);
+        await using StudioPage studio = await StudioPage.SignInAsync(browser, host, user, StudioPage.SignInTimeout, viewportWidth);
 
         try
         {
