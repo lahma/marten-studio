@@ -31,6 +31,13 @@ namespace PostgresStudio.Integration.Tests.Query;
 /// <c>tests/PostgresStudio.Tests/Statements/PlanCorpus/text-*.txt</c> (the TIMING-off variant on 17 only), and each plain plan's JSON
 /// beside it as <c>pair-text-*.json</c>, for the fast suite to read offline. The files are checked in; this switch is how they were made.
 /// </para>
+/// <para>
+/// <b>Statistics that hold still.</b> Each statement is explained twice, once a format, and the plain comparison includes the costs and
+/// estimates, so the statistics must not change between the two runs. The seed's one <c>vacuum analyze</c> is the only analyze: every
+/// table is created with <c>autovacuum_enabled = off</c> (the partitions, since a partitioned table takes no storage parameter), because an
+/// autovacuum analyze that started after the inserts samples other rows and, committing later, moved a CTE scan's startup cost between
+/// the text and the JSON run (CI, PostgreSQL 17, 2026-11-02).
+/// </para>
 /// </remarks>
 public class PlanTextParityLiveTests(PostgresVersionMatrix matrix)
 {
@@ -38,21 +45,21 @@ public class PlanTextParityLiveTests(PostgresVersionMatrix matrix)
 
     private static readonly string[] Seed =
     [
-        "create table public.customers (id int primary key, region text not null)",
+        "create table public.customers (id int primary key, region text not null) with (autovacuum_enabled = off)",
         "insert into public.customers select g, 'r' || (g % 10) from pg_catalog.generate_series(1, 2000) g",
-        "create table public.orders (id int primary key, customer_id int not null, bucket int not null, amount numeric not null, placed date not null, note text)",
+        "create table public.orders (id int primary key, customer_id int not null, bucket int not null, amount numeric not null, placed date not null, note text) with (autovacuum_enabled = off)",
         "insert into public.orders select g, (g % 2000) + 1, g % 20, (g % 500)::numeric, date '2025-01-01' + (g % 365), 'note ' || g from pg_catalog.generate_series(1, 100000) g",
         "create index orders_customer_idx on public.orders (customer_id)",
         "create index orders_placed_idx on public.orders (placed)",
         "create table public.readings (id int not null, day date not null, v int not null) partition by range (day)",
-        "create table public.readings_q1 partition of public.readings for values from ('2025-01-01') to ('2025-04-01')",
-        "create table public.readings_q2 partition of public.readings for values from ('2025-04-01') to ('2025-07-01')",
-        "create table public.readings_q3 partition of public.readings for values from ('2025-07-01') to ('2025-10-01')",
-        "create table public.readings_q4 partition of public.readings for values from ('2025-10-01') to ('2026-01-01')",
+        "create table public.readings_q1 partition of public.readings for values from ('2025-01-01') to ('2025-04-01') with (autovacuum_enabled = off)",
+        "create table public.readings_q2 partition of public.readings for values from ('2025-04-01') to ('2025-07-01') with (autovacuum_enabled = off)",
+        "create table public.readings_q3 partition of public.readings for values from ('2025-07-01') to ('2025-10-01') with (autovacuum_enabled = off)",
+        "create table public.readings_q4 partition of public.readings for values from ('2025-10-01') to ('2026-01-01') with (autovacuum_enabled = off)",
         "insert into public.readings select g, date '2025-01-01' + (g % 360), g % 100 from pg_catalog.generate_series(1, 40000) g",
         "create index readings_day_idx on public.readings (day)",
-        "create table public.parents (id int primary key)",
-        "create table public.children (id int primary key, parent_id int not null references public.parents (id))",
+        "create table public.parents (id int primary key) with (autovacuum_enabled = off)",
+        "create table public.children (id int primary key, parent_id int not null references public.parents (id)) with (autovacuum_enabled = off)",
         "insert into public.parents select g from pg_catalog.generate_series(1, 100) g",
         "vacuum analyze",
     ];
