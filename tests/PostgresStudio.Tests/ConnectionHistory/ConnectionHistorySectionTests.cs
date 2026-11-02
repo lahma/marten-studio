@@ -168,6 +168,23 @@ public class ConnectionHistorySectionTests
     }
 
     [Fact]
+    public void An_empty_window_says_the_first_sample_is_coming_here_and_in_reader_mode_that_another_process_fills_it()
+    {
+        ConnectionHistoryRead none = new(PostgresReadOutcome.Unavailable, "db:5432", TimeSpan.FromDays(7), null, 0, null);
+
+        PostgresConnectionHistorySection sampling = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false);
+        PostgresConnectionHistorySection explicitSampling = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, readerOnly: false);
+        PostgresConnectionHistorySection reading = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, readerOnly: true);
+
+        sampling.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYet).And.Contain("is taken a moment after the application starts");
+        explicitSampling.Reason.Should().Be(sampling.Reason);
+        reading.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYetReaderOnly)
+            .And.Contain("This process only reads it: another process fills it, and has sampled nothing of this server within the window.")
+            .And.NotContain("moment after the application starts");
+        reading.Outcome.Should().Be(PostgresReadOutcome.Unavailable);
+    }
+
+    [Fact]
     public async Task Holders_and_the_API_read_one_sample_set_through_one_cache_and_cannot_disagree_on_a_peak()
     {
         CountingStore store = new(Day());

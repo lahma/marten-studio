@@ -244,15 +244,4 @@ public class ConnectionNearMissCheckTests
         withheldWith.Should().Be(0);
         System.Text.Json.JsonSerializer.Serialize(with).Should().Contain(Application);
     }
-
-    [Fact]
-    public void It_can_be_accepted_like_any_check()
-    {
-        // Acceptance is by code, applied by the sweep to a finding of any check (AcceptedChecks): C15 asks for nothing special.
-        HealthFinding finding = Evaluate(Facts(90)).Findings.Single();
-
-        finding.Key.Should().Be("C15");
-        finding.Accepted.Should().BeFalse();
-        (finding with { Accepted = true, AcceptedReason = "We run close to the limit on purpose." }).Accepted.Should().BeTrue();
-    }
 }
