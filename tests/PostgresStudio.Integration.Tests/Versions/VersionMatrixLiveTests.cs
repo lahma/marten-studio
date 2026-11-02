@@ -13,7 +13,7 @@ using PostgresStudio.Services.Server;
 namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
-/// The studio's core reads on PostgreSQL 14 to 18, and on 19's release candidate as a preview: every one of the shared
+/// The studio's core reads on PostgreSQL 15 to 19 (19 on its release candidate until its general-availability image): every one of the shared
 /// studio's health checks - the regular and the statement checks; it has no deeper ones, and MartenStudio's checks are not
 /// in the matrix - ends read, not applicable or not checked, never failed, never on an unknown column, function, relation
 /// or syntax, as the application's role and as a role with no grant at all, and C01 judges the host's pool; every
@@ -23,9 +23,10 @@ namespace PostgresStudio.Integration.Tests.Versions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The preview leg reports, and never fails.</b> A finding on 19's release candidate is written to the test's output
-/// and the row is skipped with it as the reason, so a run on CI stays green while the report says what 19 broke; the
-/// day its image is a released one (<see cref="MatrixVersion.Preview" />), the same finding fails.
+/// <b>A preview leg reports, and never fails.</b> A finding on a leg whose <see cref="MatrixVersion.Preview" /> is set is
+/// written to the test's output and the row is skipped with it as the reason, so a run on CI stays green while the report
+/// says what that major broke. 19 is not one since 1.1: its release candidate is a supported leg and its findings fail the
+/// run. The mechanism stays for the next major's beta.
 /// </para>
 /// <para>
 /// <b>Wall clock</b> (this machine, images local, 2026-10-26): about 40 s for the folder - the first test of each major
@@ -102,7 +103,7 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
             }
         }
 
-        // No core check is refused anything as probe on 14 to 19 - every statistics view it reads is open to every role - so
+        // No core check is refused anything as probe on 15 to 19 - every statistics view it reads is open to every role - so
         // the 42501 wording is proved where a check is refused on purpose: ServerGrantsLiveTests' T95.
 
         TestContext.Current.TestOutputHelper?.WriteLine("PostgreSQL {0} as {1}:\n{2}", server.ServerVersion, role, report);
@@ -236,17 +237,19 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
         Report(server, problems);
     }
 
-    /// <summary>A leg is a preview by its tag alone: a repository whose name has "rc" or "beta" in it is not a release candidate.</summary>
-    [Theory]
-    [InlineData("postgres:19rc1-alpine", true)]
-    [InlineData("postgres:19beta2", true)]
-    [InlineData("postgres:18.6-alpine", false)]
-    [InlineData("postgres:19.1-alpine", false)]
-    [InlineData("example.org/rcorp/postgres-beta:18.6-alpine", false)]
-    [InlineData("localhost:5000/postgres:19rc2", true)]
-    public void A_preview_is_told_by_its_tag(string image, bool preview)
+    /// <summary>
+    /// 1.1: 19 is a supported leg on its release candidate (it fails a run), 14 has left, and a leg is a preview only when it
+    /// says so - never because of what its tag looks like.
+    /// </summary>
+    [Fact]
+    public void The_matrix_is_15_to_19_and_only_a_leg_that_says_so_is_a_preview()
     {
-        new MatrixVersion(19, image).Preview.Should().Be(preview);
+        PostgresVersionMatrix.Versions.Select(static x => x.Major).Should().Equal(15, 16, 17, 18, 19);
+        PostgresVersionMatrix.Versions.Should().OnlyContain(static x => !x.Preview, "19's release candidate is a supported leg, not a preview");
+        PostgresVersionMatrix.Versions.Single(static x => x.Major == 19).Tag.Should().Be("19rc1-alpine");
+
+        new MatrixVersion(19, "postgres:19rc1-alpine").Preview.Should().BeFalse("a release candidate's tag does not make a leg a preview");
+        new MatrixVersion(19, "postgres:19rc1-alpine", Preview: true).Preview.Should().BeTrue("a leg says so itself");
     }
 
     /// <summary>

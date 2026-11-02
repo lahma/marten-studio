@@ -14202,3 +14202,23 @@ a.ms-schema-health-mark:focus-visible {
 .ms-stmts-server-counters {
     margin-top: var(--ms-space-xs);
 }
+
+/* ==========================================================================
+   1.1-PG19. What PostgreSQL 19 adds, shown where it belongs
+
+   Appended in D26 order, after 1.0-PG18. A table's own reset time (Storage and Maintenance, "Stats since") is a short date and
+   time, so it does not wrap; the Maintenance page's "Next for autovacuum" scores are numbers, so they align and do not wrap
+   and its last column may. Both sit in a TableScroll, which is the floor at 390 px.
+   ========================================================================== */
+
+.ms-storage-since,
+.ms-maint-since {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-maint-next-table .ms-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}

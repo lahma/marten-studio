@@ -1,17 +1,19 @@
 # PostgreSQL versions
 
-Marten Studio and Postgres Studio support **PostgreSQL 14 to 18**, and every release is tested on each of them. The
-studio reads every server it is pointed at; the floor is what it promises, not what it refuses.
+Marten Studio and Postgres Studio are **tested on PostgreSQL 15 to 19**, and every release is tested on each of them -
+19 on its release candidate until its general availability. **14 works but is past its end of life and untested from
+1.1:** the studio keeps every read it makes on 14, and warns about its end of life, but no release is run against it any
+more. The studio reads every server it is pointed at; the floor is what it promises, not what it refuses.
 
-| Major | Status in 0.5 | Community end of life |
+| Major | Status in 1.1 | Community end of life |
 |---|---|---|
 | 13 and older | **Below the floor.** The studio still runs, read by read, with no promise | 13: 2025-11-13 (passed) |
-| 14 | **Supported, end of life 2026-11-12.** Plan the move to 15 | 2026-11-12 |
+| 14 | **Works, untested from 1.1.** The studio's reads still run on it, and health check S01 says it is out of support from 2026-11-12. Plan the move to 15 | 2026-11-12 |
 | 15 | Supported | 2027-11-11 |
 | 16 | Supported | 2028-11-09 |
 | 17 | Supported; the default of the live test suite | 2029-11-08 |
 | 18 | Supported | 2030-11-14 |
-| 19 | Supported from its general availability (planned 2026-11-19); the matrix runs its release candidate in 0.5 | 2031-11-13 (planned) |
+| 19 | **Supported, tested on its release candidate** (`19rc1`) until its general availability (planned 2026-11-19), when the matrix moves to the released image | 2031-11-13 (planned) |
 
 The dates are the community's ([versioning policy](https://www.postgresql.org/support/versioning/), read
 2026-10-26): five years from a major's first release. Health check S01 raises the end of life of the server it is
@@ -20,8 +22,8 @@ says the provider's own schedule may differ ([S01](health/server.md#s01-postgres
 
 ## How the studio is tested on each version
 
-Every release runs the **version matrix**: one server per major - `postgres:14.24-alpine`, `15.19-alpine`,
-`16.15-alpine`, `17.11-alpine` and `18.6-alpine`, with `pg_stat_statements` preloaded and `track_io_timing` on - and
+Every release runs the **version matrix**: one server per major - `postgres:15.19-alpine`, `16.15-alpine`,
+`17.11-alpine`, `18.6-alpine` and `19rc1-alpine`, with `pg_stat_statements` preloaded and `track_io_timing` on - and
 on each one, as the application's own role and as a role with no grant at all:
 
 - a health sweep of the shared studio's checks - the regular ones and the statement checks; it has no deeper ones,
@@ -37,8 +39,9 @@ on each one, as the application's own role and as a role with no grant at all:
   anything;
 - the studio's table of version gates against the server's own catalog.
 
-PostgreSQL 19's release candidate (`postgres:19rc1-alpine`) runs the same matrix as a **preview leg**: it reports what
-it finds and does not fail a run until 19's image is a released one.
+PostgreSQL 19's release candidate (`postgres:19rc1-alpine`) is a leg like the others: a finding on it fails the run.
+(The matrix keeps a *preview* leg for a major whose image is a beta - it reports what it finds and fails nothing - and
+none is in it today.) A later patch swaps the candidate's tag for 19's general-availability image.
 
 ## What each version adds, and what the studio does without it
 
@@ -99,12 +102,46 @@ catalog and the statistics views only, so nothing here locks what it lists:
   statement per snapshot reads every session shown, never one a row. The function checks no role (a role in no monitoring
   role reads another's backend, as it reads `pg_stat_io`), so the gate is the studio's, not the server's.
 
-**On 19 the studio will also gain** per-table and per-index `stats_reset`, autovacuum's own per-table scores
-(`pg_stat_autovacuum_scores`), multixact member statistics (`pg_get_multixact_stats()`) and the `pg_stat_lock` view -
-in 0.6. 0.5 already knows what 19 changes: JIT is off by default (so the JIT-share check usually has nothing to
-judge), `max_locks_per_transaction` defaults to 128 and the lock table is sized differently, the `BUFFERPIN` wait
-type is renamed `BUFFER`, and `pg_stat_subscription_stats.sync_error_count` is renamed `sync_table_error_count`.
-Nothing the studio ships names either renamed literal.
+**On 19 you also get** a `stats_reset` per table and per index, autovacuum's own score for each table
+(`pg_stat_autovacuum_scores`), multixact usage (`pg_get_multixact_stats()`) and the `pg_stat_lock` view. The studio also
+knows what else 19 changes: JIT is off by default (so the JIT-share check usually has nothing to judge),
+`max_locks_per_transaction` defaults to 128 and the lock table is sized differently, the `BUFFERPIN` wait type is renamed
+`BUFFER`, and `pg_stat_subscription_stats.sync_error_count` is renamed `sync_table_error_count`. Nothing the studio ships
+names either renamed literal.
+
+**What the studio reads on 19, and where.** Each is absent below 19 - not a column of dashes, not an error; a view or
+function that only 19 has is never named in a statement sent to an older server - and reads the catalog and the statistics views only, so nothing here locks what it lists. Each
+sits behind the gate its page or check already has: 19 adds no capability and no check.
+
+- **A table's and an index's own reset time** (`stats_reset` of `pg_stat_all_tables` and `pg_stat_all_indexes`, set when
+  somebody resets that one object with `pg_stat_reset_single_table_counters`; null for an object nobody reset on its own):
+  - **T05** (an unused index on a write-heavy table) judges an index over its own counters when 19 gives it a reset time
+    later than the database's window began. An index reset less than seven days ago is counted and not judged ("an index
+    reset an hour ago is not unused"); one reset longer ago is judged, and the finding says "since 2026-10-16 09:00 UTC
+    (this index's own reset)". A table reset on its own is named in the evidence too, because its writes are counted from
+    then.
+  - **T01** (sequential scans on a large table) does the same for a table: not judged until its own counters have counted
+    for seven days, never over a span of samples that began before the reset, and the finding says since when.
+  - **Storage** and **Maintenance** show a *Stats since* column where they show per-table counters. A dash means nobody
+    reset that table on its own, so its counters count from the database's statistics (*Statistics since* on Storage). A
+    table reset on its own is also divided by its own days in Storage's growth a day.
+- **Autovacuum's own score** (`pg_stat_autovacuum_scores`), for the tables the studio judges and no others: the largest of
+  the parts autovacuum weighs (dead rows, inserts, changes since the last analyze, transaction-id age, multixact age), each
+  a counter against its trigger, so 1 or more is a table autovacuum takes at its next look. **Maintenance › Next for
+  autovacuum** lists the ten highest, with the parts, and what autovacuum would do (vacuum, analyse, or to prevent
+  wraparound); **T07**'s evidence carries the table's score. A partitioned table shows the partition autovacuum would take
+  first. The view lists every relation of the database whatever the reader may see, which is why the studio joins it to the
+  judged tables' own oids and names nothing else.
+- **Multixact usage** (`pg_get_multixact_stats()`): **T13**'s evidence adds how many multixacts and members the server holds
+  and the space the members take. It is evidence only: no line, threshold or variant moves. PostgreSQL answers a role outside
+  `pg_read_all_stats` (`pg_monitor` includes it) a row of nulls, and the evidence then says it is not shown to that role -
+  never that there is none.
+- **`pg_stat_lock`**: Database › Sessions › Blocking already carries *Lock waits by type* - waits, time waited, how often a
+  backend's fast-path slots were full, and since when - on 19. **T19** adds the relation-lock row's fast-path figure to its
+  evidence, in either variant, whenever a partitioned table is past one of its lines. The view is readable by every role.
+
+The studio's table of version gates (`PostgresFeatures`) is held against each server's own catalog by the matrix, so a
+column that 19's final release renames fails the 19 leg.
 
 ## Privileges, and "not checked"
 

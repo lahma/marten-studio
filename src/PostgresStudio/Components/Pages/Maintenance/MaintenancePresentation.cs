@@ -54,6 +54,25 @@ internal static class MaintenancePresentation
         return Autovacuum.Number(unit.Threshold) + " + " + Autovacuum.Number(unit.ScaleFactor) + " × " + TableText.Rows((long) unit.Tuples) + " rows";
     }
 
+    /// <summary>A score or one of its parts: two decimals, "under 0.01" for less, "0" for none.</summary>
+    public static string Score(double value) => VacuumBehindCheck.Score(value);
+
+    /// <summary>What autovacuum would do with the table at its next look, from the score's own flags.</summary>
+    public static string NextAction(AutovacuumScoreRow score)
+    {
+        ArgumentNullException.ThrowIfNull(score);
+
+        string what = (score.DoVacuum, score.DoAnalyze) switch
+        {
+            (true, true) => "vacuum and analyse",
+            (true, false) => "vacuum",
+            (false, true) => "analyse",
+            _ => "leave it",
+        };
+
+        return what + (score.ForWraparound ? " (to prevent wraparound)" : string.Empty);
+    }
+
     /// <summary>A moment, or "never".</summary>
     public static string When(DateTimeOffset? at, DateTimeOffset now) =>
         at is { } value ? SessionText.Duration(now - value) + " ago" : "never";

@@ -29,6 +29,10 @@ namespace PostgresStudio.Services.Storage;
 /// The share of its heap's pages the visibility map marks all-visible (<c>relallvisible / relpages</c>), 0 to 1; <see langword="null" />
 /// while the catalog counts no pages. Not drawn on the page: the snapshot download carries it.
 /// </param>
+/// <param name="CountersReset">
+/// When the table's own counters were last reset (PostgreSQL 19 only), the latest of its partitions' for a partitioned table;
+/// <see langword="null" /> when none was - the database's own window governs it - and always before 19. Withheld with the name.
+/// </param>
 internal sealed record StorageTableView(
     string? Schema,
     string? Name,
@@ -44,7 +48,8 @@ internal sealed record StorageTableView(
     double? HotUpdateRatio,
     double? NewPageShare,
     double? GrowthBytesPerDay,
-    double? AllVisibleRatio = null)
+    double? AllVisibleRatio = null,
+    DateTimeOffset? CountersReset = null)
 {
     /// <summary>Whether its name is withheld from this visitor.</summary>
     public bool Withheld => Name is null;
@@ -103,6 +108,12 @@ internal sealed record StorageView
 
     /// <summary>Whether the server reports updates that went to another page (16+), for the column's note.</summary>
     public bool NewPageUpdatesRead { get; init; }
+
+    /// <summary>
+    /// Whether the server keeps a reset time per table (PostgreSQL 19), so the grid has a "Stats since" column. Absent below 19 -
+    /// not a column of dashes.
+    /// </summary>
+    public bool StatsResetPerTableRead { get; init; }
 
     /// <summary>
     /// Operations › Maintenance for this scope (W5-V1), where autovacuum's view of the same tables is - or <see langword="null" />
@@ -305,7 +316,8 @@ internal sealed class StorageService : IStorageService
                 table.HotUpdateRatio,
                 table.NewPageShare,
                 window is null ? null : table.GrowthBytesPerDay(window),
-                table.AllVisibleRatio));
+                table.AllVisibleRatio,
+                named ? table.Row.CountersReset : null));
         }
 
         string? withheldReason = withheld == 0 ? null : WithheldReason(withheld, gate is not null);
@@ -333,6 +345,7 @@ internal sealed class StorageService : IStorageService
             Tables = tables,
             WithheldReason = withheldReason,
             NewPageUpdatesRead = read.NewPageUpdatesRead,
+            StatsResetPerTableRead = read.StatsResetPerTableRead,
             MaintenanceLink = MaintenanceLinks.ToMaintenance(settings, descriptor, scope),
             Statements = read.Statements,
         };

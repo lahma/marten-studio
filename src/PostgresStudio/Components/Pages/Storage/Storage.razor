@@ -156,6 +156,10 @@
                                 <th scope="col" class="ms-storage-number">Rows</th>
                                 <th scope="col">Share</th>
                                 <th scope="col" class="ms-storage-number" title="@HotTitle(view)">HOT</th>
+                                @if (view.StatsResetPerTableRead)
+                                {
+                                    <th scope="col" class="ms-storage-since" title="When this table's own counters were last reset (PostgreSQL 19). A dash means nobody reset them on their own: they count from the database's statistics, 'Statistics since' above.">Stats since</th>
+                                }
                             </tr>
                         </thead>
                         <tbody>
@@ -191,6 +195,10 @@
                                         }
                                     </td>
                                     <td class="ms-storage-number" title="@NewPageTitle(row)">@(row.HotUpdateRatio is { } hot ? Percent(hot) : "–")</td>
+                                    @if (view.StatsResetPerTableRead)
+                                    {
+                                        <td class="ms-storage-since">@(row.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "–")</td>
+                                    }
                                 </tr>
                             }
                         </tbody>

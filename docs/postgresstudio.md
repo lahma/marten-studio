@@ -24,7 +24,7 @@ The package references `PostgresStudio.Diagnostics` at exactly its own version -
 alone when you have no UI to mount ([diagnostics.md](diagnostics.md#without-the-ui)) - and
 `Microsoft.AspNetCore.App.Internal.Assets` (floor 10.0.12, which puts `_framework/blazor.web.js` in your application's
 own static web assets), takes everything else from the shared framework, and references no Marten, JasperFx or Weasel
-package. It targets `net10.0`. PostgreSQL 14 to 18 are supported ([postgres-versions.md](postgres-versions.md)).
+package. It targets `net10.0`. PostgreSQL 15 to 19 are tested, and 14 still works ([postgres-versions.md](postgres-versions.md)).
 
 ```csharp
 builder.Services.AddNpgsqlDataSource(connectionString);   // your application's own data source

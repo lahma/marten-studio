@@ -15,7 +15,7 @@ namespace PostgresStudio.Integration.Tests.Statements;
 /// row with the calls of both, and T02 checks.
 /// </summary>
 /// <remarks>
-/// On the version matrix's PostgreSQL 14, which preloads the library: <c>track</c> is set for this test's database alone
+/// On the version matrix's PostgreSQL 15 (14 left the matrix in 1.1; 15 still creates the extension at 1.8), which preloads the library: <c>track</c> is set for this test's database alone
 /// (<c>ALTER DATABASE … SET</c>, as the superuser), so no other test on the server tracks nested statements.
 /// </remarks>
 public class StatementsNestedLiveTests(PostgresVersionMatrix matrix)
@@ -25,7 +25,7 @@ public class StatementsNestedLiveTests(PostgresVersionMatrix matrix)
     [PostgresFact]
     public async Task On_extension_1_8_a_statement_run_top_level_and_nested_is_one_row_and_T02_checks()
     {
-        MatrixServer leg = await matrix.ServerAsync(14);
+        MatrixServer leg = await matrix.ServerAsync(15);
         leg.SkipIfUnavailable();
 
         string database = await leg.CreateDatabaseAsync("q1_nested", Token);
@@ -59,7 +59,7 @@ public class StatementsNestedLiveTests(PostgresVersionMatrix matrix)
 
         // Anti-vacuity: the extension itself returns a queryid twice for the app role here - or this proves nothing.
         Dictionary<long, long> twice = await TwiceAsync(leg, database);
-        twice.Should().NotBeEmpty("PostgreSQL 14 under track = all keeps a top-level and a nested entry of one queryid, and 1.8 returns both");
+        twice.Should().NotBeEmpty("PostgreSQL 15 under track = all keeps a top-level and a nested entry of one queryid, and 1.8 returns both");
 
         // T02 samples every kept statement into a series named by its queryid: a second row would fail the sweep outright.
         await using (MatrixHost matrixHost = await MatrixHost.CreateAsync(leg, MatrixRole.App, database))

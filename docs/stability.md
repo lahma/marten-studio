@@ -50,11 +50,13 @@ What a minor or patch release will not break:
 | .NET | `net10.0` | .NET 10; a .NET 11 host (release candidate 3) runs both studios unchanged |
 | Marten (Marten Studio) | 9.x from 9.57.0 | 9.57.0 on every build |
 | Npgsql (Postgres Studio, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
-| PostgreSQL | 14 to 18 | every major from 14 to 18, and 19's release candidate as a preview |
+| PostgreSQL | 15 to 19; 14 works, untested | every major from 15 to 19, 19 on its release candidate until its general availability |
 
-PostgreSQL 14 reaches its upstream end of life on 2026-11-12. 1.x keeps it in the test matrix; a minor release may stop
-supporting it, and says so in the changelog first. PostgreSQL 19 is supported from its general availability (planned for
-2026-11-19) in a minor release. [docs/postgres-versions.md](postgres-versions.md) says what each version adds.
+PostgreSQL 14 reaches its upstream end of life on 2026-11-12. 1.1 took it out of the test matrix (the changelog says so):
+every read the studio makes on 14 is still there, and health check S01 still names its end of life, but no release is
+tested against it, and a minor release may stop supporting it outright. PostgreSQL 19 is supported in 1.1 on its release
+candidate, and the matrix moves to its general-availability image in a later patch.
+[docs/postgres-versions.md](postgres-versions.md) says what each version adds.
 
 ## Security fixes
 

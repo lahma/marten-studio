@@ -278,6 +278,14 @@ internal sealed record HealthTableRow
     /// </summary>
     public int UnseenVacuums { get; init; }
 
+    /// <summary>
+    /// <c>pg_stat_all_tables.stats_reset</c> (PostgreSQL 19+): since when this one table's counters count, because somebody
+    /// reset them on their own (<c>pg_stat_reset_single_table_counters</c>) - the latest of its partitions' for a partitioned
+    /// table - or <see langword="null" /> when none was, and always before 19. The database's own window
+    /// (<see cref="StatsReset" />) is what governs a table that has none.
+    /// </summary>
+    public DateTimeOffset? CountersReset { get; init; }
+
     /// <summary>The key the history and the findings name this table by.</summary>
     public string Key => Schema + "." + Table;
 }
@@ -479,6 +487,56 @@ internal sealed record HealthIndexRow
     public string TableKey => Schema + "." + Table;
 }
 
+/// <summary>
+/// PostgreSQL 19's own score for one judged table (<c>pg_stat_autovacuum_scores</c>): how urgently autovacuum would take it,
+/// by the parts it adds up - and, for a partitioned table, the score of the partition autovacuum would take first.
+/// </summary>
+/// <param name="Schema">The schema.</param>
+/// <param name="Table">The table.</param>
+/// <param name="Score">The score: the largest of the parts. At 1 or more autovacuum takes the table at its next look.</param>
+/// <param name="TransactionIdScore">Its part for the transaction-id age against <c>autovacuum_freeze_max_age</c>.</param>
+/// <param name="MultixactScore">Its part for the multixact age against <c>autovacuum_multixact_freeze_max_age</c>.</param>
+/// <param name="VacuumScore">Its part for dead rows against the dead-row trigger.</param>
+/// <param name="InsertScore">Its part for inserts since the last vacuum against the insert trigger.</param>
+/// <param name="AnalyzeScore">Its part for changes since the last analyze against the analyze trigger.</param>
+/// <param name="DoVacuum">Whether autovacuum would vacuum it at its next look.</param>
+/// <param name="DoAnalyze">Whether autovacuum would analyse it at its next look.</param>
+/// <param name="ForWraparound">Whether that vacuum would be one to prevent wraparound.</param>
+internal sealed record AutovacuumScoreRow(
+    string Schema,
+    string Table,
+    double Score,
+    double TransactionIdScore,
+    double MultixactScore,
+    double VacuumScore,
+    double InsertScore,
+    double AnalyzeScore,
+    bool DoVacuum,
+    bool DoAnalyze,
+    bool ForWraparound)
+{
+    /// <summary>The key the findings and the pages name the table by.</summary>
+    public string Key => Schema + "." + Table;
+
+    /// <summary>The part that is the largest - what the score is made of: <c>dead rows</c>, <c>inserts</c>, <c>changes</c>, <c>transaction ids</c> or <c>multixacts</c>.</summary>
+    public string Dominant
+    {
+        get
+        {
+            (double Part, string Name)[] parts =
+            [
+                (VacuumScore, "dead rows"),
+                (InsertScore, "inserts"),
+                (AnalyzeScore, "changes since analyze"),
+                (TransactionIdScore, "transaction-id age"),
+                (MultixactScore, "multixact age"),
+            ];
+
+            return parts.MaxBy(static x => x.Part).Name;
+        }
+    }
+}
+
 /// <summary>What the statistics say of one soft-deleted table's <c>mt_deleted</c> column.</summary>
 /// <param name="Schema">The schema.</param>
 /// <param name="Table">The table.</param>
@@ -620,7 +678,8 @@ internal static class HealthTableQueries
                    pg_catalog.sum((pg_catalog.to_jsonb(s) ->> 'total_vacuum_time')::float8
                                   + (pg_catalog.to_jsonb(s) ->> 'total_autovacuum_time')::float8) as vacuum_ms,
                    pg_catalog.sum((pg_catalog.to_jsonb(s) ->> 'total_analyze_time')::float8
-                                  + (pg_catalog.to_jsonb(s) ->> 'total_autoanalyze_time')::float8) as analyze_ms
+                                  + (pg_catalog.to_jsonb(s) ->> 'total_autoanalyze_time')::float8) as analyze_ms,
+                   pg_catalog.max((pg_catalog.to_jsonb(s) ->> 'stats_reset')::timestamptz) as counters_reset
             from tree t
             join pg_catalog.pg_class d on d.oid = t.relid
             left join pg_catalog.pg_class toast on toast.oid = d.reltoastrelid
@@ -910,7 +969,8 @@ internal static class HealthTableQueries
                case when l.relkind = 'p' then r.analyze_ms
                     else (pg_catalog.to_jsonb(s) ->> 'total_analyze_time')::float8 + (pg_catalog.to_jsonb(s) ->> 'total_autoanalyze_time')::float8 end,
                st.track_counts,
-               st.unseen_vacuums
+               st.unseen_vacuums,
+               case when l.relkind = 'p' then r.counters_reset else (pg_catalog.to_jsonb(s) ->> 'stats_reset')::timestamptz end
         from listed l
         cross join settings st
         left join pg_catalog.pg_class lt on lt.oid = l.reltoastrelid
@@ -1175,6 +1235,64 @@ internal static class HealthTableQueries
         order by 1, 2
         """;
 
+    /// <summary>
+    /// PostgreSQL 19's own autovacuum score (<c>pg_stat_autovacuum_scores</c>) for each listed table - for a partitioned table the
+    /// leaf partition with the highest - and nothing of any table that is not listed: the view lists every relation of the
+    /// database, so the statement joins it to the listed tables' own oids, and a name it returns is one the sweep judges.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Asked only of a server that has the view</b> (<c>PostgresFeature.AutovacuumScores</c>, 190000): below it the
+    /// view does not exist and naming it is <c>42P01</c>. The view is a function over the statistics and <c>pg_class</c>; it
+    /// opens no relation, so a migration's <c>ACCESS EXCLUSIVE</c> lock queues nothing behind it, as with every list here.
+    /// </para>
+    /// <para>
+    /// <b>Partitions are walked through <c>pg_inherits</c></b>, never <c>pg_partition_tree()</c> (D27), and a partitioned
+    /// parent has no score of its own: autovacuum judges each leaf.
+    /// </para>
+    /// </remarks>
+    internal const string AutovacuumScoresSql =
+        """
+        with recursive listed as (
+            select c.oid, n.nspname, c.relname
+            from rows from (pg_catalog.unnest(@schemas), pg_catalog.unnest(@tables)) as m(schema_name, table_name)
+            join pg_catalog.pg_namespace n on n.nspname = m.schema_name
+            join pg_catalog.pg_class c on c.relnamespace = n.oid and c.relname = m.table_name
+            where c.relkind in ('r', 'p')
+        ),
+        tree (root, relid) as (
+            select l.oid, l.oid
+            from listed l
+            union all
+            select t.root, i.inhrelid
+            from tree t
+            join pg_catalog.pg_inherits i on i.inhparent = t.relid
+            join pg_catalog.pg_class ch on ch.oid = i.inhrelid
+            where ch.relispartition
+        ),
+        scored as (
+            select t.root, a.score, a.xid_score, a.mxid_score, a.vacuum_score, a.vacuum_insert_score, a.analyze_score,
+                   a.do_vacuum, a.do_analyze, a.for_wraparound,
+                   pg_catalog.row_number() over (partition by t.root order by a.score desc nulls last, a.relid) as place
+            from tree t
+            join pg_catalog.pg_stat_autovacuum_scores a on a.relid = t.relid
+        )
+        select l.nspname::text,
+               l.relname::text,
+               s.score::float8,
+               s.xid_score::float8,
+               s.mxid_score::float8,
+               s.vacuum_score::float8,
+               s.vacuum_insert_score::float8,
+               s.analyze_score::float8,
+               s.do_vacuum,
+               s.do_analyze,
+               s.for_wraparound
+        from listed l
+        join scored s on s.root = l.oid and s.place = 1
+        order by s.score desc nulls last, 1, 2
+        """;
+
     /// <summary>Whether the store's document schema has an <c>mt_hilo</c> table - read first, so a missing one is never a <c>42P01</c>.</summary>
     internal const string HiloExistsSql =
         """
@@ -1359,7 +1477,7 @@ internal static class HealthTableQueries
 
     /// <summary>Every list statement - the ones that must lock nothing they list - for the tests that hold them to it.</summary>
     internal static IReadOnlyList<string> ListStatements { get; } =
-        [TablesSql, IndexesSql, SoftDeleteSql, HiloExistsSql, RelationalTablesSql, UndeclaredTablesSql];
+        [TablesSql, IndexesSql, SoftDeleteSql, AutovacuumScoresSql, HiloExistsSql, RelationalTablesSql, UndeclaredTablesSql];
 
     /// <summary>
     /// The tables a plain data source's health checks judge (<see cref="RelationalTablesSql" />): every table in
@@ -1497,6 +1615,32 @@ internal static class HealthTableQueries
     /// <summary>The deleted share of each listed soft-deleted table (<see cref="SoftDeleteSql" />).</summary>
     public static HealthQuery SoftDeleteShares(IReadOnlyList<HealthTableTarget> tables) => new(SoftDeleteSql, TargetParameters(tables));
 
+    /// <summary>PostgreSQL 19's autovacuum score of each listed table (<see cref="AutovacuumScoresSql" />).</summary>
+    /// <param name="tables">The judged tables.</param>
+    public static HealthQuery AutovacuumScores(IReadOnlyList<HealthTableTarget> tables) => new(AutovacuumScoresSql, TargetParameters(tables));
+
+    /// <summary>Maps one row of <see cref="AutovacuumScoresSql" />.</summary>
+    public static AutovacuumScoreRow ReadAutovacuumScore(NpgsqlDataReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        double Number(int ordinal) => reader.IsDBNull(ordinal) ? 0d : reader.GetDouble(ordinal);
+        bool Flag(int ordinal) => !reader.IsDBNull(ordinal) && reader.GetBoolean(ordinal);
+
+        return new AutovacuumScoreRow(
+            reader.GetString(0),
+            reader.GetString(1),
+            Number(2),
+            Number(3),
+            Number(4),
+            Number(5),
+            Number(6),
+            Number(7),
+            Flag(8),
+            Flag(9),
+            Flag(10));
+    }
+
     /// <summary>Whether <c>mt_hilo</c> exists in <paramref name="schema" /> (<see cref="HiloExistsSql" />).</summary>
     public static HealthQuery HiloExists(string schema)
     {
@@ -1630,6 +1774,7 @@ internal static class HealthTableQueries
             TotalAnalyzeMilliseconds = reader.IsDBNull(55) ? null : reader.GetDouble(55),
             TrackCounts = reader.IsDBNull(56) || reader.GetBoolean(56),
             UnseenVacuums = reader.GetInt32(57),
+            CountersReset = NullableTimestamp(reader, 58),
         };
     }
 

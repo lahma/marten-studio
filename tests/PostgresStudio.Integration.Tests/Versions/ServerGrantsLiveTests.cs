@@ -95,8 +95,9 @@ public class ServerGrantsLiveTests(PostgresVersionMatrix matrix)
     /// (<c>QueryAsApplicationRoleAsync</c>) names the login - each the role Postgres refused.
     /// </summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
+    [InlineData(19)]
     public async Task A_refused_read_names_the_role_it_ran_as(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);
@@ -245,8 +246,9 @@ public class ServerGrantsLiveTests(PostgresVersionMatrix matrix)
     /// which role was refused, that pg_monitor covers the advisor's reads, and who can grant it here.
     /// </summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
+    [InlineData(19)]
     public async Task A_refused_privilege_is_not_checked_and_names_the_role_the_grant_and_the_grantor(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);

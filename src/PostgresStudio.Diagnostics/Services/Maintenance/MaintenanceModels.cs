@@ -91,6 +91,18 @@ internal sealed record MaintenanceTableView
 
     /// <summary>How far past its triggers it is, for the order: the largest counter-to-trigger ratio of its decisions.</summary>
     public double Pressure { get; init; }
+
+    /// <summary>
+    /// When the table's own counters were last reset (PostgreSQL 19 only; the latest of its partitions' for a partitioned table), or
+    /// <see langword="null" /> when none was - the database's statistics govern it - and before 19.
+    /// </summary>
+    public DateTimeOffset? CountersReset { get; init; }
+
+    /// <summary>
+    /// PostgreSQL 19's own autovacuum score for the table (<c>pg_stat_autovacuum_scores</c>; for a partitioned table the partition
+    /// autovacuum would take first), or <see langword="null" /> before 19 and where the view has no row for it.
+    /// </summary>
+    public AutovacuumScoreRow? Score { get; init; }
 }
 
 /// <summary>One maintenance command running now, as the page draws it.</summary>
@@ -194,6 +206,15 @@ internal sealed record MaintenanceView
 
     /// <summary>What a capped table set left out, in words.</summary>
     public string? Coverage { get; init; }
+
+    /// <summary>
+    /// "Next for autovacuum" (PostgreSQL 19): the tables this visitor is shown, by autovacuum's own score, highest first, at most
+    /// <c>MaintenanceService.NextCount</c> - those with a score of nothing at all left out. Empty before 19.
+    /// </summary>
+    public IReadOnlyList<MaintenanceTableView> Next { get; init; } = [];
+
+    /// <summary>Whether the server has PostgreSQL 19's score and the sweep read it, so the section is drawn at all.</summary>
+    public bool ScoresRead { get; init; }
 
     /// <summary>What is running now.</summary>
     public MaintenanceRunningView Running { get; init; } = MaintenanceRunningView.NotRead;

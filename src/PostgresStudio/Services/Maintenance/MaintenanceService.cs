@@ -128,6 +128,9 @@ internal sealed class MaintenanceService : IMaintenanceService
     /// <summary>How many tables the forecast lists.</summary>
     internal const int FreezeTables = 5;
 
+    /// <summary>How many tables "Next for autovacuum" lists (PostgreSQL 19).</summary>
+    internal const int NextCount = 10;
+
     private readonly IStudioSettings settings;
     private readonly StudioSourceResolver resolver;
     private readonly StudioAuthorization authorization;
@@ -211,7 +214,7 @@ internal sealed class MaintenanceService : IMaintenanceService
                 continue;
             }
 
-            tables.Add(ViewOf(table, read.MeasuredAt));
+            tables.Add(ViewOf(table, read.MeasuredAt, read.AutovacuumScores?.GetValueOrDefault(table.Key)));
         }
 
         List<MaintenanceTableView> ordered =
@@ -232,6 +235,8 @@ internal sealed class MaintenanceService : IMaintenanceService
             TablesCut = Math.Max(0, ordered.Count - MaxTables),
             TablesWithheld = withheld,
             Coverage = wholeCount ? read.Coverage : read.OwnSchemasCoverage,
+            Next = NextOf(tables),
+            ScoresRead = read.AutovacuumScores is not null,
             Running = await RunningAsync(read, shown).ConfigureAwait(false),
             Workers = WorkersOf(read),
             Freeze = await FreezeAsync(read, shown).ConfigureAwait(false),
@@ -404,8 +409,30 @@ internal sealed class MaintenanceService : IMaintenanceService
         return !twoReadings || await gate().ConfigureAwait(false) is { Succeeded: true, Gate.IsOpen: true };
     }
 
+    /// <summary>
+    /// "Next for autovacuum": the tables this visitor is shown that PostgreSQL 19 scores, highest score first and then by name,
+    /// at most <see cref="NextCount" />. Taken from the views the visitor is shown, so a table the page withholds is not in it.
+    /// Pure.
+    /// </summary>
+    internal static IReadOnlyList<MaintenanceTableView> NextOf(IReadOnlyList<MaintenanceTableView> shown)
+    {
+        ArgumentNullException.ThrowIfNull(shown);
+
+        return
+        [
+            .. shown
+                .Where(static x => x.Score is not null)
+                .OrderByDescending(static x => x.Score!.Score)
+                .ThenBy(static x => x.Key, StringComparer.Ordinal)
+                .Take(NextCount),
+        ];
+    }
+
     /// <summary>One table as the page draws it. Pure.</summary>
-    internal static MaintenanceTableView ViewOf(TableFacts table, DateTimeOffset at)
+    /// <param name="table">The table.</param>
+    /// <param name="at">When the sweep read it.</param>
+    /// <param name="score">PostgreSQL 19's autovacuum score for it, when the sweep read one.</param>
+    internal static MaintenanceTableView ViewOf(TableFacts table, DateTimeOffset at, AutovacuumScoreRow? score = null)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -454,6 +481,8 @@ internal sealed class MaintenanceService : IMaintenanceService
             Analyzes = row.AnalyzeCount is null && row.AutoanalyzeCount is null ? null : (row.AnalyzeCount ?? 0) + (row.AutoanalyzeCount ?? 0),
             Measurable = !row.IsPartitioned,
             Pressure = Math.Max(Ratio(row.Vacuum), Math.Max(Ratio(row.Insert), Ratio(row.Analyze))),
+            CountersReset = row.CountersReset,
+            Score = score,
         };
     }
 

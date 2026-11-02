@@ -25,7 +25,7 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    public static TheoryData<int> Legs => [14, 17, 18];
+    public static TheoryData<int> Legs => [15, 17, 18, 19];
 
     private const string Seed =
         """
@@ -299,7 +299,7 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
         result.ServerMajor.Should().Be(major);
 
         QueryPlan plan = QueryPlanReader.Read(result.PlanJson).Plan!;
-        plan.Root.WalRecords.Should().NotBeNull("WAL was asked for under ANALYZE, on every major from 14");
+        plan.Root.WalRecords.Should().NotBeNull("WAL was asked for under ANALYZE, on every major the matrix runs");
         plan.Root.Schema.Should().Be("public", "VERBOSE prints every relation's schema");
 
         if (major >= 17)

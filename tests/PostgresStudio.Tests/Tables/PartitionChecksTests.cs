@@ -1,6 +1,7 @@
 using static PostgresStudio.Tests.Tables.LintBuilders;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Sources;
@@ -333,5 +334,41 @@ public class PartitionChecksTests
         finding.Evidence.Should().Contain(x => x.Label == "Documented capacity" && x.Value.Contains("from PostgreSQL 19 the lock table keeps no margin", StringComparison.Ordinal));
         finding.Evidence.Should().Contain(new HealthEvidence("Fast-path slots a backend", "128"));
         finding.Remedy!.Explanation.Should().Contain("holds about half the locks it did");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void On_19_pg_stat_lock_adds_the_fast_path_figure_to_either_variant_as_evidence_only(bool capacity)
+    {
+        HealthPartitionedTableRow row = capacity ? TwoHundred(190_000, maxLocks: 128, maxConnections: 8) : TwoHundred(190_000, maxLocks: 128, maxConnections: 1000);
+        LockStatisticsRow relation = new("relation", Waits: 1_204, WaitTimeMilliseconds: 9_000, FastPathExceeded: 37, StatsReset: new DateTimeOffset(2026, 10, 20, 8, 57, 0, TimeSpan.Zero));
+
+        HealthVerdict without = new PartitionLockBudgetCheck()
+            .Evaluate(new PartitionLockFacts(new PartitionFacts(Now, [row], [Events]), PostgresPlatform.SelfHosted), Evaluation());
+        HealthVerdict with = new PartitionLockBudgetCheck()
+            .Evaluate(new PartitionLockFacts(new PartitionFacts(Now, [row], [Events]), PostgresPlatform.SelfHosted) { RelationLocks = relation }, Evaluation());
+
+        HealthFinding bare = without.Findings.Single();
+        HealthFinding evidenced = with.Findings.Single();
+
+        evidenced.Variant.Should().Be(bare.Variant, "evidence moves no line and no variant");
+        evidenced.Severity.Should().Be(bare.Severity);
+        evidenced.Title.Should().Be(bare.Title);
+        evidenced.Evidence.Should().StartWith(bare.Evidence);
+        bare.Evidence.Select(static x => x.Label).Should().NotContain(static x => x.Contains("pg_stat_lock", StringComparison.Ordinal) || x.Contains("Fast-path slots found full", StringComparison.Ordinal));
+
+        HealthEvidence added = evidenced.Evidence[^1];
+        added.Label.Should().Be("Fast-path slots found full, whole server (PostgreSQL 19)");
+        added.Value.Should().Be("37 times since 2026-10-20 08:57 UTC; 1,204 relation-lock requests had to wait");
+    }
+
+    [Fact]
+    public void A_fast_path_figure_of_one_and_of_none_is_worded_for_its_number()
+    {
+        PartitionLockBudgetCheck.FastPathEvidence(new LockStatisticsRow("relation", 1, 0, 1, null)).Value
+            .Should().Be("1 time since the server's statistics began; 1 relation-lock request had to wait");
+        PartitionLockBudgetCheck.FastPathEvidence(new LockStatisticsRow("relation", 0, 0, 0, null)).Value
+            .Should().Be("0 times since the server's statistics began; 0 relation-lock requests had to wait");
     }
 }

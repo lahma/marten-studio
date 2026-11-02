@@ -51,28 +51,25 @@ public enum MatrixRole
 }
 
 /// <summary>One leg of the matrix: a PostgreSQL major and the exact image it runs.</summary>
-/// <param name="Major">The major: 14 to 19.</param>
+/// <param name="Major">The major: 15 to 19.</param>
 /// <param name="Image">The image, pinned to the minor B0 measured (2026-10-20) - or 19's release candidate.</param>
-public sealed record MatrixVersion(int Major, string Image)
+/// <param name="Preview">
+/// Whether the leg is a preview: it runs and reports, and never fails a run. Said outright, never read off the tag, so that
+/// swapping 19's image for its general-availability one, or adding a 20 on its beta, is one line in
+/// <see cref="PostgresVersionMatrix.Versions" /> and no pattern in a tag decides what fails CI.
+/// </param>
+public sealed record MatrixVersion(int Major, string Image, bool Preview = false)
 {
-    /// <summary>
-    /// Whether the image's tag - and only the tag, never the repository's name - is a pre-release: a version then
-    /// <c>rc</c>, <c>beta</c> or <c>alpha</c> (<c>19rc1-alpine</c>, <c>19beta2</c>). A preview leg runs and reports, and fails
-    /// CI only once its tag is a general-availability one.
-    /// </summary>
-    public bool Preview => System.Text.RegularExpressions.Regex.IsMatch(
-        Tag, @"^\d+(rc|beta|alpha)\d*\b", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
-
     /// <summary>The image's tag: <c>19rc1-alpine</c> of <c>postgres:19rc1-alpine</c>.</summary>
     public string Tag => Image[(Image.LastIndexOf(':') + 1)..];
 
     /// <inheritdoc />
-    public override string ToString() => Major.ToString(CultureInfo.InvariantCulture) + " (" + Image + ")";
+    public override string ToString() => Major.ToString(CultureInfo.InvariantCulture) + " (" + Image + ")" + (Preview ? " preview" : string.Empty);
 }
 
 /// <summary>
-/// PostgreSQL 14 to 18 - and 19's release candidate as a preview leg - one server per major, started on first use and
-/// shared by every class of the run: the fixture every W5 packet's live tests run their version legs on.
+/// PostgreSQL 15 to 19 - 19 on its release candidate until its general-availability image replaces it - one server per major,
+/// started on first use and shared by every class of the run: the fixture every W5 packet's live tests run their version legs on.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -106,19 +103,23 @@ public sealed record MatrixVersion(int Major, string Image)
 /// <para>
 /// <b>D19's rule.</b> An image that cannot be pulled or started skips its leg locally, with the <c>docker pull</c> line in
 /// the reason (<see cref="MatrixServer.Unavailable" />), and fails the run on CI - except a <see cref="MatrixVersion.Preview" />
-/// leg, which skips on CI too until its tag is a released one. No Docker at all is <c>[PostgresTheory]</c>'s skip.
+/// leg, which skips on CI too. No Docker at all is <c>[PostgresTheory]</c>'s skip.
 /// </para>
 /// <para>
-/// <b>What it costs.</b> Five servers (six with the preview), started one after another as the first test of each major
+/// <b>What it costs.</b> Five servers (six with a preview), started one after another as the first test of each major
 /// reaches it: about 3-6 s each on this machine once the images are local, and a ~110 MB pull per image the first time.
 /// </para>
 /// </remarks>
 public sealed class PostgresVersionMatrix : IAsyncLifetime
 {
-    /// <summary>Every leg, oldest first. 14.24 to 18.6 are B0's pins; 19 runs its release candidate.</summary>
+    /// <summary>
+    /// Every leg, oldest first. 15.19 to 18.6 are B0's pins. 19 runs its release candidate, as a supported leg that fails a
+    /// run (<see cref="MatrixVersion.Preview" /> is false); a later patch swaps the tag for 19's general-availability image.
+    /// 14 left the matrix in 1.1, the month of its end of life: the studio still reads it and keeps its code paths, and nothing
+    /// tests them. A future major's beta or release candidate goes in here with <c>Preview: true</c>.
+    /// </summary>
     public static IReadOnlyList<MatrixVersion> Versions { get; } =
     [
-        new(14, "postgres:14.24-alpine"),
         new(15, "postgres:15.19-alpine"),
         new(16, "postgres:16.15-alpine"),
         new(17, "postgres:17.11-alpine"),
@@ -126,7 +127,7 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
         new(19, "postgres:19rc1-alpine"),
     ];
 
-    /// <summary>The supported majors, 14 to 18, for a theory.</summary>
+    /// <summary>The supported majors, 15 to 19 - every leg that is not a preview - for a theory.</summary>
     public static TheoryData<int> Supported => [.. Versions.Where(static x => !x.Preview).Select(static x => x.Major)];
 
     /// <summary>Every major the matrix runs, the preview included, for a theory.</summary>
@@ -238,7 +239,7 @@ public sealed class PostgresVersionMatrix : IAsyncLifetime
 
     private static MatrixVersion VersionOf(int major) =>
         Versions.FirstOrDefault(x => x.Major == major)
-            ?? throw new ArgumentOutOfRangeException(nameof(major), major, "The version matrix runs 14 to 19.");
+            ?? throw new ArgumentOutOfRangeException(nameof(major), major, "The version matrix runs 15 to 19.");
 
     /// <inheritdoc />
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;

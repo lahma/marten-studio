@@ -114,6 +114,10 @@
                                 {
                                     <th scope="col">Time vacuuming / analysing</th>
                                 }
+                                @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
+                                {
+                                    <th scope="col" title="When this table's own counters were last reset (PostgreSQL 19). A dash means nobody reset them on their own: they count from the database's statistics.">Stats since</th>
+                                }
                                 <th scope="col">Bloat</th>
                             </tr>
                         </thead>
@@ -159,6 +163,10 @@
                                         <td class="ms-table-cell ms-num">
                                             @MaintenancePresentation.Milliseconds(table.TotalVacuumMilliseconds) / @MaintenancePresentation.Milliseconds(table.TotalAnalyzeMilliseconds)
                                         </td>
+                                    }
+                                    @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
+                                    {
+                                        <td class="ms-table-cell ms-maint-since">@(table.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "-")</td>
                                     }
                                     <td class="ms-table-cell">
                                         @if (table.Measurable)
@@ -265,6 +273,59 @@
                 </div>
             }
         </section>
+
+        @if (view.ScoresRead)
+        {
+            <section class="ms-section ms-maint-next" aria-labelledby="ms-maint-next-title">
+                <h2 class="ms-section-title" id="ms-maint-next-title">Next for autovacuum</h2>
+
+                @if (view.Next.Count == 0)
+                {
+                    <p class="ms-muted">PostgreSQL 19 scored none of the tables this page shows you.</p>
+                }
+                else
+                {
+                    <p class="ms-maint-legend">
+                        PostgreSQL 19's own score (<code>pg_stat_autovacuum_scores</code>): the largest of the parts autovacuum weighs,
+                        each a counter against its trigger, so a score of 1 or more is a table autovacuum takes at its next look. A
+                        partitioned table shows the partition autovacuum would take first.
+                    </p>
+
+                    <TableScroll Label="The tables autovacuum would take next, by its own score">
+                        <table class="ms-table ms-maint-next-table">
+                            <thead>
+                                <tr>
+                                    <th scope="col">Table</th>
+                                    <th scope="col" class="ms-num">Score</th>
+                                    <th scope="col" class="ms-num">Dead rows</th>
+                                    <th scope="col" class="ms-num">Inserts</th>
+                                    <th scope="col" class="ms-num">Changes</th>
+                                    <th scope="col" class="ms-num">Transaction ids</th>
+                                    <th scope="col" class="ms-num">Multixacts</th>
+                                    <th scope="col">At its next look</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (MaintenanceTableView table in view.Next)
+                                {
+                                    AutovacuumScoreRow score = table.Score!;
+                                    <tr class="ms-table-row" @key="table.Key">
+                                        <td class="ms-table-cell ms-mono">@table.Key</td>
+                                        <td class="ms-table-cell ms-num">@MaintenancePresentation.Score(score.Score)</td>
+                                        <td class="ms-table-cell ms-num">@MaintenancePresentation.Score(score.VacuumScore)</td>
+                                        <td class="ms-table-cell ms-num">@MaintenancePresentation.Score(score.InsertScore)</td>
+                                        <td class="ms-table-cell ms-num">@MaintenancePresentation.Score(score.AnalyzeScore)</td>
+                                        <td class="ms-table-cell ms-num">@MaintenancePresentation.Score(score.TransactionIdScore)</td>
+                                        <td class="ms-table-cell ms-num">@MaintenancePresentation.Score(score.MultixactScore)</td>
+                                        <td class="ms-table-cell">@MaintenancePresentation.NextAction(score)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+            </section>
+        }
 
         <section class="ms-section ms-maint-running" aria-labelledby="ms-maint-running-title">
             <h2 class="ms-section-title" id="ms-maint-running-title">Running now</h2>

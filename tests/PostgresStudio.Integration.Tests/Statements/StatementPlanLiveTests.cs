@@ -23,11 +23,11 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
     /// <summary>A statement slow on purpose, so it is among the statements read: 25 calls of 20 ms.</summary>
     private const string Slow = "select pg_catalog.pg_sleep(0.02), o.note from public.orders o where o.id = @id";
 
-    /// <summary>The supported floor, the first major with <c>GENERIC_PLAN</c>, and the newest release.</summary>
-    public static TheoryData<int> PlanLegs => [14, 16, 18];
+    /// <summary>The oldest tested release (15, without <c>GENERIC_PLAN</c>), the first major with it, and the newest releases.</summary>
+    public static TheoryData<int> PlanLegs => [15, 16, 18, 19];
 
     /// <summary>The majors that have <c>EXPLAIN (GENERIC_PLAN)</c> at all.</summary>
-    public static TheoryData<int> GenericPlanLegs => [16, 18];
+    public static TheoryData<int> GenericPlanLegs => [16, 18, 19];
 
     private static async Task<(MatrixServer Leg, string Database, string App)> SeedAsync(PostgresVersionMatrix matrix, int major, string name)
     {

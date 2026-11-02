@@ -246,7 +246,20 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
         evidence.Add(new HealthEvidence("Writes to the table", TableText.Count(writes)
             + " (" + TableText.Count(table.Row.Inserts ?? 0) + " inserts, " + TableText.Count(table.Row.Updates ?? 0)
             + " updates, " + TableText.Count(table.Row.Deletes ?? 0) + " deletes)"));
-        evidence.Add(new HealthEvidence("Counters since", usage.SinceText));
+        // PostgreSQL 19 keeps a reset time per index and per table. The index's own, when it is later than the window's start, is
+        // what its scans were counted over: the finding says "since <time>" for it, not for the database's window.
+        DateTimeOffset? ownReset = index.Row.CountersReset is { } own && own > usage.Since ? own : null;
+        string sinceText = ownReset is { } ownSince
+            ? "since " + StatisticsWindow.When(ownSince) + " (this index's own reset, PostgreSQL 19)"
+            : usage.SinceText;
+        TimeSpan length = ownReset is { } ownStart && facts.ReadAt > ownStart ? facts.ReadAt - ownStart : usage.Length;
+
+        evidence.Add(new HealthEvidence("Counters since", sinceText));
+
+        if (table.Row.CountersReset is { } tableReset && tableReset > usage.Since)
+        {
+            evidence.Add(new HealthEvidence("The table's counters since", StatisticsWindow.When(tableReset) + " (its own reset, PostgreSQL 19): its writes are counted from then"));
+        }
 
         return new HealthFinding
         {
@@ -263,13 +276,13 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
                 + TableText.Bytes(index.Row.Bytes) + " of disk and buffer cache. "
                 + (lastScan is { } since
                     ? "No query has used it since " + TableText.When(since) + "."
-                    : "No query has used it in " + UsageWindow.Age(usage.Length) + " of statistics.")
+                    : "No query has used it in " + UsageWindow.Age(length) + " of statistics.")
                 + (index.Origin == IndexOrigin.Undeclared
                     ? " Nothing declares it, so the next apply drops it anyway (AutoCreate.CreateOrUpdate is not additive)."
                     : string.Empty),
             Evidence = evidence,
             Caveat =
-                "Judged over " + UsageWindow.Age(usage.Length) + " of statistics, " + usage.SinceText + ": a usage verdict is never "
+                "Judged over " + UsageWindow.Age(length) + " of statistics, " + sinceText + ": a usage verdict is never "
                 + "given over less than 7 days or over counters that look reset."
                 + (facts.MultiHost ? " " + MultiHostCaveat : string.Empty)
                 + " An index used by a monthly job, a failover's replica or a query that has not run yet looks unused too: "

@@ -50,6 +50,12 @@ internal sealed record MaintenanceFacts
     /// </summary>
     public string? OwnSchemasCoverage { get; init; }
 
+    /// <summary>
+    /// PostgreSQL 19's own autovacuum score of each judged table that has one, by table key (T07's read), or
+    /// <see langword="null" /> before 19, where the server refused the view, or when the sweep did not finish T07.
+    /// </summary>
+    public IReadOnlyDictionary<string, AutovacuumScoreRow>? AutovacuumScores { get; init; }
+
     /// <summary>The server's autovacuum workers (T16's read), or <see langword="null" />.</summary>
     public MaintenanceWorkersRow? Workers { get; init; }
 
@@ -115,6 +121,7 @@ internal sealed class MaintenanceFactsReader(HealthSweepCache cache, HealthHisto
             Tables = sweep.TryShared<IReadOnlyList<TableFacts>>(HealthTables.TablesKey, out var tables) ? tables : null,
             Coverage = set?.Coverage,
             OwnSchemasCoverage = set?.OwnSchemasCoverage,
+            AutovacuumScores = sweep.TryShared<IReadOnlyDictionary<string, AutovacuumScoreRow>>(HealthTables.AutovacuumScoresKey, out var scores) ? scores : null,
             Workers = sweep.TryShared<MaintenanceWorkersRow>(MaintenanceQueries.WorkersKey, out var workers) ? workers : null,
             Running = sweep.TryShared<IReadOnlyList<MaintenanceProgressRow>>(MaintenanceQueries.ProgressKey, out var running) ? running : null,
             Wraparound = sweep.TryShared<WraparoundFacts>(Wraparound.Key, out var wraparound) ? wraparound : null,

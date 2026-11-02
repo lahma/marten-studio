@@ -23,8 +23,8 @@ namespace PostgresStudio.Integration.Tests.Storage;
 /// </summary>
 public class StorageFactsLiveTests(PostgresVersionMatrix matrix)
 {
-    /// <summary>The legs: 15's facts are 14's and 16's together, and 19 is the matrix's own preview.</summary>
-    public static TheoryData<int> Legs => [14, 16, 17, 18];
+    /// <summary>The legs: 15's facts are 14's and 16's together (14 left the matrix in 1.1), and 19 is a supported leg.</summary>
+    public static TheoryData<int> Legs => [15, 16, 17, 18, 19];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
@@ -80,7 +80,7 @@ public class StorageFactsLiveTests(PostgresVersionMatrix matrix)
         }
         else
         {
-            hot.NewPageShare.Should().BeNull("14 has no n_tup_newpage_upd, and the statement still runs");
+            hot.NewPageShare.Should().BeNull("15 has no n_tup_newpage_upd, and the statement still runs");
         }
 
         facts.Window.Should().NotBeNull(facts.WindowNotRead);
@@ -177,10 +177,11 @@ public class StorageFactsLiveTests(PostgresVersionMatrix matrix)
     /// </summary>
     public static TheoryData<int, string> ControlRevocations => new()
     {
-        { 14, "pg_catalog.pg_control_system()" },
+        { 15, "pg_catalog.pg_control_system()" },
         { 17, "pg_catalog.pg_control_checkpoint()" },
         { 16, "pg_catalog.has_function_privilege(text, text)" },
         { 18, "pg_catalog.has_function_privilege(text, text)" },
+        { 19, "pg_catalog.pg_control_checkpoint()" },
     };
 
     /// <summary>

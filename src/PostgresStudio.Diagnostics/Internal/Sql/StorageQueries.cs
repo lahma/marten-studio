@@ -63,6 +63,13 @@ internal sealed record StorageTableRow
     /// the catalog counts no pages.
     /// </summary>
     public double? AllVisibleRatio { get; init; }
+
+    /// <summary>
+    /// <c>stats_reset</c> of the table's own counters (PostgreSQL 19+), the latest of its partitions' for a partitioned table:
+    /// set when somebody reset this table alone (<c>pg_stat_reset_single_table_counters</c>), <see langword="null" /> when none
+    /// did, and always before 19. The database's own window governs a table that has none.
+    /// </summary>
+    public DateTimeOffset? CountersReset { get; init; }
 }
 
 /// <summary>
@@ -151,7 +158,8 @@ internal static class StorageQueries
                    pg_catalog.sum(s.n_tup_del) as del,
                    pg_catalog.sum(s.n_tup_upd) as upd,
                    pg_catalog.sum(s.n_tup_hot_upd) as hot,
-                   pg_catalog.sum((pg_catalog.to_jsonb(s) ->> 'n_tup_newpage_upd')::bigint) as newpage
+                   pg_catalog.sum((pg_catalog.to_jsonb(s) ->> 'n_tup_newpage_upd')::bigint) as newpage,
+                   pg_catalog.max((pg_catalog.to_jsonb(s) ->> 'stats_reset')::timestamptz) as counters_reset
             from tree t
             join pg_catalog.pg_class d on d.oid = t.relid
             left join pg_catalog.pg_class toast on toast.oid = d.reltoastrelid
@@ -171,7 +179,8 @@ internal static class StorageQueries
                r.hot::bigint,
                r.newpage::bigint,
                case when coalesce(r.heap_pages, 0) > 0
-                    then least(r.all_visible_pages::float8 / r.heap_pages::float8, 1::float8) end
+                    then least(r.all_visible_pages::float8 / r.heap_pages::float8, 1::float8) end,
+               r.counters_reset
         from listed l
         left join rolled r on r.root = l.oid
         cross join (select pg_catalog.current_setting('block_size')::bigint as block_size) b
@@ -239,6 +248,7 @@ internal static class StorageQueries
             HotUpdates = Nullable(reader, 10),
             NewPageUpdates = Nullable(reader, 11),
             AllVisibleRatio = reader.IsDBNull(12) ? null : reader.GetDouble(12),
+            CountersReset = reader.IsDBNull(13) ? null : reader.GetFieldValue<DateTimeOffset>(13),
         };
     }
 

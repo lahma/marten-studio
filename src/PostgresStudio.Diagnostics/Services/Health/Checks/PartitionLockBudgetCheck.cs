@@ -1,6 +1,9 @@
 using System.Globalization;
 
+using Npgsql;
+
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 
@@ -21,7 +24,15 @@ internal sealed record PartitionLockBudget(long Locks, int PerTransaction, long 
 /// <summary>What T19 reads: the sweep's partition facts, and who runs the server - for the remedy's words.</summary>
 /// <param name="Partitions">The partition facts (<see cref="HealthPartitions.SharedAsync" />).</param>
 /// <param name="Platform">Who runs the server.</param>
-internal sealed record PartitionLockFacts(PartitionFacts Partitions, PostgresPlatform Platform);
+internal sealed record PartitionLockFacts(PartitionFacts Partitions, PostgresPlatform Platform)
+{
+    /// <summary>
+    /// PostgreSQL 19's <c>pg_stat_lock</c> row for relation locks - the whole server's, since its counters were last reset - or
+    /// <see langword="null" /> before 19, where no table is partitioned past the lines, and where the server refused the view.
+    /// Evidence only: it changes no line.
+    /// </summary>
+    public LockStatisticsRow? RelationLocks { get; init; }
+}
 
 /// <summary>
 /// T19: a partitioned table one unpruned query - or a generic plan of a pruned one - takes more locks on than the lock table
@@ -65,7 +76,58 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
             ? PostgresPlatform.SelfHosted
             : (await PostgresServerFacts.SharedAsync(context).ConfigureAwait(false)).Platform;
 
-        return new PartitionLockFacts(partitions, platform);
+        return new PartitionLockFacts(partitions, platform)
+        {
+            RelationLocks = await RelationLocksAsync(context, partitions, cancellationToken).ConfigureAwait(false),
+        };
+    }
+
+    /// <summary>
+    /// The relation-lock row of PostgreSQL 19's <c>pg_stat_lock</c>, read only for a sweep that has a partitioned table past one
+    /// of the lines - the only finding that shows it - on a server that has the view; <see langword="null" /> otherwise, and
+    /// where the server refuses the view for a reason of its own (a platform that revokes it): the figure is evidence, so its
+    /// absence is not a failed check. The same statement the Sessions page reads, so "Show SQL" says the same thing.
+    /// </summary>
+    internal static async Task<LockStatisticsRow?> RelationLocksAsync(HealthCheckContext context, PartitionFacts partitions, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(partitions);
+
+        if (partitions.Tables.Count == 0
+            || !PostgresFeatures.Has(PostgresFeature.PgStatLock, partitions.Tables[0].ServerVersion)
+            || !partitions.Tables.Any(static x => Budget(x).Locks > x.MaxLocksPerTransaction))
+        {
+            return null;
+        }
+
+        try
+        {
+            IReadOnlyList<LockStatisticsRow> rows = await context.Sql
+                .QueryAsync(HealthConnectionQueries.LockStatistics(), SessionActivityReader.MapLockStatistics, cancellationToken)
+                .ConfigureAwait(false);
+
+            return rows.FirstOrDefault(static x => string.Equals(x.LockType, "relation", StringComparison.Ordinal));
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn
+                                                  or PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The evidence PostgreSQL 19's <c>pg_stat_lock</c> adds: how often a backend found its fast-path slots full, whole server,
+    /// since the view's counters were last reset - the cost the "Fast-path slots" line above is about.
+    /// </summary>
+    internal static HealthEvidence FastPathEvidence(LockStatisticsRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return new HealthEvidence(
+            "Fast-path slots found full, whole server (PostgreSQL 19)",
+            Number(row.FastPathExceeded) + " time" + (row.FastPathExceeded == 1 ? string.Empty : "s")
+            + (row.StatsReset is { } reset ? " since " + TableText.When(reset) : " since the server's statistics began")
+            + "; " + Number(row.Waits) + " relation-lock request" + (row.Waits == 1 ? string.Empty : "s") + " had to wait");
     }
 
     /// <summary>The lock count and the budget for one partitioned table.</summary>
@@ -145,11 +207,11 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
 
             if (budget.Capacity > 0 && budget.Locks > CapacityShare * budget.Capacity)
             {
-                findings.Add(Finding(table, row, budget, capacity: true, facts.Platform, evaluation));
+                findings.Add(Finding(table, row, budget, capacity: true, facts.Platform, evaluation, facts.RelationLocks));
             }
             else if (budget.Locks > budget.PerTransaction)
             {
-                findings.Add(Finding(table, row, budget, capacity: false, facts.Platform, evaluation));
+                findings.Add(Finding(table, row, budget, capacity: false, facts.Platform, evaluation, facts.RelationLocks));
             }
         }
 
@@ -166,7 +228,8 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
         PartitionLockBudget budget,
         bool capacity,
         PostgresPlatform platform,
-        HealthEvaluation evaluation)
+        HealthEvaluation evaluation,
+        LockStatisticsRow? relationLocks)
     {
         bool nineteen = PostgresFeatures.Has(PostgresFeature.MaxLocksDefault128, row.ServerVersion);
         bool partitionedIndexes = PostgresFeatures.Has(PostgresFeature.PartitionedIndexLocks, row.ServerVersion);
@@ -176,6 +239,26 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
             + " (partitions) + " + Number(row.LeafIndexes) + " (their indexes)"
             + (partitionedIndexes ? " + " + Number(row.PartitionedIndexes) + " (partitioned indexes, from PostgreSQL 16)" : string.Empty)
             + " = " + Number(budget.Locks);
+
+        List<HealthEvidence> evidence =
+        [
+            new HealthEvidence("Table", table.Describe()),
+            new HealthEvidence("Locks one unpruned query takes", formula),
+            new HealthEvidence("max_locks_per_transaction", Number(budget.PerTransaction)),
+            new HealthEvidence(
+                "Documented capacity",
+                Number(budget.Capacity) + " = max_locks_per_transaction × (max_connections " + Number(row.MaxConnections)
+                + " + max_prepared_transactions " + Number(row.MaxPreparedTransactions) + ")"
+                + (nineteen
+                    ? "; from PostgreSQL 19 the lock table keeps no margin past it"
+                    : "; a floor: one backend measured about twice it")),
+            new HealthEvidence("Fast-path slots a backend", Number(budget.FastPathSlots)),
+        ];
+
+        if (relationLocks is not null)
+        {
+            evidence.Add(FastPathEvidence(relationLocks));
+        }
 
         return new HealthFinding
         {
@@ -199,20 +282,7 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
                     : "one such query takes more than its share, which is fine alone and is what fills the table when several run "
                       + "at once.")
                 + " Fast-path slots, " + Number(budget.FastPathSlots) + " a backend here, hold only the first few of them.",
-            Evidence =
-            [
-                new HealthEvidence("Table", table.Describe()),
-                new HealthEvidence("Locks one unpruned query takes", formula),
-                new HealthEvidence("max_locks_per_transaction", Number(budget.PerTransaction)),
-                new HealthEvidence(
-                    "Documented capacity",
-                    Number(budget.Capacity) + " = max_locks_per_transaction × (max_connections " + Number(row.MaxConnections)
-                    + " + max_prepared_transactions " + Number(row.MaxPreparedTransactions) + ")"
-                    + (nineteen
-                        ? "; from PostgreSQL 19 the lock table keeps no margin past it"
-                        : "; a floor: one backend measured about twice it")),
-                new HealthEvidence("Fast-path slots a backend", Number(budget.FastPathSlots)),
-            ],
+            Evidence = evidence,
             Caveat =
                 "A generic plan of a query that filters on the partition key still locks every partition (measured, B0 §8a); only a "
                 + "custom plan prunes at plan time. Counted from the catalog, never by locking anything.",

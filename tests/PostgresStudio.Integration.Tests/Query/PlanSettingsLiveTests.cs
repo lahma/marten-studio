@@ -25,7 +25,7 @@ public class PlanSettingsLiveTests(PostgresVersionMatrix matrix)
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    public static TheoryData<int> Legs => [14, 17, 18];
+    public static TheoryData<int> Legs => [15, 17, 18, 19];
 
     private const string Seed =
         """

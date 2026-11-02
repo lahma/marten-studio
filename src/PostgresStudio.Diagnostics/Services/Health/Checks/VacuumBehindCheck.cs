@@ -22,6 +22,12 @@ internal sealed record VacuumFacts(DateTimeOffset ReadAt, IReadOnlyList<TableFac
 
     /// <summary>Who runs the server, for a server setting's wording.</summary>
     public PostgresPlatform Platform { get; init; } = PostgresPlatform.SelfHosted;
+
+    /// <summary>
+    /// PostgreSQL 19's own autovacuum score of each judged table, by key (<see cref="HealthTables.AutovacuumScoresAsync" />), or
+    /// <see langword="null" /> before 19. Evidence, and the Maintenance page's "Next for autovacuum" list; no line moves on it.
+    /// </summary>
+    public IReadOnlyDictionary<string, AutovacuumScoreRow>? Scores { get; init; }
 }
 
 /// <summary>Which of autovacuum's two vacuum decisions a table is behind on.</summary>
@@ -108,7 +114,12 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
 
         IReadOnlyList<TableFacts> tables = await HealthTables.TablesAsync(context).ConfigureAwait(false);
 
-        VacuumFacts facts = new(context.Now, tables, await ProgressHiddenAsync(context, tables).ConfigureAwait(false));
+        VacuumFacts facts = new(context.Now, tables, await ProgressHiddenAsync(context, tables).ConfigureAwait(false))
+        {
+            // On 19 in every regular sweep, not only for a table behind: the Maintenance page's "Next for autovacuum" list is
+            // built from the sweep's memo of it.
+            Scores = await HealthTables.AutovacuumScoresAsync(context, tables).ConfigureAwait(false),
+        };
 
         // Only for a table behind: T16's workers read and the server facts, which the sweep reads once for every check that
         // asks - what explains it (every worker busy, the server's throttling) and who runs the server, for a setting's wording.
@@ -122,6 +133,37 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
 
         return facts with { Workers = workers, Platform = server.Platform };
     }
+
+    /// <summary>
+    /// PostgreSQL 19's own score of a table as evidence: the score and the parts it is made of, and what autovacuum would do at
+    /// its next look. A score of 1 or more is a table autovacuum takes.
+    /// </summary>
+    internal static HealthEvidence ScoreEvidence(AutovacuumScoreRow score)
+    {
+        ArgumentNullException.ThrowIfNull(score);
+
+        string next = (score.DoVacuum, score.DoAnalyze) switch
+        {
+            (true, true) => "; autovacuum would vacuum and analyse it at its next look",
+            (true, false) => "; autovacuum would vacuum it at its next look",
+            (false, true) => "; autovacuum would analyse it at its next look",
+            _ => "; autovacuum would leave it at its next look",
+        };
+
+        return new HealthEvidence(
+            "Autovacuum's own score (PostgreSQL 19)",
+            Score(score.Score) + ", mostly " + score.Dominant + " (dead rows " + Score(score.VacuumScore) + ", inserts " + Score(score.InsertScore)
+            + ", changes since analyze " + Score(score.AnalyzeScore) + ", transaction-id age " + Score(score.TransactionIdScore)
+            + ", multixact age " + Score(score.MultixactScore) + ")" + next + (score.ForWraparound ? ", to prevent wraparound" : string.Empty));
+    }
+
+    /// <summary>A score's part as the evidence says it: 2 decimals, and "under 0.01" for a part that small.</summary>
+    internal static string Score(double value) => value switch
+    {
+        <= 0 => "0",
+        < 0.01 => "under 0.01",
+        _ => value.ToString("0.##", CultureInfo.InvariantCulture),
+    };
 
     /// <summary>
     /// The "not checked" sentence for running vacuums this role cannot see, or <see langword="null" /> - read only when the
@@ -323,6 +365,11 @@ internal sealed class VacuumBehindCheck : HealthCheck<VacuumFacts>
 
         evidence.Add(new HealthEvidence("Storage parameters", table.Row.StorageOptions.Count == 0 ? "none" : string.Join(", ", table.Row.StorageOptions)));
         evidence.Add(new HealthEvidence("Being vacuumed now", facts.ProgressHidden is null ? "no" : "not known - this role cannot see autovacuum's progress"));
+
+        if (facts.Scores is { } scores && scores.TryGetValue(table.Key, out AutovacuumScoreRow? score))
+        {
+            evidence.Add(ScoreEvidence(score));
+        }
 
         if (!table.AutovacuumOff)
         {

@@ -10,8 +10,8 @@ using PostgresStudio.Services.Health.Checks;
 namespace PostgresStudio.Integration.Tests.Versions;
 
 /// <summary>
-/// W5-B1 on the version matrix: T05's usage guard over a new database's young counters on 15 and 16, T20's bounds on 14
-/// and 18, the lint reads behind a held <c>ACCESS EXCLUSIVE</c> on a partitioned table - beside the two deparses that do
+/// W5-B1 on the version matrix: T05's usage guard over a new database's young counters on 15 and 16, T20's bounds on 15,
+/// 18 and 19, the lint reads behind a held <c>ACCESS EXCLUSIVE</c> on a partitioned table - beside the two deparses that do
 /// queue, which is AGENTS.md D27's sentence - and what <c>ALTER COLUMN … TYPE bigint</c> does to an identity's and a
 /// serial's sequence, which T26's remedy relies on.
 /// </summary>
@@ -74,9 +74,10 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
 
     /// <summary>T20's bounds, read through <c>pg_get_expr(relpartbound, 0)</c>, on the oldest and newest supported releases.</summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
-    public async Task T20_reads_its_bounds_and_judges_them_on_14_and_18(int major)
+    [InlineData(19)]
+    public async Task T20_reads_its_bounds_and_judges_them_on_15_18_and_19(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);
         server.SkipIfUnavailable();
@@ -117,8 +118,9 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
     /// <c>pg_get_expr(relpartbound, &lt;relid&gt;)</c> open the relation and queue, <c>pg_get_expr(relpartbound, 0)</c> does not.
     /// </summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
+    [InlineData(19)]
     public async Task The_lint_reads_take_no_lock_where_partkeydef_and_a_relids_deparse_queue(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);
@@ -203,8 +205,9 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
     /// T18's tenant shares, from a table's partitions and from <c>pg_stats</c>.
     /// </summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
+    [InlineData(19)]
     public async Task X4s_partition_and_skew_reads_parse_each_releases_text_and_return_behind_a_held_lock(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);
@@ -302,8 +305,9 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
     /// 18 is what keeps its lock away - while the owner's read waits for it (W5-B1 review F4).
     /// </summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
+    [InlineData(19)]
     public async Task A_sequence_value_the_role_may_not_read_is_answered_behind_a_lock_and_the_owners_waits(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);
@@ -351,8 +355,9 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
     /// both, and the remedy's <c>NO MAXVALUE</c> lifts it - and the integer-key read judges the sequence it caps.
     /// </summary>
     [PostgresTheory]
-    [InlineData(14)]
+    [InlineData(15)]
     [InlineData(18)]
+    [InlineData(19)]
     public async Task Widening_an_identity_column_widens_its_sequence_and_a_serials_needs_its_own_statement(int major)
     {
         MatrixServer server = await matrix.ServerAsync(major);

@@ -257,6 +257,38 @@ internal static class MatrixReads
             x, IndexLintQueries.CountersAge(LintTargets, PostgresFeatures.Has(PostgresFeature.LastScanColumns, x.Connection.PostgreSqlVersion.Major * 10_000)),
             IndexLintQueries.ReadCountersAge, t)),
         new("lints: integer keys", true, static (x, t) => QueryAsync(x, IndexLintQueries.IntegerKeys(LintTargets), IndexLintQueries.ReadIntegerKey, t)),
+
+        // ---- 1.1-PG19: a table's own reset rides the table read on every version (null below 19); the scores and the multixact
+        // usage are asked only of a server that has them, and answer the fixture's tables / no error ----------------------------
+        new("tables: statistics, each table's own reset", true, static async (x, t) =>
+        {
+            IReadOnlyList<HealthTableRow> rows = await QueryAsync(x, HealthTableQueries.Tables(LintTargets, []), HealthTableQueries.ReadTable, t);
+            Owned(x, rows.FirstOrDefault(static y => y.Table == "child"), "store.child's statistics");
+
+            if (!PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, x.Connection.PostgreSqlVersion.Major * 10_000)
+                && rows.FirstOrDefault(static y => y.CountersReset is not null) is { } wrong)
+            {
+                throw new InvalidOperationException(wrong.Key + " reports a reset of its own on a server below 19.");
+            }
+        }),
+        new("19: autovacuum scores of the listed tables", true, static async (x, t) =>
+        {
+            if (PostgresFeatures.Has(PostgresFeature.AutovacuumScores, x.Connection.PostgreSqlVersion.Major * 10_000))
+            {
+                IReadOnlyList<AutovacuumScoreRow> scores = await QueryAsync(x, HealthTableQueries.AutovacuumScores(LintTargets), HealthTableQueries.ReadAutovacuumScore, t);
+                Found(scores.FirstOrDefault(static y => y.Table == "child"), "a score for store.child, whatever the role may read of it");
+                scores.Select(static y => y.Schema + "." + y.Table).Should().OnlyContain(static y => y.StartsWith("store.", StringComparison.Ordinal),
+                    "only the listed tables are named");
+            }
+        }),
+        new("19: multixact usage", true, static async (x, t) =>
+        {
+            if (PostgresFeatures.Has(PostgresFeature.MultixactStats, x.Connection.PostgreSqlVersion.Major * 10_000))
+            {
+                IReadOnlyList<MultixactUsage> usage = await QueryAsync(x, HealthHorizonQueries.MultixactStats(), HealthHorizonQueries.ReadMultixactUsage, t);
+                usage.Should().ContainSingle("the function answers one row, with nothing in it while no multixact exists");
+            }
+        }),
         new("lints: partitions", true, static async (x, t) =>
         {
             // store.r's bounds are deparsed with no relation, so its partition the matrix holds ACCESS EXCLUSIVE on is read too.

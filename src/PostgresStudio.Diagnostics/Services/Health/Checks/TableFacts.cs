@@ -174,6 +174,9 @@ internal static class HealthTables
     /// <summary>The memo key of the index read.</summary>
     internal const string IndexesKey = "tables.indexes";
 
+    /// <summary>The memo key of PostgreSQL 19's autovacuum scores of the judged tables.</summary>
+    internal const string AutovacuumScoresKey = "tables.autovacuum-scores";
+
     /// <summary>What a status row says when the studio registered no table source.</summary>
     internal const string NoSource = "This studio registers no table source, so no table is judged.";
 
@@ -232,6 +235,63 @@ internal static class HealthTables
         ArgumentNullException.ThrowIfNull(set);
 
         return context.Shared(TablesKey, token => ReadTablesAsync(context, set, token));
+    }
+
+    /// <summary>
+    /// PostgreSQL 19's own autovacuum score of each judged table that has one (<c>pg_stat_autovacuum_scores</c>), by
+    /// <see cref="TableFacts.Key" />, read once per sweep - or <see langword="null" /> before 19 (the view is never named
+    /// there) and where the server refuses it for a reason of its own. A table without a row is one the view has no score for.
+    /// </summary>
+    /// <remarks>
+    /// Evidence and the Maintenance page's "Next for autovacuum" list only: no line of any check moves on a score. The first
+    /// check to ask runs the one statement; T07 is the one that does, in every regular sweep, so the page finds it in the
+    /// sweep's memo.
+    /// </remarks>
+    /// <param name="context">The sweep's context.</param>
+    /// <param name="tables">The judged tables, from <see cref="TablesAsync(HealthCheckContext)" />: their rows say which server this is.</param>
+    public static async Task<IReadOnlyDictionary<string, AutovacuumScoreRow>?> AutovacuumScoresAsync(HealthCheckContext context, IReadOnlyList<TableFacts> tables)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(tables);
+
+        if (tables.Count == 0 || !PostgresFeatures.Has(PostgresFeature.AutovacuumScores, tables[0].Row.ServerVersion))
+        {
+            return null;
+        }
+
+        IStudioTableSet set = await SetAsync(context).ConfigureAwait(false);
+
+        return await context.Shared(AutovacuumScoresKey, token => ReadAutovacuumScoresAsync(context, set, token)).ConfigureAwait(false);
+    }
+
+    private static async Task<IReadOnlyDictionary<string, AutovacuumScoreRow>?> ReadAutovacuumScoresAsync(
+        HealthCheckContext context,
+        IStudioTableSet set,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            IReadOnlyList<AutovacuumScoreRow> rows = await context.Sql
+                .QueryAsync(HealthTableQueries.AutovacuumScores(Targets(set)), HealthTableQueries.ReadAutovacuumScore, cancellationToken)
+                .ConfigureAwait(false);
+
+            Dictionary<string, AutovacuumScoreRow> scores = new(StringComparer.Ordinal);
+
+            foreach (AutovacuumScoreRow row in rows)
+            {
+                if (set.Find(row.Schema, row.Table) is { } table)
+                {
+                    scores[table.Key] = row;
+                }
+            }
+
+            return scores;
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn
+                                                  or PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return null;
+        }
     }
 
     /// <summary>

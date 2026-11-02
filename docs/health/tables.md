@@ -112,6 +112,12 @@ look reset - a crash, a restore, a pre-18 `pg_upgrade`, a failover - T01 makes n
 and later, until somebody resets it), no older than the oldest moment its statistics record - so a database created after
 the server's statistics began is not taken for one as old as they are.
 
+**A table reset on its own (PostgreSQL 19, 1.1).** 19 keeps a `stats_reset` per table, set when somebody resets that one
+table (`pg_stat_reset_single_table_counters`). A table whose own reset is later than the window began is judged over its
+own counters: not at all until they have counted for seven days (the row says how many tables were not judged), never over
+a span of samples that began before the reset, and the finding's evidence and caveat say "Counters since ... (this table's
+own reset)". A table nobody reset on its own counts from the database's window, as before; below 19 there is no such time.
+
 **A partitioned table is judged by its largest partition.** A tenant-partitioned table counts one scan per
 partition read, and a per-tenant query that reads its own small partition whole is often the right plan. So the
 100,000 line applies to the table's largest partition, and so does "an average scan read a good part of one
@@ -206,7 +212,10 @@ and a failover zero `idx_scan`, and an index used by a weekly job looks unused f
 statistics have counted for less than seven days, or look reset, there is no finding at all, and the row says why
 ("Withheld: statistics 3 days old (since ..., basis ...)", "Withheld: the counters look reset (...)"). The window is the
 one T01 reads, narrowed the same way for a database newer than the server's statistics; on PostgreSQL 19 an index whose
-own counters were reset less than seven days ago is not judged either, and counted. **What changed in 0.5:** 0.4 made
+own counters were reset less than seven days ago is not judged either, and counted. An index reset on its own longer ago
+than that is judged over its own counters, and its evidence and caveat say "since ... (this index's own reset, PostgreSQL
+19)" - an index reset an hour ago is not "unused" - and a table reset on its own is named in the evidence, because its writes
+are counted from then. **What changed in 0.5:** 0.4 made
 the finding Info while the counters were under a day old or had never been reset, and a Warning once the advisor's own
 samples had seen the index unscanned for a day (`MinCounterAge`). That is folded into the guard: the finding is a
 Warning over a covering window or nothing, and T05 keeps no samples of its own - so it is never Info for its first day,
@@ -294,6 +303,11 @@ on both is one finding, the `dead-rows` one, with both counters and both trigger
 that began as `inserts` takes the `dead-rows` key once the dead rows have been behind for their own ten minutes: its
 key, and a mute of it, change mid-incident. That is deliberate (one table, one thing to do), and a mute of the
 `inserts` key does not hide the `dead-rows` finding.
+
+**PostgreSQL 19's own score (1.1).** On 19 the evidence adds "Autovacuum's own score": `pg_stat_autovacuum_scores` for the
+table (for a partitioned table, the partition autovacuum would take first), the parts it is made of - dead rows, inserts,
+changes since the last analyze, transaction-id age, multixact age - and what autovacuum would do at its next look. It is
+evidence only: the lines above are unchanged, and the Maintenance page lists the highest scores under *Next for autovacuum*.
 
 **"Not being vacuumed now"** is `pg_stat_progress_vacuum.relid`. A role without `pg_read_all_stats` sees only the
 process id and database of a `VACUUM` it did not run - autovacuum's on its own tables included - so while such a
@@ -482,7 +496,11 @@ foreign-key check would share the stream's row.
 
 Multixacts are held back by a long transaction that is itself a member of one, or a prepared transaction; unlike
 transaction ids, replication slots do not hold them back. Multixact *member* storage, which can run out before the
-ids do (about 20 GB), is not read: Postgres has no view of it.
+ids do (about 20 GB), has no view before PostgreSQL 19, and the check reads none there. **On 19 (1.1)** the evidence adds
+`pg_get_multixact_stats()`: how many multixacts and members the server holds, the space the members take and the oldest
+multixact still needed. It is evidence only - no line, threshold or variant moves on it - and PostgreSQL answers a role
+outside `pg_read_all_stats` (`pg_monitor` includes it) a row of nulls, which the evidence words as "not shown", never as
+"none".
 
 ## T14 Vacuum held back
 
@@ -949,7 +967,9 @@ Up to 18 the documented capacity is a floor - one backend measured about twice i
 from PostgreSQL 19 the lock table keeps no such margin and `max_locks_per_transaction` defaults to 128, so a value carried
 over from an older release holds about half the locks it did. The evidence shows the formula with its numbers and the
 fast-path slots a backend has (16 up to 17; from 18 the smallest power of two at or above `max_locks_per_transaction`,
-at least 16 - 64 at its default, 128 at 100). The
+at least 16 - 64 at its default, 128 at 100). On 19 (1.1) the evidence adds `pg_stat_lock`'s relation-lock row: how often a
+backend found its fast-path slots full, whole server, since that view's counters were reset, and how many relation-lock
+requests had to wait. It is evidence only, in either variant; the lines are unchanged. The
 remedy is `max_locks_per_transaction`, sized from the formula (the smallest power of two that holds one such query
 within the line, and at least double the setting in force), which takes effect at the server's restart. Counted from the
 catalog, never by locking anything.

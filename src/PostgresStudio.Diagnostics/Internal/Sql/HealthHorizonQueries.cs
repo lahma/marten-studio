@@ -211,6 +211,23 @@ internal sealed record HealthHorizonHolderRow
 }
 
 /// <summary>
+/// PostgreSQL 19's multixact usage, server-wide (<c>pg_get_multixact_stats()</c>): how many multixacts exist, how many members
+/// they hold, the space those take, and the oldest one still needed. A server that has made none answers zeros and the oldest id
+/// (measured on 19rc1); every figure is <see langword="null" /> when the function answers a role outside
+/// <c>pg_read_all_stats</c> - which <c>pg_monitor</c> includes - and nothing else (measured on 19rc1: <c>postgres</c>, a
+/// <c>pg_monitor</c> member and a <c>pg_read_all_stats</c> member read the figures, a role in neither a row of nulls).
+/// </summary>
+/// <param name="Multixacts"><c>num_mxids</c>.</param>
+/// <param name="Members"><c>num_members</c>.</param>
+/// <param name="MembersBytes"><c>members_size</c>, in bytes.</param>
+/// <param name="OldestMultixact"><c>oldest_multixact</c>, the id.</param>
+internal sealed record MultixactUsage(long? Multixacts, long? Members, long? MembersBytes, long? OldestMultixact)
+{
+    /// <summary>Whether the function answered this role nothing: every figure is null.</summary>
+    public bool Withheld => Multixacts is null && Members is null && MembersBytes is null && OldestMultixact is null;
+}
+
+/// <summary>
 /// The statements behind wraparound and the vacuum horizon (T12's database half, T13 and T14): <c>pg_database</c>,
 /// <c>pg_class</c>'s freeze ages, the counters, and the four kinds of horizon holder.
 /// </summary>
@@ -560,8 +577,32 @@ internal static class HealthHorizonQueries
         "left join holders h on true\n" +
         "order by h.kind, h.xid_age desc";
 
+    /// <summary>
+    /// PostgreSQL 19's multixact usage for the whole server (<c>pg_get_multixact_stats()</c>), one row. The function reads
+    /// shared memory and takes no role, and its figures are <see langword="null" /> while the server has made no multixact.
+    /// </summary>
+    /// <remarks>
+    /// Asked only of a server that has it (<c>PostgresFeature.MultixactStats</c>, 190000): below it the function does not exist
+    /// and naming it is <c>42883</c>. <c>oldest_multixact</c> is an <c>xid</c>, which Npgsql hands over as an unsigned integer;
+    /// cast through text it is a plain <c>bigint</c>.
+    /// </remarks>
+    internal const string MultixactUsageSql =
+        "select m.num_mxids::bigint, m.num_members::bigint, m.members_size::bigint, m.oldest_multixact::text::bigint\n" +
+        "from pg_catalog.pg_get_multixact_stats() as m";
+
     /// <summary>Every statement here, for the tests that hold them to a catalog read.</summary>
-    internal static IReadOnlyList<string> Statements { get; } = [WraparoundSql, HoldersSql];
+    internal static IReadOnlyList<string> Statements { get; } = [WraparoundSql, HoldersSql, MultixactUsageSql];
+
+    /// <summary>PostgreSQL 19's multixact usage (<see cref="MultixactUsageSql" />).</summary>
+    public static HealthQuery MultixactStats() => new(MultixactUsageSql);
+
+    /// <summary>Maps the one row of <see cref="MultixactUsageSql" />.</summary>
+    public static MultixactUsage ReadMultixactUsage(NpgsqlDataReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        return new MultixactUsage(NullableInt64(reader, 0), NullableInt64(reader, 1), NullableInt64(reader, 2), NullableInt64(reader, 3));
+    }
 
     /// <summary>The database-wide wraparound facts and the store's tables' oldest ages (<see cref="WraparoundSql" />).</summary>
     /// <param name="tables">The store's tables, a hidden document type's left out.</param>

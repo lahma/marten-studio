@@ -90,20 +90,26 @@ public class ServerPostureLiveTests(PostgresVersionMatrix matrix)
 
     // ---- S06 ----------------------------------------------------------------------------------------------------------
 
-    /// <summary>A cluster made on 14 gives every role CREATE on <c>public</c> (B0 §6): S06 names it.</summary>
+    /// <summary>
+    /// A cluster made on 14 gave every role CREATE on <c>public</c> (B0 §6); from 15 somebody has to grant it, and S06 names it
+    /// with the 15-and-later caveat. (14 left the version matrix in 1.1: its "Below PostgreSQL 15" caveat is held by
+    /// <c>ServerPostureCheckTests</c> alone.)
+    /// </summary>
     [PostgresFact]
     [HealthFires("S06")]
-    public async Task S06_fires_on_14_where_PUBLIC_may_create_in_public()
+    public async Task S06_fires_where_somebody_granted_PUBLIC_CREATE_in_public()
     {
-        MatrixServer server = await ServerAsync(14);
+        MatrixServer server = await ServerAsync(17);
+        string database = await server.CreateDatabaseAsync("s06_public", Token);
+        await server.ExecuteAsync("grant create on schema public to public", database, Token);
 
-        await using PostureHost host = await PostureHost.CreateAsync(server.ConnectionString(MatrixRole.App));
+        await using PostureHost host = await PostureHost.CreateAsync(server.ConnectionString(MatrixRole.App, database));
         HealthCheckResult result = PostureHost.Result(await host.SweepAsync(), "S06");
 
         result.Outcome.Should().Be(HealthCheckOutcome.Checked, result.Problem?.Reason);
         HealthFinding finding = result.Findings.Should().ContainSingle().Subject;
         finding.Subject.Should().Be("public");
-        finding.Caveat.Should().StartWith("Below PostgreSQL 15");
+        finding.Caveat.Should().StartWith("PostgreSQL 15 and later create the public schema without this grant");
     }
 
     /// <summary>From 15 <c>public</c> is <c>pg_database_owner</c>'s and PUBLIC holds no CREATE on it: S06 is quiet.</summary>

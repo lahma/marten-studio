@@ -194,6 +194,52 @@ public class StoragePageTests
     }
 
     /// <summary>
+    /// 1.1-PG19: on PostgreSQL 19 the grid has a "Stats since" column - the time a table was reset on its own, a dash for a table
+    /// nobody reset, nothing for a withheld table's name or time - and below 19 there is no such column at all.
+    /// </summary>
+    [Theory]
+    [InlineData(190_000, true)]
+    [InlineData(180_006, false)]
+    public async Task The_stats_since_column_is_drawn_on_19_and_absent_below(int serverVersion, bool drawn)
+    {
+        StorageFacts facts = StorageFacts.Build(
+            "default",
+            "localhost.marten",
+            Window(TimeSpan.FromDays(3)),
+            new StorageDatabaseRow(DatabaseBytes: 400L << 20, EstimatedBytes: 360L << 20, BlockSize: 8192, ServerVersion: serverVersion),
+            new Set([Orders, Salaries, Triggers]),
+            [
+                Row("public", "orders", heap: 120L << 20, index: 40L << 20, toast: 0, rows: 900_000) with { CountersReset = new DateTimeOffset(2026, 10, 24, 8, 30, 0, TimeSpan.Zero) },
+                Row("hr", "salaries", heap: 60L << 20, index: 6L << 20, toast: 0, rows: 50_000) with { CountersReset = new DateTimeOffset(2026, 10, 25, 7, 0, 0, TimeSpan.Zero) },
+                Row("quartz", "qrtz_triggers", heap: 10L << 20, index: 2L << 20, toast: 0, rows: 4_000),
+            ]);
+
+        FakeStorageService storage = new()
+        {
+            View = await Service(Hiding()).ShowAsync(facts, new StudioScope("default", "localhost.marten", null), static () => Task.FromResult<DatabaseGate?>(Gate())),
+        };
+        await using StudioComponentContext context = await ContextAsync(storage);
+
+        var page = context.Render<PostgresStudio.Components.Pages.Storage.Storage>();
+        page.WaitForAssertion(() => page.FindAll(".ms-storage-tiles").Should().ContainSingle());
+
+        page.TextOfAll(".ms-storage-table thead th").Contains("Stats since").Should().Be(drawn);
+
+        if (!drawn)
+        {
+            page.FindAll(".ms-storage-since").Should().BeEmpty("below 19 the column is absent, not a column of dashes");
+            return;
+        }
+
+        string[] since = [.. page.FindAll(".ms-storage-table tbody td.ms-storage-since").Select(static x => x.TextContent.Trim())];
+        since.Should().HaveCount(3);
+        since[0].Should().Be("2026-10-24 08:30", "orders was reset on its own");
+        since[1].Should().Be("–", "salaries' name is withheld, and so is when it was reset");
+        since[2].Should().Be("–", "nobody reset qrtz_triggers on its own");
+        page.Markup.Should().NotContain("2026-10-25", "the withheld table's reset time is not drawn");
+    }
+
+    /// <summary>
     /// W5b-int: Maintenance (W5-V1) has landed, so the page points at it for the same tables - the scope carried (D9), and only
     /// while the studio's sidebar offers the page, which is what null-safe means for a studio without one.
     /// </summary>

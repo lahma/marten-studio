@@ -12,7 +12,7 @@ using PostgresStudio.Services.Sources;
 namespace PostgresStudio.Integration.Tests.Query;
 
 /// <summary>
-/// The SQL console's Explain buttons (X1, K1) on the version matrix, 14 and 18: <c>EXPLAIN ANALYZE</c> runs in the console's
+/// The SQL console's Explain buttons (X1, K1) on the version matrix, 15, 18 and 19: <c>EXPLAIN ANALYZE</c> runs in the console's
 /// read-only transaction, so a write the guard does not spot - a data-modifying CTE - comes back as <c>25006</c> and changes
 /// nothing, audited as a failed <c>RunSql</c> run; a read's measured plan comes back whole, with its buffers, and its insights
 /// fire; a plain plan runs nothing; and an <c>EXPLAIN (FORMAT JSON)</c> typed and Run is drawn as a plan too.
@@ -23,7 +23,7 @@ public class ConsoleExplainLiveTests(PostgresVersionMatrix matrix)
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 
-    public static TheoryData<int> Legs => [14, 18];
+    public static TheoryData<int> Legs => [15, 18, 19];
 
     private static async Task<(StudioHost Host, string Connection)> HostAsync(PostgresVersionMatrix matrix, int major)
     {

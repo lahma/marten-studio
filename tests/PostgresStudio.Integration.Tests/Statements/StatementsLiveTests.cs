@@ -265,12 +265,12 @@ public class StatementsLiveTests(StatementsPageServer server, PostgresVersionMat
         view.Rows.Should().NotContain(static x => (x.Text ?? string.Empty).Contains("alice", StringComparison.Ordinal));
     }
 
-    /// <summary>The supported floor and the newest release, through the version matrix (VERS).</summary>
-    public static TheoryData<int> MatrixLegs => [14, 18];
+    /// <summary>The oldest tested release, 18 and the newest, through the version matrix (VERS).</summary>
+    public static TheoryData<int> MatrixLegs => [15, 18, 19];
 
     [PostgresTheory]
     [MemberData(nameof(MatrixLegs))]
-    public async Task On_14_and_18_a_known_statement_ranks_first_with_its_calls(int major)
+    public async Task On_15_18_and_19_a_known_statement_ranks_first_with_its_calls(int major)
     {
         MatrixServer leg = await matrix.ServerAsync(major);
         leg.SkipIfUnavailable();

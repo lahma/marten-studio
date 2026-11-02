@@ -1,6 +1,9 @@
 using System.Globalization;
 
+using Npgsql;
+
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
@@ -15,7 +18,14 @@ internal sealed record TableMultixactAge(StudioTable Table, long Age);
 /// <param name="Database">The database-wide facts: the multixact settings, ages and counter.</param>
 /// <param name="Tables">The store's tables that exist and have an age, a hidden document type's never among them.</param>
 /// <param name="HealthInterval">The history's cadence, which sizes how long a forecast can be held; a minute when unknown.</param>
-internal sealed record MultixactAgeFacts(HealthWraparoundDatabase Database, IReadOnlyList<TableMultixactAge> Tables, TimeSpan? HealthInterval = null);
+internal sealed record MultixactAgeFacts(HealthWraparoundDatabase Database, IReadOnlyList<TableMultixactAge> Tables, TimeSpan? HealthInterval = null)
+{
+    /// <summary>
+    /// PostgreSQL 19's multixact member usage for the whole server (<c>pg_get_multixact_stats()</c>), or <see langword="null" />
+    /// before 19 and where the server refused the function. Evidence only: no line is drawn on it.
+    /// </summary>
+    public MultixactUsage? Usage { get; init; }
+}
 
 /// <summary>
 /// T13: the database, or one of Marten's tables, is far into Postgres' multixact-id range - or, at the rate it is
@@ -87,7 +97,52 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
             }
         }
 
-        return new MultixactAgeFacts(wraparound.Database, tables, wraparound.Interval);
+        return new MultixactAgeFacts(wraparound.Database, tables, wraparound.Interval)
+        {
+            Usage = await UsageAsync(context, wraparound.Database.ServerVersion, cancellationToken).ConfigureAwait(false),
+        };
+    }
+
+    /// <summary>
+    /// The server's multixact member usage on PostgreSQL 19 and later (<see cref="PostgresFeature.MultixactStats" />), or
+    /// <see langword="null" /> below it - the function is never named there - and where the server refuses it for a reason
+    /// that is its own (a platform that revokes it): the figures are evidence, so their absence is not a failed check.
+    /// </summary>
+    internal static async Task<MultixactUsage?> UsageAsync(HealthCheckContext context, int serverVersion, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (!PostgresFeatures.Has(PostgresFeature.MultixactStats, serverVersion))
+        {
+            return null;
+        }
+
+        try
+        {
+            IReadOnlyList<MultixactUsage> rows = await context.Sql
+                .QueryAsync(HealthHorizonQueries.MultixactStats(), HealthHorizonQueries.ReadMultixactUsage, cancellationToken)
+                .ConfigureAwait(false);
+
+            return rows.Count == 0 ? null : rows[0];
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedFunction or PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The member-usage evidence on PostgreSQL 19: how many multixacts and members the server holds, and the space they take.</summary>
+    internal static HealthEvidence UsageEvidence(MultixactUsage usage)
+    {
+        ArgumentNullException.ThrowIfNull(usage);
+
+        string text = usage.Withheld
+            ? "not shown: PostgreSQL answers this role nothing - pg_get_multixact_stats() needs pg_read_all_stats (pg_monitor includes it)"
+            : Wraparound.Number(usage.Members ?? 0) + " members in " + Wraparound.Number(usage.Multixacts ?? 0) + " multixacts"
+              + (usage.MembersBytes is { } bytes ? ", " + TableText.Bytes(bytes) + " of member storage" : string.Empty)
+              + (usage.OldestMultixact is { } oldest ? "; the oldest still needed is multixact " + Wraparound.Number(oldest) : string.Empty);
+
+        return new HealthEvidence("Multixact members, whole server (PostgreSQL 19)", text);
     }
 
     /// <inheritdoc />
@@ -209,6 +264,11 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
                 : string.Empty)
             + ", never named: they are " + evaluation.Text.NotJudged));
 
+        if (facts.Usage is { } usage)
+        {
+            evidence.Add(UsageEvidence(usage));
+        }
+
         if (forecast is not null)
         {
             evidence.Add(new HealthEvidence("Multixacts created", forecast.RateText("multixacts")));
@@ -252,7 +312,15 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
             Caveat =
                 "Read from pg_class.relminmxid of " + evaluation.Text.JudgedTablesRead + ", their TOAST tables and their partitions, and from "
                 + "pg_database.datminmxid of this database and the server's oldest. Tables that are " + evaluation.Text.NotJudged + " are counted and "
-                + "never named. Multixact member storage, which can run out before the ids do, is not read: Postgres has no view of it."
+                + "never named. "
+                + facts.Usage switch
+                {
+                    { Withheld: false } => "Multixact member storage, which can run out before the ids do, is shown from PostgreSQL 19's "
+                        + "pg_get_multixact_stats() as evidence only: no line is drawn on it.",
+                    { Withheld: true } => "Multixact member storage, which can run out before the ids do, is not shown: PostgreSQL 19's "
+                        + "pg_get_multixact_stats() answers a role outside pg_read_all_stats nothing, and no line is drawn on it either way.",
+                    null => "Multixact member storage, which can run out before the ids do, is not read: Postgres has no view of it before 19.",
+                }
                 + (forecast is null
                     ? " No forecast yet: a rate needs two samples, an interval apart, in which multixacts were created."
                     : " " + forecast.Caveat("the next multixact id")),

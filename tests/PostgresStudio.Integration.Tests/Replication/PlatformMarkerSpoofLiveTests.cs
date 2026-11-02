@@ -33,7 +33,7 @@ public class PlatformMarkerSpoofLiveTests
     /// <summary>The detector statement's marker columns.</summary>
     private static readonly string[] MarkerColumns = ["rds", "aurora", "azure", "cloud_sql", "neon"];
 
-    public static TheoryData<string> Images => ["postgres:14.24-alpine", "postgres:17.11-alpine", "postgres:18.6-alpine"];
+    public static TheoryData<string> Images => ["postgres:15.19-alpine", "postgres:17.11-alpine", "postgres:18.6-alpine"];
 
     private static CancellationToken Token => TestContext.Current.CancellationToken;
 

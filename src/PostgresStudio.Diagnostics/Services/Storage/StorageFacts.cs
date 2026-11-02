@@ -55,7 +55,21 @@ internal sealed record StorageTableFacts(StudioTable Table, StorageTableRow Row)
     public double? GrowthBytesPerDay(StatisticsWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
-        return window.CoversADay && NetInserts is { } net ? net / window.Days * BytesPerRow : null;
+
+        if (!window.CoversADay || NetInserts is not { } net)
+        {
+            return null;
+        }
+
+        // PostgreSQL 19: a table somebody reset on its own counted only from then, so its rows are divided by its own days -
+        // and it has no growth to give until those cover a day.
+        if (Row.CountersReset is { } own && own > window.Since)
+        {
+            double days = (window.MeasuredAt - own).TotalDays;
+            return days >= 1 ? net / days * BytesPerRow : null;
+        }
+
+        return net / window.Days * BytesPerRow;
     }
 }
 
@@ -151,6 +165,9 @@ internal sealed record StorageFacts
 
     /// <summary>Whether the server reports updates that went to another page (<c>n_tup_newpage_upd</c>, PostgreSQL 16+).</summary>
     public bool NewPageUpdatesRead => PostgresFeatures.Has(PostgresFeature.NewPageUpdates, ServerVersion);
+
+    /// <summary>Whether the server keeps a reset time per table (<c>pg_stat_all_tables.stats_reset</c>, PostgreSQL 19+).</summary>
+    public bool StatsResetPerTableRead => PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, ServerVersion);
 
     /// <summary>What the read ran, for "Show SQL".</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];

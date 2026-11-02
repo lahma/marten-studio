@@ -16,10 +16,10 @@ using Testcontainers.PostgreSql;
 namespace PostgresStudio.Integration.Tests.Storage;
 
 /// <summary>
-/// The statistics window across a real crash, on PostgreSQL 14 and 17 (W5-CAP, B0 G4): a sweep reads the window, the
+/// The statistics window across a real crash, on PostgreSQL 17 and 19 (W5-CAP, B0 G4): a sweep reads the window, the
 /// postmaster is sent <c>SIGQUIT</c> - an immediate shutdown, which keeps no statistics - and started again, and the next read
-/// sees the reset, says it looks like a crash, and starts the window again at the restart. 14 moves the database's own
-/// <c>stats_reset</c> as well; 17 leaves it null and moves only the shared views'.
+/// sees the reset, says it looks like a crash, and starts the window again at the restart. 14 moved the database's own
+/// <c>stats_reset</c> as well, and left the matrix in 1.1; from 15 it stays null and only the shared views' move.
 /// </summary>
 /// <remarks>
 /// <b>A server of its own for each leg</b>, never the matrix's shared one, which other classes read while this one kills it:
@@ -34,9 +34,12 @@ public class StatisticsWindowCrashLiveTests
     /// <summary>How long the container is given to exit once its postmaster is sent <c>SIGQUIT</c>; it takes well under a second.</summary>
     private static readonly TimeSpan ExitBudget = TimeSpan.FromSeconds(60);
 
-    /// <summary>The matrix's own pins for 14, the last major whose collector stamps the database's reset, and 17.</summary>
+    /// <summary>
+    /// The matrix's own pins for 17 and 19. 14, the last major whose collector stamps the database's reset, left the matrix in
+    /// 1.1; from 15 a database's own <c>stats_reset</c> stays null and only the shared views' moves.
+    /// </summary>
     public static TheoryData<string> Images =>
-        [.. Versions.PostgresVersionMatrix.Versions.Where(static x => x.Major is 14 or 17).Select(static x => x.Image)];
+        [.. Versions.PostgresVersionMatrix.Versions.Where(static x => x.Major is 17 or 19).Select(static x => x.Image)];
 
     [PostgresTheory]
     [MemberData(nameof(Images))]
