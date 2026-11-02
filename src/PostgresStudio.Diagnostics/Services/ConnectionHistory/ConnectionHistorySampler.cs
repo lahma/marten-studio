@@ -215,8 +215,11 @@ internal sealed class ConnectionHistorySampler : BackgroundService
 
             int stored = 0;
 
+            HashSet<string> sampled = new(StringComparer.OrdinalIgnoreCase);
+
             foreach ((string server, NpgsqlDataSource dataSource) in await ServersAsync(cancellationToken).ConfigureAwait(false))
             {
+                sampled.Add(server);
                 PostgresConnectionSample? sample = null;
 
                 try
@@ -242,6 +245,21 @@ internal sealed class ConnectionHistorySampler : BackgroundService
                 // A sample that could not be read is lost - there is nothing to keep - but the samples a store refused earlier are
                 // still offered to it.
                 stored += await StoreAsync(server, sample, cancellationToken).ConfigureAwait(false);
+            }
+
+            // A server that left the list - a source stayed unreadable, the host's databases changed, the MaxServers cut moved - still
+            // has a backlog, and writing it needs no connection to that server: offered to the store all the same, so it is neither
+            // stranded nor claimed as waiting until the process stops.
+            string[] left;
+
+            lock (backlogGate)
+            {
+                left = [.. backlogs.Keys.Where(x => !sampled.Contains(x))];
+            }
+
+            foreach (string server in left)
+            {
+                stored += await StoreAsync(server, null, cancellationToken).ConfigureAwait(false);
             }
 
             return stored;
