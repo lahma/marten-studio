@@ -14078,7 +14078,10 @@ a.ms-schema-health-mark:focus-visible {
 @media (max-width: 640px) {
     .ms-plan-icicle-frame text {
         display: none;
+    }
+}
 
+/* ==========================================================================
    1.0-UIFIX. Menus open at their button; the credit line at the rail's foot
 
    Appended in D26 order; later wins on purpose. A popover is a top-layer element, and the user agent centres an unplaced
