@@ -705,7 +705,7 @@ internal enum DatabaseIdentityKind
 /// <param name="Nullable">Whether it accepts null.</param>
 /// <param name="Default">Its default, or a generated column's expression.</param>
 /// <param name="Identity">Whether it is an identity column.</param>
-/// <param name="Generated">Whether it is a stored generated column.</param>
+/// <param name="Generated">Whether it is a generated column, stored or (from PostgreSQL 18) virtual; <see cref="DatabaseColumnInfo.GeneratedVirtual" /> says which.</param>
 /// <param name="Sortable">Whether its type has a default btree operator class - what lets it be sorted and compared.</param>
 /// <param name="Comment">Its comment.</param>
 /// <param name="Quotable">Whether its name can be quoted.</param>
@@ -724,7 +724,14 @@ internal sealed record DatabaseColumnInfo(
     bool Sortable,
     string? Comment,
     bool Quotable,
-    PgVectorColumn? Vector = null);
+    PgVectorColumn? Vector = null)
+{
+    /// <summary>
+    /// Whether <see cref="Generated" /> is a <em>virtual</em> generated column (<c>attgenerated = 'v'</c>, PostgreSQL 18+):
+    /// computed when it is read, never stored. <see langword="false" /> for a stored one, and for every column below 18.
+    /// </summary>
+    public bool GeneratedVirtual { get; init; }
+}
 
 /// <summary>Where a relation's row key came from.</summary>
 internal enum DatabaseRowKeySource
@@ -768,7 +775,11 @@ internal enum DatabaseConstraintKind
 /// <param name="Name">Its name.</param>
 /// <param name="Kind">What kind.</param>
 /// <param name="Definition"><c>pg_get_constraintdef</c>.</param>
-internal sealed record DatabaseConstraintInfo(string Name, DatabaseConstraintKind Kind, string Definition);
+/// <param name="Temporal">
+/// Whether it is declared <c>WITHOUT OVERLAPS</c> (PostgreSQL 18+, <c>pg_constraint.conperiod</c>): a primary key or unique
+/// constraint whose last column is a range that may not overlap for equal other columns. <see langword="false" /> below 18.
+/// </param>
+internal sealed record DatabaseConstraintInfo(string Name, DatabaseConstraintKind Kind, string Definition, bool Temporal = false);
 
 /// <summary>One index.</summary>
 /// <param name="Name">Its name.</param>
@@ -836,6 +847,27 @@ internal sealed record DatabaseForeignKeyInfo(
     /// so the Keys tab says nothing either way.
     /// </summary>
     public bool? Covered { get; init; }
+
+    /// <summary>
+    /// Whether the last column of each side is a <c>PERIOD</c> (PostgreSQL 18+, <c>pg_constraint.conperiod</c>): a temporal
+    /// foreign key, which references a <c>WITHOUT OVERLAPS</c> key and holds while the referencing range is covered by the
+    /// referenced ones. <see langword="false" /> below 18.
+    /// </summary>
+    public bool Period { get; init; }
+
+    /// <summary>
+    /// <paramref name="columns" /> as the key spells them: comma-separated, with a <c>PERIOD</c> key's last one
+    /// <c>PERIOD column</c>, as <c>FOREIGN KEY (id, PERIOD valid_at)</c> is written.
+    /// </summary>
+    /// <param name="columns">This end's columns, <see cref="Columns" /> or <see cref="LinkedColumns" />.</param>
+    public string ColumnText(IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+
+        return Period && columns.Count > 0
+            ? string.Join(", ", columns.Take(columns.Count - 1).Append("PERIOD " + columns[^1]))
+            : string.Join(", ", columns);
+    }
 }
 
 /// <summary>One relation a view reads.</summary>

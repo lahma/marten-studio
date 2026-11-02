@@ -87,6 +87,12 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             ? await LockStatisticsAsync(sql, cancellationToken).ConfigureAwait(false)
             : null;
 
+        // PostgreSQL 18's per-backend I/O, in one statement for every session just read, and not asked of an older server.
+        IReadOnlyDictionary<int, SessionBackendIo>? backendIo = Server.PostgresFeatures.Has(Server.PostgresFeature.BackendIo, blocking.ServerVersion)
+            ? await BackendIoAsync(sql, [.. sessions.Where(static x => x.Row is not null).Select(static x => x.Row!.ProcessId)], cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+
         return new SessionSnapshot(
             readAt,
             sessions.Count > 0 ? sessions[0].Visibility : SessionVisibility.Everything,
@@ -102,8 +108,52 @@ internal sealed class SessionActivityReader : ISessionActivityReader
             Holders = Holders(holders),
             Blocking = blocking,
             LockStatistics = statistics,
+            BackendIo = backendIo,
         };
     }
+
+    /// <summary>
+    /// The sessions' <c>pg_stat_get_backend_io</c>, or an empty answer when there are no sessions (no statement is run for
+    /// none). A refusal that is the server's - the function revoked on a platform - is the same empty answer, not a failed
+    /// page: the sessions are the page, the I/O one column of it.
+    /// </summary>
+    private static async Task<IReadOnlyDictionary<int, SessionBackendIo>> BackendIoAsync(
+        HealthSqlRunner sql,
+        IReadOnlyCollection<int> processIds,
+        CancellationToken cancellationToken)
+    {
+        if (processIds.Count == 0)
+        {
+            return new Dictionary<int, SessionBackendIo>();
+        }
+
+        try
+        {
+            IReadOnlyList<(int ProcessId, SessionBackendIo Io)> rows = await sql
+                .QueryAsync(HealthConnectionQueries.BackendIo(processIds), MapBackendIo, cancellationToken)
+                .ConfigureAwait(false);
+
+            return rows.ToDictionary(static x => x.ProcessId, static x => x.Io);
+        }
+        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedFunction or PostgresErrorCodes.InsufficientPrivilege)
+        {
+            return new Dictionary<int, SessionBackendIo>();
+        }
+    }
+
+    /// <summary>One row of <see cref="HealthConnectionQueries.BackendIo" />.</summary>
+    internal static (int ProcessId, SessionBackendIo Io) MapBackendIo(NpgsqlDataReader reader) => (
+        reader.GetInt32(0),
+        new SessionBackendIo(
+            reader.IsDBNull(1) ? 0 : reader.GetInt64(1),
+            reader.IsDBNull(2) ? 0d : reader.GetDouble(2),
+            reader.IsDBNull(3) ? 0d : reader.GetDouble(3),
+            reader.IsDBNull(4) ? 0 : reader.GetInt64(4),
+            reader.IsDBNull(5) ? 0d : reader.GetDouble(5),
+            reader.IsDBNull(6) ? 0d : reader.GetDouble(6),
+            reader.IsDBNull(7) ? 0 : reader.GetInt64(7),
+            reader.IsDBNull(8) ? 0 : reader.GetInt64(8),
+            reader.IsDBNull(9) ? 0 : reader.GetInt64(9)));
 
     /// <summary>
     /// What each statement of the snapshot reads, in words, keyed by the text its builder writes: the Sessions page draws a
@@ -119,6 +169,7 @@ internal sealed class SessionActivityReader : ISessionActivityReader
         [HealthConnectionQueries.ServerHolders().Sql] = "the server's connections by holder",
         [HealthConnectionQueries.LockTable().Sql] = "who blocks whom",
         [HealthConnectionQueries.LockStatistics().Sql] = "lock waits by type",
+        [HealthConnectionQueries.BackendIo([]).Sql] = "each session's I/O",
     };
 
     /// <summary>The statements the snapshot ran, each named by what it reads where <see cref="Labels" /> knows it.</summary>

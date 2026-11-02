@@ -284,6 +284,10 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
     private static readonly HashSet<PostgresFeature> Unprobed =
     [
         PostgresFeature.ExplainGenerationObject,
+
+        // Seen only on a column that is one: Pg18SurfacingLiveTests makes a virtual generated column, in a database of its own,
+        // on every leg - read as virtual from 18, a syntax error below it.
+        PostgresFeature.VirtualGeneratedColumns,
     ];
 
     /// <summary>
@@ -369,6 +373,9 @@ public class VersionMatrixLiveTests(PostgresVersionMatrix matrix)
             "select (select pg_catalog.count(*) from store.r where id = 1) >= 0 and exists (select 1 from pg_catalog.pg_locks l "
             + "join pg_catalog.pg_class c on c.oid = l.relation where l.pid = pg_catalog.pg_backend_pid() and c.relkind = 'I')",
         [PostgresFeature.FastPathSlotsFromMaxLocks] = FastPathProbe,
+        [PostgresFeature.TemporalConstraints] = Column("pg_catalog.pg_constraint", "conperiod"),
+        [PostgresFeature.BackendIo] = Function("pg_stat_get_backend_io"),
+        [PostgresFeature.StatementsParallelWorkers] = Column("public.pg_stat_statements", "parallel_workers_launched"),
         [PostgresFeature.WaitTypeBufferRenamed] = null,
         [PostgresFeature.SubscriptionSyncTableErrorCount] = Column("pg_catalog.pg_stat_subscription_stats", "sync_table_error_count"),
     };

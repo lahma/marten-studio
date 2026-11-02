@@ -79,6 +79,26 @@ vacuum and analyse times per table. Two of 18's changes needed a fix in the stud
   is read on demand, one at a time, after the role's privilege on it is checked - which on 18 is also what keeps the
   lock away.
 
+**What the studio shows of 18, and where.** Each is absent below 18 - not a column of dashes, not an error - and reads the
+catalog and the statistics views only, so nothing here locks what it lists:
+
+- **Virtual generated columns** (`attgenerated = 'v'`): the database browser's Columns tab badges a generated column
+  "stored" or "virtual" - before 18 every generated column is stored, and 17 refuses the `VIRTUAL` syntax outright.
+- **Temporal keys** (`pg_constraint.conperiod`, one column for both): Keys & indexes badges a primary key or unique
+  constraint declared `WITHOUT OVERLAPS`, and a foreign key declared with `PERIOD`, whose last column is spelled
+  `PERIOD valid_at` as it was declared. Relationships draws a `PERIOD` foreign key like any other, with the word in its
+  label and in the table's column lists.
+- **`pg_stat_statements` 1.12**, which 18 ships: `parallel_workers_to_launch`, `parallel_workers_launched` and
+  `wal_buffers_full` - and no other column (18.6's 1.12 has no generic or custom plan counts). The Statements page and its
+  drill-in say, under a statement, how often it filled the WAL buffers and how many parallel workers its plans asked for
+  and were given, since its counters began and only where there is something to say. They come from the extension's
+  version, so 17's extension at 1.11 shows nothing.
+- **Per-backend I/O** (`pg_stat_get_backend_io(pid)`): Database › Sessions, behind the same gate as the session rows' other
+  columns (`ViewDatabaseActivity`), adds Reads, Writes and Cache hits for each session - the blocks and bytes it read and
+  wrote, and the reads served from shared buffers - with its extends, evictions and time in the cell's tooltip. One
+  statement per snapshot reads every session shown, never one a row. The function checks no role (a role in no monitoring
+  role reads another's backend, as it reads `pg_stat_io`), so the gate is the studio's, not the server's.
+
 **On 19 the studio will also gain** per-table and per-index `stats_reset`, autovacuum's own per-table scores
 (`pg_stat_autovacuum_scores`), multixact member statistics (`pg_get_multixact_stats()`) and the `pg_stat_lock` view -
 in 0.6. 0.5 already knows what 19 changes: JIT is off by default (so the JIT-share check usually has nothing to

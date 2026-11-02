@@ -77,6 +77,51 @@ internal sealed record StatementRowView(
 
     /// <summary>What the page ranks and sorts by: the window's counters.</summary>
     public StatementCounts? Ranked => Window;
+
+    /// <summary>
+    /// The counters <c>pg_stat_statements</c> 1.12 adds (PostgreSQL 18+), since this statement's counters began - or
+    /// <see langword="null" /> where the installed extension is older, and where the statement has nothing to show of them.
+    /// </summary>
+    public StatementServerCounters? ServerCounters { get; init; }
+}
+
+/// <summary>
+/// What <c>pg_stat_statements</c> 1.12 (PostgreSQL 18) counts for one statement beyond the window's columns: the parallel
+/// workers its plans asked for and were given, and how often the WAL buffers were full. All since its counters began - the
+/// page's window is made of the series the statement history keeps, and these three are not among them.
+/// </summary>
+/// <param name="WorkersPlanned"><c>parallel_workers_to_launch</c>: the workers its parallel plans asked for.</param>
+/// <param name="WorkersLaunched"><c>parallel_workers_launched</c>: the workers it was given.</param>
+/// <param name="WalBuffersFull"><c>wal_buffers_full</c>: how often it wrote WAL because the buffers were full.</param>
+internal sealed record StatementServerCounters(long? WorkersPlanned, long? WorkersLaunched, long? WalBuffersFull)
+{
+    /// <summary>
+    /// What the counters say, or <see langword="null" /> when all of them are zero or unread: a statement that never ran a
+    /// parallel plan and never filled the WAL buffers has nothing to add to its row.
+    /// </summary>
+    public string? Text
+    {
+        get
+        {
+            List<string> parts = [];
+
+            if (WorkersPlanned is > 0 and { } planned)
+            {
+                parts.Add(
+                    "parallel workers: asked for " + TableText.Count(planned)
+                    + (WorkersLaunched is { } launched ? ", given " + TableText.Count(launched) : string.Empty));
+            }
+
+            if (WalBuffersFull is > 0 and { } full)
+            {
+                parts.Add("WAL buffers full " + TableText.Count(full) + (full == 1 ? " time" : " times"));
+            }
+
+            return parts.Count == 0
+                ? null
+                : "Since its counters began (PostgreSQL 18): " + string.Join("; ", parts) + ".";
+        }
+    }
 }
 
 /// <summary>One group of statements, summed - the page's group view.</summary>
@@ -819,6 +864,8 @@ internal sealed class StatementsService : IStatementsService
             (string? shown, string? note) = Text(fact, screen);
             (string key, string label) = Group(fact.Group, fact.TextRead, browser);
 
+            string? parallelNote = ParallelNote(fact);
+
             rows.Add(new StatementRowView(
                 fact.QueryId,
                 shown,
@@ -829,7 +876,14 @@ internal sealed class StatementsService : IStatementsService
                 fact.SinceBegan,
                 fact.Share,
                 fact.WatchedFrom,
-                ParallelNote(fact)));
+                parallelNote)
+            {
+                // The shortfall note already says what the parallel workers came to; the counters line does not repeat it.
+                ServerCounters = new StatementServerCounters(
+                    parallelNote is null ? fact.ParallelWorkersToLaunch : null,
+                    parallelNote is null ? fact.ParallelWorkersLaunched : null,
+                    fact.WalBuffersFull),
+            });
         }
 
         return new StatementsView

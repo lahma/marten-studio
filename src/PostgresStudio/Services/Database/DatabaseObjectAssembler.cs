@@ -301,14 +301,17 @@ internal static class DatabaseObjectAssembler
             column.Sortable,
             gate.RedactText(column.Comment),
             DatabaseCatalogQueries.IsQuotable(column.Name),
-            PgVector.Column(column.TypeExtension, column.BaseTypeName, column.TypeModifier)))];
+            PgVector.Column(column.TypeExtension, column.BaseTypeName, column.TypeModifier))
+        {
+            GeneratedVirtual = column.Generated == "v",
+        })];
 
         return new DatabaseObjectDetail(
             summary,
             columns,
             RowKey(detail),
             [.. detail.Constraints.Select(x => new DatabaseConstraintInfo(
-                x.Name, ConstraintKind(x.Kind), gate.Redact(x.Definition) ?? x.Definition))],
+                x.Name, ConstraintKind(x.Kind), gate.Redact(x.Definition) ?? x.Definition, x.Temporal))],
             [.. detail.Indexes.Select(x => new DatabaseIndexInfo(
                 x.Name,
                 gate.Redact(x.Definition) ?? x.Definition,
@@ -806,6 +809,7 @@ internal static class DatabaseObjectAssembler
             Action(key.OnUpdate))
         {
             Covered = key.Covered,
+            Period = key.Period,
         };
     }
 
@@ -838,6 +842,7 @@ internal static class DatabaseObjectAssembler
             Action(key.OnUpdate))
         {
             Covered = key.Covered,
+            Period = key.Period,
         };
     }
 

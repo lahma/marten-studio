@@ -14178,3 +14178,27 @@ a.ms-schema-health-mark:focus-visible {
         border-width: 0;
     }
 }
+
+/* ==========================================================================
+   1.0-PG18. What PostgreSQL 18 adds, shown where it belongs
+
+   Appended in D26 order, after 1.0-P3A. A temporal key (WITHOUT OVERLAPS, PERIOD) takes the info accent a primary-key badge
+   has; the per-backend I/O cells of Sessions are numbers, so they align and do not wrap; the 1.12 counters of a statement
+   are one more note under its text, in the notes' own style.
+   ========================================================================== */
+
+.ms-db-badge-temporal {
+    border-color: var(--ms-color-info);
+    background-color: var(--ms-color-info-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-sessions-io {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-stmts-server-counters {
+    margin-top: var(--ms-space-xs);
+}

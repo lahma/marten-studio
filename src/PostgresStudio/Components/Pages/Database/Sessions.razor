@@ -1,6 +1,7 @@
 @page "/postgres/database/sessions"
 @using PostgresStudio.Services.Database
 @using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Health.Checks
 @using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Settings
 @using PostgresStudio.Components.Shared
@@ -270,6 +271,12 @@
                                     <th scope="col">In state</th>
                                     <th scope="col">Waiting on</th>
                                     <th scope="col">Blocked by</th>
+                                    @if (details!.BackendIoRead)
+                                    {
+                                        <th scope="col" title="PostgreSQL 18: this backend's I/O since its statistics began, from pg_stat_get_backend_io">Reads</th>
+                                        <th scope="col" title="PostgreSQL 18: this backend's I/O since its statistics began, from pg_stat_get_backend_io">Writes</th>
+                                        <th scope="col" title="PostgreSQL 18: reads this backend served from shared buffers">Cache hits</th>
+                                    }
                                     <th scope="col">Statement</th>
                                 </tr>
                             </thead>
@@ -286,6 +293,12 @@
                                         <td>@Age(row.StateAge)</td>
                                         <td>@Wait(row.WaitEventType, row.WaitEvent)</td>
                                         <td class="ms-mono">@(row.BlockedBy.Count == 0 ? "–" : string.Join(", ", row.BlockedBy))</td>
+                                        @if (details!.BackendIoRead)
+                                        {
+                                            <td class="ms-sessions-io" title="@IoTitle(row.BackendIo)">@IoReads(row.BackendIo)</td>
+                                            <td class="ms-sessions-io" title="@IoTitle(row.BackendIo)">@IoWrites(row.BackendIo)</td>
+                                            <td class="ms-sessions-io">@(row.BackendIo is { } io ? SessionText.Number(io.Hits) : "–")</td>
+                                        }
                                         <td class="ms-sessions-statement">
                                             @if (row.Statement.Text is { Length: > 0 } text)
                                             {
@@ -654,6 +667,33 @@
     };
 
     private static string Age(TimeSpan? value) => value is { } age ? SessionText.Duration(age) : "–";
+
+    /// <summary>A backend's reads (PostgreSQL 18): "1,204 · 9.4 MiB", or a dash when the server told nothing about the session.</summary>
+    private static string IoReads(SessionBackendIo? io) =>
+        io is null ? "–" : SessionText.Number(io.Reads) + " · " + TableText.Bytes((long) io.ReadBytes);
+
+    /// <summary>A backend's writes, likewise.</summary>
+    private static string IoWrites(SessionBackendIo? io) =>
+        io is null ? "–" : SessionText.Number(io.Writes) + " · " + TableText.Bytes((long) io.WriteBytes);
+
+    /// <summary>
+    /// What the I/O cells add: the extends and evictions, and the time spent where <c>track_io_timing</c> measured it - or
+    /// nothing for a session with no I/O to show.
+    /// </summary>
+    private static string? IoTitle(SessionBackendIo? io)
+    {
+        if (io is null)
+        {
+            return "The server returned no I/O statistics for this session: it may have ended since the sessions were read.";
+        }
+
+        string time = io.ReadMilliseconds > 0 || io.WriteMilliseconds > 0
+            ? ", " + SessionText.Number((long) io.ReadMilliseconds) + " ms reading and " + SessionText.Number((long) io.WriteMilliseconds) + " ms writing"
+            : ", no time measured (track_io_timing is off)";
+
+        return "Since this backend's statistics began: " + SessionText.Number(io.Extends) + " blocks added to relations, "
+            + SessionText.Number(io.Evictions) + " buffers evicted" + time + ".";
+    }
 
     private static string Wait(string? type, string? wait) =>
         type is null ? "–" : wait is null ? type : type + ": " + wait;

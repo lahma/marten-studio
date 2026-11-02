@@ -264,6 +264,11 @@
                                         <p class="ms-stmts-note">@parallel</p>
                                     }
 
+                                    @if (row.ServerCounters?.Text is { Length: > 0 } serverCounters)
+                                    {
+                                        <p class="ms-stmts-note ms-stmts-server-counters">@serverCounters</p>
+                                    }
+
                                     <p class="ms-stmts-queryid">
                                         queryid @row.Key
                                         @if (row.Text is { Length: > 0 })
@@ -523,6 +528,11 @@
                             @(counts.MeanMs is { } mean ? "(" + StatementWindows.Milliseconds(mean) + " a call)" : string.Empty),
                             @TableText.Count(counts.Rows) rows, over the window above.
                         </p>
+                    }
+
+                    @if (row.ServerCounters?.Text is { Length: > 0 } serverCounters)
+                    {
+                        <p class="ms-plan-drill-counts ms-stmts-server-counters">@serverCounters</p>
                     }
                 }
 

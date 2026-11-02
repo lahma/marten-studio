@@ -499,8 +499,12 @@ internal sealed class SessionActivityService : ISessionActivityService
                     x.QueryAge,
                     x.StateAge,
                     x.BlockedBy,
-                    SessionQueryText.Present(x.Query, x.QueryTruncated, screen))),
+                    SessionQueryText.Present(x.Query, x.QueryTruncated, screen))
+                {
+                    BackendIo = snapshot.BackendIo?.GetValueOrDefault(x.ProcessId),
+                }),
             ],
+            BackendIoRead = snapshot.BackendIo is not null,
             Locks =
             [
                 .. snapshot.Locks.Select(x =>

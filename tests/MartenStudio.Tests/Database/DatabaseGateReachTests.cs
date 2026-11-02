@@ -79,6 +79,41 @@ public class DatabaseGateReachTests
         }
     }
 
+    /// <summary>1.0-PG18: what the catalog read says of a virtual column, a temporal key and a PERIOD key reaches the page's model.</summary>
+    [Fact]
+    public void The_assembler_carries_virtual_columns_temporal_keys_and_period_foreign_keys()
+    {
+        CatalogRelationDetail detail = new(
+            Relation("legacy", "bookings"),
+            [
+                new CatalogColumn("id", 1, "integer", false, null, string.Empty, string.Empty, true, null),
+                new CatalogColumn("stored_col", 2, "integer", true, "id * 2", string.Empty, "s", true, null),
+                new CatalogColumn("virtual_col", 3, "integer", true, "id * 3", string.Empty, "v", true, null),
+            ],
+            [
+                new CatalogConstraint("bookings_pkey", "p", "PRIMARY KEY (id, valid_at WITHOUT OVERLAPS)", Temporal: true),
+                new CatalogConstraint("bookings_code_key", "u", "UNIQUE (code)"),
+            ],
+            [],
+            [],
+            new CatalogList<CatalogForeignKey>(
+                [
+                    new CatalogForeignKey("legacy", "bookings", ["id", "valid_at"], "legacy", "rooms", ["id", "valid_at"], "bookings_room_fkey", true, "a", "a")
+                    {
+                        Period = true,
+                    },
+                ],
+                false),
+            CatalogList<CatalogViewDependency>.Empty);
+
+        DatabaseObjectDetail shown = DatabaseObjectAssembler.Detail(Gate(), detail);
+
+        shown.Columns.Select(static x => (x.Name, x.Generated, x.GeneratedVirtual)).Should().Equal(
+            ("id", false, false), ("stored_col", true, false), ("virtual_col", true, true));
+        shown.Constraints.Select(static x => (x.Name, x.Temporal)).Should().Equal(("bookings_pkey", true), ("bookings_code_key", false));
+        shown.ForeignKeysOut.Should().ContainSingle().Which.Period.Should().BeTrue();
+    }
+
     [Fact]
     public void A_materialized_view_is_local_rows_and_so_is_a_view_that_reaches_a_foreign_table_only_through_one()
     {
