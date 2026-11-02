@@ -40,6 +40,12 @@ internal sealed class PostgresDiagnosticsSettings : IDiagnosticsSettings
     public TimeSpan QueryTimeout => Value.QueryTimeout;
 
     /// <inheritdoc />
+    public int MaxStudioConnections => Value.MaxStudioConnections;
+
+    /// <inheritdoc />
+    public string? StudioApplicationName => Value.StudioApplicationName;
+
+    /// <inheritdoc />
     /// <remarks>There is no refresh interval without a UI, so the health interval is the cadence as set.</remarks>
     public TimeSpan EffectiveHealthInterval => Value.HealthInterval;
 

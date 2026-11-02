@@ -10,7 +10,9 @@ using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Services;
 
@@ -41,8 +43,15 @@ internal sealed class MartenStudioSourceProvider : IStudioSourceProvider
         TenantDiscovery tenantDiscovery,
         IServiceProvider services,
         ILogger<MartenStudioSourceProvider> logger,
-        StudioLogThrottle? throttle = null)
+        StudioLogThrottle? throttle = null,
+        IStudioSettings? settings = null)
     {
+        // Issue #44: the studio's share of each pool it reads through, and its sessions' name - this process's, set here.
+        if (settings is not null)
+        {
+            StudioConnectionPools.Configure(settings.MaxStudioConnections, settings.StudioApplicationName, settings.SessionProduct, settings.QueryTimeout);
+        }
+
         this.options = options;
         this.registry = registry;
         this.tenantDiscovery = tenantDiscovery;

@@ -256,6 +256,14 @@ internal sealed class ReadOnlySqlSession
         {
             await ExecuteNonQueryAsync(connection, transaction, ReadOnlySql, cancellationToken).ConfigureAwait(false);
 
+            // Issue #44: the studio's own sessions carry a name of their own in pg_stat_activity - set for this transaction only
+            // (set_config's is_local), so it reverts at the rollback below and a pooled connection goes back to the application as
+            // it came, whatever the host's No Reset On Close says. Before the role: any role may set it.
+            if (StudioConnectionMeter.ApplicationNameOf(connection) is { } applicationName)
+            {
+                await SetLocalAsync(connection, transaction, "application_name", applicationName, cancellationToken).ConfigureAwait(false);
+            }
+
             await SetLocalAsync(connection, transaction, "statement_timeout",
                 Milliseconds(options.StatementTimeout), cancellationToken).ConfigureAwait(false);
             await SetLocalAsync(connection, transaction, "lock_timeout",

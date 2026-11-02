@@ -7,6 +7,8 @@ using Microsoft.Extensions.Options;
 
 using Npgsql;
 
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 namespace PostgresStudio.Services.Postgres;
@@ -44,13 +46,30 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
         IOptions<PostgresDiagnosticsOptions> options,
         PostgresSourceRegistry registry,
         ILogger<PostgresStudioSourceProvider> logger,
-        StudioLogThrottle? throttle = null)
+        StudioLogThrottle? throttle = null,
+        IDiagnosticsSettings? settings = null)
     {
         this.options = options;
         this.registry = registry;
         this.logger = logger;
         this.throttle = throttle;
+
+        // Issue #44: the studio's share of each pool it reads through, and its sessions' name - this process's, set here, and
+        // registered for each data source this provider hands out (Pool), so its own settings hold for its own pools.
+        if (settings is not null)
+        {
+            StudioConnectionPools.Configure(settings.MaxStudioConnections, settings.StudioApplicationName, settings.SessionProduct, settings.QueryTimeout);
+            this.settings = settings;
+        }
     }
+
+    private readonly IDiagnosticsSettings? settings;
+
+    /// <summary>Issue #44: <paramref name="dataSource" />'s studio share under this provider's settings, or <see langword="null" /> without them.</summary>
+    private StudioConnectionPool? PoolFor(NpgsqlDataSource dataSource) =>
+        settings is null
+            ? null
+            : StudioConnectionPools.Register(dataSource, settings.MaxStudioConnections, settings.StudioApplicationName, settings.SessionProduct, settings.QueryTimeout);
 
     /// <inheritdoc />
     public IReadOnlyList<StudioSourceRegistration> Registrations() => registry.Registrations(options.Value, logger);
@@ -84,7 +103,7 @@ internal sealed class PostgresStudioSourceProvider : IStudioSourceProvider
         StoreAvailability availability = registry.TryResolveDataSource(known, options.Value, out NpgsqlDataSource? dataSource);
         if (availability.IsAvailable && dataSource is not null)
         {
-            source = new PostgresDataSourceSource(known, new DataSourceDatabase(known.Key, dataSource));
+            source = new PostgresDataSourceSource(known, new DataSourceDatabase(known.Key, dataSource) { Pool = PoolFor(dataSource) });
         }
 
         return availability;

@@ -1,5 +1,7 @@
 using Npgsql;
 
+using PostgresStudio.Internal.Sql;
+
 namespace PostgresStudio.Services;
 
 /// <summary>
@@ -44,13 +46,32 @@ internal static class PostgresFailure
     /// </remarks>
     /// <param name="connection">A connection that has not been opened yet.</param>
     /// <param name="cancellationToken">Cancels the open.</param>
-    public static async Task OpenAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    public static Task OpenAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
+        // Issue #44: opened through the studio's share of its pool - and not async here, so the slot the open marks is marked in
+        // the caller's own execution context, where a nested read of the caller's sees it (StudioConnections.OpenStudioAsync).
+        Task opening;
+
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            opening = connection.OpenStudioAsync(cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            MarkAsConnectionFailure(exception);
+            throw;
+        }
+
+        return MarkFailuresAsync(opening);
+    }
+
+    private static async Task MarkFailuresAsync(Task opening)
+    {
+        try
+        {
+            await opening.ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

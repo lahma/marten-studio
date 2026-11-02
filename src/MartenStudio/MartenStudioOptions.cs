@@ -86,6 +86,25 @@ public sealed class MartenStudioOptions
     public TimeSpan QueryTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// The most connections the studio holds at a time of each pool it reads through - each of the application's own
+    /// <c>NpgsqlDataSource</c>s (issue #44). Between 1 and 100; 2 by default, because the studio is there to watch a database
+    /// under load, not to add to it. A read that finds every one of them in use waits for one, at most <c>QueryTimeout</c>,
+    /// and then says so; a read that is part of one already holding a connection - a nested read - never waits for itself.
+    /// The health advisor's C01 says how many of a saturated pool's connections were the studio's.
+    /// </summary>
+    public int MaxStudioConnections { get; set; } = 2;
+
+    /// <summary>
+    /// The <c>application_name</c> the studio's sessions carry in <c>pg_stat_activity</c>, Database › Sessions and an external
+    /// monitor, so that the studio's load is never mistaken for the application's (issue #44). <see langword="null" /> - the
+    /// default - is the application's own name from its connection string with the studio's after it in parentheses
+    /// (<c>orders-api (Marten Studio)</c>), or the studio's alone; an empty string leaves the application's own name. It is set for
+    /// each of the studio's read-only transactions only (<c>set_config(…, true)</c>), so a pooled connection goes back to the
+    /// application as it came. Printable ASCII, at most 63 characters: what PostgreSQL keeps as written.
+    /// </summary>
+    public string? StudioApplicationName { get; set; }
+
+    /// <summary>
     /// Documents larger than this are not fetched into list views and are shown as raw text only in the
     /// detail view.
     /// </summary>

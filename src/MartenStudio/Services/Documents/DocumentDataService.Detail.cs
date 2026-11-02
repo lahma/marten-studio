@@ -38,7 +38,7 @@ internal sealed partial class DocumentDataService
         try
         {
             await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
                 .ConfigureAwait(false);
@@ -132,7 +132,7 @@ internal sealed partial class DocumentDataService
         try
         {
             await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             CollectionContext? context = await LoadContextAsync(resolved, connection, alias, cancellationToken)
                 .ConfigureAwait(false);
@@ -223,7 +223,7 @@ internal sealed partial class DocumentDataService
             string schema = resolved.Store.Options.Events.DatabaseSchemaName;
 
             await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             TableColumns streams = await columnCatalog
                 .GetAsync(connection, schema, EventTableInfo.StreamsTable, cancellationToken)
@@ -286,7 +286,7 @@ internal sealed partial class DocumentDataService
         try
         {
             await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
             {

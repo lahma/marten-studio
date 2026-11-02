@@ -1307,7 +1307,7 @@ internal sealed class SchemaDataService : ISchemaDataService
         int commandTimeout = CommandTimeoutSeconds + 5;
 
         await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         return await session
             .InTransactionAsync(

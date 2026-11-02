@@ -280,7 +280,8 @@ the types are in a new assembly and there is no type forwarding, so it is not bi
 - **One registration.** `AddPostgresDiagnostics()` throws in a container that already called `AddPostgresStudio()` or
   `AddMartenStudio()`, and they throw after it: the studios register the engine themselves, from the same options object.
   An application that wants a studio calls the studio's method alone.
-- **No studio-only options.** `PostgresDiagnosticsOptions` has `QueryTimeout`, `SqlConsoleRole`, `HealthInterval`,
+- **No studio-only options.** `PostgresDiagnosticsOptions` has `QueryTimeout`, `MaxStudioConnections`, `StudioApplicationName` (whose
+  derived name ends with `(Postgres Studio Diagnostics)` on a host with no studio), `SqlConsoleRole`, `HealthInterval`,
   `AcceptedChecks`, `BrowsableSchemas`, `IncludeDefaultDataSource`, `AddDataSource` and `AddDatabaseSource`. The path, the
   title, the three authorization policies, `ReadOnly`, the capabilities, paging, the console's limits and `RefreshInterval`
   belong to `PostgresStudioOptions`, which inherits all of the above: configure a member the same way in either.

@@ -59,7 +59,10 @@ internal sealed record MartenStudioDatabase(IMartenDatabase Database) : IStudioD
     public static NpgsqlConnection CreateConnection(IMartenDatabase database, ConnectionUsage usage)
     {
         ArgumentNullException.ThrowIfNull(database);
-        return StudioConnectionMeter.Attach(database.CreateConnection(usage));
+        // Issue #44: held to the store's pool's studio share; a read replica's pool counts against the primary's, conservatively.
+        return StudioConnectionMeter.Attach(
+            database.CreateConnection(usage),
+            pool: StudioConnectionPools.Of(database is PostgresqlDatabase { DataSource: { } dataSource } ? dataSource : null));
     }
 
     /// <summary>The wrapper of <paramref name="database" />.</summary>

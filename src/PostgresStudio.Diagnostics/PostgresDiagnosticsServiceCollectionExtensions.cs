@@ -66,6 +66,8 @@ public static class PostgresDiagnosticsServiceCollectionExtensions
             .Validate(static options => DiagnosticsOptionsValidation.IsQueryTimeout(options.QueryTimeout), DiagnosticsOptionsValidation.QueryTimeoutMessage(optionsType))
             .Validate(static options => DiagnosticsOptionsValidation.IsSqlConsoleRole(options.SqlConsoleRole), DiagnosticsOptionsValidation.SqlConsoleRoleMessage(optionsType))
             .Validate(static options => DiagnosticsOptionsValidation.IsHealthInterval(options.HealthInterval), DiagnosticsOptionsValidation.HealthIntervalMessage(optionsType))
+            .Validate(static options => DiagnosticsOptionsValidation.IsMaxStudioConnections(options.MaxStudioConnections), DiagnosticsOptionsValidation.MaxStudioConnectionsMessage(optionsType))
+            .Validate(static options => DiagnosticsOptionsValidation.IsStudioApplicationName(options.StudioApplicationName), DiagnosticsOptionsValidation.StudioApplicationNameMessage(optionsType))
             .Validate(static options => DiagnosticsOptionsValidation.AreSchemas(options.BrowsableSchemas), DiagnosticsOptionsValidation.SchemasMessage(optionsType))
             .ValidateSharedAcceptedChecks(optionsType, PostgresDiagnosticsDescriptor.Instance, static options => options.AcceptedCheckReasons)
             .ValidateSourceNames(optionsType, static options => options.DataSources.Concat(options.DatabaseSources).Select(static x => x.Name));

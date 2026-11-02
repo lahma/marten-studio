@@ -101,6 +101,12 @@ internal sealed class PostgresStudioSettings : IStudioSettings
     public TimeSpan QueryTimeout => Value.QueryTimeout;
 
     /// <inheritdoc />
+    public int MaxStudioConnections => Value.MaxStudioConnections;
+
+    /// <inheritdoc />
+    public string? StudioApplicationName => Value.StudioApplicationName;
+
+    /// <inheritdoc />
     public TimeSpan RefreshInterval => Value.RefreshInterval;
 
     /// <inheritdoc />

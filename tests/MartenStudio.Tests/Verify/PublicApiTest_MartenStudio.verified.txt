@@ -53,6 +53,7 @@ namespace MartenStudio
         public int MaxInlineDocumentBytes { get; set; }
         public int MaxPageSize { get; set; }
         public int MaxSqlConsoleRows { get; set; }
+        public int MaxStudioConnections { get; set; }
         public string Path { get; set; }
         public System.TimeSpan QueryTimeout { get; set; }
         public bool ReadOnly { get; set; }
@@ -60,6 +61,7 @@ namespace MartenStudio
         public System.TimeSpan RefreshInterval { get; set; }
         public string? SqlConsoleRole { get; set; }
         public string? StoreAuthorizationPolicy { get; set; }
+        public string? StudioApplicationName { get; set; }
         public string Title { get; set; }
         public string? WriteAuthorizationPolicy { get; set; }
     }

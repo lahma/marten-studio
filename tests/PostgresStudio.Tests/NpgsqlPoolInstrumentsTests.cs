@@ -335,7 +335,7 @@ public sealed class NpgsqlPoolInstrumentsTests
         PoolSaturationCheck check = new();
         PoolFacts facts = await check.GatherAsync(context, Token);
 
-        facts.Should().Be(new PoolFacts(true, 7, 0, 0, 7, facts.PoolsInProcess, now) { Instruments = Expected });
+        facts.Should().Be(new PoolFacts(true, 7, 0, 0, 7, facts.PoolsInProcess, now) { Instruments = Expected, Studio = facts.Studio });
         facts.PoolsInProcess.Should().BeGreaterThan(0);
         observer.IsListening.Should().BeFalse("the gatherer's lease is given back when it has read");
 

@@ -131,6 +131,9 @@ public class StudioRegistrationTests
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
+        // 1.0 (#44): MaxStudioConnections and StudioApplicationName, two more of the shared bounds.
+        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
+        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(AcceptedChecksValidator<MartenStudioOptions>)),
         (typeof(MartenStoreRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenStoreRegistry)),
         (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenStudioSourceProvider)),

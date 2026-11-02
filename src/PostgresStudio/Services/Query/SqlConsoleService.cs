@@ -608,7 +608,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
 
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             PlanRunResult result = await PlanRunner
                 .RunAsync(
@@ -703,7 +703,7 @@ internal sealed class SqlConsoleService : ISqlConsoleService
 
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
             SqlResultSet result = await session
                 .ExecuteAsync(connection, statement, bind, cancellationToken)

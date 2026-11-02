@@ -28,6 +28,21 @@ internal static partial class DiagnosticsOptionsValidation
     /// <summary>The refusal of a query timeout out of bounds.</summary>
     public static string QueryTimeoutMessage(string optionsType) => optionsType + ".QueryTimeout must be between one second and ten minutes";
 
+    /// <summary>Issue #44: whether <paramref name="max" /> is a cap on the studio's connections the studio accepts.</summary>
+    public static bool IsMaxStudioConnections(int max) => max is >= 1 and <= Internal.Sql.StudioConnectionPools.MaxAllowed;
+
+    /// <summary>The refusal of a cap out of bounds.</summary>
+    public static string MaxStudioConnectionsMessage(string optionsType) =>
+        optionsType + ".MaxStudioConnections must be between 1 and 100";
+
+    /// <summary>Issue #44: whether <paramref name="name" /> is absent, empty, or a name PostgreSQL keeps as written.</summary>
+    public static bool IsStudioApplicationName(string? name) =>
+        name is null || Internal.Sql.StudioConnectionPools.IsValidApplicationName(name);
+
+    /// <summary>The refusal of a session name PostgreSQL would change.</summary>
+    public static string StudioApplicationNameMessage(string optionsType) =>
+        optionsType + ".StudioApplicationName must be printable ASCII of at most 63 characters, or empty to leave the application's own name";
+
     /// <summary>Whether <paramref name="role" /> is absent or a plain Postgres identifier.</summary>
     public static bool IsSqlConsoleRole(string? role) => role is null || PostgresRoleName().IsMatch(role);
 

@@ -99,6 +99,21 @@ internal static class HealthPresentation
             + "every connection the studio opens to it (" + text.StudioCostCovers + ").";
     }
 
+    /// <summary>
+    /// Issue #44: the studio's share of the database's pool, after its cost: the cap, the property that sets it, and how many it
+    /// holds now.
+    /// </summary>
+    /// <param name="max">The cap.</param>
+    /// <param name="inUse">How many it holds now.</param>
+    /// <param name="settings">The studio's settings, for the property's name as the host spells it.</param>
+    public static string Share(int max, int inUse, IStudioSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        return "It holds at most " + max.ToString(CultureInfo.InvariantCulture) + " of the pool's connections at a time ("
+            + settings.OptionName("MaxStudioConnections") + "), " + inUse.ToString(CultureInfo.InvariantCulture) + " now.";
+    }
+
     /// <summary>A findings count with its noun.</summary>
     public static string Count(int count, string noun) =>
         count.ToString(CultureInfo.InvariantCulture) + " " + noun + (count == 1 ? string.Empty : "s");

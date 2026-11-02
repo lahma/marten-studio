@@ -26,6 +26,12 @@ namespace PostgresStudio.Services.Postgres;
 /// <param name="DataSource">The application's data source.</param>
 internal sealed record DataSourceDatabase(string Identity, NpgsqlDataSource DataSource) : IStudioDatabase
 {
+    /// <summary>
+    /// Issue #44: the studio's share of this data source's pool, as the source provider registered it - or, when nobody did,
+    /// whatever this process's studio configured (<see cref="StudioConnectionPools.Of" />).
+    /// </summary>
+    public StudioConnectionPool? Pool { get; init; }
+
     private readonly (string Name, string Server) endpoint = Describe(DataSource);
 
     /// <inheritdoc />
@@ -45,7 +51,8 @@ internal sealed record DataSourceDatabase(string Identity, NpgsqlDataSource Data
     /// the studio issues here runs on a connection from this.
     /// </para>
     /// </remarks>
-    public NpgsqlConnection CreateConnection(StudioConnectionUsage usage) => StudioConnectionMeter.Attach(DataSource.CreateConnection());
+    public NpgsqlConnection CreateConnection(StudioConnectionUsage usage) =>
+        StudioConnectionMeter.Attach(DataSource.CreateConnection(), pool: Pool ?? StudioConnectionPools.Of(DataSource));
 
     private static (string Name, string Server) Describe(NpgsqlDataSource dataSource)
     {
