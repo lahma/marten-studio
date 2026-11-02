@@ -170,6 +170,10 @@ public class LogLevelsTests
             "A round of the opt-in connection history (#43) failed as a whole; the sampler tries again every Interval."),
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.ConnectionHistory.cs : 9461 ConnectionHistorySampleFailed"] = (Verdict.Throttled,
             "One server could not be sampled or its sample kept; its connection is opened again at the next round, every Interval."),
+        ["src/PostgresStudio.Diagnostics/Services/StudioLog.ConnectionHistory.cs : 9464 ConnectionHistoryBacklogDropped"] = (Verdict.Throttled,
+            "The sampler's backlog of samples the history's store refused (#46) outgrew its hour and dropped its oldest; every round that drops says so, so once per throttle window a Warning."),
+        ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9464 PostgresStudioConnectionHistoryBacklogDropped"] = (Verdict.Throttled,
+            "9464 in Postgres Studio's words: the backlog dropped its oldest samples, once per throttle window a Warning."),
         ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9460 PostgresStudioConnectionHistoryRoundFailed"] = (Verdict.Throttled,
             "9460 in Postgres Studio's words: a round of the connection history failed, tried again every Interval."),
         ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.ConnectionHistory.cs : 9461 PostgresStudioConnectionHistorySampleFailed"] = (Verdict.Throttled,
@@ -459,7 +463,7 @@ public class LogLevelsTests
 
     /// <summary>
     /// The events the rule is about are exactly the ones the roster files as throttled in the event files - 9210,
-    /// 9212-9222 and 9237 in the main ones, and the partials' 9246, 9270, 9410, 9430, 9440, 9451, 9460, 9461, 9500 and 9501 - so
+    /// 9212-9222 and 9237 in the main ones, and the partials' 9246, 9270, 9410, 9430, 9440, 9451, 9460, 9461, 9464, 9500 and 9501 - so
     /// neither list can drift from the other.
     /// </summary>
     [Fact]

@@ -481,6 +481,12 @@ internal sealed record SessionActivitySummary
     /// <summary>Issue #48: whether this process only reads that history, another process filling it (<c>AddPostgresConnectionHistoryReader()</c>).</summary>
     public bool ConnectionHistoryReadOnly { get; init; }
 
+    /// <summary>
+    /// Issue #46: how many samples of this server the sampling process holds because the history's store refused their append, to
+    /// write when it answers again - a count under the history's own gate, no names.
+    /// </summary>
+    public int ConnectionHistoryPending { get; init; }
+
     /// <summary>What was run, for Show SQL.</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
 

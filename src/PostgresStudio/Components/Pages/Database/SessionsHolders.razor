@@ -102,6 +102,15 @@
             </p>
         }
 
+        @if (Summary.ConnectionHistoryPending > 0)
+        {
+            <p class="ms-sessions-caveat ms-holders-history-pending">
+                <strong>@SessionText.Count(Summary.ConnectionHistoryPending, "sample")</strong>
+                @(Summary.ConnectionHistoryPending == 1 ? "is" : "are") waiting to be stored: the history store refused
+                @(Summary.ConnectionHistoryPending == 1 ? "it; it is" : "them; they are") written when it answers again.
+            </p>
+        }
+
         <h3 class="ms-holders-subheading" id="ms-holders-databases">By database</h3>
 
         @if (Rows(holders).Count == 0 && holders.Others is null)

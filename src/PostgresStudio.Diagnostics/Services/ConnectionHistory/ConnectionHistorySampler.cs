@@ -69,6 +69,14 @@ internal sealed class ConnectionHistorySampler : BackgroundService
     private readonly SemaphoreSlim round = new(1, 1);
 
     /// <summary>
+    /// Issue #46: the samples whose append failed, per server, oldest first. Mutated only inside <see cref="round" />, and each
+    /// mutation - an enqueue, a dequeue, a clear - is made under <see cref="backlogGate" />, which a page's read of
+    /// <see cref="PendingSamples" /> takes too, so the copy it gets is never taken mid-change. No await is made under the lock.
+    /// </summary>
+    private readonly Dictionary<string, Backlog> backlogs = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock backlogGate = new();
+
+    /// <summary>
     /// The kept connections' own meter: the Health page's "studio cost" is the studio's work, and a session kept open for days would
     /// be booked there as days of it when it closes. Metered all the same, so each sample's transaction is named and counted nowhere.
     /// </summary>
@@ -139,6 +147,12 @@ internal sealed class ConnectionHistorySampler : BackgroundService
         try
         {
             await ReleaseAsync().ConfigureAwait(false);
+
+            // The backlog is in this process alone; a stopped sampler has no next round to store it in.
+            lock (backlogGate)
+            {
+                backlogs.Clear();
+            }
         }
         finally
         {
@@ -156,7 +170,37 @@ internal sealed class ConnectionHistorySampler : BackgroundService
         round.Dispose();
     }
 
-    /// <summary>One round: every server sampled once, unless the host says another process samples. How many samples were kept.</summary>
+    /// <summary>
+    /// How many samples of one server the backlog holds (issue #46): an hour of them at <paramref name="interval" /> - 60 at the
+    /// default minute, 240 at 15 seconds, 1 at an hour - and never fewer than one. Past it the oldest is dropped first.
+    /// </summary>
+    internal static int PendingBound(TimeSpan interval) => Math.Max(1, (int) Math.Ceiling(TimeSpan.FromHours(1) / interval));
+
+    /// <summary>How many samples of <paramref name="server" /> wait to be stored: appended by nobody yet, because the store refused them.</summary>
+    internal int Pending(string server)
+    {
+        lock (backlogGate)
+        {
+            return backlogs.TryGetValue(server, out Backlog? backlog) ? backlog.Samples.Count : 0;
+        }
+    }
+
+    /// <summary>
+    /// A copy, oldest first, of the samples of <paramref name="server" /> that wait to be stored - taken under the lock the round's
+    /// own changes to the backlog take, so a page on another thread never reads it mid-change.
+    /// </summary>
+    internal IReadOnlyList<PostgresConnectionSample> PendingSamples(string server)
+    {
+        lock (backlogGate)
+        {
+            return backlogs.TryGetValue(server, out Backlog? backlog) ? [.. backlog.Samples] : [];
+        }
+    }
+
+    /// <summary>
+    /// One round: every server sampled once, unless the host says another process samples. How many samples were stored - the ones
+    /// a store had refused earlier included.
+    /// </summary>
     internal async Task<int> SampleOnceAsync(CancellationToken cancellationToken)
     {
         await round.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -169,11 +213,11 @@ internal sealed class ConnectionHistorySampler : BackgroundService
                 return 0;
             }
 
-            int kept = 0;
+            int stored = 0;
 
             foreach ((string server, NpgsqlDataSource dataSource) in await ServersAsync(cancellationToken).ConfigureAwait(false))
             {
-                PostgresConnectionSample sample;
+                PostgresConnectionSample? sample = null;
 
                 try
                 {
@@ -193,31 +237,184 @@ internal sealed class ConnectionHistorySampler : BackgroundService
                     }
 
                     await ForgetAsync(server).ConfigureAwait(false);
-                    continue;
                 }
 
-                // The store may be the host's own; it gets the studio's QueryTimeout, and its failure is the round's, not the server's:
-                // the kept connection stays.
-                using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                limit.CancelAfter(settings.QueryTimeout);
-
-                try
-                {
-                    await store.AppendAsync(sample, limit.Token).ConfigureAwait(false);
-                    kept++;
-                }
-                catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-                {
-                    LogRoundFailed(exception);
-                }
+                // A sample that could not be read is lost - there is nothing to keep - but the samples a store refused earlier are
+                // still offered to it.
+                stored += await StoreAsync(server, sample, cancellationToken).ConfigureAwait(false);
             }
 
-            return kept;
+            return stored;
         }
         finally
         {
             round.Release();
         }
+    }
+
+    /// <summary>
+    /// Issue #46: the server's backlog, oldest first, then <paramref name="sample" /> (when it was read), each appended on its own
+    /// <c>QueryTimeout</c>. The first failure stops it: that sample and every later one stay in the backlog, or go into it, in order,
+    /// so a store that hangs costs one timeout a server a round. Past <see cref="PendingBound" /> the oldest is dropped. How many were
+    /// stored.
+    /// </summary>
+    /// <remarks>
+    /// The store may be the host's own, and a table in the sampled database needs a connection from the application's pool - so its
+    /// append fails exactly when the pool is exhausted, the moment the history exists for. The backlog is in this process alone: a
+    /// process that dies loses it.
+    /// </remarks>
+    internal async Task<int> StoreAsync(string server, PostgresConnectionSample? sample, CancellationToken cancellationToken)
+    {
+        bool hadBacklog = Pending(server) > 0;
+        int stored = 0;
+        int flushed = 0;
+        bool refused = false;
+
+        while (!refused && PeekPending(server) is { } head)
+        {
+            if (await TryAppendAsync(head, cancellationToken).ConfigureAwait(false))
+            {
+                DequeuePending(server);
+                stored++;
+                flushed++;
+            }
+            else
+            {
+                refused = true;
+            }
+        }
+
+        int dropped = 0;
+        DateTimeOffset since = default;
+
+        if (sample is not null)
+        {
+            if (!refused && await TryAppendAsync(sample, cancellationToken).ConfigureAwait(false))
+            {
+                stored++;
+            }
+            else
+            {
+                (dropped, since) = EnqueuePending(server, sample);
+            }
+        }
+
+        Backlog? drained = null;
+
+        lock (backlogGate)
+        {
+            if (backlogs.TryGetValue(server, out Backlog? backlog))
+            {
+                backlog.Flushed += flushed;
+
+                if (hadBacklog && backlog.Samples.Count == 0)
+                {
+                    backlogs.Remove(server);
+                    drained = backlog;
+                }
+            }
+        }
+
+        if (drained is not null)
+        {
+            if (settings.Text.Product == StudioProduct.PostgresStudio)
+            {
+                logger.PostgresStudioConnectionHistoryBacklogStored(drained.Flushed, server, drained.Since);
+            }
+            else
+            {
+                logger.ConnectionHistoryBacklogStored(drained.Flushed, server, drained.Since);
+            }
+        }
+
+        if (dropped > 0)
+        {
+            LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Backlog", server, null, null);
+
+            if (settings.Text.Product == StudioProduct.PostgresStudio)
+            {
+                logger.PostgresStudioConnectionHistoryBacklogDropped(level, dropped, server, since);
+            }
+            else
+            {
+                logger.ConnectionHistoryBacklogDropped(level, dropped, server, since);
+            }
+        }
+
+        return stored;
+    }
+
+    /// <summary>One append, on the studio's <c>QueryTimeout</c>; a failure is the round's, not the server's - the kept connection stays.</summary>
+    private async Task<bool> TryAppendAsync(PostgresConnectionSample sample, CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        limit.CancelAfter(settings.QueryTimeout);
+
+        try
+        {
+            await store.AppendAsync(sample, limit.Token).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            LogRoundFailed(exception);
+            return false;
+        }
+    }
+
+    private PostgresConnectionSample? PeekPending(string server)
+    {
+        lock (backlogGate)
+        {
+            return backlogs.TryGetValue(server, out Backlog? backlog) && backlog.Samples.Count > 0 ? backlog.Samples.Peek() : null;
+        }
+    }
+
+    private void DequeuePending(string server)
+    {
+        lock (backlogGate)
+        {
+            if (backlogs.TryGetValue(server, out Backlog? backlog) && backlog.Samples.Count > 0)
+            {
+                backlog.Samples.Dequeue();
+            }
+        }
+    }
+
+    /// <summary>Holds <paramref name="sample" /> at the back of the server's backlog, dropping the oldest past the bound; how many were dropped, and since when the backlog has been held.</summary>
+    private (int Dropped, DateTimeOffset Since) EnqueuePending(string server, PostgresConnectionSample sample)
+    {
+        int bound = PendingBound(options.Value.Interval);
+        int dropped = 0;
+
+        lock (backlogGate)
+        {
+            if (!backlogs.TryGetValue(server, out Backlog? backlog))
+            {
+                backlog = new Backlog(time.GetUtcNow());
+                backlogs[server] = backlog;
+            }
+
+            while (backlog.Samples.Count >= bound)
+            {
+                backlog.Samples.Dequeue();
+                dropped++;
+            }
+
+            backlog.Samples.Enqueue(sample);
+            return (dropped, backlog.Since);
+        }
+    }
+
+    private sealed class Backlog(DateTimeOffset since)
+    {
+        public Queue<PostgresConnectionSample> Samples { get; } = new();
+
+        /// <summary>When the first sample of this backlog was held.</summary>
+        public DateTimeOffset Since { get; } = since;
+
+        /// <summary>How many of its samples were stored since.</summary>
+        public int Flushed { get; set; }
     }
 
     /// <summary>

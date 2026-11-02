@@ -21,8 +21,10 @@ namespace PostgresStudio;
 /// </code>
 /// <para>
 /// Both calls are made from the sampler's background loop and from the Holders page; a store should keep its own retention (or
-/// let <see cref="ReadAsync" />'s <c>since</c> bound the reads) and answer reads quickly. A failure is logged and the next
-/// interval tries again; it never stops the sampler or a page.
+/// let <see cref="ReadAsync" />'s <c>since</c> bound the reads) and answer reads quickly. A failure never stops the sampler or a
+/// page: it is logged, and the sample is kept in the sampling process, per server, for up to an hour of samples at the
+/// configured <c>Interval</c>. Before the next sample the sampler appends what it holds, oldest first, one <see cref="AppendAsync" />
+/// each, and stops at the first that fails; past the hour the oldest is dropped, and a process that stops loses what it held.
 /// </para>
 /// </remarks>
 public interface IPostgresConnectionHistoryStore

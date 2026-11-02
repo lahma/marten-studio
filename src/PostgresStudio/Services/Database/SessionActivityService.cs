@@ -105,6 +105,7 @@ internal sealed class SessionActivityService : ISessionActivityService
     private readonly ILogger<SessionActivityService> logger;
     private readonly TableRowAuditLedger ledger = new();
     private readonly ConnectionHistoryReader? history;
+    private readonly ConnectionHistorySampler? sampler;
 
     public SessionActivityService(
         IStudioSettings settings,
@@ -119,9 +120,11 @@ internal sealed class SessionActivityService : ISessionActivityService
         SessionHolderNames holderNames,
         StudioLogThrottle throttle,
         ILogger<SessionActivityService> logger,
-        ConnectionHistoryReader? history = null)
+        ConnectionHistoryReader? history = null,
+        ConnectionHistorySampler? sampler = null)
     {
         this.history = history;
+        this.sampler = sampler;
         this.settings = settings;
         this.capabilities = capabilities;
         this.authorization = authorization;
@@ -154,7 +157,10 @@ internal sealed class SessionActivityService : ISessionActivityService
 
         try
         {
-            IReadOnlyList<PostgresConnectionSample> samples = await history.ReadAsync(server, cancellationToken).ConfigureAwait(false);
+            // Issue #46: beside what the store holds, the samples this process holds because the store refused them.
+            IReadOnlyList<PostgresConnectionSample> samples = await history
+                .ReadWithPendingAsync(server, sampler?.PendingSamples(server) ?? [], cancellationToken)
+                .ConfigureAwait(false);
             return ConnectionHistoryView.Of(samples, names);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
@@ -167,6 +173,12 @@ internal sealed class SessionActivityService : ISessionActivityService
             return null;
         }
     }
+
+    /// <summary>Issue #46: how many samples of the server <paramref name="resolved" /> is on this process holds because the store refused them - a count, no names.</summary>
+    private int PendingCount(ResolvedSource resolved) =>
+        sampler is not null && ConnectionHistorySampler.ServerOf(resolved.Target.DataSource?.ConnectionString) is { } server
+            ? sampler.Pending(server)
+            : 0;
 
     /// <inheritdoc />
     public async Task<SessionActivitySummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
@@ -280,6 +292,7 @@ internal sealed class SessionActivityService : ISessionActivityService
             ConnectionHistory = await HistoryAsync(resolved, names: false, cancellationToken).ConfigureAwait(false),
             ConnectionHistoryKept = history is not null,
             ConnectionHistoryReadOnly = history?.ReaderOnly ?? false,
+            ConnectionHistoryPending = PendingCount(resolved),
             Caveats = caveats,
             Blocking = CountsOf(snapshot.Blocking),
             LockStatistics = snapshot.LockStatistics,

@@ -355,6 +355,16 @@ Holders' applications do. Without the registration, Holders says how to turn it 
 **Failures.** A round or a server that fails is logged as event 9460 or 9461, throttled like the studio's polled reads, and
 tried again at the next interval; nothing a page shows fails with it.
 
+**A store that refuses a sample.** The natural store is a table in the sampled database, whose append needs a connection from
+the application's pool - and fails when the pool is exhausted, the moment the history exists for. So a sample whose append
+fails is kept by the sampling process, per server, up to one hour of samples at the configured `Interval` (60 at the default
+minute); before each new sample the sampler appends what it holds, oldest first, and stops at the first append that fails, so a
+store that hangs costs one `QueryTimeout` per server per round. A sample the sampler could not read is lost, but the backlog is
+still offered to the store. Past the hour the oldest is dropped (event 9464, throttled), and when the backlog is written the
+sampler says so (event 9463, Information, once). The backlog lives in the sampling process alone: a process that stops
+loses it. While `ShouldSample` answers no, it is held and not written. Holders, in the process that samples, merges those
+samples into the history it draws - the store's read failing too leaves it the held ones - and says how many are waiting.
+
 ## Security
 
 **It answers your code, not a visitor.** No authorization policy, capability or `ReadOnly` is asked: those decide what
