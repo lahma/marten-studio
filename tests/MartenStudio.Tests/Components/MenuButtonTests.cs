@@ -58,6 +58,33 @@ public class MenuButtonTests
         menu.TextOfAll(".ms-menu-item-detail").Should().Equal(["the first thing", "the third thing"], "an item with no detail draws no empty line");
     }
 
+    /// <summary>
+    /// What the stylesheet's placement rests on: the button is the anchor of its own popover, by a name that is this
+    /// instance's own, and the popover is inside the same wrapper as the button. A popover with no anchor is placed by the
+    /// browser in the middle of the viewport (the Snapshot menu did that), and two menus on a page must never share a name.
+    /// </summary>
+    [Fact]
+    public void The_button_is_the_anchor_of_its_own_popover_inside_one_wrapper()
+    {
+        using var context = new StudioComponentContext();
+
+        var first = Render(context, ThreeItems([]), elementId: "first-menu");
+        var second = Render(context, ThreeItems([]), elementId: "second.menu");
+
+        IElement button = first.Find("button.test-button");
+        IElement popover = first.Find(".test-popover");
+
+        button.GetAttribute("style").Should().Be("anchor-name: --first-menu-button");
+        popover.GetAttribute("style").Should().Be("position-anchor: --first-menu-button", "the popover is placed against that button");
+        popover.ParentElement.Should().BeSameAs(button.ParentElement, "the button and its menu share one wrapper");
+        popover.ParentElement!.ClassName.Should().Be("ms-menu-button");
+
+        second.Find("button.test-button").GetAttribute("style").Should().Be(
+            "anchor-name: --second-menu-button",
+            "a name is a dashed identifier: what it cannot hold becomes a hyphen");
+        second.Find(".test-popover").GetAttribute("style").Should().Be("position-anchor: --second-menu-button");
+    }
+
     [Fact]
     public async Task The_arrow_keys_home_and_end_move_the_roving_tabindex_and_the_focus()
     {

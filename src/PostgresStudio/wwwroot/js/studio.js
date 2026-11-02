@@ -236,6 +236,33 @@
         }
     };
 
+    // The JSON viewer has one copy menu for every row, so the stylesheet cannot name its anchor the way a
+    // MenuButton's own markup does: the anchor is whichever key button asked for the menu last. It is given the
+    // name the menu's rule (`.ms-copy-menu:popover-open`) anchors to and taken off the one before, so there is
+    // never more than one. A press on a key button gets here before the popover opens, because the capture
+    // listener runs ahead of the button's default action.
+    const menuAnchorName = "--ms-menu-invoker";
+    let menuAnchored = null;
+
+    function anchorMenuTo(element) {
+        if (menuAnchored && menuAnchored !== element) {
+            menuAnchored.style.removeProperty("anchor-name");
+        }
+
+        if (element && element.style) {
+            element.style.setProperty("anchor-name", menuAnchorName);
+        }
+
+        menuAnchored = element || null;
+    }
+
+    document.addEventListener("click", function (event) {
+        const key = event.target && event.target.closest ? event.target.closest(".ms-json-key") : null;
+        if (key) {
+            anchorMenuTo(key);
+        }
+    }, true);
+
     // JSON toolkit helpers (folded in from the W1 packet). Every C# call site degrades when these
     // are missing (prerender), so each function is defensive and idempotent.
     window.martenStudio.json = window.martenStudio.json || {
@@ -247,6 +274,15 @@
             let shown = false;
             try {
                 if (element && typeof element.showPopover === "function") {
+                    // Opened from the keyboard there is no key button being pressed, so the row that has focus
+                    // is what the menu is placed against (see anchorMenuTo).
+                    const row = document.activeElement && document.activeElement.closest
+                        ? document.activeElement.closest("[role=\"treeitem\"]")
+                        : null;
+                    if (row) {
+                        anchorMenuTo(row.querySelector(".ms-json-key") || row);
+                    }
+
                     element.showPopover();
                     shown = true;
                 }

@@ -37,14 +37,19 @@ public class CorePageSmokeTests
     }
 
     [Fact]
-    public async Task The_rail_ends_with_the_product_its_licence_and_its_author()
+    public async Task The_rail_ends_with_the_product_its_licence_and_its_author_a_line_each()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
 
         var rail = context.Render<NavMenu>();
 
         var credit = rail.Find(".ms-rail-credit");
-        credit.TextContent.Should().Contain("Postgres Studio").And.Contain("MIT licensed").And.Contain("Marko Lahma");
+        var lines = credit.QuerySelectorAll(".ms-rail-credit-line").Select(static x => x.TextContent.Trim()).ToList();
+        lines.Should().HaveCount(3, "the product and its version, the licence and the author, a line each");
+        lines[0].Should().StartWith("Postgres Studio ").And.NotContain("MIT").And.NotContain("Marko");
+        lines[1].Should().Be("MIT licensed");
+        lines[2].Should().Be("by Marko Lahma");
+        rail.Find(".ms-sidebar-inner").LastElementChild!.ClassList.Should().Contain("ms-rail-credit", "the credit is the last thing in the rail's column, after the list");
         credit.QuerySelectorAll("a").Select(static a => a.GetAttribute("href")).Should().Contain(
             "https://github.com/lahma/marten-studio/blob/main/LICENSE");
     }

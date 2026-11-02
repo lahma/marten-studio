@@ -13,66 +13,74 @@
 @inject HealthAlerts HealthAlerts
 @inject IJSRuntime JsRuntime
 
-<div class="ms-sidebar-brand">
-    <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2" />
-        <path d="M4 7v14c0 2.2 4.5 4 10 4s10-1.8 10-4V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        <path d="M4 14c0 2.2 4.5 4 10 4s10-1.8 10-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-    </svg>
-    <span class="ms-sidebar-brand-text">@Settings.Title</span>
-</div>
+@*
+    The rail's own column: it sticks to the top of the window and is as tall as the window, so the credit at its
+    foot is at the foot of what is on screen, whatever the page's length, and a rail longer than the window
+    scrolls inside itself. The aside round it (StudioLayout) keeps the full height of the page for the rail's
+    background and border.
+*@
+<div class="ms-sidebar-inner">
+    <div class="ms-sidebar-brand">
+        <svg class="ms-sidebar-brand-logo" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <ellipse cx="14" cy="7" rx="10" ry="4" stroke="currentColor" stroke-width="2" />
+            <path d="M4 7v14c0 2.2 4.5 4 10 4s10-1.8 10-4V7" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+            <path d="M4 14c0 2.2 4.5 4 10 4s10-1.8 10-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span class="ms-sidebar-brand-text">@Settings.Title</span>
+    </div>
 
-<nav>
-    <ul class="ms-sidebar-nav">
-        @foreach (StudioNavSection section in Descriptor.Navigation)
-        {
-            <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
-
-            @foreach (StudioNavItem item in section.Items.Where(Shown))
+    <nav>
+        <ul class="ms-sidebar-nav">
+            @foreach (StudioNavSection section in Descriptor.Navigation)
             {
-                <li class="ms-nav-item" @key="item.Label">
-                    @if (item.Route is null)
-                    {
-                        @* No @page yet: rendered as a disabled entry rather than omitted, so the
-                           information architecture is visible from the first release and the route
-                           table's fail-fast is not tripped by a template nothing can match. *@
-                        <span class="ms-nav-link ms-nav-link-disabled" aria-disabled="true" title="@ComingSoon">
-                            @Icon(item.Icon)
-                            <span class="ms-nav-link-text">@item.Label</span>
-                        </span>
-                    }
-                    else
-                    {
-                        @* `title` as well as the label: below 1024 px the rail is 56 px wide and the
-                           label is visually hidden (the sr-only technique, so the link keeps its
-                           accessible name), which leaves a sighted mouse user with ten icons and no
-                           way to read what they are. The tooltip is that way. An entry whose one-word
-                           label undersells it - "Tables" is six kinds of object - says more there. *@
-                        <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)" title="@(item.Title ?? item.Label)">
-                            @Icon(item.Icon)
-                            <span class="ms-nav-link-text">@item.Label</span>
-                            @if (BadgeFor(item.BadgeKey) is { } badge)
-                            {
-                                @* A sibling of the label, never part of it: the link's text is what a
-                                   screen reader announces and what every navigation test matches on, and
-                                   a count folded into it would change the name of the page. *@
-                                <span class="ms-nav-badge @badge.CssClass" title="@badge.Title" aria-label="@badge.Title">
-                                    @badge.Text
-                                </span>
-                            }
-                        </a>
-                    }
-                </li>
-            }
-        }
-    </ul>
-</nav>
+                <li class="ms-sidebar-section" @key="section.Title">@section.Title</li>
 
-<p class="ms-rail-credit">
-    @Settings.ProductName @StudioVersion ·
-    <a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a> ·
-    by <a href="https://github.com/lahma/marten-studio" target="_blank" rel="noopener noreferrer">Marko Lahma</a>
-</p>
+                @foreach (StudioNavItem item in section.Items.Where(Shown))
+                {
+                    <li class="ms-nav-item" @key="item.Label">
+                        @if (item.Route is null)
+                        {
+                            @* No @page yet: rendered as a disabled entry rather than omitted, so the
+                               information architecture is visible from the first release and the route
+                               table's fail-fast is not tripped by a template nothing can match. *@
+                            <span class="ms-nav-link ms-nav-link-disabled" aria-disabled="true" title="@ComingSoon">
+                                @Icon(item.Icon)
+                                <span class="ms-nav-link-text">@item.Label</span>
+                            </span>
+                        }
+                        else
+                        {
+                            @* `title` as well as the label: below 1024 px the rail is 56 px wide and the
+                               label is visually hidden (the sr-only technique, so the link keeps its
+                               accessible name), which leaves a sighted mouse user with ten icons and no
+                               way to read what they are. The tooltip is that way. An entry whose one-word
+                               label undersells it - "Tables" is six kinds of object - says more there. *@
+                            <a class="ms-nav-link @NavClass(item.Route)" href="@Link(item.Route)" title="@(item.Title ?? item.Label)">
+                                @Icon(item.Icon)
+                                <span class="ms-nav-link-text">@item.Label</span>
+                                @if (BadgeFor(item.BadgeKey) is { } badge)
+                                {
+                                    @* A sibling of the label, never part of it: the link's text is what a
+                                       screen reader announces and what every navigation test matches on, and
+                                       a count folded into it would change the name of the page. *@
+                                    <span class="ms-nav-badge @badge.CssClass" title="@badge.Title" aria-label="@badge.Title">
+                                        @badge.Text
+                                    </span>
+                                }
+                            </a>
+                        }
+                    </li>
+                }
+            }
+        </ul>
+    </nav>
+
+    <p class="ms-rail-credit">
+        <span class="ms-rail-credit-line">@Settings.ProductName @StudioVersion</span>
+        <span class="ms-rail-credit-line"><a href="https://github.com/lahma/marten-studio/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT licensed</a></span>
+        <span class="ms-rail-credit-line">by <a href="https://github.com/lahma/marten-studio" target="_blank" rel="noopener noreferrer">Marko Lahma</a></span>
+    </p>
+</div>
 
 @code
 {

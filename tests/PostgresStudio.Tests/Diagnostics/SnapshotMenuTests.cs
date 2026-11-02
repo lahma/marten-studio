@@ -103,6 +103,31 @@ public class SnapshotMenuTests
         await item.ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
     }
 
+    /// <summary>
+    /// The markup the stylesheet places the menu by (1.0-UIFIX): the button is the anchor of the popover that sits in the
+    /// same wrapper, and the popover carries the shared menu's class. Without an anchor the browser puts a popover in the
+    /// middle of the viewport, which is where this menu opened over a finding's SQL.
+    /// </summary>
+    [Fact]
+    public async Task The_menu_is_anchored_to_its_button_in_one_wrapper()
+    {
+        (PostgresStudioComponentContext context, _) = await ContextAsync();
+        await using PostgresStudioComponentContext owned = context;
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+
+        AngleSharp.Dom.IElement button = menu.Find("button.ms-snapshot-menu-button");
+        AngleSharp.Dom.IElement popover = menu.Find(".ms-snapshot-menu-popover");
+
+        popover.ClassList.Should().Contain("ms-menu-popover");
+        popover.ParentElement.Should().BeSameAs(button.ParentElement);
+        popover.ParentElement!.ClassList.Should().Contain(["ms-menu-button", "ms-snapshot-menu"]);
+
+        string? anchor = button.GetAttribute("style");
+        anchor.Should().StartWith("anchor-name: --").And.EndWith("-button");
+        popover.GetAttribute("style").Should().Be("position-anchor: " + anchor!["anchor-name: ".Length..]);
+    }
+
     [Fact]
     public async Task Download_hands_the_browser_the_visitors_json_under_the_designed_file_name()
     {
