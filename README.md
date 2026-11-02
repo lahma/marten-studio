@@ -939,6 +939,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9440 | `ServerFactsReadFailed` | A section of the Server page could not be read |
   | 9451 | `StatementsReadFailed` | The Statements page could not read `pg_stat_statements` for a reason nobody chose |
   | 9460, 9461 | `ConnectionHistoryRoundFailed`, `ConnectionHistorySampleFailed` | The opt-in connection history could not finish a round, or sample one server; it tries again at the next interval |
+  | 9463, 9464 | `ConnectionHistoryBacklogStored`, `ConnectionHistoryBacklogDropped` | The connection history stored the samples its store had refused (Information, once); it dropped the oldest of them past an hour (throttled) |
   | 9500, 9501 | `CapacitySourceFailed`, `AuroraReadFailed` | The host's `IPostgresCapacitySource` threw or timed out; one of Aurora's own reads failed |
 
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation path
