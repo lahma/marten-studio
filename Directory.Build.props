@@ -37,12 +37,21 @@
   <PropertyGroup>
     <Authors>Marko Lahma</Authors>
     <Company>Marko Lahma</Company>
+    <!-- Each shipped project names its own Product (1.0): a Postgres Studio user should not read "Marten Studio". -->
     <Product>Marten Studio</Product>
     <Copyright>Copyright (c) 2026 Marko Lahma</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/lahma/marten-studio</PackageProjectUrl>
     <RepositoryUrl>https://github.com/lahma/marten-studio</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <!-- 1.0: the icon is the studio's favicon at 128 px (icon.png at the repository root, packed by each shipped project), and the
+         release notes are the CHANGELOG, the version authority (D15). -->
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>What changed in each release: https://github.com/lahma/marten-studio/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <!-- 1.0: package validation compares each shipped package with the last release on nuget.org (EnablePackageValidation is
+         on in each shipped project). Move it to the version just released, in the release's own pull request
+         (build-and-release.md, Release engineering). -->
+    <PackageValidationBaselineVersion>0.11.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
 </Project>
