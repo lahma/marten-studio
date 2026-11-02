@@ -279,6 +279,7 @@ internal sealed class SessionActivityService : ISessionActivityService
             Holders = holders,
             ConnectionHistory = await HistoryAsync(resolved, names: false, cancellationToken).ConfigureAwait(false),
             ConnectionHistoryKept = history is not null,
+            ConnectionHistoryReadOnly = history?.ReaderOnly ?? false,
             Caveats = caveats,
             Blocking = CountsOf(snapshot.Blocking),
             LockStatistics = snapshot.LockStatistics,

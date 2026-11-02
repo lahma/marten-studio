@@ -341,6 +341,13 @@ own name back before it is closed. It is **outside `MaxStudioConnections`**: cou
 time is not the studio's on the Health page's cost line - a session kept for a week is not a week of the studio's work. A
 connection that breaks is opened again at the next round; while `ShouldSample` answers no, every kept connection is closed.
 
+**Reading a history another process fills** (1.0.1, issue #48). A process that must never sample - a web application whose
+studio pool has no connection to spare, while a worker samples on a connection it reserves - registers
+`AddPostgresConnectionHistoryReader()` instead, with the store the sampling process appends to. It adds no background service
+and opens no connection of its own, validates only `Retention` (the window Holders reads), and refuses to start without an
+`IPostgresConnectionHistoryStore` (an in-memory store nothing appends to is always empty) or without a studio or the engine. It is
+exclusive with `AddPostgresConnectionHistory()` in one container. See [Postgres Studio's README](../src/PostgresStudio/README.md).
+
 **What a visitor sees.** On Holders, anybody the source policy passes sees the counts: the window, the peak against the client
 limit and when, how many samples, and how many instance changes. The applications' own peaks need `ViewDatabaseActivity`, as
 Holders' applications do. Without the registration, Holders says how to turn it on.

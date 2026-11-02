@@ -244,10 +244,10 @@ public class SessionsHoldersPageTests
         },
     ];
 
-    private static async Task HistoryAsync(SessionDetailsAccess access, bool kept, ConnectionHistoryView? counts, ConnectionHistoryView? named, Func<Bunit.IRenderedComponent<Sessions>, Task> check)
+    private static async Task HistoryAsync(SessionDetailsAccess access, bool kept, ConnectionHistoryView? counts, ConnectionHistoryView? named, Func<Bunit.IRenderedComponent<Sessions>, Task> check, bool readOnly = false)
     {
         (StudioComponentContext context, SessionPoolObserver pools) = await ReadyAsync(
-            Summary(access) with { ConnectionHistoryKept = kept, ConnectionHistory = counts },
+            Summary(access) with { ConnectionHistoryKept = kept, ConnectionHistoryReadOnly = readOnly, ConnectionHistory = counts },
             Details() with { ConnectionHistory = named });
 
         try
@@ -282,6 +282,17 @@ public class SessionsHoldersPageTests
             page.FindAll(".ms-holders-history-off").Should().BeEmpty("the host registered it");
             return Task.CompletedTask;
         });
+
+    [Fact]
+    public async Task A_reader_only_history_with_no_sample_says_another_process_fills_it_and_never_asks_for_the_sampling_registration() =>
+        await HistoryAsync(Open, kept: true, null, null, static page =>
+        {
+            string said = page.Find(".ms-holders-history-none").TextContent;
+            said.Should().Contain("another process fills it").And.NotContain("samples each server once an interval");
+            page.Markup.Should().NotContain("AddPostgresConnectionHistory()");
+            page.FindAll(".ms-holders-history-off").Should().BeEmpty();
+            return Task.CompletedTask;
+        }, readOnly: true);
 
     [Fact]
     public async Task Without_the_gate_the_history_is_counts_and_names_no_application() =>

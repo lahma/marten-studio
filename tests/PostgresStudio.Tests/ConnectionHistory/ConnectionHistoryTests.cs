@@ -142,6 +142,133 @@ public class ConnectionHistoryTests
         resolve.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("AddPostgresDiagnostics()");
     }
 
+    private const string Unreachable = "Host=postgres-history-test.invalid;Database=none;Username=none;Password=none";
+
+    private static IHost ReaderHost(bool engine, bool store, Action<PostgresConnectionHistoryOptions>? configure = null)
+    {
+        HostApplicationBuilder builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        builder.Services.AddLogging();
+        if (engine)
+        {
+            builder.Services.AddSingleton(NpgsqlDataSource.Create(Unreachable));
+            builder.Services.AddPostgresDiagnostics();
+        }
+
+        builder.Services.AddPostgresConnectionHistoryReader(configure);
+        if (store)
+        {
+            builder.Services.AddSingleton<IPostgresConnectionHistoryStore, HostStore>();
+        }
+
+        return builder.Build();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_reader_registers_no_sampler_no_hosted_service_and_no_store_of_its_own_and_reads_the_hosts_store_registered_before_or_after(bool storeFirst)
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        if (storeFirst)
+        {
+            services.AddSingleton<IPostgresConnectionHistoryStore, HostStore>();
+        }
+
+        services.AddPostgresConnectionHistoryReader();
+        services.AddPostgresConnectionHistoryReader();
+        if (!storeFirst)
+        {
+            services.AddSingleton<IPostgresConnectionHistoryStore, HostStore>();
+        }
+
+        services.Should().NotContain(static x => x.ServiceType == typeof(IHostedService), "the reader runs no background loop");
+        services.Should().NotContain(static x => x.ServiceType == typeof(ConnectionHistorySampler));
+        services.Where(static x => x.ServiceType == typeof(IPostgresConnectionHistoryStore)).Should().ContainSingle()
+            .Which.ImplementationType.Should().Be<HostStore>("the in-memory store is not registered in reader mode");
+        services.Count(static x => x.ServiceType == typeof(ConnectionHistoryReader)).Should().Be(1, "registering twice adds the reader once");
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        provider.GetServices<IHostedService>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_reader_reads_the_hosts_store_and_knows_it_only_reads()
+    {
+        using IHost host = ReaderHost(engine: true, store: true);
+
+        await host.StartAsync(Token);
+        try
+        {
+            ConnectionHistoryReader reader = host.Services.GetRequiredService<ConnectionHistoryReader>();
+            reader.ReaderOnly.Should().BeTrue();
+            (await reader.ReadAsync("db:5432", Token)).Should().BeEmpty();
+            host.Services.GetServices<IHostedService>().OfType<ConnectionHistorySampler>().Should().BeEmpty();
+        }
+        finally
+        {
+            await host.StopAsync(Token);
+        }
+    }
+
+    [Fact]
+    public async Task The_reader_is_refused_when_the_host_starts_without_a_store()
+    {
+        using IHost host = ReaderHost(engine: true, store: false);
+
+        OptionsValidationException refused = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(Token));
+
+        refused.Message.Should().Contain("AddPostgresConnectionHistoryReader() reads a history another process fills: register the IPostgresConnectionHistoryStore "
+            + "that process appends to (an in-memory history nothing appends to is always empty).");
+    }
+
+    [Fact]
+    public async Task The_reader_is_refused_when_the_host_starts_without_a_studio_or_the_engine()
+    {
+        using IHost host = ReaderHost(engine: false, store: true);
+
+        OptionsValidationException refused = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync(Token));
+
+        refused.Message.Should().Contain("AddPostgresConnectionHistoryReader() reads the history of the servers a studio or the diagnostics engine reads:")
+            .And.Contain("AddPostgresDiagnostics()");
+    }
+
+    [Fact]
+    public async Task The_reader_validates_only_the_retention_and_not_the_samplers_interval()
+    {
+        using (IHost fine = ReaderHost(engine: true, store: true, static o =>
+        {
+            o.Interval = TimeSpan.FromSeconds(1);
+            o.MaxApplications = 0;
+        }))
+        {
+            await fine.StartAsync(Token);
+            await fine.StopAsync(Token);
+        }
+
+        using IHost refused = ReaderHost(engine: true, store: true, static o => o.Retention = TimeSpan.FromMinutes(1));
+
+        OptionsValidationException failure = await Assert.ThrowsAsync<OptionsValidationException>(() => refused.StartAsync(Token));
+        failure.Message.Should().Contain("PostgresConnectionHistoryOptions.Retention");
+    }
+
+    [Fact]
+    public void Sampling_and_only_reading_are_exclusive_in_either_order_and_the_same_one_twice_is_harmless()
+    {
+        ServiceCollection samplerFirst = new();
+        samplerFirst.AddPostgresConnectionHistory();
+        samplerFirst.AddPostgresConnectionHistory();
+        Action reader = () => samplerFirst.AddPostgresConnectionHistoryReader();
+        reader.Should().Throw<InvalidOperationException>().Which.Message.Should().Be(
+            "AddPostgresConnectionHistory() and AddPostgresConnectionHistoryReader() are exclusive: a process either samples (and reads) or only reads.");
+
+        ServiceCollection readerFirst = new();
+        readerFirst.AddPostgresConnectionHistoryReader();
+        readerFirst.AddPostgresConnectionHistoryReader();
+        Action sampler = () => readerFirst.AddPostgresConnectionHistory();
+        sampler.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("are exclusive");
+    }
+
     [Theory]
     [InlineData(null, "Host=db;Application Name=orders-api", "orders-api (Postgres Studio history)")]
     [InlineData(null, "Host=db", "Postgres Studio history")]
