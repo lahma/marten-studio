@@ -478,6 +478,9 @@ internal sealed record SessionActivitySummary
     /// <summary>Issue #43: whether the host registered the connection history at all (<c>AddPostgresConnectionHistory()</c>).</summary>
     public bool ConnectionHistoryKept { get; init; }
 
+    /// <summary>Issue #48: whether this process only reads that history, another process filling it (<c>AddPostgresConnectionHistoryReader()</c>).</summary>
+    public bool ConnectionHistoryReadOnly { get; init; }
+
     /// <summary>What was run, for Show SQL.</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
 

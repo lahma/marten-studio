@@ -26,6 +26,7 @@ public static class PostgresConnectionHistoryServiceCollectionExtensions
         Action<PostgresConnectionHistoryOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
+        RefuseTheOther(services, readerOnly: false);
 
         OptionsBuilder<PostgresConnectionHistoryOptions> options = services.AddOptions<PostgresConnectionHistoryOptions>()
             .Validate(static x => x.Interval >= TimeSpan.FromSeconds(15) && x.Interval <= TimeSpan.FromHours(1),
@@ -42,6 +43,7 @@ public static class PostgresConnectionHistoryServiceCollectionExtensions
 
         options.ValidateOnStart();
 
+        Mark(services, readerOnly: false);
         services.TryAddSingleton<IPostgresConnectionHistoryStore, InMemoryConnectionHistoryStore>();
         services.TryAddSingleton<ConnectionHistoryReader>();
         services.TryAddSingleton(static provider =>
@@ -53,5 +55,66 @@ public static class PostgresConnectionHistoryServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, ConnectionHistorySampler>(static provider => provider.GetRequiredService<ConnectionHistorySampler>()));
 
         return services;
+    }
+
+    /// <summary>
+    /// Reads the connection history of the servers a studio or the diagnostics engine reads, from an
+    /// <see cref="IPostgresConnectionHistoryStore" /> another process fills: a worker that samples with
+    /// <see cref="AddPostgresConnectionHistory" />, or a process with a pool reserved for it. Database › Sessions › Holders shows the
+    /// peaks, and the diagnostics snapshot its connection history; this process samples nothing, opens no connection of its own and
+    /// runs no background service, and only the <see cref="PostgresConnectionHistoryOptions.Retention" /> window is read from the
+    /// options (the interval, the applications kept and <see cref="PostgresConnectionHistoryOptions.ShouldSample" /> are the sampler's).
+    /// The host must register that store - before or after this call - and refuses to start without it, as without a studio or the
+    /// engine. It cannot be combined with <see cref="AddPostgresConnectionHistory" /> in one container.
+    /// </summary>
+    /// <param name="services">The application's services.</param>
+    /// <param name="configure">The retention: how far back Holders reads.</param>
+    /// <returns>The same collection.</returns>
+    /// <exception cref="InvalidOperationException"><see cref="AddPostgresConnectionHistory" /> is registered already.</exception>
+    public static IServiceCollection AddPostgresConnectionHistoryReader(
+        this IServiceCollection services,
+        Action<PostgresConnectionHistoryOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        RefuseTheOther(services, readerOnly: true);
+
+        OptionsBuilder<PostgresConnectionHistoryOptions> options = services.AddOptions<PostgresConnectionHistoryOptions>()
+            .Validate(static x => x.Retention >= TimeSpan.FromHours(1) && x.Retention <= TimeSpan.FromDays(90),
+                "PostgresConnectionHistoryOptions.Retention must be between one hour and ninety days");
+
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        options.ValidateOnStart();
+
+        Mark(services, readerOnly: true);
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<PostgresConnectionHistoryOptions>, ConnectionHistoryReaderStartCheck>());
+        services.TryAddSingleton<ConnectionHistoryReader>();
+
+        return services;
+    }
+
+    private static void Mark(IServiceCollection services, bool readerOnly)
+    {
+        if (!Holds(services, readerOnly))
+        {
+            services.AddSingleton(new ConnectionHistoryRegistration(readerOnly));
+        }
+    }
+
+    private static bool Holds(IServiceCollection services, bool readerOnly) =>
+        services.Any(x => x.ServiceType == typeof(ConnectionHistoryRegistration)
+            && x.ImplementationInstance is ConnectionHistoryRegistration registration
+            && registration.ReaderOnly == readerOnly);
+
+    private static void RefuseTheOther(IServiceCollection services, bool readerOnly)
+    {
+        if (Holds(services, !readerOnly))
+        {
+            throw new InvalidOperationException(
+                "AddPostgresConnectionHistory() and AddPostgresConnectionHistoryReader() are exclusive: a process either samples (and reads) or only reads.");
+        }
     }
 }

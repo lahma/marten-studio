@@ -78,6 +78,7 @@ namespace PostgresStudio
     public static class PostgresConnectionHistoryServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresConnectionHistory(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresConnectionHistoryOptions>? configure = null) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresConnectionHistoryReader(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresConnectionHistoryOptions>? configure = null) { }
     }
     public sealed record PostgresConnectionSample : System.IEquatable<PostgresStudio.PostgresConnectionSample>
     {

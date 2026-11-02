@@ -37,14 +37,19 @@ internal sealed class ConnectionHistoryReader
         IPostgresConnectionHistoryStore store,
         IOptions<PostgresConnectionHistoryOptions> options,
         IDiagnosticsSettings settings,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        ConnectionHistoryRegistration? registration = null)
     {
+        ReaderOnly = registration?.ReaderOnly ?? false;
         this.store = store;
         this.options = options;
         this.settings = settings;
         this.time = time ?? TimeProvider.System;
         cache = new StudioSnapshotCache(this.time, CacheFor);
     }
+
+    /// <summary>Issue #48: whether this process only reads a history another process fills (<c>AddPostgresConnectionHistoryReader()</c>).</summary>
+    public bool ReaderOnly { get; }
 
     /// <summary>The history's window: how far back a page reads, the options' <c>Retention</c>.</summary>
     public TimeSpan Window => options.Value.Retention;

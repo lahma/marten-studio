@@ -262,6 +262,25 @@ memory). Holders then says the peak against the client limit and when it happene
 application's own peak. Only one process of a scaled-out application needs to sample: `ShouldSample` is asked before every
 round. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
 
+**Reader only (1.0.1).** A process that must never sample - the web application whose studio pool has no connection to spare -
+reads a history another process fills. The worker samples and appends to a store both processes share; the web application
+registers `AddPostgresConnectionHistoryReader()` with the same store. It adds no background service, opens no connection of its
+own, and refuses to start without the store:
+
+```csharp
+// The worker: samples, and appends to the shared store.
+builder.Services.AddPostgresDiagnostics();
+builder.Services.AddSingleton<IPostgresConnectionHistoryStore, SharedHistoryStore>();
+builder.Services.AddPostgresConnectionHistory();
+
+// The web application: reads it, samples nothing.
+builder.Services.AddPostgresStudio();
+builder.Services.AddSingleton<IPostgresConnectionHistoryStore, SharedHistoryStore>();
+builder.Services.AddPostgresConnectionHistoryReader(o => o.Retention = TimeSpan.FromDays(7));
+```
+
+The two registrations are exclusive in one container.
+
 ## The diagnostics API
 
 `IPostgresDiagnostics`, registered by `AddPostgresStudio()`, gives your own code what the studio reads: the databases it

@@ -78,8 +78,20 @@
         else if (Summary.ConnectionHistoryKept)
         {
             <p class="ms-muted ms-holders-history-none">
-                The connection history has no sample of this server yet. It samples each server once an interval, and a server only a
-                source of dynamic databases names is not sampled.
+                @if (Summary.ConnectionHistoryReadOnly)
+                {
+                    <text>
+                        The connection history has no sample of this server yet. This process only reads it: another process fills it, and
+                        has sampled nothing of this server within the window.
+                    </text>
+                }
+                else
+                {
+                    <text>
+                        The connection history has no sample of this server yet. It samples each server once an interval, and a server only a
+                        source of dynamic databases names is not sampled.
+                    </text>
+                }
             </p>
         }
         else
