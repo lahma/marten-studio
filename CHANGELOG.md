@@ -1,3 +1,26 @@
+# 1.0.1
+
+1.0.1 handles the four issues opened after 1.0.0. The studio's share of a pool never exceeds the pool itself (#49), the
+connection history keeps the samples its store refused (#46), a process can read the history another process fills
+(#48), and the diagnostics API reports the history, which a new check, C15, judges (#47).
+
+- `MaxStudioConnections` is never above the data source's own `Maximum Pool Size` (#49). The studio holds the smaller of
+  the two of each pool (the option alone where `Pooling` is off), so a dedicated pool of one makes a second read fail
+  in the studio's queue with the sentence that names the option, not as Npgsql's pool timeout, and a host never copies
+  a pool's size into the option. The Health page's studio-cost line shows the cap in force and says when the data
+  source's pool size held it below the option. The connection history's kept connection stays outside the cap: a
+  dedicated pool for both needs one more.
+- Connection history: a sample whose append failed is no longer lost (#46). The sampler keeps up to an hour of samples
+  per server in its own process (at the configured `Interval`), appends them oldest first before the next sample and
+  stops at the first failure, so an exhausted pool no longer leaves a gap where the peak was. Event 9463 says once that
+  a backlog was stored; 9464 (throttled) says the oldest were dropped past the hour. Holders merges the held samples
+  into its history, shows them when the store cannot be read, and says how many are waiting. A process that stops loses
+  what it held.
+- `AddPostgresConnectionHistoryReader()` (#48) reads a connection history another process fills: it adds no sampler, no
+  hosted service and no in-memory store, validates only `Retention`, and refuses to start without an
+  `IPostgresConnectionHistoryStore` or without a studio or the diagnostics engine. It is exclusive with
+  `AddPostgresConnectionHistory()` in one container, and Holders says another process fills the history.
+
 # 1.0.0
 
 1.0 is the first release with a stability promise: from here the three packages follow Semantic Versioning over the
