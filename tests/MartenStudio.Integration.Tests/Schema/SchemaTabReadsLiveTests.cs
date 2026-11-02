@@ -208,11 +208,16 @@ public class SchemaTabReadsLiveTests(SchemaTabReadsLiveTests.Fixture fixture) : 
     }
 
     // ------------------------------------------------------------------------------------------------
-    // A lock gives up after three seconds
+    // A lock gives up after three seconds - and since 1.0 the Tables read takes none
     // ------------------------------------------------------------------------------------------------
 
+    /// <summary>
+    /// 1.0-HARD (D27): the Tables read sizes every table from the catalog's page counts and calls no size function, so a migration
+    /// holding a listed table in <c>ACCESS EXCLUSIVE</c> mode no longer makes it wait - it answers at once, the locked table
+    /// included, its sizes marked as estimates. (Before 1.0 it gave up after the three-second lock timeout and said it was busy.)
+    /// </summary>
     [PostgresFact]
-    public async Task The_tables_read_gives_up_on_a_locked_table_after_three_seconds_and_says_it_was_busy()
+    public async Task The_tables_read_answers_while_a_migration_holds_a_table()
     {
         await using BrowserHost host = fixture.Host(static options => options.QueryTimeout = TimeSpan.FromSeconds(60));
 
@@ -224,14 +229,11 @@ public class SchemaTabReadsLiveTests(SchemaTabReadsLiveTests.Fixture fixture) : 
         SchemaTables tables = await SchemaAsync(host, x => x.TablesAsync(BrowserHost.Scope, Token));
         watch.Stop();
 
-        tables.Busy.Should().BeTrue();
-        tables.Reason.Should().Contain("locked right now").And.Contain("three seconds");
-        tables.Tables.Should().BeEmpty();
-        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(20), "lock_timeout is three seconds, not the sixty-second query timeout");
+        tables.Busy.Should().BeFalse("the read locks nothing it lists, so another session's lock does not stop it");
+        tables.Tables.Should().Contain(static x => x.Table == "host_settings");
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3), "it never waits for the lock");
 
         await holding.RollbackAsync(Token);
-
-        (await SchemaAsync(host, x => x.TablesAsync(BrowserHost.Scope, Token))).Busy.Should().BeFalse("the lock is gone");
     }
 
     /// <summary>
