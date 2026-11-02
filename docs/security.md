@@ -460,16 +460,19 @@ Postgres Studio has the same three layers, the same switches and the same startu
   visitor. A host database source must list without creating anything, and its names are identities.
 - **How much of the pool, and under what name** (1.0, #44). The studio holds at most `MaxStudioConnections` (2 by
   default) of each pool at a time; a read past it waits for one, at most `QueryTimeout`, and then fails as a connection
-  failure, audited where the operation is. A nested read of an operation that already holds one never waits for it, so the
-  cap cannot deadlock. Each of the studio's read-only transactions names its session with `set_config('application_name',
+  failure that says so and names the option, audited where the operation is. A health check that could not get one is
+  "not checked" for that interval with the same sentence, never failed, and the opt-in health check stays Healthy for it:
+  it is the host's cap at work, not the database's state. A second connection opened in the same flow as one the operation
+  already holds rides on its slot instead of waiting; no read the studio ships opens a second connection while it holds
+  one (the sweep's checks share one), so the cap cannot deadlock. Each of the studio's read-only transactions names its session with `set_config('application_name',
   …, true)` - by default the application's own name with the studio's after it - which reverts at the transaction's end,
   so a pooled connection goes back to the application with its own name whatever `No Reset On Close` says. The short
   single-statement reads outside such a transaction (Marten Studio's document and event lists) keep the application's
   name for their milliseconds.
 - **The connection history's own connection** (1.0, #43). Only when the host registers `AddPostgresConnectionHistory()`:
   one connection per server from the application's own data source, kept open and outside `MaxStudioConnections` - it is
-  the one that must be there when the server refuses new ones - named with "history" after the product. Its read is
-  Holders' own, read-only, under `QueryTimeout` and `SqlConsoleRole`. What it stores is counts by application name and the
+  the one that must be there when the server refuses new ones - named with "history" after the product for as long as it
+  is kept. Its read is Holders' own, read-only, under `QueryTimeout` and `SqlConsoleRole`. What it stores is counts by application name and the
   server's `host:port`, never a statement, a user, a client address or a credential; a store the host supplies keeps it
   wherever the host chooses. On the page the counts are under the source policy and the application names under
   `ViewDatabaseActivity`.

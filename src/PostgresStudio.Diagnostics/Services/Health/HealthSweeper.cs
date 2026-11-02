@@ -104,6 +104,13 @@ internal enum HealthUnavailableReason
 
     /// <summary>The sweep's budget - one <c>HealthInterval</c> - ran out before this check's turn.</summary>
     SweepBudget,
+
+    /// <summary>
+    /// 1.0 (issue #44): the studio's own share of the pool (<c>MaxStudioConnections</c>) was all in use while the check waited -
+    /// visitors' reads holding it, the host's cap at work. Not the database's state, so the health export does not count it as
+    /// degraded, and it is never a failed check.
+    /// </summary>
+    StudioBusy,
 }
 
 /// <summary>
@@ -812,6 +819,14 @@ internal sealed class HealthSweeper
             return (HealthCheckOutcome.Failed, new HealthCheckProblem(rule.Shown, null, null));
         }
 
+        if (PostgresFailure.IsStudioBusy(exception))
+        {
+            // Issue #44: the studio's own visitors held its share of the pool; the database answered nobody nothing.
+            return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(
+                PostgresFailure.CouldNotConnect(exception) + " The check is tried again at the next interval.", null, null,
+                UnavailableReason: HealthUnavailableReason.StudioBusy));
+        }
+
         if (exception is OperationCanceledException && budgetExpired)
         {
             return (HealthCheckOutcome.Unavailable, new HealthCheckProblem(
@@ -857,7 +872,7 @@ internal sealed class HealthSweeper
         {
             // Npgsql's or the socket's words, not Postgres': carried apart, and shown at the database-wide gate.
             return (HealthCheckOutcome.Failed, new HealthCheckProblem(
-                "The studio could not connect to this database.", null, null, exception.Message));
+                PostgresFailure.CouldNotConnect(exception), null, null, exception.Message));
         }
 
         // Anything else is a bug in a check or a library, in words the studio did not write: the type is shown, and

@@ -187,6 +187,67 @@ public class StudioConnectionsLiveTests(PostgresFixture postgres)
         (await PoolAsync(dataSource)).InUse.Should().Be(0);
     }
 
+    [PostgresFact]
+    public async Task A_sweep_that_finds_every_connection_held_is_not_checked_rather_than_failed()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, ["ps_conn_sweep_busy"], Token);
+        NpgsqlDataSource dataSource = NpgsqlDataSource.Create(owned[0]);
+
+        await using StudioHost host = StudioHost.Create(
+            services => services.AddSingleton(dataSource),
+            static o =>
+            {
+                o.Capabilities.RunSql = true;
+                o.MaxStudioConnections = 1;
+                o.QueryTimeout = TimeSpan.FromSeconds(1);
+            });
+        await using StudioCircuit circuit = host.Circuit();
+
+        // A first read registers this data source's share under the host's settings.
+        (await circuit.Get<ISqlConsoleService>().RunSqlAsync(Scope, new SqlConsoleRequest("select 1"), Token)).Succeeded.Should().BeTrue();
+
+        StudioConnectionPool pool = await PoolAsync(dataSource);
+        StudioConnectionLease held = await pool.AcquireAsync(new StudioConnectionLease(pool, reentrant: false), Token);
+
+        try
+        {
+            HealthReport report = await circuit.Get<IHealthService>().GetReportAsync(Scope, HealthReportRequest.Regular, Token);
+
+            report.Checks.Should().Contain(static x => x.Outcome == HealthCheckOutcome.Unavailable
+                && x.Problem != null && x.Problem.Contains("MaxStudioConnections", StringComparison.Ordinal));
+            report.Checks.Should().NotContain(static x => x.Outcome == HealthCheckOutcome.Failed,
+                "a share of the pool that visitors hold is the host's cap at work, not a check that failed");
+            report.Checks.Should().NotContain(static x => x.Problem != null && x.Problem.Contains("could not connect", StringComparison.Ordinal));
+        }
+        finally
+        {
+            held.Release();
+        }
+    }
+
+    [PostgresFact]
+    public async Task A_nested_open_in_the_same_flow_rides_on_the_slot_it_already_holds()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, ["ps_conn_nested"], Token);
+        NpgsqlDataSource dataSource = NpgsqlDataSource.Create(owned[0]);
+        StudioConnectionPool pool = new(1, "nested-test", TimeSpan.FromSeconds(1));
+
+        await using NpgsqlConnection outer = StudioConnectionMeter.Attach(dataSource.CreateConnection(), pool: pool);
+        await outer.OpenStudioAsync(Token);
+        pool.InUse.Should().Be(1);
+
+        // The same flow opens a second connection of the same share: it neither waits out the second's timeout nor takes a slot.
+        await using (NpgsqlConnection inner = StudioConnectionMeter.Attach(dataSource.CreateConnection(), pool: pool))
+        {
+            await inner.OpenStudioAsync(Token);
+            pool.InUse.Should().Be(1);
+            pool.Waiting.Should().Be(0);
+        }
+
+        await outer.CloseAsync();
+        pool.InUse.Should().Be(0, "the outer connection's close gives the one slot back");
+    }
+
     /// <summary>The studio's share of <paramref name="dataSource" />, once the host has registered it.</summary>
     private static async Task<StudioConnectionPool> PoolAsync(NpgsqlDataSource dataSource)
     {

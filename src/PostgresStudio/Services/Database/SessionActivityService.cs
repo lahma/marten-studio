@@ -3,7 +3,6 @@ using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -105,8 +104,7 @@ internal sealed class SessionActivityService : ISessionActivityService
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<SessionActivityService> logger;
     private readonly TableRowAuditLedger ledger = new();
-    private readonly IPostgresConnectionHistoryStore? history;
-    private readonly IOptions<PostgresConnectionHistoryOptions>? historyOptions;
+    private readonly ConnectionHistoryReader? history;
 
     public SessionActivityService(
         IStudioSettings settings,
@@ -121,11 +119,9 @@ internal sealed class SessionActivityService : ISessionActivityService
         SessionHolderNames holderNames,
         StudioLogThrottle throttle,
         ILogger<SessionActivityService> logger,
-        IPostgresConnectionHistoryStore? history = null,
-        IOptions<PostgresConnectionHistoryOptions>? historyOptions = null)
+        ConnectionHistoryReader? history = null)
     {
         this.history = history;
-        this.historyOptions = historyOptions;
         this.settings = settings;
         this.capabilities = capabilities;
         this.authorization = authorization;
@@ -156,18 +152,14 @@ internal sealed class SessionActivityService : ISessionActivityService
             return null;
         }
 
-        TimeSpan retention = historyOptions?.Value.Retention ?? TimeSpan.FromDays(7);
-
         try
         {
-            IReadOnlyList<PostgresConnectionSample> samples = await history
-                .ReadAsync(server, DateTimeOffset.UtcNow - retention, cancellationToken)
-                .ConfigureAwait(false);
-
+            IReadOnlyList<PostgresConnectionSample> samples = await history.ReadAsync(server, cancellationToken).ConfigureAwait(false);
             return ConnectionHistoryView.Of(samples, names);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
+            // A store that failed or took longer than QueryTimeout: the page shows now alone for this poll.
             if (logger.IsEnabled(LogLevel.Debug))
             {
                 logger.LogDebug(exception, "The connection history of {Server} could not be read", server);
@@ -763,7 +755,7 @@ internal sealed class SessionActivityService : ISessionActivityService
         }
 
         return PostgresFailure.IsConnectionFailure(exception)
-            ? "The studio could not connect to this database."
+            ? PostgresFailure.CouldNotConnect(exception)
             : "The sessions could not be read" + (postgres is null
                 ? " (" + exception.GetType().Name + ")."
                 : " (SQLSTATE " + postgres.SqlState + ").");

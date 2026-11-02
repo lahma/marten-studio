@@ -10,8 +10,10 @@ shows what PostgreSQL 18 adds.
 - The studio holds at most `MaxStudioConnections` (new option, 2 by default, 1 to 100) of each pool it reads through - each
   of the application's own data sources - at a time (#44). A read that finds every one in use waits for one, at most
   `QueryTimeout`, and then fails as a connection failure that names the option, audited like any other; a nested read of an
-  operation that already holds one never waits for its own caller. The Health page's studio-cost line shows the cap and how
-  many are in use, and C01 names how many of a saturated pool's connections were the studio's.
+  operation that already holds one never waits for its own caller. A health check that could not get one is "not checked"
+  for that interval, with the same sentence - never failed, and the opt-in health check stays Healthy for it. The Health
+  page's studio-cost line shows the cap and how many are in use, and C01 names how many of a saturated pool's connections
+  were the studio's.
 - The studio's sessions carry a name of their own in `pg_stat_activity`, Database › Sessions and an external monitor
   (#44): by default the application's own `Application Name` with the studio's after it (`orders-api (Marten Studio)`),
   or `StudioApplicationName` (new option; `""` keeps the application's). It is set for each of the studio's read-only
@@ -19,9 +21,11 @@ shows what PostgreSQL 18 adds.
   says.
 - A connection history, opt in with `AddPostgresConnectionHistory()` in `PostgresStudio.Diagnostics` (#43): a background
   sampler counts each server's client sessions by application every `Interval` (a minute by default) over one connection it
-  keeps open for the purpose - outside `MaxStudioConnections`, named "history" - and appends the sample to
-  `IPostgresConnectionHistoryStore`, in memory for `Retention` (seven days) unless the host registers its own. Only one
-  process need sample: `ShouldSample` is asked before every round. A source of dynamic databases is never enumerated.
+  keeps open for the purpose - outside `MaxStudioConnections`, named "history" for as long as it is kept - and appends the
+  sample to `IPostgresConnectionHistoryStore`, in memory for `Retention` (seven days, at most 20,160 samples a server)
+  unless the host registers its own. Only one process need sample: `ShouldSample` is asked before every round. A source of
+  dynamic databases is never enumerated. The pages read the store at most every 30 seconds a server, however many visitors
+  look, and every store call is cut off at `QueryTimeout`.
 - Database › Sessions › Holders says what the server's connections peaked at before now, against the client limit, when,
   and across how many failovers or restarts, under the source policy; each application's own peak behind
   `ViewDatabaseActivity`. Without the registration, the tab says how to turn it on (#43).

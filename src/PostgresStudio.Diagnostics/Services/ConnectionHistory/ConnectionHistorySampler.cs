@@ -23,8 +23,10 @@ namespace PostgresStudio.Services.ConnectionHistory;
 /// <b>One kept-open connection per server.</b> A sampler that opened a connection to sample would record nothing at the one moment
 /// that matters - when the server refuses new ones. So each server gets one connection, from the application's own data source,
 /// opened once and kept: lent out by the pool, it is never pruned, and the sample every interval keeps it alive. It is outside
-/// <c>MaxStudioConnections</c>, and its sessions are named like the studio's, with "history" after the product. A connection that
-/// broke is opened again at the next round.
+/// <c>MaxStudioConnections</c>, and its session is named like the studio's, with "history" after the product, for as long as it is
+/// kept - between samples too - and given its own name back before it is closed. Its time is not the studio's time on the Health
+/// page (a meter of its own): a session open for a week is not a week of the studio's work. A connection that broke is opened again
+/// at the next round.
 /// </para>
 /// <para>
 /// <b>Server, not database.</b> <c>pg_stat_activity</c> is server-wide, so the studio's databases are grouped by the host and port
@@ -65,6 +67,12 @@ internal sealed class ConnectionHistorySampler : BackgroundService
     private readonly TimeProvider time;
     private readonly Dictionary<string, NpgsqlConnection> kept = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim round = new(1, 1);
+
+    /// <summary>
+    /// The kept connections' own meter: the Health page's "studio cost" is the studio's work, and a session kept open for days would
+    /// be booked there as days of it when it closes. Metered all the same, so each sample's transaction is named and counted nowhere.
+    /// </summary>
+    private readonly StudioDatabaseTime keptTime = new(TimeProvider.System);
     private IReadOnlyList<(string Server, NpgsqlDataSource DataSource)>? servers;
     private DateTimeOffset serversAt;
 
@@ -103,16 +111,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService
             }
             catch (Exception exception)
             {
-                LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Round", null, null, StudioLogThrottle.KindOf(exception));
-
-                if (settings.Text.Product == StudioProduct.PostgresStudio)
-                {
-                    logger.PostgresStudioConnectionHistoryRoundFailed(level, exception);
-                }
-                else
-                {
-                    logger.ConnectionHistoryRoundFailed(level, exception);
-                }
+                LogRoundFailed(exception);
             }
         }
         while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
@@ -122,7 +121,32 @@ internal sealed class ConnectionHistorySampler : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
-        await ReleaseAsync().ConfigureAwait(false);
+
+        // After a round still in flight - which the stop has cancelled - so the kept connections are not closed under it; unless the
+        // host's own shutdown budget runs out first, when they are closed regardless.
+        bool entered = false;
+
+        try
+        {
+            await round.WaitAsync(cancellationToken).ConfigureAwait(false);
+            entered = true;
+        }
+        catch (OperationCanceledException)
+        {
+            // The host stops waiting; so does this.
+        }
+
+        try
+        {
+            await ReleaseAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            if (entered)
+            {
+                round.Release();
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -149,13 +173,13 @@ internal sealed class ConnectionHistorySampler : BackgroundService
 
             foreach ((string server, NpgsqlDataSource dataSource) in await ServersAsync(cancellationToken).ConfigureAwait(false))
             {
+                PostgresConnectionSample sample;
+
                 try
                 {
-                    PostgresConnectionSample sample = await SampleAsync(server, dataSource, cancellationToken).ConfigureAwait(false);
-                    await store.AppendAsync(sample, cancellationToken).ConfigureAwait(false);
-                    kept++;
+                    sample = await SampleAsync(server, dataSource, cancellationToken).ConfigureAwait(false);
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+                catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
                 {
                     LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Sample", server, null, StudioLogThrottle.KindOf(exception));
 
@@ -169,6 +193,22 @@ internal sealed class ConnectionHistorySampler : BackgroundService
                     }
 
                     await ForgetAsync(server).ConfigureAwait(false);
+                    continue;
+                }
+
+                // The store may be the host's own; it gets the studio's QueryTimeout, and its failure is the round's, not the server's:
+                // the kept connection stays.
+                using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                limit.CancelAfter(settings.QueryTimeout);
+
+                try
+                {
+                    await store.AppendAsync(sample, limit.Token).ConfigureAwait(false);
+                    kept++;
+                }
+                catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+                {
+                    LogRoundFailed(exception);
                 }
             }
 
@@ -315,12 +355,20 @@ internal sealed class ConnectionHistorySampler : BackgroundService
 
         // Named like the studio's own sessions, with "history" after the product; held to no cap - it is the one connection that
         // must be there when the server refuses new ones (see the remarks).
-        string? name = StudioConnectionPools.ApplicationNameFor(settings.StudioApplicationName, dataSource.ConnectionString, settings.SessionProduct + " history");
-        NpgsqlConnection connection = StudioConnectionMeter.Attach(dataSource.CreateConnection(), pool: new StudioConnectionPool(1, name, settings.QueryTimeout));
+        string? name = HistoryName(settings.StudioApplicationName, dataSource.ConnectionString, settings.SessionProduct);
+        NpgsqlConnection connection = StudioConnectionMeter.Attach(
+            dataSource.CreateConnection(),
+            meter: keptTime,
+            pool: new StudioConnectionPool(1, name, settings.QueryTimeout));
 
         try
         {
             await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+
+            if (name is not null)
+            {
+                await ConnectionHistoryQueries.NameSessionAsync(connection, name, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -332,10 +380,54 @@ internal sealed class ConnectionHistorySampler : BackgroundService
         return connection;
     }
 
+    private void LogRoundFailed(Exception exception)
+    {
+        LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Round", null, null, StudioLogThrottle.KindOf(exception));
+
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioConnectionHistoryRoundFailed(level, exception);
+        }
+        else
+        {
+            logger.ConnectionHistoryRoundFailed(level, exception);
+        }
+    }
+
+    /// <summary>
+    /// The kept session's name: the studio's own name with "history" after the product (<c>orders-api (Postgres Studio history)</c>),
+    /// the host's <c>StudioApplicationName</c> with " (history)" after it, or none when the host chose to keep the application's.
+    /// </summary>
+    internal static string? HistoryName(string? configured, string? connectionString, string product)
+    {
+        const string Tail = " (history)";
+
+        return configured switch
+        {
+            null => StudioConnectionPools.ApplicationNameFor(null, connectionString, product + " history"),
+            { Length: 0 } => null,
+            _ => (configured.Length + Tail.Length > StudioConnectionPools.MaxApplicationNameBytes
+                ? configured[..(StudioConnectionPools.MaxApplicationNameBytes - Tail.Length)]
+                : configured) + Tail,
+        };
+    }
+
     private async Task ForgetAsync(string server)
     {
         if (kept.Remove(server, out NpgsqlConnection? connection))
         {
+            if (connection.State == ConnectionState.Open)
+            {
+                try
+                {
+                    await ConnectionHistoryQueries.ForgetSessionNameAsync(connection, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is NpgsqlException or TimeoutException or InvalidOperationException)
+                {
+                    // A broken connection is not returned to the pool as it is; there is no name left to give back.
+                }
+            }
+
             await connection.DisposeAsync().ConfigureAwait(false);
         }
     }

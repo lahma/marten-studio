@@ -1,5 +1,7 @@
 using System.Text.RegularExpressions;
 
+using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Health.Export;
 using PostgresStudio.Services.Settings;
 
@@ -97,6 +99,38 @@ public class HealthExportSummaryTests
         summary.Level.Should().Be(HealthExportLevel.Healthy);
         summary.Unavailable.Should().Equal("C03");
         summary.Failed.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #44 (RV-C F1): a check that could not get one of the studio's own connections - visitors' reads holding all of
+    /// MaxStudioConnections - is the host's cap at work, not the database's state: listed, never failed, and the run stays Healthy.
+    /// </summary>
+    [Fact]
+    public void A_check_the_studios_full_share_of_the_pool_kept_from_running_is_listed_and_leaves_the_run_healthy()
+    {
+        HealthExportSummary summary = HealthExportSummary.From(Now, [Sweep(NotChecked("C04", HealthUnavailableReason.StudioBusy))]);
+
+        summary.Level.Should().Be(HealthExportLevel.Healthy);
+        summary.Unavailable.Should().Equal("C04");
+        summary.Failed.Should().BeEmpty();
+        summary.TimedOut.Should().BeEmpty();
+    }
+
+    /// <summary>The sweeper reads the busy failure as the studio's own share being full, whatever wraps it, and says the option.</summary>
+    [Fact]
+    public void The_sweeper_reads_a_full_share_of_the_pool_as_not_checked_and_names_the_option()
+    {
+        StudioConnectionsBusyException busy = new(2, TimeSpan.FromSeconds(30));
+        PostgresFailure.MarkAsConnectionFailure(busy);
+
+        (HealthCheckOutcome outcome, HealthCheckProblem problem) = HealthSweeper.Classify(busy, budgetExpired: false);
+
+        outcome.Should().Be(HealthCheckOutcome.Unavailable);
+        problem.UnavailableReason.Should().Be(HealthUnavailableReason.StudioBusy);
+        problem.Reason.Should().Contain("MaxStudioConnections").And.NotContain("could not connect");
+
+        PostgresFailure.CouldNotConnect(new NpgsqlException("refused")).Should().Be("The studio could not connect to this database.");
+        PostgresFailure.CouldNotConnect(new InvalidOperationException("wrapped", busy)).Should().Contain("all in use (MaxStudioConnections)");
     }
 
     /// <summary>

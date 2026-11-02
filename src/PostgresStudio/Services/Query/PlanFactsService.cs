@@ -592,6 +592,7 @@ internal sealed class PlanFactsService : IPlanFactsService
     private static string FailureText(Exception exception) => exception switch
     {
         PostgresException postgres => "The facts could not be read (SQLSTATE " + postgres.SqlState + ").",
+        NpgsqlException when PostgresFailure.IsStudioBusy(exception) => PostgresFailure.CouldNotConnect(exception),
         NpgsqlException or SocketException => "The studio could not connect to this database to read the facts.",
         _ => "The facts could not be read (" + exception.GetType().Name + ").",
     };

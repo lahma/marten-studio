@@ -55,6 +55,36 @@ internal static class ConnectionHistoryQueries
         return (instance, rows);
     }
 
+    /// <summary>
+    /// Names the sampler's kept session for as long as it is kept (<c>set_config(..., false)</c>, the session's own value): between
+    /// samples it is an idle session of the application's pool, and <c>pg_stat_activity</c> should say whose. Each sample's read-only
+    /// transaction sets the same name locally, which reverts to this one at its end.
+    /// </summary>
+    /// <param name="connection">The kept connection, just opened.</param>
+    /// <param name="name">The name, already one PostgreSQL keeps as written.</param>
+    /// <param name="cancellationToken">Cancels the statement.</param>
+    public static async Task NameSessionAsync(NpgsqlConnection connection, string name, CancellationToken cancellationToken)
+    {
+        await using NpgsqlCommand command = new("select pg_catalog.set_config('application_name', @name, false)", connection)
+        {
+            CommandTimeout = 5,
+        };
+        command.Parameters.Add(new NpgsqlParameter<string>("name", name));
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Gives the session the name it was opened with (<c>reset application_name</c>), so the connection goes back to the
+    /// application's pool as the application's - whatever <c>No Reset On Close</c> says.
+    /// </summary>
+    /// <param name="connection">The kept connection, about to be closed.</param>
+    /// <param name="cancellationToken">Cancels the statement.</param>
+    public static async Task ForgetSessionNameAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        await using NpgsqlCommand command = new("reset application_name", connection) { CommandTimeout = 5 };
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     private static NpgsqlCommand Command(HealthQuery query, NpgsqlConnection connection, NpgsqlTransaction transaction, TimeSpan timeout)
     {
         NpgsqlCommand command = new(query.Sql, connection, transaction) { CommandTimeout = (int) Math.Ceiling(timeout.TotalSeconds) + 5 };

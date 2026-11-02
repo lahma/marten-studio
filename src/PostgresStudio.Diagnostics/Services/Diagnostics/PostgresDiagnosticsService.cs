@@ -636,7 +636,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         LogSectionFailure(section, exception, new PostgresDatabaseRef(resolved.Source.Key, resolved.Target.Identity));
 
         return (PostgresReadOutcome.Failed, PostgresFailure.IsConnectionFailure(exception)
-            ? "The studio could not connect to this database."
+            ? PostgresFailure.CouldNotConnect(exception)
             : "The " + section + " could not be read (" + (postgres is null ? exception.GetType().Name : "SQLSTATE " + postgres.SqlState)
               + "); the server log has it (event 9251).");
     }

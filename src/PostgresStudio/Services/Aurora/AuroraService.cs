@@ -209,7 +209,7 @@ internal sealed class AuroraService : IAuroraService
             return new AuroraView
             {
                 Refused = PostgresFailure.IsConnectionFailure(exception)
-                    ? "The studio could not connect to this database."
+                    ? PostgresFailure.CouldNotConnect(exception)
                     : "The server's version and platform could not be read" + (postgres is null ? " (" + exception.GetType().Name + ")." : " (SQLSTATE " + postgres.SqlState + ")."),
             };
         }

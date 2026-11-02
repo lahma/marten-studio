@@ -622,7 +622,7 @@ internal sealed class QueryService : IQueryService
         }
         catch (Exception exception) when (exception is NpgsqlException or System.Net.Sockets.SocketException)
         {
-            return WhatIfResult.NotCompared(index, "Not compared: the studio could not connect to this database.");
+            return WhatIfResult.NotCompared(index, "Not compared: " + PostgresFailure.CouldNotConnectClause(exception) + ".");
         }
 
         ComposedQuery composed = QuerySqlComposer.Compose(table, request.WhereClause, limit, tenantId, request.IncludeDeleted);

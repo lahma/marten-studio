@@ -619,7 +619,7 @@ internal sealed class StatementsService : IStatementsService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             string failed = PostgresFailure.IsConnectionFailure(exception)
-                ? "Not planned: the studio could not connect to this database."
+                ? "Not planned: " + PostgresFailure.CouldNotConnectClause(exception) + "."
                 : "Not planned: the plan failed (" + exception.GetType().Name + ").";
 
             audit.Record(PlanAction, target, succeeded: false, failed, StudioCapability.ViewDatabaseActivity, whole);
@@ -750,7 +750,7 @@ internal sealed class StatementsService : IStatementsService
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             result = WhatIfResult.NotCompared(index, PostgresFailure.IsConnectionFailure(exception)
-                ? "Not compared: the studio could not connect to this database."
+                ? "Not compared: " + PostgresFailure.CouldNotConnectClause(exception) + "."
                 : "Not compared: the what-if failed (" + exception.GetType().Name + ").");
         }
 
@@ -1135,7 +1135,7 @@ internal sealed class StatementsService : IStatementsService
         }
 
         return PostgresFailure.IsConnectionFailure(exception)
-            ? "The studio could not connect to this database."
+            ? PostgresFailure.CouldNotConnect(exception)
             : "The statements could not be read" + (postgres is null
                 ? " (" + exception.GetType().Name + ")."
                 : " (SQLSTATE " + postgres.SqlState + ").");

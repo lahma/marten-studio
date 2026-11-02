@@ -143,6 +143,85 @@ public class ConnectionHistoryTests
     }
 
     [Theory]
+    [InlineData(null, "Host=db;Application Name=orders-api", "orders-api (Postgres Studio history)")]
+    [InlineData(null, "Host=db", "Postgres Studio history")]
+    [InlineData("", "Host=db;Application Name=orders-api", null)]
+    [InlineData("studio", "Host=db;Application Name=orders-api", "studio (history)")]
+    public void The_kept_session_is_named_as_the_history_unless_the_host_keeps_the_applications(string? configured, string connectionString, string? expected) =>
+        ConnectionHistorySampler.HistoryName(configured, connectionString, "Postgres Studio").Should().Be(expected);
+
+    [Fact]
+    public void A_long_host_name_is_cut_so_the_history_is_still_said_within_what_PostgreSQL_keeps()
+    {
+        string name = ConnectionHistorySampler.HistoryName(new string('a', 63), "Host=db", "Postgres Studio")!;
+
+        name.Should().HaveLength(63).And.EndWith(" (history)");
+    }
+
+    [Fact]
+    public async Task The_in_memory_store_keeps_at_most_its_bound_a_server_the_oldest_dropped_first()
+    {
+        ManualClock clock = new(Now);
+        InMemoryConnectionHistoryStore store = new(Options.Create(new PostgresConnectionHistoryOptions { Retention = TimeSpan.FromDays(90) }), clock);
+
+        for (int i = 0; i <= InMemoryConnectionHistoryStore.MaxSamplesPerServer; i++)
+        {
+            await store.AppendAsync(new PostgresConnectionSample { Server = "db:5432", At = Now.AddSeconds(i - InMemoryConnectionHistoryStore.MaxSamplesPerServer), Connections = i }, Token);
+        }
+
+        IReadOnlyList<PostgresConnectionSample> kept = await store.ReadAsync("db:5432", Now.AddDays(-90), Token);
+
+        kept.Should().HaveCount(InMemoryConnectionHistoryStore.MaxSamplesPerServer);
+        kept[0].Connections.Should().Be(1, "the first sample was the one dropped");
+    }
+
+    [Fact]
+    public async Task The_pages_read_a_servers_history_once_per_interval_and_give_up_on_a_store_that_hangs()
+    {
+        CountingStore counting = new();
+        ConnectionHistoryReader reader = new(
+            counting,
+            Options.Create(new PostgresConnectionHistoryOptions()),
+            PostgresStudioSettings.Of(new PostgresStudioOptions { QueryTimeout = TimeSpan.FromMilliseconds(200) }));
+
+        await reader.ReadAsync("db:5432", Token);
+        await reader.ReadAsync("DB:5432", Token);
+        counting.Reads.Should().Be(1, "two visitors within ConnectionHistoryReader.CacheFor share one read of the store");
+
+        ConnectionHistoryReader hanging = new(
+            new HangingStore(),
+            Options.Create(new PostgresConnectionHistoryOptions()),
+            PostgresStudioSettings.Of(new PostgresStudioOptions { QueryTimeout = TimeSpan.FromMilliseconds(200) }));
+
+        Func<Task> read = () => hanging.ReadAsync("db:5432", Token);
+        await read.Should().ThrowAsync<OperationCanceledException>("a store that hangs is cut off at QueryTimeout");
+    }
+
+    private sealed class CountingStore : IPostgresConnectionHistoryStore
+    {
+        public int Reads { get; private set; }
+
+        public ValueTask AppendAsync(PostgresConnectionSample sample, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public ValueTask<IReadOnlyList<PostgresConnectionSample>> ReadAsync(string server, DateTimeOffset since, CancellationToken cancellationToken)
+        {
+            Reads++;
+            return ValueTask.FromResult<IReadOnlyList<PostgresConnectionSample>>([]);
+        }
+    }
+
+    private sealed class HangingStore : IPostgresConnectionHistoryStore
+    {
+        public ValueTask AppendAsync(PostgresConnectionSample sample, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public async ValueTask<IReadOnlyList<PostgresConnectionSample>> ReadAsync(string server, DateTimeOffset since, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return [];
+        }
+    }
+
+    [Theory]
     [InlineData(10, 7, 20, "Interval")]
     [InlineData(60, 0, 20, "Retention")]
     [InlineData(60, 7, 0, "MaxApplications")]
