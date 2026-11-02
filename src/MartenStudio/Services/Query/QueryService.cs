@@ -227,7 +227,7 @@ internal sealed class QueryService : IQueryService
         }
 
         await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         // The configuration describes the table Marten would create; the studio reads one somebody else
         // migrated. Reconciling before the predicates are written is what keeps a physical tenant_id or
@@ -617,7 +617,7 @@ internal sealed class QueryService : IQueryService
         try
         {
             await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
             table = table.WithPhysicalColumns(await columnCatalog.GetAsync(connection, table.Schema, table.Table, cancellationToken).ConfigureAwait(false));
         }
         catch (Exception exception) when (exception is NpgsqlException or System.Net.Sockets.SocketException)

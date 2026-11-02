@@ -105,6 +105,10 @@ them are out, the next request waits inside Npgsql for up to its `Timeout` and t
 pool has been exhausted": the application stalls while Postgres looks idle. A pool that fills up is more often
 connections held too long (C04, C05, sessions never disposed) than a ceiling too low.
 
+Since 1.0 the finding says how many of the busy connections were the studio's own (**Held by the studio**, from its own
+count, with its `MaxStudioConnections` cap), so a pool an administrator's console filled is not read as one the
+application outgrew.
+
 ### How it reads the pool without changing the host
 
 C01 is read **in process**, from Npgsql's own counters, by a `MeterListener` the studio starts when a sweep (or

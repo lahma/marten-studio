@@ -291,6 +291,9 @@ internal sealed class HealthService : IHealthService
             Checks = statuses,
             History = history.Read(storeKey, databaseId).Describe(cache.Now),
             Cost = database ? meter.Total(CostKey(resolved.Target)) : null,
+            StudioConnections = database && PostgresStudio.Internal.Sql.StudioConnectionPools.Of(resolved.Target.DataSource) is { } share
+                ? (share.Max, share.InUse)
+                : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
             Server = database ? HealthServerLine.Of(regular) : null,
             StatisticsReset = database && regular.Statistics is { LooksReset: true } window

@@ -50,6 +50,24 @@ public class PoolChecksTests
         finding.Caveat.Should().Contain("never listens to").And.Contain("Other processes");
     }
 
+    /// <summary>
+    /// Issue #44: C01 says how many of the pool's busy connections were the studio's, from its own count, so the remedy is not
+    /// "raise Max Pool Size" when the cause was somebody's console; without a studio share there is no such line.
+    /// </summary>
+    [Fact]
+    public void C01_names_the_studios_share_of_the_busy_connections()
+    {
+        HealthFinding shared = new PoolSaturationCheck()
+            .Evaluate(new PoolFacts(true, 10, 9, 1, 10, 1, Now) { Studio = (2, 2) }, At())
+            .Findings.Should().ContainSingle().Subject;
+
+        shared.Evidence.Should().Contain(new HealthEvidence("Held by the studio", "2 of them (it holds at most 2, MaxStudioConnections)"));
+        shared.Evidence.Select(static x => x.Label).Should().OnlyHaveUniqueItems();
+
+        new PoolSaturationCheck().Evaluate(new PoolFacts(true, 10, 9, 1, 10, 1, Now), At())
+            .Findings.Single().Evidence.Should().NotContain(static x => x.Label == "Held by the studio");
+    }
+
     [Fact]
     public void C01_at_exactly_eighty_percent_is_quiet()
     {

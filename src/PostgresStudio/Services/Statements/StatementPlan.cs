@@ -266,7 +266,7 @@ internal sealed class StatementPlanReader
         int commandTimeout = (int) Math.Ceiling(statementTimeout.TotalSeconds) + 5;
 
         await using NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         for (int attempt = 0; ; attempt++)
         {

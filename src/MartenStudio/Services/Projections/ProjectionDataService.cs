@@ -924,7 +924,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
             return connection;
         }
         catch

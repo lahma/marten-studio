@@ -171,7 +171,7 @@ internal sealed class HypotheticalIndexReader
         int commandTimeout = CommandTimeoutSeconds();
 
         await using NpgsqlConnection connection = database.CreateConnection(StudioConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         int processId = connection.ProcessID;
         string? schema = null;

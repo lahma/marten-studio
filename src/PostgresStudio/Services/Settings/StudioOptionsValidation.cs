@@ -17,6 +17,8 @@ namespace PostgresStudio.Services.Settings;
 /// <param name="HealthInterval">The health interval.</param>
 /// <param name="HasCapabilities">Whether the capabilities object is set.</param>
 /// <param name="BrowsableSchemas">The browsable schemas.</param>
+/// <param name="MaxStudioConnections">The cap on the studio's connections per pool (issue #44).</param>
+/// <param name="StudioApplicationName">The studio sessions' application_name, if the host set one (issue #44).</param>
 internal sealed record StudioOptionsShape(
     string? Path,
     int DefaultPageSize,
@@ -29,7 +31,9 @@ internal sealed record StudioOptionsShape(
     TimeSpan RefreshInterval,
     TimeSpan HealthInterval,
     bool HasCapabilities,
-    IEnumerable<string> BrowsableSchemas);
+    IEnumerable<string> BrowsableSchemas,
+    int MaxStudioConnections = Internal.Sql.StudioConnectionPools.DefaultMax,
+    string? StudioApplicationName = null);
 
 /// <summary>
 /// One validation chain for the options both studios have - the same bounds, and sentences that differ only in the type
@@ -91,7 +95,13 @@ internal static class StudioOptionsValidation
                 optionsType + ".RefreshInterval must be between one second and five minutes")
             .Validate(
                 options => DiagnosticsOptionsValidation.IsHealthInterval(shape(options).HealthInterval),
-                DiagnosticsOptionsValidation.HealthIntervalMessage(optionsType));
+                DiagnosticsOptionsValidation.HealthIntervalMessage(optionsType))
+            .Validate(
+                options => DiagnosticsOptionsValidation.IsMaxStudioConnections(shape(options).MaxStudioConnections),
+                DiagnosticsOptionsValidation.MaxStudioConnectionsMessage(optionsType))
+            .Validate(
+                options => DiagnosticsOptionsValidation.IsStudioApplicationName(shape(options).StudioApplicationName),
+                DiagnosticsOptionsValidation.StudioApplicationNameMessage(optionsType));
     }
 
     /// <summary>The capabilities object, which a host may set to <see langword="null" /> by mistake.</summary>

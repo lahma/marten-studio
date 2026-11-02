@@ -1295,7 +1295,7 @@ internal sealed class DocumentWriteService : IDocumentWriteService
 
         try
         {
-            await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+            await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
             return connection;
         }
         catch

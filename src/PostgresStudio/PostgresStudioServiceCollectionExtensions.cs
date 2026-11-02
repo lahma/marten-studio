@@ -127,5 +127,7 @@ public static class PostgresStudioServiceCollectionExtensions
         options.RefreshInterval,
         options.HealthInterval,
         options.Capabilities is not null,
-        options.BrowsableSchemas);
+        options.BrowsableSchemas,
+        options.MaxStudioConnections,
+        options.StudioApplicationName);
 }

@@ -88,8 +88,10 @@ namespace PostgresStudio
         public System.Collections.Generic.IList<string> BrowsableSchemas { get; }
         public System.TimeSpan HealthInterval { get; set; }
         public bool IncludeDefaultDataSource { get; set; }
+        public int MaxStudioConnections { get; set; }
         public System.TimeSpan QueryTimeout { get; set; }
         public string? SqlConsoleRole { get; set; }
+        public string? StudioApplicationName { get; set; }
         public PostgresStudio.PostgresDiagnosticsOptions AddDataSource(string name, System.Func<System.IServiceProvider, Npgsql.NpgsqlDataSource> resolve) { }
         public PostgresStudio.PostgresDiagnosticsOptions AddDatabaseSource(string name, System.Func<System.IServiceProvider, PostgresStudio.IPostgresDatabaseSource> resolve) { }
     }

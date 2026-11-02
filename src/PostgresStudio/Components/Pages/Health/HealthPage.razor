@@ -102,6 +102,10 @@
 
             <p class="ms-health-summary-line ms-health-cost">
                 @(report.Cost is { } cost ? HealthPresentation.Cost(cost, Settings.Text) : "Studio cost: withheld - " + report.CostWithheld + ".")
+                @if (report.StudioConnections is { } share)
+                {
+                    @(" " + HealthPresentation.Share(share.Max, share.InUse, Settings))
+                }
             </p>
 
             @if (!report.DeeperChecksExist)

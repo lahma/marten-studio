@@ -29,6 +29,12 @@ internal sealed record PoolFacts(
     /// </summary>
     public NpgsqlPoolInstruments Instruments { get; init; } = NpgsqlPoolInstruments.UpToNpgsql9;
 
+    /// <summary>
+    /// Issue #44: how many of the pool's connections the studio held at the reading, and its cap - or <see langword="null" />
+    /// when no studio share is kept for this pool.
+    /// </summary>
+    public (int InUse, int Max)? Studio { get; init; }
+
     /// <summary>The ceiling the pool is judged against.</summary>
     public int Max => ReportedMax is > 0 ? ReportedMax.Value : ConfiguredMax;
 
@@ -103,6 +109,7 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
         return Task.FromResult(new PoolFacts(true, settings.MaxPoolSize, mine.Used, mine.Idle, mine.Max, pools.Count, context.Now)
         {
             Instruments = mine.Instruments,
+            Studio = Internal.Sql.StudioConnectionPools.Of(context.Target.DataSource) is { } share ? (share.InUse, share.Max) : null,
         });
     }
 
@@ -172,6 +179,15 @@ internal sealed class PoolSaturationCheck : HealthCheck<PoolFacts>
             new("Idle in the pool", facts.Idle.ToString(CultureInfo.InvariantCulture)),
             new("Max Pool Size", facts.Max.ToString(CultureInfo.InvariantCulture)),
         ];
+
+        // Issue #44: so the remedy is not "raise Max Pool Size" when the cause was somebody's console.
+        if (facts.Studio is { } studio)
+        {
+            evidence.Add(new HealthEvidence(
+                "Held by the studio",
+                studio.InUse.ToString(CultureInfo.InvariantCulture) + " of them (it holds at most " + studio.Max.ToString(CultureInfo.InvariantCulture)
+                + ", MaxStudioConnections)"));
+        }
 
         if (facts.Saturated)
         {

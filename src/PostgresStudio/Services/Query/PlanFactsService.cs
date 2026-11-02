@@ -221,7 +221,7 @@ internal sealed class PlanFactsService : IPlanFactsService
         });
 
         await using NpgsqlConnection connection = resolved.Target.CreateConnection(StudioConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         // 1. Resolve every name to the catalog's own, with no lock and no fact: the gate is applied before anything is asked.
         string[] schemas = [.. targets.Relations.Select(static x => x.Schema)];

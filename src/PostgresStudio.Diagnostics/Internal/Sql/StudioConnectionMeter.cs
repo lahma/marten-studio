@@ -46,8 +46,12 @@ internal static class StudioConnectionMeter
     /// <param name="connection">A connection the studio has just created and not yet opened.</param>
     /// <param name="meter">Where to record, for a test; <see cref="StudioDatabaseTime.Shared" /> otherwise.</param>
     /// <param name="clock">A <see cref="Stopwatch" />-style timestamp source, for a test; <see cref="Stopwatch.GetTimestamp" /> otherwise.</param>
+    /// <param name="pool">
+    /// Issue #44: the pool share it is held to (<see cref="StudioConnectionPools.Of" />), or <see langword="null" /> for none - a
+    /// connection opened with <see cref="StudioConnections.OpenStudioAsync" /> then takes a slot of it, and is named.
+    /// </param>
     /// <returns>The same connection.</returns>
-    public static NpgsqlConnection Attach(NpgsqlConnection connection, StudioDatabaseTime? meter = null, Func<long>? clock = null)
+    public static NpgsqlConnection Attach(NpgsqlConnection connection, StudioDatabaseTime? meter = null, Func<long>? clock = null, StudioConnectionPool? pool = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
 
@@ -56,7 +60,10 @@ internal static class StudioConnectionMeter
             return connection;
         }
 
-        Tracker tracker = new(StudioDatabaseTime.KeyOf(connection), meter ?? StudioDatabaseTime.Shared, clock ?? Stopwatch.GetTimestamp);
+        Tracker tracker = new(StudioDatabaseTime.KeyOf(connection), meter ?? StudioDatabaseTime.Shared, clock ?? Stopwatch.GetTimestamp)
+        {
+            Pool = pool,
+        };
         Metered.AddOrUpdate(connection, tracker);
         connection.StateChange += tracker.OnStateChange;
 
@@ -75,6 +82,41 @@ internal static class StudioConnectionMeter
         return Metered.TryGetValue(connection, out _);
     }
 
+    /// <summary>
+    /// Issue #44: the pool share <paramref name="connection" /> is held to (<see cref="StudioConnectionPools" />), or
+    /// <see langword="null" /> for a connection the studio did not create, or one whose pool no studio configured.
+    /// </summary>
+    public static StudioConnectionPool? PoolOf(NpgsqlConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        return Metered.TryGetValue(connection, out Tracker? tracker) ? tracker.Pool : null;
+    }
+
+    /// <summary>
+    /// Issue #44: the <c>application_name</c> the studio's transactions on <paramref name="connection" /> set
+    /// (<see cref="ReadOnlySqlSession" />), or <see langword="null" /> for none.
+    /// </summary>
+    public static string? ApplicationNameOf(NpgsqlConnection connection) => PoolOf(connection)?.ApplicationName;
+
+    /// <summary>
+    /// Issue #44: <paramref name="connection" /> holds <paramref name="lease" /> from its open until it closes - a dispose, a
+    /// close or a break, each of which Npgsql reports as the state leaving Open - and the lease is given back once.
+    /// </summary>
+    internal static void Hold(NpgsqlConnection connection, StudioConnectionLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(lease);
+
+        if (Metered.TryGetValue(connection, out Tracker? tracker))
+        {
+            tracker.Hold(lease);
+        }
+        else
+        {
+            lease.Release();
+        }
+    }
+
     /// <summary>One connection's open time, and where it goes.</summary>
     /// <param name="database">The database's key.</param>
     /// <param name="meter">Where it is recorded.</param>
@@ -84,6 +126,37 @@ internal static class StudioConnectionMeter
         private readonly Lock gate = new();
         private long openedAt;
         private bool open;
+        private StudioConnectionLease? lease;
+
+        /// <summary>Issue #44: the pool share the connection is held to, or <see langword="null" />.</summary>
+        public StudioConnectionPool? Pool { get; init; }
+
+        /// <summary>Holds <paramref name="held" /> until the connection closes; one held before it is given back first.</summary>
+        public void Hold(StudioConnectionLease held)
+        {
+            StudioConnectionLease? previous;
+
+            lock (gate)
+            {
+                previous = lease;
+                lease = held;
+            }
+
+            previous?.Release();
+        }
+
+        private void ReleaseLease()
+        {
+            StudioConnectionLease? held;
+
+            lock (gate)
+            {
+                held = lease;
+                lease = null;
+            }
+
+            held?.Release();
+        }
 
         /// <summary>Npgsql's <see cref="DbConnection.StateChange" />: into open starts the clock, out of it records.</summary>
         public void OnStateChange(object? sender, StateChangeEventArgs change)
@@ -100,6 +173,7 @@ internal static class StudioConnectionMeter
             else if (wasOpen && !isOpen)
             {
                 Closed();
+                ReleaseLease();
             }
         }
 

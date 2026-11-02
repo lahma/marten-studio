@@ -42,6 +42,20 @@ internal interface IDiagnosticsSettings
     /// <summary>The role the console, the browser's reads and plans run as (<c>SET LOCAL ROLE</c>), or <see langword="null" />.</summary>
     string? SqlConsoleRole { get; }
 
+    /// <summary>Issue #44: the most connections the studio holds of each pool at a time (<c>MaxStudioConnections</c>).</summary>
+    int MaxStudioConnections => Internal.Sql.StudioConnectionPools.DefaultMax;
+
+    /// <summary>
+    /// Issue #44: the <c>application_name</c> the studio's sessions carry: the host's, <c>""</c> for the application's own, or
+    /// <see langword="null" /> for the derived one (<c>StudioApplicationName</c>).
+    /// </summary>
+    string? StudioApplicationName => null;
+
+    /// <summary>
+    /// Issue #44: the name the derived session name ends with - the product's, or the engine's on a host with no studio.
+    /// </summary>
+    string SessionProduct => OptionsTypeName == "PostgresDiagnosticsOptions" ? "Postgres Studio Diagnostics" : Text.ProductName;
+
     /// <summary>The schemas the database browser may show beyond a source's own: exact names, or <c>"*"</c> (D27).</summary>
     IReadOnlyList<string> BrowsableSchemas { get; }
 

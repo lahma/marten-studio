@@ -246,6 +246,13 @@ internal sealed record HealthReport
     /// </summary>
     public StudioCost? Cost { get; init; }
 
+    /// <summary>
+    /// Issue #44: the studio's share of this database's pool - how many of its connections the studio may hold at a time
+    /// (<c>MaxStudioConnections</c>) and how many it holds now - or <see langword="null" /> when the source exposes no pool, or
+    /// under the same gate as <see cref="Cost" />.
+    /// </summary>
+    public (int Max, int InUse)? StudioConnections { get; init; }
+
     /// <summary>Why <see cref="Cost" /> is not shown, when it is not.</summary>
     public string? CostWithheld { get; init; }
 

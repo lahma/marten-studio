@@ -443,7 +443,7 @@ internal sealed class TenantDiscovery
             tables.Select(table => $"(select distinct tenant_id from {table} order by tenant_id limit {MaxListedTenants + 1})"));
 
         await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(database, ConnectionUsage.Read);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         await using NpgsqlCommand command = connection.CreateCommand();
         command.CommandText =
