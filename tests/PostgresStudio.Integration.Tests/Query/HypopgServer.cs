@@ -63,7 +63,9 @@ public sealed class HypopgServer : IAsyncLifetime
 
         container = new PostgreSqlBuilder(Image)
             .WithReuse(false)
-            .WithName("ms-hypopg-" + RunId)
+            // Per instance: PlanWhatIfLiveTests and WhatIfLiveTests each take a class fixture of their own, and two that start at
+            // once under one name are Docker's 409 Conflict (CI, 1.0).
+            .WithName("ms-hypopg-" + RunId + "-" + Guid.NewGuid().ToString("N")[..6])
             .WithLabel(PostgresFixture.ReuseLabel, PostgresFixture.ReuseLabelValue)
             .WithLabel("ms-purpose", "hypopg")
             .WithCommand("-c", "shared_preload_libraries=pg_stat_statements")
