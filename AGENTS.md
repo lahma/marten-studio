@@ -105,8 +105,9 @@ Each rule's full text, with its lists of events, tests and history, is in
    static classes, two classes and one record, and it must not move because of PostgresStudio; PostgresStudio's is its five
    registration types, and PostgresStudio.Diagnostics' (a baseline of its own) is `AddPostgresDiagnostics`, the health-check
    extension, `PostgresDiagnosticsOptions`, the six inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and
-   their records) and the D31 read model. Anything else that appears in any baseline is a mistake,
-   not a feature.
+   their records), the D31 read model and, since 1.0, the connection history's four (`AddPostgresConnectionHistory`, its
+   options, `IPostgresConnectionHistoryStore` and `PostgresConnectionSample`). Anything else that appears in any baseline is
+   a mistake, not a feature.
    Never hand-edit a `.verified.txt`: run the test, read the diff deliberately, say in the pull request what moved and
    why, then accept the baseline. The read model is extend-only (D31). **`docs/health/codes.md` is a contract too, and a
    row is never deleted**: every registered check's code has its row; a retired check keeps its row, marked with the
@@ -248,7 +249,8 @@ assembly's own root (`/postgres`, `/marten`), and `/_blazor`, `blazor.web.js`, `
 MartenStudio (D30), and from the engine for PostgresStudio and MartenStudio. Each package's *registration* surface is
 snapshot-tested: MartenStudio's three static classes, two classes and one record; PostgresStudio's five registration types;
 PostgresStudio.Diagnostics' `AddPostgresDiagnostics`, the health-check extension, `PostgresDiagnosticsOptions`, the six
-inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and their records) and the D31 read model. Full text: [architecture.md](docs/maintainers/architecture.md#d12).
+inbound types (`IPostgresDatabaseSource`, `IPostgresCapacitySource` and their records), the D31 read model and the
+connection history's four types (1.0). Full text: [architecture.md](docs/maintainers/architecture.md#d12).
 
 **D13 — The SQL console is off by default, and its real guard is the transaction.** `RunSql` is a capability like any
 other. What makes it safe is `SET TRANSACTION READ ONLY` plus `statement_timeout` and an optional `SET LOCAL ROLE`, not

@@ -437,6 +437,15 @@ internal sealed record SessionActivitySummary
     /// </summary>
     public SessionHoldersSummary? Holders { get; init; }
 
+    /// <summary>
+    /// Issue #43: the server's connection history - the window, the peak against the client budget and when, instance breaks -
+    /// with no application named; <see langword="null" /> when none is kept or none read.
+    /// </summary>
+    public ConnectionHistory.ConnectionHistoryView? ConnectionHistory { get; init; }
+
+    /// <summary>Issue #43: whether the host registered the connection history at all (<c>AddPostgresConnectionHistory()</c>).</summary>
+    public bool ConnectionHistoryKept { get; init; }
+
     /// <summary>What was run, for Show SQL.</summary>
     public IReadOnlyList<HealthStatement> Statements { get; init; } = [];
 
@@ -537,6 +546,9 @@ internal sealed record SessionActivityDetails
     /// same gate.
     /// </summary>
     public SessionHoldersDetails Holders { get; init; } = SessionHoldersDetails.None;
+
+    /// <summary>Issue #43: the server's connection history with each application's own peak, past the activity gate.</summary>
+    public ConnectionHistory.ConnectionHistoryView? ConnectionHistory { get; init; }
 
     /// <summary>
     /// Whether the statements are withheld outright, because the visitor's withheld schemas could not be read.

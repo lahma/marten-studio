@@ -1,7 +1,9 @@
 @using PostgresStudio.Services.Database
+@using PostgresStudio.Services.ConnectionHistory
 @using PostgresStudio.Services.Settings
 @using PostgresStudio.Components.Shared
 @inject IStudioSettings Settings
+@inject StudioState State
 
 @*
     Database › Sessions › Holders (issue #20): who holds the whole server's connections - every database on it, not only this one -
@@ -37,6 +39,56 @@
             @SessionText.Number(holders.Available) an ordinary role may open (<code>max_connections</code> less what is reserved:
             @holders.AvailableText). The studio's own reading session is counted here and not listed below.
         </p>
+
+        @* Issue #43: what held the server's connections before now - counts under the page's own gate, names past the activity gate. *@
+        @if (Summary.ConnectionHistory is { } history)
+        {
+            <h3 class="ms-holders-subheading" id="ms-holders-history">Since @State.FormatInSelectedTimeZone(history.Since)</h3>
+            <p class="ms-holders-history">
+                The most client sessions one sample counted was @SessionText.Number(history.Peak) of the @SessionText.Number(history.ClientLimit)
+                an ordinary role may open, at @State.FormatInSelectedTimeZone(history.PeakAt) - @SessionText.Count(history.Samples, "sample") up to
+                @State.FormatInSelectedTimeZone(history.Until)@(history.InstanceChanges > 0 ? ", across " + SessionText.Count(history.InstanceChanges, "change") + " of the answering instance (a failover or a restart)" : string.Empty).
+            </p>
+
+            @if (ShowDetails && Details!.ConnectionHistory is { Applications.Count: > 0 } named)
+            {
+                <TableScroll Label="Each application's own peak since the history began">
+                    <table class="ms-table ms-sessions-table ms-holders-history-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Application</th>
+                                <th scope="col">Peak</th>
+                                <th scope="col">At</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (ConnectionHistoryPeak peak in named.Applications)
+                            {
+                                <tr>
+                                    <td>@(peak.Application ?? "(none set)")</td>
+                                    <td>@SessionText.Number(peak.Peak)</td>
+                                    <td>@State.FormatInSelectedTimeZone(peak.At)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+        }
+        else if (Summary.ConnectionHistoryKept)
+        {
+            <p class="ms-muted ms-holders-history-none">
+                The connection history has no sample of this server yet. It samples each server once an interval, and a server only a
+                source of dynamic databases names is not sampled.
+            </p>
+        }
+        else
+        {
+            <p class="ms-muted ms-holders-history-off">
+                This is the server's connections now. A history of them - what peaked, when, and who held them - is kept once the host
+                registers <code>AddPostgresConnectionHistory()</code>.
+            </p>
+        }
 
         <h3 class="ms-holders-subheading" id="ms-holders-databases">By database</h3>
 

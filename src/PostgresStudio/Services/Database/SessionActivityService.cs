@@ -1,7 +1,9 @@
+using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 using Npgsql;
 
@@ -103,6 +105,8 @@ internal sealed class SessionActivityService : ISessionActivityService
     private readonly StudioLogThrottle throttle;
     private readonly ILogger<SessionActivityService> logger;
     private readonly TableRowAuditLedger ledger = new();
+    private readonly IPostgresConnectionHistoryStore? history;
+    private readonly IOptions<PostgresConnectionHistoryOptions>? historyOptions;
 
     public SessionActivityService(
         IStudioSettings settings,
@@ -116,8 +120,12 @@ internal sealed class SessionActivityService : ISessionActivityService
         ISessionLockLabeler labeler,
         SessionHolderNames holderNames,
         StudioLogThrottle throttle,
-        ILogger<SessionActivityService> logger)
+        ILogger<SessionActivityService> logger,
+        IPostgresConnectionHistoryStore? history = null,
+        IOptions<PostgresConnectionHistoryOptions>? historyOptions = null)
     {
+        this.history = history;
+        this.historyOptions = historyOptions;
         this.settings = settings;
         this.capabilities = capabilities;
         this.authorization = authorization;
@@ -134,6 +142,39 @@ internal sealed class SessionActivityService : ISessionActivityService
 
     /// <summary>How many first reads this circuit has recorded, for a test.</summary>
     internal int RecordedReads => ledger.Count;
+
+    /// <summary>
+    /// Issue #43: the connection history of the server <paramref name="resolved" /> is on, for its retention - naming applications
+    /// only when <paramref name="names" /> says the activity gate passed - or <see langword="null" /> when none is kept, the source
+    /// exposes no data source, or the store could not be read (a failure is logged and the page shows now alone).
+    /// </summary>
+    private async Task<ConnectionHistoryView?> HistoryAsync(ResolvedSource resolved, bool names, CancellationToken cancellationToken)
+    {
+        if (history is null
+            || ConnectionHistorySampler.ServerOf(resolved.Target.DataSource?.ConnectionString) is not { } server)
+        {
+            return null;
+        }
+
+        TimeSpan retention = historyOptions?.Value.Retention ?? TimeSpan.FromDays(7);
+
+        try
+        {
+            IReadOnlyList<PostgresConnectionSample> samples = await history
+                .ReadAsync(server, DateTimeOffset.UtcNow - retention, cancellationToken)
+                .ConfigureAwait(false);
+
+            return ConnectionHistoryView.Of(samples, names);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "The connection history of {Server} could not be read", server);
+            }
+            return null;
+        }
+    }
 
     /// <inheritdoc />
     public async Task<SessionActivitySummary> GetSummaryAsync(StudioScope scope, CancellationToken cancellationToken = default)
@@ -244,6 +285,8 @@ internal sealed class SessionActivityService : ISessionActivityService
             Budget = snapshot.Connections?.ToBudget(),
             ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
             Holders = holders,
+            ConnectionHistory = await HistoryAsync(resolved, names: false, cancellationToken).ConfigureAwait(false),
+            ConnectionHistoryKept = history is not null,
             Caveats = caveats,
             Blocking = CountsOf(snapshot.Blocking),
             LockStatistics = snapshot.LockStatistics,
@@ -475,6 +518,7 @@ internal sealed class SessionActivityService : ISessionActivityService
             Applications = snapshot.Connections?.Applications ?? [],
             ApplicationCount = snapshot.Connections?.ApplicationCount ?? 0,
             Holders = snapshot.Holders is { } served ? SessionHolders.Detail(served) : SessionHoldersDetails.None,
+            ConnectionHistory = await HistoryAsync(resolved, names: true, cancellationToken).ConfigureAwait(false),
             StatementsWithheld = withheld is null,
         };
 
