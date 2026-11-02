@@ -251,8 +251,8 @@ its tab is visible, through caches shared by every circuit, so ten open tabs cos
 ## The health advisor
 
 The Health page (`/postgres/health`, long form in [health.md](health.md), every code in
-[health/codes.md](health/codes.md)) runs the shared checks: 44 of the advisor's 73 in 0.5, the ones that read Postgres
-alone. The `D` and `E` checks and the Marten-only `C`, `K` and `T` ones run only in Marten Studio.
+[health/codes.md](health/codes.md)) runs the shared checks: the ones that read Postgres alone, 47 of the advisor's 80 at 1.0
+(the Studios column of the codes table says which). The `D` and `E` checks and the Marten-only `C`, `K` and `T` ones run only in Marten Studio.
 
 - **What a sweep judges.** Every ordinary and partitioned table of the schemas `BrowsableSchemas` admits, up to the 2,000
   largest by estimated size; every table check says what it left out, in counts. A table is the application's own, a
@@ -352,7 +352,7 @@ and 8.0.0 to 8.0.2 carry CVE-2024-32655. It is tested at 8.0.3 and at 10.0.3, wh
 
 ## Limits
 
-- One studio per application in 0.5; a Marten application uses Marten Studio, whose database browser shows what else
+- One studio per application; a Marten application uses Marten Studio, whose database browser shows what else
   lives in the store's own databases.
 - No tenant in the scope, and no row-level filtering: a Postgres Studio visitor who may read a table's rows reads all
   of them.

@@ -27,7 +27,7 @@ byte-for-byte the application it was.
 
 ## Three packages
 
-From 0.5 the studio is two packages and from 0.11 three, released together at one version:
+The studio is three packages, released together at one version:
 
 | Package | For | Register and map | Mounted at |
 |---|---|---|---|
@@ -49,10 +49,10 @@ ASP.NET Core in it ([`docs/diagnostics.md`](docs/diagnostics.md#without-the-ui),
 **One studio per application.** `AddPostgresStudio()` throws in an application that called `AddMartenStudio()`, and
 the reverse; each `Map*Studio()` names the other call to make. Marten Studio's database browser shows what else lives
 in the store's own databases - a job store, a legacy schema - but a separate plain database of a Marten application
-is not listed in 0.5.
+is not listed.
 
 **Upgrade them together.** The assemblies are one program in several files, so `MartenStudio` depends on exactly its
-own `PostgresStudio` (`[0.5.0]` in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A
+own `PostgresStudio` (an exact `[x.y.z]` dependency in the nuspec), and `PostgresStudio` on exactly its own `PostgresStudio.Diagnostics`. A
 central `PackageVersion` for either, if your repository has one, must equal `MartenStudio`'s, or be removed. Under
 `CentralPackageTransitivePinningEnabled` a central pin at another version makes NuGet drop the package from the graph
 without a warning, so `AddMartenStudio()` checks all three at startup and throws an `InvalidOperationException` that says
@@ -1058,6 +1058,13 @@ version matrix starts one server per PostgreSQL major, 14 to 18, and 19's releas
 `.\build.ps1 Browsers` installs the Chromium build the browser tests drive. It is deliberately opt-in
 locally — a developer should not pay a 150 MB download for a test run — and automatic on CI, where a
 missing browser has to be a failure rather than a silent skip.
+
+## Versioning and support
+
+From 1.0 the three packages follow Semantic Versioning, over what [`docs/stability.md`](docs/stability.md) lists as the
+contract - the public API baselines, the finding codes, the snapshot JSON, the capabilities and their defaults, the log
+event ids - and say there what is not one (page addresses, markup, wording). The same page has the support matrix.
+Upgrading from 0.x: [`docs/upgrading.md`](docs/upgrading.md). Reporting a vulnerability: [`SECURITY.md`](SECURITY.md).
 
 ## Contributing
 
