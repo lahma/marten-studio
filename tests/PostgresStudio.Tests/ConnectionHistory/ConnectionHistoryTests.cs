@@ -212,6 +212,40 @@ public class ConnectionHistoryTests
     }
 
     [Fact]
+    public async Task A_host_store_that_reads_the_options_in_its_constructor_does_not_re_enter_the_start_check()
+    {
+        HostApplicationBuilder builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings());
+        builder.Services.AddLogging();
+        builder.Services.AddSingleton(NpgsqlDataSource.Create(Unreachable));
+        builder.Services.AddPostgresDiagnostics();
+        builder.Services.AddPostgresConnectionHistoryReader(static o => o.Retention = TimeSpan.FromDays(3));
+        builder.Services.AddSingleton<IPostgresConnectionHistoryStore, OptionsReadingStore>();
+        using IHost host = builder.Build();
+
+        await host.StartAsync(Token);
+        try
+        {
+            host.Services.GetRequiredService<IPostgresConnectionHistoryStore>().Should().BeOfType<OptionsReadingStore>()
+                .Which.Retention.Should().Be(TimeSpan.FromDays(3));
+            (await host.Services.GetRequiredService<ConnectionHistoryReader>().ReadAsync("db:5432", Token)).Should().BeEmpty();
+        }
+        finally
+        {
+            await host.StopAsync(Token);
+        }
+    }
+
+    private sealed class OptionsReadingStore(IOptions<PostgresConnectionHistoryOptions> options) : IPostgresConnectionHistoryStore
+    {
+        public TimeSpan Retention { get; } = options.Value.Retention;
+
+        public ValueTask AppendAsync(PostgresConnectionSample sample, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public ValueTask<IReadOnlyList<PostgresConnectionSample>> ReadAsync(string server, DateTimeOffset since, CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IReadOnlyList<PostgresConnectionSample>>([]);
+    }
+
+    [Fact]
     public async Task The_reader_is_refused_when_the_host_starts_without_a_store()
     {
         using IHost host = ReaderHost(engine: true, store: false);
