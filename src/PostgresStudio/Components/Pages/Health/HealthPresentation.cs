@@ -101,17 +101,23 @@ internal static class HealthPresentation
 
     /// <summary>
     /// Issue #44: the studio's share of the database's pool, after its cost: the cap, the property that sets it, and how many it
-    /// holds now.
+    /// holds now. Issue #49: when the data source's own <c>Max Pool Size</c> held the cap below the property, it says so.
     /// </summary>
-    /// <param name="max">The cap.</param>
-    /// <param name="inUse">How many it holds now.</param>
+    /// <param name="share">The cap in force, the property's value, the data source's pool size where it was the bound, and how many it holds now.</param>
     /// <param name="settings">The studio's settings, for the property's name as the host spells it.</param>
-    public static string Share(int max, int inUse, IStudioSettings settings)
+    public static string Share(StudioConnectionShare share, IStudioSettings settings)
     {
+        ArgumentNullException.ThrowIfNull(share);
         ArgumentNullException.ThrowIfNull(settings);
 
-        return "It holds at most " + max.ToString(CultureInfo.InvariantCulture) + " of the pool's connections at a time ("
-            + settings.OptionName("MaxStudioConnections") + "), " + inUse.ToString(CultureInfo.InvariantCulture) + " now.";
+        string option = settings.OptionName("MaxStudioConnections");
+        string reason = share.PoolSize is { } poolSize
+            ? option + " is " + share.Configured.ToString(CultureInfo.InvariantCulture) + "; the data source's Max Pool Size is "
+                + poolSize.ToString(CultureInfo.InvariantCulture)
+            : option;
+
+        return "It holds at most " + share.Max.ToString(CultureInfo.InvariantCulture) + " of the pool's connections at a time ("
+            + reason + "), " + share.InUse.ToString(CultureInfo.InvariantCulture) + " now.";
     }
 
     /// <summary>A findings count with its noun.</summary>

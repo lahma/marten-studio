@@ -292,7 +292,7 @@ internal sealed class HealthService : IHealthService
             History = history.Read(storeKey, databaseId).Describe(cache.Now),
             Cost = database ? meter.Total(CostKey(resolved.Target)) : null,
             StudioConnections = database && PostgresStudio.Internal.Sql.StudioConnectionPools.Of(resolved.Target.DataSource) is { } share
-                ? (share.Max, share.InUse)
+                ? new StudioConnectionShare(share.Max, share.InUse, share.Configured, share.PoolSize)
                 : null,
             CostWithheld = database ? null : gate.WhyNot(HealthGate.Database),
             Server = database ? HealthServerLine.Of(regular) : null,

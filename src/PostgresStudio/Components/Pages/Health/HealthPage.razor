@@ -104,7 +104,7 @@
                 @(report.Cost is { } cost ? HealthPresentation.Cost(cost, Settings.Text) : "Studio cost: withheld - " + report.CostWithheld + ".")
                 @if (report.StudioConnections is { } share)
                 {
-                    @(" " + HealthPresentation.Share(share.Max, share.InUse, Settings))
+                    @(" " + HealthPresentation.Share(share, Settings))
                 }
             </p>
 

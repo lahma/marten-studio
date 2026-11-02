@@ -466,7 +466,7 @@ Postgres Studio has the same three layers, the same switches and the same startu
   for the process and never disposed, and a scoped or transient registration is refused rather than resolved per
   visitor. A host database source must list without creating anything, and its names are identities.
 - **How much of the pool, and under what name** (1.0, #44). The studio holds at most `MaxStudioConnections` (2 by
-  default) of each pool at a time; a read past it waits for one, at most `QueryTimeout`, and then fails as a connection
+  default, and never above the data source's own `Max Pool Size`) of each pool at a time; a read past it waits for one, at most `QueryTimeout`, and then fails as a connection
   failure that says so and names the option, audited where the operation is. A health check that could not get one is
   "not checked" for that interval with the same sentence, never failed, and the opt-in health check stays Healthy for it:
   it is the host's cap at work, not the database's state. A second connection opened in the same flow as one the operation

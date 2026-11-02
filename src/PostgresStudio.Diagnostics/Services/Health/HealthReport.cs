@@ -248,10 +248,10 @@ internal sealed record HealthReport
 
     /// <summary>
     /// Issue #44: the studio's share of this database's pool - how many of its connections the studio may hold at a time
-    /// (<c>MaxStudioConnections</c>) and how many it holds now - or <see langword="null" /> when the source exposes no pool, or
+    /// (<c>MaxStudioConnections</c>, never above the data source's <c>Max Pool Size</c>, issue #49) and how many it holds now - or <see langword="null" /> when the source exposes no pool, or
     /// under the same gate as <see cref="Cost" />.
     /// </summary>
-    public (int Max, int InUse)? StudioConnections { get; init; }
+    public StudioConnectionShare? StudioConnections { get; init; }
 
     /// <summary>Why <see cref="Cost" /> is not shown, when it is not.</summary>
     public string? CostWithheld { get; init; }
@@ -326,3 +326,12 @@ internal sealed record HealthGlance(
     /// </summary>
     public StudioScope? Scope { get; init; }
 }
+
+/// <summary>
+/// Issue #44, #49: the studio's share of one pool, as the Health page says it.
+/// </summary>
+/// <param name="Max">The cap in force: <c>MaxStudioConnections</c>, never above the data source's <c>Max Pool Size</c>.</param>
+/// <param name="InUse">How many connections of the pool the studio holds now.</param>
+/// <param name="Configured">What <c>MaxStudioConnections</c> was set to.</param>
+/// <param name="PoolSize">The data source's <c>Max Pool Size</c> when it held the cap below <paramref name="Configured" />, else <see langword="null" />.</param>
+internal sealed record StudioConnectionShare(int Max, int InUse, int Configured, int? PoolSize);
