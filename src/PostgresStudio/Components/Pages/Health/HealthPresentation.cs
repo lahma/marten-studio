@@ -101,7 +101,7 @@ internal static class HealthPresentation
 
     /// <summary>
     /// Issue #44: the studio's share of the database's pool, after its cost: the cap, the property that sets it, and how many it
-    /// holds now. Issue #49: when the data source's own <c>Max Pool Size</c> held the cap below the property, it says so.
+    /// holds now. Issue #49: when the data source's own <c>Maximum Pool Size</c> held the cap below the property, it says so.
     /// </summary>
     /// <param name="share">The cap in force, the property's value, the data source's pool size where it was the bound, and how many it holds now.</param>
     /// <param name="settings">The studio's settings, for the property's name as the host spells it.</param>
@@ -112,7 +112,7 @@ internal static class HealthPresentation
 
         string option = settings.OptionName("MaxStudioConnections");
         string reason = share.PoolSize is { } poolSize
-            ? option + " is " + share.Configured.ToString(CultureInfo.InvariantCulture) + "; the data source's Max Pool Size is "
+            ? option + " is " + share.Configured.ToString(CultureInfo.InvariantCulture) + "; the data source's Maximum Pool Size is "
                 + poolSize.ToString(CultureInfo.InvariantCulture)
             : option;
 

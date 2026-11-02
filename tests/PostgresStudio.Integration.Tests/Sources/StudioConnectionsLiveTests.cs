@@ -164,7 +164,7 @@ public class StudioConnectionsLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
-    /// Issue #49: a data source of <c>Max Pool Size=1</c> with <c>MaxStudioConnections = 2</c> is held to one by the studio's own
+    /// Issue #49: a data source of <c>Maximum Pool Size=1</c> with <c>MaxStudioConnections = 2</c> is held to one by the studio's own
     /// queue - the second read fails there, with the sentence that names the option, not as Npgsql's pool-exhaustion timeout.
     /// </summary>
     [PostgresFact]
@@ -200,7 +200,7 @@ public class StudioConnectionsLiveTests(PostgresFixture postgres)
             await using NpgsqlConnection extra = StudioConnectionMeter.Attach(dataSource.CreateConnection(), pool: pool);
             Func<Task> open = () => extra.OpenStudioAsync(Token);
             (await open.Should().ThrowAsync<StudioConnectionsBusyException>()).Which.Message
-                .Should().Contain("MaxStudioConnections, held to the data source's Max Pool Size of 1");
+                .Should().Contain("MaxStudioConnections, held to the data source's Maximum Pool Size of 1");
 
             SqlConsoleResult result = await circuit.Get<ISqlConsoleService>().RunSqlAsync(Scope, new SqlConsoleRequest("select 1"), Token);
 
