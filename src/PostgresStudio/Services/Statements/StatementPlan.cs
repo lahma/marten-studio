@@ -240,6 +240,9 @@ internal sealed class StatementPlanReader
         int parameters = HealthStatementQueries.HighestParameter(text);
         IReadOnlyList<HealthStatement> shown =
         [
+            // RVH-FIX: the two reads of the crossing walk run first, in the plan's transaction (StatementCrossing).
+            new(StatementPlanCrossingQueries.CrossingSql, ["withheld", "limit"]) { Label = StatementPlanCrossingQueries.EdgesLabel },
+            new(StatementPlanCrossingQueries.SqlFunctionSourcesSql, ["withheld", "limit"]) { Label = StatementPlanCrossingQueries.FunctionsLabel },
             new(StatementPlanQueries.SearchPathSql, []),
             new(StatementPlanQueries.SetSearchPathSql, ["path"]),
             new(StatementPlanQueries.Shown(queryId, parameters), []),
@@ -297,7 +300,7 @@ internal sealed class StatementPlanReader
 
                             if (observer is not null)
                             {
-                                await observer.ObserveAsync(connection.ProcessID, shown[2], token).ConfigureAwait(false);
+                                await observer.ObserveAsync(connection.ProcessID, shown[^1], token).ConfigureAwait(false);
                             }
 
                             return (plan.Json, plan.Characters, false);

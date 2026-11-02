@@ -2,6 +2,7 @@ using Npgsql;
 
 using PostgresStudio.Integration.Tests.Health;
 using PostgresStudio.Integration.Tests.Versions;
+using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Query;
@@ -43,8 +44,12 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
         return (leg, database, app);
     }
 
-    private static StatementRowView Row(StatementsView view, string marker) =>
-        view.Rows.Single(x => x.Text?.Contains(marker, StringComparison.Ordinal) == true);
+    private static StatementRowView Row(StatementsView view, string marker)
+    {
+        StatementRowView[] rows = [.. view.Rows.Where(x => x.Text?.Contains(marker, StringComparison.Ordinal) == true)];
+        rows.Should().ContainSingle("a statement carries '{0}':\n{1}", marker, StatementsLive.Describe(view));
+        return rows[0];
+    }
 
     [PostgresTheory]
     [MemberData(nameof(PlanLegs))]
@@ -325,6 +330,115 @@ public class StatementPlanLiveTests(PostgresVersionMatrix matrix)
             StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
 
             foreach ((string marker, string definition) in cases)
+            {
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, Row(view, marker).QueryId, Token);
+
+                plan.NoPlan.Should().BeNull(marker);
+                string.Join(" | ", plan.Plan!.Nodes.Select(static x => x.Filter + " " + x.IndexCondition))
+                    .Should().Contain(definition, "the plan of {0} carries the definition behind the name", marker);
+            }
+        }
+    }
+
+    /// <summary>
+    /// RVH-FIX: the other ways a withheld SQL function's body reaches a plan with no withheld relation in it. An operator whose
+    /// function is in <c>hr</c> (the statement's own, or a visible view's); a parameter default a call leaves out, which calls an
+    /// <c>hr</c> function; a row-level-security policy's condition on a table the plan reads. Each is refused for a visitor who may
+    /// not see <c>hr</c> and planned, showing exactly the definition, for one who may; and each has a control whose operator,
+    /// default or policy is visible, which is planned for both.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_withheld_function_reached_through_an_operator_a_default_or_a_policy_is_not_planned_for_a_visitor_who_may_not_see_it()
+    {
+        (_, _, string app) = await SeedAsync(matrix, 18, "hard_crossing_wide");
+
+        await StatementsLive.ExecuteAsync(app,
+            "alter table public.orders add column tier text; "
+            + "update public.orders set tier = 'std'; "
+            + "create schema hr; "
+            + "create function hr.vip_eq(a text, b text) returns boolean language sql immutable as $$ select a = 'vip'::text and b is not null $$; "
+            + "create operator public.=== (leftarg = text, rightarg = text, function = hr.vip_eq); "
+            + "create function public.same_text(a text, b text) returns boolean language sql immutable as $$ select a = b $$; "
+            + "create operator public.=~= (leftarg = text, rightarg = text, function = public.same_text); "
+            + "create view public.v_op as select o.id, o.note from public.orders o where o.tier === 'z'; "
+            + "create function hr.vip_flag() returns text language sql immutable as $$ select 'vip'::text $$; "
+            + "create function public.pick(n int, t text default hr.vip_flag()) returns boolean language plpgsql immutable as $$ begin return t is not null; end $$; "
+            + "create function public.plain_flag() returns text language sql immutable as $$ select 'plain'::text $$; "
+            + "create function public.pick_ok(n int, t text default public.plain_flag()) returns boolean language plpgsql immutable as $$ begin return t is not null; end $$; "
+            + "create function hr.can_see(o text) returns boolean language sql immutable as $$ select o = 'secret'::text $$; "
+            + "create function public.can_see_here(o text) returns boolean language sql immutable as $$ select o = 'open'::text $$; "
+            + "create table public.docs (id int primary key, owner text, body text); "
+            + "create table public.docs_ok (id int primary key, owner text, body text); "
+            + "insert into public.docs select g, 'x', 'b' || g from pg_catalog.generate_series(1, 20) g; "
+            + "insert into public.docs_ok select g, 'x', 'b' || g from pg_catalog.generate_series(1, 20) g; "
+            + "alter table public.docs enable row level security; alter table public.docs force row level security; "
+            + "alter table public.docs_ok enable row level security; alter table public.docs_ok force row level security; "
+            + "create policy p_hr on public.docs using (hr.can_see(owner)); "
+            + "create policy p_here on public.docs_ok using (public.can_see_here(owner))");
+
+        const string Sleep = "select pg_catalog.pg_sleep(0.02), ";
+        await StatementsLive.RepeatAsync(app, Sleep + "v.note from public.v_op v where v.id = @id", 20);
+        await StatementsLive.RepeatAsync(app, Sleep + "o.note from public.orders o where o.id = @id and o.tier === 'z'", 20);
+        await StatementsLive.RepeatAsync(app, Sleep + "o.note from public.orders o where o.id = @id and public.pick(o.id)", 20);
+        await StatementsLive.RepeatAsync(app, Sleep + "d.body from public.docs d where d.id = @id", 20);
+        await StatementsLive.RepeatAsync(app, Sleep + "o.note from public.orders o where o.id = @id and o.tier =~= 'z'", 20);
+        await StatementsLive.RepeatAsync(app, Sleep + "o.note from public.orders o where o.id = @id and public.pick_ok(o.id)", 20);
+        await StatementsLive.RepeatAsync(app, Sleep + "d.body, d.owner from public.docs_ok d where d.id = @id", 20);
+
+        (string Marker, string Definition)[] refused =
+        [
+            ("public.v_op v", "'vip'::text"),
+            ("o.tier ===", "'vip'::text"),
+            ("public.pick(o.id)", "'vip'::text"),
+            ("public.docs d", "'secret'::text"),
+        ];
+        string[] controls = ["o.tier =~=", "public.pick_ok(o.id)", "public.docs_ok d"];
+
+        await using (StudioHost withheld = StatementsLive.Host(app))
+        {
+            await using StudioCircuit circuit = withheld.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+
+            StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
+            view.State.Should().Be(StatementsState.Read, StatementsLive.Describe(view));
+
+            foreach ((string marker, string definition) in refused)
+            {
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, Row(view, marker).QueryId, Token);
+
+                plan.Plan.Should().BeNull("a plan of {0} would show {1}, from hr", marker, definition);
+                plan.NoPlan.Should().Be(StatementsService.ReachesWithheldSchema, marker);
+            }
+
+            foreach (string marker in controls)
+            {
+                StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, Row(view, marker).QueryId, Token);
+
+                plan.NoPlan.Should().BeNull(marker + ": its operator, default or policy is visible, so it is planned");
+                plan.Plan.Should().NotBeNull(marker);
+                plan.Plan!.Nodes.Should().NotBeEmpty();
+            }
+
+            // RVH-FIX: "Show SQL" lists the two crossing reads, labelled, before the statements that follow them.
+            StatementPlanView shown = await statements.PlanAsync(StatementsLive.Scope, Row(view, controls[0]).QueryId, Token);
+            shown.Statements.Select(static x => x.Label).Take(2).Should().Equal(
+                StatementPlanCrossingQueries.EdgesLabel, StatementPlanCrossingQueries.FunctionsLabel);
+            shown.Statements.Take(2).Select(static x => x.Sql).Should().Equal(
+                StatementPlanCrossingQueries.CrossingSql, StatementPlanCrossingQueries.SqlFunctionSourcesSql);
+        }
+
+        await using (StudioHost admitted = StatementsLive.Host(app, studio: static o =>
+        {
+            o.BrowsableSchemas.Add("public");
+            o.BrowsableSchemas.Add("hr");
+        }))
+        {
+            await using StudioCircuit circuit = admitted.Circuit();
+            IStatementsService statements = circuit.Get<IStatementsService>();
+
+            StatementsView view = await statements.GetAsync(StatementsLive.Scope, Token);
+
+            foreach ((string marker, string definition) in refused)
             {
                 StatementPlanView plan = await statements.PlanAsync(StatementsLive.Scope, Row(view, marker).QueryId, Token);
 

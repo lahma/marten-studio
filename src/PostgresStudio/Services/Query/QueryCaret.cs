@@ -15,13 +15,14 @@ internal static class QueryCaret
 
     /// <summary>
     /// <paramref name="line" /> - or a window of it, with <see cref="Cut" /> where it was cut - and the caret line under the
-    /// character at <paramref name="column" /> (zero-based, clamped to the line).
+    /// character at <paramref name="column" /> (zero-based, clamped to the line: a column at the line's end - an error "at end of
+    /// input" - points just after its last character).
     /// </summary>
     public static (string Source, string Line) Window(string line, int column)
     {
         ArgumentNullException.ThrowIfNull(line);
 
-        int at = Math.Clamp(column, 0, Math.Max(line.Length - 1, 0));
+        int at = Math.Clamp(column, 0, line.Length);
 
         if (line.Length <= Width)
         {

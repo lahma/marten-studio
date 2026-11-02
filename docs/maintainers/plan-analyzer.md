@@ -15,9 +15,14 @@ drill-in plans a `pg_stat_statements` text as its generic plan by `prepare` + `f
 that names a withheld schema (`StatementsService.TextNamesWithheld`: one the visitor's mask changes, or a `U&"` name
 while anything is withheld; asked again by the reader before any `prepare`), because a qualified view or `LANGUAGE
 sql` function is expanded or inlined into visible tables and a `plpgsql` call prints its defaults. Nor (1.0) one that
-names a view or SQL function in a visible schema that reaches a withheld schema's view or function
-(`StatementCrossing`: a `pg_depend` walk from visible views and SQL-standard bodies, string-bodied SQL functions lexed,
-to a fixed point, bounded, failing closed; matched by whole word). A plan reading a withheld schema is not
+names a view, function, operator or table in a visible schema that reaches a withheld schema's view, function or operator
+(`StatementCrossing`, RVH-FIX: the direct `pg_depend` edges of every visible view's rule, function (parameter defaults
+included), operator and table's policies and virtual generated columns, read flat through `pg_depend`'s `(classid, objid)`
+index - 22 s to 26 ms on 2,000 views and 4,000 SQL functions - string-bodied SQL functions lexed, to a fixed point of
+`MaxRounds` rounds, failing closed when a read is cut or the last round still grew; matched by identifier as Postgres keeps
+it: `""` is one quote, 63 bytes, an operator as its symbol). Known limit: it sees what the catalog records and a SQL body
+spells; an extension's planner hook or a function's support function (C code) is outside it, and a body in another language
+than SQL is never inlined. "Show SQL" lists the walk's two reads, labelled, before the plan's. A plan reading a withheld schema is not
 shown; the rest is masked like the text, and each plan is audited by `queryid`. Console and Mode A plans are `RunSql`
 output, unmasked (D27). What if? (X2) imagines one index with hypopg behind the gate of the plan it accompanies, only
 one a builder writes (`MigrationSqlText`, or Marten's own `ToDDL`), re-derived on the server. Read-only; never

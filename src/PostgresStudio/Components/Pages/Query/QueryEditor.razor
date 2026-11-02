@@ -347,7 +347,7 @@
         }
 
         string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
-        int position = Math.Min(ErrorPosition, normalized.Length - 1);
+        int position = Math.Min(ErrorPosition, normalized.Length);
         int start = normalized.LastIndexOf('\n', Math.Max(position - 1, 0)) + 1;
         int end = normalized.IndexOf('\n', position);
 
