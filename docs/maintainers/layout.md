@@ -85,8 +85,8 @@ tests/PostgresStudio.Tests/Support/      PostgresStudio's own test doubles (the 
 tests/PostgresStudio.Tests/Verify/       PostgresStudio's approved API baseline; never hand-edited (hard rule 7)
 tests/PostgresStudio.Integration.Tests/  PostgresStudio's live suite: Testcontainers Postgres under a reuse label of its own
                                          (never the Marten suite's container) + Playwright. Needs Docker; no Marten
-tests/PostgresStudio.Integration.Tests/Browser/  Playwright over samples/PostgresStudio.Sample on real Kestrel: six
-                                         scenarios, the D19 gate, and the zero-config start
+tests/PostgresStudio.Integration.Tests/Browser/  Playwright over samples/PostgresStudio.Sample on real Kestrel: the
+                                         scenarios, where menus open (1.0), the D19 gate, and the zero-config start
 tests/PostgresStudio.Integration.Tests/Database/  Live Postgres: first navigation writes nothing, the D27 gate and its
                                          audit, Sessions, the pool panel at both Npgsql majors, the sample's tenant databases
 tests/PostgresStudio.Integration.Tests/Health/  Live Postgres: the table checks fire and stay quiet over the
