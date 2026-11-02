@@ -36,11 +36,16 @@ public class QueryCaretTests
     }
 
     [Fact]
-    public void A_column_past_the_line_is_held_to_its_last_character()
+    public void A_column_at_or_past_the_end_of_the_line_points_just_after_its_last_character()
     {
-        (string source, string line) = QueryCaret.Window("abc", 10);
-
+        (string source, string line) = QueryCaret.Window("abc", 3);
         source.Should().Be("abc");
-        line.Should().Be("  ^");
+        line.Should().Be("   ^", "an error at end of input points after the last character");
+
+        (_, string past) = QueryCaret.Window("abc", 10);
+        past.Should().Be("   ^");
+
+        (string longSource, string longLine) = QueryCaret.Window(new string('x', 300), 300);
+        longLine.IndexOf('^', StringComparison.Ordinal).Should().Be(longSource.Length, "a cut line's caret is still just after its end");
     }
 }

@@ -289,8 +289,11 @@ internal sealed class RelationshipReads
     /// </summary>
     internal static string Describe(Exception exception, DatabaseGate? gate)
     {
-        // 1.0-HARD: the resolver wraps what a host's source threw; it is described as it was thrown (H1b).
+        // 1.0-HARD: the resolver wraps what a host's source threw; it is described as it was thrown (H1b). What was unwrapped is the
+        // host's, whatever its type: a host's KeyNotFoundException is its own words, not the studio's refusal (RVH-FIX).
+        Exception wrapped = exception;
         exception = StudioHostFailure.Unwrap(exception);
+        bool hosts = !ReferenceEquals(wrapped, exception);
 
         if (gate is null && exception is PostgresException withheld)
         {
@@ -302,6 +305,9 @@ internal sealed class RelationshipReads
         {
             PostgresException postgres => $"{postgres.SqlState}: {postgres.MessageText}",
             NpgsqlException => "The database could not be reached: " + exception.Message,
+
+            // A host's own exception, unwrapped: escaped and bounded, as DatabaseObjectService.ScopeReadFailure says it.
+            _ when hosts => StudioHostFailure.Words(exception),
 
             // The studio's own sentences, which put whatever they quote through StudioLogValue already.
             KeyNotFoundException or StudioNotAuthorizedException or StudioStoreUnavailableException => exception.Message,

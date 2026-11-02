@@ -93,6 +93,27 @@ public class ScopeFailureWordsTests
             "The scope could not be resolved: " + StudioLogValue.CapText(HostWords), "the sentence is the studio's, the words the host's");
     }
 
+    /// <summary>
+    /// RVH-FIX: a host's <see cref="KeyNotFoundException" />, which the resolver wraps like any other of its failures, is the host's
+    /// words once unwrapped - not the studio's refusal, whose KeyNotFoundException is said as it is. The Relationships page
+    /// escapes and bounds it.
+    /// </summary>
+    [Fact]
+    public void A_hosts_wrapped_KeyNotFoundException_reaches_Relationships_escaped_and_bounded()
+    {
+        KeyNotFoundException host = new(HostWords);
+        StudioStoreUnavailableException wrapped = new("tenants", "its databases could not be listed: " + StudioHostFailure.Words(host), "data source", host);
+
+        string said = RelationshipReads.Describe(wrapped, gate: null);
+
+        said.Should().Be(StudioLogValue.CapText(HostWords));
+        ShouldBeEscapedAndBounded(said);
+
+        // The studio's own refusal, unwrapped, is still said as it is.
+        RelationshipReads.Describe(new KeyNotFoundException("No data source is registered under 'x'."), gate: null)
+            .Should().Be("No data source is registered under 'x'.");
+    }
+
     /// <summary>What a host's list says when it fails: a forged second line, an override, and far past any bound.</summary>
     private static readonly string HostWords =
         "the tenant directory is down\n2026-10-27 INFO forged: all clear ‮evil" + new string('x', StudioLogValue.MaxTextLength * 2);

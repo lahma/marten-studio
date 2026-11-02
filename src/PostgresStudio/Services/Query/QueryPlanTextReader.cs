@@ -86,6 +86,24 @@ internal static class QueryPlanTextReader
     /// <param name="mask">Applied to every name and condition read, or <see langword="null" /> for none.</param>
     public static QueryPlanRead Read(string? text, Func<string, string>? mask = null)
     {
+        try
+        {
+            return ReadUnguarded(text, mask);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The reader is bounded and linear, so this is a defect of its own and never the paste's fault; a paste that reaches it is
+            // still refused rather than answered with an exception. The fuzz test calls ReadUnguarded, so it sees this fire.
+            return QueryPlanRead.Failed(NotAPlan);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Read" /> without its catch-all: what the fuzz test calls, so a mangled paste that makes the parser itself throw
+    /// fails the test instead of passing as a refusal. A page never calls it.
+    /// </summary>
+    internal static QueryPlanRead ReadUnguarded(string? text, Func<string, string>? mask = null)
+    {
         if (string.IsNullOrWhiteSpace(text))
         {
             return QueryPlanRead.Failed("There is no plan.");
@@ -96,16 +114,7 @@ internal static class QueryPlanTextReader
             return QueryPlanRead.Failed(QueryPlanReader.TooLarge(text.Length));
         }
 
-        try
-        {
-            return new Parser(mask).Parse(text);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            // The reader is bounded and linear, so this is a defect of its own and never the paste's fault; a paste that reaches it is
-            // still refused rather than answered with an exception (the fuzz test asserts none does).
-            return QueryPlanRead.Failed(NotAPlan);
-        }
+        return new Parser(mask).Parse(text);
     }
 
     // ---- One node while it is being read -------------------------------------------------------------------------------

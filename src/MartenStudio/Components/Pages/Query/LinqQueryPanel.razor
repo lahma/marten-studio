@@ -817,6 +817,6 @@
         }
 
         // 1.0-HARD: a long order clause is cut to a window around the caret, so the caret is on screen at any width.
-        return PostgresStudio.Services.Query.QueryCaret.Window(text, Math.Min(position, text.Length - 1));
+        return PostgresStudio.Services.Query.QueryCaret.Window(text, position);
     }
 }

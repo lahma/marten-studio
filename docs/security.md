@@ -269,9 +269,16 @@ and deallocates what it prepared. A text withheld from the visitor, one that nam
 text shows `‹withheld›`, or, while any schema is withheld, a `U&"…"` name the mask cannot read), a write, a locking read
 and a cut text are never planned, and no What if? is asked of them: a schema-qualified view or `LANGUAGE sql` function
 would be expanded or inlined into the tables it reads, and `VERBOSE` would print its definition. Since 1.0 neither is a
-text that names a view or SQL function in a visible schema that itself reaches a withheld schema's view or function - the
-plan would inline or expand that definition with no withheld table in it to hide it by. A plan that reads a schema the
-visitor may not see is not shown; every other plan is masked as the text is.
+text that names a view, SQL function, operator or table in a visible schema that itself reaches a withheld schema's view,
+function or operator - through a view's query, a function's body or parameter default, an operator's function, a table's
+row-level-security policy or (PostgreSQL 18) virtual generated column - because the plan would inline or expand that
+definition with no withheld table in it to hide it by. The walk reads the catalog's recorded dependencies and the
+string bodies of SQL functions, to a fixed point of at most 32 rounds; a walk or a read that is cut at a bound, or
+whose last round still grew, refuses every text. It matches by name and refuses more than it must (a name in a literal
+or a comment counts). Known limit: it sees only what the catalog records or a SQL body spells, so what an extension's
+planner hook or a function's support function (C code) puts into a plan is outside it; a body in another language than
+SQL is never inlined and needs no walk. A plan that reads a schema the visitor may not see is not shown; every other
+plan is masked as the text is.
 Each plan is audited by `queryid` ("Plan database statement"), and so is each What if? there ("What-if database
 statement").
 

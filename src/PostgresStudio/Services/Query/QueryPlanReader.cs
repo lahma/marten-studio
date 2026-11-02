@@ -133,9 +133,9 @@ internal static class QueryPlanReader
             : QueryPlanRead.Failed("Tried it as the text format of EXPLAIN, because it does not start with “[” or “{”: " + plain.Failure);
     }
 
-    /// <summary>What a plan too large to read says.</summary>
+    /// <summary>What a plan too large to read says: of JSON or of text, so it says neither.</summary>
     internal static string TooLarge(long characters) =>
-        "The plan is " + characters.ToString("N0", CultureInfo.InvariantCulture) + " characters of JSON, more than the "
+        "The plan is " + characters.ToString("N0", CultureInfo.InvariantCulture) + " characters, more than the "
         + MaxCharacters.ToString("N0", CultureInfo.InvariantCulture) + " the studio draws.";
 
     /// <summary>

@@ -611,12 +611,20 @@ statement that names a table only through one of those schemas then fails to pla
 
 **Through a name you may see** (1.0). A view or a SQL function in a schema you *may* see that itself calls into, or reads a
 view of, one you may not would be inlined or expanded too - a withheld `LANGUAGE sql` function becomes a plain condition over a
-table you may see, with no withheld table in the plan to hide it by. So a text that names such a view or function is not planned
-either. The studio finds them before anything is prepared: it walks `pg_depend` from every view and SQL-standard-body function
-in the schemas you may see, reads the bodies of the string-bodied SQL functions there (which record no dependencies) with the
-same check as the text, follows what reaches what to a fixed point, and refuses a text that names any of them as a word - in a
-literal or a comment too, which costs a plan, never a leak. A view that only reads a withheld schema's *table* is still planned,
-and its plan is not shown, as above.
+table you may see, with no withheld table in the plan to hide it by. So does an operator whose function is withheld, a
+parameter default (`f(n int, t text default hr.flag())`) that a call leaves out, a row-level-security policy on a table the
+statement reads, and, on PostgreSQL 18, a virtual generated column. A text that names such a view, function, operator or
+table is not planned either. The studio finds them before anything is prepared: it reads from the catalog what every view,
+function, operator and table in the schemas you may see directly depends on (`pg_depend`), reads the bodies of the
+string-bodied SQL functions there (which record no dependencies) with the same check as the text, follows what reaches what
+to a fixed point, and refuses a text that names any of them as an identifier - spelled as Postgres keeps it, a quoted name's
+`""` as one quote and a name cut to 63 bytes - or, for an operator, as its symbol, in a literal or a comment too. That costs a
+plan, not a leak, and it fails closed: a read cut at its limit, or a fixed point whose last round still grew, refuses every
+text. A view that only reads a withheld schema's *table* is still planned, and its plan is not shown, as above.
+
+What the walk cannot see: it knows what the catalog records and what a SQL body spells. A body in another language than SQL is
+never inlined into a plan, so it needs no walk; but what an extension's planner hook or a function's support function (C code)
+puts into a plan is in no catalog row, and a database that does so is outside this protection.
 
 **Audited.** Each plan is an Activity entry, "Plan database statement", naming the `queryid` and never the text.
 

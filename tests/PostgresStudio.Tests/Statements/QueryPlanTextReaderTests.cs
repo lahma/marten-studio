@@ -303,7 +303,8 @@ public class QueryPlanTextReaderTests
 
         static void Assert(string input)
         {
-            QueryPlanRead read = QueryPlanTextReader.Read(input);
+            // The unguarded entry: the guarded one would turn a parser defect into a refusal this test accepts.
+            QueryPlanRead read = QueryPlanTextReader.ReadUnguarded(input);
 
             (read.Plan is null).Should().Be(read.Failure is not null, "a read is a plan or a refusal: {0}", input);
 
