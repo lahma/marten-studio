@@ -279,6 +279,46 @@ public class ConnectionHistoryBacklogTests
         await none.Should().ThrowAsync<InvalidOperationException>("with nothing held there is nothing to show in the store's place");
     }
 
+    /// <summary>
+    /// The one lookup Holders, the diagnostics API and C15 read through merges the sampler's held samples (the 1.0.1 integration of
+    /// #46 and #47): the peak of a burst whose appends all failed is in the view, and the section's pending count is theirs.
+    /// </summary>
+    [Fact]
+    public async Task The_shared_lookup_sees_the_samples_the_sampler_holds()
+    {
+        await using Rig rig = new();
+
+        rig.Store.AcceptNext = 1;
+        (await rig.Sampler.StoreAsync(Server, Sample(1), Token)).Should().Be(1);
+        (await rig.Sampler.StoreAsync(Server, Sample(7), Token)).Should().Be(0, "the store refuses from here on");
+        (await rig.Sampler.StoreAsync(Server, Sample(2), Token)).Should().Be(0);
+
+        ConnectionHistoryReader reader = new(
+            rig.Store,
+            rig.Options,
+            PostgresStudioSettings.Of(new PostgresStudioOptions()),
+            rig.Clock);
+
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, rig.Sampler, Server, names: false, since: null, Token);
+
+        read.Outcome.Should().Be(PostgresReadOutcome.Read);
+        read.PendingSamples.Should().Be(2);
+        read.View!.Samples.Should().Be(3);
+        read.View.Peak.Should().Be(7, "the peak was in a sample the store refused");
+
+        rig.Store.FailReads = true;
+        ConnectionHistoryRead down = await ConnectionHistoryLookup.ReadAsync(
+            new ConnectionHistoryReader(rig.Store, rig.Options, PostgresStudioSettings.Of(new PostgresStudioOptions()), rig.Clock),
+            rig.Sampler,
+            Server,
+            names: false,
+            since: null,
+            Token);
+
+        down.Outcome.Should().Be(PostgresReadOutcome.Read, "the held samples stand in for a store that cannot be read");
+        down.View!.Peak.Should().Be(7);
+    }
+
     /// <summary>A source provider that lists no source: every round's list of servers is empty.</summary>
     private sealed class NoSources : IStudioSourceProvider
     {

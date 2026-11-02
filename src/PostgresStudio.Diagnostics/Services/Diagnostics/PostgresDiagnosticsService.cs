@@ -617,7 +617,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             };
         }
 
-        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, server, includeActivity, null, cancellationToken).ConfigureAwait(false);
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, services.GetService<ConnectionHistorySampler>(), server, includeActivity, null, cancellationToken).ConfigureAwait(false);
 
         if (read.Failure is { } failure)
         {
