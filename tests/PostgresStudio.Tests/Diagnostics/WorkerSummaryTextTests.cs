@@ -60,6 +60,53 @@ public class WorkerSummaryTextTests
         text.Should().Contain("  Warning  Index public.a is unused: public.a").And.NotContain(" - ");
     }
 
+    [Fact]
+    public async Task The_summary_prints_the_connection_historys_peak_line_when_the_snapshot_has_one()
+    {
+        PostgresDiagnosticsSnapshot snapshot = new()
+        {
+            Database = new PostgresDatabaseRef("default", "app"),
+            ConnectionHistory = new PostgresConnectionHistorySection
+            {
+                Outcome = PostgresReadOutcome.Read,
+                Server = "db:5432",
+                Samples = 1_440,
+                Peak = 83,
+                PeakAt = new DateTimeOffset(2026, 11, 2, 3, 0, 0, TimeSpan.Zero),
+                ClientLimit = 100,
+                ClientLimitNow = 100,
+                Since = new DateTimeOffset(2026, 11, 1, 6, 0, 0, TimeSpan.Zero),
+                InstanceChanges = 1,
+            },
+        };
+
+        string text = await DiagnosticsSummaryService.BuildAsync(new Source(snapshot), null, TestContext.Current.CancellationToken);
+
+        text.ReplaceLineEndings("\n").Should().Be(
+            "Postgres diagnostics summary\n"
+            + "\n"
+            + "default / app: OK (0 critical, 0 warning, 0 info)\n"
+            + "  Connection history: peak 83 of 100 client connections (83.0%) at 2026-11-02 03:00:00Z, 1,440 samples since 2026-11-01 06:00:00Z, 1 instance changes\n");
+    }
+
+    [Fact]
+    public async Task The_summary_says_nothing_of_a_history_that_is_not_kept_and_why_of_one_that_has_no_sample_yet()
+    {
+        PostgresDiagnosticsSnapshot notKept = new()
+        {
+            Database = new PostgresDatabaseRef("default", "app"),
+            ConnectionHistory = new PostgresConnectionHistorySection { Outcome = PostgresReadOutcome.NotApplicable, Reason = "No connection history is kept" },
+        };
+        PostgresDiagnosticsSnapshot unavailable = notKept with
+        {
+            ConnectionHistory = new PostgresConnectionHistorySection { Outcome = PostgresReadOutcome.Unavailable, Reason = "no sample yet" },
+        };
+
+        (await DiagnosticsSummaryService.BuildAsync(new Source(notKept), null, TestContext.Current.CancellationToken)).Should().NotContain("Connection history");
+        (await DiagnosticsSummaryService.BuildAsync(new Source(unavailable), null, TestContext.Current.CancellationToken)).Should()
+            .Contain("  Connection history: Unavailable - no sample yet");
+    }
+
     private sealed class Source(PostgresDiagnosticsSnapshot snapshot) : IPostgresDiagnostics
     {
         public IReadOnlyList<PostgresCheck> Checks => [];
