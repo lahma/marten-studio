@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using PostgresStudio.Services.Settings;
@@ -33,16 +34,24 @@ internal sealed class ConnectionHistoryReaderStartCheck(IServiceProvider service
     {
         List<string> failures = [];
 
-        if (services.GetService(typeof(IPostgresConnectionHistoryStore)) is null)
+        if (!Registered(typeof(IPostgresConnectionHistoryStore)))
         {
             failures.Add(NoStore);
         }
 
-        if (services.GetService(typeof(IDiagnosticsSettings)) is null)
+        if (!Registered(typeof(IDiagnosticsSettings)))
         {
             failures.Add(NoStudio);
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }
+
+    // This runs while PostgresConnectionHistoryOptions is being created. A host store (or settings) whose constructor reads
+    // IOptions<PostgresConnectionHistoryOptions>.Value would re-enter that creation if it were built here, so ask whether the
+    // service is registered and never construct it. A container without IServiceProviderIsService falls back to resolving it.
+    private bool Registered(Type serviceType) =>
+        services.GetService(typeof(IServiceProviderIsService)) is IServiceProviderIsService isService
+            ? isService.IsService(serviceType)
+            : services.GetService(serviceType) is not null;
 }
