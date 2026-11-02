@@ -120,7 +120,7 @@ public class StudioConnectionPoolsTests
         StudioConnectionPools.Register(source, 9, "x", "y", TimeSpan.Zero).Should().BeSameAs(registered, "the first registration wins");
     }
 
-    /// <summary>Issue #49: the cap is the option, never above the data source's own Max Pool Size, and never below one.</summary>
+    /// <summary>Issue #49: the cap is the option, never above the data source's own Maximum Pool Size, and never below one.</summary>
     [Theory]
     [InlineData("Host=db;Maximum Pool Size=1", 2, 1, 1)]
     [InlineData("Host=db;Maximum Pool Size=5", 2, 2, null)]
@@ -152,27 +152,21 @@ public class StudioConnectionPoolsTests
     [Fact]
     public void A_pool_reached_through_Of_after_Configure_is_held_to_the_data_sources_pool_size()
     {
-        try
-        {
-            StudioConnectionPools.Configure(2, null, "Marten Studio", TimeSpan.FromSeconds(5));
+        // No reset afterwards: every studio provider this suite builds calls Configure, and a reset would clear it under a parallel test.
+        StudioConnectionPools.Configure(2, null, "Marten Studio", TimeSpan.FromSeconds(5));
 
-            using NpgsqlDataSource small = NpgsqlDataSource.Create("Host=nowhere.invalid;Maximum Pool Size=1");
-            using NpgsqlDataSource large = NpgsqlDataSource.Create("Host=nowhere.invalid;Maximum Pool Size=50");
+        using NpgsqlDataSource small = NpgsqlDataSource.Create("Host=nowhere.invalid;Maximum Pool Size=1");
+        using NpgsqlDataSource large = NpgsqlDataSource.Create("Host=nowhere.invalid;Maximum Pool Size=50");
 
-            StudioConnectionPool? bounded = StudioConnectionPools.Of(small);
-            bounded.Should().NotBeNull();
-            bounded!.Max.Should().Be(1);
-            bounded.Configured.Should().Be(2);
-            bounded.PoolSize.Should().Be(1);
+        StudioConnectionPool? bounded = StudioConnectionPools.Of(small);
+        bounded.Should().NotBeNull();
+        bounded!.Max.Should().Be(1);
+        bounded.Configured.Should().Be(2);
+        bounded.PoolSize.Should().Be(1);
 
-            StudioConnectionPool? free = StudioConnectionPools.Of(large);
-            free!.Max.Should().Be(2);
-            free.PoolSize.Should().BeNull();
-        }
-        finally
-        {
-            StudioConnectionPools.ResetForTests();
-        }
+        StudioConnectionPool? free = StudioConnectionPools.Of(large);
+        free!.Max.Should().Be(2);
+        free.PoolSize.Should().BeNull();
     }
 
     [Fact]
@@ -183,7 +177,7 @@ public class StudioConnectionPoolsTests
         Func<Task> wait = () => bounded.AcquireAsync(new StudioConnectionLease(bounded, reentrant: false), Token);
 
         (await wait.Should().ThrowAsync<StudioConnectionsBusyException>()).Which.Message.Should().Be(
-            "The studio's connections to this database are all in use (1 at most, MaxStudioConnections, held to the data source's Max Pool Size of 1), "
+            "The studio's connections to this database are all in use (1 at most, MaxStudioConnections, held to the data source's Maximum Pool Size of 1), "
             + "and none came free within 0.1 s. Try again in a moment.");
         PostgresFailure.IsStudioBusy(new StudioConnectionsBusyException(1, TimeSpan.FromSeconds(30), poolSize: 1)).Should().BeTrue();
         held.Release();
@@ -200,7 +194,7 @@ public class StudioConnectionPoolsTests
         HealthPresentation.Share(new StudioConnectionShare(2, 1, 2, null), settings).Should().Be(
             "It holds at most 2 of the pool's connections at a time (PostgresStudioOptions.MaxStudioConnections), 1 now.");
         HealthPresentation.Share(new StudioConnectionShare(1, 0, 2, 1), settings).Should().Be(
-            "It holds at most 1 of the pool's connections at a time (PostgresStudioOptions.MaxStudioConnections is 2; the data source's Max Pool Size is 1), 0 now.");
+            "It holds at most 1 of the pool's connections at a time (PostgresStudioOptions.MaxStudioConnections is 2; the data source's Maximum Pool Size is 1), 0 now.");
     }
 
     [Fact]

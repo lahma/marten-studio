@@ -36,7 +36,7 @@ public class PostgresDiagnosticsOptions
     /// under load, not to add to it. A read that finds every one of them in use waits for one, at most <c>QueryTimeout</c>,
     /// and then says so; a read that is part of one already holding a connection - a nested read - never waits for itself.
     /// The health advisor's C01 says how many of a saturated pool's connections were the studio's. The cap is never above the data
-    /// source's own <c>Max Pool Size</c> (issue #49): it is the smaller of the two, read from the data source's connection string
+    /// source's own <c>Maximum Pool Size</c> (issue #49): it is the smaller of the two, read from the data source's connection string
     /// when <c>Pooling</c> is on, so a host never copies a pool's size into this option. A data source the connection history
     /// samples through keeps one more connection for it outside the cap, so a dedicated pool for both needs one more.
     /// </summary>

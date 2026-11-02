@@ -310,7 +310,7 @@ statement. Grant `RunSql` to people you would give `psql` to, and set `SqlConsol
 | `IncludeDefaultDataSource` | `true` | List the unkeyed singleton `NpgsqlDataSource` as `default` |
 | `SqlConsoleRole` | `null` | A plain identifier; `SET LOCAL ROLE` for the console, the browser and the health reads (not the statement checks) |
 | `QueryTimeout` | 30 s | 1 second to 10 minutes |
-| `MaxStudioConnections` | 2 | 1 to 100: the studio's connections per pool at a time, never above the data source's own `Max Pool Size` (#44, #49) |
+| `MaxStudioConnections` | 2 | 1 to 100: the studio's connections per pool at a time, never above the data source's own `Maximum Pool Size` (#44, #49) |
 | `StudioApplicationName` | derived | printable ASCII, at most 63 characters; `""` keeps the application's own name (#44) |
 | `DefaultPageSize` | `50` | 1 to `MaxPageSize` |
 | `MaxPageSize` | `500` | 1 to 5,000 |
