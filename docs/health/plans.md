@@ -363,7 +363,7 @@ because a Blazor Server circuit accepts only 32 KB a message by default and a pl
 reopens the page with the editor filled - and never runs it: a run needs a click. The plan and the values of the placeholders are
 never in it. The console's **Open in Plan** link carries the statement there; the console keeps its inline plan panel.
 
-**Views of one plan.** The tree stays the default. *Node table*: every node as a row - its own time (or cost), rows, estimate,
+**Views of one plan.** The tree stays the default. *Icicle*: the plan as hand-drawn frames, the root on top and each node a frame as wide as its time with what is below it (its estimated cost when the plan was not timed - the view says which), with a bar along its foot for its own part, the same self time or cost the tree's bars show. It takes the heat of the page, and a frame's accessible name and tooltip give its value and its share of the plan, so colour is never the only signal. Choosing a frame selects the node, in the tree and the node table too; with the keyboard, Enter or Space selects, and Up, Down, Left and Right go to the parent, the first child and the siblings. Nodes too narrow to see (under 0.2 % of the plan) are one dashed "N small nodes" frame for their parent, which selects nothing; a node with nothing of its own and nothing below it has no width and is not drawn. The view scrolls inside its own region and never sideways on the page. *Node table*: every node as a row - its own time (or cost), rows, estimate,
 the misestimate as `×N`, loops, shared hit and read, temp read and written and I/O time - sortable by clicking a header. A
 node's buffers and I/O are its **own**, its total less its children's, because Postgres prints them cumulatively. Selecting a row
 selects the node in the tree and the other way round. *Summary strip*: planning and execution time, JIT and its share, the
@@ -381,8 +381,7 @@ issue) and *Download plan.json* - for a pasted text plan, *Copy text* and *Downl
 pre-order, `[#3]`), and one sampled profile for each measure the plan has - *Self time* (analyzed with timing), *Self cost*,
 *Shared blocks read* and *Temp blocks written* (each when buffers were printed and not all zero) - the weight of a node being its
 own value, the same self time or cost the tree shows. The file is saved by the browser; there is no link to the viewer, which is
-opened by hand at speedscope.app (the file stays in the browser). A plan from Operations › Statements gets no export, as its
-masked form is not offered raw.
+opened by hand at speedscope.app (the file stays in the browser). A plan from Operations › Statements gets *Copy as Markdown* and *Download for speedscope* only, built from the masked plan the drill-in draws, so what is masked on the page is masked in the files; it has no JSON or text to copy or download, because its masked form is not offered raw.
 
 ## Comparing plans
 

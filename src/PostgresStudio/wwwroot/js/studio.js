@@ -942,6 +942,28 @@
         return {};
     })();
 
+    // The plan page's icicle view (1.0-P3B): a focused frame moves on the arrow keys and selects on Enter or Space, which the circuit
+    // hears through the frame's own @onkeydown. What it cannot do is stop the browser's own scrolling under those keys - Razor
+    // decides `@onkeydown:preventDefault` when the component renders, not per key, and preventing every key would take Tab away. So
+    // this stops the arrows and Space and nothing else, and only when a frame itself has the focus. One listener on the document,
+    // idempotent like everything here.
+    window.martenStudio.icicleKeys = window.martenStudio.icicleKeys || (function () {
+        const captured = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Spacebar"];
+
+        document.addEventListener("keydown", function (event) {
+            if (event.ctrlKey || event.altKey || event.metaKey || captured.indexOf(event.key) < 0) {
+                return;
+            }
+
+            const target = event.target;
+            if (target && target.nodeType === 1 && typeof target.matches === "function" && target.matches(".ms-plan-icicle-frame")) {
+                event.preventDefault();
+            }
+        });
+
+        return {};
+    })();
+
     // The health advisor's "mute in this browser" (H1): one JSON object in localStorage, and nowhere else - not
     // the cookie martenStudio.prefs falls back to, because a mute is nothing the server needs on every request.
     // It is {key, muted} (wave 6): "key" is this browser's random HMAC key as the host's Data Protection protected

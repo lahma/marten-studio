@@ -19,7 +19,22 @@
     with the same Markdown and speedscope exports, which are built from the plan read.
 *@
 
-@if (Json is { Length: > 0 } || Text is { Length: > 0 })
+@if (MaskedOnly && plan is not null)
+{
+    @* 1.0-P3B: a masked plan (the Statements drill-in's) - Markdown and speedscope, built from what the page draws. *@
+    <section class="ms-plan-export ms-plan-export-masked" aria-label="Plan export">
+        <div class="ms-plan-export-actions">
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-copy-markdown" @onclick="CopyMarkdownAsync">Copy as Markdown</button>
+            <button type="button" class="ms-btn ms-btn-sm ms-plan-download-speedscope" @onclick="DownloadSpeedscopeAsync">Download for speedscope</button>
+            <span class="ms-plan-export-status" role="status" aria-live="polite">@message</span>
+        </div>
+        <p class="ms-muted ms-plan-export-note">
+            Built from the plan as it is drawn here: what is masked on this page is masked in the files too. Open the speedscope file at
+            speedscope.app (drag it in; it stays in your browser).
+        </p>
+    </section>
+}
+else if (Json is { Length: > 0 } || Text is { Length: > 0 })
 {
     <section class="ms-plan-export" aria-label="Raw plan and export">
         <div class="ms-plan-export-actions">
@@ -71,6 +86,12 @@
     /// <summary>The plan read from <see cref="Json" />, a <c>QueryPlan</c> (<see cref="object" />: a public parameter cannot have an internal type), for the Markdown.</summary>
     [Parameter]
     public object? Plan { get; set; }
+
+    /// <summary>
+    /// 1.0-P3B: whether only the exports built from <see cref="Plan" /> are offered - for a masked plan, which has no raw form to give.
+    /// </summary>
+    [Parameter]
+    public bool MaskedOnly { get; set; }
 
     /// <summary>The download's name.</summary>
     [Parameter]

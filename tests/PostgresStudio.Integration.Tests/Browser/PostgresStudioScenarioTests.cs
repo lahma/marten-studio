@@ -190,6 +190,39 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             await page.Locator(".ms-plan-critical-flag").First.WaitForAsync();
             (await page.Locator(".ms-plan-critical-flag").CountAsync()).Should().BePositive();
 
+            // 1.0-P3B: the same plan as an icicle - a frame for each node, the selection shared with the tree, the arrow keys, and no
+            // sideways scroll at a phone's width.
+            await page.Locator(".ms-plan-view-icicle").ClickAsync();
+            await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").First.WaitForAsync();
+            int frames = await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").CountAsync();
+            frames.Should().BeGreaterThan(1, "the plan's nodes are frames");
+            (await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").First.GetAttributeAsync("aria-label"))!.Should().Contain("with what is below it");
+
+            await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").Last.ClickAsync();
+            await page.Locator(".ms-plan-icicle-selected").WaitForAsync();
+            (await page.Locator(".ms-plan-icicle-selected").CountAsync()).Should().Be(1);
+            string selectedNode = (await page.Locator(".ms-plan-icicle-selected").GetAttributeAsync("data-node"))!;
+
+            await page.Locator(".ms-plan-icicle .ms-plan-icicle-frame").First.FocusAsync();
+            int scrolled = await page.EvaluateAsync<int>("window.scrollY");
+            await page.Keyboard.PressAsync("ArrowDown");
+
+            // The key goes to the circuit and the focus comes back from it: wait for the condition, never for a time.
+            await page.WaitForFunctionAsync("document.activeElement && document.activeElement.getAttribute('data-node') === '1'");
+            (await page.EvaluateAsync<int>("window.scrollY")).Should().Be(scrolled, "the arrow keys do not scroll the page");
+
+            await page.Locator(".ms-plan-view-tree").ClickAsync();
+            await page.Locator(".ms-plan-node-selected").WaitForAsync();
+            (await page.Locator(".ms-plan-node-selected").CountAsync()).Should().Be(1, "the icicle's selection is the tree's");
+            await page.Locator(".ms-plan-view-icicle").ClickAsync();
+            (await page.Locator(".ms-plan-icicle-selected").GetAttributeAsync("data-node")).Should().Be(selectedNode);
+
+            await studio.AssertNoSidewaysScrollAsync("a drawn plan as an icicle");
+            await page.SetViewportSizeAsync(390, 800);
+            await studio.AssertNoSidewaysScrollAsync("a drawn plan as an icicle at 390 px");
+            await page.SetViewportSizeAsync(StudioPage.ViewportWidth, StudioPage.ViewportHeight);
+            await page.Locator(".ms-plan-view-tree").ClickAsync();
+
             await studio.AssertNoSidewaysScrollAsync("a drawn plan");
 
             // A pasted plan of a hundred and fifty nodes, far past the 32 KB a circuit message carries: it goes over in chunks.
