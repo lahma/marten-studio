@@ -5,6 +5,7 @@
     <RootNamespace>MartenStudio</RootNamespace>
     <PackageId>MartenStudio</PackageId>
     <IsPackable>true</IsPackable>
+    <Product>Marten Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>marten;martendb;postgresql;event-sourcing;document-database;admin;dashboard;ui;blazor;aspnetcore</PackageTags>
     <Description>An embeddable Blazor Server admin UI for MartenDB. Register it with AddMartenStudio() and mount it with MapMartenStudio() inside your own ASP.NET Core application; it runs against that application's own configured IDocumentStore. Browse document collections and JSON, inspect and steer event streams, projections and the async daemon, run guarded queries and manage schema. Every mutating operation is an individual capability flag and the studio refuses to start without an explicit authorization decision.</Description>
@@ -25,6 +26,7 @@
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

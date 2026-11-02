@@ -5,6 +5,7 @@
     <RootNamespace>PostgresStudio</RootNamespace>
     <PackageId>PostgresStudio</PackageId>
     <IsPackable>true</IsPackable>
+    <Product>Postgres Studio</Product>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>postgresql;npgsql;database;admin;dashboard;ui;blazor;aspnetcore</PackageTags>
     <Description>An embeddable Blazor Server admin UI for the PostgreSQL databases an ASP.NET Core application already registers as NpgsqlDataSource.</Description>
@@ -20,6 +21,7 @@
 
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../icon.png" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>
