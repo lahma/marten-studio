@@ -338,7 +338,9 @@ public class MaintenanceLiveTests(PostgresFixture postgres)
         await RunAsync(
             connectionString,
             "create schema ps_bloat",
-            "create table ps_bloat.notes (id int primary key, body text not null)",
+            // No autovacuum on it: half its rows deleted is past autovacuum's threshold, and a worker that came by between the
+            // delete and the measure would leave no dead tuples to count (it did, once, on the 1.0 Npgsql 10 pass).
+            "create table ps_bloat.notes (id int primary key, body text not null) with (autovacuum_enabled = false)",
             "insert into ps_bloat.notes select g, pg_catalog.repeat('n', 100) from generate_series(1, 20000) g",
             "delete from ps_bloat.notes where id % 2 = 0");
 
