@@ -102,6 +102,15 @@ internal static class ConnectionThresholds
 
     /// <summary>How many sessions a finding names in its gated evidence; the count says how many there are.</summary>
     public const int SessionsNamed = 5;
+
+    /// <summary>
+    /// C15: how far back the connection history is judged - a peak older than this is no longer a warning, whatever the history's
+    /// retention (and when the retention is shorter, the whole of it).
+    /// </summary>
+    public static readonly TimeSpan NearMissWindow = TimeSpan.FromHours(24);
+
+    /// <summary>C15: how many applications its gated evidence names, by their own peaks in the window.</summary>
+    public const int NearMissApplicationsNamed = 3;
 }
 
 /// <summary>

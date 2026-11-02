@@ -181,14 +181,31 @@ internal sealed class ServerConnectionHeadroomCheck : HealthCheck<ServerConnecti
                 + "is counted too, because Postgres withholds its backend type rather than its row - so a hidden background worker that "
                 + "runs for a role can be counted with them. Background workers it can see, autovacuum and replication have slots of "
                 + "their own and are not counted. A moment's reading: a burst can come and go between two checks.",
-            Remedy = facts.Platform.Kind == PostgresPlatformKind.AmazonAurora
-                ? AuroraRemedy(facts.Capacity, limits)
-                : new HealthRemedy(
-                    text.FewerConnectionsRemedyCode,
-                    "Lower pool ceilings across the applications that share the server, or a pooler such as PgBouncer in front of it. "
-                    + "max_connections itself is the server's setting, which the studio never changes; raising it costs memory per "
-                    + "connection on the server."),
+            Remedy = ServerRemedy(facts.Platform, facts.Capacity, limits, text),
         };
+    }
+
+    /// <summary>
+    /// What relieves the server's own connection limit - the remedy of C03's server finding, and of C15's, which judges the same
+    /// limit by its peak: Aurora's capacity remedy, or fewer connections and a pooler. A <see langword="null" /> <paramref name="limits" />
+    /// (the server's settings could not be read) is the platform-neutral one.
+    /// </summary>
+    /// <param name="platform">Who runs the server.</param>
+    /// <param name="capacity">What the host's capacity source said, or <see langword="null" />.</param>
+    /// <param name="limits">The server's connection budget, or <see langword="null" /> when it could not be read.</param>
+    /// <param name="text">The studio's words.</param>
+    internal static HealthRemedy ServerRemedy(PostgresPlatform platform, CapacityReading? capacity, ServerConnectionLimits? limits, StudioText text)
+    {
+        ArgumentNullException.ThrowIfNull(platform);
+        ArgumentNullException.ThrowIfNull(text);
+
+        return platform.Kind == PostgresPlatformKind.AmazonAurora && limits is not null
+            ? AuroraRemedy(capacity, limits)
+            : new HealthRemedy(
+                text.FewerConnectionsRemedyCode,
+                "Lower pool ceilings across the applications that share the server, or a pooler such as PgBouncer in front of it. "
+                + "max_connections itself is the server's setting, which the studio never changes; raising it costs memory per "
+                + "connection on the server.");
     }
 
     /// <summary>Aurora caps <c>max_connections</c> at this with a minimum capacity of 0 or 0.5 ACU.</summary>

@@ -1,6 +1,7 @@
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Aurora;
+using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
@@ -180,7 +181,7 @@ internal static class CheckWordCases
         History((held, [(sweptSeries, 1), (conditionSeries, 1)]), (TimeSpan.Zero, [(sweptSeries, 1), (conditionSeries, 1)]));
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Connections: C01, C03-C08, C11-C14.
+    // Connections: C01, C03-C08, C11-C15.
 
     private static IEnumerable<CheckWordCase> Connections()
     {
@@ -317,6 +318,26 @@ internal static class CheckWordCases
         yield return Case<UnattributedConnectionsCheck>(
             "unnamed connections in two databases, one role unreadable",
             Holders(60, false, Holder("app", string.Empty, 12), Holder("audit", string.Empty, 9, role: "auditor", client: null), Holder("app", string.Empty, 0, role: "other", client: null, unknown: 3, hidden: true)));
+
+        // C15 (1.0.1, issue #47) - a peak of the connection history close to the client limit.
+        ConnectionNearMissFacts NearMiss(long peak, int limitNow = 100) => new(
+            ConnectionHistoryView.Of(
+                [
+                    new PostgresConnectionSample { At = At.AddHours(-3), Server = "db:5432", Instance = "a", Connections = peak, ClientLimit = 100, ByApplication = [new PostgresConnectionCounts { ApplicationName = "billing-api", Total = (int) peak - 10 }] },
+                    new PostgresConnectionSample { At = At.AddHours(-1), Server = "db:5432", Instance = "a", Connections = 20, ClientLimit = limitNow },
+                ],
+                names: true),
+            "db:5432",
+            TimeSpan.FromHours(24),
+            TimeSpan.FromDays(7),
+            new ServerConnectionLimits(0, 0, 103, 3, 0, 170000),
+            PostgresPlatform.SelfHosted,
+            null);
+
+        yield return Case<ConnectionNearMissCheck>("a peak well under the line", NearMiss(40));
+        yield return Case<ConnectionNearMissCheck>("a peak over the Warning line", NearMiss(85));
+        yield return Case<ConnectionNearMissCheck>("a peak over the Critical line", NearMiss(97));
+        yield return Case<ConnectionNearMissCheck>("a peak that a resize has since made room for", NearMiss(97, limitNow: 300));
 
         // C07 - a forgotten prepared transaction.
         yield return Case<PreparedTransactionCheck>("none prepared", new PreparedTransactionFacts(At, 10, []));

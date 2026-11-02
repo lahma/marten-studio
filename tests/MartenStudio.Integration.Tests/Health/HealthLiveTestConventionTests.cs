@@ -47,6 +47,7 @@ public class HealthLiveTestConventionTests
         ["C12"] = "a head idle in its transaction holding ACCESS EXCLUSIVE with two waiters, and a running head's chain - Database/BlockingLiveTests",
         ["C13"] = "an application's idle pool on a server with max_connections lowered, in two databases, and the same pool below the line - Database/ConnectionHoldersLiveTests",
         ["C14"] = "connections with no application name in two databases, and every connection named - Database/ConnectionHoldersLiveTests",
+        ["C15"] = "a store holding a 96-of-100 peak three hours old, and the same peak after a resize - Sources/ConnectionHistoryLiveTests",
     };
 
     [Fact]
