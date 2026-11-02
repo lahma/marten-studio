@@ -75,10 +75,35 @@ namespace PostgresStudio
         public System.TimeSpan Retention { get; set; }
         public System.Func<System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<bool>>? ShouldSample { get; set; }
     }
+    public sealed record PostgresConnectionHistorySection : System.IEquatable<PostgresStudio.PostgresConnectionHistorySection>
+    {
+        public PostgresConnectionHistorySection() { }
+        public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresConnectionPeak> ByApplication { get; init; }
+        public int ClientLimit { get; init; }
+        public int ClientLimitNow { get; init; }
+        public int InstanceChanges { get; init; }
+        public PostgresStudio.PostgresReadOutcome Outcome { get; init; }
+        public long Peak { get; init; }
+        public System.DateTimeOffset? PeakAt { get; init; }
+        public int PendingSamples { get; init; }
+        public string? Reason { get; init; }
+        public int Samples { get; init; }
+        public string Server { get; init; }
+        public System.DateTimeOffset? Since { get; init; }
+        public System.DateTimeOffset? Until { get; init; }
+        public System.TimeSpan Window { get; init; }
+    }
     public static class PostgresConnectionHistoryServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresConnectionHistory(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresConnectionHistoryOptions>? configure = null) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddPostgresConnectionHistoryReader(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<PostgresStudio.PostgresConnectionHistoryOptions>? configure = null) { }
+    }
+    public sealed record PostgresConnectionPeak : System.IEquatable<PostgresStudio.PostgresConnectionPeak>
+    {
+        public PostgresConnectionPeak() { }
+        public string? ApplicationName { get; init; }
+        public System.DateTimeOffset At { get; init; }
+        public int Peak { get; init; }
     }
     public sealed record PostgresConnectionSample : System.IEquatable<PostgresStudio.PostgresConnectionSample>
     {
@@ -126,6 +151,7 @@ namespace PostgresStudio
     public sealed record PostgresDiagnosticsRequest : System.IEquatable<PostgresStudio.PostgresDiagnosticsRequest>
     {
         public PostgresDiagnosticsRequest() { }
+        public bool ConnectionHistory { get; init; }
         public bool Connections { get; init; }
         public bool Findings { get; init; }
         public bool IncludeActivity { get; init; }
@@ -146,6 +172,7 @@ namespace PostgresStudio
         public PostgresDiagnosticsSnapshot() { }
         public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresCheck> Checks { get; init; }
         public PostgresStudio.PostgresComputeCapacity? Compute { get; init; }
+        public PostgresStudio.PostgresConnectionHistorySection? ConnectionHistory { get; init; }
         public PostgresStudio.PostgresConnectionsSection? Connections { get; init; }
         public PostgresStudio.PostgresDatabaseRef Database { get; init; }
         public System.Collections.Generic.IReadOnlyList<PostgresStudio.PostgresFinding> Findings { get; init; }

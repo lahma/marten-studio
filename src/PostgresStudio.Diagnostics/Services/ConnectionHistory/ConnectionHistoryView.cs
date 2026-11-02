@@ -10,6 +10,7 @@ namespace PostgresStudio.Services.ConnectionHistory;
 /// <param name="Peak">The most client connections one sample counted.</param>
 /// <param name="PeakAt">When that was, the first time it was reached.</param>
 /// <param name="ClientLimit">The client budget at the peak.</param>
+/// <param name="ClientLimitNow">The client budget at the last sample - what a peak is judged against once a cluster is resized.</param>
 /// <param name="InstanceChanges">How many times the answering instance changed between two samples - a failover or a restart.</param>
 /// <param name="Applications">Each application's own peak, most first; empty below the activity gate, where no name is shown.</param>
 internal sealed record ConnectionHistoryView(
@@ -19,6 +20,7 @@ internal sealed record ConnectionHistoryView(
     long Peak,
     DateTimeOffset PeakAt,
     int ClientLimit,
+    int ClientLimitNow,
     int InstanceChanges,
     IReadOnlyList<ConnectionHistoryPeak> Applications)
 {
@@ -69,7 +71,7 @@ internal sealed record ConnectionHistoryView(
                 .Take(MaxApplications)]
             : [];
 
-        return new ConnectionHistoryView(samples[0].At, samples[^1].At, samples.Count, peak.Connections, peak.At, peak.ClientLimit, changes, applications);
+        return new ConnectionHistoryView(samples[0].At, samples[^1].At, samples.Count, peak.Connections, peak.At, peak.ClientLimit, samples[^1].ClientLimit, changes, applications);
     }
 }
 

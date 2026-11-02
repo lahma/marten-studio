@@ -63,6 +63,12 @@ public sealed record PostgresDiagnosticsSnapshot
     /// <summary>Connections and headroom.</summary>
     public PostgresConnectionsSection? Connections { get; init; }
 
+    /// <summary>
+    /// The connection history of the database's server; <see langword="null" /> unless the request asked for it
+    /// (<see cref="PostgresDiagnosticsRequest.ConnectionHistory" />).
+    /// </summary>
+    public PostgresConnectionHistorySection? ConnectionHistory { get; init; }
+
     /// <summary>The write-ahead log's counters: records, full-page images and bytes since the statistics last began.</summary>
     public PostgresWalSection? Wal { get; init; }
 

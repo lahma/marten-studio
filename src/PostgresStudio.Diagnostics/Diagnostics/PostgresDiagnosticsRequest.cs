@@ -27,6 +27,13 @@ public sealed record PostgresDiagnosticsRequest
     public bool Connections { get; init; }
 
     /// <summary>
+    /// The connection history of the database's server (issue #47): the window, the samples, the peak against the client limit and
+    /// when. Not applicable without <c>AddPostgresConnectionHistory()</c>; the peak by application only with
+    /// <see cref="IncludeActivity" />.
+    /// </summary>
+    public bool ConnectionHistory { get; init; }
+
+    /// <summary>
     /// The write-ahead log's counters (<c>pg_stat_wal</c>): records, full-page images and bytes. Read with the Replication
     /// page's facts, which a call shares with the page.
     /// </summary>
@@ -59,5 +66,6 @@ public sealed record PostgresDiagnosticsRequest
         Settings = true,
         Connections = true,
         Wal = true,
+        ConnectionHistory = true,
     };
 }

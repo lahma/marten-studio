@@ -22,5 +22,6 @@
   "settings": null,
   "connections": null,
   "wal": null,
+  "connectionHistory": null,
   "withheld": {}
 }

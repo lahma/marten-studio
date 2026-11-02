@@ -204,6 +204,26 @@ public class DiagnosticsJsonTests
             SyncTimeMs = 987_654.25,
             StatsReset = At.AddDays(-30),
         },
+        ConnectionHistory = new PostgresConnectionHistorySection
+        {
+            Outcome = PostgresReadOutcome.Read,
+            Server = "db.example:5432",
+            Window = TimeSpan.FromDays(7),
+            Since = At.AddDays(-7),
+            Until = At,
+            Samples = 10_080,
+            PendingSamples = 2,
+            InstanceChanges = 1,
+            Peak = 93,
+            PeakAt = At.AddHours(-27),
+            ClientLimit = 97,
+            ClientLimitNow = 197,
+            ByApplication =
+            [
+                new PostgresConnectionPeak { ApplicationName = "orders-api", Peak = 61, At = At.AddHours(-27) },
+                new PostgresConnectionPeak { ApplicationName = null, Peak = 20, At = At.AddHours(-26) },
+            ],
+        },
         Withheld = new Dictionary<string, string> { ["connections.byApplication"] = HostGate.WithheldSection, ["statements"] = HostGate.WithheldSection },
     };
 
