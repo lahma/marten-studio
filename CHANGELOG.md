@@ -20,6 +20,17 @@ connection history keeps the samples its store refused (#46), a process can read
   hosted service and no in-memory store, validates only `Retention`, and refuses to start without an
   `IPostgresConnectionHistoryStore` or without a studio or the diagnostics engine. It is exclusive with
   `AddPostgresConnectionHistory()` in one container, and Holders says another process fills the history.
+- The diagnostics API returns the connection history (#47): `PostgresDiagnosticsRequest.ConnectionHistory` (in
+  `AllSections`) adds `PostgresDiagnosticsSnapshot.ConnectionHistory`, a `PostgresConnectionHistorySection` with the
+  window, samples, the samples still waiting to be stored, instance changes and the peak against the client limit, with
+  its time and the limit now. The applications' own peaks (`PostgresConnectionPeak`) come only with `IncludeActivity`.
+  It is the same read and arithmetic as Database › Sessions › Holders, `notApplicable` without a connection history,
+  and the snapshot JSON gains a `connectionHistory` key (`schemaVersion` stays 1). The worker sample prints the peak.
+- New check C15, "Connections came close to the limit" (#47): Warning when the connection history's peak of the last
+  24 hours is 80 % or more of the client limit now, Critical from 95 %; a resize clears it. C03's remedy, the Aurora
+  capacity remedy included; the applications that held the most are behind the activity gate. Not applicable without a
+  connection history. C15 can make the opt-in health check report `Degraded` (or `Unhealthy` at Critical) on a host that
+  keeps a history and runs close to its limit: accept it with `AcceptedChecks` to keep the health check as it was.
 
 # 1.0.0
 
