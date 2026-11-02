@@ -347,7 +347,11 @@ internal sealed class StudioConnectionsBusyException : NpgsqlException
             + " s. Try again in a moment.",
             new TimeoutException())
     {
+        PoolSize = poolSize;
     }
+
+    /// <summary>The data source's <c>Maximum Pool Size</c> when it held the cap below <c>MaxStudioConnections</c> (issue #49), else <see langword="null" />.</summary>
+    public int? PoolSize { get; }
 }
 
 /// <summary>How a studio connection is opened: through its pool's slot, re-entrant within one asynchronous flow.</summary>

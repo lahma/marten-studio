@@ -186,6 +186,23 @@ public class StudioConnectionPoolsTests
             "The studio's connections to this database are all in use (2 at most, MaxStudioConnections), and none came free within 30 s. Try again in a moment.");
     }
 
+    /// <summary>Issue #49: the pages' busy clause names the pool size only when it held the cap, whatever wraps the exception.</summary>
+    [Fact]
+    public void The_pages_busy_clause_names_the_pool_size_only_when_it_held_the_cap()
+    {
+        StudioConnectionsBusyException bounded = new(1, TimeSpan.FromSeconds(30), poolSize: 1);
+        StudioConnectionsBusyException unbounded = new(2, TimeSpan.FromSeconds(30));
+
+        bounded.PoolSize.Should().Be(1);
+        unbounded.PoolSize.Should().BeNull();
+        PostgresFailure.CouldNotConnectClause(new InvalidOperationException("wrapped", bounded)).Should().Be(
+            "the studio's connections to this database were all in use (MaxStudioConnections, held to the data source's Maximum Pool Size of 1); try again in a moment");
+        PostgresFailure.CouldNotConnectClause(unbounded).Should().Be(
+            "the studio's connections to this database were all in use (MaxStudioConnections); try again in a moment");
+        PostgresFailure.CouldNotConnect(bounded).Should().EndWith("Maximum Pool Size of 1); try again in a moment.");
+        PostgresFailure.CouldNotConnectClause(new NpgsqlException("refused")).Should().Be("the studio could not connect to this database");
+    }
+
     [Fact]
     public void The_health_pages_share_line_names_the_pool_size_only_when_it_held_the_cap()
     {
