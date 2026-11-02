@@ -45,3 +45,6 @@ The long form - the request and the snapshot, findings and their codes, `Include
 guarantees - is
 [`docs/diagnostics.md`](https://github.com/lahma/marten-studio/blob/main/docs/diagnostics.md), and a complete worker is
 [`samples/PostgresStudio.Worker`](https://github.com/lahma/marten-studio/tree/main/samples/PostgresStudio.Worker).
+From 1.0 the package follows Semantic Versioning over the contract in
+[`docs/stability.md`](https://github.com/lahma/marten-studio/blob/main/docs/stability.md): the read model is extend-only,
+and a finding's code never changes meaning.

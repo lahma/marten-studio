@@ -57,7 +57,7 @@ every mute again when it restarts. An instance whose key ring cannot open the br
 share one, or keys since lost - shows nothing muted and leaves the list alone, so going back to the instance that
 made it finds every mute still there; the list is replaced only when you mute something on an instance that cannot
 read it. A container built by hand with no Data Protection at all keys mutes in memory, for the life of the
-process. Upgrading to 0.5 resets every mute once: a list kept by an earlier release is dropped, not migrated.
+process.
 
 A Critical finding that appears while a tab is open raises a toast in that tab, once. One that was already Critical
 when the tab first looked is not toasted - it is on the page and in the badge already - and one that stays Critical

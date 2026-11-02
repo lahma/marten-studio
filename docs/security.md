@@ -809,4 +809,5 @@ diagnostics API call is not audited (event 9250, at Debug, codes and counts only
 
 ## Reporting a vulnerability
 
-Open a private security advisory on the repository rather than a public issue.
+Do not open a public issue: report it privately, as [SECURITY.md](../SECURITY.md) says, which also lists the versions that
+get security fixes.
