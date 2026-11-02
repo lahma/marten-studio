@@ -56,20 +56,7 @@ internal sealed record StorageTableFacts(StudioTable Table, StorageTableRow Row)
     {
         ArgumentNullException.ThrowIfNull(window);
 
-        if (!window.CoversADay || NetInserts is not { } net)
-        {
-            return null;
-        }
-
-        // PostgreSQL 19: a table somebody reset on its own counted only from then, so its rows are divided by its own days -
-        // and it has no growth to give until those cover a day.
-        if (Row.CountersReset is { } own && own > window.Since)
-        {
-            double days = (window.MeasuredAt - own).TotalDays;
-            return days >= 1 ? net / days * BytesPerRow : null;
-        }
-
-        return net / window.Days * BytesPerRow;
+        return window.CoversADay && NetInserts is { } net ? net / window.Days * BytesPerRow : null;
     }
 }
 

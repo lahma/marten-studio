@@ -65,9 +65,9 @@ internal sealed record StorageTableRow
     public double? AllVisibleRatio { get; init; }
 
     /// <summary>
-    /// <c>stats_reset</c> of the table's own counters (PostgreSQL 19+), the latest of its partitions' for a partitioned table:
-    /// set when somebody reset this table alone (<c>pg_stat_reset_single_table_counters</c>), <see langword="null" /> when none
-    /// did, and always before 19. The database's own window governs a table that has none.
+    /// <c>stats_reset</c> of the table's counters (PostgreSQL 19+), the latest of its partitions' for a partitioned table: when
+    /// they were last reset (<c>pg_stat_reset()</c> sets it for every table), <see langword="null" /> when none is recorded, and
+    /// always before 19. Display only.
     /// </summary>
     public DateTimeOffset? CountersReset { get; init; }
 }

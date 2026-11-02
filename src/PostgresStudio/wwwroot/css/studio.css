@@ -14217,7 +14217,7 @@ a.ms-schema-health-mark:focus-visible {
     font-variant-numeric: tabular-nums;
 }
 
-.ms-maint-next-table .ms-num {
+.ms-maint-next-table td.ms-num {
     text-align: right;
     white-space: nowrap;
     font-variant-numeric: tabular-nums;

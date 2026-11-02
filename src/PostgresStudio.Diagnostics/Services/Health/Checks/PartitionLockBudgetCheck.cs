@@ -108,8 +108,7 @@ internal sealed class PartitionLockBudgetCheck : HealthCheck<PartitionLockFacts>
 
             return rows.FirstOrDefault(static x => string.Equals(x.LockType, "relation", StringComparison.Ordinal));
         }
-        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn
-                                                  or PostgresErrorCodes.InsufficientPrivilege)
+        catch (PostgresException exception) when (HealthTables.IsEvidenceRefused(exception))
         {
             return null;
         }

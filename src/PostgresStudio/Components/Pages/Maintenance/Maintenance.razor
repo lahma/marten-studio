@@ -116,7 +116,7 @@
                                 }
                                 @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
                                 {
-                                    <th scope="col" title="When this table's own counters were last reset (PostgreSQL 19). A dash means nobody reset them on their own: they count from the database's statistics.">Stats since</th>
+                                    <th scope="col" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. A dash means no reset time is recorded for the table.">Stats since</th>
                                 }
                                 <th scope="col">Bloat</th>
                             </tr>

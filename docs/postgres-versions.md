@@ -113,18 +113,14 @@ names either renamed literal.
 function that only 19 has is never named in a statement sent to an older server - and reads the catalog and the statistics views only, so nothing here locks what it lists. Each
 sits behind the gate its page or check already has: 19 adds no capability and no check.
 
-- **A table's and an index's own reset time** (`stats_reset` of `pg_stat_all_tables` and `pg_stat_all_indexes`, set when
-  somebody resets that one object with `pg_stat_reset_single_table_counters`; null for an object nobody reset on its own):
-  - **T05** (an unused index on a write-heavy table) judges an index over its own counters when 19 gives it a reset time
-    later than the database's window began. An index reset less than seven days ago is counted and not judged ("an index
-    reset an hour ago is not unused"); one reset longer ago is judged, and the finding says "since 2026-10-16 09:00 UTC
-    (this index's own reset)". A table reset on its own is named in the evidence too, because its writes are counted from
-    then.
-  - **T01** (sequential scans on a large table) does the same for a table: not judged until its own counters have counted
-    for seven days, never over a span of samples that began before the reset, and the finding says since when.
-  - **Storage** and **Maintenance** show a *Stats since* column where they show per-table counters. A dash means nobody
-    reset that table on its own, so its counters count from the database's statistics (*Statistics since* on Storage). A
-    table reset on its own is also divided by its own days in Storage's growth a day.
+- **A table's and an index's reset time** (`stats_reset` of `pg_stat_all_tables` and `pg_stat_all_indexes`; null where none
+  is recorded). Measured on 19rc1, resetting one table with `pg_stat_reset_single_table_counters` also moves the database's
+  own `stats_reset` to the same instant, and `pg_stat_reset()` stamps every table with the database's time. So on 19 any
+  reset restarts the database window, and the seven-day guard of T01, T05 and T06 already covers it ("an index reset an hour
+  ago is not unused"): no check judges an object over a window of its own. The matrix asserts the single-table behaviour on
+  the 19 leg, so a change at 19's general availability is noticed.
+  - **Storage** and **Maintenance** show a *Stats since* column where they show per-table counters: when that table's
+    counters were last reset, which `pg_stat_reset()` sets for every table. A dash means no reset time is recorded for it.
 - **Autovacuum's own score** (`pg_stat_autovacuum_scores`), for the tables the studio judges and no others: the largest of
   the parts autovacuum weighs (dead rows, inserts, changes since the last analyze, transaction-id age, multixact age), each
   a counter against its trigger, so 1 or more is a table autovacuum takes at its next look. **Maintenance › Next for

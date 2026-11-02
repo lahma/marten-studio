@@ -158,7 +158,7 @@
                                 <th scope="col" class="ms-storage-number" title="@HotTitle(view)">HOT</th>
                                 @if (view.StatsResetPerTableRead)
                                 {
-                                    <th scope="col" class="ms-storage-since" title="When this table's own counters were last reset (PostgreSQL 19). A dash means nobody reset them on their own: they count from the database's statistics, 'Statistics since' above.">Stats since</th>
+                                    <th scope="col" class="ms-storage-since" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. A dash means no reset time is recorded for the table.">Stats since</th>
                                 }
                             </tr>
                         </thead>

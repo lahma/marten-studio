@@ -93,8 +93,8 @@ internal sealed record MaintenanceTableView
     public double Pressure { get; init; }
 
     /// <summary>
-    /// When the table's own counters were last reset (PostgreSQL 19 only; the latest of its partitions' for a partitioned table), or
-    /// <see langword="null" /> when none was - the database's statistics govern it - and before 19.
+    /// When the table's counters were last reset (PostgreSQL 19 only; the latest of its partitions' for a partitioned table), or
+    /// <see langword="null" /> when none is recorded, and before 19. Display only.
     /// </summary>
     public DateTimeOffset? CountersReset { get; init; }
 

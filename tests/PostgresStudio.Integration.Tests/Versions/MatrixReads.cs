@@ -286,7 +286,7 @@ internal static class MatrixReads
             if (PostgresFeatures.Has(PostgresFeature.MultixactStats, x.Connection.PostgreSqlVersion.Major * 10_000))
             {
                 IReadOnlyList<MultixactUsage> usage = await QueryAsync(x, HealthHorizonQueries.MultixactStats(), HealthHorizonQueries.ReadMultixactUsage, t);
-                usage.Should().ContainSingle("the function answers one row, with nothing in it while no multixact exists");
+                usage.Should().ContainSingle("the function answers one row: zeros while no multixact exists, nulls to a role outside pg_read_all_stats");
             }
         }),
         new("lints: partitions", true, static async (x, t) =>

@@ -11,8 +11,7 @@ using PostgresStudio.Integration.Tests.Versions;
 namespace PostgresStudio.Integration.Tests.Diagnostics;
 
 /// <summary>
-/// Issue #31's three additions to the diagnostics snapshot, read live on PostgreSQL 14 to 18 and on 19's release candidate as a
-/// preview: the write-ahead log's counters (<c>pg_stat_wal</c>), whether data checksums are on and what they counted, and each
+/// Issue #31's three additions to the diagnostics snapshot, read live on PostgreSQL 15 to 19 (19 on its release candidate): the write-ahead log's counters (<c>pg_stat_wal</c>), whether data checksums are on and what they counted, and each
 /// table's all-visible ratio (<c>relallvisible / relpages</c>). Each is held to the catalog's own answer on the same server, so
 /// a read that returned something plausible and wrong fails.
 /// </summary>
@@ -25,8 +24,8 @@ namespace PostgresStudio.Integration.Tests.Diagnostics;
 /// </para>
 /// <para>
 /// A database of the test's own, with autovacuum off for its tables, so the ratio the test compares with is the one its
-/// <c>VACUUM</c> wrote and no worker moves it between the two reads. The preview leg reports and never fails a run, as
-/// <c>VersionMatrixLiveTests</c> does.
+/// <c>VACUUM</c> wrote and no worker moves it between the two reads. A leg the matrix marks as a preview (none today; 19's
+/// release candidate is a supported leg) reports and never fails a run, as <c>VersionMatrixLiveTests</c> does.
 /// </para>
 /// <para>
 /// <b>The load commits synchronously.</b> The matrix servers run with <c>synchronous_commit = off</c> (Testcontainers' fast

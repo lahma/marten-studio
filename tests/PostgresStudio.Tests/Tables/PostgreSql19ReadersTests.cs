@@ -7,15 +7,14 @@ using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Maintenance;
 using PostgresStudio.Services.Sources;
-using PostgresStudio.Services.Storage;
 
 namespace PostgresStudio.Tests.Tables;
 
 /// <summary>
 /// What PostgreSQL 19 adds that 1.1 reads (<c>pg_stat_autovacuum_scores</c>, <c>pg_get_multixact_stats()</c>, a table's own
-/// <c>stats_reset</c>), held over stated facts: the evidence each check adds and nothing else it moves, the Maintenance page's
-/// "Next for autovacuum" list, the Storage page's growth for a table reset on its own - and the statements, which name the
-/// 19-only objects only inside a statement the callers run on 19.
+/// <c>stats_reset</c>, display only), held over stated facts: the evidence each check adds and nothing else it moves, the
+/// Maintenance page's "Next for autovacuum" list - and the statements, which name the 19-only objects only inside a statement
+/// the callers run on 19.
 /// </summary>
 public partial class PostgreSql19ReadersTests
 {
@@ -117,11 +116,11 @@ public partial class PostgreSql19ReadersTests
         with.Variant.Should().Be(bare.Variant);
 
         bare.Evidence.Select(static x => x.Label).Should().NotContain(static x => x.StartsWith("Multixact members", StringComparison.Ordinal));
-        bare.Caveat.Should().Contain("is not read: Postgres has no view of it before 19");
+        bare.Caveat.Should().Contain("PostgreSQL refused pg_get_multixact_stats() to the role the studio reads as");
 
         with.Evidence.Single(static x => x.Label == "Multixact members, whole server (PostgreSQL 19)").Value
             .Should().Be("48,000 members in 12,000 multixacts, 240 KiB of member storage; the oldest still needed is multixact 77");
-        with.Caveat.Should().Contain("is shown from PostgreSQL 19's pg_get_multixact_stats() as evidence only: no line is drawn on it")
+        with.Caveat.Should().Contain("pg_get_multixact_stats() shows it here as evidence only: no line is drawn on it")
             .And.NotContain("Postgres has no view of it");
     }
 
@@ -140,7 +139,38 @@ public partial class PostgreSql19ReadersTests
             .Should().Be("0 members in 0 multixacts, 0 B of member storage; the oldest still needed is multixact 1");
 
         HealthFinding finding = new MultixactAgeCheck().Evaluate(Aged(withheld), Evaluation()).Findings.Single();
-        finding.Caveat.Should().Contain("is not shown: PostgreSQL 19's pg_get_multixact_stats() answers a role outside pg_read_all_stats nothing");
+        finding.Caveat.Should().Contain("pg_get_multixact_stats() answers a role outside pg_read_all_stats nothing, so it is not shown to this role");
+    }
+
+    [Fact]
+    public void T13s_caveat_tells_apart_below_19_shown_withheld_and_refused_on_19()
+    {
+        // Below 19: today's text, unchanged.
+        MultixactAgeCheck.MemberStorageCaveat(Aged(null) with { Database = Aged(null).Database with { ServerVersion = 180_006 } })
+            .Should().Be("Multixact member storage, which can run out before the ids do, is not read: Postgres has no view of it before 19.");
+
+        // On 19 the members area no longer wraps; past about 2 billion members autovacuum vacuums aggressively.
+        string shown = MultixactAgeCheck.MemberStorageCaveat(Aged(new MultixactUsage(1, 2, 10, 1)));
+        shown.Should().StartWith("On PostgreSQL 19 multixact member storage no longer wraps around; past about 2 billion members (about 10 GB)")
+            .And.EndWith("shows it here as evidence only: no line is drawn on it.");
+
+        MultixactAgeCheck.MemberStorageCaveat(Aged(new MultixactUsage(null, null, null, null))).Should().Contain("so it is not shown to this role");
+
+        string refused = MultixactAgeCheck.MemberStorageCaveat(Aged(null));
+        refused.Should().Contain("PostgreSQL refused pg_get_multixact_stats() to the role the studio reads as").And.NotContain("before 19");
+    }
+
+    [Theory]
+    [InlineData("42P01", true)]
+    [InlineData("42703", true)]
+    [InlineData("42883", true)]
+    [InlineData("42501", true)]
+    [InlineData("57014", true)]
+    [InlineData("40001", false)]
+    [InlineData("53300", false)]
+    public void Evidence_reads_drop_what_postgres_turns_down_or_times_out_and_fail_on_nothing_else(string sqlState, bool dropped)
+    {
+        HealthTables.IsEvidenceRefused(new Npgsql.PostgresException("msg", "ERROR", "ERROR", sqlState)).Should().Be(dropped);
     }
 
     // ---- Maintenance: "Next for autovacuum" and "Stats since" -------------------------------------------------------------
@@ -191,35 +221,6 @@ public partial class PostgreSql19ReadersTests
         MaintenanceTableView old = MaintenanceService.ViewOf(Table(Orders, shape: static row => row with { ServerVersion = 180_006 }), Now);
         old.CountersReset.Should().BeNull();
         old.Score.Should().BeNull();
-    }
-
-    // ---- Storage: growth for a table reset on its own ---------------------------------------------------------------------
-
-    private static StorageTableFacts Grown(DateTimeOffset? reset) =>
-        new(Orders, new StorageTableRow
-        {
-            Schema = "app",
-            Table = "orders",
-            HeapBytes = 10_000 * 100,
-            EstimatedRows = 10_000,
-            Inserts = 20_000,
-            Deletes = 0,
-            CountersReset = reset,
-        });
-
-    [Fact]
-    public void A_table_reset_on_its_own_is_divided_by_its_own_days_and_has_no_growth_until_those_cover_a_day()
-    {
-        StatisticsWindow thirtyDays = Window(TimeSpan.FromDays(30));
-
-        double? whole = Grown(null).GrowthBytesPerDay(thirtyDays);
-        whole.Should().NotBeNull();
-
-        double? fromReset = Grown(Now.AddDays(-10)).GrowthBytesPerDay(thirtyDays);
-        fromReset.Should().BeApproximately(whole!.Value * 3, 0.001, "ten days of the same rows is three times the rate of thirty");
-
-        Grown(Now.AddHours(-5)).GrowthBytesPerDay(thirtyDays).Should().BeNull("five hours of its own counters is not a day");
-        Grown(Now.AddDays(-45)).GrowthBytesPerDay(thirtyDays).Should().Be(whole, "a reset before the window began says nothing the window does not");
     }
 
     // ---- The statements ----------------------------------------------------------------------------------------------------

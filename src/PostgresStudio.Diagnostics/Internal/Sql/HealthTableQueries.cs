@@ -279,10 +279,10 @@ internal sealed record HealthTableRow
     public int UnseenVacuums { get; init; }
 
     /// <summary>
-    /// <c>pg_stat_all_tables.stats_reset</c> (PostgreSQL 19+): since when this one table's counters count, because somebody
-    /// reset them on their own (<c>pg_stat_reset_single_table_counters</c>) - the latest of its partitions' for a partitioned
-    /// table - or <see langword="null" /> when none was, and always before 19. The database's own window
-    /// (<see cref="StatsReset" />) is what governs a table that has none.
+    /// <c>pg_stat_all_tables.stats_reset</c> (PostgreSQL 19+): when this table's counters were last reset - the latest of its
+    /// partitions' for a partitioned table - or <see langword="null" /> when none is recorded, and always before 19. Display
+    /// only: on 19rc1 any reset, of one table or of all, also moves the database's own <see cref="StatsReset" />, so the
+    /// usage guards' window already covers it and no check judges a table over this time.
     /// </summary>
     public DateTimeOffset? CountersReset { get; init; }
 

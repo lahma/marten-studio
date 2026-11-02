@@ -154,6 +154,23 @@ public class Pg19ReadersLiveTests(PostgresVersionMatrix matrix)
         DateTimeOffset resetAt = DateTimeOffset.UtcNow;
 
         await server.ExecuteAsync("select pg_catalog.pg_stat_reset_single_table_counters('public.reset_me'::pg_catalog.regclass)", database, Token);
+
+        // Measured on 19rc1 (1.1 review): a reset of one table moves the database's own stats_reset to the same instant, so the
+        // database window restarts with it and the seven-day usage guard covers every table. T01 and T05 therefore keep no
+        // judgement of a table's own reset, and "Stats since" only says when a table's counters began. If 19's final release
+        // stops stamping the database, this assertion fails and that decision is to be reopened.
+        if (nineteen)
+        {
+            bool same = await ScalarAsync<bool>(
+                server,
+                database,
+                "select d.stats_reset is not null and d.stats_reset = t.stats_reset "
+                + "from pg_catalog.pg_stat_database d, pg_catalog.pg_stat_user_tables t "
+                + "where d.datname = pg_catalog.current_database() and t.relname = 'reset_me'");
+
+            same.Should().BeTrue("on 19rc1 a single-table reset stamps the database's stats_reset with the table's own time");
+        }
+
         await server.ExecuteAsync("select pg_catalog.pg_stat_reset_single_table_counters('public.reset_me_v'::pg_catalog.regclass)", database, Token);
 
         await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);

@@ -232,7 +232,7 @@ src/PostgresStudio.Diagnostics/Services/Server/  The server facts every W5 packe
                                          sentences (PostgresGrants), and server-setting remedies
 src/PostgresStudio/Services/Server/       The Server page's per-visitor service
 tests/PostgresStudio.Tests/Server/        The gate table, the grant sentence per platform and grant, the remedy kinds
-tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 14-18, 19's RC as a preview leg),
+tests/PostgresStudio.Integration.Tests/Versions/  The version matrix (PostgreSQL 15-19, 19 on its RC),
                                          the Aurora shim, MatrixReads and VersionMatrixLiveTests: one never-reused
                                          server per major, started on first use (an assembly fixture)
 src/PostgresStudio.Diagnostics/Services/Maintenance/  The Maintenance page's facts (the regular sweep's own reads) and the page's route
@@ -249,7 +249,7 @@ src/PostgresStudio/Components/Pages/Storage/  The Storage page: the tiles and th
 tests/PostgresStudio.Tests/Storage/       The statistics window over hand-built histories, the growth arithmetic, the
                                          Storage builder's D27 fence - no database
 tests/MartenStudio.Tests/Storage/         bUnit: the Storage page and its per-visitor view in MartenStudio's words
-tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 14-18: the Storage facts, behind a held lock, no DDL,
+tests/PostgresStudio.Integration.Tests/Storage/  Live Postgres on 15-19: the Storage facts, behind a held lock, no DDL,
                                          and the statistics window across a real crash
 src/PostgresStudio.Diagnostics/Services/Replication/  The Replication page's facts (recovery, standbys, slot statistics, the archiver,
                                          WAL, checkpoints, pg_stat_io, tablespaces), A2's not-applicable rules and the
@@ -264,7 +264,7 @@ tests/PostgresStudio.Integration.Tests/Replication/  Live primary and standby pa
 src/PostgresStudio/Components/Pages/Server/  System › Server: the server's facts, what the studio can see, the curated
                                          settings, the extension chips, the security posture and the platform slot
 tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
-                                         14-18 as app and probe, and their no-lock, no-DDL reads
+                                         15-19 as app and probe, and their no-lock, no-DDL reads
 src/PostgresStudio.Diagnostics/Services/Aurora/  Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
                                          profile and its samples, the parameter reference and the host's capacity reader
 src/PostgresStudio/Services/Aurora/       The Server page Aurora section's per-visitor view

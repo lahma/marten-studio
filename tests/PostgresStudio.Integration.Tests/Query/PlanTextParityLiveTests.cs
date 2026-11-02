@@ -11,8 +11,8 @@ using PostgresStudio.Tests.Statements;
 namespace PostgresStudio.Integration.Tests.Query;
 
 /// <summary>
-/// 1.0-P3A (issue #28): the text-format plan reader against the JSON reader, on the version matrix - 14 to 18, and 19's release
-/// candidate as a preview leg. Each statement of the set - a sequential, index, index-only and bitmap scan, a hash, a merge and a
+/// 1.0-P3A (issue #28): the text-format plan reader against the JSON reader, on the version matrix - 15 to 19, 19 on its release
+/// candidate. Each statement of the set - a sequential, index, index-only and bitmap scan, a hash, a merge and a
 /// nested-loop join with a memoize, a sort that spills, a hash aggregate, an append over partitions with run-time pruning, a CTE,
 /// an InitPlan and a SubPlan, a parallel gather, and the plans of writes - is explained as <c>FORMAT TEXT</c> and as <c>FORMAT
 /// JSON</c> with the same options, and the two reads must agree on every field both carry.
@@ -27,7 +27,7 @@ namespace PostgresStudio.Integration.Tests.Query;
 /// on how many workers got scheduled, and are not compared at all.
 /// </para>
 /// <para>
-/// <b>Fixtures.</b> With <c>MARTENSTUDIO_SAVE_PLAN_FIXTURES=1</c> the text of every statement on 14, 17 and 18 is written to
+/// <b>Fixtures.</b> With <c>MARTENSTUDIO_SAVE_PLAN_FIXTURES=1</c> the text of every statement on 17 and 18 is written to
 /// <c>tests/PostgresStudio.Tests/Statements/PlanCorpus/text-*.txt</c> (the TIMING-off variant on 17 only), and each plain plan's JSON
 /// beside it as <c>pair-text-*.json</c>, for the fast suite to read offline. The files are checked in; this switch is how they were made.
 /// </para>
@@ -134,7 +134,7 @@ public class PlanTextParityLiveTests(PostgresVersionMatrix matrix)
             }
         }
 
-        bool save = Environment.GetEnvironmentVariable("MARTENSTUDIO_SAVE_PLAN_FIXTURES") == "1" && major is 14 or 17 or 18;
+        bool save = Environment.GetEnvironmentVariable("MARTENSTUDIO_SAVE_PLAN_FIXTURES") == "1" && major is 17 or 18;
         string corpus = Path.Combine(SampleHost.RepositoryRoot(), "tests", "PostgresStudio.Tests", "Statements", "PlanCorpus");
 
         List<string> problems = [];

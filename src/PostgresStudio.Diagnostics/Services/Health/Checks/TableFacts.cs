@@ -287,11 +287,23 @@ internal static class HealthTables
 
             return scores;
         }
-        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn
-                                                  or PostgresErrorCodes.InsufficientPrivilege)
+        catch (PostgresException exception) when (IsEvidenceRefused(exception))
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Whether Postgres turned down a read that is only evidence - a 19-only view or function a platform revokes, a role without
+    /// the grant, or a statement that outlasted <c>statement_timeout</c> (<c>57014</c>) - so the evidence is dropped and the
+    /// check, which does not depend on it, still runs.
+    /// </summary>
+    internal static bool IsEvidenceRefused(PostgresException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception.SqlState is PostgresErrorCodes.UndefinedTable or PostgresErrorCodes.UndefinedColumn
+            or PostgresErrorCodes.UndefinedFunction or PostgresErrorCodes.InsufficientPrivilege or PostgresErrorCodes.QueryCanceled;
     }
 
     /// <summary>

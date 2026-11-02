@@ -30,8 +30,9 @@ namespace PostgresStudio.Services.Storage;
 /// while the catalog counts no pages. Not drawn on the page: the snapshot download carries it.
 /// </param>
 /// <param name="CountersReset">
-/// When the table's own counters were last reset (PostgreSQL 19 only), the latest of its partitions' for a partitioned table;
-/// <see langword="null" /> when none was - the database's own window governs it - and always before 19. Withheld with the name.
+/// When the table's counters were last reset (PostgreSQL 19 only; <c>pg_stat_reset()</c> sets it for every table), the latest of
+/// its partitions' for a partitioned table; <see langword="null" /> when none is recorded, and always before 19. Withheld with
+/// the name.
 /// </param>
 internal sealed record StorageTableView(
     string? Schema,

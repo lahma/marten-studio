@@ -579,7 +579,8 @@ internal static class HealthHorizonQueries
 
     /// <summary>
     /// PostgreSQL 19's multixact usage for the whole server (<c>pg_get_multixact_stats()</c>), one row. The function reads
-    /// shared memory and takes no role, and its figures are <see langword="null" /> while the server has made no multixact.
+    /// shared memory and answers a server that has made no multixact zeros (and the oldest id); its figures are
+    /// <see langword="null" /> only for a role outside <c>pg_read_all_stats</c> (<see cref="MultixactUsage.Withheld" />).
     /// </summary>
     /// <remarks>
     /// Asked only of a server that has it (<c>PostgresFeature.MultixactStats</c>, 190000): below it the function does not exist

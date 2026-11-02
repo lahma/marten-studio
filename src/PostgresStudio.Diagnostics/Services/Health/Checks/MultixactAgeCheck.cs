@@ -125,7 +125,7 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
 
             return rows.Count == 0 ? null : rows[0];
         }
-        catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.UndefinedFunction or PostgresErrorCodes.InsufficientPrivilege)
+        catch (PostgresException exception) when (HealthTables.IsEvidenceRefused(exception))
         {
             return null;
         }
@@ -313,18 +313,33 @@ internal sealed class MultixactAgeCheck : HealthCheck<MultixactAgeFacts>
                 "Read from pg_class.relminmxid of " + evaluation.Text.JudgedTablesRead + ", their TOAST tables and their partitions, and from "
                 + "pg_database.datminmxid of this database and the server's oldest. Tables that are " + evaluation.Text.NotJudged + " are counted and "
                 + "never named. "
-                + facts.Usage switch
-                {
-                    { Withheld: false } => "Multixact member storage, which can run out before the ids do, is shown from PostgreSQL 19's "
-                        + "pg_get_multixact_stats() as evidence only: no line is drawn on it.",
-                    { Withheld: true } => "Multixact member storage, which can run out before the ids do, is not shown: PostgreSQL 19's "
-                        + "pg_get_multixact_stats() answers a role outside pg_read_all_stats nothing, and no line is drawn on it either way.",
-                    null => "Multixact member storage, which can run out before the ids do, is not read: Postgres has no view of it before 19.",
-                }
+                + MemberStorageCaveat(facts)
                 + (forecast is null
                     ? " No forecast yet: a rate needs two samples, an interval apart, in which multixacts were created."
                     : " " + forecast.Caveat("the next multixact id")),
         });
+    }
+
+    /// <summary>What the caveat says of multixact member storage: before 19, on 19 shown, withheld from the role, or refused.</summary>
+    internal static string MemberStorageCaveat(MultixactAgeFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        // PostgreSQL 19 no longer lets the members area wrap around; it vacuums aggressively past about 2 billion members.
+        const string NineteenStorage =
+            "On PostgreSQL 19 multixact member storage no longer wraps around; past about 2 billion members (about 10 GB) autovacuum "
+            + "vacuums aggressively to truncate it. ";
+
+        return facts.Usage switch
+        {
+            { Withheld: false } => NineteenStorage + "pg_get_multixact_stats() shows it here as evidence only: no line is drawn on it.",
+            { Withheld: true } => NineteenStorage + "pg_get_multixact_stats() answers a role outside pg_read_all_stats nothing, so it is not "
+                + "shown to this role; no line is drawn on it either way.",
+            null when PostgresFeatures.Has(PostgresFeature.MultixactStats, facts.Database.ServerVersion) =>
+                NineteenStorage + "PostgreSQL refused pg_get_multixact_stats() to the role the studio reads as, so the figure is not shown; "
+                + "no line is drawn on it either way.",
+            null => "Multixact member storage, which can run out before the ids do, is not read: Postgres has no view of it before 19.",
+        };
     }
 
     private static string Capitalised(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];

@@ -137,8 +137,6 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
             return HealthVerdict.Quiet(withheld);
         }
 
-        int young = 0;
-
         foreach (TableFacts table in facts.Tables)
         {
             if (!IsJudged(table))
@@ -146,19 +144,10 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
                 continue;
             }
 
-            // PostgreSQL 19 keeps a reset time per table. A table whose own counters were reset inside the window is judged over
-            // their shorter one: not before they have counted for as long as the guard asks, and never over a span of samples that
-            // began before the reset (a rate across it would mix two runs of the counter).
-            if (OwnResetWithin(table, usage) is { } ownReset && facts.ReadAt - ownReset < UsageGuard.MinimumWindow)
-            {
-                young++;
-                continue;
-            }
-
             CounterDelta? scans = TableHistory.Delta(evaluation.History.Trend(ScansSeries + table.Key));
             CounterDelta? read = TableHistory.Delta(evaluation.History.Trend(RowsReadSeries + table.Key));
 
-            if (scans is null || read is null || (OwnResetWithin(table, usage) is { } reset && reset > read.From))
+            if (scans is null || read is null)
             {
                 continue;
             }
@@ -181,31 +170,16 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
             }
         }
 
-        string? youngNote = young switch
-        {
-            0 => null,
-            1 => "1 table's own counters were reset less than 7 days ago and it was not judged.",
-            _ => TableText.Count(young) + " tables' own counters were reset less than 7 days ago and were not judged.",
-        };
-
         if (findings.Count > 0)
         {
-            return new HealthVerdict(findings, youngNote);
+            return new HealthVerdict(findings);
         }
 
-        return HealthVerdict.Quiet(watched == 0 && large > young
-            ? "Watching " + TableText.Count(large - young) + " large table" + (large - young == 1 ? string.Empty : "s")
+        return HealthVerdict.Quiet(watched == 0
+            ? "Watching " + TableText.Count(large) + " large table" + (large == 1 ? string.Empty : "s")
               + ": a scan rate needs two samples, one interval apart."
-              + (youngNote is null ? string.Empty : " " + youngNote)
-            : youngNote);
+            : null);
     }
-
-    /// <summary>
-    /// When this table's own counters were last reset (PostgreSQL 19), if that is later than the start of the window the
-    /// database's counters are judged over - or <see langword="null" /> for a table that counts from the window's start.
-    /// </summary>
-    internal static DateTimeOffset? OwnResetWithin(TableFacts table, UsageWindow usage) =>
-        table.Row.CountersReset is { } own && own > usage.Since ? own : null;
 
     private static HealthFinding Finding(
         TableFacts table,
@@ -218,23 +192,7 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
         StudioTable declared = table.Table;
         TimeSpan window = read.Span;
         string times = Math.Floor(wholeTableReads).ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
-        DateTimeOffset? ownReset = OwnResetWithin(table, usage);
 
-        List<HealthEvidence> evidence =
-        [
-            new HealthEvidence("Table", declared.Describe()),
-            new HealthEvidence("Live rows", TableText.Rows(table.Rows)),
-            new HealthEvidence("Sequential scans in the window", TableText.Count(scans.Change)),
-            new HealthEvidence("Rows they read", TableText.Count(read.Change)),
-            new HealthEvidence("Whole-table reads", wholeTableReads.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)),
-            new HealthEvidence("Window", TableText.Span(window) + ", " + TableText.When(read.From) + " to " + TableText.When(read.To)),
-        ];
-
-        // PostgreSQL 19: a table whose own counters were reset since the database's window began is judged over its own.
-        if (ownReset is { } own)
-        {
-            evidence.Add(new HealthEvidence("Counters since", StatisticsWindow.When(own) + " (this table's own reset, PostgreSQL 19)"));
-        }
 
         return new HealthFinding
         {
@@ -252,11 +210,17 @@ internal sealed class SequentialScansCheck : HealthCheck<SequentialScanFacts>
                 + TableText.Rows(table.Rows) + " rows that is the query's whole cost, it grows with the table, and while it runs it "
                 + "fills the buffer cache with pages nobody else asked for. A query that filters, sorts or joins on a member no "
                 + "index covers does this every time it runs.",
-            Evidence = evidence,
+            Evidence =
+            [
+                new HealthEvidence("Table", declared.Describe()),
+                new HealthEvidence("Live rows", TableText.Rows(table.Rows)),
+                new HealthEvidence("Sequential scans in the window", TableText.Count(scans.Change)),
+                new HealthEvidence("Rows they read", TableText.Count(read.Change)),
+                new HealthEvidence("Whole-table reads", wholeTableReads.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)),
+                new HealthEvidence("Window", TableText.Span(window) + ", " + TableText.When(read.From) + " to " + TableText.When(read.To)),
+            ],
             Caveat =
-                "Counters " + (ownReset is { } ownSince
-                    ? "since " + StatisticsWindow.When(ownSince) + " (this table's own reset, PostgreSQL 19)"
-                    : usage.SinceText) + "; a usage verdict is never given over less than 7 days of them, or over counters "
+                "Counters " + usage.SinceText + "; a usage verdict is never given over less than 7 days of them, or over counters "
                 + "that look reset. A parallel scan counts once per worker. The studio's own exact counts, pg_dump and a one-off report are "
                 + "sequential scans too; which statement it was is T02's to say.",
             Remedy = evaluation.TableRemedies?.IndexTheFilteredMember(declared),
