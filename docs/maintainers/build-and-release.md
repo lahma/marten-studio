@@ -174,6 +174,13 @@ floor, and `Pack` refuses any other Marten.
 `GITHUB_REF_NAME` equals `v{version parsed from CHANGELOG.md}`. To release: land the changelog entry first,
 then tag that commit.
 
+**Package validation (1.0).** Each shipped project has `EnablePackageValidation`, and `Directory.Build.props`'s
+`PackageValidationBaselineVersion` names the release the packages are compared with at `Pack` (0.11.0 for 1.0.0): `Pack`
+restores that version of each package from nuget.org and fails on a breaking change to the public surface (a removed or
+changed member, an interface member without a default body). In the pull request that lands a release's CHANGELOG section,
+move the baseline to the release before it, so the next release is compared with the last one shipped. A deliberate break
+is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline.
+
 The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). All three packages are consumed
 by `PackageReference`; there is nothing a user could usefully download, and attaching a copy of a .nupkg
 would only invite installing a file that never went through the trusted-publishing path. The release body
