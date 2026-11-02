@@ -1,3 +1,96 @@
+# 1.0.0
+
+1.0 is the first release with a stability promise: from here the three packages follow Semantic Versioning over the
+contract `docs/stability.md` lists - the public API baselines, the finding codes, the snapshot JSON, capabilities and
+their defaults, the log event ids. Nothing was renamed or removed; `docs/upgrading.md` says what an upgrade from 0.x
+notices. It also bounds and names the studio's share of the application's connection pool (#44), adds an opt-in history
+of the server's connections (#43), finishes the plan analyzer (#28), groups the diagnostics API's findings (#42) and
+shows what PostgreSQL 18 adds.
+
+- The studio holds at most `MaxStudioConnections` (new option, 2 by default, 1 to 100) of each pool it reads through - each
+  of the application's own data sources - at a time (#44). A read that finds every one in use waits for one, at most
+  `QueryTimeout`, and then fails as a connection failure that names the option, audited like any other; a nested read of an
+  operation that already holds one never waits for its own caller. The Health page's studio-cost line shows the cap and how
+  many are in use, and C01 names how many of a saturated pool's connections were the studio's.
+- The studio's sessions carry a name of their own in `pg_stat_activity`, Database › Sessions and an external monitor
+  (#44): by default the application's own `Application Name` with the studio's after it (`orders-api (Marten Studio)`),
+  or `StudioApplicationName` (new option; `""` keeps the application's). It is set for each of the studio's read-only
+  transactions only, so a pooled connection goes back to the application with its own name, whatever `No Reset On Close`
+  says.
+- A connection history, opt in with `AddPostgresConnectionHistory()` in `PostgresStudio.Diagnostics` (#43): a background
+  sampler counts each server's client sessions by application every `Interval` (a minute by default) over one connection it
+  keeps open for the purpose - outside `MaxStudioConnections`, named "history" - and appends the sample to
+  `IPostgresConnectionHistoryStore`, in memory for `Retention` (seven days) unless the host registers its own. Only one
+  process need sample: `ShouldSample` is asked before every round. A source of dynamic databases is never enumerated.
+- Database › Sessions › Holders says what the server's connections peaked at before now, against the client limit, when,
+  and across how many failovers or restarts, under the source policy; each application's own peak behind
+  `ViewDatabaseActivity`. Without the registration, the tab says how to turn it on (#43).
+- New public types in `PostgresStudio.Diagnostics`: `PostgresConnectionHistoryServiceCollectionExtensions`,
+  `PostgresConnectionHistoryOptions`, `IPostgresConnectionHistoryStore` and `PostgresConnectionSample`. New log events 9460
+  and 9461 (throttled) and 9462 (Debug).
+- Diagnostics API: `PostgresDiagnosticsSnapshot.FindingsByCheck()` returns the findings as the Health page lists them, a
+  `PostgresFindingGroup` per check (worst severity, the check's title for several findings and the finding's own subject
+  and detail for one, the count, a studio path), accepted findings left out and the groups ordered by severity and then
+  check order (#42).
+- Diagnostics API: `IPostgresDiagnostics.GetSnapshotAsync(request, cancellationToken)`, a default member that reads the one
+  listed database and throws `InvalidOperationException` for none or several (#42).
+- Query › Plan reads a pasted plan in `EXPLAIN`'s default text format as well as JSON (#28): what `psql` prints - its
+  `QUERY PLAN` header, rule and row count, a log line or `auto_explain`'s `Query Text:` before it, CRLF line ends - into
+  the same plan, so every view, insight, export and comparison works on it. It is held to the JSON reader by a test that
+  explains a set of statements both ways on PostgreSQL 14 to 18 and 19's release candidate. A text plan is offered as Copy
+  text and Download plan.txt.
+- Pasting a plan is every visitor's (#28): it reads nothing and runs nothing, so Plan is in both studios' rails whatever
+  `RunSql` and `ReadOnly` say, and the paste box is offered with `RunSql` off, under `ReadOnly` and when the write policy
+  refuses running. Running a plan keeps the console's gate. Pasting is not audited.
+- Four plan insights judged from the statement's text as it is written, before anything runs (#28): P22 `NOT IN` over a
+  subquery, P23 a large literal `OFFSET`, P24 `SELECT *` over a join, P25 `ORDER BY random()`. They are found with the
+  studio's own lexer, so nothing in a comment or a literal counts, and each names its line and column.
+- Query › Plan: an Icicle view beside the tree and the node table - the plan as frames, each as wide as its time (or
+  estimated cost) with what is below it, its own part a bar along its foot, in the page's heat, sharing the selected node,
+  keyboard-navigable, with nodes too narrow to see merged into one frame (#28).
+- Operations › Statements: the drill-in's plan can be copied as Markdown and downloaded for speedscope, built from the
+  masked plan the page draws; it offers no JSON or text copy (#28).
+- Marten Studio's plan insights P26 to P28: a JSON filter on a document table that no index the store declares serves
+  (with the `Duplicate`, `Index` or `GinIndexJsonData` line to declare), a GIN index on `data` a containment filter did not
+  use, and a tenant or soft-delete predicate filtered after the index (with the `StartIndexesByTenantId`, `IndexTenantId`
+  or partial `Index` line). Judged from `StoreOptions` alone, for visible document types, on plans that name their schema
+  (#28).
+- PostgreSQL 18 is shown where it belongs, and absent, not empty, below it. The database browser badges a generated
+  column "virtual" or "stored" - a PostgreSQL 18 virtual column was badged "stored" before - and Keys & indexes badges a
+  primary key or unique constraint declared `WITHOUT OVERLAPS` and a foreign key declared `PERIOD` (spelled
+  `PERIOD valid_at`, as declared); Relationships draws a `PERIOD` foreign key like any other, with the word in its label.
+- Statements and its drill-in show the counters `pg_stat_statements` 1.12 adds on PostgreSQL 18 - how often a statement
+  filled the WAL buffers and how many parallel workers its plans asked for and were given - and Database › Sessions shows
+  each session's I/O (reads, writes, cache hits) from `pg_stat_get_backend_io`, read in one statement for every session
+  shown and behind `ViewDatabaseActivity`.
+- The Statements drill-in no longer plans a statement that names a view or a SQL function, in a schema the visitor may
+  see, that reaches into one they may not: the planner would inline or expand that schema's function or view into
+  conditions over tables the visitor may see, with no withheld table in the plan to hide it by (the known limit of 0.6).
+  The studio walks `pg_depend` from views and SQL-standard bodies and reads string-bodied SQL functions before anything is
+  prepared, locking nothing.
+- A host's database source or tenancy whose own code throws while the studio resolves a scope - listing its databases,
+  completing the scope, opening one - no longer reaches a page as an unhandled exception of whatever type it threw: it is
+  the studio's "could not be built" failure, saying the host's words escaped and bounded and Postgres' own withheld, and
+  the original is logged once at Warning (9213, 9219) under the existing throttle.
+- Marten Studio's Schema screen reads every size from the catalog's page counts, marked `~`, and calls no size function:
+  `pg_total_relation_size` waited behind any migration holding a lock on a store table, so the screen hung for as long as
+  the migration ran.
+- The bulk skip's preview on Dead letters › By cause is refused with `ManageDeadLetters` off or under `ReadOnly`, before
+  anything is read.
+- The Health page's Snapshot menu and the JSON viewer's copy menu open at their button again. A menu on the shared
+  `MenuButton` is anchored to its own button (and flips where there is no room), and the JSON viewer's shared menu to the
+  key button that asked for it; both used to open in the middle of the window, over the page. The Snapshot menu's second
+  lines are in the UI font.
+- The rail's credit line is three lines (product and version, licence, author) at the foot of the rail. The rail is now
+  as tall as the window and sticks to it as a long page scrolls, so the credit is always at the foot of what is on screen;
+  a rail longer than the window scrolls inside itself, with the credit after the list.
+- A health finding with two statements labels each "Show SQL"; an error's caret is never off-screen at a narrow width (a
+  long line is shown as a window around it); unmuting a Critical finding no longer toasts it as new; Postgres Studio's
+  Relationships draws no always-empty Member column and explains a key it cannot draw without naming document types.
+- Packages: an icon, release notes that link this changelog, a product name of each package's own (`Postgres Studio`,
+  `Postgres Studio Diagnostics`), and package validation against 0.11.0. New `SECURITY.md`, `docs/stability.md` and
+  `docs/upgrading.md`.
+
 # 0.11.0
 
 0.11 splits the diagnostics engine into a package of its own, `PostgresStudio.Diagnostics`, so a worker, a job host or a
