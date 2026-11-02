@@ -287,6 +287,33 @@
     "syncTimeMs": 987654.25,
     "statsReset": "2026-10-03T06:00:01.0000000+00:00"
   },
+  "connectionHistory": {
+    "outcome": "read",
+    "reason": null,
+    "server": "db.example:5432",
+    "windowSeconds": 604800,
+    "since": "2026-10-26T06:00:01.0000000+00:00",
+    "until": "2026-11-02T06:00:01.0000000+00:00",
+    "samples": 10080,
+    "pendingSamples": 2,
+    "instanceChanges": 1,
+    "peak": 93,
+    "peakAt": "2026-11-01T03:00:01.0000000+00:00",
+    "clientLimit": 97,
+    "clientLimitNow": 197,
+    "byApplication": [
+      {
+        "applicationName": "orders-api",
+        "peak": 61,
+        "at": "2026-11-01T03:00:01.0000000+00:00"
+      },
+      {
+        "applicationName": null,
+        "peak": 20,
+        "at": "2026-11-01T04:00:01.0000000+00:00"
+      }
+    ]
+  },
   "withheld": {
     "connections.byApplication": "Activity-grade: call with IncludeActivity = true",
     "statements": "Activity-grade: call with IncludeActivity = true"

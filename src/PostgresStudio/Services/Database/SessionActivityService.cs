@@ -150,28 +150,21 @@ internal sealed class SessionActivityService : ISessionActivityService
     private async Task<ConnectionHistoryView?> HistoryAsync(ResolvedSource resolved, bool names, CancellationToken cancellationToken)
     {
         if (history is null
-            || ConnectionHistorySampler.ServerOf(resolved.Target.DataSource?.ConnectionString) is not { } server)
+            || ConnectionHistoryLookup.ServerOf(resolved) is not { } server)
         {
             return null;
         }
 
-        try
+        // The one arithmetic Holders and the diagnostics API share (issue #47).
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(history, server, names, null, cancellationToken).ConfigureAwait(false);
+
+        // A store that failed or took longer than QueryTimeout: the page shows now alone for this poll.
+        if (read.Failure is { } failure && logger.IsEnabled(LogLevel.Debug))
         {
-            // Issue #46: beside what the store holds, the samples this process holds because the store refused them.
-            IReadOnlyList<PostgresConnectionSample> samples = await history
-                .ReadWithPendingAsync(server, sampler?.PendingSamples(server) ?? [], cancellationToken)
-                .ConfigureAwait(false);
-            return ConnectionHistoryView.Of(samples, names);
+            logger.LogDebug(failure, "The connection history of {Server} could not be read", server);
         }
-        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
-        {
-            // A store that failed or took longer than QueryTimeout: the page shows now alone for this poll.
-            if (logger.IsEnabled(LogLevel.Debug))
-            {
-                logger.LogDebug(exception, "The connection history of {Server} could not be read", server);
-            }
-            return null;
-        }
+
+        return read.View;
     }
 
     /// <summary>Issue #46: how many samples of the server <paramref name="resolved" /> is on this process holds because the store refused them - a count, no names.</summary>

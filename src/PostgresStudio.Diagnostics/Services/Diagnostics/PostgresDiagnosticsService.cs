@@ -7,6 +7,7 @@ using Npgsql;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Aurora;
+using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Maintenance;
@@ -307,6 +308,18 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             };
         }
 
+        // The connection history is the history store's, not the database's: it is read even when the database is not reached - a peak
+        // near the limit is what a host wants to see then - and by the one lookup Holders reads through (issue #47).
+        if (request.ConnectionHistory)
+        {
+            if (!request.IncludeActivity)
+            {
+                withheld[ConnectionHistoryWithheldKey] = HostGate.WithheldSection;
+            }
+
+            snapshot = snapshot with { ConnectionHistory = await ConnectionHistoryAsync(resolved, request.IncludeActivity, cancellationToken).ConfigureAwait(false) };
+        }
+
         if (!reached)
         {
             // Every check that reads the catalog already failed to connect: each section asked for says so, without a second
@@ -404,6 +417,12 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             withheld["connections.byApplication"] = HostGate.WithheldSection;
         }
 
+        // The connection history is read before this is called and kept as it is: it needs no connection to the database.
+        if (request.ConnectionHistory && !request.IncludeActivity)
+        {
+            withheld[ConnectionHistoryWithheldKey] = HostGate.WithheldSection;
+        }
+
         return snapshot with
         {
             Storage = request.Storage
@@ -434,7 +453,8 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
     {
         ArgumentNullException.ThrowIfNull(sweep);
 
-        HealthCheckResult[] catalog = [.. sweep.Results.Where(static x => x.Check.Tier == HealthCostTier.Catalog)];
+        // A check that stood down (not applicable here: no connection history, Aurora's storage layer) never tried the database.
+        HealthCheckResult[] catalog = [.. sweep.Results.Where(static x => x.Check.Tier == HealthCostTier.Catalog && x.Outcome != HealthCheckOutcome.NotApplicable)];
 
         if (catalog.Length > 0 && catalog.All(static x => x.Outcome == HealthCheckOutcome.Failed))
         {
@@ -569,6 +589,59 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
     /// The write-ahead log section: the Replication page's facts - its one single-flight read per database per interval, with
     /// the platform and release gates applied there - and <c>pg_stat_wal</c> from them. Never a read of its own.
     /// </summary>
+    /// <summary>The <see cref="PostgresDiagnosticsSnapshot.Withheld" /> key of the connection history's per-application peaks.</summary>
+    internal const string ConnectionHistoryWithheldKey = "connectionHistory.byApplication";
+
+    /// <summary>What the connection history section says when no history is registered.</summary>
+    internal const string NoConnectionHistory =
+        "No connection history is kept: register AddPostgresConnectionHistory() (or a history reader) to have the studio sample the server's connections.";
+
+    /// <summary>
+    /// The connection history section: the history store's samples for the database's server, summarized by the lookup Database ›
+    /// Sessions › Holders reads through - one arithmetic - and through the same 30-second shared cache. Never a read of the database.
+    /// </summary>
+    private async Task<PostgresConnectionHistorySection> ConnectionHistoryAsync(ResolvedSource resolved, bool includeActivity, CancellationToken cancellationToken)
+    {
+        if (services.GetService<ConnectionHistoryReader>() is not { } reader)
+        {
+            return new PostgresConnectionHistorySection { Outcome = PostgresReadOutcome.NotApplicable, Reason = NoConnectionHistory };
+        }
+
+        if (ConnectionHistoryLookup.ServerOf(resolved) is not { } server)
+        {
+            return new PostgresConnectionHistorySection
+            {
+                Outcome = PostgresReadOutcome.NotApplicable,
+                Reason = "The source exposes no data source, so there is no server whose connections could be sampled.",
+                Window = reader.Window,
+            };
+        }
+
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, server, includeActivity, null, cancellationToken).ConfigureAwait(false);
+
+        if (read.Failure is { } failure)
+        {
+            LogHistoryFailure(failure, resolved);
+        }
+
+        return DiagnosticsSnapshotBuilder.ConnectionHistory(read, includeActivity);
+    }
+
+    private void LogHistoryFailure(Exception exception, ResolvedSource resolved)
+    {
+        if (exception is OperationCanceledException or TimeoutException)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "The diagnostics API did not read the connection history of {DatabaseId}: it timed out", resolved.Target.Identity);
+            }
+
+            return;
+        }
+
+        LogSectionFailure("connectionHistory", exception, new PostgresDatabaseRef(resolved.Source.Key, resolved.Target.Identity));
+    }
+
     private async Task<PostgresWalSection> WalAsync(ResolvedSource resolved, IServiceProvider scope, CancellationToken cancellationToken)
     {
         ReplicationFactsCache replication = scope.GetRequiredService<ReplicationFactsCache>();
@@ -689,6 +762,11 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
         if (request.Wal)
         {
             sections.Add("wal");
+        }
+
+        if (request.ConnectionHistory)
+        {
+            sections.Add("connectionHistory");
         }
 
         string flags = (request.IncludeActivity ? "+activity" : string.Empty) + (request.RunDeeperChecks ? "+deeper" : string.Empty);

@@ -135,6 +135,7 @@ internal static class DiagnosticsJson
         Settings(json, snapshot.Settings);
         Connections(json, snapshot.Connections);
         Wal(json, snapshot.Wal);
+        ConnectionHistory(json, snapshot.ConnectionHistory);
 
         json.WriteStartObject("withheld");
         foreach (KeyValuePair<string, string> section in snapshot.Withheld.OrderBy(static x => x.Key, StringComparer.Ordinal))
@@ -394,6 +395,44 @@ internal static class DiagnosticsJson
         Number(json, "writeTimeMs", wal.WriteTimeMs);
         Number(json, "syncTimeMs", wal.SyncTimeMs);
         Time(json, "statsReset", wal.StatsReset);
+        json.WriteEndObject();
+    }
+
+    private static void ConnectionHistory(Utf8JsonWriter json, PostgresConnectionHistorySection? history)
+    {
+        json.WritePropertyName("connectionHistory");
+
+        if (history is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        json.WriteString("outcome", Name(history.Outcome));
+        Text(json, "reason", history.Reason);
+        json.WriteString("server", history.Server);
+        json.WriteNumber("windowSeconds", (long) history.Window.TotalSeconds);
+        Time(json, "since", history.Since);
+        Time(json, "until", history.Until);
+        json.WriteNumber("samples", history.Samples);
+        json.WriteNumber("pendingSamples", history.PendingSamples);
+        json.WriteNumber("instanceChanges", history.InstanceChanges);
+        json.WriteNumber("peak", history.Peak);
+        Time(json, "peakAt", history.PeakAt);
+        json.WriteNumber("clientLimit", history.ClientLimit);
+        json.WriteNumber("clientLimitNow", history.ClientLimitNow);
+        json.WriteStartArray("byApplication");
+        foreach (PostgresConnectionPeak application in history.ByApplication)
+        {
+            json.WriteStartObject();
+            Text(json, "applicationName", application.ApplicationName);
+            json.WriteNumber("peak", application.Peak);
+            Time(json, "at", application.At);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
         json.WriteEndObject();
     }
 

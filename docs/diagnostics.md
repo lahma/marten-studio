@@ -84,6 +84,7 @@ PostgresDiagnosticsSnapshot s = await diagnostics.GetSnapshotAsync(
 | `Settings` | the curated server settings and the extensions, and whether data checksums are on and what they have counted | `Settings` |
 | `Connections` | sessions by state for the database, the server's connection budget, and sessions per application | `Connections` |
 | `Wal` | the write-ahead log's records, full-page images, bytes, writes and syncs (and their times when the server times them) since the statistics last began | `Wal` |
+| `ConnectionHistory` | the connection history of the database's server (1.0.1): the window, samples, the peak against the client limit and when, instance changes, and per application with `IncludeActivity` | `ConnectionHistory` |
 | `Withheld` | each section or part left out, keyed by its name, with what it would take | always |
 
 `PostgresDiagnosticsRequest.FindingsOnly` asks for the findings alone; `PostgresDiagnosticsRequest.AllSections` for every
@@ -204,6 +205,8 @@ names, other sessions' process ids and roles, and findings about one tenant. On 
 - the `Statements` section is `null`, and `Withheld["statements"]` says why;
 - `Connections.ByApplication` is empty - the database's totals and the server's budget are always there - and
   `Withheld["connections.byApplication"]` says why;
+- `ConnectionHistory.ByApplication` is empty - the window, the peak and the limits are always there - and
+  `Withheld["connectionHistory.byApplication"]` says why;
 - a finding of a check that reads other programs' statements (T02, T22, T23 - `PostgresCheck.RequiresActivity`) or names
   other sessions' blockers, applications, roles and addresses (C12, C13, C14) and a finding about one tenant are counted in
   `FindingsWithheld` and never described, and such a check's `Outcome` is `Withheld`;
@@ -352,6 +355,33 @@ exclusive with `AddPostgresConnectionHistory()` in one container. See [Postgres 
 limit and when, how many samples, and how many instance changes. The applications' own peaks need `ViewDatabaseActivity`, as
 Holders' applications do. Without the registration, Holders says how to turn it on.
 
+**In the snapshot** (1.0.1, issue #47). `PostgresDiagnosticsRequest.ConnectionHistory` (in `AllSections`, not in `FindingsOnly`)
+adds a `ConnectionHistory` section, for a worker or a support page that has no Holders to open:
+
+```csharp
+PostgresDiagnosticsSnapshot snapshot = await diagnostics.GetSnapshotAsync(
+    database, PostgresDiagnosticsRequest.FindingsOnly with { ConnectionHistory = true }, ct);
+
+if (snapshot.ConnectionHistory is { Outcome: PostgresReadOutcome.Read } history)
+{
+    logger.LogInformation("Peak {Peak} of {Limit} client connections at {At} ({Samples} samples)",
+        history.Peak, history.ClientLimit, history.PeakAt, history.Samples);
+}
+```
+
+`Outcome` is `NotApplicable` without a connection history registration, `Unavailable` while the window holds no sample, `TimedOut`
+or `Failed` when the history's store did not answer. `Server` is `host:port`; `Window`, `Since` and `Until` are the retention and the
+first and last sample; `Samples`, `PendingSamples` (samples this process took and has not yet stored) and `InstanceChanges` count;
+`Peak`, `PeakAt` and `ClientLimit` (at the peak) are the most client connections one sample counted and when it was first reached,
+and `ClientLimitNow` is the latest sample's limit - the one a peak is judged against once a cluster is resized (C15 does exactly
+that). `ByApplication` lists each application's own peak (`ApplicationName`, `Peak`, `At`), at most twenty, and only with
+`IncludeActivity`. It is the same read and the same arithmetic as Database › Sessions › Holders, through the same 30-second shared
+cache, so the two never disagree. It reads the history store and not the database, so it is there even when the database cannot be
+reached. In the JSON it is the `connectionHistory` key (`null` when not asked; `windowSeconds` for the window; the times in UTC).
+
+**Check C15** "Connections came close to the limit" (1.0.1) raises a peak of the last 24 hours at 80 % (Warning) or 95 % (Critical)
+of `ClientLimitNow`; it is not applicable without a connection history. See [connections.md](health/connections.md#c15-connections-came-close-to-the-limit).
+
 **Failures.** A round or a server that fails is logged as event 9460 or 9461, throttled like the studio's polled reads, and
 tried again at the next interval; nothing a page shows fails with it.
 
@@ -425,7 +455,7 @@ Adding a key keeps the version. Removing or renaming one, changing its type or c
 
 | `schemaVersion` | Written by | What changed |
 |---|---|---|
-| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. |
+| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. 1.0.1 added `connectionHistory`. |
 
 ## The Snapshot menu
 

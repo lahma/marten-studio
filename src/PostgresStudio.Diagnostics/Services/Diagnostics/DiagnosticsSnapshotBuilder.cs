@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using PostgresStudio.Internal.Sql;
+using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Replication;
@@ -295,6 +296,71 @@ internal static class DiagnosticsSnapshotBuilder
             ByApplication = gate.IncludeActivity ? [.. connections.Applications.Select(DiagnosticsMapper.Counts)] : [],
             AllSessionsVisible = connections.AllSessionsVisible,
         };
+    }
+
+    /// <summary>What the section says while the window holds no sample.</summary>
+    internal const string NoSamplesYet = "The connection history holds no sample of this server yet: the first is taken a moment after the application starts.";
+
+    /// <summary>
+    /// The connection history section from one read of the history - the arithmetic is <see cref="ConnectionHistoryView" />'s, the
+    /// same Holders shows. Per-application peaks only with the host gate's <c>IncludeActivity</c>.
+    /// </summary>
+    /// <param name="read">The lookup's answer.</param>
+    /// <param name="includeActivity">The request's switch.</param>
+    public static PostgresConnectionHistorySection ConnectionHistory(ConnectionHistoryRead read, bool includeActivity)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        switch (read.Outcome)
+        {
+            case PostgresReadOutcome.Read when read.View is { } view:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.Read,
+                    Server = read.Server,
+                    Window = read.Window,
+                    Since = view.Since,
+                    Until = view.Until,
+                    Samples = view.Samples,
+                    PendingSamples = read.PendingSamples,
+                    InstanceChanges = view.InstanceChanges,
+                    Peak = view.Peak,
+                    PeakAt = view.PeakAt,
+                    ClientLimit = view.ClientLimit,
+                    ClientLimitNow = view.ClientLimitNow,
+                    ByApplication = includeActivity
+                        ? [.. view.Applications.Select(static x => new PostgresConnectionPeak { ApplicationName = x.Application, Peak = x.Peak, At = x.At })]
+                        : [],
+                };
+
+            case PostgresReadOutcome.Unavailable:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.Unavailable,
+                    Reason = NoSamplesYet,
+                    Server = read.Server,
+                    Window = read.Window,
+                    PendingSamples = read.PendingSamples,
+                };
+
+            case PostgresReadOutcome.TimedOut:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.TimedOut,
+                    Reason = "The history's store took longer than QueryTimeout to answer.",
+                    Server = read.Server,
+                    Window = read.Window,
+                };
+
+            default:
+                return new PostgresConnectionHistorySection
+                {
+                    Outcome = PostgresReadOutcome.Failed,
+                    Reason = "The connection history could not be read (" + (read.Failure?.GetType().Name ?? "unknown") + "); the server log has it (event 9251).",
+                    Server = read.Server,
+                    Window = read.Window,
+                };
+        }
     }
 
     private static int Count(long value) => DiagnosticsMapper.Count(value);
