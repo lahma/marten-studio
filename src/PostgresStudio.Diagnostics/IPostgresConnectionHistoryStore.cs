@@ -26,6 +26,13 @@ namespace PostgresStudio;
 /// configured <c>Interval</c>. Before the next sample the sampler appends what it holds, oldest first, one <see cref="AppendAsync" />
 /// each, and stops at the first that fails; past the hour the oldest is dropped, and a process that stops loses what it held.
 /// </para>
+/// <para>
+/// <b>Reads are incremental.</b> The studio asks <see cref="ReadAsync" /> for the whole window the first time (and after it dropped
+/// a server it had not read for ten minutes, or more than 64 servers), and then only for the samples since its last read of the
+/// server less five minutes - de-duplicated by <see cref="PostgresConnectionSample.At" />, so a store may return a sample twice -
+/// with a full read every ten minutes to find samples that landed late. Serve <c>since</c> with an index on
+/// <c>(server, taken_at)</c>, which the example table's primary key already gives.
+/// </para>
 /// </remarks>
 public interface IPostgresConnectionHistoryStore
 {

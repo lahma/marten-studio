@@ -328,6 +328,9 @@ oldest go first), and gone after a restart. To keep it, register your own `IPost
 a table of your own, a time-series database or a log sink all fit. The sampler calls `AppendAsync` once per server per
 interval and never reads. The studio's pages call `ReadAsync` at most once every 30 seconds a server, however many visitors
 have Database › Sessions open, and the samples are shared between them (the gate is applied to each visitor afterwards).
+The first call reads the whole window; after it, a call asks only for the samples since the last read, less five minutes
+(de-duplicated by time), and every ten minutes the whole window is read again to find samples that landed late. Serve `since`
+with an index on `(server, taken_at)`, which the example table's primary key already gives.
 Each call is cut off at the studio's `QueryTimeout`: a store that hangs leaves Holders without its history for that poll,
 and a round without its sample, and slows neither.
 
