@@ -49,8 +49,8 @@
 
     /// <summary>What is in the disclosure, by name, so a closed one still says what it holds (the six lines inside, in order).</summary>
     internal const string Summary =
-        "Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it: password providers, certificate callbacks, "
-        + "logging and tracing, type mappings, a script per connection, the default password file";
+        "Not in the connection string, so not shown: password providers, certificate callbacks, logging and tracing, type mappings "
+        + "and a script per connection (all set in code on the NpgsqlDataSourceBuilder), and the default password file";
 
     private ElementReference details;
     private bool open;

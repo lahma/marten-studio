@@ -138,6 +138,10 @@ store-level `IEventStore.CompactStreamAsync` overloads, the tenant ones included
 `LightweightSession()` or `LightweightSession(tenantId)`, and neither pins the database the scope selector
 chose.
 
+Where a stream is not offered for compaction, its Compact section says why in one sentence (an untyped stream, an archived
+one, a single event, an aggregate the store does not register). The Marten sample has four typed order streams; the last
+is voided by its own aggregate, so its dialog shows that it folds to no `OrderSummary`.
+
 ## A stream that folds to nothing
 
 An aggregate can delete its own stream: `ShouldDelete`, or `DeleteEvent<T>` in a projection. Folding such a

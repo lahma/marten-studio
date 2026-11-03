@@ -169,6 +169,9 @@ pinned session documents use, **with no tenant argument** (the overload with one
 model), applies your predicate to it, and runs the SQL Marten builds. The tenant filter and the archive filter are Marten's.
 It is the same capability (`RunLinqQueries`), the same gate and the same audit as documents; nothing new has to be granted.
 
+The list "Not offered here, and why" under the boxes is open by default, and says why each member this store withholds is
+not offered. Ctrl+Enter runs the query from either box.
+
 ### Members
 
 The members are a closed list computed from `StoreOptions.Events`: the ones Marten keeps a column for. Anything else

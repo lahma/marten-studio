@@ -330,8 +330,8 @@ public sealed class ConnectionPageTests
         details.HasAttribute("open").Should().BeFalse("closed by default");
         page.Find("#conn-not-visible > h2.ms-section-title").TextContent.Should().Be("Not visible from here");
         details.QuerySelector("summary")!.TextContent.Trim().Should().Be(
-            "Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it: password providers, certificate callbacks, "
-            + "logging and tracing, type mappings, a script per connection, the default password file");
+            "Not in the connection string, so not shown: password providers, certificate callbacks, logging and tracing, type mappings "
+            + "and a script per connection (all set in code on the NpgsqlDataSourceBuilder), and the default password file");
         details.QuerySelectorAll("dt").Should().HaveCount(6, "the content is still all there, for whoever opens it");
     }
 

@@ -53,7 +53,7 @@ public partial class StylesheetTests
     {
         string section = Section("1.1-UX-FIX-B2 light-theme contrast");
 
-        string lightSystem = AtRuleBlock("@media not (prefers-color-scheme: dark)", ":root");
+        string lightSystem = AtRuleBlock("@media not all and (prefers-color-scheme: dark)", ":root");
         Declaration(":root", "--ms-color-text-muted", lightSystem).Should().Be(LightMuted);
         Declaration(AdviceSelectorLightSystem, "color", lightSystem).Should().Be("var(--ms-color-primary-hover)");
 

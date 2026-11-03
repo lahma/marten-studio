@@ -65,6 +65,26 @@ mode, and makes compaction safe on streams that fold to nothing.
   connections, Npgsql logging, connection tracing, the hi-lo block size and retry limit, the multi-host session
   preferences, the schema apply lock id and whether row-level security is configured (never its setting), and the
   identity-map and tag-type options of the event store.
+- The Connection page's TLS tile and the Overview's line follow S05's rule: an unencrypted connection is "(local)" only
+  when the data source's host is a socket or loopback and the server also sees a socket or loopback peer; otherwise it
+  is "not encrypted · the server sees a TCP peer", with "(likely a container network)" when the host is loopback but the
+  peer is not (Docker, NAT) and no pooler is in front of it. The address is never shown.
+- S05's remedy has two steps, on separate lines, when the server's `ssl` is off ("1. Enable TLS on the server (`ssl =
+  on` with a certificate; on a managed platform it is usually on already). 2. Then set `SSL Mode=VerifyFull` (and `Root
+  Certificate=` if the CA is private)."), and says that `SSL Mode=Prefer` or `Require` encrypts but does not check the
+  server's certificate. The Connection page's finding cards show a remedy's explanation above the text to copy.
+- Compare a connection string opens with a one-sentence verdict (the certificate check, a readable password, the advice
+  that is new or gone, or "Same advice as the connection in effect."); the note about a removed password says the text
+  stays in the box until you press Clear or leave the page.
+- On a phone or a narrow window (below 720 px) each setting is a card with "From:" and "Default:" instead of a table
+  that scrolls sideways, keeping its table roles for assistive technology; every group table has the same column widths;
+  fix blocks wrap; Compare's heading matches the page's other section titles. The "Worth a look" count names findings,
+  hints and notes apart ("1 finding · 2 hints · 2 notes"), C14 says "1 connection" for one, and findings an account may
+  not see are counted as "1 finding is hidden because your account may not see activity on this database."
+- "Not visible from here" on the Connection page is a closed disclosure that names what it holds, follows the browser
+  opening it (find-in-page) and is remembered per browser. A variable Npgsql 9 does not read (`PGAPPNAME`;
+  `PGGSSENCMODE` and `PGREQUIREAUTH`) is noted on the setting it would stand in for, or above the table where Npgsql 9
+  has no such setting, with the variable's value never shown.
 - The Connection page's LIFETIME hint also fires for an Amazon RDS Proxy when `Connection Lifetime` is 0 or above 24
   hours, because the proxy closes a client connection at 24 hours and Npgsql does not check a connection it hands out of
   the pool. Its TLS hint behind an Amazon RDS Proxy advises `SSL Mode=VerifyFull` with no `Root Certificate` (the proxy's
@@ -101,10 +121,19 @@ mode, and makes compaction safe on streams that fold to nothing.
 - New check S13, "Driver settings that copy values into logs or exceptions": Info, in Production only, for
   `Log Parameters` (which logs only where the data source has a logger factory; `EnableParameterLogging()` turns it on
   whatever the keyword says), `Include Error Detail` and (Npgsql 10) `Include Failed Batched Command`.
+- The connection-settings checks (C16, C17, C18, S11, S12, S13) fail with the rest when the studio cannot reach the
+  database or the server refuses its login, instead of judging the connection string alone, so a database whose data
+  source is disposed, unreachable or refusing the login reads as failed in a snapshot and on the Health page (the
+  Connection page still shows its settings); a stand-down the connection string alone decides (a pooler for S11 and C17,
+  pooling off for C16) still wins.
 - LINQ mode now queries the event store: pick "Events" on the Query page's LINQ tab (or "Query these events with LINQ" on
   the Feed) to filter and order events by sequence, time, type, stream, version, tenant and, where the store records them,
   correlation id, causation id and user name, through Marten's own IReadOnlyEventStore.QueryRawEvents(). Same
   RunLinqQueries capability and gate; archived events are left out unless asked for; no table is ever created.
+- LINQ over events: the "Not offered here, and why" list is open by default, with the reason for each member the store
+  withholds, and Ctrl+Enter runs the query from the Order-by box as well as the predicate box. The Query page no longer
+  pushes an address it is already at or on its way to: editing a box and clicking Run used to start two page
+  navigations, and the second aborted the first.
 - Compaction under Marten 9.57: the Compact dialog folds the stream through its version when it opens, and says when the
   events fold to no aggregate (the stream was deleted by its own aggregate). Marten 9.57 (#5797) leaves such a stream as it
   is, so the Compact button is disabled with the reason as its title; if the fold cannot be run in advance the dialog says
@@ -119,6 +148,9 @@ mode, and makes compaction safe on streams that fold to nothing.
   per tenant, shown only through the activity gate to a visitor who may see that tenant, as E03's streams are. The remedy
   is to restore the streams from a backup or wherever an archiver copied them. `docs/health/codes.md` gains the E09 row
   and the `tenant` subject kind.
+- Stream detail says why Compact is not offered (an untyped stream, an archived one, one event, an unregistered
+  aggregate) in one sentence where the button would be. The Marten sample gains four typed order streams, one of which
+  is voided by its own aggregate and folds to nothing, so the Compact dialog can be seen.
 - Health check S05, "Connection without TLS", is now not applicable when the data source reaches a connection pooler (a
   Neon pooled endpoint, port 6543, Azure's built-in PgBouncer, port 6432 or an Amazon RDS Proxy): the server's
   `pg_stat_ssl` row behind a pooler is the pooler's own connection, not the application's. The Connection page's TLS hint
@@ -151,6 +183,16 @@ mode, and makes compaction safe on streams that fold to nothing.
 - On PostgreSQL 19, T13's evidence adds the multixact members from `pg_get_multixact_stats()` (it shows "not shown" to a
   role outside `pg_read_all_stats`), and T19's evidence adds `pg_stat_lock`'s fast-path figure. No check, code, threshold
   or variant changed.
+- Both studios have a "Skip to content" link as the first Tab stop, visible on focus, which moves focus to the content
+  region.
+- Muted text and the Connection page's "advice" badge meet 4.5:1 against their backgrounds in both themes (light: muted
+  5.26:1 on white, the badge 5.49:1; dark: muted 4.87:1 on the surface, the badge 6.38:1).
+- The connection history stores the samples a process still holds after it stops being the sampler (#54): every round
+  offers the held samples to the store, oldest first, whatever `ShouldSample` answers, so a peak held through a
+  leadership change during an incident is not lost, and nothing is read from the server for it. A held sample older than
+  an hour of intervals is dropped while the process is not the sampler (event 9464, throttled), so a sample the store
+  refuses for good no longer blocks the ones behind it; a store's append should be idempotent (`on conflict (server,
+  taken_at) do nothing`).
 - Docs: `docs/connection.md` describes the Connection page for administrators, `docs/upgrading.md` has a 1.0 → 1.1
   section, and `docs/security.md` states the page's promise: never a raw connection string or a credential.
 

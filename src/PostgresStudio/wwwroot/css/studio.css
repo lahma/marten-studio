@@ -14987,12 +14987,12 @@ a.ms-schema-health-mark:focus-visible {
 
    Placement is the point. A bare `:root { --ms-color-text-muted: ... }` here would come later in the file than the section
    above's system-dark `:root` and win it, bringing the grey back in dark mode. So the muted token is declared for a light
-   system (`not (prefers-color-scheme: dark)`) and for the explicit light theme, and for nothing else; the badge likewise
-   follows the explicit theme first and the system second. Dark is untouched in all three of its spellings (system dark,
-   data-theme="dark", and a light override under a dark system).
+   system (`not all and (prefers-color-scheme: dark)`, the spelling every browser reads) and for the explicit light theme, and for nothing else; the badge likewise
+   follows the explicit theme first and the system second. Dark is untouched in both its spellings (system dark and
+   data-theme="dark"); a light theme chosen under a dark system takes these light values.
    ========================================================================== */
 
-@media not (prefers-color-scheme: dark) {
+@media not all and (prefers-color-scheme: dark) {
     :root {
         --ms-color-text-muted: #5e6d83;
     }

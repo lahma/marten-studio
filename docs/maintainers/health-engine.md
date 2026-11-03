@@ -93,7 +93,10 @@ the database). All six are `Database` checks, none shows a value of a secret key
 connection-string form and the `NpgsqlDataSourceBuilder` form through `StudioText.DataSourceBuilderRemedy`, which Marten
 Studio wraps in `opts.ConfigureNpgsqlDataSourceBuilder`. A stand-down that is the data source's design (pooling off for C16,
 a pooler for C17, the Cloud SQL Auth Proxy or an unreadable TLS row for S11) is `HealthCheckNotApplicableException`; an
-unread server is `HealthCheckUnavailableException`. S05 and S11 are also not applicable behind a pooler sign (a Neon pooled
+unread server is `HealthCheckUnavailableException`. The six rethrow the connection read's failure
+(`ConnectionFacts.ObservedFailure`, captured once, thrown by `ConnectionCheckSupport.ReadAsync`) when the server never
+answered or refused the login, so `Reached` stays meaningful: a database the studio cannot reach is not "reached" by checks
+that judge settings, while a stand-down the connection string alone decides still wins. S05 and S11 are also not applicable behind a pooler sign (a Neon pooled
 endpoint, port 6543, Azure's built-in PgBouncer, port 6432, an Amazon RDS Proxy): the server's `pg_stat_ssl` row is then
 the pooler's own connection, not the application's. S05 reads the signs from the same `ConnectionFacts`, so it adds no
 statement, and S11 asks for the pooler before it asks whether the server could be read, so a pooler data source whose
