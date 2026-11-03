@@ -123,14 +123,4 @@ internal interface ISchemaDataService
     /// The identity of the database in scope, which is what the apply dialog makes the visitor type.
     /// </summary>
     Task<string> DatabaseIdentityAsync(StudioScope scope, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// The sentence the Apply area shows when this host's Weasel cannot apply the store's schemas twice - a schema name that
-    /// needs quoting, below Weasel 9.47.1 (K10) - or <see langword="null" /> when it can.
-    /// </summary>
-    /// <remarks>
-    /// Read from the store's configuration alone, which the Configuration page prints: it touches no connection, so it is
-    /// asked on arrival, unlike the three actions above.
-    /// </remarks>
-    Task<string?> SchemaNameNoticeAsync(StudioScope scope, CancellationToken cancellationToken = default);
 }

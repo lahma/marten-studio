@@ -85,18 +85,18 @@ public class HealthSourceKindTests
 
         // 50; W5-V1's T16 and T24, W5-CAP's C11, W5-R2's R02-R04, W5-S2's ten and W5-B1's five in the shared engine; and
         // W5-S2's K08, W5-B1's T17, 0.6's T18 (X4) and 0.6 M4's D10; and 0.6's C12, shared (X3); and 0.8's C13 and C14, shared (#20); and 1.0.1's C15, shared (#47).
-        registry.All.Should().HaveCount(81);
+        registry.All.Should().HaveCount(80);
         registry.All.Should().OnlyContain(static x => x.RunsAgainst(StudioSourceKind.MartenStore));
         marten.Should().NotBeEmpty().And.OnlyContain(
             static x => !x.RunsAgainst(StudioSourceKind.DataSource) && !x.RunsAgainst(StudioSourceKind.HostProvider));
 
         if (typeof(HealthCheckRegistry).Assembly == typeof(MartenStudioDescriptor).Assembly)
         {
-            restricted.Should().HaveCount(81, "one assembly: a check found by both entries runs against what both admit");
+            restricted.Should().HaveCount(80, "one assembly: a check found by both entries runs against what both admit");
         }
         else
         {
-            marten.Should().HaveCount(33, "MartenStudio keeps 26 of the 49 checks (design Appendix B), W5 adds D09, K08 and T17, 0.6 T18 (X4) and D10 (M4), and 0.10 K09 and K10; W5-S2's S04-S10 and K05-K07 and W5-B1's T15, T19, T20, T25 and T26 are shared");
+            marten.Should().HaveCount(32, "MartenStudio keeps 26 of the 49 checks (design Appendix B), W5 adds D09, K08 and T17, 0.6 T18 (X4) and D10 (M4), and 0.10 K09 (K10 was retired in 1.1); W5-S2's S04-S10 and K05-K07 and W5-B1's T15, T19, T20, T25 and T26 are shared");
             restricted.Should().BeEquivalentTo(marten,
                 "the shared engine's 45 (23, W5-V1's T16 and T24, W5-CAP's C11, W5-R2's R02-R04, W5-S2's ten, W5-B1's five and 0.6's C12) run against every kind of source");
         }

@@ -510,7 +510,7 @@ dotnet test postgres-studio.slnf -p:PostgresStudioNpgsqlVersion=10.0.3   # that 
 **Both suites run at two Marten versions**: the floor (`build.yml`) and the pinned latest-tested 9.x
 (`marten-latest.yml`, which runs `dotnet fallout Test` with `MARTEN_VERSION: latest`). A change is green only when both
 are. A fix for a behavioural difference between them must hold at both ends; one that needs a member only the newer side
-has is run-time light-up behind a probe, not a reason to move the floor. `PublicApiTest` must pass at both without a
+has is run-time light-up behind a probe, not a reason to move the floor unless the floor moves (user, 2026-11-02). `PublicApiTest` must pass at both without a
 baseline edit, which is one reason `JasperFxSourceGeneratorTests` exists.
 
 Container reuse is on by default locally (a second run attaches to the same Postgres) and off on CI.

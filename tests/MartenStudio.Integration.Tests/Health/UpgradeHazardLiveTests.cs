@@ -1,5 +1,3 @@
-using MartenStudio.Services.Configuration;
-
 using PostgresStudio.Services.Health;
 
 using static MartenStudio.Integration.Tests.Health.TableHealthLive;
@@ -7,8 +5,8 @@ using static MartenStudio.Integration.Tests.Health.TableHealthLive;
 namespace MartenStudio.Integration.Tests.Health;
 
 /// <summary>
-/// K09 and K10 on a live store (0.10 V1): document storage named with a dotless <c>ı</c>, which Marten 9.55 no longer writes,
-/// and a schema name Postgres writes quoted, which Weasel before 9.47.1 cannot apply twice.
+/// K09 on a live store (0.10 V1): document storage named with a dotless <c>ı</c>, which Marten 9.55 no longer writes. (K10, a
+/// schema name Weasel before 9.47.1 could not apply twice, was retired in 1.1.)
 /// </summary>
 /// <summary>A document type with a literal dotless <c>ı</c> in its name, which Marten keeps at every version.</summary>
 public sealed class HealthKayıt
@@ -107,61 +105,5 @@ public class UpgradeHazardLiveTests(PostgresFixture postgres)
         string text = finding.Finding.Title + " " + finding.Finding.WhyItMatters + " " + finding.Finding.Caveat + " "
             + string.Join(" ", finding.Evidence.Select(static x => x.Value));
         text.Should().NotContain("dempotent").And.NotContain("mt_doc_");
-    }
-
-    /// <summary>
-    /// K10's expectation is the host's own Weasel: at the floor (Weasel 9.33) a schema named with a reserved word is a finding;
-    /// from Marten 9.55 (Weasel 9.47.1) it never is. One test, both ends, asserted against the version it runs on.
-    /// </summary>
-    [PostgresFact]
-    [HealthFires("K10")]
-    public async Task A_reserved_word_schema_is_a_K10_finding_below_Weasel_9_47_1_and_never_from_it()
-    {
-        Version weasel = MartenRuntime.Current.VersionOf(RuntimePackage.WeaselPostgresql)!;
-        await ExecuteAsync(postgres, "create schema if not exists \"order\"");
-
-        try
-        {
-            await using HealthLiveHost host = await HostAsync(
-                postgres,
-                "health_k10_fires",
-                new ManualClock(Start),
-                static o =>
-                {
-                    o.DatabaseSchemaName = "order";
-                    o.Events.DatabaseSchemaName = "order";
-                });
-
-            HealthReport report = await ReportAsync(host);
-
-            if (weasel < new Version(9, 47, 1))
-            {
-                HealthReportFinding finding = Of(report, "K10").Should().ContainSingle().Subject;
-                finding.Severity.Should().Be(HealthSeverity.Warning);
-                finding.Finding.Title.Should().Be("The schema \"order\" breaks every schema apply after the first");
-                finding.Evidence.Should().Contain(new HealthEvidence("Schema", "\"order\""));
-            }
-            else
-            {
-                Of(report, "K10").Should().BeEmpty("Weasel " + weasel + " reads such a schema's indexes back");
-                report.Checks.Single(static x => x.Code == "K10").Outcome.Should().Be(HealthCheckOutcome.Checked);
-            }
-        }
-        finally
-        {
-            await ExecuteAsync(postgres, "drop schema if exists \"order\" cascade");
-        }
-    }
-
-    [PostgresFact]
-    [HealthQuiet("K10")]
-    public async Task Schemas_that_need_no_quoting_are_quiet_on_K10_at_every_Weasel()
-    {
-        await using HealthLiveHost host = await HostAsync(postgres, "health_k10_quiet", new ManualClock(Start));
-
-        HealthReport report = await ReportAsync(host);
-
-        Of(report, "K10").Should().BeEmpty();
-        report.Checks.Single(static x => x.Code == "K10").Outcome.Should().Be(HealthCheckOutcome.Checked, "quiet because it looked");
     }
 }

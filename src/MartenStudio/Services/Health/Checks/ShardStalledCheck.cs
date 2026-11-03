@@ -193,7 +193,7 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
                 ],
                 Caveat =
                     "Progress is measured in the database server's time; that the mark has been ahead of the shard for the whole window "
-                    + "comes from the advisor's own samples, which exist only while the Health page or the Overview is open. ",
+                    + "comes from the advisor's own samples, which exist only while the Health page or the Overview is open.",
                 Remedy = null,
             });
         }

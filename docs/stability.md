@@ -56,6 +56,9 @@ PostgreSQL 14 reaches its upstream end of life on 2026-11-12. 1.1 took it out of
 every read the studio makes on 14 is still there, and health check S01 still names its end of life, but no release is
 tested against it, and a minor release may stop supporting it outright. PostgreSQL 19 is supported in 1.1 on its release
 candidate, and the matrix moves to its general-availability image in a later patch.
+
+A minor release may raise the Marten and Npgsql floors (1.1 raised them to Marten 9.57.0 and Npgsql 9.0.4): a host that is
+on an older one upgrades it before it upgrades the studio.
 [docs/postgres-versions.md](postgres-versions.md) says what each version adds.
 
 ## Security fixes

@@ -4,7 +4,6 @@ using Marten;
 using Marten.Events;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Projections;
 using PostgresStudio.Services.Health;
 
@@ -65,10 +64,7 @@ internal sealed record SkippedGapsFacts(
 /// <b>Severity follows the configuration.</b> Under the defaults a skip is a range of numbers that rolled-back
 /// appends drew - lost numbers, not lost events - and is an Info. Where the configuration lets the detector skip past
 /// a live append, a skip in the last hour is a Warning: if that append committed afterwards, every async projection
-/// has already passed its events and will never see them. Below Marten 9.47 the evidence's in-progress-xid clause
-/// (<c>pg_snapshot_xip(pg_current_snapshot())</c>) counts every transaction on the server, prepared ones included;
-/// #5605 scoped it to this database and had to add <c>pg_prepared_xacts</c> back. So an older host errs toward
-/// holding the mark, never toward skipping - which the caveat says.
+/// has already passed its events and will never see them.
 /// </para>
 /// <para>
 /// Tier 1: the newest <see cref="HealthEventQueries.MaxSkipRows" /> rows by primary key. The table exists only
@@ -86,9 +82,6 @@ internal sealed class SkippedGapsCheck : HealthCheck<SkippedGapsFacts>
 
     /// <summary>The projections screen, where D01's Explain sits beside a held mark.</summary>
     internal const string ProjectionsRoute = "projections";
-
-    /// <summary>The first Marten whose gap evidence counts only this database's transactions (#5605).</summary>
-    internal static readonly Version EvidenceScopedToDatabaseFrom = new(9, 47, 0);
 
     /// <inheritdoc />
     public override async Task<SkippedGapsFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
@@ -200,8 +193,6 @@ internal sealed class SkippedGapsCheck : HealthCheck<SkippedGapsFacts>
         string count = EventHealth.Count(recent ? hour.Count : day.Count) + (recent ? (hour.Count == facts.Skips.Count ? more : string.Empty) : more);
         string span = recent ? "hour" : "day";
 
-        bool serverWideEvidence = evaluation.Runtime.VersionOf(RuntimePackage.Marten) is { } marten && marten < EvidenceScopedToDatabaseFrom;
-
         return HealthVerdict.Of(new HealthFinding
         {
             Code = "D07",
@@ -230,10 +221,6 @@ internal sealed class SkippedGapsCheck : HealthCheck<SkippedGapsFacts>
             Caveat =
                 "Read from mt_high_water_skips, which records each move of the store-global mark past a gap, in server time; a skip "
                 + "spans the committed numbers between the old mark and the new one as well as the missing ones."
-                + (serverWideEvidence
-                    ? " Below Marten 9.47 the gap evidence counts in-progress transactions in every database on the server "
-                        + "(#5605), so it errs toward holding the mark rather than skipping."
-                    : string.Empty)
                 + tenantNote,
             Remedy = Remedy(facts),
             Link = new HealthLink("Open the projections screen (Explain, while the mark is held)", ProjectionsRoute),

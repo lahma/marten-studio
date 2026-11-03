@@ -8,10 +8,9 @@ is K04's host and port, which are evidence at the database-wide gate - the store
 whole - because that is what the Configuration page asks before it lists a database's server and port. K05-K07 read
 the studio's own options the same way, in both studios. K08 is the one that reads the server too: three timeouts in
 `pg_settings`, a catalog read, so it is shown at the database-wide gate, and so is K09, which reads the catalog for document
-tables named under a Turkish or Azerbaijani culture; K10 reads two configuration names and nothing else. Back to the
-[index](../health.md).
+tables named under a Turkish or Azerbaijani culture. (K10 is retired.) Back to the [index](../health.md).
 
-**Studios.** K05, K06 and K07 run in both studios. K01 to K04, K08, K09 and K10 read a Marten store's configuration, and run
+**Studios.** K05, K06 and K07 run in both studios. K01 to K04, K08 and K09 read a Marten store's configuration, and run
 only in Marten Studio ([codes.md](codes.md)).
 
 ## K01 AutoCreate in Production
@@ -125,10 +124,10 @@ or none. PgBouncer's feature map says session-level advisory locks never work in
 **What changed in Marten 9.41.** `UseAdvisoryLockTransaction` defaults to `false` from 9.41.0, so the lock is
 session-scoped unless the host says otherwise. Marten's migration guide (V9.50.2, *Key Changes in 9.41.0*) says
 "The one deployment that needs action is a daemon running behind PgBouncer in transaction pooling mode". On
-9.39 and 9.40 (the studio's floor and the release after it) the default is `true`, so the lock is
-transaction-scoped and this fires only for a host that turned it off. From 9.41 it fires for every HotCold host
-behind such a pooler that has not turned it on. The finding says which default applies to the Marten the host
-runs.
+9.39 and 9.40 (older than the studio's floor, 9.57) the default is `true`, so the lock is
+transaction-scoped and this fires only for a host that turned it off. From 9.41, which is every Marten the studio runs
+against, it fires for every HotCold host behind such a pooler that has not turned it on. The finding says which default
+applies to the Marten the host runs.
 
 What to change:
 
@@ -265,19 +264,19 @@ the old table, and the application no longer sees them. Nothing is lost and noth
 
 The check reads the store's own schemas in the catalog (`pg_class` and `pg_proc`, locking nothing) for `mt_` tables and for
 `mt_upsert_`, `mt_insert_`, `mt_update_` and `mt_overwrite_` functions whose name has a dotless `ı`, and runs at **every** Marten
-version, because the hazard is the upgrade: a host on Marten 9.39 under `tr-TR` is warned before it upgrades. Two variants:
+version, because the hazard is state in the database, not a version: a table a Marten below 9.55 wrote under `tr-TR` or `az-AZ`
+stays where it is, and every Marten the studio supports looks for the invariant name instead. Two variants:
 
-- **`dotless-only`**: the invariant name does not exist. After upgrading to Marten 9.55 these documents will appear missing (on
-  a 9.55 or later that has not yet touched the type, they already do).
+- **`dotless-only`**: the invariant name does not exist. These documents appear missing: Marten looks for the invariant name,
+  finds nothing and creates it empty when the type is first used.
 - **`both`**: both names exist, so the documents are split between two tables. A function is judged against a function of the
   same schema.
 
 **A name Marten writes itself is left out.** A document type may carry a literal `ı` in its own name (`Kayıt`, `Satış`),
 and Marten keeps it at every version: from 9.55 it lowers with `ToLowerInvariant()`, which leaves `ı` alone. So a table (and
 the functions that share its stem) whose schema and name are exactly what a document type this process knows is called today
-is not a finding, as long as this process's Marten writes that exact name itself: from 9.55 always, and before it only when the
-process's culture lowers `I` to `i`. (Under `tr-TR` on a Marten before 9.55 the name does not settle it, since the same Marten
-writes `mt_doc_ınvoice` for `Invoice`, so the table is judged.) Renaming a healthy `mt_doc_kayıt` to `mt_doc_kayit` would lose
+is not a finding, whatever the process's culture and whether or not its Marten version can be read, because every Marten the
+studio supports (9.55 and later) writes that exact name itself. Renaming a healthy `mt_doc_kayıt` to `mt_doc_kayit` would lose
 its documents.
 
 A document type's functions are evidence of its table's finding; any other function with a dotless letter, such as a flat-table
@@ -295,35 +294,15 @@ process no longer has, or has not loaded yet, may be a `Kayıt` that is healthy.
 not looked at, its parent is. Tables and functions of other schemas than the store's own are not read, and a database with more
 than 500 of a kind says the read stopped.
 
-The remedy is in words, and the studio renames and drops nothing: before upgrading, in your own migration, rename each table to the
+The remedy is in words, and the studio renames and drops nothing: with the application stopped, in your own migration, rename each table to the
 invariant name, **drop** the dotless `mt_upsert_`, `mt_insert_`, `mt_update_` and `mt_overwrite_` functions, and apply the schema so
 Marten recreates them under the invariant name. Do not rename the functions: a renamed upsert function still writes to the old
 dotless table inside its body. Where both tables exist, merge the rows first.
 
 ## K10 Schema name breaks every apply after the first
 
-**Warning**, Marten Studio only, shown to anybody the scope admits (the schema names are on the Configuration page). Since 0.10.
-Weasel 9.47.1 (in Marten 9.55) fixed index readback for a `DatabaseSchemaName`, or an events schema, that is a reserved word or
-needs quoting (weasel#750). Before it, `regclassout` wrote such a schema quoted, none of the four spellings
-Weasel compared the indexed table against did, and no index of the schema was ever read back: every declared index looked
-missing, and **every schema apply after the first failed with `42P07`**, "relation already exists", which aborts everything
-ordered after it. The first apply works, which is why it goes unnoticed. Marten lowercases the schema names it is given, so in
-a store an upper-case letter is never the cause: the name that triggers it is a reserved word (`order`, `user`) or one with a
-character outside `a` to `z`, digits and underscore, such as a hyphen.
-
-The check fires when the loaded `Weasel.Postgresql` is older than 9.47.1 **and** a schema the store declares is a name
-Postgres writes quoted: anything not made of `a` to `z`, digits and underscores, one starting with a digit, or one of the
-keywords `quote_ident` quotes (the reserved, type-or-function and column-name categories). That is `quote_ident`'s rule, not
-`SqlIdentifier`'s, which quotes every name. The schemas judged are every one the store declares: the document schema, the events
-schema, a document type's own (`[DatabaseSchemaName]`), a flat-table projection's and an `ExtendedSchemaObjects` object's, so a
-type declared in `order` breaks just the same. A schema only a hidden document type declares is never named. It reads no database. On Marten 9.55 and later it is always quiet. No variants; the
-subject is the store as a whole. The Schema screen's Apply area shows the same sentence as a notice while the check would fire.
-
-**Known limits.** A schema on the connection's `search_path` reads back fine below 9.47.1, because `regclassout` writes the bare
-name for it, so the check can fire for a host that is not affected. And the keyword list is PostgreSQL 17's: on PostgreSQL 14 and 15
-`json`, `json_array`, `json_arrayagg`, `json_exists`, `json_object`, `json_objectagg`, `json_query`, `json_scalar`,
-`json_serialize`, `json_table` and `json_value`, `merge_action` and `system_user` are not keywords, so a schema named so is not
-quoted there.
-
-The remedy is an upgrade, or lower-case names without a reserved word (`opts.DatabaseSchemaName = "orders"`), which moves the
-store to schemas that do not exist yet: a migration of the data, not a setting.
+**Retired in 1.1.** K10 warned, below Weasel 9.47.1, of a `DatabaseSchemaName` or events schema that is a reserved word or
+needs quoting: the old index readback never saw such a schema's indexes (weasel#750), so every schema apply after the first
+failed with `42P07`. It left nothing in a database, and Marten 9.57, the floor from 1.1, needs a Weasel.Postgresql that
+reads such an index back (9.48.0 or later), so the hazard cannot arise. The row stays in [codes.md](codes.md), and the code
+is never reassigned. The Schema screen's Apply area no longer shows the notice either.

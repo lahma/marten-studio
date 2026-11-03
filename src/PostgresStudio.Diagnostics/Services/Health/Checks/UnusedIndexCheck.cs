@@ -1,5 +1,4 @@
 using PostgresStudio.Internal.Sql;
-using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
 
@@ -165,7 +164,6 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
         // Ordinal, as the set keys its tables: "Orders" and orders are two tables, and ignoring case threw on the second.
         Dictionary<string, TableFacts> tables = facts.Tables.ToDictionary(static x => x.Key, StringComparer.Ordinal);
         List<HealthFinding> findings = [];
-        int youngIndexes = 0;
 
         foreach (IndexFacts index in facts.Indexes)
         {
@@ -186,25 +184,10 @@ internal sealed class UnusedIndexCheck : HealthCheck<UnusedIndexFacts>
                 continue;
             }
 
-            // PostgreSQL 19 keeps a reset time per index: an index whose own counters were reset inside the window is judged
-            // over its own, shorter one.
-            if (index.Row.CountersReset is { } own && own > usage.Since && facts.ReadAt - own < UsageGuard.MinimumWindow && lastScan is null)
-            {
-                youngIndexes++;
-                continue;
-            }
-
             findings.Add(Finding(index, table, writes, lastScan, usage, facts, evaluation.TableRemedies));
         }
 
-        string? note = youngIndexes switch
-        {
-            0 => locked,
-            1 => HealthTables.WithLockedNote("1 index's own counters were reset less than 7 days ago and was not judged.", facts.LockedTables),
-            int count => HealthTables.WithLockedNote(SessionText.Number(count) + " indexes' own counters were reset less than 7 days ago and were not judged.", facts.LockedTables),
-        };
-
-        return findings.Count == 0 ? HealthVerdict.Quiet(note) : new HealthVerdict(findings, note);
+        return findings.Count == 0 ? HealthVerdict.Quiet(locked) : new HealthVerdict(findings, locked);
     }
 
     /// <summary>What the caveat says of a multi-host data source, which no length of this primary's counters lifts.</summary>

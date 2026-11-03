@@ -1,10 +1,7 @@
-using System.Globalization;
-
 using Marten;
 using Marten.Schema;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
 
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Schema;
@@ -74,12 +71,13 @@ internal sealed record DotlessDocumentNamesFacts(IReadOnlyList<DotlessName> Name
 /// <para>
 /// Marten 9.55 lowers document aliases, <c>DdlTemplate</c> lookups and flat-table upsert function names with the invariant
 /// culture (marten#5778, #5783). Before it, a host under <c>tr-TR</c> or <c>az-AZ</c> got <c>mt_doc_ınvoice</c> (U+0131) for
-/// <c>Invoice</c>; from 9.55 Marten expects <c>mt_doc_invoice</c> and creates it, empty. So the hazard is the upgrade, and the
-/// check runs at every Marten version: it finds the objects <em>now</em>, whichever Marten wrote them.
+/// <c>Invoice</c>; from 9.55 Marten expects <c>mt_doc_invoice</c> and creates it, empty. Every Marten the studio supports
+/// is 9.55 or later, so the hazard is state in the database, not a version: a table a Marten below 9.55 wrote stays, and the
+/// check finds it whichever Marten wrote it.
 /// </para>
 /// <para>
-/// Two variants: <see cref="DotlessOnlyVariant" /> (no invariant twin: the documents will appear missing, or already do on a
-/// 9.55 that has not yet touched the type) and <see cref="BothVariant" /> (both exist: the documents are split between two
+/// Two variants: <see cref="DotlessOnlyVariant" /> (no invariant twin: the documents appear missing until Marten creates the
+/// invariant table, empty) and <see cref="BothVariant" /> (both exist: the documents are split between two
 /// tables). A document type's <c>mt_upsert_</c>, <c>mt_insert_</c>, <c>mt_update_</c> and <c>mt_overwrite_</c> functions are
 /// listed in its table's finding; any other function with a dotless letter - a flat-table projection's - is a finding of its
 /// own.
@@ -104,9 +102,6 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
 
     /// <summary>The variant of a name whose invariant twin exists too: the documents are split.</summary>
     internal const string BothVariant = "both";
-
-    /// <summary>The first Marten that names these objects with the invariant culture.</summary>
-    internal static readonly Version InvariantFrom = new(9, 55, 0);
 
     /// <summary>The subject of the finding that counts what the host's document-type filter keeps from being named.</summary>
     internal const string Unlisted = "(not listed)";
@@ -134,26 +129,9 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
 
         // What the process knows: a document type by its table, under the name Marten declares now.
         bool hidesTypes = context.Settings.IsDocumentTypeVisible is not null;
-        bool martenWritesInvariant = WritesInvariantNames(context.Runtime, CultureInfo.CurrentCulture);
-        IReadOnlyList<DotlessName> names = NamesToJudge(kept, KnownTypes(context.StoreOptions), hidesTypes, martenWritesInvariant);
+        IReadOnlyList<DotlessName> names = NamesToJudge(kept, KnownTypes(context.StoreOptions), hidesTypes);
 
         return new DotlessDocumentNamesFacts(names, more, schemas.Count);
-    }
-
-    /// <summary>
-    /// Whether this process's Marten lowers a document's name with a culture that leaves a literal <c>ı</c> as it is and makes
-    /// an <c>I</c> an <c>i</c>: from Marten 9.55 always (invariant), before it only when the process's culture lowers
-    /// <c>I</c> to <c>i</c>. Then a table whose name a known type declares today is a name Marten writes itself.
-    /// </summary>
-    /// <param name="runtime">The Marten the host runs.</param>
-    /// <param name="culture">The process's culture, which Marten before 9.55 lowered with.</param>
-    internal static bool WritesInvariantNames(MartenRuntime runtime, CultureInfo culture)
-    {
-        ArgumentNullException.ThrowIfNull(runtime);
-        ArgumentNullException.ThrowIfNull(culture);
-
-        return runtime.VersionOf(RuntimePackage.Marten) is { } marten && marten >= InvariantFrom
-            || culture.TextInfo.ToLower('I') == 'i';
     }
 
     /// <summary>The document types this process knows, by <c>schema.table</c>, under the table name Marten declares now.</summary>
@@ -181,18 +159,16 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
     /// A document type may carry a literal <c>ı</c> in its own name (<c>Kayıt</c>, <c>Satış</c>), and Marten keeps it at every
     /// version: <c>ToLowerInvariant()</c> leaves it alone. Such a table, and the functions that share its stem, are healthy,
     /// and renaming them to <c>mt_doc_kayit</c> would lose their documents. So a row whose schema and name are exactly what a
-    /// known type's table is called today is skipped while <paramref name="martenWritesInvariant" /> says this process's Marten
-    /// writes that exact name. A name no known type claims is judged by its letters alone.
+    /// known type's table is called today is skipped, because every Marten the studio supports (9.55 and later) writes that exact
+    /// name itself. A name no known type claims is judged by its letters alone.
     /// </remarks>
     /// <param name="rows">What the catalog read returned.</param>
     /// <param name="known">The document types this process knows (<see cref="KnownTypes" />).</param>
     /// <param name="hidesTypes">Whether the host hides any document type.</param>
-    /// <param name="martenWritesInvariant"><see cref="WritesInvariantNames" />.</param>
     internal static IReadOnlyList<DotlessName> NamesToJudge(
         IEnumerable<DotlessNameRow> rows,
         IReadOnlyDictionary<string, IDocumentType> known,
-        bool hidesTypes,
-        bool martenWritesInvariant)
+        bool hidesTypes)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(known);
@@ -211,7 +187,7 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
                 string invariant = table.Replace(DotlessNameQueries.Dotless, DotlessNameQueries.Plain, StringComparison.Ordinal);
                 IDocumentType? exact = known.GetValueOrDefault(SchemaKey.For(row.Schema, table));
 
-                if (exact is not null && martenWritesInvariant && string.Equals(exact.TableName.Name, table, StringComparison.Ordinal))
+                if (exact is not null && string.Equals(exact.TableName.Name, table, StringComparison.Ordinal))
                 {
                     // Marten names this table itself (a type called Kayıt): nothing to rename.
                     continue;
@@ -241,7 +217,6 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
             return HealthVerdict.Quiet(facts.SchemasRead == 0 ? "The store declares no schema to read." : null);
         }
 
-        bool invariantMarten = evaluation.Runtime.VersionOf(RuntimePackage.Marten) is { } marten && marten >= InvariantFrom;
         List<HealthFinding> findings = [];
 
         IReadOnlyList<DotlessName> tables = [.. facts.Names.Where(static x => !x.IsFunction && x.Listable)];
@@ -259,24 +234,24 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
                 attached.Add(function.Key);
             }
 
-            findings.Add(Finding(table, functions, invariantMarten, facts.More));
+            findings.Add(Finding(table, functions, facts.More));
         }
 
         foreach (DotlessName function in facts.Names.Where(x => x.IsFunction && x.Listable && !attached.Contains(x.Key)))
         {
-            findings.Add(Finding(function, [], invariantMarten, facts.More));
+            findings.Add(Finding(function, [], facts.More));
         }
 
         // Counted, never named: the host hides document types, and these may be one's.
         foreach (IGrouping<bool, DotlessName> group in facts.Names.Where(static x => !x.Listable).GroupBy(static x => x.HasInvariantTwin))
         {
-            findings.Add(UnlistedFinding(group.Key, group.Count(), group.Count(static x => !x.IsFunction), invariantMarten));
+            findings.Add(UnlistedFinding(group.Key, group.Count(), group.Count(static x => !x.IsFunction)));
         }
 
         return findings.Count == 0 ? HealthVerdict.Quiet() : HealthVerdict.Of([.. findings]);
     }
 
-    private static HealthFinding Finding(DotlessName name, DotlessName[] functions, bool invariantMarten, bool more)
+    private static HealthFinding Finding(DotlessName name, DotlessName[] functions, bool more)
     {
         string kind = name.IsFunction ? "function" : "table";
         string subject = name.Key;
@@ -285,11 +260,8 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
         string title = both
             ? "The " + kind + " " + subject + " exists under a dotless ı and under its invariant name"
                 + (name.IsFunction ? ": Marten 9.55 and later calls the invariant one" : ": the documents are split between two tables")
-            : invariantMarten
-                ? "The " + kind + " " + subject + " is named with a dotless ı, and this Marten looks for the invariant name"
-                    + (name.IsFunction ? "" : ": its documents appear missing")
-                : "The " + kind + " " + subject + " is named with a dotless ı: after upgrading to Marten 9.55 "
-                    + (name.IsFunction ? "Marten will not find it" : "these documents will appear missing");
+            : "The " + kind + " " + subject + " is named with a dotless ı, and this Marten looks for the invariant name"
+                + (name.IsFunction ? "" : ": its documents appear missing");
 
         List<HealthEvidence> evidence =
         [
@@ -317,7 +289,7 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
             Subject = subject,
             DocumentTypes = name.DocumentTypes,
             Title = title,
-            WhyItMatters = Why(both, invariantMarten),
+            WhyItMatters = Why(both),
             Evidence = evidence,
             Caveat =
                 "Read from the catalog: tables and functions of the store's own schemas named mt_, with a dotless ı (U+0131) in the name. "
@@ -331,7 +303,7 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
         };
     }
 
-    private static HealthFinding UnlistedFinding(bool both, int count, int tables, bool invariantMarten) => new()
+    private static HealthFinding UnlistedFinding(bool both, int count, int tables) => new()
     {
         Code = "K09",
         Severity = HealthSeverity.Warning,
@@ -340,7 +312,7 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
         Title = count == 1
             ? "1 table or function is named with a dotless ı" + (both ? " and its invariant twin exists" : "") + ", and is not named here"
             : count + " tables or functions are named with a dotless ı" + (both ? " and their invariant twins exist" : "") + ", and are not named here",
-        WhyItMatters = Why(both, invariantMarten)
+        WhyItMatters = Why(both)
             + " The host hides some document types from the studio (IsDocumentTypeVisible), and these may belong to one, so their names are not shown.",
         Evidence =
         [
@@ -352,25 +324,20 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
         Remedy = Remedy(),
     };
 
-    private static string Why(bool both, bool invariantMarten) =>
+    private static string Why(bool both) =>
         both
             ? "Marten 9.55 (marten#5778, #5783) lowers a document's alias and its upsert function names with the invariant culture, where a "
                 + "host under tr-TR or az-AZ used to get a dotless ı for each capital I. Both spellings exist here, so writes go to one table "
                 + "and reads to the other, depending on which Marten wrote the row: the documents are split between two tables, and each "
                 + "half looks like the whole to the code that reads it."
-            : invariantMarten
-                ? "Marten 9.55 and later (marten#5778, #5783) lowers a document's alias and its upsert function names with the invariant "
-                    + "culture, where a host under tr-TR or az-AZ used to get a dotless ı for each capital I. This Marten therefore looks for the "
-                    + "invariant name, finds nothing, and creates it empty when the type is first used: the existing documents are still in "
-                    + "the old table, and the application does not see them."
-                : "Marten 9.55 (marten#5778, #5783) lowers a document's alias and its upsert function names with the invariant culture, where "
-                    + "a host under tr-TR or az-AZ used to get a dotless ı for each capital I. After the upgrade Marten looks for the invariant "
-                    + "name, finds nothing, and creates it empty: the existing documents stay in the old table, and the application does not "
-                    + "see them. Nothing is lost, and nothing is migrated.";
+            : "Marten 9.55 and later (marten#5778, #5783) lowers a document's alias and its upsert function names with the invariant "
+                + "culture, where a host under tr-TR or az-AZ used to get a dotless ı for each capital I. This Marten therefore looks for the "
+                + "invariant name, finds nothing, and creates it empty when the type is first used: the existing documents are still in "
+                + "the old table, and the application does not see them. Nothing is lost, and nothing is migrated.";
 
     private static HealthRemedy Remedy() => new(
         """
-        // Before upgrading Marten, with the application stopped, in your own migration:
+        // With the application stopped, in your own migration:
         // 1. rename each table to the invariant name (mt_doc_ınvoice -> mt_doc_invoice);
         // 2. drop the dotless functions (mt_upsert_, mt_insert_, mt_update_ and mt_overwrite_ + the same stem);
         // 3. apply the schema, so Marten recreates the functions under the invariant name.

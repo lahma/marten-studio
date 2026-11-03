@@ -94,8 +94,8 @@ routing — from the shared framework, so it pins no ASP.NET Core patch onto you
 `net10.0`. Your application's Npgsql stays the one Marten brings, which is never below Postgres Studio's floor;
 Marten Studio is tested at Marten 9.57.0, the floor, and not on Npgsql 10, which no tested Marten brings.
 
-**PostgreSQL 14 to 18** are supported, and every release is tested on each. 14 reaches the community's end of life on
-2026-11-12, and 19 is supported from its general availability. Below 14 the studio still reads the server, with no
+**PostgreSQL 15 to 19** are tested (19 on its release candidate until it is generally available, planned 2026-11-19). 14
+works but is past its end of life on 2026-11-12 and untested from 1.1. Below 14 the studio still reads the server, with no
 promise. A health check that needs more privilege than the reading role has says "not checked", which grant it needs
 and who can give it on your platform. See [`docs/postgres-versions.md`](docs/postgres-versions.md), and, for Amazon
 Aurora, [`docs/aurora.md`](docs/aurora.md).
@@ -1047,7 +1047,7 @@ dotnet test tests\PostgresStudio.Integration.Tests
 ```
 
 Postgres Studio's live suite has a container reuse identity of its own and never attaches to the Marten suite's; its
-version matrix starts one server per PostgreSQL major, 14 to 18, and 19's release candidate as a preview.
+version matrix starts one server per PostgreSQL major, 15 to 19, 19 on its release candidate.
 
 (`TESTCONTAINERS_REUSE_ENABLE` is not read by Testcontainers 4.x and must not be used.)
 

@@ -183,16 +183,6 @@ else if (previewed)
 }
 else
 {
-    @if (applyNotice is { Length: > 0 })
-    {
-        @* K10: the same sentence the Health page's finding carries. *@
-        <div class="ms-alert ms-alert-warning ms-schema-name-notice" role="alert">
-            <div class="ms-alert-content">
-                <p>@applyNotice</p>
-            </div>
-        </div>
-    }
-
     <p class="ms-schema-note">
         Applying runs Marten's own migration for <strong>this database only</strong> - but for all of it:
         <strong>every tenant's</strong> tables and partitions, whichever tenant is selected above, which is why
@@ -349,9 +339,6 @@ else
     /// </remarks>
     private bool mayApply = true;
 
-    /// <summary>K10's sentence: a schema name this host's Weasel cannot apply twice, or <see langword="null" />.</summary>
-    private string? applyNotice;
-
     private string ApplyTitle => mayApply
         ? "Runs the previewed migration against this database - every tenant's tables included"
         : WritePolicyRefusal.For(StudioCapability.ApplySchemaChanges);
@@ -372,16 +359,6 @@ else
 
             mayApply = await Authorization.IsAuthorizedAsync(wholeDatabase, capability: null, lifetime.Token)
                 && await Authorization.IsAuthorizedAsync(wholeDatabase, StudioCapability.ApplySchemaChanges, lifetime.Token);
-
-            try
-            {
-                // Configuration only, no connection: a failure of it hides a notice, nothing else.
-                applyNotice = await SchemaData.SchemaNameNoticeAsync(scope, lifetime.Token);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                applyNotice = null;
-            }
         }
         catch (OperationCanceledException)
         {

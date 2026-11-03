@@ -157,15 +157,4 @@ public class UsageGuardTests
         new UnusedIndexCheck().Evaluate(Unused(Scanned(160_004, Now.AddDays(-31))), Evaluation(Window(TimeSpan.FromDays(3)))).Findings
             .Should().BeEmpty("even a dated last scan waits for the window");
     }
-
-    [Fact]
-    public void On_19_an_index_whose_own_counters_were_reset_inside_the_window_is_counted_not_judged()
-    {
-        HealthVerdict verdict = new UnusedIndexCheck().Evaluate(
-            Unused(Scanned(190_000, null) with { Scans = 0, CountersReset = Now.AddDays(-2) }),
-            Covered());
-
-        verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Be("1 index's own counters were reset less than 7 days ago and was not judged.");
-    }
 }

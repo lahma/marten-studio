@@ -897,8 +897,8 @@ index as `ForeignKey<TReference>(...)` does - or, for a conjoined key `ForeignKe
 Marten creates itself, nothing - its
 next apply drops an index nobody declares. Marten's DCB tag tables (`mt_event_tag_<suffix>`) are the case in point: their
 primary key leads with `value`, so a delete of an event reads every tag table whole. marten#5694 declares
-`idx_mt_event_tag_<suffix>_seq_id` from Marten 9.51.0: on 9.51 or later an apply builds it, and the tag table is covered;
-below, it arrives with the upgrade.
+`idx_mt_event_tag_<suffix>_seq_id` from Marten 9.51.0, so a tag table the studio's Marten applied is covered; one built by a
+Marten below 9.51 is not until the next apply builds the index.
 
 ## T17 Orphaned document tables
 

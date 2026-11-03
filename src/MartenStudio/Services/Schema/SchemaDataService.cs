@@ -8,8 +8,6 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
-using MartenStudio.Services.Configuration;
-using MartenStudio.Services.Health.Checks;
 using PostgresStudio.Services.Database;
 
 using Microsoft.Extensions.Logging;
@@ -860,16 +858,6 @@ internal sealed class SchemaDataService : ISchemaDataService
     {
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
         return resolved.Database.Id.Identity;
-    }
-
-    /// <inheritdoc />
-    public async Task<string?> SchemaNameNoticeAsync(StudioScope scope, CancellationToken cancellationToken = default)
-    {
-        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
-
-        return SchemaNameQuoting.Notice(
-            SchemaNameQuoting.QuotedSchemas(resolved.Store.Options, options.Value.IsDocumentTypeVisible),
-            MartenRuntime.Current.VersionOf(RuntimePackage.WeaselPostgresql));
     }
 
     private async Task<SchemaCheck> RunCheckAsync(ResolvedScope resolved, CancellationToken cancellationToken)

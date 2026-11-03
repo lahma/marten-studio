@@ -437,8 +437,8 @@ internal sealed class MartenHealthRemedyProvider : IHealthTableRemedies
     internal const string TagTableNote =
         "Marten creates this table, and its next apply drops any index its configuration does not declare (AutoCreate.CreateOrUpdate "
         + "is not additive), so none is offered here. marten#5694 declares one leading with seq_id, "
-        + "idx_mt_event_tag_<suffix>_seq_id, from Marten 9.51.0: on 9.51 or later an apply builds it; below, it arrives with the "
-        + "upgrade.";
+        + "idx_mt_event_tag_<suffix>_seq_id, from Marten 9.51.0: an apply builds it, so a tag table built below 9.51 has it "
+        + "once the next apply has run.";
 
     /// <summary>What T15 says of any other table Marten creates itself - the event store's, a projection's, its bookkeeping.</summary>
     internal const string MartenTableNote =

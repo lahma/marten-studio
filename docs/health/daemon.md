@@ -85,7 +85,7 @@ opts.Projections.SkipStaleGapsDespiteLiveTransactionsAfter = TimeSpan.FromMinute
 PostgreSQL's `idle_in_transaction_session_timeout` removes the cause instead.
 
 Marten 9.38 fixed a failed `StartStream` under `QuickWithServerTimestamps` leaving a permanent gap (#5454). The
-studio's floor is 9.39, so that cause cannot apply to a host running the studio, and D01 does not look for it.
+studio's floor is 9.57 (it was 9.39 before 1.1), so that cause cannot apply to a host running the studio, and D01 does not look for it.
 
 ## D02 Async projections behind, and nothing runs the daemon
 
@@ -309,10 +309,7 @@ a gap.
 Where the configuration lets the detector skip past a live append - the evidence switched off, or the cap set - a
 skip in the last hour is a Warning: if the append that held the gap committed afterwards, its events sit inside a
 range every async projection and subscription has already passed, and none of them will ever see them. **Explain**,
-on the projections screen while the mark is held (D01), names the transactions that could be holding it. Below
-Marten 9.47 the evidence counts in-progress transactions in every database on the server, prepared ones included
-(`pg_snapshot_xip(pg_current_snapshot())` is server-wide; #5605 scoped it to this database and added
-`pg_prepared_xacts` back), so an older host errs toward holding the mark rather than skipping; the caveat says so.
+on the projections screen while the mark is held (D01), names the transactions that could be holding it.
 
 The check reads the newest 100 rows of `mt_high_water_skips` by its primary key - `ending_sequence` only grows -
 with the server's clock, so every age is server time. The table exists only under advanced async tracking: without

@@ -24,7 +24,7 @@ public class SkippedGapsCheckTests
         bool asyncWork = true) =>
         new(asyncWork, [.. skips ?? []], Now, evidence, cap, mode, exclusive, tenantPartitioned);
 
-    private static HealthVerdict Evaluate(SkippedGapsFacts facts, string marten = "9.50.2") =>
+    private static HealthVerdict Evaluate(SkippedGapsFacts facts, string marten = "9.57.0") =>
         new SkippedGapsCheck().Evaluate(
             facts,
             HealthEvaluation.At(Now, MartenRuntime.ForVersions(new Dictionary<RuntimePackage, string> { [RuntimePackage.Marten] = marten })));
@@ -75,6 +75,8 @@ public class SkippedGapsCheckTests
         HealthFinding finding = Evaluate(Facts([Skip(TimeSpan.FromMinutes(5))])).Findings.Should().ContainSingle().Subject;
 
         finding.Remedy!.Code.Should().Be("opts.Events.UseExclusiveLockOnConcurrentAppends = true;");
+        finding.Caveat.Should().NotContain("#5605", "no supported Marten counts in-progress transactions server-wide")
+            .And.NotContain("can be skipped even under the defaults", "the old caveat had the direction backwards");
     }
 
     [Fact]
@@ -113,24 +115,6 @@ public class SkippedGapsCheckTests
 
         finding.Severity.Should().Be(HealthSeverity.Info, "a Warning is for a skip in the last hour");
         finding.Title.Should().EndWith("in the last day");
-    }
-
-    [Theory]
-    [InlineData("9.39.0", true)]
-    [InlineData("9.46.0", true)]
-    [InlineData("9.47.0", false)]
-    [InlineData("9.50.2", false)]
-    public void Below_Marten_9_47_the_caveat_says_the_evidence_is_server_wide_and_errs_toward_holding(string marten, bool said)
-    {
-        HealthFinding finding = Evaluate(Facts([Skip(TimeSpan.FromMinutes(5))]), marten).Findings.Should().ContainSingle().Subject;
-
-        finding.Caveat!.Contains("every database on the server (#5605)", StringComparison.Ordinal).Should().Be(said);
-        finding.Caveat.Should().NotContain("can be skipped even under the defaults", "the old caveat had the direction backwards");
-
-        if (said)
-        {
-            finding.Caveat.Should().Contain("errs toward holding the mark");
-        }
     }
 
     [Fact]

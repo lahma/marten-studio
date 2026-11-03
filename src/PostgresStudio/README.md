@@ -31,7 +31,7 @@ at exactly its own version (the diagnostics engine, with `Npgsql` - floor `9.0.4
 `Microsoft.Extensions.*` abstractions) and `Microsoft.AspNetCore.App.Internal.Assets` (floor `10.0.12`, three `.js` files
 and an MSBuild target, no runtime assembly), and takes everything else from the shared framework. It references no Marten,
 JasperFx or Weasel package.
-Target framework: `net10.0`. PostgreSQL 14 to 18 are supported, and every release is tested on each
+Target framework: `net10.0`. PostgreSQL 15 to 19 are tested, and 14 still works
 ([`docs/postgres-versions.md`](https://github.com/lahma/marten-studio/blob/main/docs/postgres-versions.md)).
 
 **Which package.** Want the UI: this one. Want only the findings in your own code - a worker that mails a daily summary, a
