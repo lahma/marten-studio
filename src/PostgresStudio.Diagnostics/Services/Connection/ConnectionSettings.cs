@@ -35,6 +35,8 @@ internal enum ConnectionSettingOrigin
 /// <param name="Obsolete">Npgsql's <c>[Obsolete]</c> message, or <see langword="null" />.</param>
 /// <param name="IsExplicit">Whether the connection string sets this keyword.</param>
 /// <param name="HintIds">The hints and checks that are about this keyword.</param>
+/// <param name="DefaultValue">Npgsql's own default for the keyword, formatted as <paramref name="Value" /> is (<c>not set</c> for none); <see langword="null" /> for a keyword the studio does not know.</param>
+/// <param name="BuilderProperty">The loaded <c>NpgsqlConnectionStringBuilder</c> property that carries the keyword, <c>MaxPoolSize</c>.</param>
 internal sealed record ConnectionSettingRow(
     string Keyword,
     string Category,
@@ -45,7 +47,9 @@ internal sealed record ConnectionSettingRow(
     string? Note,
     string? Obsolete,
     bool IsExplicit,
-    IReadOnlyList<string> HintIds);
+    IReadOnlyList<string> HintIds,
+    string? DefaultValue = null,
+    string? BuilderProperty = null);
 
 /// <summary>
 /// The effective, non-secret values of the settings the hints and checks read: the connection string over the

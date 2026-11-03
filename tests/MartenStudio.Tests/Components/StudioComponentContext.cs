@@ -120,6 +120,10 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<PostgresStudio.Services.Health.HealthMutes>();
         Services.AddSingleton<PostgresStudio.Services.Health.HealthAlerts>();
 
+        // 1.1-NP3: the Overview's one line about the connection, and Database > Connection itself.
+        Connection = new FakeConnectionInsightService();
+        Services.AddSingleton<PostgresStudio.Services.Connection.IConnectionInsightService>(Connection);
+
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
@@ -182,6 +186,9 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>What the Health page, the Overview's Health region and the badge are told (H1).</summary>
     public MartenStudio.Tests.Health.FakeHealthService Health { get; }
+
+    /// <summary>What Database › Connection and the Overview's connection line are told (NP3).</summary>
+    public FakeConnectionInsightService Connection { get; }
 
     /// <summary>What document detail's "referenced by" panel and the relationships screen are given.</summary>
     public FakeRelationshipDataService RelationshipData { get; }

@@ -184,6 +184,13 @@ internal static class StudioCoreRegistration
 
         // W5-AUR: the Server page's Aurora section, whose facts are the engine's and whose view is the circuit's.
         services.TryAddScoped<Aurora.IAuroraService, Aurora.AuroraService>();
+
+        // 1.1-NP3: Database > Connection. Its facts are the sweep's own shared read where a fresh sweep holds it and one read per
+        // HealthInterval otherwise (a singleton: a fact about the database, the same for every circuit); what a visitor is shown of
+        // them, and which first reveal of application sessions this circuit has audited, are the circuit's. A studio adds its own
+        // knowledge through IConnectionInsightContributor, which the service takes as any number of.
+        services.TryAddSingleton<Connection.IConnectionFactsSource, Connection.ConnectionFactsSource>();
+        services.TryAddScoped<Connection.IConnectionInsightService, Connection.ConnectionInsightService>();
         // W5-Q1: the Statements page. The facts are the engine's; what a visitor is shown of them, and which first read this
         // circuit has audited, are the circuit's.
         // X1: the drill-in's planner - stateless, its plans the visitor's own, run as SqlConsoleRole on a connection of each

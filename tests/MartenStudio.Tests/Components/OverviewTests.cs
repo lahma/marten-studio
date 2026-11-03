@@ -33,6 +33,45 @@ public class OverviewTests
         page.StatCardClasses("PostgreSQL").Should().Contain("ms-stat-card-success");
     }
 
+    /// <summary>1.1-NP3: one line about how the store connects, from the Connection page's own service, linking to the page.</summary>
+    [Fact]
+    public async Task The_overview_draws_one_line_about_how_the_store_connects_and_links_to_the_connection_page()
+    {
+        await using StudioComponentContext context = new();
+        context.StoreInfo.WithStore();
+        await context.ReadyAsync();
+        context.Connection.View = new PostgresStudio.Services.Connection.ConnectionPageView
+        {
+            Tls = new(PostgresStudio.Services.Connection.ConnectionTlsState.Verified, "verified (VerifyFull)", "TLSv1.3"),
+            PoolMax = 100,
+            Cards =
+            [
+                new("conn-card-a", PostgresStudio.Services.Connection.ConnectionCardKind.Hint, "One", "text", ["A"], [], []),
+                new("conn-card-b", PostgresStudio.Services.Connection.ConnectionCardKind.Hint, "Two", "text", ["B"], [], []),
+            ],
+        };
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-overview-connection").Should().ContainSingle());
+        string.Join(' ', page.Find(".ms-overview-connection").TextContent.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries))
+            .Should().Be("Connection: TLS verified (VerifyFull) · pool 100 · 2 things worth a look");
+        page.Find(".ms-overview-connection a").GetAttribute("href").Should().Contain("database/connection");
+    }
+
+    [Fact]
+    public async Task The_overview_draws_no_connection_line_for_a_visitor_the_page_refuses()
+    {
+        await using StudioComponentContext context = new();
+        context.StoreInfo.WithStore();
+        await context.ReadyAsync();
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => context.Connection.Requests.Should().NotBeEmpty());
+        page.FindAll(".ms-overview-connection").Should().BeEmpty();
+    }
+
     [Fact]
     public void The_event_store_configuration_is_rendered_as_facts_a_person_can_act_on()
     {

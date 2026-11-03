@@ -323,7 +323,7 @@ internal static class NpgsqlSettingsReader
 
         return empty with
         {
-            Rows = rows,
+            Rows = [.. rows.Select(row => WithDefault(row, fresh))],
             Values = new ConnectionValues(values),
             Endpoints = endpoints,
             PoolerSigns = PoolerSigns.Find(endpoints),
@@ -332,6 +332,26 @@ internal static class NpgsqlSettingsReader
             PasswordEnvironmentSet = passwordEnvironmentSet,
             Options = options,
         };
+    }
+
+    /// <summary>
+    /// The row with Npgsql's own default for its keyword and the builder property that carries it. A secret's and
+    /// <c>Options</c>' default is <c>not set</c>, whatever the loaded Npgsql says, and a keyword the studio does not know has no
+    /// default shown, as it has no value.
+    /// </summary>
+    private static ConnectionSettingRow WithDefault(ConnectionSettingRow row, NpgsqlConnectionStringBuilder fresh)
+    {
+        BuilderProperty? property = BuilderProperties.Value.FirstOrDefault(x => string.Equals(x.Keyword, row.Keyword, StringComparison.OrdinalIgnoreCase));
+
+        string? shown = row.Exposure switch
+        {
+            null => null,
+            NpgsqlSettingExposure.Secret or NpgsqlSettingExposure.Options => "not set",
+            _ when property is null => null,
+            _ => SafeGet(property, fresh, out _) is { } value && value is not UnreadableValue ? Format(value) : "not set",
+        };
+
+        return row with { DefaultValue = shown, BuilderProperty = property?.Name };
     }
 
     private static ConnectionSettingRow SecretRow(
@@ -558,7 +578,7 @@ internal static class NpgsqlSettingsReader
             ObsoleteAttribute? obsolete = property.GetCustomAttribute<ObsoleteAttribute>();
             MethodInfo getter = property.GetMethod!;
 
-            found.Add(new BuilderProperty(keyword, category, obsolete is null ? null : obsolete.Message ?? "obsolete", instance => getter.Invoke(instance, null)));
+            found.Add(new BuilderProperty(property.Name, keyword, category, obsolete is null ? null : obsolete.Message ?? "obsolete", instance => getter.Invoke(instance, null)));
         }
 
         return found;
@@ -579,7 +599,7 @@ internal static class NpgsqlSettingsReader
         return version is null ? "unknown" : version.Major.ToString(CultureInfo.InvariantCulture) + "." + version.Minor.ToString(CultureInfo.InvariantCulture) + "." + version.Build.ToString(CultureInfo.InvariantCulture);
     }
 
-    private sealed record BuilderProperty(string Keyword, string Category, string? Obsolete, Func<NpgsqlConnectionStringBuilder, object?> Getter);
+    private sealed record BuilderProperty(string Name, string Keyword, string Category, string? Obsolete, Func<NpgsqlConnectionStringBuilder, object?> Getter);
 
     private sealed record UnreadableValue(string ExceptionType);
 }

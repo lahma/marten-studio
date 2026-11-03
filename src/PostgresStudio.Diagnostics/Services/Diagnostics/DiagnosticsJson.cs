@@ -136,6 +136,7 @@ internal static class DiagnosticsJson
         Connections(json, snapshot.Connections);
         Wal(json, snapshot.Wal);
         ConnectionHistory(json, snapshot.ConnectionHistory);
+        ConnectionSection(json, snapshot.Connection);
 
         json.WriteStartObject("withheld");
         foreach (KeyValuePair<string, string> section in snapshot.Withheld.OrderBy(static x => x.Key, StringComparer.Ordinal))
@@ -430,6 +431,100 @@ internal static class DiagnosticsJson
             json.WriteNumber("peak", application.Peak);
             Time(json, "at", application.At);
             json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
+    }
+
+    /// <summary>
+    /// The Connection page's settings (<c>connection</c>, 1.1): studio-only, so <c>null</c> in every snapshot but the studio's own
+    /// download. A key added to <c>schemaVersion</c> 1, as <c>docs/diagnostics.md</c> allows.
+    /// </summary>
+    private static void ConnectionSection(Utf8JsonWriter json, ConnectionSnapshotSection? connection)
+    {
+        json.WritePropertyName("connection");
+
+        if (connection is null)
+        {
+            json.WriteNullValue();
+            return;
+        }
+
+        json.WriteStartObject();
+        Time(json, "measuredAt", connection.MeasuredAt);
+        json.WriteString("npgsqlVersion", connection.NpgsqlVersion);
+        Text(json, "platform", connection.Platform);
+        Text(json, "pooler", connection.Pooler);
+        json.WriteString("tls", connection.Tls);
+
+        json.WriteStartArray("settings");
+        foreach (ConnectionSnapshotSetting setting in connection.Settings)
+        {
+            json.WriteStartObject();
+            json.WriteString("keyword", setting.Keyword);
+            json.WriteString("category", setting.Category);
+            json.WriteString("value", setting.Value);
+            json.WriteString("from", setting.From);
+            Text(json, "environmentVariable", setting.EnvironmentVariable);
+            Text(json, "default", setting.Default);
+            Text(json, "obsolete", setting.Obsolete);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        json.WriteStartArray("observed");
+        foreach (ConnectionSnapshotValue value in connection.Observed)
+        {
+            json.WriteStartObject();
+            json.WriteString("name", value.Name);
+            json.WriteString("value", value.Value);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        json.WriteStartArray("hints");
+        foreach (ConnectionSnapshotHint hint in connection.Hints)
+        {
+            json.WriteStartObject();
+            json.WriteString("id", hint.Id);
+            Text(json, "keyword", hint.Keyword);
+            json.WriteString("text", hint.Text);
+            Text(json, "connectionStringFix", hint.ConnectionStringFix);
+            Text(json, "builderFix", hint.BuilderFix);
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        json.WritePropertyName("applications");
+        if (connection.Applications is null)
+        {
+            json.WriteNullValue();
+        }
+        else
+        {
+            json.WriteStartArray();
+            foreach (ConnectionSnapshotApplication application in connection.Applications)
+            {
+                json.WriteStartObject();
+                json.WriteString("applicationName", application.Application);
+                json.WriteNumber("sessions", application.Sessions);
+                Time(json, "oldestConnection", application.OldestConnection);
+                json.WriteNumber("tlsKnown", application.TlsKnown);
+                json.WriteNumber("tlsOn", application.TlsOn);
+                json.WriteEndObject();
+            }
+
+            json.WriteEndArray();
+        }
+
+        json.WriteStartArray("notes");
+        foreach (string note in connection.Notes)
+        {
+            json.WriteStringValue(note);
         }
 
         json.WriteEndArray();

@@ -257,6 +257,41 @@ internal sealed class FakeAurora : PostgresStudio.Services.Aurora.IAuroraService
     }
 }
 
+/// <summary>
+/// Database › Connection and both Overviews' connection line (NP3): the view said outright by a test. Refused by default, so an
+/// Overview test that is not about the line draws none. The same shape as MartenStudio.Tests' fake of the same name, which this
+/// project cannot link without a change to its project file.
+/// </summary>
+internal sealed class FakeConnectionInsightService : PostgresStudio.Services.Connection.IConnectionInsightService
+{
+    public PostgresStudio.Services.Connection.ConnectionPageView View { get; set; } =
+        PostgresStudio.Services.Connection.ConnectionPageView.Refused(PostgresStudio.Services.Connection.ConnectionRefusal.Unavailable, "No connection facts in this test.");
+
+    public PostgresStudio.Services.Connection.ConnectionApplicationsView Applications { get; set; } =
+        new() { Role = "app", MeasuredAt = new DateTimeOffset(2026, 11, 3, 9, 0, 0, TimeSpan.Zero) };
+
+    public Exception? Failure { get; set; }
+
+    public List<StudioScope> Requests { get; } = [];
+
+    public List<StudioScope> ApplicationRequests { get; } = [];
+
+    public Task<PostgresStudio.Services.Connection.ConnectionPageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        Requests.Add(scope);
+
+        return Failure is not null
+            ? Task.FromException<PostgresStudio.Services.Connection.ConnectionPageView>(Failure)
+            : Task.FromResult(View);
+    }
+
+    public Task<PostgresStudio.Services.Connection.ConnectionApplicationsView> GetApplicationsAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        ApplicationRequests.Add(scope);
+        return Task.FromResult(Applications);
+    }
+}
+
 /// <summary>The sidebar's badges: none.</summary>
 internal sealed class FakeNavIndicators : INavIndicatorService
 {

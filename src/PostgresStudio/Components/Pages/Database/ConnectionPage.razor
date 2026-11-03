@@ -1,0 +1,311 @@
+@page "/postgres/database/connection"
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@implements IAsyncDisposable
+@inject IConnectionInsightService Insights
+@inject HealthMutes Mutes
+@inject SessionPoolObserver Pools
+@inject StudioState State
+@inject StudioLiveUpdatesFactory LiveFactory
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject IJSRuntime JsRuntime
+
+@*
+    Database › Connection (1.1, NP3): how this application connects to this database, for an admin who arrives with three
+    questions - what is it actually connecting with, is anything here hurting me, and what should I change and where. The page
+    answers them in that order: a strip of facts, then "Worth a look" (the advisor's findings about the connection and the page's
+    own hints, each with the change to make), then every Npgsql setting with where its value came from, what the server saw of
+    the studio's own connection, this application's sessions (the activity gate), and what no page can see.
+
+    Redaction is the model's (NP-DESIGN §2): a password is only ever "set" or "not set", the connection string is never shown,
+    and nothing on this page can print one. It reads and changes nothing, and is not audited - but for the sessions, which name
+    other programs' activity and are the Sessions page's gate.
+
+    Read when the page becomes interactive (a prerender reads nothing), every HealthInterval while it stays open, and on Refresh.
+    While it is open it holds a lease on the in-process pool observer, which is what gives the header the pool's live numbers.
+*@
+
+<PageTitle>Connection</PageTitle>
+
+<div class="ms-page ms-conn">
+    <nav class="ms-db-breadcrumb ms-sessions-back" aria-label="Breadcrumb">
+        <a href="@DatabaseLinks.ToBrowser(Settings, Descriptor, State.ActiveScope)">Database</a>
+        <span class="ms-db-breadcrumb-sep" aria-hidden="true">/</span>
+        <span>Connection</span>
+    </nav>
+
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Connection</h1>
+        <div class="ms-conn-actions">
+            <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+        </div>
+    </div>
+
+    <p class="ms-conn-lead">
+        How this application connects to this database: what its Npgsql settings are and where each value came from, what the server
+        saw, and what is worth changing. A password is only ever shown as set or not set. Read when this page opens, once per
+        <code>HealthInterval</code> while it stays open, and on Refresh. It changes nothing.
+    </p>
+
+    @if (!interactive || (loading && view is null))
+    {
+        @* A static render reads nothing: the read waits for the circuit, so a prerender is never a second read. *@
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 })
+    {
+        <ErrorAlert Message="@error" OnRetry="RefreshAsync" />
+    }
+    else if (view is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No database selected</p>
+            <p class="ms-empty-description">Pick @Settings.Text.PickInTheHeader in the header to see how it is connected to.</p>
+        </div>
+    }
+    else if (view.Refusal != ConnectionRefusal.None)
+    {
+        <div class="ms-alert ms-alert-warning ms-conn-refusal" role="status">
+            <div class="ms-alert-content">
+                <p>@view.Reason</p>
+            </div>
+        </div>
+    }
+    else
+    {
+        <ConnectionHeaderStrip Model="view" />
+
+        @if (!view.Readable)
+        {
+            <div class="ms-alert ms-alert-warning ms-conn-unreadable" role="status">
+                <div class="ms-alert-content">
+                    <p>
+                        This data source's connection string could not be read (@view.UnreadableReason). Its settings are not
+                        listed; what the server saw is below.
+                    </p>
+                </div>
+            </div>
+        }
+
+        <ConnectionWorthALook Model="view" ShowAllNotes="@(!onlyDiffers)" />
+
+        @if (view.Readable)
+        {
+            <ConnectionSettingsTable Model="view" OnlyDiffersChanged="OnOnlyDiffersChangedAsync" />
+        }
+
+        <ConnectionObservedSection Model="view" />
+
+        <ConnectionApplicationsSection Model="apps" Access="view.Activity" Failure="@appsFailure" />
+
+        <ConnectionNotVisible Model="view" />
+
+        @if (view.Contributed.Count > 0)
+        {
+            <ConnectionContributedSections Model="view" />
+        }
+
+        <p class="ms-muted ms-conn-measured">
+            Read @State.FormatInSelectedTimeZone(view.MeasuredAt) (<TimeAgo Timestamp="view.MeasuredAt" />).
+        </p>
+
+        @foreach (HealthStatement statement in view.Statements)
+        {
+            <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" Reads="what the server saw" />
+        }
+    }
+</div>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private StudioLiveUpdates? live;
+
+    /// <summary>This page's lease on the pool observer: the listener runs only while some page or sweep holds one.</summary>
+    private SessionPoolLease? lease;
+
+    private ConnectionPageView? view;
+    private ConnectionApplicationsView? apps;
+    private string? appsFailure;
+    private string? error;
+    private bool loading = true;
+    private bool busy;
+    private bool interactive;
+    private bool disposed;
+
+    /// <summary>Whether the settings table shows only what differs from the default: the table owns the preference and says so here.</summary>
+    private bool onlyDiffers = true;
+
+    protected override void OnInitialized()
+    {
+        // Nothing is read here: this runs during prerendering too, and the read waits for the circuit.
+        State.ScopeChanged += OnScopeChangedAsync;
+        Mutes.Changed += OnMutesChangedAsync;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || disposed)
+        {
+            return;
+        }
+
+        interactive = true;
+        CancellationToken token = lifetime.Token;
+
+        try
+        {
+            lease = Pools.Lease();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The container is going away with the circuit; the page has nothing to show for long.
+        }
+
+        await State.EnsureInitializedAsync(token);
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await Mutes.LoadAsync(JsRuntime, token);
+
+        if (disposed)
+        {
+            return;
+        }
+
+        await LoadAsync();
+
+        // Leaving the page during the first read disposes it under the await: the lifetime's source is gone.
+        if (disposed)
+        {
+            return;
+        }
+
+        live = LiveFactory.Create();
+        await live.StartAsync(Settings.EffectiveHealthInterval, TickAsync, token);
+    }
+
+    private async Task TickAsync(CancellationToken cancellationToken) => await LoadAsync(cancellationToken);
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnMutesChangedAsync() => await InvokeAsync(StateHasChanged);
+
+    private Task OnOnlyDiffersChangedAsync(bool value)
+    {
+        onlyDiffers = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (!interactive)
+        {
+            return;
+        }
+
+        view = null;
+        apps = null;
+        appsFailure = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync(CancellationToken poll = default)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        StudioScope? scope = State.ActiveScope;
+
+        // Taken while the page is alive: a disposal under one of the awaits below cancels it rather than leaving a disposed
+        // source to be read. A poll's own token is linked in, so stopping the loop cancels the read it waits on.
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token, poll);
+        CancellationToken token = linked.Token;
+        busy = true;
+        loading = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            ConnectionPageView? read = scope is null ? null : await Insights.GetAsync(scope, token);
+
+            // The application's sessions only through an open gate: a closed one is never asked, so it refuses - and audits - nothing.
+            ConnectionApplicationsView? named = scope is not null && !disposed && read is { Refusal: ConnectionRefusal.None, Activity.IsOpen: true }
+                ? await Insights.GetApplicationsAsync(scope, token)
+                : null;
+
+            // A scope change while this was reading: the answer is about a database nobody is looking at.
+            if (State.ActiveScope == scope)
+            {
+                view = read;
+                apps = named is { Refusal: DatabaseRefusal.None } ? named : null;
+                appsFailure = named is { Refusal: not DatabaseRefusal.None } ? named.Reason : null;
+                error = null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in the log: a failure the visitor cannot see is a page that silently shows nothing. The type
+            // only - an exception's own words can name what a gate withholds (D27).
+            error = "The connection could not be read (" + (exception is Npgsql.PostgresException postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name) + ").";
+        }
+        finally
+        {
+            busy = false;
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        State.ScopeChanged -= OnScopeChangedAsync;
+        Mutes.Changed -= OnMutesChangedAsync;
+
+        try
+        {
+            if (live is not null)
+            {
+                await live.DisposeAsync();
+                live = null;
+            }
+        }
+        finally
+        {
+            lease?.Dispose();
+            lease = null;
+
+            try
+            {
+                await lifetime.CancelAsync();
+            }
+            finally
+            {
+                lifetime.Dispose();
+            }
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

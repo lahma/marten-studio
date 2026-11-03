@@ -23,5 +23,6 @@
   "connections": null,
   "wal": null,
   "connectionHistory": null,
+  "connection": null,
   "withheld": {}
 }

@@ -1,0 +1,68 @@
+@using PostgresStudio.Services.Connection
+
+@*
+    The slot a studio fills (NP3 draws it; NP4 is the first to fill it): sections of rows and cards that
+    IConnectionInsightContributor handed the page, drawn below the page's own. It is empty in Postgres Studio, and the page
+    does not draw it then. A contributed card is the page's own card: the same sentence, settings and copyable fixes.
+*@
+
+@if (Model is ConnectionPageView view)
+{
+    @foreach (ConnectionContributedSection section in view.Contributed)
+    {
+        <section class="ms-section ms-conn-contributed" id="@section.Id" aria-labelledby="@(section.Id + "-title")" @key="section.Id">
+            <h2 class="ms-section-title" id="@(section.Id + "-title")">@section.Title</h2>
+
+            @if (section.Intro is { Length: > 0 } intro)
+            {
+                <p class="ms-conn-note">@intro</p>
+            }
+
+            @if (section.Rows.Count > 0)
+            {
+                <dl class="ms-conn-observed-list">
+                    @foreach (ConnectionObservedLine line in section.Rows)
+                    {
+                        <div class="ms-conn-observed-row" @key="line.Label">
+                            <dt>@line.Label</dt>
+                            <dd>
+                                <span class="ms-mono">@line.Value</span>
+                                @if (line.Note is { Length: > 0 } note)
+                                {
+                                    <span class="ms-conn-row-note">@note</span>
+                                }
+                            </dd>
+                        </div>
+                    }
+                </dl>
+            }
+
+            @foreach (ConnectionCard card in section.Cards)
+            {
+                <article class="ms-health-finding ms-conn-card ms-conn-card-contributed" id="@card.Id" aria-labelledby="@(card.Id + "-title")" @key="card.Id">
+                    <header class="ms-health-finding-header">
+                        <span class="ms-health-severity ms-health-severity-info ms-conn-kind">Hint</span>
+                        <h3 class="ms-health-finding-title" id="@(card.Id + "-title")">@card.Heading</h3>
+                    </header>
+                    <p class="ms-health-why">@card.Text</p>
+                    @foreach (ConnectionFix fix in card.Fixes)
+                    {
+                        <div class="ms-health-remedy ms-conn-fix" @key="fix.Label">
+                            <div class="ms-health-remedy-header">
+                                <span class="ms-health-remedy-title">@fix.Label</span>
+                                <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + card.Heading + ")")" />
+                            </div>
+                            <pre class="ms-code ms-health-remedy-code"><code>@fix.Code</code></pre>
+                        </div>
+                    }
+                </article>
+            }
+        </section>
+    }
+}
+
+@code {
+    /// <summary>The page's view, as a <c>ConnectionPageView</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+}

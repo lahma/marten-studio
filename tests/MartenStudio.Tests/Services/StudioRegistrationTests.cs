@@ -197,6 +197,10 @@ public class StudioRegistrationTests
         (typeof(PostgresStudio.Services.Aurora.AuroraFactsCache), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraFactsCache)),
         (typeof(PostgresStudio.Services.Aurora.IAuroraService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Aurora.AuroraService)),
 
+        // 1.1-NP3: Database > Connection - the facts the sweep's own where a fresh sweep holds them, the view the circuit's.
+        (typeof(PostgresStudio.Services.Connection.IConnectionFactsSource), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Connection.ConnectionFactsSource)),
+        (typeof(PostgresStudio.Services.Connection.IConnectionInsightService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Connection.ConnectionInsightService)),
+
         // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
         (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
         // 0.6 (X1): the Statements drill-in's planner, stateless and the process's.

@@ -101,6 +101,14 @@ public class ActivityViewsOffThePollPathTests
     /// </summary>
     private const string HistoryBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ConnectionHistoryQueries.cs";
 
+    /// <summary>
+    /// The Connection page's builder (1.1-NP3): its <c>Applications</c> read lists the studio's own login's sessions in this database
+    /// from <c>pg_stat_activity</c>, by application name, and takes H3's session predicate. It is called only by the connection facts
+    /// source's applications read (the net below), which the Connection service reaches only past the activity gate, through a
+    /// single flight of <c>HealthInterval</c> time to live, and the page that shows it polls at <c>HealthInterval</c>.
+    /// </summary>
+    private const string ConnectionBuilder = "src/PostgresStudio.Diagnostics/Internal/Sql/ConnectionObservedQueries.cs";
+
     /// <summary>SQL that reads one of the views: from or join it, or call <c>pg_blocking_pids</c>.</summary>
     internal static readonly Regex ReadsAnActivityView = new(
         @"\b(from|join)\s+(pg_catalog\.)?pg_(stat_activity|locks|prepared_xacts)\b(?!\.)|\bpg_blocking_pids\s*\(",
@@ -116,7 +124,7 @@ public class ActivityViewsOffThePollPathTests
         List<string> offenders =
         [
             .. files
-                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder))
+                .Where(static file => SourceScanner.Relative(file) is not (Builder or DaemonBuilder or HorizonBuilder or MaintenanceBuilder or ReplicationBuilder or AuroraBuilder or ApplicationsBuilder or ConnectionBuilder))
                 .Where(static file => ReadsAnActivityView.IsMatch(File.ReadAllText(file)))
                 .Select(SourceScanner.Relative),
         ];
@@ -137,6 +145,46 @@ public class ActivityViewsOffThePollPathTests
             .Should().BeTrue("the Aurora builder lists this database's sessions for their waits, so its exemption is not an exemption for nothing");
         ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ApplicationsBuilder.Split('/'))))
             .Should().BeTrue("the applications builder counts this database's sessions, so its exemption is not an exemption for nothing");
+        ReadsAnActivityView.IsMatch(File.ReadAllText(RepositoryRoot.Combine(ConnectionBuilder.Split('/'))))
+            .Should().BeTrue("the connection builder lists the login's sessions by application, so its exemption is not an exemption for nothing");
+    }
+
+    /// <summary>
+    /// 1.1-NP3: the Connection page's application-sessions read is called by one place, the connection facts source, which only the
+    /// Connection service reaches - and the service reaches it only after the activity gate (capability, store policy, write policy)
+    /// has passed, and the page asks the service only when the view says the gate is open.
+    /// </summary>
+    [Fact]
+    public void The_connection_builders_applications_read_is_called_only_behind_the_activity_gate()
+    {
+        List<string> callers =
+        [
+            .. SourceScanner.ShippedSourceFiles()
+                .Where(static file => SourceScanner.Relative(file) != ConnectionBuilder)
+                .Where(static file => SourceScanner.StripCommentsAndStrings(File.ReadAllText(file)).Contains("ConnectionObservedQueries.Applications(", StringComparison.Ordinal))
+                .Select(SourceScanner.Relative),
+        ];
+
+        callers.Should().Equal(["src/PostgresStudio/Services/Connection/ConnectionFactsSource.cs"],
+            "the application sessions are the connection facts source's read, and nothing else's");
+
+        string service = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Services", "Connection", "ConnectionInsightService.cs")));
+        int method = service.IndexOf("Task<ConnectionApplicationsView> GetApplicationsAsync(", StringComparison.Ordinal);
+        method.Should().BePositive();
+        int require = service.IndexOf("capabilities.Require(StudioCapability.ViewDatabaseActivity)", method, StringComparison.Ordinal);
+        int writePolicy = service.IndexOf("IsAuthorizedAsync(whole, StudioCapability.ViewDatabaseActivity", method, StringComparison.Ordinal);
+        int read = service.IndexOf("facts.ReadApplicationsAsync(", method, StringComparison.Ordinal);
+
+        require.Should().BePositive();
+        writePolicy.Should().BeGreaterThan(require);
+        read.Should().BeGreaterThan(writePolicy, "the sessions are read only after the capability and both policies have said yes");
+
+        string page = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "Components", "Pages", "Database", "ConnectionPage.razor")));
+        page.Should().Contain("Activity.IsOpen").And.Contain("EffectiveHealthInterval").And.NotContain("RefreshInterval");
+        page.IndexOf("Activity.IsOpen", StringComparison.Ordinal).Should().BeLessThan(page.IndexOf("GetApplicationsAsync(", StringComparison.Ordinal),
+            "the page asks the service only through an open gate");
     }
 
     [Fact]
@@ -335,8 +383,9 @@ public class ActivityViewsOffThePollPathTests
                 || x == "src/PostgresStudio.Diagnostics/Services/Database/SessionActivityReader.cs"
                 || x == HorizonBuilder
                 || x == ApplicationsBuilder
+                || x == ConnectionBuilder
                 || x == HistoryBuilder,
-            "every other caller would be a new path to the process array and the lock table; the horizon and applications builders take only H3's session predicate, and the opt-in connection history (#43) reads the holders on its own cadence over its own kept connection");
+            "every other caller would be a new path to the process array and the lock table; the horizon, applications and connection builders take only H3's session predicate, and the opt-in connection history (#43) reads the holders on its own cadence over its own kept connection");
     }
 
     [Fact]

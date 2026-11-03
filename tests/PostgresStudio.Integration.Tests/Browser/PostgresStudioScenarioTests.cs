@@ -243,6 +243,62 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         });
     }
 
+    /// <summary>
+    /// 1.1-NP3: Database › Connection over the sample, on the admin database and on a tenant's: the strip of facts, the settings
+    /// table with its toggle, the server's own view, the application's sessions behind the activity gate, no password anywhere
+    /// and no sideways scroll at 1280 or at 390 px.
+    /// </summary>
+    [BrowserFact]
+    public async Task The_Connection_page_shows_how_the_app_connects_what_the_server_saw_and_what_to_change()
+    {
+        await RunAsync("connection", "admin", async studio =>
+        {
+            IPage page = studio.Page;
+
+            await studio.GoAsync(fixture.Host.StudioUrl("database/connection"));
+            await page.Locator(".ms-conn-strip").WaitForAsync();
+            await page.Locator("#conn-settings tbody tr").First.WaitForAsync();
+            await page.Locator("#conn-observed dt").First.WaitForAsync();
+
+            (await page.Locator("h1.ms-page-title").InnerTextAsync()).Trim().Should().Be("Connection");
+            (await page.Locator(".ms-conn-fact dt").AllTextContentsAsync()).Should().Contain(["Server", "Database", "Role", "TLS", "Pool", "Npgsql", "Platform"]);
+            (await page.Locator("#conn-worth").CountAsync()).Should().Be(1);
+            (await page.Locator("#conn-settings-title").TextContentAsync())!.Trim().Should().Be("Settings");
+
+            // The identity of the connection is always in the table; the password is only ever set or not set, never read out.
+            (await page.Locator("tr#conn-row-host").CountAsync()).Should().Be(1);
+            (await page.Locator("tr#conn-row-password .ms-conn-value").InnerTextAsync()).Should().MatchRegex("^(set|not set|not visible)");
+
+            // The toggle shows every setting, and the choice survives a reload (local storage).
+            int differing = await page.Locator("#conn-settings tbody tr").CountAsync();
+            await page.Locator("button.ms-conn-toggle").ClickAsync();
+            await page.Locator("button.ms-conn-toggle[aria-pressed='false']").WaitForAsync();
+            (await page.Locator("#conn-settings tbody tr").CountAsync()).Should().BeGreaterThan(differing, "the defaults are shown once the toggle is off");
+
+            await page.ReloadAsync();
+            await page.Locator("button.ms-conn-toggle[aria-pressed='false']").WaitForAsync();
+
+            // A fact links to its row: the link scrolls the page to it and the studio stays on this page.
+            await page.Locator(".ms-conn-fact a", new PageLocatorOptions { HasTextString = "max" }).ClickAsync();
+            page.Url.Should().Contain("database/connection").And.Contain("#conn-row-maximum-pool-size");
+
+            // The application's sessions are the activity gate's: a table, or the sentence naming the option.
+            await page.Locator("#conn-sessions table, #conn-sessions .ms-capability-disabled").First.WaitForAsync();
+
+            await studio.AssertNoSidewaysScrollAsync("Database › Connection");
+            await page.SetViewportSizeAsync(390, 800);
+            await studio.AssertNoSidewaysScrollAsync("Database › Connection at 390 px");
+            await page.SetViewportSizeAsync(StudioPage.ViewportWidth, StudioPage.ViewportHeight);
+
+            // A tenant database has its own connection; the page reads it the same way.
+            await studio.GoAsync(fixture.Host.StudioUrl("database/connection?store=tenants&db=tenant_a"));
+            await page.Locator("#conn-observed dt").First.WaitForAsync();
+            (await page.Locator(".ms-conn-fact dd").AllTextContentsAsync()).Should().Contain(static x => x.Contains("tenant_a", StringComparison.Ordinal));
+
+            studio.AssertClean("opening Database › Connection as admin");
+        });
+    }
+
     [BrowserFact]
     public async Task Health_reports_what_it_checked_on_a_tenant_database()
     {
@@ -297,6 +353,7 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
         ("", ".ms-pg-overview-server"),
         ("database", ".ms-db-rail-schemas .ms-db-rail-name"),
         ("database/sessions", ".ms-sessions-stats"),
+        ("database/connection", "#conn-settings tbody tr"),
         ("relationships", ".ms-graph-toolbar, .ms-schema-note, .ms-alert"),
         ("health", "table.ms-health-check-table tbody tr"),
         ("query", "#ms-query-sql"),

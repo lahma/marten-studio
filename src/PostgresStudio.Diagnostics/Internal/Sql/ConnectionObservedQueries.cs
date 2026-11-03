@@ -86,6 +86,44 @@ internal static class ConnectionObservedQueries
         "  from pg_catalog.pg_stat_database d\n" +
         " where d.datname = pg_catalog.current_database()";
 
+    /// <summary>The most applications one read of <see cref="Applications" /> lists; the count says how many there are.</summary>
+    public const int MaxApplications = 50;
+
+    private const string ApplicationsSql =
+        "select coalesce(a.application_name, '')::text as application,\n" +
+        "       count(*)::bigint as sessions,\n" +
+        "       min(a.backend_start) as oldest_start,\n" +
+        "       count(s.pid)::bigint as tls_known,\n" +
+        "       (count(*) filter (where s.ssl))::bigint as tls_on,\n" +
+        "       (count(*) over ())::bigint as applications\n" +
+        "  from pg_catalog.pg_stat_activity a\n" +
+        "  left join pg_catalog.pg_stat_ssl s on s.pid = a.pid\n" +
+        " where a.datname = pg_catalog.current_database()\n" +
+        "   and a.usename = session_user\n" +
+        "   and " + HealthConnectionQueries.ClientSession + "\n" +
+        "   and a.pid <> pg_catalog.pg_backend_pid()\n" +
+        " group by 1\n" +
+        " order by 2 desc, 1\n" +
+        " limit @limit";
+
+    /// <summary>
+    /// This application's own sessions (the Connection page's "This application's sessions", the activity gate's): the client
+    /// sessions of <b>this database that the studio's login owns</b> (<c>session_user</c> - the role the data source connects as,
+    /// whatever <c>SqlConsoleRole</c> the reads run as), grouped by <c>application_name</c>, with the oldest <c>backend_start</c> and
+    /// how many of them <c>pg_stat_ssl</c> shows on TLS.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>What a role short of <c>pg_read_all_stats</c> sees.</b> Every session's <c>application_name</c> and role are readable; its
+    /// <c>backend_start</c> and its <c>pg_stat_ssl</c> row only for the roles the reading role holds the privileges of, and
+    /// <c>pg_stat_ssl</c> has no row at all for a backend it may not see into. So the oldest start is the oldest <i>visible</i> one,
+    /// and the TLS count says how many sessions it could tell about (<c>tls_known</c>), never "none".
+    /// </para>
+    /// <para>The studio's own reading backend is left out (<c>pg_backend_pid()</c>); its other connections share the application's data source and are counted under its name.</para>
+    /// </remarks>
+    public static HealthQuery Applications() =>
+        new(ApplicationsSql, [new NpgsqlParameter("limit", NpgsqlDbType.Integer) { Value = MaxApplications }]);
+
     /// <summary>
     /// The one statement of NP-DESIGN §4: who the server thinks the studio's connection is, the settings a new session
     /// starts with, the connection's TLS and GSS state, and which of <paramref name="optionNames" /> exist as settings.

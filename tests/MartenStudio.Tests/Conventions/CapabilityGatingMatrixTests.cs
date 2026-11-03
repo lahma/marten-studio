@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
@@ -170,6 +171,10 @@ public class CapabilityGatingMatrixTests
         // H3: Database > Sessions' details - process ids, roles, client addresses, application names and
         // statements - refused as a value and audited; the summary beside it is a plain read.
         new(typeof(ISessionActivityService), nameof(ISessionActivityService.GetDetailsAsync), StudioCapability.ViewDatabaseActivity),
+
+        // 1.1-NP3: Database > Connection's "This application's sessions" - the same gate, the same three refusals as values, audited.
+        // The page beside it (GetAsync) is the store policy's for the database as a whole, like the sessions' summary.
+        new(typeof(IConnectionInsightService), nameof(IConnectionInsightService.GetApplicationsAsync), StudioCapability.ViewDatabaseActivity),
         // X2: a what-if plans a statement under a hypothetical index, behind the gate of the plan it accompanies - the
         // console's (RunSql), Mode A's (the console's again) and LINQ mode's (RunLinqQueries) - refused as a value, audited.
         new(typeof(ISqlConsoleService), nameof(ISqlConsoleService.WhatIfAsync), StudioCapability.RunSql),
@@ -256,6 +261,9 @@ public class CapabilityGatingMatrixTests
 
         // H3: the summary is the store policy's for the database as a whole; the details are a gated read.
         [typeof(ISessionActivityService)] = ["GetDetailsAsync", "GetSummaryAsync"],
+
+        // 1.1-NP3: the Connection page reads (GetAsync, the store policy's) and its application sessions (a gated read, above).
+        [typeof(IConnectionInsightService)] = ["GetApplicationsAsync", "GetAsync"],
     };
 
     /// <summary>

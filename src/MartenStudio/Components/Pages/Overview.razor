@@ -1,5 +1,6 @@
 @using System.Globalization
 @using MartenStudio.Services
+@using PostgresStudio.Components.Pages.Database
 @using PostgresStudio.Components.Pages.Health
 @using MartenStudio.Services.Events
 @using MartenStudio.Services.Health
@@ -131,6 +132,12 @@
                 <p class="ms-muted">
                     <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">Open the Health page</a>
                 </p>
+            }
+
+            @* 1.1-NP3: one line about how the store connects, a link to Database › Connection; read once the health region is. *@
+            @if (healthRead)
+            {
+                <ConnectionGlanceLine Revision="health?.MeasuredAt" />
             }
         </section>
 

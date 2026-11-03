@@ -73,6 +73,13 @@ public sealed record PostgresDiagnosticsSnapshot
     public PostgresWalSection? Wal { get; init; }
 
     /// <summary>
+    /// The Connection page's settings (1.1): <b>studio-only</b>. Filled by the studio's own Snapshot download from the visitor's
+    /// view of the page and never by <c>IPostgresDiagnostics</c>, so the public read model does not carry it (D31) and the JSON
+    /// writes <c>"connection": null</c> for a host's snapshot.
+    /// </summary>
+    internal ConnectionSnapshotSection? Connection { get; init; }
+
+    /// <summary>
     /// Sections asked for and not included, by section name (<c>statements</c>), with the reason - for the API, the
     /// <see cref="PostgresDiagnosticsRequest.IncludeActivity" /> it would take; in the studio's own download, the gate the
     /// visitor is short of.

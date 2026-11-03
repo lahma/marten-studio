@@ -1,0 +1,51 @@
+@using PostgresStudio.Services.Connection
+
+@*
+    "What the server saw" (NP3): the values the server reports about the studio's own connection, which is the same data source,
+    pool, role and database as the application's - so a setting made at role or database level (ALTER ROLE ... SET) is in
+    them, and one the application sets for itself with SET is not. Each timeout is what a new session of this login starts with,
+    not what the studio's read-only transaction sets for itself. The section says so before it shows anything, because an admin
+    comparing it with the application's own behaviour needs to know whose connection it is.
+*@
+
+@if (Model is ConnectionPageView view)
+{
+    <section class="ms-section ms-conn-observed" id="conn-observed" aria-labelledby="conn-observed-title">
+        <h2 class="ms-section-title" id="conn-observed-title">What the server saw</h2>
+
+        <p class="ms-conn-note">
+            This is the studio's own connection, opened from the same pool as the application's with the same role and database. A
+            setting made for the role or the database (<code>ALTER ROLE ... SET</code>) is included; one the application sets
+            for itself with <code>SET</code> is not. Timeouts are what a new session of this login starts with.
+        </p>
+
+        @if (view.Observed.NotRead is { Length: > 0 } notRead)
+        {
+            <p class="ms-muted ms-conn-unavailable">The server was not asked: @notRead</p>
+        }
+        else
+        {
+            <dl class="ms-conn-observed-list">
+                @foreach (ConnectionObservedLine line in view.Observed.Lines)
+                {
+                    <div class="ms-conn-observed-row" @key="line.Label">
+                        <dt>@line.Label</dt>
+                        <dd>
+                            <span class="ms-mono">@line.Value</span>
+                            @if (line.Note is { Length: > 0 } note)
+                            {
+                                <span class="ms-conn-row-note">@note</span>
+                            }
+                        </dd>
+                    </div>
+                }
+            </dl>
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The page's view, as a <c>ConnectionPageView</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+}

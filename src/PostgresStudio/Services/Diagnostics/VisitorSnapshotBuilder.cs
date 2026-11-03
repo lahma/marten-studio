@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Replication;
@@ -60,6 +61,7 @@ internal sealed class VisitorSnapshotBuilder
     private readonly IServerPageService server;
     private readonly ISessionActivityService sessions;
     private readonly IReplicationService replication;
+    private readonly IConnectionInsightService connection;
     private readonly HealthCheckRegistry registry;
     private readonly IStudioSettings settings;
     private readonly StudioDescriptor descriptor;
@@ -71,6 +73,7 @@ internal sealed class VisitorSnapshotBuilder
     /// <param name="server">The Server page's service.</param>
     /// <param name="sessions">Database › Sessions' service.</param>
     /// <param name="replication">The Replication page's service, for its WAL read.</param>
+    /// <param name="connection">Database › Connection's service, for its <c>connection</c> section.</param>
     /// <param name="registry">The checks, for their variants.</param>
     /// <param name="settings">The studio's settings.</param>
     /// <param name="descriptor">The studio, for its key.</param>
@@ -82,6 +85,7 @@ internal sealed class VisitorSnapshotBuilder
         IServerPageService server,
         ISessionActivityService sessions,
         IReplicationService replication,
+        IConnectionInsightService connection,
         HealthCheckRegistry registry,
         IStudioSettings settings,
         StudioDescriptor descriptor,
@@ -93,6 +97,7 @@ internal sealed class VisitorSnapshotBuilder
         this.server = server;
         this.sessions = sessions;
         this.replication = replication;
+        this.connection = connection;
         this.registry = registry;
         this.settings = settings;
         this.descriptor = descriptor;
@@ -121,6 +126,13 @@ internal sealed class VisitorSnapshotBuilder
 
         ReplicationView replicationView = await replication.GetNumbersAsync(scope, cancellationToken).ConfigureAwait(false);
 
+        // 1.1-NP3: the Connection page's settings, as this visitor's page holds them; the application's sessions only through an open
+        // gate, as the Sessions details are asked for - a closed gate is a withheld entry, never a refused (and audited) request.
+        ConnectionPageView connectionView = await connection.GetAsync(scope, cancellationToken).ConfigureAwait(false);
+        ConnectionApplicationsView? applications = connectionView is { Refusal: ConnectionRefusal.None, Activity.IsOpen: true }
+            ? await connection.GetApplicationsAsync(scope, cancellationToken).ConfigureAwait(false)
+            : null;
+
         DateTimeOffset now = timeProvider.GetUtcNow();
         PostgresDiagnosticsSnapshot snapshot = Compose(
             new PostgresDatabaseRef(scope.StoreKey, scope.DatabaseId),
@@ -133,7 +145,9 @@ internal sealed class VisitorSnapshotBuilder
             replicationView,
             registry,
             DiagnosticsJson.ProducerFor(settings.Text.Product),
-            now);
+            now,
+            connectionView,
+            applications);
 
         return new VisitorSnapshot(snapshot.ToJson(), FileName(descriptor.Key, scope.StoreKey, scope.DatabaseId, now));
     }
@@ -188,7 +202,9 @@ internal sealed class VisitorSnapshotBuilder
         ReplicationView replicationView,
         HealthCheckRegistry registry,
         string producer,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        ConnectionPageView? connectionView = null,
+        ConnectionApplicationsView? applications = null)
     {
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(report);
@@ -254,7 +270,85 @@ internal sealed class VisitorSnapshotBuilder
             Settings = settingsSection,
             Connections = Connections(summary, details, withheld),
             Wal = Wal(replicationView, now, withheld),
+            Connection = ConnectionSection(connectionView, applications, withheld),
             Withheld = withheld,
+        };
+    }
+
+    /// <summary>
+    /// The Connection page's settings, as this visitor's page shows them: the redacted rows, what the server saw, the page's hints
+    /// and - past the activity gate - the application's sessions. A visitor the page refuses is a <c>withheld</c> entry carrying
+    /// its sentence, and so is the part of it behind the activity gate. Nothing here can be a connection string: the page's model
+    /// holds none (NP-DESIGN §2).
+    /// </summary>
+    private static ConnectionSnapshotSection? ConnectionSection(
+        ConnectionPageView? view,
+        ConnectionApplicationsView? applications,
+        SortedDictionary<string, string> withheld)
+    {
+        if (view is null)
+        {
+            return null;
+        }
+
+        if (view.Refusal != ConnectionRefusal.None)
+        {
+            withheld["connection"] = view.Reason ?? "withheld";
+            return null;
+        }
+
+        IReadOnlyList<ConnectionSnapshotApplication>? named = null;
+
+        if (applications is { Refusal: DatabaseRefusal.None })
+        {
+            named = [.. applications.Rows.Select(static x => new ConnectionSnapshotApplication(x.Application, x.Sessions, x.OldestConnection, x.TlsKnown, x.TlsOn))];
+        }
+        else
+        {
+            withheld["connection.applications"] = applications?.Reason ?? view.Activity.Denial ?? "withheld";
+        }
+
+        return new ConnectionSnapshotSection
+        {
+            MeasuredAt = view.MeasuredAt,
+            NpgsqlVersion = view.NpgsqlVersion,
+            Platform = view.Header.FirstOrDefault(static x => x.Label == "Platform")?.Value,
+            Tls = view.Tls.State switch
+            {
+                ConnectionTlsState.Verified => "verified",
+                ConnectionTlsState.EncryptedNotVerified => "encryptedNotVerified",
+                ConnectionTlsState.NotEncrypted => "notEncrypted",
+                ConnectionTlsState.NotEncryptedLocal => "notEncryptedLocal",
+                ConnectionTlsState.EncryptedByProxy => "encryptedByProxy",
+                ConnectionTlsState.EncryptedGss => "encryptedGss",
+                ConnectionTlsState.NotVisible => "notVisible",
+                _ => "notRead",
+            },
+            Settings =
+            [
+                .. view.Settings.Select(static x => new ConnectionSnapshotSetting(
+                    x.Row.Keyword,
+                    x.Row.Category,
+                    x.Row.Value,
+                    char.ToLowerInvariant(x.Row.Origin.ToString()[0]) + x.Row.Origin.ToString()[1..],
+                    x.Row.EnvironmentVariable,
+                    x.Row.DefaultValue,
+                    x.Row.Obsolete)),
+            ],
+            Observed = [.. view.Observed.Lines.Select(static x => new ConnectionSnapshotValue(x.Label, x.Value))],
+            Hints =
+            [
+                .. view.Cards.Concat(view.Notes)
+                    .Where(static x => x.Kind is ConnectionCardKind.Hint or ConnectionCardKind.Note)
+                    .Select(static x => new ConnectionSnapshotHint(
+                        x.Code ?? x.Id,
+                        x.Keywords.Count > 0 ? x.Keywords[0] : null,
+                        x.Text,
+                        x.Fixes.FirstOrDefault(static f => f.Label == "Connection string")?.Code,
+                        x.Fixes.FirstOrDefault(static f => f.Label == "NpgsqlDataSourceBuilder")?.Code)),
+            ],
+            Applications = named,
+            Notes = view.SettingsNotes,
         };
     }
 

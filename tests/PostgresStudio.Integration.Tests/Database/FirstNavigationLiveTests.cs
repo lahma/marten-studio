@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 using PostgresStudio.Services;
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Live;
@@ -120,6 +121,7 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
         walked.RowsRead.Should().BeGreaterThanOrEqualTo(3 * 4, "customers, orders, app.settings and the views' rows were read");
         walked.Definitions.Should().BeGreaterThanOrEqualTo(3 * 5);
         walked.HealthChecks.Should().BePositive();
+        walked.Connections.Should().Be(3, "the Connection page was read on every database, and wrote nothing");
 
         before.ShouldBeUnchangedIn(await ServerSnapshot.ReadAsync(owned.ConnectionStrings, Prefix, Token));
         host.Logs.WarningsOrWorse.Should().BeEmpty("a first navigation of a healthy database is nothing to warn about");
@@ -140,6 +142,14 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
 
         ISessionActivityService sessions = circuit.Get<ISessionActivityService>();
         (await sessions.GetSummaryAsync(scope, Token)).Refusal.Should().Be(DatabaseRefusal.None);
+
+        // 1.1-NP3: Database > Connection - the page and the application's sessions behind the activity gate.
+        IConnectionInsightService connection = circuit.Get<IConnectionInsightService>();
+        ConnectionPageView connectionView = await connection.GetAsync(scope, Token);
+        connectionView.Refusal.Should().Be(ConnectionRefusal.None, connectionView.Reason);
+        connectionView.Settings.Should().NotBeEmpty();
+        (await connection.GetApplicationsAsync(scope, Token)).Refusal.Should().Be(DatabaseRefusal.None);
+        walked.Connections++;
 
         IHealthService health = circuit.Get<IHealthService>();
         HealthReport regular = await health.GetReportAsync(scope, HealthReportRequest.Regular, Token);
@@ -214,6 +224,8 @@ public class FirstNavigationLiveTests(PostgresFixture postgres)
         public int Definitions { get; set; }
 
         public int HealthChecks { get; set; }
+
+        public int Connections { get; set; }
     }
 
     /// <summary>A host's database source over fixed databases, building each data source once.</summary>

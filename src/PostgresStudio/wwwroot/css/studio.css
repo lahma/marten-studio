@@ -14222,3 +14222,332 @@ a.ms-schema-health-mark:focus-visible {
     white-space: nowrap;
     font-variant-numeric: tabular-nums;
 }
+
+/* ===== 1.1-NP3 connection ===== */
+
+/* ==========================================================================
+   1.1-NP3. Database > Connection
+
+   Appended in D26 order, after 1.1-PG19. Existing tokens and classes first: the cards are the Health page's own
+   (.ms-health-finding and its parts), the tables are .ms-table inside TableScroll, and what is new here is the strip of facts, the
+   settings table's row styling and its "From" badge, and the lists of what the server saw and of what no page can see. At 390 px
+   the strip wraps to one fact a line, the cards stack, and a table scrolls inside its own region.
+   ========================================================================== */
+
+.ms-conn-lead {
+    max-width: 72ch;
+    margin: 0 0 var(--ms-space-md);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-conn-note {
+    max-width: 80ch;
+    margin: 0 0 var(--ms-space-sm);
+}
+
+.ms-conn-caveat,
+.ms-conn-withheld {
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-conn-subtitle {
+    margin: var(--ms-space-lg) 0 var(--ms-space-sm);
+    font-size: var(--ms-font-size-lg);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+/* The strip: one fact each, as many to a line as fit. The left edge carries the tone; the words carry the meaning. */
+.ms-conn-strip {
+    margin: 0 0 var(--ms-space-lg);
+}
+
+.ms-conn-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+    margin: 0;
+}
+
+.ms-conn-fact {
+    flex: 1 1 11rem;
+    min-width: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 1px solid var(--ms-color-border);
+    border-left: 4px solid var(--ms-color-border-strong);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+}
+
+.ms-conn-fact-ok {
+    border-left-color: var(--ms-color-success);
+}
+
+.ms-conn-fact-warn {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-conn-fact dt {
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-fact dd {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+    overflow-wrap: anywhere;
+}
+
+.ms-conn-fact dd a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.ms-conn-fact dd a:hover,
+.ms-conn-fact dd a:focus-visible {
+    text-decoration: underline;
+}
+
+/* Worth a look: the cards are .ms-health-finding; a note is quieter than a hint. */
+.ms-conn-nothing {
+    margin: 0 0 var(--ms-space-sm);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-conn-worth .ms-conn-card {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-conn-card-note {
+    border-left-color: var(--ms-color-border-strong);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-conn-kind {
+    text-transform: none;
+}
+
+.ms-conn-about {
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-about-link {
+    margin-left: var(--ms-space-xs);
+    font-family: var(--ms-font-mono);
+}
+
+/* A row the page has just been sent to, marked the way the Health page marks a linked finding. */
+.ms-conn-row.ms-health-finding-linked > th,
+.ms-conn-row.ms-health-finding-linked > td {
+    background-color: var(--ms-color-info-bg);
+}
+
+/* The settings: a toolbar, then one labelled table per category. */
+.ms-conn-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm) var(--ms-space-md);
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-conn-toolbar-note {
+    flex: 1 1 20rem;
+    min-width: 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-conn-toggle-on {
+    border-color: var(--ms-color-primary);
+    background-color: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+}
+
+.ms-conn-group {
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-conn-group-title {
+    margin: 0;
+    font-size: var(--ms-font-size-base);
+}
+
+.ms-conn-group-button {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    width: 100%;
+    padding: var(--ms-space-xs) 0;
+    border: 0;
+    background: none;
+    color: var(--ms-color-text);
+    font: inherit;
+    font-weight: var(--ms-font-weight-semibold);
+    text-align: left;
+    cursor: pointer;
+}
+
+.ms-conn-group-button:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    border-radius: var(--ms-radius-sm);
+}
+
+.ms-conn-group-caret {
+    width: 1em;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-group-count {
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-normal);
+    color: var(--ms-color-text-muted);
+}
+
+/* A row header of this table is a setting's name, not the key column of a key and value table. */
+.ms-conn-table tbody th.ms-conn-keyword {
+    width: auto;
+    min-width: 12rem;
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-medium);
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--ms-color-text);
+    background-color: transparent;
+    border-right: 0;
+}
+
+.ms-conn-advice {
+    margin-left: var(--ms-space-sm);
+    padding: 0 var(--ms-space-sm);
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-info-bg);
+    color: var(--ms-color-info);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.ms-conn-advice:hover,
+.ms-conn-advice:focus-visible {
+    text-decoration: underline;
+}
+
+.ms-conn-value {
+    min-width: 12rem;
+}
+
+.ms-conn-value .ms-mono {
+    overflow-wrap: anywhere;
+}
+
+.ms-conn-row-note {
+    display: block;
+    max-width: 60ch;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-obsolete {
+    color: var(--ms-color-warning);
+}
+
+.ms-conn-default {
+    color: var(--ms-color-text-secondary);
+}
+
+/* "From": text on a tinted pill, so the colour only repeats what the words say. */
+.ms-conn-from {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-full);
+    font-size: var(--ms-font-size-xs);
+    line-height: 1.5rem;
+    white-space: nowrap;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-from-connectionstring {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+}
+
+.ms-conn-from-environment {
+    border-color: var(--ms-color-executing);
+    background: var(--ms-color-executing-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-conn-from-notvisible,
+.ms-conn-from-withheld,
+.ms-conn-from-unreadable {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+/* What the server saw, what no page can see, and a studio's own rows: a label and a value, two columns that become one. */
+.ms-conn-observed-list,
+.ms-conn-hidden-list {
+    display: grid;
+    grid-template-columns: minmax(12rem, max-content) minmax(0, 1fr);
+    gap: var(--ms-space-xs) var(--ms-space-md);
+    margin: 0;
+}
+
+.ms-conn-observed-row,
+.ms-conn-hidden-row {
+    display: contents;
+}
+
+.ms-conn-observed-list dt,
+.ms-conn-hidden-list dt {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-observed-list dd,
+.ms-conn-hidden-list dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.ms-conn-hidden-list dt {
+    font-weight: var(--ms-font-weight-medium);
+    color: var(--ms-color-text);
+}
+
+.ms-conn-sessions-table .ms-num {
+    text-align: right;
+}
+
+.ms-conn-measured {
+    margin-top: var(--ms-space-md);
+}
+
+.ms-overview-connection {
+    margin: var(--ms-space-sm) 0 0;
+}
+
+@media (max-width: 640px) {
+    .ms-conn-observed-list,
+    .ms-conn-hidden-list {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .ms-conn-fact {
+        flex-basis: 100%;
+    }
+}

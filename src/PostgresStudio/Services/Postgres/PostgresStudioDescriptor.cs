@@ -1,5 +1,6 @@
 using PostgresStudio.Components.Pages;
 using PostgresStudio.Components.Pages.Query;
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
@@ -89,6 +90,9 @@ internal static class PostgresStudioDescriptor
         [
             new("Tables", "database", "table", Title: "Tables, views, functions, triggers, sequences and types"),
             new("Sessions", SessionLinks.Route, "feed", Title: "Sessions, locks and prepared transactions"),
+
+            // 1.1-NP3: how the application connects - its Npgsql settings and where each came from, what the server saw, and what to change.
+            new("Connection", ConnectionLinks.Route, "plug", Title: "How the application connects: its Npgsql settings, where each came from, what the server saw and what to change"),
             new("Relationships", "relationships", "graph"),
         ]),
         new("Operations",

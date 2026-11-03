@@ -1,0 +1,35 @@
+@using PostgresStudio.Services.Connection
+
+@*
+    "Not visible from here" (NP3): what an application can configure in code, on the NpgsqlDataSourceBuilder, that is no part of a
+    connection string and so is invisible to any page. Short, and honest: an admin who sees a password row that says "not
+    visible" or "not set" on an application that logs in to a cloud database should know a password provider may be the reason.
+*@
+
+@if (Model is ConnectionPageView view)
+{
+    <section class="ms-section ms-conn-hidden" id="conn-not-visible" aria-labelledby="conn-not-visible-title">
+        <h2 class="ms-section-title" id="conn-not-visible-title">Not visible from here</h2>
+
+        <p class="ms-conn-note">
+            Some of how an application connects is set in code, on its <code>NpgsqlDataSourceBuilder</code>, and is no part of the
+            connection string this page reads.
+        </p>
+
+        <dl class="ms-conn-hidden-list">
+            @foreach (ConnectionObservedLine line in view.NotVisible)
+            {
+                <div class="ms-conn-hidden-row" @key="line.Label">
+                    <dt>@line.Label</dt>
+                    <dd>@line.Value</dd>
+                </div>
+            }
+        </dl>
+    </section>
+}
+
+@code {
+    /// <summary>The page's view, as a <c>ConnectionPageView</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+}

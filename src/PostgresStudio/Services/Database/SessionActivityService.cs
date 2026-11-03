@@ -678,8 +678,19 @@ internal sealed class SessionActivityService : ISessionActivityService
     }
 
     /// <summary>The database's pool in this process, while somebody holds a lease on the observer.</summary>
-    private SessionPoolSummary? PoolOf(ResolvedSource resolved)
+    private SessionPoolSummary? PoolOf(ResolvedSource resolved) => PoolOf(pools, resolved);
+
+    /// <summary>
+    /// The database's pool in this process, while somebody holds a lease on <paramref name="pools" /> - Sessions' read of it, and
+    /// the Connection page's header.
+    /// </summary>
+    /// <param name="pools">The in-process pool observer.</param>
+    /// <param name="resolved">The database.</param>
+    internal static SessionPoolSummary? PoolOf(SessionPoolObserver pools, ResolvedSource resolved)
     {
+        ArgumentNullException.ThrowIfNull(pools);
+        ArgumentNullException.ThrowIfNull(resolved);
+
         DatabasePoolSettings? pool = DatabasePoolSettings.Of(resolved.Target);
 
         if (pool is null)

@@ -1,0 +1,103 @@
+@using System.Globalization
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Settings
+@implements IDisposable
+@inject IConnectionInsightService Insights
+@inject HealthMutes Mutes
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+
+@*
+    Both Overviews' one line about the connection (NP3): "Connection: TLS verified · pool 100 · 2 things worth a look", a link to
+    Database › Connection. It reads through the same service as the page, so it is the page's own words and the page's own
+    counts, with this browser's mutes taken off; a visitor the page refuses, or a read that failed, gets no line rather than a
+    wrong one.
+
+    The Overview renders it only once it is interactive, so a prerender reads nothing, and hands it the time of its own latest
+    health read as Revision: a new value reads the line again, so it is read once per HealthInterval and never on the poll.
+*@
+
+@if (view is { Refusal: ConnectionRefusal.None } read)
+{
+    int worth = Worth(read);
+
+    <p class="ms-muted ms-overview-connection">
+        <a href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope)">Connection</a>:
+        TLS @read.Tls.Text
+        @if (read.PoolMax is { } pool)
+        {
+            <text> · pool @pool.ToString(CultureInfo.InvariantCulture)</text>
+        }
+        <text> · @(worth == 0 ? "nothing to change" : worth == 1 ? "1 thing worth a look" : worth.ToString(CultureInfo.InvariantCulture) + " things worth a look")</text>
+    </p>
+}
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+
+    private ConnectionPageView? view;
+    private (StudioScope? Scope, DateTimeOffset? Revision) loaded;
+    private bool disposed;
+
+    /// <summary>When the Overview last read its own facts: a new value reads the line again.</summary>
+    [Parameter]
+    public DateTimeOffset? Revision { get; set; }
+
+    protected override void OnInitialized() => Mutes.Changed += OnMutesChangedAsync;
+
+    private Task OnMutesChangedAsync() => InvokeAsync(StateHasChanged);
+
+    /// <summary>The things worth a look this browser has not muted.</summary>
+    private int Worth(ConnectionPageView read) =>
+        read.Cards.Count(x => x.Finding is null || !Mutes.IsMuted(x.Finding.MuteKey));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (disposed || scope is null || loaded == (scope, Revision))
+        {
+            return;
+        }
+
+        (StudioScope? Scope, DateTimeOffset? Revision) asked = (scope, Revision);
+        loaded = asked;
+
+        try
+        {
+            ConnectionPageView read = await Insights.GetAsync(scope, lifetime.Token);
+
+            // A read for a scope the Overview has since moved on from is dropped: the newer read draws its own.
+            if (loaded == asked)
+            {
+                view = read;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception)
+        {
+            // A line that could not be read is no line: the Overview's own regions say what failed.
+            if (loaded == asked)
+            {
+                view = null;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        Mutes.Changed -= OnMutesChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

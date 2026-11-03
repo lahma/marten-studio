@@ -1,0 +1,170 @@
+@using PostgresStudio.Components.Pages.Health
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Health
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+@inject HealthMutes Mutes
+
+@*
+    "Worth a look" (NP3): the advisor's findings about how the application connects (C13 to C18, S05, S11 to S13, K04, K08) as
+    this visitor's Health report shows them, and the page's own hints - most severe first, each a card with the sentence, the
+    settings it is about (links into the table below) and the change to make, with a copy button for every form of it. The
+    cards are the Health page's own (`ms-health-finding`), so a finding reads the same here and there.
+
+    Muting is the Health page's, per browser: a finding muted there is not drawn here, and is counted in the line beneath. A
+    finding the host accepted is a count, not a card. With nothing to say the block says so - and never "nothing" while findings
+    exist that this visitor is not shown.
+
+    Context that is not advice (a socket, which timeout cancels first, auto-prepare left off) is under "Good to know" and is
+    not counted: an admin scanning for what to change should not have to read past a default.
+*@
+
+@if (Model is ConnectionPageView view)
+{
+    List<ConnectionCard> shown = [.. view.Cards.Where(Visible)];
+    int muted = view.Cards.Count(static x => x.Finding is not null) - view.Cards.Count(x => x.Finding is not null && Visible(x));
+    List<ConnectionCard> notes = [.. view.Notes.Where(x => !x.AllSettingsOnly || ShowAllNotes)];
+
+    <section class="ms-section ms-conn-worth" id="conn-worth" aria-labelledby="conn-worth-title">
+        <h2 class="ms-section-title" id="conn-worth-title">
+            Worth a look
+            @if (shown.Count > 0)
+            {
+                <span class="ms-tab-count" aria-label="@(shown.Count == 1 ? "1 thing" : shown.Count + " things")">@shown.Count</span>
+            }
+        </h2>
+
+        @if (shown.Count == 0)
+        {
+            <p class="ms-conn-nothing">
+                @(view.FindingsWithheld > 0 ? "Nothing to change among what you are shown." : "Nothing to change.")
+            </p>
+        }
+
+        @foreach (ConnectionCard card in shown)
+        {
+            @CardView(card)
+        }
+
+        @if (view.FindingsNote is { Length: > 0 } note)
+        {
+            <p class="ms-muted ms-conn-note">@note</p>
+        }
+
+        @if (view.FindingsWithheld > 0)
+        {
+            <p class="ms-muted ms-conn-note ms-conn-withheld">@HealthPresentation.Withheld(view.FindingsWithheld, view.FindingsWithheldReason)</p>
+        }
+
+        @if (muted > 0)
+        {
+            <p class="ms-muted ms-conn-note">@HealthPresentation.Count(muted, "finding") muted in this browser; the Health page lists them.</p>
+        }
+
+        @if (view.AcceptedFindings > 0)
+        {
+            <p class="ms-muted ms-conn-note">@HealthPresentation.Count(view.AcceptedFindings, "finding") accepted by the host, and counted nowhere; the Health page says why.</p>
+        }
+
+        @if (notes.Count > 0)
+        {
+            <h3 class="ms-conn-subtitle" id="conn-notes-title">Good to know</h3>
+
+            @foreach (ConnectionCard card in notes)
+            {
+                @CardView(card)
+            }
+        }
+    </section>
+}
+
+@code {
+    /// <summary>The page's view, as a <c>ConnectionPageView</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether the settings table shows every setting: then the notes that belong only there are drawn too.</summary>
+    [Parameter]
+    public bool ShowAllNotes { get; set; }
+
+    private bool Visible(ConnectionCard card) => card.Finding is null || !Mutes.IsMuted(card.Finding.MuteKey);
+
+    private string RowLink(string keyword) =>
+        ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, ConnectionPageBuilder.RowAnchor(keyword));
+
+    private RenderFragment CardView(ConnectionCard card) => __builder =>
+    {
+        string severity = card.Finding is { } finding ? finding.Severity.ToString().ToLowerInvariant() : "info";
+        string title = card.Id + "-title";
+
+        <article class="@("ms-health-finding ms-conn-card ms-conn-card-" + card.Kind.ToString().ToLowerInvariant() + " ms-health-finding-" + severity)"
+                 id="@card.Id"
+                 aria-labelledby="@title"
+                 @key="card.Id">
+            <header class="ms-health-finding-header">
+                @if (card.Finding is { } found)
+                {
+                    <span class="@HealthPresentation.ChipClass(found.Severity)">@HealthPresentation.Label(found.Severity)</span>
+                }
+                else
+                {
+                    <span class="ms-health-severity ms-health-severity-info ms-conn-kind">@(card.Kind == ConnectionCardKind.Note ? "Note" : "Hint")</span>
+                }
+
+                @if (card.Code is { Length: > 0 } label)
+                {
+                    <code class="ms-health-code">@label</code>
+                }
+
+                <h3 class="ms-health-finding-title" id="@title">@card.Heading</h3>
+            </header>
+
+            <p class="ms-health-why">@card.Text</p>
+
+            @if (card.Finding is { Evidence.Count: > 0 } withEvidence)
+            {
+                <dl class="ms-health-evidence">
+                    @foreach (HealthEvidence item in withEvidence.Evidence.Take(5))
+                    {
+                        <div class="ms-health-evidence-row" @key="item.Label">
+                            <dt>@item.Label</dt>
+                            <dd class="ms-mono">@item.Value</dd>
+                        </div>
+                    }
+                </dl>
+            }
+
+            @if (card.Keywords.Count > 0)
+            {
+                <p class="ms-conn-about">
+                    About:
+                    @for (int i = 0; i < card.Keywords.Count; i++)
+                    {
+                        string keyword = card.Keywords[i];
+                        <a class="ms-conn-about-link" href="@RowLink(keyword)" @key="keyword">@keyword</a>@(i < card.Keywords.Count - 1 ? "," : string.Empty)
+                    }
+                </p>
+            }
+
+            @foreach (ConnectionFix fix in card.Fixes)
+            {
+                <div class="ms-health-remedy ms-conn-fix" @key="fix.Label">
+                    <div class="ms-health-remedy-header">
+                        <span class="ms-health-remedy-title">@fix.Label</span>
+                        <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + (card.Code ?? card.Heading) + ")")" />
+                    </div>
+                    <pre class="ms-code ms-health-remedy-code"><code>@fix.Code</code></pre>
+                </div>
+            }
+
+            @if (card.Finding is { } linked)
+            {
+                <p class="ms-health-link">
+                    <a href="@HealthLinks.ToFinding(Settings, Descriptor.SourceQueryParameter, State.ActiveScope, linked)">Why, how sure, and what was read</a>
+                </p>
+            }
+        </article>
+    };
+}

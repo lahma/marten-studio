@@ -314,6 +314,7 @@
       }
     ]
   },
+  "connection": null,
   "withheld": {
     "connections.byApplication": "Activity-grade: call with IncludeActivity = true",
     "statements": "Activity-grade: call with IncludeActivity = true"

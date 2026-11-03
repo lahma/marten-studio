@@ -1,0 +1,148 @@
+@using System.Globalization
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+
+@*
+    "This application's sessions" (NP3): the sessions the studio's login has in this database, by application_name - how many,
+    the oldest connection, and how many are on TLS. They are other programs' activity as much as this one's, so they are the
+    activity gate's, as Database › Sessions' details are: ViewDatabaseActivity, then the write policy asked about the database
+    as a whole. The page asks the service only when the view says the gate is open; a closed gate is a sentence naming the
+    option a host would set, and nothing was asked.
+*@
+
+<section class="ms-section ms-conn-sessions" id="conn-sessions" aria-labelledby="conn-sessions-title">
+    <h2 class="ms-section-title" id="conn-sessions-title">This application's sessions</h2>
+
+    @if (Access is SessionDetailsAccess { IsOpen: false } closed)
+    {
+        @if (closed.Refusal is DatabaseRefusal.CapabilityOff or DatabaseRefusal.ReadOnly)
+        {
+            <CapabilityDisabled Capability="@nameof(StudioCapability.ViewDatabaseActivity)" Action="This application's sessions" />
+            <p class="ms-muted ms-conn-note">
+                Without it this page shows no application's name, session count, connection time or TLS state: they are other
+                programs' activity as much as this one's.
+            </p>
+        }
+        else if (closed.Denial is { Length: > 0 } denial)
+        {
+            <div class="ms-alert ms-alert-info ms-capability-disabled" role="note">
+                <div class="ms-alert-content">
+                    <p>This application's sessions are not shown.</p>
+                    <p class="ms-muted">@denial</p>
+                </div>
+            </div>
+        }
+    }
+    else if (Failure is { Length: > 0 } failure)
+    {
+        <p class="ms-muted ms-conn-unavailable">@failure</p>
+    }
+    else if (Model is ConnectionApplicationsView view)
+    {
+        <p class="ms-conn-note">
+            The sessions of <strong class="ms-mono">@(view.Role ?? "the studio's login")</strong> in this database, by
+            <code>application_name</code>. The studio's own connections share the application's data source and are counted under its
+            name; the connection that reads this is not counted.
+        </p>
+
+        @if (view.Rows.Count == 0)
+        {
+            <p class="ms-muted">At this reading, this login had no other session in this database.</p>
+        }
+        else
+        {
+            <TableScroll Label="This application's sessions by application name">
+                <table class="ms-table ms-conn-sessions-table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Application</th>
+                            <th scope="col" class="ms-num">Sessions</th>
+                            <th scope="col">Oldest connection</th>
+                            <th scope="col">On TLS</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (ConnectionApplicationRow row in view.Rows)
+                        {
+                            <tr @key="row.Application">
+                                <td>@(row.Application.Length == 0 ? "(none set)" : row.Application)</td>
+                                <td class="ms-num">@row.Sessions.ToString("N0", CultureInfo.InvariantCulture)</td>
+                                <td>
+                                    @if (row.OldestConnection is { } oldest)
+                                    {
+                                        <span>@State.FormatInSelectedTimeZone(oldest)</span>
+                                        <span class="ms-muted">(<TimeAgo Timestamp="oldest" />)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="ms-muted">not visible to this role</span>
+                                    }
+                                </td>
+                                <td>@Tls(row)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </TableScroll>
+
+            @if (view.ApplicationCount > view.Rows.Count)
+            {
+                <p class="ms-conn-note ms-conn-caveat"><strong>How sure:</strong> only the @view.Rows.Count.ToString("N0", CultureInfo.InvariantCulture) applications with the most sessions, of @view.ApplicationCount.ToString("N0", CultureInfo.InvariantCulture), are listed.</p>
+            }
+
+            @if (view.Rows.Any(static x => x.TlsKnown < x.Sessions))
+            {
+                <p class="ms-conn-note ms-conn-caveat">
+                    <strong>How sure:</strong> the studio's Postgres role cannot see a connection time or a TLS state of every session
+                    (PostgreSQL shows them only to roles that hold the session's role or <code>pg_read_all_stats</code>), so these
+                    say what could be seen, never "none".
+                </p>
+            }
+        }
+
+        <p class="ms-conn-note">
+            <a href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope)">Open Sessions</a>
+            for every session, their locks and what they wait for, or
+            <a href="@SessionLinks.ToSessions(Settings, Descriptor, State.ActiveScope, SessionLinks.HoldersView)">Holders</a>
+            for who holds the whole server's connections.
+        </p>
+    }
+    else
+    {
+        <p class="ms-muted ms-conn-unavailable">Reading...</p>
+    }
+</section>
+
+@code {
+    /// <summary>The application's sessions, as a <c>ConnectionApplicationsView</c>, or <see langword="null" /> while unread. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Whether the activity gate is open, as a <c>SessionDetailsAccess</c>. Typed <see cref="object" />.</summary>
+    [Parameter]
+    public object? Access { get; set; }
+
+    /// <summary>Why the sessions could not be read, when the gate was open and the read failed.</summary>
+    [Parameter]
+    public string? Failure { get; set; }
+
+    private static string Tls(ConnectionApplicationRow row)
+    {
+        if (row.TlsKnown == 0)
+        {
+            return "not visible to this role";
+        }
+
+        string text = row.TlsOn.ToString("N0", CultureInfo.InvariantCulture) + " of " + row.TlsKnown.ToString("N0", CultureInfo.InvariantCulture);
+
+        return row.TlsKnown < row.Sessions
+            ? text + " it could see (" + (row.Sessions - row.TlsKnown).ToString("N0", CultureInfo.InvariantCulture) + " not visible)"
+            : text;
+    }
+}

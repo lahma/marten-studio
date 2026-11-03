@@ -1,0 +1,219 @@
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+@inject IJSRuntime JsRuntime
+
+@*
+    The Connection page's settings table (NP3): every keyword of the Npgsql the application runs, grouped by Npgsql's own
+    categories, with the value in effect, where it came from (the connection string, an environment variable Npgsql falls back to,
+    or its default - or why none is shown) and Npgsql's default. A secret is "set" or "not set" and nothing more; a setting the
+    studio does not know is listed by name with its value withheld.
+
+    "Only what differs from the default" is on by default: an admin wants what is configured, not eighty defaults. It keeps what
+    something sets (the connection string or the environment, even to the default value), the rows that say what the application
+    connects with, and any row with advice. The toggle and the groups' open or closed state are remembered per browser, in local
+    storage, as a convenience: a browser that refuses is drawn the default, and nothing depends on it.
+
+    Every group is its own labelled scroll region (D25), so a wide value scrolls inside its table and never sideways in the page.
+*@
+
+@if (Model is ConnectionPageView view)
+{
+    <section class="ms-section ms-conn-settings" id="conn-settings" aria-labelledby="conn-settings-title">
+        <h2 class="ms-section-title" id="conn-settings-title">Settings</h2>
+
+        <div class="ms-conn-toolbar">
+            <button type="button"
+                    class="@("ms-button ms-conn-toggle" + (onlyDiffers ? " ms-conn-toggle-on" : string.Empty))"
+                    aria-pressed="@(onlyDiffers ? "true" : "false")"
+                    @onclick="ToggleOnlyDiffersAsync">
+                Only what differs from the default
+            </button>
+            <span class="ms-muted ms-conn-toolbar-note" id="conn-toggle-note">
+                @(onlyDiffers
+                    ? "Showing what the connection string or the environment sets, the rows that say what the application connects with, and any setting with advice."
+                    : "Showing every setting of Npgsql " + view.NpgsqlVersion + ".")
+            </span>
+        </div>
+
+        @foreach (string note in view.SettingsNotes)
+        {
+            <p class="ms-muted ms-conn-note" @key="note">@note</p>
+        }
+
+        @foreach (IGrouping<string, ConnectionSettingView> group in Groups(view))
+        {
+            List<ConnectionSettingView> rows = [.. group.Where(Shown)];
+
+            if (rows.Count == 0)
+            {
+                continue;
+            }
+
+            bool open = !collapsed.Contains(group.Key);
+            string id = "conn-group-" + ConnectionPageBuilder.Slug(group.Key);
+
+            <div class="ms-conn-group" @key="group.Key">
+                <h3 class="ms-conn-group-title">
+                    <button type="button"
+                            class="ms-conn-group-button"
+                            aria-expanded="@(open ? "true" : "false")"
+                            aria-controls="@id"
+                            @onclick="() => ToggleGroupAsync(group.Key)">
+                        <span class="ms-conn-group-caret" aria-hidden="true">@(open ? "▾" : "▸")</span>
+                        @group.Key
+                        <span class="ms-conn-group-count">@(rows.Count == group.Count() ? rows.Count + " settings" : rows.Count + " of " + group.Count() + " settings")</span>
+                    </button>
+                </h3>
+
+                <div id="@id" hidden="@(!open)">
+                    @if (open)
+                    {
+                        <TableScroll Label="@(group.Key + " settings")">
+                            <table class="ms-table ms-conn-table">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Setting</th>
+                                        <th scope="col">In effect</th>
+                                        <th scope="col">From</th>
+                                        <th scope="col">Default</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (ConnectionSettingView setting in rows)
+                                    {
+                                        ConnectionSettingRow row = setting.Row;
+
+                                        <tr id="@setting.Anchor" class="@("ms-conn-row" + (row.Origin == ConnectionSettingOrigin.Default ? string.Empty : " ms-conn-row-set"))" @key="row.Keyword">
+                                            <th scope="row" class="ms-conn-keyword" title="@BuilderTitle(row)">
+                                                @row.Keyword
+                                                @if (setting.AdviceCard is { } card)
+                                                {
+                                                    <a class="ms-conn-advice"
+                                                       href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, card.Id)"
+                                                       aria-label="@("Advice about " + row.Keyword + ": " + card.Heading)"
+                                                       title="@card.Heading">advice</a>
+                                                }
+                                            </th>
+                                            <td class="ms-conn-value">
+                                                <span class="ms-mono">@row.Value</span>
+                                                @if (row.Note is { Length: > 0 } note)
+                                                {
+                                                    <span class="ms-conn-row-note">@note</span>
+                                                }
+
+                                                @if (row.Obsolete is { Length: > 0 } obsolete)
+                                                {
+                                                    <span class="ms-conn-row-note ms-conn-obsolete">Obsolete: @obsolete</span>
+                                                }
+
+                                                @if (row.Origin == ConnectionSettingOrigin.ConnectionString && row.DefaultValue is { } same && string.Equals(same, row.Value, StringComparison.Ordinal))
+                                                {
+                                                    <span class="ms-conn-row-note">The same as the default.</span>
+                                                }
+                                            </td>
+                                            <td><span class="@("ms-conn-from ms-conn-from-" + row.Origin.ToString().ToLowerInvariant())">@setting.From</span></td>
+                                            <td class="ms-conn-default"><span class="ms-mono">@(row.DefaultValue ?? "–")</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </TableScroll>
+                    }
+                </div>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private const string OnlyDiffersKey = "ms_conn_only_differs";
+    private const string CollapsedKey = "ms_conn_collapsed";
+
+    private readonly HashSet<string> collapsed = new(StringComparer.Ordinal);
+    private bool onlyDiffers = true;
+    private bool prefsLoaded;
+
+    /// <summary>The page's view, as a <c>ConnectionPageView</c>. Typed <see cref="object" /> - see <c>ComponentModel</c>.</summary>
+    [Parameter]
+    public object? Model { get; set; }
+
+    /// <summary>Told whether the table shows only what differs, once the browser's preference is read and whenever it changes.</summary>
+    [Parameter]
+    public EventCallback<bool> OnlyDiffersChanged { get; set; }
+
+    private static IEnumerable<IGrouping<string, ConnectionSettingView>> Groups(ConnectionPageView view) =>
+        view.Settings.GroupBy(static x => x.Row.Category, StringComparer.Ordinal);
+
+    private bool Shown(ConnectionSettingView setting) => !onlyDiffers || setting.Differs;
+
+    private static string BuilderTitle(ConnectionSettingRow row) =>
+        row.BuilderProperty is { Length: > 0 } property
+            ? "NpgsqlConnectionStringBuilder." + property
+            : row.Keyword;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (prefsLoaded || Model is not ConnectionPageView)
+        {
+            return;
+        }
+
+        prefsLoaded = true;
+
+        // Local storage exists only once there is a browser: read the viewer's preferences on the first interactive render.
+        try
+        {
+            string? stored = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { OnlyDiffersKey });
+            string? groups = await JsRuntime.InvokeAsync<string?>("martenStudio.prefs.get", new object?[] { CollapsedKey });
+
+            onlyDiffers = stored != "0";
+            collapsed.Clear();
+
+            foreach (string name in (groups ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                collapsed.Add(Uri.UnescapeDataString(name));
+            }
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // Prerendering, a closed circuit, or a browser that refused: the default is the table's, and it is a good one.
+        }
+
+        await OnlyDiffersChanged.InvokeAsync(onlyDiffers);
+        StateHasChanged();
+    }
+
+    private async Task ToggleOnlyDiffersAsync()
+    {
+        onlyDiffers = !onlyDiffers;
+        await RememberAsync(OnlyDiffersKey, onlyDiffers ? "1" : "0");
+        await OnlyDiffersChanged.InvokeAsync(onlyDiffers);
+    }
+
+    private async Task ToggleGroupAsync(string category)
+    {
+        if (!collapsed.Remove(category))
+        {
+            collapsed.Add(category);
+        }
+
+        await RememberAsync(CollapsedKey, string.Join(',', collapsed.Order(StringComparer.Ordinal).Select(Uri.EscapeDataString)));
+    }
+
+    private async Task RememberAsync(string key, string value)
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { key, value });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // A browser that would not remember it: the choice lasts until the page is closed, which is all it was asked for.
+        }
+    }
+}

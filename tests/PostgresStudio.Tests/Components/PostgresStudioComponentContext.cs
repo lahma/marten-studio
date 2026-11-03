@@ -91,6 +91,11 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
         Services.AddSingleton<IHealthService>(Health);
+
+        // 1.1-NP3: Database > Connection, and the Overview's one line about it.
+        Connection = new FakeConnectionInsightService();
+        Services.AddSingleton<PostgresStudio.Services.Connection.IConnectionInsightService>(Connection);
+
         Services.AddSingleton<HealthMutes>();
         Services.AddSingleton<HealthAlerts>();
 
@@ -131,6 +136,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
     public FakeRelationshipDataService RelationshipData { get; }
 
     public FakeHealthService Health { get; }
+
+    /// <summary>Database › Connection and the Overview's connection line (NP3).</summary>
+    public FakeConnectionInsightService Connection { get; }
 
     public FakeSessions Sessions { get; }
 

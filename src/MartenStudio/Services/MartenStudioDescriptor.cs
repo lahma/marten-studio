@@ -102,6 +102,9 @@ internal static class MartenStudioDescriptor
         new("Database",
         [
             new("Tables", "database", "table", Title: "Tables, views, functions, triggers, sequences and types"),
+
+            // 1.1-NP3: PostgresStudio's Connection page, re-rooted under /marten like every shared page: how the store connects.
+            new("Connection", PostgresStudio.Services.Connection.ConnectionLinks.Route, "plug", Title: "How the store connects: its Npgsql settings, where each came from, what the server saw and what to change"),
             new("Relationships", "relationships", "graph"),
         ]),
         new("Events",
