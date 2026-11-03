@@ -5,6 +5,7 @@ using Marten;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Tests.Health;
@@ -41,7 +42,7 @@ public class PooledDaemonLockCheckTests
     [InlineData("pgbouncer.internal", 6432, "PgBouncer's default port")]
     public void A_documented_pooler_host_or_port_is_a_sign(string host, int port, string why)
     {
-        DaemonLockPooling.SignsOf([(host, port)]).Should().ContainSingle().Which.Should().Contain(host + ":" + port).And.Contain(why);
+        PoolerSigns.TransactionModeTexts([(host, port)]).Should().ContainSingle().Which.Should().Contain(host + ":" + port).And.Contain(why);
     }
 
     [Theory]
@@ -53,13 +54,13 @@ public class PooledDaemonLockCheckTests
     [InlineData("db-pooler", 5432)]
     public void A_direct_connection_or_a_session_mode_pooler_is_not_a_sign(string host, int port)
     {
-        DaemonLockPooling.SignsOf([(host, port)]).Should().BeEmpty();
+        PoolerSigns.TransactionModeTexts([(host, port)]).Should().BeEmpty();
     }
 
     [Fact]
     public void Every_host_of_a_multi_host_data_source_is_looked_at()
     {
-        DaemonLockPooling.SignsOf([("primary.example", 5432), ("pooled.example", 6432)]).Should().ContainSingle().Which.Should().StartWith("pooled.example:6432");
+        PoolerSigns.TransactionModeTexts([("primary.example", 5432), ("pooled.example", 6432)]).Should().ContainSingle().Which.Should().StartWith("pooled.example:6432");
     }
 
     // ---------------------------------------------------------------------------------------------------

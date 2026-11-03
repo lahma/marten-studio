@@ -1,5 +1,3 @@
-using System.Globalization;
-
 using JasperFx.Events.Daemon;
 
 using MartenStudio.Services.Configuration;
@@ -71,53 +69,12 @@ internal sealed record DaemonLockPooling(DaemonMode AsyncMode, bool TransactionS
 
     /// <summary>
     /// What, in the data source's hosts and ports, looks like a transaction-mode pooler - each sign in words, with the
-    /// provider document that says so.
+    /// provider document that says so. The signs are the engine's (<c>PoolerSigns</c>, moved there in 1.1 so the Connection
+    /// page and its checks read the same ones); K04 takes those that hand a session lock to another client, which leaves out
+    /// an RDS Proxy, because that pins a session on a session-level advisory lock and so keeps the lock with its holder.
     /// </summary>
-    public IReadOnlyList<string> PoolerSigns() => Endpoints is null ? [] : SignsOf(Endpoints.Endpoints);
-
-    /// <summary>The pooler signs of these endpoints. Pure: the unit tests hold each to it.</summary>
-    /// <remarks>
-    /// <list type="bullet">
-    /// <item>A host with <c>-pooler.</c> in it: Neon's pooled endpoint is the direct one with <c>-pooler</c> after the
-    /// endpoint id, and runs PgBouncer with <c>pool_mode=transaction</c> (<i>Connection pooling</i>, Neon docs).</item>
-    /// <item>Port <c>6543</c>: "Port 6543 reaches PgBouncer for the dedicated pooler and Supavisor for shared transaction
-    /// mode" (<i>Connect to your database</i>, Supabase docs). Supabase's shared pooler on 5432 is session mode, and is not
-    /// a sign.</item>
-    /// <item>Port <c>6432</c>: PgBouncer's default <c>listen_port</c> (pgbouncer.org, <i>Configuration</i>), and the port of
-    /// Azure's built-in PgBouncer, whose <c>pgbouncer.pool_mode</c> defaults to <c>transaction</c> (<i>PgBouncer in Azure
-    /// Database for PostgreSQL</i>, Microsoft Learn). A PgBouncer of one's own pools by session unless told otherwise, which
-    /// is why this is "looks like" and C10 is the proof.</item>
-    /// </list>
-    /// </remarks>
-    internal static IReadOnlyList<string> SignsOf(IEnumerable<(string Host, int Port)> endpoints)
-    {
-        List<string> signs = [];
-
-        foreach ((string host, int port) in endpoints)
-        {
-            string name = host.ToLowerInvariant();
-            string where = host + ":" + port.ToString(CultureInfo.InvariantCulture);
-
-            if (name.Contains("-pooler.", StringComparison.Ordinal))
-            {
-                signs.Add(where + " - the -pooler suffix of Neon's pooled endpoint, PgBouncer in transaction mode");
-            }
-            else if (port == 6543)
-            {
-                signs.Add(where + " - port 6543, where Supabase's poolers take transaction-mode connections");
-            }
-            else if (port == 6432 && name.EndsWith(".postgres.database.azure.com", StringComparison.Ordinal))
-            {
-                signs.Add(where + " - port 6432 of an Azure server, its built-in PgBouncer, which pools by transaction by default");
-            }
-            else if (port == 6432)
-            {
-                signs.Add(where + " - port 6432, PgBouncer's default port");
-            }
-        }
-
-        return signs;
-    }
+    public IReadOnlyList<string> PoolerSigns() =>
+        Endpoints is null ? [] : PostgresStudio.Services.Connection.PoolerSigns.TransactionModeTexts(Endpoints.Endpoints);
 
     /// <summary>The remedy K04 and C10 share: a lock the pooler cannot hand away, and a direct connection for the daemon.</summary>
     public static HealthRemedy Remedy { get; } = new(

@@ -65,6 +65,7 @@ internal sealed class MatrixHost : IAsyncDisposable
     /// Changes to the studio's options after the matrix's own (<see cref="MatrixReads.Schemas" />, every capability) - a
     /// <c>SqlConsoleRole</c>, say.
     /// </param>
+    /// <param name="connection">Changes to the data source's connection string after the matrix's own - a keyword a test is about, say.</param>
     /// <remarks>
     /// <b>A pool of the host's own.</b> The data source's connection string carries an <c>Application Name</c> no other pool
     /// in the process has, and <see cref="RunAsync" /> reads through that same data source: C01 matches the store's pool by
@@ -77,7 +78,8 @@ internal sealed class MatrixHost : IAsyncDisposable
         MatrixRole role,
         string database = MatrixServer.Database,
         Action<IServiceCollection>? services = null,
-        Action<PostgresStudioOptions>? options = null)
+        Action<PostgresStudioOptions>? options = null,
+        Action<NpgsqlConnectionStringBuilder>? connection = null)
     {
         ArgumentNullException.ThrowIfNull(server);
 
@@ -85,6 +87,8 @@ internal sealed class MatrixHost : IAsyncDisposable
         {
             ApplicationName = "ms-matrix-host-" + Guid.NewGuid().ToString("N")[..12],
         };
+
+        connection?.Invoke(own);
 
         ServiceCollection collection = new();
         services?.Invoke(collection);

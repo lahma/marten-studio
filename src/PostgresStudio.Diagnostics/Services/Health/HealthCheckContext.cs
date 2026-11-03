@@ -517,6 +517,24 @@ internal sealed class HealthSqlRunner
             || (exception.InnerException is { } inner && inner.Data.Contains(ApplicationRoleKey));
     }
 
+    /// <summary>
+    /// Hands <paramref name="read" /> the sweep's open connection, for the one thing it holds that no statement is needed for:
+    /// the parameters the server reported at start-up (<c>NpgsqlConnection.PostgresParameters</c>, the Connection page's
+    /// NP-DESIGN §4). It sends nothing: <paramref name="read" /> reads a property of the connection, and the connection is
+    /// opened (once per sweep) if no statement has yet.
+    /// </summary>
+    /// <remarks>
+    /// Fenced: only <c>ConnectionFacts</c> calls it, with a property read. It is not a statement, so it is not recorded in
+    /// "Show SQL"; a caller that ran a statement first has the connection already.
+    /// </remarks>
+    internal async Task<T> InspectConnectionAsync<T>(Func<NpgsqlConnection, T> read, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        NpgsqlConnection open = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return read(open);
+    }
+
     /// <summary>Runs <paramref name="query" /> and reads the first column of its first row.</summary>
     public async Task<T?> ScalarAsync<T>(HealthQuery query, CancellationToken cancellationToken)
     {
