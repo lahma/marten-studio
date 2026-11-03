@@ -268,6 +268,9 @@ tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each f
 src/PostgresStudio.Diagnostics/Services/Aurora/  Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
                                          profile and its samples, the parameter reference and the host's capacity reader
 src/PostgresStudio/Services/Aurora/       The Server page Aurora section's per-visitor view
+src/PostgresStudio/Services/Connection/   Database > Connection's per-visitor half (1.1, NP3): the service and its two gates, the page
+                                         builder, the facts source (the sweep's shared read, or one per HealthInterval), the links and
+                                         the internal IConnectionInsightContributor seam
 tests/PostgresStudio.Tests/Aurora/        By-name mapping of Aurora's functions, the wait windows, commit latency, the capacity
                                          reader, the parameter wording and R03's aurora-reader view - no database
 tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the instance, R03 aurora-reader, the wait section, a
