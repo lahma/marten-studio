@@ -6,10 +6,10 @@ and `ReadOnly` turns it off again. The write policy is asked about the scope as 
 with `CompactStreams` named. Every attempt is written to the audit log, whether it succeeds or fails.
 
 This page is the longer version of what the confirmation dialog says. Everything here was read from
-Marten's `EventStore.StreamCompacting.cs`, which is the same file at 9.39.0 (the studio's floor) and 9.50.2,
-and at 9.51.0, which adds two things and changes nothing else: an empty stream id is refused (#5695), and the
-folded events' DCB tag rows are deleted with them (#5694). Both are below, each marked with the version that
-has it. The file is unchanged again at 9.54.1, 9.54.2, 9.55.0 and 9.56.0, the latest Marten the studio is tested at.
+Marten's `EventStore.StreamCompacting.cs` at 9.57.0, which is the studio's floor and the latest Marten it is
+tested at. The studio needs 9.57 for one reason that matters here: from 9.57 (#5797) Marten leaves a stream
+that folds to no aggregate alone, where every older Marten replaced its history with an empty snapshot. That is
+[its own section](#a-stream-that-folds-to-nothing) below.
 
 ## What it does
 
@@ -25,7 +25,8 @@ further.
 2. If there are no events, or the stream is already exactly one `Compacted<T>`, it stops having done
    nothing.
 3. It folds the events into `T` with `Projections.AggregatorFor<T>()`, which uses the registered projection
-   first.
+   first. If the fold produces no `T`, it logs an information line and stops, having done nothing (see
+   [A stream that folds to nothing](#a-stream-that-folds-to-nothing)).
 4. If the request carries an `IEventsArchiver`, Marten calls it. The studio has none to give, so **the
    folded events are deleted, not copied anywhere.** Take a backup or an export first if you may need them.
 5. Three statements then run in one transaction:
@@ -58,9 +59,12 @@ entry comes from the primary.
   compacted through an earlier version. The studio's own dead-letter Skip marks an event skipped, and so
   does the daemon when it skips an apply error. The message then says which versions were left out and
   why. Those events stay in the stream after the snapshot.
-- **The watermark did not move.** Nothing was compacted, and the studio reports and audits a failure. Marten
-  found nothing to fold: the stream was archived in between, or every event after its last snapshot is a
-  skipped one.
+- **The watermark did not move.** Nothing was compacted. The studio folds the stream through the requested
+  version again, with the same fold, to say why:
+  - the events fold to no `T`: Marten left the stream alone. The studio reports and audits a **success with
+    nothing compacted**, and the message says why (see below);
+  - otherwise Marten found nothing to fold: the stream was archived in between, or every event after its last
+    snapshot is a skipped one. The studio reports and audits a failure.
 - **The result cannot be read back**, or the watermark is past the dialog's version, which means that
   another compaction ran at the same time. The studio records "Compaction was saved, not confirmed". The
   audit log has only two outcomes, so the entry is a failure whose message says this. The page shows it
@@ -104,12 +108,10 @@ The plan counts events by version. It cannot tell a skipped event from any other
 after its snapshot are all skipped is still offered. Compacting it then finds nothing to fold, and the
 studio says so.
 
-**The empty GUID.** Below Marten 9.51 the stream fetch adds its stream predicate only when the id is not
-empty. A stream whose id is `00000000-0000-0000-0000-000000000000` (or an empty key) would therefore fold every
-event of the tenant, or of the whole store, into one snapshot, and delete all the others. From 9.51 (#5695) the
-fetch reads only that stream, and `CompactStreamAsync` refuses an empty id itself. The studio never compacts
-that stream at any version, and it does not replay it on the time-travel panel either; the reason it gives
-names both ends.
+**The empty GUID.** A stream whose id is `00000000-0000-0000-0000-000000000000` (or an empty key) is the one
+id an older Marten's stream fetch read as "no stream filter", which folded every event of the tenant, or of the
+whole store, into one snapshot and deleted all the others. Marten refuses to compact it (#5695). The studio
+refuses it too, before anything is read, and it does not replay it on the time-travel panel either.
 
 **Hidden aggregates.** A compaction writes the aggregate's state into the event log. For an aggregate the
 host keeps off the screen, the Events screens would then show that state as the snapshot event's data. The
@@ -125,32 +127,59 @@ change how the host's own stream-state reads behave.
 
 Marten narrows its compaction reads and writes to the session's tenant only on a conjoined event store
 (#5234). There the scope must name the stream's tenant, and only that tenant's stream with that id is
-touched. This holds from the 9.39.0 floor, and with `UseTenantPartitionedEvents`, where two tenants' events
+touched. This holds with `UseTenantPartitionedEvents` too, where two tenants' events
 can share a `seq_id`. On an event store that is not conjoined, Marten fetches the stream by id alone and
 deletes what it folded with no tenant predicate, although every append records its session's tenant in
 `mt_streams.tenant_id`. So from a tenant's scope the studio first checks that the stream is that tenant's -
 another tenant's stream gets the answer a missing one gets - and compacts a stream that also holds an event
 another tenant's session appended only for a visitor the write policy allows for the database as a whole
 (`TenantId = null`), because Marten folds and deletes every event of it. The studio does not use the
-store-level `IEventStore.CompactStreamAsync` overloads, including the tenant ones added in 9.41.0. They open
+store-level `IEventStore.CompactStreamAsync` overloads, the tenant ones included. They open
 `LightweightSession()` or `LightweightSession(tenantId)`, and neither pins the database the scope selector
 chose.
 
+## A stream that folds to nothing
+
+An aggregate can delete its own stream: `ShouldDelete`, or `DeleteEvent<T>` in a projection. Folding such a
+stream produces no `T`, so there is no state to snapshot.
+
+**What Marten does.** From 9.57 (#5797) it logs an information line ("Left stream ... alone. Its events through
+version N fold to no T ...") and returns without queuing anything. The stream's events, its watermark and the
+archiver, if any, are untouched. Every older Marten went on regardless and replaced the stream's whole history with
+one `Compacted<T>` event holding `null`, and deleted the rest.
+
+**What the dialog says.** When the Compact dialog opens, the studio folds the stream through the dialog's
+version with the same fold time travel uses (`IAggregateFolder.FoldAsync`, on its own read of the events, under
+`QueryTimeout`; nothing that ensures storage runs). If the events fold to no `T`, the dialog says:
+
+> The events through version N fold to no `T`: the stream was deleted by its own aggregate. Marten leaves such a
+> stream as it is, so there is nothing to compact.
+
+and the Compact button stays disabled, whatever is typed; its title names the reason. If the fold cannot be run in
+advance - the read or the fold ran past the query timeout, or the projection threw - the dialog says it could not
+check, and the compaction is offered as usual. This is a read, gated as time travel is, and the check is a
+courtesy, not the refusal.
+
+**What the result says.** After a save that left `compacted_version` unchanged, the studio folds the stream
+through the requested version again. If it folds to no `T`, the result is a **success with nothing compacted**, not a
+failure: "left as it is: nothing was compacted. Its events through version N fold to no T - the stream was deleted
+by its own aggregate - and Marten leaves such a stream alone". The same sentence is the audit entry's message.
+A stream archived in between, or one whose later events are all skipped, is still the failure it was.
+
+**Streams an older Marten already compacted this way.** Their history is gone and cannot be rebuilt by Marten. The
+Health page's **E09** (Stream compacted into an empty snapshot) finds them, by probing the one event at each
+compacted stream's watermark; restore them from a backup, or from wherever an archiver copied them.
+
 ## Streams that cannot be compacted
 
-**Tagged streams, below Marten 9.51.** In the default tag-table mode, each tag row references its event
-through a foreign key to `mt_events(seq_id)`, and that key has no cascade. Below 9.51 compaction does not
-delete the tag rows first. So if any event before the last one carries a DCB tag, Postgres refuses the delete
-with `23503` and nothing changes. The studio reports this in its own words. In hstore mode the tags are kept on
-the event row and leave with it.
-
-From 9.51 (#5694) the delete removes the folded events' tag rows first, in the same statement, each narrowed to
-the tenant on a conjoined store. A tagged stream then compacts: a tag query no longer finds the folded events,
-and the snapshot, which is written in place of the last event, keeps that event's tag rows. The dialog says
-whichever of the two this host's Marten does - the studio probes for it rather than comparing version numbers.
-The same release declares an index on `seq_id` for every tag table, so a store whose tag tables were built
-below 9.51 shows it as drift on the Schema screen; its apply section notes that the index is built without
-`CONCURRENTLY`, and that every append of a tagged event waits while it builds.
+**Tagged streams.** In the default tag-table mode, each tag row references its event through a foreign key
+to `mt_events(seq_id)` with no cascade, so the delete removes the folded events' tag rows first, in the same
+statement, each narrowed to the tenant on a conjoined store (#5694). A tagged stream therefore compacts: a tag
+query no longer finds the folded events, and the snapshot, which is written in place of the last event, keeps that
+event's tag rows. In hstore mode the tags are kept on the event row and leave with it. The same Marten declares
+an index on `seq_id` for every tag table, so a store whose tag tables were built before it shows that index as
+drift on the Schema screen; its apply section notes that the index is built without `CONCURRENTLY`, and that
+every append of a tagged event waits while it builds.
 
 **Migrations.** Like every Marten session write, `FetchStreamAsync` first applies any pending event-store
 migration under the host's own `AutoCreate`. That is a property of the write, not of the page: nothing

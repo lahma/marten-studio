@@ -292,8 +292,31 @@
                    Message="@CompactMessage(dialogPlan)"
                    ConfirmationPhrase="@dialogPlan.StreamId"
                    ConfirmText="Compact"
+                   ConfirmBlockedReason="@CompactBlockedReason(dialogPlan)"
                    OnConfirm="CompactAsync"
                    OnCancel="CloseCompactDialog">
+        @* Said before the click: the events through this version are folded now, the way Marten folds them first. A
+           stream its own aggregate deleted folds to nothing and Marten (9.57) leaves it alone, so the button is dead and
+           its title says why. A fold that could not be run is said too: the result after the save then tells. *@
+        @if (compactFoldChecking)
+        {
+            <p class="ms-muted ms-compact-fold" role="status">
+                Checking whether the events through version @dialogPlan.Version.ToString(CultureInfo.InvariantCulture) fold to a @dialogPlan.AggregateName...
+            </p>
+        }
+        else if (compactFold is { Outcome: CompactionFoldOutcome.FoldsToNothing })
+        {
+            <div class="ms-alert ms-alert-warning ms-compact-fold ms-compact-fold-nothing" role="status">
+                @StreamCompactionRules.FoldsToNothing(dialogPlan.AggregateName ?? "the aggregate", dialogPlan.Version)
+            </div>
+        }
+        else if (compactFold is { Outcome: CompactionFoldOutcome.NotChecked } notChecked)
+        {
+            <div class="ms-alert ms-alert-warning ms-compact-fold ms-compact-fold-unchecked" role="status">
+                @StreamCompactionRules.FoldNotChecked(dialogPlan.AggregateName ?? "the aggregate", notChecked)
+            </div>
+        }
+
         <ul class="ms-compact-facts">
             @for (int index = 0; index < facts.Count; index++)
             {
@@ -347,6 +370,16 @@
 
     private bool compacting;
     private bool compactDialogOpen;
+
+    /// <summary>What folding the stream through the dialog's version answered; null until the dialog has asked.</summary>
+    private CompactionFold? compactFold;
+
+    /// <summary>Whether that fold is still running, which keeps the dialog's Compact button disabled.</summary>
+    private bool compactFoldChecking;
+
+    /// <summary>Counts the dialog's openings, so a fold that answers after the dialog was closed or reopened is dropped.</summary>
+    private int compactFoldChecks;
+
     private string? compactError;
 
     /// <summary>What the last compaction did, as the service read it back - the version it is compacted through.</summary>
@@ -593,6 +626,8 @@
     {
         archiveDialogOpen = false;
         compactDialogOpen = false;
+        compactFoldChecks++;
+        compactFoldChecking = false;
     }
 
     private async Task LoadAsync()
@@ -886,18 +921,81 @@
         }
     }
 
-    private void OpenCompactDialog()
+    /// <summary>
+    /// Opens the dialog and folds the stream through its version, so the dialog can say before the click that the stream
+    /// folds to nothing (deleted by its own aggregate, which Marten 9.57 leaves alone). The Compact button waits for the
+    /// answer; a fold that cannot be run is a sentence in the dialog, not a failure.
+    /// </summary>
+    private async Task OpenCompactDialog()
     {
-        if (compaction is not { IsOffered: true })
+        StudioScope? scope = State.ActiveScope;
+
+        if (compaction is not { IsOffered: true } plan || stream is null)
         {
             return;
         }
 
         ClearCompactResult();
+        compactFold = null;
+        compactFoldChecking = scope is not null;
         compactDialogOpen = true;
+        int check = ++compactFoldChecks;
+
+        if (scope is null)
+        {
+            return;
+        }
+
+        // Let the dialog draw, with its button dead, before the read starts.
+        StateHasChanged();
+
+        try
+        {
+            CompactionFold fold = await Events.CheckCompactionFoldAsync(scope, stream, plan.Version, pageCancellation.Token);
+
+            if (check == compactFoldChecks)
+            {
+                compactFold = fold;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (check == compactFoldChecks)
+            {
+                compactFold = CompactionFold.NotChecked(plan.Version, exception.GetType().Name);
+            }
+        }
+        finally
+        {
+            if (check == compactFoldChecks)
+            {
+                compactFoldChecking = false;
+            }
+        }
     }
 
-    private void CloseCompactDialog() => compactDialogOpen = false;
+    private void CloseCompactDialog()
+    {
+        compactDialogOpen = false;
+        compactFoldChecks++;
+        compactFoldChecking = false;
+    }
+
+    /// <summary>Why the dialog's Compact button is dead before the stream's id has been typed, or null when it is not.</summary>
+    private string? CompactBlockedReason(CompactionPlan plan)
+    {
+        if (compactFoldChecking)
+        {
+            return "Checking whether the events fold to a " + plan.AggregateName + " before offering the compaction.";
+        }
+
+        return compactFold is { Outcome: CompactionFoldOutcome.FoldsToNothing }
+            ? StreamCompactionRules.NothingToCompact(plan.AggregateName ?? "the aggregate", plan.Version)
+            : null;
+    }
 
     /// <summary>
     /// Compacts the stream with what the visitor typed, which the service checks again, through the version
@@ -907,6 +1005,8 @@
     {
         StudioScope? scope = State.ActiveScope;
         compactDialogOpen = false;
+        compactFoldChecks++;
+        compactFoldChecking = false;
 
         if (scope is null || string.IsNullOrWhiteSpace(Id) || compaction is not { IsOffered: true } plan)
         {

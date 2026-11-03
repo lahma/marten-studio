@@ -29,6 +29,7 @@
                 <button type="button"
                         class="ms-button ms-button-danger"
                         disabled="@(!CanConfirm)"
+                        title="@ConfirmBlockedReason"
                         @onclick="ConfirmAsync">
                     @ConfirmText
                 </button>
@@ -79,6 +80,13 @@
     public string ConfirmText { get; set; } = "Confirm";
 
     /// <summary>
+    /// Why the confirm button cannot be used, or <see langword="null" /> when it can. A dialog whose action turned out to be
+    /// a no-op, or is still being checked, says why here: the button is disabled and carries the reason as its title.
+    /// </summary>
+    [Parameter]
+    public string? ConfirmBlockedReason { get; set; }
+
+    /// <summary>
     /// Raised with <em>what the visitor typed</em>, so a caller can pass that on to the service.
     /// </summary>
     /// <remarks>
@@ -97,7 +105,8 @@
     private bool RequiresTypedConfirmation => !string.IsNullOrWhiteSpace(ConfirmationPhrase);
 
     private bool CanConfirm =>
-        !RequiresTypedConfirmation || string.Equals(typed.Trim(), ConfirmationPhrase, StringComparison.Ordinal);
+        string.IsNullOrEmpty(ConfirmBlockedReason)
+        && (!RequiresTypedConfirmation || string.Equals(typed.Trim(), ConfirmationPhrase, StringComparison.Ordinal));
 
     protected override void OnParametersSet()
     {

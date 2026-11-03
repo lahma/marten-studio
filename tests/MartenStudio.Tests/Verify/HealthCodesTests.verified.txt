@@ -30,6 +30,7 @@ E05 | Events | - | - | Marten | since 0.4 | current
 E06 | Events | - | - | Marten | since 0.4 | current
 E07 | Events | - | - | Marten | since 0.4 | current
 E08 | Events | - | - | Marten | since 0.4 | current
+E09 | Events | - | tenant | Marten | since 1.1 | current
 K01 | Configuration | - | - | Marten | since 0.4 | current
 K02 | Configuration | - | - | Marten | since 0.4 | current
 K03 | Configuration | - | - | Marten | since 0.4 | current

@@ -18,6 +18,7 @@ They read in two ways, and say which in every finding's caveat:
   `pg_class.reltuples` - with no scan of either table, at every interval (tier 1). That makes them estimates
   from the sample the last `ANALYZE` took: only as fresh as autovacuum keeps it, and blind to anything rarer
   than the sample. **E08** reads the statistics collector's counters for `mt_dcb_tag_version`.
+- **E09** is a tier-2 probe of its own: one event per compacted stream, by key (see its section).
 
 Each finding is about the database as a whole, so it is shown to a visitor the store policy allows for the
 database with no tenant selected. A stream id is data: on a conjoined event store a stream belongs to one
@@ -225,11 +226,48 @@ opts.Events.DcbTagVersionFillFactor = 70;
 The option arrived in **Marten 9.47** (#5622), and the floor is past it. A fillfactor set on the table by hand is schema
 the configuration does not know about.
 
+## E09 Stream compacted into an empty snapshot
+
+**Warning.** At least one stream has a `Compacted<T>` event at its compaction watermark whose snapshot is JSON
+`null`.
+
+A stream its own aggregate deleted (`ShouldDelete`, `DeleteEvent<T>`) folds to no aggregate. Before **Marten 9.57**
+(#5797) compaction wrote that nothing as the snapshot all the same: it deleted the stream's whole history and put one
+`Compacted<T>` event holding `null` in its place. No projection and no replay can make anything of it, and Marten
+cannot rebuild the events it replaced. From 9.57 the stream is left alone - Marten logs an information line and
+queues nothing - so a compaction run by Marten 9.57.0 or later, the studio's included, never does this. E09 finds the
+streams an older Marten did it to.
+
+**Restore those streams** from a backup, or from wherever an archiver copied them before they were compacted. There
+is no `StoreOptions` line for it, and nothing in the studio repairs one.
+
+**Tier 2, and cheap.** It never scans `mt_events` by type. It reads the streams that have a compaction watermark
+(`mt_streams.compacted_version > 0`), at most 10,000 of them, and probes the **one** event at that version of each
+through the `(stream_id, version)` key - with the stream's tenant on a conjoined store - where compaction writes the
+snapshot. The probe is the 9.57 release notes' own predicate:
+
+```sql
+select stream_id, version, tenant_id
+from <schema>.mt_events
+where mt_dotnet_type like 'JasperFx.Events.Compacted%'
+  and 'null'::jsonb in (data->'Snapshot', data->'snapshot');
+```
+
+(run there against the watermark's event, not the whole table). It runs behind **Run deeper checks** under the
+studio's `statement_timeout`; running out of time is a "not checked" row, not a failure. When there are more than
+10,000 compacted streams the finding says the later ones were not probed. A stream compacted again since is judged
+at its new watermark.
+
+The finding names up to five streams, with the version each was compacted at. On a conjoined event store a stream
+belongs to one tenant, so there is **one finding per tenant** that holds a damaged stream (its subject is the tenant,
+up to ten tenants), and each is shown only to a visitor through `ViewDatabaseActivity` whom the store policy lets see
+that tenant, as E03's is. Elsewhere the finding is the database's and names its streams at the check's own gate.
+
 ## Not covered
 
 - **`Events.UseTenantPartitionedEvents`.** Every tenant numbers its events from one, so there is no single recent
   window and no store-global mark: E02, E03 and E04 say "not checked", and so does D08 on the daemon page. The
-  statistics checks (E05-E07) and E08 still run.
+  statistics checks (E05-E07), E08 and E09 still run (E09 keys on the stream and its tenant, not on a sequence).
 - **E06's longest streams.** Naming the 20 longest streams, and which aggregate each belongs to, needs a scan of
   `mt_streams`, which no check runs; the finding says how many streams are long, not which. A screen that lists
   them is a separate, on-demand read, and is not part of this release.

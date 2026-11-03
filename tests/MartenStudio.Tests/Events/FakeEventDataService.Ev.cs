@@ -16,6 +16,15 @@ internal sealed partial class FakeEventDataService
     /// <summary>The streams the compaction read was handed, which is the page's own read, not a second one.</summary>
     public List<StreamState> CompactionDescriptions { get; } = [];
 
+    /// <summary>What folding a stream through the dialog's version answers, by stream id; a stream not here folds to an aggregate.</summary>
+    public Dictionary<string, CompactionFold> CompactionFolds { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The versions the dialog asked the fold about, as "stream id / version".</summary>
+    public List<string> CompactionFoldChecks { get; } = [];
+
+    /// <summary>When set, the fold waits for it - a fold still running while the dialog is open.</summary>
+    public TaskCompletionSource? CompactionFoldGate { get; set; }
+
     /// <summary>What a compaction answers when it succeeds: the sentence the service audited.</summary>
     public string CompactionOutcome { get; set; } = "compacted through version 3 into one Compacted<Order> event";
 
@@ -44,6 +53,22 @@ internal sealed partial class FakeEventDataService
         return Task.FromResult(CompactionPlans.TryGetValue(stream.Id, out CompactionPlan? plan)
             ? plan
             : CompactionPlan.NotOffered(stream.Id, CompactionUnavailableReason.Untyped));
+    }
+
+    public async Task<CompactionFold> CheckCompactionFoldAsync(
+        StudioScope scope,
+        StreamState stream,
+        long version,
+        CancellationToken cancellationToken = default)
+    {
+        CompactionFoldChecks.Add(stream.Id + "/" + version.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        if (CompactionFoldGate is { } gate)
+        {
+            await gate.Task.WaitAsync(cancellationToken);
+        }
+
+        return CompactionFolds.TryGetValue(stream.Id, out CompactionFold? fold) ? fold : CompactionFold.Folds(version);
     }
 
     public Task<string> CompactStreamAsync(

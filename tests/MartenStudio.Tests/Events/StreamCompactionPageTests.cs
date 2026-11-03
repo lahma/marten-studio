@@ -280,6 +280,126 @@ public class StreamCompactionPageTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // 1.1-CMP: a stream that folds to nothing, said before the click
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Marten 9.57 leaves a stream its own aggregate deleted as it is. The dialog folds the stream through its version when it
+    /// opens, says so, and the Compact button stays dead even once the id is typed - its title names the reason.
+    /// </summary>
+    [Fact]
+    public async Task A_stream_that_folds_to_nothing_says_so_and_cannot_be_confirmed()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+        context.EventData.CompactionFolds[StreamId] = CompactionFold.ToNothing(3);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        await page.Find(CompactButton).ClickAsync(new());
+
+        page.WaitForAssertion(() => page.Find(".ms-compact-fold-nothing").TextContent.Trim().Should().Be(
+            "The events through version 3 fold to no OrderSummary: the stream was deleted by its own aggregate. "
+            + "Marten leaves such a stream as it is, so there is nothing to compact."));
+        context.EventData.CompactionFoldChecks.Should().Equal(StreamId + "/3");
+
+        await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
+
+        IElement confirm = page.Find(ConfirmButton);
+        confirm.HasAttribute("disabled").Should().BeTrue("a stream Marten would leave alone is not offered for confirmation");
+        confirm.GetAttribute("title").Should().Be(StreamCompactionRules.NothingToCompact("OrderSummary", 3));
+        context.EventData.Compactions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task A_stream_that_folds_to_an_aggregate_has_no_fold_note_and_a_live_button_once_the_id_is_typed()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        await page.Find(CompactButton).ClickAsync(new());
+        await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
+
+        page.FindAll(".ms-compact-fold").Should().BeEmpty();
+        IElement confirm = page.Find(ConfirmButton);
+        confirm.HasAttribute("disabled").Should().BeFalse();
+        confirm.HasAttribute("title").Should().BeFalse();
+    }
+
+    /// <summary>A fold that cannot be run is a sentence, not a refusal: the compaction is still offered and the result says what happened.</summary>
+    [Fact]
+    public async Task A_fold_that_could_not_be_run_says_so_and_still_offers_the_compaction()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+        context.EventData.CompactionFolds[StreamId] = CompactionFold.NotChecked(3, "it took longer than the studio's query timeout of 30 s");
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        await page.Find(CompactButton).ClickAsync(new());
+
+        page.WaitForAssertion(() => page.Find(".ms-compact-fold-unchecked").TextContent.Should()
+            .Contain("could not check in advance").And.Contain("30 s").And.Contain("Marten leaves the stream as it is"));
+
+        await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
+        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse();
+    }
+
+    /// <summary>While the fold runs the button is dead, so a confirmation cannot race the answer.</summary>
+    [Fact]
+    public async Task The_button_waits_for_the_fold()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+        context.EventData.CompactionFoldGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        // Not awaited: the click's handler is the fold, which waits on the gate, and the dialog is already drawn.
+        Task opening = page.Find(CompactButton).ClickAsync(new());
+
+        page.WaitForAssertion(() => page.Find(".ms-compact-fold").TextContent.Should().Contain("Checking whether the events through version 3"));
+        await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
+        page.Find(ConfirmButton).HasAttribute("disabled").Should().BeTrue();
+
+        context.EventData.CompactionFoldGate.SetResult();
+        await opening;
+
+        page.WaitForAssertion(() =>
+        {
+            page.FindAll(".ms-compact-fold").Should().BeEmpty();
+            page.Find(ConfirmButton).HasAttribute("disabled").Should().BeFalse();
+        });
+    }
+
+    /// <summary>The outcome of a stream Marten left alone is a success with nothing compacted: it is shown as the outcome, not as an error.</summary>
+    [Fact]
+    public async Task A_compaction_Marten_left_alone_is_shown_as_an_outcome_and_not_an_error()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+        context.EventData.CompactionOutcome = StreamCompactionRules.LeftAloneOutcome("OrderSummary", 3);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        await page.Find(CompactButton).ClickAsync(new());
+        await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
+        await page.Find(ConfirmButton).ClickAsync(new());
+
+        page.WaitForAssertion(() => page.Find(".ms-stream-compact-outcome").TextContent.Should()
+            .StartWith("Stream " + StreamId + " is left as it is: nothing was compacted.")
+            .And.Contain("fold to no OrderSummary"));
+        page.FindAll(".ms-stream-compact .ms-error-alert").Should().BeEmpty();
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // Tags on the timeline
     // ------------------------------------------------------------------------------------------------
 

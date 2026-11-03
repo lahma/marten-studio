@@ -476,6 +476,85 @@ public class StreamCompactionRulesTests
             .Outcome.Should().Contain("Marten's stream fetch did not return version 5").And.NotContain("skipped");
     }
 
+    // ------------------------------------------------------------------------------------------------
+    // 1.1-CMP: Marten 9.57 leaves a stream that folds to no aggregate alone
+    // ------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void The_dialogs_sentences_for_a_fold_name_the_aggregate_and_the_version()
+    {
+        StreamCompactionRules.FoldsToNothing("TimeTravelOrder", 4).Should().Be(
+            "The events through version 4 fold to no TimeTravelOrder: the stream was deleted by its own aggregate. "
+            + "Marten leaves such a stream as it is, so there is nothing to compact.");
+
+        StreamCompactionRules.NothingToCompact("TimeTravelOrder", 4).Should().Be(
+            "Nothing to compact: the events through version 4 fold to no TimeTravelOrder (the stream was deleted by its own "
+            + "aggregate), and Marten leaves such a stream as it is.");
+
+        StreamCompactionRules.FoldNotChecked("TimeTravelOrder", CompactionFold.NotChecked(4, "the fold threw InvalidOperationException."))
+            .Should().Be(
+                "The studio could not check in advance whether the events through version 4 fold to a TimeTravelOrder "
+                + "(the fold threw InvalidOperationException). If they fold to nothing - the stream was deleted by its own "
+                + "aggregate - Marten leaves the stream as it is and nothing is compacted; the result will say so.");
+    }
+
+    /// <summary>
+    /// An unmoved watermark is one of three things: the archive that landed in between, a skipped tail - both the verdicts
+    /// <see cref="StreamCompactionRules.Verify" /> already reached - or Marten 9.57 leaving a stream alone because its events
+    /// fold to no aggregate. Only the last is told apart, and it is a success with nothing compacted.
+    /// </summary>
+    [Fact]
+    public void An_unmoved_watermark_over_events_that_fold_to_nothing_is_marten_leaving_the_stream_alone()
+    {
+        (CompactionVerdict verdict, string outcome) =
+            StreamCompactionRules.Verify(3, 0, Stream(version: 3), "TimeTravelOrder", null, skipping: false);
+        verdict.Should().Be(CompactionVerdict.NothingCompacted);
+
+        (CompactionVerdict reconciled, string reason) = StreamCompactionRules.Reconcile(
+            verdict, outcome, CompactionFold.ToNothing(3), "TimeTravelOrder", 3);
+
+        reconciled.Should().Be(CompactionVerdict.LeftAlone);
+        reason.Should().Be(StreamCompactionRules.LeftAloneOutcome("TimeTravelOrder", 3))
+            .And.StartWith("left as it is: nothing was compacted.")
+            .And.Contain("through version 3 fold to no TimeTravelOrder")
+            .And.Contain("deleted by its own aggregate")
+            .And.NotEndWith(".", "the page adds the full stop");
+    }
+
+    [Fact]
+    public void An_unmoved_watermark_over_events_that_fold_or_that_could_not_be_folded_keeps_its_verdict()
+    {
+        (CompactionVerdict verdict, string outcome) =
+            StreamCompactionRules.Verify(3, 0, Stream(version: 3), "TimeTravelOrder", null, skipping: false);
+
+        foreach (CompactionFold fold in new[] { CompactionFold.Folds(3), CompactionFold.NotChecked(3, "x") })
+        {
+            StreamCompactionRules.Reconcile(verdict, outcome, fold, "TimeTravelOrder", 3)
+                .Should().Be((CompactionVerdict.NothingCompacted, outcome));
+        }
+
+        StreamCompactionRules.Reconcile(verdict, outcome, fold: null, "TimeTravelOrder", 3)
+            .Should().Be((CompactionVerdict.NothingCompacted, outcome), "a fold that was not run changes nothing");
+    }
+
+    [Fact]
+    public void Only_an_unmoved_watermark_is_reconciled()
+    {
+        // A compaction that did happen is that compaction, whatever the fold says afterwards.
+        (CompactionVerdict compacted, string outcome) =
+            StreamCompactionRules.Verify(3, 0, Stream(version: 3, compacted: 3), "TimeTravelOrder", null, skipping: false);
+        compacted.Should().Be(CompactionVerdict.Compacted);
+
+        StreamCompactionRules.Reconcile(compacted, outcome, CompactionFold.ToNothing(3), "TimeTravelOrder", 3)
+            .Should().Be((CompactionVerdict.Compacted, outcome));
+
+        (CompactionVerdict unconfirmed, string unconfirmedOutcome) =
+            StreamCompactionRules.Verify(3, 0, StreamState.Missing(StreamId), "TimeTravelOrder", null, skipping: false);
+
+        StreamCompactionRules.Reconcile(unconfirmed, unconfirmedOutcome, CompactionFold.ToNothing(3), "TimeTravelOrder", 3)
+            .Should().Be((CompactionVerdict.Unconfirmed, unconfirmedOutcome));
+    }
+
     [Fact]
     public void A_save_whose_result_cannot_be_read_back_is_saved_and_not_confirmed()
     {

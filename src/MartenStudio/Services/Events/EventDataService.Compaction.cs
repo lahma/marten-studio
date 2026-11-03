@@ -52,6 +52,120 @@ internal sealed partial class EventDataService
     }
 
     /// <inheritdoc />
+    public async Task<CompactionFold> CheckCompactionFoldAsync(
+        StudioScope scope,
+        StreamState stream,
+        long version,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(stream);
+
+        try
+        {
+            // Gated as time travel is: the scope is resolved (the store policy is asked) and nothing more. The fold reads
+            // events the visitor may already read on this very page, and the answer is a boolean about them.
+            ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+            (CompactionPlan plan, CompactionAggregate? aggregate) = Assess(resolved, stream);
+
+            if (aggregate is null)
+            {
+                return CompactionFold.NotChecked(version, plan.Explanation ?? "the stream is not offered for compaction");
+            }
+
+            IdParseResult parsed = ParseStreamIdFor(resolved, stream.Id);
+
+            if (!parsed.Success || StreamCompactionRules.IsWholeLogId(parsed.Value))
+            {
+                return CompactionFold.NotChecked(version, "the stream's id cannot be addressed");
+            }
+
+            return await FoldThroughAsync(resolved, aggregate, parsed.Value!, version, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsReadFailure(exception))
+        {
+            return CompactionFold.NotChecked(version, Describe(scope, exception, "fold the stream before compacting it").Display);
+        }
+    }
+
+    /// <summary>
+    /// Folds one stream through <paramref name="version" /> as Marten's compaction does first - the stream's events up to
+    /// that version, folded by the registered aggregation - and says whether anything came out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The sanctioned fold, on the studio's own read.</b> The events come from <see cref="ReadReplayEventsAsync" /> (the
+    /// studio's SQL and Marten's own selector, never <c>session.Events</c>) and are folded by
+    /// <see cref="IAggregateFolder.FoldAsync" /> - the path time travel and the stepper use - so nothing here ensures
+    /// storage (hard rule 14). The read is time travel's, with its limits: the command timeout, and here the whole call
+    /// under <see cref="MartenStudioOptions.QueryTimeout" /> as the stepper's is.
+    /// </para>
+    /// <para>
+    /// <b>Never an error.</b> A stream the studio cannot read the way Marten would, one that takes longer than the budget, or
+    /// a projection that throws is <see cref="CompactionFoldOutcome.NotChecked" />, because the caller already has an answer
+    /// without it (the dialog goes on to offer the compaction; the service reports the outcome from <c>mt_streams</c>). Only
+    /// the caller's own cancellation is let through. The reason names no data: a Postgres message, or the exception's type.
+    /// </para>
+    /// <para>
+    /// One difference from Marten, inherited from the replay: on a store whose events are not conjoined, a visitor in a
+    /// tenant's scope folds only that tenant's events of the stream, where Marten folds every event of it. A stream another
+    /// tenant also appended to needs the database as a whole authorized to be compacted at all (step 2b).
+    /// </para>
+    /// </remarks>
+    private async Task<CompactionFold> FoldThroughAsync(
+        ResolvedScope resolved,
+        CompactionAggregate aggregate,
+        object streamId,
+        long version,
+        CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource budget = Budget(cancellationToken);
+
+        try
+        {
+            await using IQuerySession session = OpenQuerySession(resolved);
+
+            ReplayEvents replay = await ReadReplayEventsAsync(resolved, session, streamId, version, budget.Token).ConfigureAwait(false);
+
+            if (replay.Refusal is not null)
+            {
+                return CompactionFold.NotChecked(version, "the studio cannot read this stream's events the way Marten does");
+            }
+
+            if (replay.NotInScope)
+            {
+                return CompactionFold.NotChecked(version, "the stream is not in this scope");
+            }
+
+            if (replay.Events.Count == 0)
+            {
+                return CompactionFold.NotChecked(version, "the studio's read found no events to fold");
+            }
+
+            object? folded = await AggregateStreamInvoker.FolderFor(aggregate.Type)
+                .FoldAsync(session, null, replay.Events, budget.Token)
+                .ConfigureAwait(false);
+
+            return folded is null ? CompactionFold.ToNothing(version) : CompactionFold.Folds(version);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return CompactionFold.NotChecked(
+                version,
+                "it took longer than the studio's query timeout of "
+                + options.Value.QueryTimeout.TotalSeconds.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " s");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // A projection's own code or the read failed. Nothing about it is shown but where it came from.
+            return CompactionFold.NotChecked(
+                version,
+                exception is PostgresException postgres ? postgres.MessageText : "the fold threw " + exception.GetType().Name);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<string> CompactStreamAsync(
         StudioScope scope,
         string streamId,
@@ -193,9 +307,25 @@ internal sealed partial class EventDataService
                 (CompactionVerdict verdict, string outcome) = StreamCompactionRules.Verify(
                     expectedVersion, stream.CompactedVersion, after, aggregate.Name, plan.StreamTenantId, plan.SkippedEventsStay);
 
+                // 6. Why nothing moved. From Marten 9.57 (#5797) a stream whose events fold to no aggregate - deleted by its
+                //    own aggregate - is left alone: Marten logs and returns, SaveChangesAsync commits an empty unit of work,
+                //    and the watermark stays. That is not a failure, and it is told apart from the archive that landed in
+                //    between and the stream whose later events are all skipped by folding it through the same version with
+                //    the same fold. A fold that cannot be run changes nothing: the verdict stays what Verify said.
+                CompactionFold? fold = null;
+
+                if (verdict == CompactionVerdict.NothingCompacted && !after.IsArchived)
+                {
+                    fold = await FoldThroughAsync(resolved, aggregate, parsed.Value!, expectedVersion, CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+
+                (verdict, outcome) = StreamCompactionRules.Reconcile(verdict, outcome, fold, aggregate.Name, expectedVersion);
+
                 return verdict switch
                 {
                     CompactionVerdict.Compacted => outcome,
+                    CompactionVerdict.LeftAlone => outcome,
                     CompactionVerdict.Unconfirmed => throw new StreamCompactionUnconfirmedException(outcome),
                     _ => throw new InvalidOperationException(outcome),
                 };

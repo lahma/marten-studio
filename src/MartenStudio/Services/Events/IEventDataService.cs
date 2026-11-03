@@ -243,6 +243,28 @@ internal interface IEventDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Folds the stream through the version the compaction dialog described, so the dialog can say before the click that
+    /// the events fold to no aggregate - the stream was deleted by its own aggregate - and that Marten 9.57 leaves such a
+    /// stream as it is.
+    /// </summary>
+    /// <remarks>
+    /// A read, gated as time travel is (the store policy for the scope, no capability), and the same fold
+    /// (<see cref="IAggregateFolder.FoldAsync" />) on the studio's own event read, under
+    /// <see cref="MartenStudioOptions.QueryTimeout" />: it opens no storage-ensuring Marten call (hard rule 14). A stream
+    /// the fold cannot reach in time, or whose projection throws, is a value (<see cref="CompactionFoldOutcome.NotChecked" />),
+    /// never an error: the service reports the real outcome after the save either way.
+    /// </remarks>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="stream">The stream the page has just read.</param>
+    /// <param name="version">The version the dialog described.</param>
+    /// <param name="cancellationToken">Cancels the read and the fold.</param>
+    Task<CompactionFold> CheckCompactionFoldAsync(
+        StudioScope scope,
+        StreamState stream,
+        long version,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Archives one stream: <c>ArchiveStreams</c>, the write policy, <c>session.Events.ArchiveStream</c>
     /// and <c>SaveChangesAsync</c>, audited either way.
     /// </summary>

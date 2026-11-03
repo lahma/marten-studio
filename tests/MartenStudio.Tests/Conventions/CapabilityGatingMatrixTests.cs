@@ -207,7 +207,7 @@ public class CapabilityGatingMatrixTests
         ],
         [typeof(IEventDataService)] =
         [
-            "AggregateAtVersionAsync", "CountDeadLettersAsync", "DescribeAsync", "DescribeCompactionAsync",
+            "AggregateAtVersionAsync", "CheckCompactionFoldAsync", "CountDeadLettersAsync", "DescribeAsync", "DescribeCompactionAsync",
             "FindStreamsByNaturalKeyAsync", "GetEventBySequenceAsync", "GetEventStoreCountsAsync",
             "GetEventTagsAsync", "GetFeedAsync", "GetHighestSequenceAsync", "GetRecentStreamsAsync",
             "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",

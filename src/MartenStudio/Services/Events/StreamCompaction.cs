@@ -73,10 +73,52 @@ internal enum CompactionVerdict
     NothingCompacted,
 
     /// <summary>
+    /// The watermark did not move because the events through the requested version fold to no aggregate - the stream was
+    /// deleted by its own aggregate - and Marten (9.57, #5797) leaves such a stream as it is. Nothing was compacted, and
+    /// that is not a failure.
+    /// </summary>
+    LeftAlone,
+
+    /// <summary>
     /// The save returned, but what it did cannot be told - the read-back failed, the stream is gone, or the
     /// watermark is past anything this compaction could have written.
     /// </summary>
     Unconfirmed,
+}
+
+/// <summary>What folding a stream's events through a version produced.</summary>
+internal enum CompactionFoldOutcome
+{
+    /// <summary>The events fold to an aggregate: Marten has a state to snapshot.</summary>
+    Folds,
+
+    /// <summary>
+    /// The events fold to no aggregate - the stream was deleted by its own aggregate (<c>ShouldDelete</c>,
+    /// <c>DeleteEvent&lt;T&gt;</c>). Marten 9.57 leaves such a stream alone.
+    /// </summary>
+    FoldsToNothing,
+
+    /// <summary>The fold could not be run (the stream is out of reach, too slow, or the projection threw): nothing is known.</summary>
+    NotChecked,
+}
+
+/// <summary>
+/// The result of folding one stream through one version with the studio's sanctioned fold
+/// (<see cref="IAggregateFolder.FoldAsync" />), which is what Marten's compaction does first.
+/// </summary>
+/// <param name="Outcome">What it produced.</param>
+/// <param name="Version">The version it folded through.</param>
+/// <param name="Reason">Why nothing could be checked, as a clause, for <see cref="CompactionFoldOutcome.NotChecked" />.</param>
+internal sealed record CompactionFold(CompactionFoldOutcome Outcome, long Version, string? Reason = null)
+{
+    /// <summary>The events fold to an aggregate.</summary>
+    public static CompactionFold Folds(long version) => new(CompactionFoldOutcome.Folds, version);
+
+    /// <summary>The events fold to no aggregate.</summary>
+    public static CompactionFold ToNothing(long version) => new(CompactionFoldOutcome.FoldsToNothing, version);
+
+    /// <summary>The fold could not be run.</summary>
+    public static CompactionFold NotChecked(long version, string reason) => new(CompactionFoldOutcome.NotChecked, version, reason);
 }
 
 /// <summary>
@@ -264,8 +306,8 @@ internal sealed record CompactionPlan
     public bool TagTablesMayRefuse { get; init; }
 
     /// <summary>
-    /// Whether the store keeps DCB tags in tag tables and this Marten deletes the folded events' tag rows with them
-    /// (9.51+, <c>RuntimeFeature.TaggedStreamCompaction</c>), so a tagged stream compacts instead of being refused.
+    /// Whether the store keeps DCB tags in tag tables and Marten deletes the folded events' tag rows with them (from 9.51,
+    /// so at every version the studio supports), so a tagged stream compacts instead of being refused.
     /// </summary>
     public bool TagRowsFoldWithEvents { get; init; }
 
@@ -302,8 +344,10 @@ internal sealed record CompactionPlan
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>What Marten does</b>, read from <c>EventStore.StreamCompacting.cs</c> at 9.39.0 and 9.50.2, which are
-/// byte for byte the same file, and at 9.51.0 (unchanged again at 9.54.1), which adds two things and changes nothing else: an empty key or
+/// <b>What Marten does</b>, read from <c>EventStore.StreamCompacting.cs</c> at V9.57.0 (the floor), where a stream whose
+/// events fold to no aggregate - deleted by its own aggregate - is left alone (#5797; below it Marten replaced its history
+/// with a <c>Compacted&lt;T&gt;</c> holding null, which E09 looks for). The rest is unchanged since 9.51.0, which added two
+/// things to what 9.39.0 and 9.50.2 did: an empty key or
 /// <see cref="Guid.Empty" /> is refused with <c>ArgumentOutOfRangeException</c> before anything is read (#5695), and
 /// the delete of the folded events deletes their DCB tag rows first, in the same statement (#5694, see
 /// <see cref="CompactionPlan.TagRowsFoldWithEvents" />). <c>FetchStreamAsync</c> reads the stream's events - never archived ones, and
@@ -468,8 +512,8 @@ internal static class StreamCompactionRules
     /// <param name="tags">How the store keeps DCB tags.</param>
     /// <param name="skipping">Whether the store records skipped events.</param>
     /// <param name="martenDeletesTagRows">
-    /// Whether this Marten's compaction deletes the folded events' tag rows with them
-    /// (<c>RuntimeFeature.TaggedStreamCompaction</c>, 9.51+); below it a tag table refuses a tagged stream's delete.
+    /// Whether Marten's compaction deletes the folded events' tag rows with them (9.51+, so always true at the floor);
+    /// without it a tag table refuses a tagged stream's delete. The service passes <see langword="true" />.
     /// </param>
     public static CompactionPlan Plan(
         StreamState stream,
@@ -687,6 +731,66 @@ internal static class StreamCompactionRules
     public static string Unconfirmed(string why) =>
         "Compaction was saved, not confirmed: " + (why ?? string.Empty).TrimEnd().TrimEnd('.')
         + ". Reload the page to see what the stream holds now.";
+
+    /// <summary>
+    /// What the dialog says when the events through its version fold to no aggregate: Marten 9.57 (#5797) leaves a stream
+    /// deleted by its own aggregate as it is, so there is nothing to compact.
+    /// </summary>
+    /// <param name="aggregateName">The aggregate, for the sentence.</param>
+    /// <param name="version">The version the dialog described.</param>
+    public static string FoldsToNothing(string aggregateName, long version) =>
+        "The events through version " + Text(version) + " fold to no " + aggregateName + ": the stream was deleted by its own "
+        + "aggregate. Marten leaves such a stream as it is, so there is nothing to compact.";
+
+    /// <summary>The title the dialog's Compact button carries while it is disabled for <see cref="FoldsToNothing" />.</summary>
+    /// <param name="aggregateName">The aggregate, for the sentence.</param>
+    /// <param name="version">The version the dialog described.</param>
+    public static string NothingToCompact(string aggregateName, long version) =>
+        "Nothing to compact: the events through version " + Text(version) + " fold to no " + aggregateName
+        + " (the stream was deleted by its own aggregate), and Marten leaves such a stream as it is.";
+
+    /// <summary>What the dialog says when the fold could not be run in advance.</summary>
+    /// <param name="aggregateName">The aggregate, for the sentence.</param>
+    /// <param name="fold">What the check answered; its reason is a clause.</param>
+    public static string FoldNotChecked(string aggregateName, CompactionFold fold)
+    {
+        ArgumentNullException.ThrowIfNull(fold);
+
+        return "The studio could not check in advance whether the events through version " + Text(fold.Version) + " fold to a "
+            + aggregateName + (string.IsNullOrWhiteSpace(fold.Reason) ? string.Empty : " (" + fold.Reason.TrimEnd().TrimEnd('.') + ")")
+            + ". If they fold to nothing - the stream was deleted by its own aggregate - Marten leaves the stream as it is and "
+            + "nothing is compacted; the result will say so.";
+    }
+
+    /// <summary>
+    /// What a compaction that moved nothing because the events fold to no aggregate reports: a success with nothing
+    /// compacted, for the page and the audit entry. It carries no trailing full stop - the page adds one.
+    /// </summary>
+    /// <param name="aggregateName">The aggregate, for the sentence.</param>
+    /// <param name="version">The version the compaction was bounded to.</param>
+    public static string LeftAloneOutcome(string aggregateName, long version) =>
+        "left as it is: nothing was compacted. Its events through version " + Text(version) + " fold to no " + aggregateName
+        + " - the stream was deleted by its own aggregate - and Marten leaves such a stream alone";
+
+    /// <summary>
+    /// Tells apart why a save moved nothing, once the service has folded the stream: events that fold to no aggregate are
+    /// Marten leaving the stream alone - a success with nothing compacted - and every other unmoved watermark keeps the
+    /// verdict <see cref="Verify" /> reached.
+    /// </summary>
+    /// <param name="verdict">What <see cref="Verify" /> answered.</param>
+    /// <param name="outcome">Its sentence.</param>
+    /// <param name="fold">The fold through the requested version, or <see langword="null" /> when it was not run.</param>
+    /// <param name="aggregateName">The aggregate, for the sentence.</param>
+    /// <param name="plannedVersion">The version the compaction was bounded to.</param>
+    public static (CompactionVerdict Verdict, string Outcome) Reconcile(
+        CompactionVerdict verdict,
+        string outcome,
+        CompactionFold? fold,
+        string aggregateName,
+        long plannedVersion) =>
+        verdict == CompactionVerdict.NothingCompacted && fold is { Outcome: CompactionFoldOutcome.FoldsToNothing }
+            ? (CompactionVerdict.LeftAlone, LeftAloneOutcome(aggregateName, plannedVersion))
+            : (verdict, outcome);
 
     private static string Text(long value) => value.ToString(CultureInfo.InvariantCulture);
 

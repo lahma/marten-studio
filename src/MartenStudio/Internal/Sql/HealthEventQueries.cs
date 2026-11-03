@@ -150,8 +150,23 @@ internal sealed record DcbTagVersionRow(
     IReadOnlyList<string> StorageOptions,
     DateTimeOffset? StatsReset);
 
+/// <summary>What <see cref="HealthEventQueries.EmptyCompactedSnapshots" /> has to know about the event store before it is built.</summary>
+/// <param name="EventSchema">The event store's schema.</param>
+/// <param name="Conjoined">
+/// Whether the event store is conjoined-tenanted: the probe then keys on the stream's tenant as well, and names it.
+/// </param>
+internal sealed record EmptySnapshotShape(string EventSchema, bool Conjoined);
+
+/// <summary>One row of the empty-snapshot probe: its summary, or one damaged stream.</summary>
+/// <param name="Kind"><see cref="HealthEventQueries.SummaryRow" /> or <see cref="HealthEventQueries.StreamRow" />.</param>
+/// <param name="Stream">The stream's id or key as text; <see langword="null" /> on the summary.</param>
+/// <param name="TenantId">The stream's tenant on a conjoined store; <see langword="null" /> elsewhere and on the summary.</param>
+/// <param name="First">The summary's candidates (at most one more than the cap); a stream's watermark version.</param>
+/// <param name="Second">The summary's damaged streams in all; how many damaged streams the stream's tenant holds.</param>
+internal sealed record EmptySnapshotRow(string Kind, string? Stream, string? TenantId, long First, long Second);
+
 /// <summary>
-/// The statements the event health checks (E02-E08) and the daemon's D07 and D08 read with.
+/// The statements the event health checks (E02-E09) and the daemon's D07 and D08 read with.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -221,6 +236,27 @@ internal static class HealthEventQueries
     /// key cut by a <c>limit</c>. Bounded in rows by this and in time by <c>statement_timeout</c>.
     /// </summary>
     public const long TrafficWindow = 100_000;
+
+    /// <summary>The empty-snapshot probe's <see cref="EmptySnapshotRow.Kind" /> for its totals.</summary>
+    public const string SummaryRow = "summary";
+
+    /// <summary>
+    /// How many compacted streams (<c>mt_streams.compacted_version &gt; 0</c>) <see cref="EmptyCompactedSnapshots" /> probes. The
+    /// read takes one more to know whether there were more, so the cap is a value the finding can state.
+    /// </summary>
+    public const int MaxCompactedProbes = 10_000;
+
+    /// <summary>How many damaged streams <see cref="EmptyCompactedSnapshots" /> names per tenant (per database when it has none).</summary>
+    public const int MaxEmptySnapshotStreams = 5;
+
+    /// <summary>How many tenants <see cref="EmptyCompactedSnapshots" /> names streams for, on a conjoined event store.</summary>
+    public const int MaxEmptySnapshotTenants = 10;
+
+    /// <summary>
+    /// The <c>mt_dotnet_type</c> pattern of a <c>Compacted&lt;T&gt;</c> event: <c>JasperFx.Events.Compacted`1[[...]]</c>, whatever
+    /// <c>T</c> is.
+    /// </summary>
+    public const string CompactedEventTypePattern = "JasperFx.Events.Compacted%";
 
     /// <summary>How many event types the profile returns, busiest first.</summary>
     public const int MaxTypeRows = 50;
@@ -641,6 +677,110 @@ internal static class HealthEventQueries
             NullableInt64(reader, 13),
             NullableInt64(reader, 14),
             NullableInt64(reader, 15));
+    }
+
+    /// <summary>
+    /// E09: the compacted streams whose snapshot is empty - a <c>Compacted&lt;T&gt;</c> event at the stream's compaction
+    /// watermark whose <c>Snapshot</c> is JSON <c>null</c>, which Marten before 9.57 wrote for a stream its own aggregate had
+    /// deleted (marten#5797).
+    /// </summary>
+    /// <param name="shape">The event store's schema and whether it is conjoined.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>Cheap by construction.</b> It never scans <c>mt_events</c> by <c>mt_dotnet_type</c>. It reads the streams that have a
+    /// watermark (<c>mt_streams.compacted_version &gt; 0</c>, <see cref="MaxCompactedProbes" /> of them, one more to know whether
+    /// there were more) and probes <i>one</i> event of each: the one at that version, through the <c>(stream_id, version)</c>
+    /// key - with the stream's tenant on a conjoined store, where the key carries it - which is where compaction writes the
+    /// snapshot (it keeps the last folded event's version). Only then are the type and the snapshot looked at, with the
+    /// release notes' own predicate: <c>'null'::jsonb in (data-&gt;'Snapshot', data-&gt;'snapshot')</c>, both spellings because
+    /// the serializer's casing is the host's. It runs inside the health runner's read-only transaction under
+    /// <c>statement_timeout</c>; a timeout is a "not checked" row.
+    /// </para>
+    /// <para>
+    /// <b>Rows.</b> One <see cref="SummaryRow" /> (columns <c>first</c>: the candidates read, at most
+    /// <see cref="MaxCompactedProbes" /> + 1; <c>second</c>: the damaged streams in all), then up to
+    /// <see cref="MaxEmptySnapshotStreams" /> <see cref="StreamRow" /> rows per tenant (per database when not conjoined), for up
+    /// to <see cref="MaxEmptySnapshotTenants" /> tenants: the stream's id, its tenant on a conjoined store, its watermark
+    /// version and how many damaged streams its tenant holds. Every name is a quoted identifier through
+    /// <see cref="SqlIdentifier" />; the type pattern and every cap are parameters.
+    /// </para>
+    /// </remarks>
+    public static HealthQuery EmptyCompactedSnapshots(EmptySnapshotShape shape)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        ArgumentException.ThrowIfNullOrWhiteSpace(shape.EventSchema);
+
+        string streams = SqlIdentifier.Qualify(shape.EventSchema, StreamsTable);
+        string events = SqlIdentifier.Qualify(shape.EventSchema, EventsTable);
+
+        StringBuilder sql = new();
+        sql.Append("with picked as materialized (\n");
+        sql.Append("  select s.id, s.tenant_id, s.compacted_version\n");
+        sql.Append("    from ").Append(streams).Append(" s\n");
+        sql.Append("   where s.compacted_version > 0\n");
+        sql.Append("   limit @candidates\n");
+        sql.Append("), bounded as materialized (\n");
+        sql.Append("  select b.id, b.tenant_id, b.compacted_version\n");
+        sql.Append("    from picked b\n");
+        sql.Append("   order by b.tenant_id, b.id\n");
+        sql.Append("   limit @max_probed\n");
+        sql.Append("), damaged as materialized (\n");
+        sql.Append("  select b.id::text as stream,\n");
+        sql.Append(shape.Conjoined ? "         b.tenant_id::text as tenant_id,\n" : "         null::text as tenant_id,\n");
+        sql.Append("         b.compacted_version as version\n");
+        sql.Append("    from bounded b\n");
+        sql.Append("    join ").Append(events).Append(" e\n");
+        sql.Append("      on e.stream_id = b.id\n");
+        sql.Append("     and e.version = b.compacted_version\n");
+
+        if (shape.Conjoined)
+        {
+            sql.Append("     and e.tenant_id = b.tenant_id\n");
+        }
+
+        sql.Append("   where e.mt_dotnet_type like @compacted_type\n");
+        sql.Append("     and 'null'::pg_catalog.jsonb in (e.data -> 'Snapshot', e.data -> 'snapshot')\n");
+        sql.Append("), ranked as (\n");
+        sql.Append("  select d.stream, d.tenant_id, d.version,\n");
+        sql.Append("         pg_catalog.row_number() over (partition by d.tenant_id order by d.stream) as rn,\n");
+        sql.Append("         pg_catalog.count(*) over (partition by d.tenant_id) as in_tenant,\n");
+        sql.Append("         pg_catalog.dense_rank() over (order by d.tenant_id) as tenant_rank\n");
+        sql.Append("    from damaged d\n");
+        sql.Append(")\n");
+        sql.Append("select 'summary'::text as kind,\n");
+        sql.Append("       null::text as stream,\n");
+        sql.Append("       null::text as tenant_id,\n");
+        sql.Append("       (select pg_catalog.count(*) from picked) as first,\n");
+        sql.Append("       (select pg_catalog.count(*) from damaged) as second\n");
+        sql.Append("union all\n");
+        sql.Append("(select 'stream', r.stream, r.tenant_id, r.version, r.in_tenant\n");
+        sql.Append("   from ranked r\n");
+        sql.Append("  where r.rn <= @max_listed\n");
+        sql.Append("    and r.tenant_rank <= @max_tenants\n");
+        sql.Append("  order by r.tenant_id, r.stream)");
+
+        return new HealthQuery(
+            sql.ToString(),
+            [
+                Integer("candidates", MaxCompactedProbes + 1),
+                Integer("max_probed", MaxCompactedProbes),
+                Text("compacted_type", CompactedEventTypePattern),
+                Integer("max_listed", MaxEmptySnapshotStreams),
+                Integer("max_tenants", MaxEmptySnapshotTenants),
+            ]);
+    }
+
+    /// <summary>Reads one row of <see cref="EmptyCompactedSnapshots" />.</summary>
+    public static EmptySnapshotRow ReadEmptySnapshot(NpgsqlDataReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        return new EmptySnapshotRow(
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2),
+            reader.IsDBNull(3) ? 0 : reader.GetInt64(3),
+            reader.IsDBNull(4) ? 0 : reader.GetInt64(4));
     }
 
     /// <summary>

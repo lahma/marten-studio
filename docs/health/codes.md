@@ -60,6 +60,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | [E06](events.md#e06-long-streams-without-a-snapshot) | Long streams without a snapshot | Events | - | - | Marten | 0.4 | - |
 | [E07](events.md#e07-archived-share-without-partitioning) | Archived share without partitioning | Events | - | - | Marten | 0.4 | - |
 | [E08](events.md#e08-dcb-tag-version-churn) | DCB tag-version churn | Events | - | - | Marten | 0.4 | - |
+| [E09](events.md#e09-stream-compacted-into-an-empty-snapshot) | Stream compacted into an empty snapshot | Events | - | tenant | Marten | 1.1 | - |
 | [K01](configuration.md#k01-autocreate-in-production) | AutoCreate in Production | Configuration | - | - | Marten | 0.4 | - |
 | [K02](configuration.md#k02-extended-progression-tracking) | Extended progression tracking | Configuration | - | - | Marten | 0.4 | - |
 | [K03](configuration.md#k03-advanced-async-tracking) | Advanced async tracking | Configuration | - | - | Marten | 0.4 | - |
@@ -156,6 +157,7 @@ baseline, so editing or deleting a row is a reviewed change.
 | sequence | the event sequence's schema-qualified name |
 | stream | the stream's id, prefixed with `tenant/` on a conjoined event store |
 | document type | the document type's name |
+| tenant | the tenant's id, on a store tenanted per event; E09 has no subject elsewhere |
 
 A subject that names a tenant (E03's) or a statement (T02's) is Activity-grade: the Health page shows it only past the
 Activity gate, and the diagnostics API only with `IncludeActivity` (see [diagnostics.md](../diagnostics.md)).

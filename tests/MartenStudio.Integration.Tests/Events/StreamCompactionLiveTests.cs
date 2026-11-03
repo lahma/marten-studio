@@ -146,6 +146,7 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
             Configure(options, ConjoinedSchema);
             options.Events.TenancyStyle = TenancyStyle.Conjoined;
             options.Schema.For<OrderSummary>().MultiTenanted();
+            options.Schema.For<CompactionBasket>().MultiTenanted();
         });
 
         Partitioned = DocumentStore.For(options =>
@@ -247,6 +248,27 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
             : [new OrderPlaced("customer"), new ItemAdded("sku-1", 10), new ItemAdded("sku-2", 5)];
 
         session.Events.StartStream<OrderSummary>(streamId, appended);
+
+        await session.SaveChangesAsync();
+
+        return streamId;
+    }
+
+    /// <summary>
+    /// Starts a <see cref="CompactionBasket" /> stream: opened, two lines and - when <paramref name="closed" /> - closed, which
+    /// its aggregate deletes on (<c>ShouldDelete</c>), so the stream folds to no aggregate.
+    /// </summary>
+    public static async Task<Guid> StartBasketAsync(IDocumentStore store, string? tenantId, bool closed, Guid? id = null)
+    {
+        Guid streamId = id ?? Guid.CreateVersion7();
+
+        await using IDocumentSession session = tenantId is null ? store.LightweightSession() : store.LightweightSession(tenantId);
+
+        object[] events = closed
+            ? [new BasketOpened("customer"), new BasketItemAdded("sku-1"), new BasketClosed("done")]
+            : [new BasketOpened("customer"), new BasketItemAdded("sku-1"), new BasketItemAdded("sku-2")];
+
+        session.Events.StartStream<CompactionBasket>(streamId, events);
 
         await session.SaveChangesAsync();
 
@@ -433,6 +455,9 @@ public sealed class StreamCompactionFixture(PostgresFixture postgres) : IAsyncLi
         // The registered single-stream aggregate a stream of OrderSummary compacts into. Registered, never
         // run: what compaction needs from it is Marten's aggregator, which only a registration provides.
         options.Projections.Add(new OrderSummaryProjection(), ProjectionLifecycle.Async);
+
+        // 1.1-CMP: and one whose aggregate can delete its own stream, which folds to nothing once closed.
+        options.Projections.Add(new CompactionBasketProjection(), ProjectionLifecycle.Async);
     }
 }
 
@@ -776,6 +801,107 @@ public class StreamCompactionLiveTests(StreamCompactionFixture fixture) : IClass
         replay.Found.Should().BeFalse();
         replay.Json.Should().BeNull();
         replay.Error!.Message.Should().Contain("is not one of this store's aggregate types");
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // 1.1-CMP: a stream that folds to nothing. Marten 9.57 (#5797) leaves it alone; the dialog says so before the click
+    // and the service says so after it.
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A stream its own aggregate closed (<c>ShouldDelete</c>) folds to no aggregate: the dialog's fold says so, Marten
+    /// compacts nothing - every event stays, the watermark stays - and the service reports and audits a success with
+    /// nothing compacted rather than a failure.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_stream_deleted_by_its_own_aggregate_is_left_alone_and_the_dialog_and_the_service_say_so()
+    {
+        IServiceProvider studio = fixture.Studio(fixture.Plain, capabilities: true);
+        IEventDataService events = studio.GetRequiredService<IEventDataService>();
+
+        Guid id = await StreamCompactionFixture.StartBasketAsync(fixture.Plain, tenantId: null, closed: true);
+        IReadOnlyList<(long Sequence, long Version, string Type)> before = await fixture.EventsAsync(fixture.PlainSchema, id);
+
+        CompactionPlan plan = await PlanAsync(events, Everyone, id.ToString(), Token);
+        plan.IsOffered.Should().BeTrue(plan.Explanation);
+        plan.AggregateName.Should().Be(nameof(CompactionBasket));
+        plan.EventsToFold.Should().Be(3);
+
+        // Before the click: the dialog's fold.
+        StreamState stream = await events.GetStreamAsync(Everyone, id.ToString(), Token);
+        CompactionFold fold = await events.CheckCompactionFoldAsync(Everyone, stream, plan.Version, Token);
+        fold.Outcome.Should().Be(CompactionFoldOutcome.FoldsToNothing, fold.Reason);
+        fold.Version.Should().Be(3);
+
+        // After it: Marten compacts nothing, and the service tells that apart from every other unmoved watermark.
+        string outcome = await events.CompactStreamAsync(Everyone, id.ToString(), plan.StreamId, plan.Version, Token);
+
+        outcome.Should().Be(StreamCompactionRules.LeftAloneOutcome(nameof(CompactionBasket), 3))
+            .And.StartWith("left as it is: nothing was compacted.");
+
+        (await fixture.EventsAsync(fixture.PlainSchema, id)).Should().Equal(before, "Marten left the stream exactly as it was");
+        (await fixture.CompactedVersionAsync(fixture.PlainSchema, id)).Should().Be(0);
+
+        StudioActionLogEntry entry = Latest(studio);
+        entry.Action.Should().Be(EventDataService.CompactStreamAction);
+        entry.Target.Should().Be(id.ToString());
+        entry.Succeeded.Should().BeTrue("Marten leaving the stream alone is not a failure");
+        entry.Message.Should().Be(outcome, "the audit says why nothing was compacted");
+    }
+
+    /// <summary>The same aggregate, not closed, folds to a state: the fold says so and the compaction goes through.</summary>
+    [PostgresFact]
+    public async Task A_stream_that_folds_to_an_aggregate_is_compacted_as_before()
+    {
+        IServiceProvider studio = fixture.Studio(fixture.Plain, capabilities: true);
+        IEventDataService events = studio.GetRequiredService<IEventDataService>();
+
+        Guid id = await StreamCompactionFixture.StartBasketAsync(fixture.Plain, tenantId: null, closed: false);
+
+        CompactionPlan plan = await PlanAsync(events, Everyone, id.ToString(), Token);
+        plan.IsOffered.Should().BeTrue(plan.Explanation);
+
+        StreamState stream = await events.GetStreamAsync(Everyone, id.ToString(), Token);
+        (await events.CheckCompactionFoldAsync(Everyone, stream, plan.Version, Token)).Outcome
+            .Should().Be(CompactionFoldOutcome.Folds);
+
+        string outcome = await events.CompactStreamAsync(Everyone, id.ToString(), plan.StreamId, plan.Version, Token);
+
+        outcome.Should().Be("compacted through version 3 into one Compacted<CompactionBasket> event");
+        (await fixture.EventsAsync(fixture.PlainSchema, id)).Should().ContainSingle();
+        (await fixture.CompactedVersionAsync(fixture.PlainSchema, id)).Should().Be(3);
+    }
+
+    /// <summary>
+    /// On a conjoined store the fold is the scope's tenant's: acme's closed basket folds to nothing and is left alone, while
+    /// globex's stream of the same id - not closed - folds to an aggregate and is untouched either way.
+    /// </summary>
+    [PostgresFact]
+    public async Task On_a_conjoined_store_the_fold_and_the_left_alone_outcome_are_the_scopes_tenants()
+    {
+        IServiceProvider studio = fixture.Studio(fixture.Conjoined, capabilities: true);
+        IEventDataService events = studio.GetRequiredService<IEventDataService>();
+
+        Guid id = Guid.CreateVersion7();
+        await StreamCompactionFixture.StartBasketAsync(fixture.Conjoined, StreamCompactionFixture.TenantA, closed: true, id);
+        await StreamCompactionFixture.StartBasketAsync(fixture.Conjoined, StreamCompactionFixture.TenantB, closed: false, id);
+
+        StudioScope acme = Everyone with { TenantId = StreamCompactionFixture.TenantA };
+        StudioScope globex = Everyone with { TenantId = StreamCompactionFixture.TenantB };
+
+        StreamState acmeStream = await events.GetStreamAsync(acme, id.ToString(), Token);
+        StreamState globexStream = await events.GetStreamAsync(globex, id.ToString(), Token);
+
+        (await events.CheckCompactionFoldAsync(acme, acmeStream, 3, Token)).Outcome.Should().Be(CompactionFoldOutcome.FoldsToNothing);
+        (await events.CheckCompactionFoldAsync(globex, globexStream, 3, Token)).Outcome.Should().Be(CompactionFoldOutcome.Folds);
+
+        string outcome = await events.CompactStreamAsync(acme, id.ToString(), id.ToString(), 3, Token);
+
+        outcome.Should().StartWith("left as it is: nothing was compacted.");
+        (await fixture.EventsAsync(fixture.ConjoinedSchema, id, StreamCompactionFixture.TenantA)).Should().HaveCount(3);
+        (await fixture.EventsAsync(fixture.ConjoinedSchema, id, StreamCompactionFixture.TenantB)).Should().HaveCount(3);
+        (await fixture.CompactedVersionAsync(fixture.ConjoinedSchema, id, StreamCompactionFixture.TenantA)).Should().Be(0);
+        (await fixture.CompactedVersionAsync(fixture.ConjoinedSchema, id, StreamCompactionFixture.TenantB)).Should().Be(0);
     }
 
     /// <summary>The page's two reads: the stream, then the plan made from it.</summary>
