@@ -166,9 +166,17 @@ failure: "left as it is: nothing was compacted. Its events through version N fol
 by its own aggregate - and Marten leaves such a stream alone". The same sentence is the audit entry's message.
 A stream archived in between, or one whose later events are all skipped, is still the failure it was.
 
+**On a store whose events are not divided by tenant,** a visitor scoped to one tenant folds only that tenant's events
+of the stream before the click, while Marten folds the whole stream. On a stream another tenant also appended to, the
+dialog's reason can therefore be wrong. Compacting such a stream needs the write policy to allow the database as a
+whole (`TenantId = null`) anyway, as described above.
+
 **Streams an older Marten already compacted this way.** Their history is gone and cannot be rebuilt by Marten. The
 Health page's **E09** (Stream compacted into an empty snapshot) finds them, by probing the one event at each
-compacted stream's watermark; restore them from a backup, or from wherever an archiver copied them.
+compacted stream's watermark; restore them from a backup, or from wherever an archiver copied them. E09 sees only
+streams with a watermark, which Marten records since 9.32: streams compacted by an older Marten are not seen, and the
+release notes' query, run by hand against `mt_events` (a full scan), is what finds them (the query is in E09's
+section of the events health page).
 
 ## Streams that cannot be compacted
 

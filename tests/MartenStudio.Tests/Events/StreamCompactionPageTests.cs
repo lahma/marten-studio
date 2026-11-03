@@ -312,6 +312,27 @@ public class StreamCompactionPageTests
         context.EventData.Compactions.Should().BeEmpty();
     }
 
+    /// <summary>The plan reloads while the dialog is open: a fold answer for another version says nothing about this one.</summary>
+    [Fact]
+    public async Task A_fold_answer_for_another_version_than_the_dialogs_blocks_nothing()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+        context.EventData.CompactionFolds[StreamId] = CompactionFold.ToNothing(2);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        await page.Find(CompactButton).ClickAsync(new());
+        await page.Find(".ms-confirm-dialog input").InputAsync(new() { Value = StreamId });
+
+        context.EventData.CompactionFoldChecks.Should().Equal(StreamId + "/3");
+        page.FindAll(".ms-compact-fold").Should().BeEmpty("the answer was for version 2, the dialog is about version 3");
+        IElement confirm = page.Find(ConfirmButton);
+        confirm.HasAttribute("disabled").Should().BeFalse();
+        confirm.HasAttribute("title").Should().BeFalse();
+    }
+
     [Fact]
     public async Task A_stream_that_folds_to_an_aggregate_has_no_fold_note_and_a_live_button_once_the_id_is_typed()
     {

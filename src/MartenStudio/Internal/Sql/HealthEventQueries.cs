@@ -687,14 +687,16 @@ internal static class HealthEventQueries
     /// <param name="shape">The event store's schema and whether it is conjoined.</param>
     /// <remarks>
     /// <para>
-    /// <b>Cheap by construction.</b> It never scans <c>mt_events</c> by <c>mt_dotnet_type</c>. It reads the streams that have a
+    /// <b>Bounded by construction.</b> It never scans <c>mt_events</c> by <c>mt_dotnet_type</c>. It reads the streams that have a
     /// watermark (<c>mt_streams.compacted_version &gt; 0</c>, <see cref="MaxCompactedProbes" /> of them, one more to know whether
     /// there were more) and probes <i>one</i> event of each: the one at that version, through the <c>(stream_id, version)</c>
     /// key - with the stream's tenant on a conjoined store, where the key carries it - which is where compaction writes the
     /// snapshot (it keeps the last folded event's version). Only then are the type and the snapshot looked at, with the
     /// release notes' own predicate: <c>'null'::jsonb in (data-&gt;'Snapshot', data-&gt;'snapshot')</c>, both spellings because
     /// the serializer's casing is the host's. It runs inside the health runner's read-only transaction under
-    /// <c>statement_timeout</c>; a timeout is a "not checked" row.
+    /// <c>statement_timeout</c>; a timeout is a "not checked" row. <c>mt_streams</c> has no index on <c>compacted_version</c>, so
+    /// the candidate read is a sequential scan until <see cref="MaxCompactedProbes" /> + 1 rows are found (the whole table when
+    /// few streams are compacted); the probe alone is by key.
     /// </para>
     /// <para>
     /// <b>Rows.</b> One <see cref="SummaryRow" /> (columns <c>first</c>: the candidates read, at most

@@ -1017,9 +1017,10 @@ internal sealed partial class EventDataService : IEventDataService
         IQuerySession session,
         object streamId,
         long version,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ConnectionUsage usage = ConnectionUsage.Read)
     {
-        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+        await using NpgsqlConnection connection = await OpenAsync(resolved, usage, cancellationToken).ConfigureAwait(false);
         EventTableInfo table = await DescribeTablesAsync(resolved, connection, cancellationToken).ConfigureAwait(false);
 
         if (table.EventColumns.Count == 0)

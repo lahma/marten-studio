@@ -241,10 +241,12 @@ streams an older Marten did it to.
 **Restore those streams** from a backup, or from wherever an archiver copied them before they were compacted. There
 is no `StoreOptions` line for it, and nothing in the studio repairs one.
 
-**Tier 2, and cheap.** It never scans `mt_events` by type. It reads the streams that have a compaction watermark
+**Tier 2, and bounded.** It never scans `mt_events` by type. It reads the streams that have a compaction watermark
 (`mt_streams.compacted_version > 0`), at most 10,000 of them, and probes the **one** event at that version of each
 through the `(stream_id, version)` key - with the stream's tenant on a conjoined store - where compaction writes the
-snapshot. The probe is the 9.57 release notes' own predicate:
+snapshot. `mt_streams` has no index on `compacted_version`, so reading the candidates is a sequential scan of
+`mt_streams` until 10,001 compacted streams are found - the whole table when few streams are compacted - bounded by
+the `statement_timeout`; only the probe is by key. The probe is the 9.57 release notes' own predicate:
 
 ```sql
 select stream_id, version, tenant_id
@@ -258,9 +260,22 @@ studio's `statement_timeout`; running out of time is a "not checked" row, not a 
 10,000 compacted streams the finding says the later ones were not probed. A stream compacted again since is judged
 at its new watermark.
 
+**What it cannot see: streams compacted before Marten 9.32.** `compacted_version` first appears in `mt_streams` in
+Marten 9.32, and its migration fills `0`. A stream that 9.0 to 9.31 (or 8.x) compacted into an empty snapshot has
+watermark 0 and is never probed, so a quiet E09 means "none of the streams with a watermark", not "none ever". Those
+streams are found only by the release notes' query, run by hand against `mt_events`. It is a full scan of that table,
+which is why no check runs it:
+
+```sql
+select stream_id, version, tenant_id
+from <schema>.mt_events
+where mt_dotnet_type like 'JasperFx.Events.Compacted%'
+  and 'null'::jsonb in (data->'Snapshot', data->'snapshot');
+```
+
 The finding names up to five streams, with the version each was compacted at. On a conjoined event store a stream
 belongs to one tenant, so there is **one finding per tenant** that holds a damaged stream (its subject is the tenant,
-up to ten tenants), and each is shown only to a visitor through `ViewDatabaseActivity` whom the store policy lets see
+up to ten tenants; the finding's caveat says when that cap was hit), and each is shown only to a visitor through `ViewDatabaseActivity` whom the store policy lets see
 that tenant, as E03's is. Elsewhere the finding is the database's and names its streams at the check's own gate.
 
 ## Not covered
@@ -268,8 +283,9 @@ that tenant, as E03's is. Elsewhere the finding is the database's and names its 
 - **`Events.UseTenantPartitionedEvents`.** Every tenant numbers its events from one, so there is no single recent
   window and no store-global mark: E02, E03 and E04 say "not checked", and so does D08 on the daemon page. The
   statistics checks (E05-E07), E08 and E09 still run (E09 keys on the stream and its tenant, not on a sequence).
-- **E06's longest streams.** Naming the 20 longest streams, and which aggregate each belongs to, needs a scan of
-  `mt_streams`, which no check runs; the finding says how many streams are long, not which. A screen that lists
+- **E06's longest streams.** Naming the 20 longest streams, and which aggregate each belongs to, needs ordering all of
+  `mt_streams` by version, which no check does (E09 reads `mt_streams` too, but only its compacted streams and stops at
+  10,001 of them); the finding says how many streams are long, not which. A screen that lists
   them is a separate, on-demand read, and is not part of this release.
 - **E05's unmatched aliases.** An unmapped alias whose own type name the statistics did not sample is reported as
   unmatched, not as unreadable. The Event types screen counts every type exactly.

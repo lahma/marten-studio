@@ -1,6 +1,7 @@
 using JasperFx.MultiTenancy;
 
 using Marten;
+using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
 
@@ -108,6 +109,11 @@ internal sealed partial class EventDataService
     /// the caller's own cancellation is let through. The reason names no data: a Postgres message, or the exception's type.
     /// </para>
     /// <para>
+    /// <b>Which host.</b> The pre-click fold is a page read (<see cref="ConnectionUsage.Read" />). The one after a save runs
+    /// on <see cref="ConnectionUsage.ReadWrite" />, the host the write ran on, so a lagging standby cannot make the
+    /// LeftAlone or failure classification describe events the primary has already changed.
+    /// </para>
+    /// <para>
     /// One difference from Marten, inherited from the replay: on a store whose events are not conjoined, a visitor in a
     /// tenant's scope folds only that tenant's events of the stream, where Marten folds every event of it. A stream another
     /// tenant also appended to needs the database as a whole authorized to be compacted at all (step 2b).
@@ -118,7 +124,8 @@ internal sealed partial class EventDataService
         CompactionAggregate aggregate,
         object streamId,
         long version,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ConnectionUsage usage = ConnectionUsage.Read)
     {
         using CancellationTokenSource budget = Budget(cancellationToken);
 
@@ -126,7 +133,7 @@ internal sealed partial class EventDataService
         {
             await using IQuerySession session = OpenQuerySession(resolved);
 
-            ReplayEvents replay = await ReadReplayEventsAsync(resolved, session, streamId, version, budget.Token).ConfigureAwait(false);
+            ReplayEvents replay = await ReadReplayEventsAsync(resolved, session, streamId, version, budget.Token, usage).ConfigureAwait(false);
 
             if (replay.Refusal is not null)
             {
@@ -316,7 +323,8 @@ internal sealed partial class EventDataService
 
                 if (verdict == CompactionVerdict.NothingCompacted && !after.IsArchived)
                 {
-                    fold = await FoldThroughAsync(resolved, aggregate, parsed.Value!, expectedVersion, CancellationToken.None)
+                    fold = await FoldThroughAsync(
+                            resolved, aggregate, parsed.Value!, expectedVersion, CancellationToken.None, ConnectionUsage.ReadWrite)
                         .ConfigureAwait(false);
                 }
 

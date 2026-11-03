@@ -304,13 +304,13 @@
                 Checking whether the events through version @dialogPlan.Version.ToString(CultureInfo.InvariantCulture) fold to a @dialogPlan.AggregateName...
             </p>
         }
-        else if (compactFold is { Outcome: CompactionFoldOutcome.FoldsToNothing })
+        else if (FoldFor(dialogPlan) is { Outcome: CompactionFoldOutcome.FoldsToNothing })
         {
             <div class="ms-alert ms-alert-warning ms-compact-fold ms-compact-fold-nothing" role="status">
                 @StreamCompactionRules.FoldsToNothing(dialogPlan.AggregateName ?? "the aggregate", dialogPlan.Version)
             </div>
         }
-        else if (compactFold is { Outcome: CompactionFoldOutcome.NotChecked } notChecked)
+        else if (FoldFor(dialogPlan) is { Outcome: CompactionFoldOutcome.NotChecked } notChecked)
         {
             <div class="ms-alert ms-alert-warning ms-compact-fold ms-compact-fold-unchecked" role="status">
                 @StreamCompactionRules.FoldNotChecked(dialogPlan.AggregateName ?? "the aggregate", notChecked)
@@ -992,10 +992,16 @@
             return "Checking whether the events fold to a " + plan.AggregateName + " before offering the compaction.";
         }
 
-        return compactFold is { Outcome: CompactionFoldOutcome.FoldsToNothing }
+        return FoldFor(plan) is { Outcome: CompactionFoldOutcome.FoldsToNothing }
             ? StreamCompactionRules.NothingToCompact(plan.AggregateName ?? "the aggregate", plan.Version)
             : null;
     }
+
+    /// <summary>
+    /// The fold answer for this plan, or null when the answer was for another version: the page reloads the plan
+    /// while the dialog is open (a new event arrived), and an answer about version 3 says nothing about version 4.
+    /// </summary>
+    private CompactionFold? FoldFor(CompactionPlan plan) => compactFold is { } fold && fold.Version == plan.Version ? fold : null;
 
     /// <summary>
     /// Compacts the stream with what the visitor typed, which the service checks again, through the version

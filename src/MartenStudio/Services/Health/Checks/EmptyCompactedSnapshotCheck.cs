@@ -41,11 +41,18 @@ internal sealed record EmptySnapshotFacts(
 /// the streams an older Marten did it to.
 /// </para>
 /// <para>
-/// <b>Tier 2, and cheap.</b> It never scans <c>mt_events</c> by type: it reads the streams with a compaction watermark
+/// <b>Tier 2, bounded.</b> It never scans <c>mt_events</c> by type: it reads the streams with a compaction watermark
 /// (<c>mt_streams.compacted_version</c>) and probes the one event at that version of each, through the
 /// <c>(stream_id, version)</c> key (<see cref="HealthEventQueries.EmptyCompactedSnapshots" />), at most
-/// <see cref="HealthEventQueries.MaxCompactedProbes" /> of them - and says so when it stopped there. It runs behind "Run
-/// deeper checks" under the sweep's statement timeout; running out of time is a "not checked" row, never a failure.
+/// <see cref="HealthEventQueries.MaxCompactedProbes" /> of them - and says so when it stopped there. <c>mt_streams</c> has
+/// no index on <c>compacted_version</c>, so the candidate read is a sequential scan of it until 10,001 compacted streams are
+/// found - the whole table when few are - and the probe alone is by key. It runs behind "Run deeper checks" under the
+/// sweep's statement timeout; running out of time is a "not checked" row, never a failure.
+/// </para>
+/// <para>
+/// <b>What it cannot see.</b> Marten records a compaction watermark since 9.32 (before it the column does not exist, and its
+/// migration fills 0), so a stream compacted by 9.0 to 9.31, or by 8.x, has watermark 0 and is never probed. Only the release
+/// notes' query, run by hand over <c>mt_events</c>, finds those.
 /// </para>
 /// <para>
 /// <b>A stream id is data, as E03's is.</b> Elsewhere than a conjoined store the ids are evidence at the check's own gate. On
@@ -136,7 +143,8 @@ internal sealed class EmptyCompactedSnapshotCheck : HealthCheck<EmptySnapshotFac
 
         if (facts.Probed == 0)
         {
-            return HealthVerdict.Quiet("No stream has been compacted: none has a compaction watermark in mt_streams.");
+            return HealthVerdict.Quiet(
+                "No stream has a compaction watermark (Marten records one since 9.32). Streams compacted by an older Marten are not seen.");
         }
 
         if (facts.Damaged == 0)
@@ -217,13 +225,21 @@ internal sealed class EmptyCompactedSnapshotCheck : HealthCheck<EmptySnapshotFac
                 "Found by reading the event at the compaction watermark (mt_streams.compacted_version) of each compacted stream, "
                 + "through its (stream_id, version) key - at most " + EventHealth.Count(HealthEventQueries.MaxCompactedProbes)
                 + " streams, read once when somebody asked for the deeper checks - and looking for a JasperFx.Events.Compacted "
-                + "event whose snapshot is JSON null. A stream compacted again since is judged at its new watermark."
+                + "event whose snapshot is JSON null. A stream compacted again since is judged at its new watermark. Marten "
+                + "records the watermark since 9.32, so a stream compacted by an older Marten has none and is not seen here."
                 + (tenant is null
                     ? string.Empty
-                    : " The streams belong to one tenant, so they are shown only to a visitor who may see that tenant. At most "
-                        + HealthEventQueries.MaxEmptySnapshotTenants + " tenants are listed."),
+                    : " The streams belong to one tenant, so they are shown only to a visitor who may see that tenant."
+                        + (TenantCapHit(facts)
+                            ? " The tenant cap was hit: only " + HealthEventQueries.MaxEmptySnapshotTenants
+                                + " tenants are listed, and other tenants hold damaged streams too."
+                            : string.Empty)),
         };
     }
+
+    /// <summary>Whether damaged streams of more tenants exist than the probe lists: the listed tenants hold fewer than were found.</summary>
+    private static bool TenantCapHit(EmptySnapshotFacts facts) =>
+        facts.Conjoined && facts.InTenant.Values.Sum() < facts.Damaged;
 
     /// <summary>"3 compacted streams", "the first 10,000 compacted streams".</summary>
     private static string Probed(EmptySnapshotFacts facts) =>

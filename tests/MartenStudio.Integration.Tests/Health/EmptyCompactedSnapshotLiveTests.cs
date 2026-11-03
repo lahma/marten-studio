@@ -83,7 +83,7 @@ public class EmptyCompactedSnapshotLiveTests(PostgresFixture postgres)
         HealthReport sample = await never.DeeperReportAsync();
 
         sample.Findings.Should().NotContain(static x => x.Code == "E09");
-        EventHealthHost.Status(sample, "E09").Note.Should().Contain("No stream has been compacted");
+        EventHealthHost.Status(sample, "E09").Note.Should().Contain("No stream has a compaction watermark");
     }
 
     /// <summary>
@@ -106,11 +106,11 @@ public class EmptyCompactedSnapshotLiveTests(PostgresFixture postgres)
             HealthReport report = await closed.DeeperReportAsync();
 
             report.Findings.Should().NotContain(static x => x.Code == "E09", "the finding names a tenant, and ViewDatabaseActivity is off");
-            report.WithheldCount.Should().BePositive();
             string shown = string.Join("|", report.Findings.SelectMany(static x => x.Evidence.Select(e => e.Value)));
             shown.Should().NotContain(damaged.ToString()).And.NotContain("acme");
             HealthCheckStatus status = EventHealthHost.Status(report, "E09");
             status.Outcome.Should().Be(HealthCheckOutcome.Checked, status.Problem);
+            status.FindingsWithheld.Should().BeTrue("E09's own finding is the one withheld, not some other check's");
         }
 
         await using EventHealthHost open = await EventHealthHost.CreateAsync(

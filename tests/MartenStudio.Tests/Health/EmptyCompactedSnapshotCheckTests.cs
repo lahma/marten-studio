@@ -30,7 +30,8 @@ public class EmptyCompactedSnapshotCheckTests
         HealthVerdict verdict = Evaluate([Summary(0, 0)]);
 
         verdict.Findings.Should().BeEmpty();
-        verdict.Note.Should().Contain("No stream has been compacted");
+        verdict.Note.Should().Contain("No stream has a compaction watermark").And.Contain("since 9.32")
+            .And.NotContain("has been compacted", "a stream compacted before Marten recorded a watermark is not seen, so the note does not claim none was");
     }
 
     [Fact]
@@ -117,6 +118,31 @@ public class EmptyCompactedSnapshotCheckTests
         globex.Title.Should().Be("A stream was compacted into an empty snapshot");
         string others = globex.Title + globex.WhyItMatters + globex.Caveat + string.Join("|", globex.Evidence.Select(static x => x.Label + x.Value));
         others.Should().NotContain("acme", "one tenant's finding names nothing of another's").And.NotContain(Stream2);
+    }
+
+    [Fact]
+    public void A_conjoined_store_with_more_damaged_tenants_than_it_lists_says_the_tenant_cap_was_hit()
+    {
+        List<EmptySnapshotRow> rows = [Summary(500, 14)];
+        rows.AddRange(Enumerable.Range(0, HealthEventQueries.MaxEmptySnapshotTenants)
+            .Select(static i => Damaged("s" + i, 3, 1, "tenant" + i)));
+
+        IReadOnlyList<HealthFinding> findings = Evaluate(rows, conjoined: true).Findings;
+
+        findings.Should().HaveCount(HealthEventQueries.MaxEmptySnapshotTenants);
+        findings.Should().OnlyContain(static x => x.Caveat!.Contains("tenant cap was hit", StringComparison.Ordinal));
+
+        rows[0] = Summary(500, HealthEventQueries.MaxEmptySnapshotTenants);
+        Evaluate(rows, conjoined: true).Findings.Should().OnlyContain(
+            static x => !x.Caveat!.Contains("tenant cap", StringComparison.Ordinal), "every damaged tenant is listed");
+    }
+
+    [Fact]
+    public void The_caveat_says_streams_compacted_before_Marten_9_32_are_not_seen()
+    {
+        HealthFinding finding = Evaluate([Summary(40, 1), Damaged(Stream1, 12, 1)]).Findings.Should().ContainSingle().Subject;
+
+        finding.Caveat.Should().Contain("9.32").And.Contain("not seen");
     }
 
     [Fact]
