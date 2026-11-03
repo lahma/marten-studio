@@ -1,6 +1,10 @@
 using System.Diagnostics;
 using System.Globalization;
 
+using MartenStudio.Services.Connection;
+
+using Microsoft.Extensions.DependencyInjection;
+
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
@@ -28,7 +32,7 @@ internal sealed record LargeDocumentsFacts(IReadOnlyList<DocumentSizeFacts> Tabl
 /// pages for about <see cref="TargetRows" /> rows, never more than that many - and the whole check stops
 /// sampling after <see cref="SampleBudget" />, largest tables first, at most <see cref="MaxSampledTables" />
 /// of them. It reads <c>pg_column_size(data)</c>, the stored size, from the TOAST pointer: nothing is
-/// decompressed and nothing is sent back but three numbers.
+/// decompressed and nothing is sent back but four numbers.
 /// </para>
 /// <para>
 /// <b>Never sampled:</b> a hidden document type's table (it is not in the set, and its name would be in the
@@ -108,6 +112,10 @@ internal sealed class LargeDocumentsCheck : HealthCheck<LargeDocumentsFacts>
             sampled++;
             facts.Add(new DocumentSizeFacts(table, rows.Count == 0 ? null : rows[0], rows.Count == 0 ? "the sample read nothing" : null));
         }
+
+        // The one aggregate the Connection page's BUFFER hint takes from these samples (1.1-NP4); a deeper sweep keeps nothing else.
+        context.Services.GetService<MartenRowSizeCache>()?.Record(
+            context.StoreKey, context.DatabaseId, MartenRowSizeCache.Documents, MartenRowSizeCache.AverageDocumentBytes(facts));
 
         return new LargeDocumentsFacts(facts, stoppedEarly);
     }

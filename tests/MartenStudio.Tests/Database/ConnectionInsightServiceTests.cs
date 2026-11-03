@@ -137,7 +137,8 @@ public class ConnectionInsightServiceTests
         ConnectionPageView view = await harness.Service.GetAsync(Scope, Token);
 
         view.Cards.Should().Contain(static x => x.Id == "conn-card-test");
-        view.Contributed.Should().ContainSingle().Which.Title.Should().Be("Test");
+        view.Contributed.Should().Contain(static x => x.Title == "Test");
+        view.Contributed.Select(static x => x.Id).Should().Contain("conn-marten", "AddMartenStudio registers the Marten contributor beside the test's own");
 
         recording.Seen.Should().NotBeNull();
         JsonSerializer.Serialize(recording.Seen, DumpOptions)

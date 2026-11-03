@@ -557,7 +557,8 @@ internal sealed record HiloRow(string EntityName, long HiValue);
 /// <param name="Sampled">How many rows the sample read.</param>
 /// <param name="P95Bytes">The 95th percentile of <c>pg_column_size(data)</c> - the stored, compressed size.</param>
 /// <param name="MaxBytes">The largest stored document the sample saw.</param>
-internal sealed record DocumentSizeSampleRow(int Sampled, double? P95Bytes, long? MaxBytes);
+/// <param name="AverageBytes">The mean of <c>pg_column_size(data)</c> over the sample, which the Connection page's <c>BUFFER</c> hint judges (1.1).</param>
+internal sealed record DocumentSizeSampleRow(int Sampled, double? P95Bytes, long? MaxBytes, double? AverageBytes = null);
 
 /// <summary>
 /// The statements behind the tables-and-indexes health checks (T01, T03-T12).
@@ -1699,7 +1700,8 @@ internal static class HealthTableQueries
         return new HealthQuery(
             "select pg_catalog.count(*)::int,\n"
             + "       (pg_catalog.percentile_cont(0.95) within group (order by pg_catalog.pg_column_size(d.data)))::float8,\n"
-            + "       pg_catalog.max(pg_catalog.pg_column_size(d.data))::bigint\n"
+            + "       pg_catalog.max(pg_catalog.pg_column_size(d.data))::bigint,\n"
+            + "       pg_catalog.avg(pg_catalog.pg_column_size(d.data))::float8\n"
             + "from (select t.data from " + SqlIdentifier.Qualify(schema, table) + " as t tablesample system (@percent) limit @limit) as d",
             [
                 new NpgsqlParameter("percent", NpgsqlDbType.Real) { Value = percent },
@@ -1900,7 +1902,8 @@ internal static class HealthTableQueries
         return new DocumentSizeSampleRow(
             reader.GetInt32(0),
             reader.IsDBNull(1) ? null : reader.GetDouble(1),
-            reader.IsDBNull(2) ? null : reader.GetInt64(2));
+            reader.IsDBNull(2) ? null : reader.GetInt64(2),
+            reader.IsDBNull(3) ? null : reader.GetDouble(3));
     }
 
     private static NpgsqlParameter[] TargetParameters(IReadOnlyList<HealthTableTarget> tables)

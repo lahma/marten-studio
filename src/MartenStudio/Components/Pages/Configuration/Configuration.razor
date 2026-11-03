@@ -1,9 +1,14 @@
 @page "/marten/config"
 @using MartenStudio.Services.Configuration
+@using MartenStudio.Services.Connection
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Settings
 @implements IDisposable
 @inject IConfigurationService ConfigurationData
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
 @inject StudioState State
 
 <PageTitle>Configuration</PageTitle>
@@ -50,6 +55,21 @@
                         <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
                     }
                 </div>
+
+                @if (configuration.Store.Connections.Count > 0)
+                {
+                    <h3 class="ms-config-group-title">Connections and sessions</h3>
+                    <p class="ms-schema-note">
+                        What this application told Marten about connecting. <a href="@ConnectionHref">Database › Connection</a>
+                        explains how each one affects the pool.
+                    </p>
+                    <div class="ms-config-grid" id="config-connections">
+                        @foreach (ConfigurationValue value in configuration.Store.Connections)
+                        {
+                            <ConfigurationValueRow Name="@value.Name" Value="@value.Value" Member="@value.Member" @key="value.Name" />
+                        }
+                    </div>
+                }
 
                 <h3 class="ms-config-group-title">Databases</h3>
                 @if (configuration.Store.DatabaseNotice is { Length: > 0 } notice)
@@ -364,6 +384,9 @@
         component.InformationalVersion is { Length: > 0 } informational
             ? "AssemblyInformationalVersion " + informational
             : "no informational version on the assembly";
+
+    /// <summary>The Connection page's section on how Marten uses the connection, with the scope carried.</summary>
+    private string ConnectionHref => ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, MartenConnectionSection.SectionId);
 
     private StudioConfiguration? configuration;
     private string filter = string.Empty;

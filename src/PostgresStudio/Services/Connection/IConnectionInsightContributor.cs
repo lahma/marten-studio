@@ -25,6 +25,13 @@ internal sealed record ConnectionContribution
 
     /// <summary>Cards that join "Worth a look" (a card with fixes, a hint of the studio's own).</summary>
     public IReadOnlyList<ConnectionCard> Cards { get; init; } = [];
+
+    /// <summary>
+    /// A sentence the studio adds to the end of a hint's card, by the hint's id (<c>ConnectionHintIds</c>): where the studio knows
+    /// something that changes what the generic hint means - Marten sets its commands' timeout itself, and picks a multi-host
+    /// session by its own preference. A note for a hint that is not on the page is not drawn.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> HintNotes { get; init; } = new Dictionary<string, string>(0);
 }
 
 /// <summary>

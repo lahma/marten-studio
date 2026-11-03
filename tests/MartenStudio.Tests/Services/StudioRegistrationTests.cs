@@ -6,6 +6,8 @@ using Marten;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Connection;
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Database;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
@@ -158,6 +160,11 @@ public class StudioRegistrationTests
 
         // 1.0-P3C: Marten Studio's plan insights P26 to P28, the one registration the packet adds.
         (typeof(IPlanInsightContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenPlanInsightContributor)),
+
+        // 1.1-NP4: "How Marten uses this connection" - the data-source registry, the deeper checks' average sizes and the contributor.
+        (typeof(MartenDataSourceRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenDataSourceRegistry)),
+        (typeof(MartenRowSizeCache), ServiceLifetime.Singleton, How.Type, typeof(MartenRowSizeCache)),
+        (typeof(IConnectionInsightContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenConnectionInsightContributor)),
         (typeof(IndexCatalog), ServiceLifetime.Singleton, How.Type, typeof(IndexCatalog)),
         (typeof(StudioScopeResolver), ServiceLifetime.Scoped, How.Type, typeof(StudioScopeResolver)),
         (typeof(TenantDiscovery), ServiceLifetime.Scoped, How.Type, typeof(TenantDiscovery)),

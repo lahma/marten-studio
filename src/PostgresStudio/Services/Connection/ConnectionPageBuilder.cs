@@ -129,7 +129,7 @@ internal static class ConnectionPageBuilder
                 continue;
             }
 
-            ConnectionCard card = HintCard(hint, settings, tight);
+            ConnectionCard card = HintCard(hint, settings, tight, inputs.Contributions);
 
             (card.Counts ? cards : notes).Add(card);
         }
@@ -423,7 +423,7 @@ internal static class ConnectionPageBuilder
         };
     }
 
-    private static ConnectionCard HintCard(ConnectionHint hint, ConnectionSettings settings, bool tight)
+    private static ConnectionCard HintCard(ConnectionHint hint, ConnectionSettings settings, bool tight, IReadOnlyList<ConnectionContribution> contributions)
     {
         List<ConnectionFix> fixes = [];
 
@@ -453,7 +453,7 @@ internal static class ConnectionPageBuilder
             "conn-card-hint-" + Slug(hint.Id + (hint.Id == ConnectionHintIds.Obsolete ? "-" + hint.Keyword : string.Empty)),
             contextOnly || hint.AllSettingsOnly ? ConnectionCardKind.Note : ConnectionCardKind.Hint,
             HintHeading(hint, settings),
-            hint.Text,
+            string.Join(" ", [hint.Text, .. contributions.Select(x => x.HintNotes.GetValueOrDefault(hint.Id)).OfType<string>().Where(static x => x.Length > 0)]),
             [hint.Id],
             hint.Id == ConnectionHintIds.Obsolete || hint.Id == ConnectionHintIds.Auth
                 ? hint.Keyword is { } only ? [only] : []

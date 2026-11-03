@@ -50,4 +50,11 @@ internal sealed record StoreConfiguration(
     string DisplayName,
     IReadOnlyList<ConfigurationValue> Values,
     IReadOnlyList<ConfiguredDatabase> Databases,
-    string? DatabaseNotice);
+    string? DatabaseNotice)
+{
+    /// <summary>
+    /// What the store was told about connections and sessions (1.1-NP4): the command timeout, sticky connections, the multi-host
+    /// preferences and the rest, each with the <c>StoreOptions</c> member behind it. Empty when the options are not Marten's own.
+    /// </summary>
+    public IReadOnlyList<ConfigurationValue> Connections { get; init; } = [];
+}

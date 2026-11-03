@@ -5,7 +5,9 @@ using JasperFx.Descriptors;
 using Marten;
 using Marten.Linq.Members;
 using Marten.Schema;
+using Marten.Storage;
 using MartenStudio.Internal;
+using MartenStudio.Services.Connection;
 using MartenStudio.Internal.Sql;
 
 using Weasel.Postgresql.Tables;
@@ -44,6 +46,10 @@ internal static class ConfigurationDescriber
     /// <param name="postgresVersion">The server version, or <see langword="null" />.</param>
     /// <param name="databases">The databases, already reduced to their safe fields.</param>
     /// <param name="databaseNotice">Why the database list is empty or partial.</param>
+    /// <param name="database">
+    /// The database the page is about, for the command timeout its own connection string names; <see langword="null" /> leaves that
+    /// row "not reported".
+    /// </param>
     public static StoreConfiguration DescribeStore(
         string storeKey,
         string displayName,
@@ -51,7 +57,8 @@ internal static class ConfigurationDescriber
         AutoCreate? autoCreate,
         string? postgresVersion,
         IReadOnlyList<ConfiguredDatabase> databases,
-        string? databaseNotice)
+        string? databaseNotice,
+        IMartenDatabase? database = null)
     {
         ArgumentNullException.ThrowIfNull(options);
 
@@ -76,8 +83,63 @@ internal static class ConfigurationDescriber
             new("PostgreSQL version", postgresVersion ?? "cannot report", "IDocumentStore.Diagnostics.GetPostgresVersion()"),
         ];
 
-        return new StoreConfiguration(storeKey, displayName, values, databases, databaseNotice);
+        return new StoreConfiguration(storeKey, displayName, values, databases, databaseNotice)
+        {
+            Connections = options is StoreOptions concrete ? DescribeConnections(concrete, database) : [],
+        };
     }
+
+    /// <summary>
+    /// The rows about connections and sessions: what the store was told, with the member behind each (1.1-NP4). The same figures
+    /// "How Marten uses this connection" explains on Database › Connection.
+    /// </summary>
+    /// <param name="options">The store's options.</param>
+    /// <param name="database">The database whose connection string may name a command timeout, or <see langword="null" />.</param>
+    /// <remarks>
+    /// <c>RlsTenantSessionSetting</c> is "configured" or "not configured", never the setting's name - the host chose it, and a
+    /// configuration page is read by every visitor of the scope.
+    /// </remarks>
+    internal static IReadOnlyList<ConfigurationValue> DescribeConnections(StoreOptions options, IMartenDatabase? database)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        MartenConnectionOptions connection = MartenConnectionOptions.Read(options, database);
+
+        MartenCommandTimeout timeout = connection.CommandTimeout;
+
+        return
+        [
+            new("Command timeout", timeout.Value, TimeoutMember(timeout, database is not null)),
+            new(
+                "Command timeout in the connection string",
+                database is null ? "not reported" : timeout.ConnectionStringValue,
+                "the Command Timeout of the connection string Marten connects with (IMartenDatabase.ConfiguredCommandTimeout); Npgsql's own default of 30 s does not count as named"),
+            new("Sticky connection lifetimes", YesNo(connection.StickyConnections), "StoreOptions.UseStickyConnectionLifetimes"),
+            new("Npgsql logging disabled", YesNo(connection.NpgsqlLoggingDisabled), "StoreOptions.DisableNpgsqlLogging"),
+            new("Connection tracing", connection.TrackConnections, "StoreOptions.OpenTelemetry.TrackConnections"),
+            new("Hi-lo block size", Number(connection.HiloMaxLo), "StoreOptions.Advanced.HiloSequenceDefaults.MaxLo"),
+            new("Hi-lo attempts to advance", Number(connection.HiloMaxAdvanceAttempts), "StoreOptions.Advanced.HiloSequenceDefaults.MaxAdvanceToNextHiAttempts"),
+            new("Read session preference", connection.ReadPreference.ToString(), "StoreOptions.Advanced.MultiHostSettings.ReadSessionPreference"),
+            new("Write session preference", connection.WritePreference.ToString(), "StoreOptions.Advanced.MultiHostSettings.WriteSessionPreference"),
+            new("Schema apply lock id", Number(connection.ApplyChangesLockId), "StoreOptions.ApplyChangesLockId"),
+            new("Row-level security", connection.RlsConfigured ? "configured" : "not configured", "StoreOptions.UseRowLevelSecurity(...) sets StoreOptions.RlsTenantSessionSetting"),
+        ];
+    }
+
+    /// <summary>Where the command timeout comes from, in words a person can act on.</summary>
+    private static string TimeoutMember(MartenCommandTimeout timeout, bool databaseKnown) => timeout.Basis switch
+    {
+        MartenCommandTimeoutBasis.StoreOption =>
+            "StoreOptions.CommandTimeout, which differs from Marten's default of " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s and so wins",
+        MartenCommandTimeoutBasis.Undetermined =>
+            "StoreOptions.CommandTimeout is " + timeout.StoreSeconds.ToString(CultureInfo.InvariantCulture) + " s and the connection string names " + timeout.ConnectionStringValue
+            + ": Marten uses the connection string's when the option was left alone and the option's when it was set on purpose, and does not say which. Set StoreOptions.CommandTimeout explicitly to remove the doubt",
+        MartenCommandTimeoutBasis.Agreed =>
+            "StoreOptions.CommandTimeout and the connection string's Command Timeout, which agree",
+        _ => databaseKnown
+            ? "StoreOptions.CommandTimeout, left at Marten's default of " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s: nothing sets it"
+            : "StoreOptions.CommandTimeout (Marten's default is " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s); the connection string's was not read",
+    };
 
     /// <summary>
     /// The five safe fields of a <see cref="DatabaseDescriptor" />.
@@ -125,6 +187,17 @@ internal static class ConfigurationDescriber
             new("Extended progression tracking", YesNo(events.EnableExtendedProgressionTracking), "StoreOptions.Events.EnableExtendedProgressionTracking"),
             new("Advanced async tracking", YesNo(events.EnableAdvancedAsyncTracking), "StoreOptions.Events.EnableAdvancedAsyncTracking"),
         ];
+
+        // 1.1-NP4: two members the read-only interface does not carry. Marten's own EventGraph implements the mutable one; any other
+        // implementation is not claimed to have a value.
+        values.Add(new(
+            "Identity map for aggregates",
+            events is Marten.Events.IEventStoreOptions mutable ? YesNo(mutable.UseIdentityMapForAggregates) : "not reported",
+            "StoreOptions.Events.UseIdentityMapForAggregates"));
+        values.Add(new(
+            "Auto-discover tag types",
+            events is Marten.Events.IEventStoreOptions tags ? YesNo(tags.AutoDiscoverTagTypes) : "not reported",
+            "StoreOptions.Events.AutoDiscoverTagTypes"));
 
         Marten.Events.IReadonlyMetadataConfig metadata = events.MetadataConfig;
 

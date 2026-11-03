@@ -4,6 +4,7 @@ using MartenStudio.Internal;
 using MartenStudio.Internal.Sql;
 using MartenStudio.Services;
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Connection;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Health.Checks;
@@ -11,6 +12,7 @@ using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
 using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -136,6 +138,12 @@ public static partial class MartenStudioServiceCollectionExtensions
 
         // 1.0-P3C: Marten Studio's plan insights (P26 to P28), judged against the document tables the store in scope declares.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IPlanInsightContributor, MartenPlanInsightContributor>());
+
+        // 1.1-NP4: "How Marten uses this connection" on Database > Connection. The data-source registry captures this collection and
+        // scans it lazily, like the store registry: AddMartenStudio() is routinely called before AddNpgsqlDataSource().
+        services.TryAddSingleton(new MartenDataSourceRegistry(services));
+        services.TryAddSingleton<MartenRowSizeCache>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IConnectionInsightContributor, MartenConnectionInsightContributor>());
 
         // Reads a table's indexes for the Mode A index verdict and caches what it said, keyed by database
         // identity, for the same reason as the shared column catalog.

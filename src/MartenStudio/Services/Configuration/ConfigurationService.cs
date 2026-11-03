@@ -86,7 +86,8 @@ internal sealed class ConfigurationService : IConfigurationService
             resolved.Database.AutoCreate,
             postgresVersion,
             databases,
-            notice);
+            notice,
+            resolved.Database);
 
         MartenRuntime runtime = MartenRuntime.Current;
 

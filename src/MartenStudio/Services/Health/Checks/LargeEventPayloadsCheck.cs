@@ -1,4 +1,8 @@
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Connection;
+
+using Microsoft.Extensions.DependencyInjection;
+
 using PostgresStudio.Services.Health;
 
 namespace MartenStudio.Services.Health.Checks;
@@ -34,8 +38,16 @@ internal sealed class LargeEventPayloadsCheck : HealthCheck<TrafficProfile>
     internal const int TypesNamed = 3;
 
     /// <inheritdoc />
-    public override Task<TrafficProfile> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken) =>
-        EventHealth.TrafficAsync(context, cancellationToken);
+    public override async Task<TrafficProfile> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
+    {
+        TrafficProfile traffic = await EventHealth.TrafficAsync(context, cancellationToken).ConfigureAwait(false);
+
+        // The one aggregate the Connection page's BUFFER hint takes from this window (1.1-NP4); a deeper sweep keeps nothing else.
+        context.Services.GetService<MartenRowSizeCache>()?.Record(
+            context.StoreKey, context.DatabaseId, MartenRowSizeCache.Events, MartenRowSizeCache.AverageEventBytes(traffic));
+
+        return traffic;
+    }
 
     /// <inheritdoc />
     public override HealthVerdict Evaluate(TrafficProfile facts, HealthEvaluation evaluation)

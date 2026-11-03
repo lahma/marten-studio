@@ -141,6 +141,32 @@ public sealed class ConnectionPageBuilderTests
     }
 
     [Fact]
+    public void A_studio_s_sentence_for_a_hint_is_added_to_the_end_of_that_hints_card_and_a_note_for_a_hint_that_is_not_there_is_not_drawn()
+    {
+        ConnectionContribution contribution = new()
+        {
+            HintNotes = new Dictionary<string, string>
+            {
+                [ConnectionHintIds.MultiHost] = "The studio's own sentence.",
+                [ConnectionHintIds.Lifetime] = "A note for a hint that is not on this page.",
+            },
+        };
+
+        ConnectionPageView view = View(Facts("Host=a.example,b.example;Database=app;Username=svc", Observed()), contributions: contribution);
+
+        ConnectionCard card = view.Cards.Concat(view.Notes).Single(static x => x.Code == ConnectionHintIds.MultiHost);
+        card.Text.Should().EndWith(" The studio's own sentence.");
+        card.Text.Should().Contain("can land on a standby", "the hint's own sentence comes first");
+
+        view.Cards.Concat(view.Notes).Concat(view.Contributed.SelectMany(static x => x.Cards)).Select(static x => x.Text)
+            .Should().NotContain(static x => x.Contains("not on this page", StringComparison.Ordinal));
+
+        // Without the contribution the hint is exactly its own.
+        View(Facts("Host=a.example,b.example;Database=app;Username=svc", Observed())).Cards.Concat(view.Notes).Single(static x => x.Code == ConnectionHintIds.MultiHost)
+            .Text.Should().NotContain("The studio's own sentence.");
+    }
+
+    [Fact]
     public void Contributions_with_a_repeated_id_are_made_distinct_so_the_page_never_repeats_a_key()
     {
         ConnectionCard card(string id) => new(id, ConnectionCardKind.Contributed, "Advice", "text", ["X"], [], []);
