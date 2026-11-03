@@ -144,6 +144,12 @@ internal sealed class ConnectionValues
 
     /// <summary>Whether <c>SSL Mode</c> is below <c>VerifyCA</c>: the server's certificate is not checked.</summary>
     public bool CertificateNotVerified => SslMode.ToLowerInvariant() is "disable" or "allow" or "prefer" or "require";
+
+    /// <summary>Whether <c>SSL Mode</c> is <c>Disable</c>: the application's connection is never encrypted, to the server or to anything in front of it.</summary>
+    public bool SslDisabled => string.Equals(SslMode, "Disable", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether <c>SSL Mode</c> is <c>Require</c>: the application's connection is encrypted, and Npgsql accepts any certificate.</summary>
+    public bool SslRequired => string.Equals(SslMode, "Require", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>One server setting named in <c>Options</c>.</summary>

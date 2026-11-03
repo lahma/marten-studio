@@ -38,7 +38,7 @@ latest-tested move; read a package's entries before changing its row. What they 
 
 - **Marten's floor is 9.57.0, and the floors follow the latest releases** (2026-11-03; the user's policy of 2026-11-02:
   "we can also target and require newer npgsql and marten if that helps, we can expect consumers to keep up with latest
-  development"). 9.57.0 fixes #5797 (compacting a stream that folds to null replaced its whole history with an empty
+  development"). 9.57.0 fixes JasperFx/marten#5797 (compacting a stream that folds to null replaced its whole history with an empty
   snapshot), which the studio's `CompactStreams` exposed on every host below it; every run-time light-up from 9.31 to 9.53
   became unconditional. History, all recorded in the entries: the 9.39.0 security floor (GHSA-q4xm-rhx9-xjm4 and
   GHSA-frqq-p5g3-8jq5, 2026-10-15), the code's own need of 9.31.0 (2026-09-19), and the walls below that

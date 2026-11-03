@@ -526,7 +526,7 @@ with each:
   `mt_insert_`, `mt_update_` and `mt_overwrite_` functions are renamed. The hazard is the upgrade, so **K09** (Configuration)
   finds those objects at every Marten version, leaves out a name a known document type declares itself (a type called
   `Kayıt` keeps its `ı`), and says in words to rename the tables and drop the functions for Marten to recreate; the studio runs nothing.
-- **Weasel 9.47.1, a schema name that needs quoting (weasel#750).** Index readback now works for a `DatabaseSchemaName` or
+- **Weasel 9.47.1, a schema name that needs quoting (JasperFx/weasel#750).** Index readback now works for a `DatabaseSchemaName` or
   events schema that is a reserved word or contains upper case; below it every apply after the first fails with `42P07`.
   **K10** fires only below Weasel 9.47.1, from the configuration alone, for any schema the store declares (a document type's included), and the
   Schema screen's Apply area shows its sentence.
@@ -629,7 +629,7 @@ newer npgsql and marten if that helps, we can expect consumers to keep up with l
 lowest-floor rule of 2026-09-19.
 
 Marten 9.57.0 fixes stream compaction replacing the whole history of a stream that folds to null with an empty snapshot
-(#5797), which the studio's `CompactStreams` exposed on every host below it. Raising the floor removes the hazard instead of
+(JasperFx/marten#5797), which the studio's `CompactStreams` exposed on every host below it. Raising the floor removes the hazard instead of
 guarding it, and makes the run-time light-ups from 9.31 to 9.53 unconditional.
 
 Npgsql 9.0.4 is the version Marten 9.57.0 itself references, so a Marten host is never moved off Marten's own Npgsql

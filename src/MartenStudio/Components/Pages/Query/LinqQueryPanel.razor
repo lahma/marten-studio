@@ -481,6 +481,15 @@
     [Parameter]
     public EventCallback<(string? Alias, bool Events, string Where, string OrderBy, string? Archived)> OnChanged { get; set; }
 
+    /// <summary>
+    /// Raised when the predicate or the ordering was edited (its box lost focus) and nothing was run: the page keeps the draft, so that
+    /// leaving the mode and coming back finds it, and does <em>not</em> touch the address. The address is pushed once per Run, with
+    /// both boxes bound (1.1): a push on each box's `change` and another for the Run began a second enhanced navigation while the
+    /// first was in flight and aborted it (net::ERR_ABORTED).
+    /// </summary>
+    [Parameter]
+    public EventCallback<(string? Alias, bool Events, string Where, string OrderBy, string? Archived)> OnDraftChanged { get; set; }
+
     private LinqDocumentTypeInfo? SelectedType =>
         eventsTarget ? null : status?.Types.FirstOrDefault(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase));
 
@@ -716,13 +725,13 @@
     private async Task OnWhereChangedAsync(string value)
     {
         where = value;
-        await NotifyAsync();
+        await DraftAsync();
     }
 
     private async Task OnOrderByChangedAsync(ChangeEventArgs args)
     {
         orderBy = args.Value?.ToString() ?? string.Empty;
-        await NotifyAsync();
+        await DraftAsync();
     }
 
     private Task SaveAsync(string text)
@@ -731,6 +740,18 @@
         // squeezed into the Marten mode's lists, where it would be offered to the wrong editor.
         statusText = "Saved queries do not cover LINQ mode yet; the address bar keeps this query.";
         return Task.CompletedTask;
+    }
+
+    private async Task DraftAsync()
+    {
+        try
+        {
+            await OnDraftChanged.InvokeAsync((alias, eventsTarget, where, orderBy, EventLinks.ArchivedToken(archived)));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            await Toasts.Error("The draft could not be kept (" + exception.GetType().Name + ").");
+        }
     }
 
     private async Task NotifyAsync()

@@ -272,7 +272,7 @@ public sealed class ConnectionCompareTests
 
         await PasteAsync(context, page, InEffect + ";Maximum Pool Size=100");
 
-        Wait(() => page.Find("#conn-compare-verdict").TextContent.Should().Be("Same advice as the connection in effect."), page);
+        Wait(() => page.Find("#conn-compare-verdict").TextContent.Should().Be("The page's hints are the same for both. Health findings such as S05 or S12 are judged only for the connection in effect."), page);
     }
 
     [Fact]

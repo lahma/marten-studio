@@ -971,6 +971,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9451 | `StatementsReadFailed` | The Statements page could not read `pg_stat_statements` for a reason nobody chose |
   | 9460, 9461 | `ConnectionHistoryRoundFailed`, `ConnectionHistorySampleFailed` | The opt-in connection history could not finish a round, or sample one server; it tries again at the next interval |
   | 9463, 9464 | `ConnectionHistoryBacklogStored`, `ConnectionHistoryBacklogDropped` | The connection history stored the samples its store had refused (Information, once); it dropped the oldest of them past an hour (throttled) |
+  | 9490 | `AcceptedCheckRetired` | Always `Information`, once per code: `AcceptedChecks` names a retired check (K10); the entry is ignored and can be removed |
   | 9500, 9501 | `CapacitySourceFailed`, `AuroraReadFailed` | The host's `IPostgresCapacitySource` threw or timed out; one of Aurora's own reads failed |
 
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation path
@@ -1033,7 +1034,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   shard at any setting and is never dead-lettered (9.52); and the Advance high water mark dialog says that the advance
   first ensures the event store's storage - with no tenant selected in every database of the store, each under its own
   `AutoCreate` - and, on a store that numbers events per tenant, which tenants' marks it moves. The edit dialog shows
-  Marten's own preview of a save (9.53). Compacting a stream that folds to nothing leaves it alone (9.57, #5797).
+  Marten's own preview of a save (9.53). Compacting a stream that folds to nothing leaves it alone (9.57, JasperFx/marten#5797).
 - **Enumerating a dynamic tenancy's databases is not read-only**, at any Marten through 9.57.0.
   `AllDatabases()` and `DescribeDatabasesAsync()` build the tenancy's databases, and the first time a
   store instance does, a master-table or sharded tenancy applies its lookup table and upserts its seed rows,

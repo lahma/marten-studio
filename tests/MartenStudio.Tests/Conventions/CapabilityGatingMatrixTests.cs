@@ -265,6 +265,10 @@ public class CapabilityGatingMatrixTests
         // 1.1-NP3: the Connection page reads (GetAsync, and the Overview's GetGlanceAsync without a peak: the store policy's) and its
         // application sessions (a gated read, above).
         [typeof(IConnectionInsightService)] = ["GetApplicationsAsync", "GetAsync", "GetGlanceAsync"],
+
+        // 1.1-NP3: the compare view parses a pasted connection string and drops it; it writes nothing and is the Connection page's
+        // read (the store policy's), so a mutating method added to the service later has to be classified here or fail the matrix.
+        [typeof(IConnectionCompareService)] = ["CompareAsync"],
     };
 
     /// <summary>

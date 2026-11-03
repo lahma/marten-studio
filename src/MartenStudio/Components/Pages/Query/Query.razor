@@ -251,7 +251,8 @@
                                 Archived="@linqArchived"
                                 Where="@linqWhere"
                                 OrderBy="@linqOrderBy"
-                                OnChanged="OnLinqChangedAsync" />
+                                OnChanged="OnLinqChangedAsync"
+                                OnDraftChanged="OnLinqDraftChangedAsync" />
             }
             else
             {
@@ -409,7 +410,55 @@
     }
 
     /// <summary>Whatever moved the address - this page's own push, the scope selector, Back - the address is known again.</summary>
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => pendingUri = null;
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        // The server's manager reports a new location as the navigation begins, not when its request has been served, so where the
+        // browser can say when the page has landed (NavigationLanded) that is what ends a push; this is the fallback without it.
+        if (!navigationWatched)
+        {
+            NavigationEnded();
+        }
+    }
+
+    /// <summary>The browser says an enhanced navigation has been served and applied (Blazor's <c>enhancedload</c>).</summary>
+    [JSInvokable]
+    public async Task NavigationLanded() => await InvokeAsync(NavigationEnded);
+
+    private void NavigationEnded()
+    {
+        pendingUri = null;
+
+        if (pushQueued)
+        {
+            // After the router has applied the parameters of the address that just landed (its handler was subscribed first and
+            // queued its refresh first), so the queued push is built from the state as it is, not overwritten by the older address.
+            _ = InvokeAsync(FlushQueuedPush);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var reference = DotNetObjectReference.Create(this);
+        navigationReference = reference;
+
+        try
+        {
+            navigationWatched = await JsRuntime.InvokeAsync<bool>("martenStudio.query.watchNavigation", reference);
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // Prerendering, a circuit that closed, or a helper script without the helper: LocationChanged ends a push instead.
+        }
+    }
+
+    private IDisposable? navigationReference;
+
+    private bool navigationWatched;
 
     protected override async Task OnInitializedAsync()
     {
@@ -495,6 +544,24 @@
     {
         State.ScopeChanged -= OnScopeChangedAsync;
         Navigation.LocationChanged -= OnLocationChanged;
+
+        try
+        {
+            if (navigationWatched)
+            {
+                await JsRuntime.InvokeVoidAsync("martenStudio.query.releaseNavigation");
+            }
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // The circuit is already gone, which is the usual way a page is disposed.
+        }
+        finally
+        {
+            navigationWatched = false;
+            navigationReference?.Dispose();
+            navigationReference = null;
+        }
 
         await pageCts.CancelAsync();
         pageCts.Dispose();
@@ -924,17 +991,6 @@
             typeValue = null;
         }
 
-        // Recorded before navigating, so OnParametersSet sees its own values arrive and leaves the editor
-        // alone - including when the text was too long to travel and the parameter is absent.
-        appliedMode = modeValue;
-        appliedType = typeValue;
-        appliedWhere = whereValue;
-        appliedSql = sqlValue;
-        appliedPredicate = predicateValue;
-        appliedOrderBy = orderByValue;
-        appliedTarget = targetValue;
-        appliedArchived = archivedValue;
-
         string uri = Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["mode"] = modeValue,
@@ -954,29 +1010,128 @@
         // one again. NavigationManager.Uri is not yet the first push's address when the second arrives (the server's manager
         // sets it after an awaited location-changing round), so the address pushed last is remembered until the location
         // changes.
-        if (string.Equals(uri, pendingUri ?? Navigation.Uri, StringComparison.Ordinal))
+        //
+        // 1.1-FINAL-POLISH: and never begin a navigation while another of this page's is in flight, whatever the address. A Run
+        // right after another Run (the LINQ tab's Order-by box, Ctrl+Enter) began its push while the first one's request was
+        // still being served, which aborted that request on a slow machine. The later address waits, is built from the state as
+        // it is then, and is pushed when the location has changed (FlushQueuedPush).
+        if (pendingUri is not null && System.Diagnostics.Stopwatch.GetElapsedTime(pendingSince) > PendingGrace)
+        {
+            // A navigation that never reported a location (cancelled by a handler, say) must not hold every later push for good.
+            pendingUri = null;
+        }
+
+        if (pendingUri is not null)
+        {
+            if (!string.Equals(uri, pendingUri, StringComparison.Ordinal) && !pushQueued)
+            {
+                pushQueued = true;
+                _ = FlushAfterGraceAsync(pendingUri);
+            }
+
+            return;
+        }
+
+        // Recorded before navigating, so OnParametersSet sees its own values arrive and leaves the editor
+        // alone - including when the text was too long to travel and the parameter is absent.
+        appliedMode = modeValue;
+        appliedType = typeValue;
+        appliedWhere = whereValue;
+        appliedSql = sqlValue;
+        appliedPredicate = predicateValue;
+        appliedOrderBy = orderByValue;
+        appliedTarget = targetValue;
+        appliedArchived = archivedValue;
+
+        if (string.Equals(uri, Navigation.Uri, StringComparison.Ordinal))
         {
             return;
         }
 
         pendingUri = uri;
+        pendingSince = System.Diagnostics.Stopwatch.GetTimestamp();
         Navigation.NavigateTo(uri, replace: true);
     }
+
+    private static readonly TimeSpan PendingGrace = TimeSpan.FromSeconds(15);
+
+    private long pendingSince;
 
     /// <summary>The address this page has pushed and the navigation manager has not yet reported, or <see langword="null" />.</summary>
     private string? pendingUri;
 
-    /// <summary>The LINQ panel's type, predicate or ordering moved: keep the deep link in step.</summary>
+    /// <summary>Whether an address was asked for while <see cref="pendingUri" /> was in flight, so it is pushed when that one lands.</summary>
+    private bool pushQueued;
+
+    /// <summary>
+    /// A push that waited must not wait for good: if the navigation in flight never reports that it landed (it was a no-op, or its
+    /// request failed), the queued address goes after <see cref="PendingGrace" />.
+    /// </summary>
+    /// <param name="waitingFor">The address in flight when the push was queued.</param>
+    private async Task FlushAfterGraceAsync(string waitingFor)
+    {
+        try
+        {
+            await Task.Delay(PendingGrace, pageCts.Token);
+            await InvokeAsync(() =>
+            {
+                if (pushQueued && string.Equals(pendingUri, waitingFor, StringComparison.Ordinal))
+                {
+                    pendingUri = null;
+                    return FlushQueuedPush();
+                }
+
+                return Task.CompletedTask;
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // The page went away.
+        }
+        catch (ObjectDisposedException)
+        {
+            // So did its token source.
+        }
+    }
+
+    /// <summary>Pushes the address that waited for the one in flight, from the state as it is now.</summary>
+    private Task FlushQueuedPush()
+    {
+        if (pushQueued && pendingUri is null)
+        {
+            pushQueued = false;
+            PushUrl();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The LINQ panel's type, target or archived choice moved, or it was run: keep the deep link in step, once.</summary>
     private Task OnLinqChangedAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) changed)
+    {
+        KeepLinq(changed);
+
+        PushUrl();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The LINQ panel's predicate or ordering was edited and not run: remember the draft, never navigate. The address follows the
+    /// Run, with both boxes bound, so an edit followed by a Run is one navigation and not two (the second aborting the first).
+    /// </summary>
+    private Task OnLinqDraftChangedAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) changed)
+    {
+        KeepLinq(changed);
+        return Task.CompletedTask;
+    }
+
+    private void KeepLinq((string? Alias, bool Events, string Where, string OrderBy, string? Archived) changed)
     {
         linqAlias = changed.Alias;
         linqEvents = changed.Events;
         linqArchived = changed.Archived;
         linqWhere = changed.Where;
         linqOrderBy = changed.OrderBy;
-
-        PushUrl();
-        return Task.CompletedTask;
     }
 
     private static string Summary(int rows, TimeSpan duration) =>

@@ -128,7 +128,9 @@ public class MaintenancePageTests
 
         page.FindAll(".ms-maint-table thead th").Select(static x => x.TextContent.Trim()).Should().Contain("Stats since");
         page.FindAll(".ms-maint-table tbody tr")[0].QuerySelector(".ms-maint-since")!.TextContent.Trim().Should().Be("2026-10-24 08:30");
-        page.FindAll(".ms-maint-table tbody tr")[1].QuerySelector(".ms-maint-since")!.TextContent.Trim().Should().Be("-", "nobody reset it on its own");
+        page.FindAll(".ms-maint-table tbody tr")[1].QuerySelector(".ms-maint-since")!.TextContent.Trim().Should().Be("never reset", "nobody reset it on its own");
+        page.FindAll(".ms-maint-table tbody tr")[1].QuerySelector(".ms-maint-since")!.GetAttribute("title").Should().Be("never reset");
+        page.FindAll(".ms-maint-table tbody tr")[0].QuerySelector(".ms-maint-since")!.HasAttribute("title").Should().BeFalse();
 
         page.Find(".ms-maint-next #ms-maint-next-title").TextContent.Should().Be("Next for autovacuum");
         page.FindAll(".ms-maint-next-table tbody tr").Select(static x => x.QuerySelector("td")!.TextContent.Trim()).Should().Equal("public.orders", "public.events");

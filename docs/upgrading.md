@@ -6,8 +6,8 @@
 release, and move the two dependencies first if your application is below either floor.
 
 - **Why Marten 9.57.0.** Marten 9.57.0 fixes stream compaction replacing the whole history of a stream that folds to
-  nothing with an empty snapshot (#5797), which Marten Studio's Compact stream exposed on every host below it. Raising the
-  floor removes the hazard instead of guarding it. The floors now follow the latest releases, on the expectation that
+  nothing with an empty snapshot (JasperFx/marten#5797), which Marten Studio's Compact stream exposed on every host below
+  it. Raising the floor removes the hazard instead of guarding it. The floors now follow the latest releases, on the expectation that
   consumers keep up; a Marten 9.x above 9.57.0 is fine, and the package still states no upper bound. Because the floor has
   everything the studio ever lit up at run time (Marten 9.31 to 9.53), the Configuration page's "Newer than the studio's
   floor" table is empty and the screens no longer say "needs Marten 9.xx" or "this host runs ...".
@@ -24,11 +24,21 @@ release, and move the two dependencies first if your application is below either
   [Database › Connection](connection.md#the-checks-it-surfaces), and, in Marten Studio, E09 (a stream compacted into an
   empty snapshot, behind "Run deeper checks"). They are findings about your configuration, not regressions; accept one with
   `AcceptedChecks` and a reason, or fix it.
-- **S05 now stands down behind a pooler.** Behind a Neon pooled endpoint, port 6543, Azure's built-in PgBouncer (port
-  6432) or an Amazon RDS Proxy, the server's TLS row is the pooler's own connection, so S05 is "not applicable" there; the
-  Connection page's TLS hint judges `SSL Mode` instead.
+- **The opt-in health check may turn `Degraded` on upgrade.** If you registered the ASP.NET Core health check
+  ([health.md](health.md#export)), any Warning from a new check changes its status from `Healthy`
+  to `Degraded`, as for any Warning ([stability.md](stability.md)). S11 `prefer` is a Warning on a detected cloud
+  platform and fires at Npgsql's default `SSL Mode=Prefer`, so most Amazon RDS and Azure hosts will see it; C16, C17 and
+  S12 can do the same. Accept the check or fix the setting before the first probe that gates a deployment on the status.
+- **S05 now stands down behind a pooler, except for `SSL Mode=Disable`.** Behind a Neon pooled endpoint, Supabase's
+  port 6543, any port 6432 (PgBouncer, Azure's built-in included) or an Amazon RDS Proxy, the server's TLS row is the
+  pooler's own connection, so S05 is "not applicable" there; the Connection page's TLS hint judges `SSL Mode` instead. A
+  port alone only means the data source may reach a pooler: with `SSL Mode=Disable` and a remote host S05 still fires,
+  from the setting, and S11's `require` variant likewise fires from `SSL Mode=Require` behind a pooler.
 - **PostgreSQL 14** is no longer tested. It still works.
-- **Nothing else changes for you.** No public API moved.
+- **The connection history (#54).** A process that stops being the sampler now offers the samples it still holds to the
+  store, oldest first, instead of leaving them. A custom `IPostgresConnectionHistoryStore` should make its append
+  idempotent (`on conflict (server, taken_at) do nothing`), because the same sample can reach it again.
+- **Nothing else you need to act on changes.** No public API moved.
 
 # Upgrading to 1.0
 

@@ -6,9 +6,9 @@ mode, and makes compaction safe on streams that fold to nothing.
 
 - The floors moved to the latest releases: Marten Studio needs Marten 9.57.0 or later (it was 9.39.0), and Postgres Studio
   and Postgres Studio Diagnostics need Npgsql 9.0.4 or later (it was 8.0.3), the Npgsql Marten 9.57.0 itself uses. Marten
-  9.57.0 fixes compaction replacing the whole history of a stream that folds to nothing with an empty snapshot (#5797),
-  which Compact stream exposed on every host below it. A Postgres Studio host on Npgsql 8 must move to 9.0.4 or later;
-  see docs/upgrading.md.
+  9.57.0 fixes compaction replacing the whole history of a stream that folds to nothing with an empty snapshot
+  (JasperFx/marten#5797), which Compact stream exposed on every host below it. A Postgres Studio host on Npgsql 8 must
+  move to 9.0.4 or later; see docs/upgrading.md.
 - PostgreSQL 19 is supported, tested on its release candidate (`postgres:19rc1-alpine`) until its general availability
   image replaces it. The version matrix runs 15 to 19, 19 as a leg that fails a run, and a leg is a preview only when
   `MatrixVersion` says so.
@@ -74,7 +74,8 @@ mode, and makes compaction safe on streams that fold to nothing.
   Certificate=` if the CA is private)."), and says that `SSL Mode=Prefer` or `Require` encrypts but does not check the
   server's certificate. The Connection page's finding cards show a remedy's explanation above the text to copy.
 - Compare a connection string opens with a one-sentence verdict (the certificate check, a readable password, the advice
-  that is new or gone, or "Same advice as the connection in effect."); the note about a removed password says the text
+  that is new or gone, or, when the hints do not change, "The page's hints are the same for both. Health findings such
+  as S05 or S12 are judged only for the connection in effect."); the note about a removed password says the text
   stays in the box until you press Clear or leave the page.
 - On a phone or a narrow window (below 720 px) each setting is a card with "From:" and "Default:" instead of a table
   that scrolls sideways, keeping its table roles for assistive technology; every group table has the same column widths;
@@ -108,8 +109,10 @@ mode, and makes compaction safe on streams that fold to nothing.
 - New check S11, "Server certificate not verified": the connection uses TLS but `SSL Mode` is below `VerifyCA`, so Npgsql
   accepts any certificate. Variants `prefer` (Allow and Prefer) and `require`; Warning on a detected cloud platform, Info
   elsewhere. Stands down behind a connection pooler (the server's `pg_stat_ssl` row is then the pooler's own connection,
-  not the application's), for a loopback or socket host, the Cloud SQL Auth Proxy, and a role that cannot see its own
-  `pg_stat_ssl` row. The remedy is `VerifyFull` with the provider's CA bundle where the studio has a source for it; behind
+  not the application's) unless `SSL Mode=Require`, which is encrypted and never verified by the setting alone, so the
+  `require` variant fires from the setting there; `Prefer` and `Allow` behind a pooler stay not applicable, because the
+  setting cannot say whether TLS is used. Also stands down for a loopback or socket host, the Cloud SQL Auth Proxy, and a
+  role that cannot see its own `pg_stat_ssl` row. The remedy is `VerifyFull` with the provider's CA bundle where the studio has a source for it; behind
   an Amazon RDS Proxy it is `VerifyFull` with no `Root Certificate`, because the proxy uses AWS Certificate Manager
   certificates and not the RDS bundle.
 - New check S12, "A credential is readable from configuration": `persist-security-info` (Warning: the password stays in
@@ -131,13 +134,15 @@ mode, and makes compaction safe on streams that fold to nothing.
   correlation id, causation id and user name, through Marten's own IReadOnlyEventStore.QueryRawEvents(). Same
   RunLinqQueries capability and gate; archived events are left out unless asked for; no table is ever created.
 - LINQ over events: the "Not offered here, and why" list is open by default, with the reason for each member the store
-  withholds, and Ctrl+Enter runs the query from the Order-by box as well as the predicate box. The Query page no longer
-  pushes an address it is already at or on its way to: editing a box and clicking Run used to start two page
-  navigations, and the second aborted the first.
+  withholds, and Ctrl+Enter runs the query from the Order-by box as well as the predicate box. The list wraps its long
+  member names, so it no longer scrolls the page sideways on a phone. The Query page's address follows the Run, not each
+  box's change: it is written once per Run with both boxes in it, never pushed twice for the same query, and a push waits
+  for the previous one's page to land instead of aborting its request (net::ERR_ABORTED); an edit that is not run is
+  kept as a draft when you switch mode and come back.
 - Compaction under Marten 9.57: the Compact dialog folds the stream through its version when it opens, and says when the
-  events fold to no aggregate (the stream was deleted by its own aggregate). Marten 9.57 (#5797) leaves such a stream as it
-  is, so the Compact button is disabled with the reason as its title; if the fold cannot be run in advance the dialog says
-  so and still offers the compaction. After a save that moved nothing the service folds again and reports a stream Marten
+  events fold to no aggregate (the stream was deleted by its own aggregate). Marten 9.57 (JasperFx/marten#5797) leaves
+  such a stream as it is, so the Compact button is disabled with the reason as its title; if the fold cannot be run in
+  advance the dialog says so and still offers the compaction. After a save that moved nothing the service folds again and reports a stream Marten
   left alone as a success with nothing compacted, with the reason in the message and in the audit entry; an archive that
   landed in between, or a skipped tail, is still the failure it was. `docs/compaction.md` is rewritten for the 9.57 floor.
 - New health check E09, Stream compacted into an empty snapshot (Events, Marten Studio, Warning, behind "Run deeper
@@ -145,18 +150,21 @@ mode, and makes compaction safe on streams that fold to nothing.
   event at each compacted stream's watermark by key (at most 10,000 streams, never a scan of `mt_events` by type). It sees
   the streams Marten recorded a compaction watermark for, which it does since 9.32; for older compactions,
   `docs/health/events.md` gives the release notes' query to run by hand. On a store tenanted per event there is a finding
-  per tenant, shown only through the activity gate to a visitor who may see that tenant, as E03's streams are. The remedy
-  is to restore the streams from a backup or wherever an archiver copied them. `docs/health/codes.md` gains the E09 row
-  and the `tenant` subject kind.
+  per tenant (up to ten tenants, and the caveat says when that cap was hit), shown only through the activity gate to a
+  visitor who may see that tenant, as E03's streams are. The remedy is to restore the streams from a backup or wherever
+  an archiver copied them. `docs/health/codes.md` gains the E09 row and the `tenant` subject kind.
 - Stream detail says why Compact is not offered (an untyped stream, an archived one, one event, an unregistered
   aggregate) in one sentence where the button would be. The Marten sample gains four typed order streams, one of which
   is voided by its own aggregate and folds to nothing, so the Compact dialog can be seen.
 - Health check S05, "Connection without TLS", is now not applicable when the data source reaches a connection pooler (a
-  Neon pooled endpoint, port 6543, Azure's built-in PgBouncer, port 6432 or an Amazon RDS Proxy): the server's
-  `pg_stat_ssl` row behind a pooler is the pooler's own connection, not the application's. The Connection page's TLS hint
-  judges `SSL Mode` there.
+  Neon pooled endpoint, Supabase's port 6543, any port 6432 (PgBouncer, Azure's built-in included) or an Amazon RDS
+  Proxy): the server's `pg_stat_ssl` row behind a pooler is the pooler's own connection, not the application's. A port
+  alone only says the data source may reach a pooler, so it does not switch S05 off for `SSL Mode=Disable`: with a remote
+  host S05 still fires from the setting (the application's own connection is then plaintext, to the server or to a
+  pooler in front of it), and its evidence says it was judged from `SSL Mode=Disable`. The Connection page's TLS hint
+  judges `SSL Mode` otherwise.
 - Health check K10 (a schema name that breaks every apply after the first) is retired. Its hazard was Weasel's old index
-  readback (weasel#750), which left nothing in a database, and Marten 9.57, the new floor, needs a Weasel that reads such
+  readback (JasperFx/weasel#750), which left nothing in a database, and Marten 9.57, the new floor, needs a Weasel that reads such
   an index back. The check, and the notice it put on the Schema screen's Apply area, are gone; its row stays in
   docs/health/codes.md, marked retired in 1.1, and the code is never reassigned. A host that accepted K10 keeps starting:
   the entry is ignored, with one Information line saying it can be removed.
@@ -176,7 +184,8 @@ mode, and makes compaction safe on streams that fold to nothing.
   floor" table is empty until the next Marten release adds to it.
 - On PostgreSQL 19, Storage and Maintenance show a "Stats since" column: when each table's counters were last reset. T01
   and T05 add nothing for it, because on 19 any reset also restarts the database's own `stats_reset`, so the seven-day
-  usage guard already covers an object reset an hour ago.
+  usage guard already covers an object reset an hour ago. A table with no reset time recorded reads "never reset"
+  (and says so in its cell's title), not a bare dash.
 - On PostgreSQL 19, Maintenance lists "Next for autovacuum" - the ten tables with the highest `pg_stat_autovacuum_scores`
   score, with the parts it is made of - and T07's evidence carries the table's score. Only the tables the studio judges
   are read.

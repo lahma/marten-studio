@@ -13,7 +13,8 @@ worth a look" - that links to it.
 
 - the server, the database and the role the application connects as;
 - whether the connection is **encrypted** and whether the **server's certificate is checked** (TLS verified, encrypted but
-  not verified, not encrypted, or - for a GSSAPI connection - "encrypted with GSSAPI (not TLS)"). An unencrypted connection
+  not verified, or not encrypted; for a GSSAPI connection the tile is labelled "Encryption" instead of "TLS" and reads
+  "GSSAPI", and the Overview's line says "encrypted with GSSAPI (not TLS)"). An unencrypted connection
   is "(local)", in green, only when the data source's host is a socket or loopback **and** the server also sees the
   connection come over a socket or from loopback. Otherwise it is amber - "not encrypted · the server sees a TCP peer", with
   "(likely a container network)" added when the host is loopback but the server's peer is not (Docker, NAT) and no pooler
@@ -132,8 +133,10 @@ the application switched to it: what is new, what is also true today, and what n
 
 The result opens with one sentence made only from what the comparison computed: whether the pasted settings check the
 server's certificate or encrypt at all, whether they keep the password readable (`Persist Security Info`), the advice that is new
-and the advice that no longer applies - or "Same advice as the connection in effect." It never says the pasted settings are
-better. The text you pasted stays in the box until you press Clear or leave the page; what the studio reads has the
+and the advice that no longer applies - or, when the page's hints do not change, "The page's hints are the same for both.
+Health findings such as S05 or S12 are judged only for the connection in effect." The comparison judges the page's hints
+only; a health finding needs the real data source, so a finding that is gone for the pasted string is not reported. It
+never says the pasted settings are better. The text you pasted stays in the box until you press Clear or leave the page; what the studio reads has the
 passwords taken out.
 
 - Passwords (`Password`, its aliases and `SSL Password`) are removed on the server before anything is read, an option's value

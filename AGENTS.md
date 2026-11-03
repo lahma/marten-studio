@@ -152,9 +152,9 @@ Each rule's full text, with its lists of events, tests and history, is in
     `session.Events` read, nor (from 9.52) `FetchProjectionFloorAsync`, its setters or the high-water advance: each
     ensures storage, which creates or migrates it. Reads use the studio's own SQL (`StorageEnsuringCallTests`; LINQ
     mode's composition builds its statement without ensuring storage, and from 1.1 that covers `QueryRawEvents()`, never
-    passed a tenant), and
-    schema names, declared indexes and what Marten owns come from `SchemaDeclarationReader`, without a connection.
-    Enumerating a dynamic tenancy's databases is not read-only either (`TenancyEnumerationCallTests`). Time travel and
+    passed a tenant), and schema names, declared indexes and what Marten owns come from `SchemaDeclarationReader`,
+    without a connection. Enumerating a dynamic tenancy's databases is not read-only either
+    (`TenancyEnumerationCallTests`). Time travel and
     the stepper fold only through `IAggregateFolder.FoldAsync`. **`AutoCreate.CreateOrUpdate` is not additive**; no
     screen, comment or doc may say an apply leaves a hand-made index alone. Apply and its preview run under
     `CreateOrUpdate`, never `AutoCreate.All`; an apply is authorized as `(db, null, ApplySchemaChanges)` whatever tenant
@@ -204,8 +204,8 @@ at exactly its own version), PostgresStudio (PostgresStudio.Diagnostics at exact
 Microsoft.AspNetCore.App` - and PostgresStudio.Diagnostics (`Npgsql`, floor `9.0.4`, and four `Microsoft.Extensions.*`
 abstractions, floor `10.0.0`), with no framework reference at all.** No `Marten.AspNetCore`; MartenStudio has no direct
 `Npgsql`, which arrives through `Weasel.Postgresql`, while PostgresStudio.Diagnostics references `Npgsql` directly and
-PostgresStudio takes it through that. The floors follow the latest releases (*Package budget changes*, 2026-11-03), tested and packed as *Build* says. Full
-text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
+PostgresStudio takes it through that. The floors follow the latest releases (*Package budget changes*, 2026-11-03),
+tested and packed as *Build* says. Full text: [build-and-release.md](docs/maintainers/build-and-release.md#d3).
 
 **D4 — Capabilities are a class of booleans, all defaulting to `false`.** A freshly mapped studio is a read-only
 browser; `o.Capabilities = MartenStudioCapabilities.All()` is the one-line, greppable opt-in, and every disabled control
@@ -523,12 +523,12 @@ dotnet test tests\PostgresStudio.Integration.Tests         # its live suite - ne
 dotnet test postgres-studio.slnf -p:PostgresStudioNpgsqlVersion=10.0.3   # that pass alone; never the .slnx
 ```
 
-**Both suites run at two Marten versions**: the floor (`build.yml`) and the pinned latest-tested 9.x
-(`marten-latest.yml`, which runs `dotnet fallout Test` with `MARTEN_VERSION: latest`). A change is green only when both
-are. A fix for a behavioural difference between them must hold at both ends; one that needs a member only the newer
-side has is run-time light-up behind a probe, unless the floor itself moves to that version (allowed since the user's
-2026-11-02 policy; *Package budget changes* 2026-11-03). `PublicApiTest` must pass at both without a baseline edit,
-which is one reason `JasperFxSourceGeneratorTests` exists.
+**Both suites run at two Marten versions** (both 9.57.0 until the next latest-tested bump): the floor (`build.yml`) and
+the pinned latest-tested 9.x (`marten-latest.yml`, which runs `dotnet fallout Test` with `MARTEN_VERSION: latest`). A
+change is green only when both are. A fix for a behavioural difference between them must hold at both ends; one that
+needs a member only the newer side has is run-time light-up behind a probe, unless the floor itself moves to that
+version (allowed since the user's 2026-11-02 policy; *Package budget changes* 2026-11-03). `PublicApiTest` must pass at
+both without a baseline edit, which is one reason `JasperFxSourceGeneratorTests` exists.
 
 Container reuse is on by default locally (a second run attaches to the same Postgres) and off on CI.
 `MARTENSTUDIO_PG_REUSE=false` is how one run opts out, which every run that might overlap another — parallel agent

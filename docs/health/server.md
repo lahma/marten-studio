@@ -209,10 +209,16 @@ source says `ssl = false`, and the connection came over TCP from another machine
 loopback address (`127.0.0.0/8`, `::1`). A Unix-domain socket, which has no client address, and a loopback connection never
 leave the server's machine and are quiet.
 
-**Not applicable behind a connection pooler** (1.1). When the data source's host or port is a pooler - a Neon pooled endpoint, port
-6543, Azure's built-in PgBouncer or PgBouncer's port 6432, or an Amazon RDS Proxy - the server's `pg_stat_ssl` row is the pooler's own
-connection to the server, not the application's connection to the pooler, so it says nothing about the application's leg. The row says
-so, and the Connection page's TLS hint judges `SSL Mode` instead.
+**Not applicable behind a connection pooler** (1.1). When the data source's host or port is a pooler - a Neon pooled endpoint,
+Supabase's port 6543, any port 6432 (PgBouncer, Azure's built-in included) or an Amazon RDS Proxy - the server's `pg_stat_ssl` row is the
+pooler's own connection to the server, not the application's connection to the pooler, so it says nothing about the application's leg.
+The row says so, and the Connection page's TLS hint judges `SSL Mode` instead. A port alone is no proof of a pooler (a plain server can
+listen on 6432 or 6543), so the sentence then says the data source *may* reach one.
+
+**Except `SSL Mode=Disable`.** With `SSL Mode=Disable` and a remote host the application's own connection is plaintext for certain, to the
+server or to a pooler in front of it, so S05 still fires behind a pooler sign, from the setting and without the server's row. Its
+evidence says it was judged from `SSL Mode=Disable` (and, behind a pooler sign, that the connection is "to the server or to a pooler in
+front of it"), and it names no host. The remedy is the same.
 
 The connection is the data source's own, so it negotiates TLS exactly as the application's connections do. Without TLS,
 every statement, every document and event, and the login itself (where the server does not ask for SCRAM) cross the
@@ -337,8 +343,11 @@ Guide (*Using TLS/SSL with RDS Proxy*) says "If you are using RDS Proxy, you don
 is `SSL Mode=VerifyFull` with no `Root Certificate` (the Amazon Trust Services root CAs are usually in the operating system's trust store).
 
 **Stands down** (the row says why, and the check never runs its own reads): a data source that reaches a **connection pooler** (a Neon
-pooled endpoint, port 6543, Azure's built-in PgBouncer or PgBouncer's port 6432, an Amazon RDS Proxy), because the server's `pg_stat_ssl`
-row is then the pooler's own connection, not the application's, and the Connection page's TLS hint judges `SSL Mode` instead; a host that is a Unix socket or loopback, where the
+pooled endpoint, Supabase's port 6543, any port 6432 or an Amazon RDS Proxy; a port alone says it *may* reach one), because the server's
+`pg_stat_ssl` row is then the pooler's own connection, not the application's, and the Connection page's TLS hint judges `SSL Mode`
+instead - except at `SSL Mode=Require`, which the setting alone makes encrypted and never verified, so the `require` variant fires from
+the setting there (its evidence says so, and behind an Amazon RDS Proxy its remedy is `VerifyFull` with no `Root Certificate`), while
+`Prefer` and `Allow` behind a pooler stay not applicable, because the setting cannot say whether TLS is used; a host that is a Unix socket or loopback, where the
 connection never leaves the machine; and **Cloud SQL through the Auth Proxy** - a Cloud SQL server reached on a local socket or loopback
 host - because the proxy wraps its connection to the instance in TLS itself (per Google's Cloud SQL Auth Proxy design), so the server
 sees no TLS from the application. It also stands down, as S05 does, when the studio's role cannot see its own backend's `pg_stat_ssl` row:

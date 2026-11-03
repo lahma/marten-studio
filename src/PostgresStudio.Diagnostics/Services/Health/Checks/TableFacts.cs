@@ -816,7 +816,7 @@ internal static class Autovacuum
                 StudioTableKind.Relational => off + " Switching it back on is the host's to do, in its own migrations, where this "
                     + "table's storage parameters are set.",
                 _ => off + " Switching it back on is the host's to do: re-enable autovacuum on this table where its storage parameters "
-                    + "are set - the host's own DDL, or (Marten 9.47+) the table's declaration where the host hands it to Marten (a "
+                    + "are set - the host's own DDL, or the table's declaration where the host hands it to Marten (a "
                     + "projection's table, or StoreOptions.Storage.ExtendedSchemaObjects).",
             };
         }

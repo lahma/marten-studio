@@ -302,7 +302,7 @@ dotless table inside its body. Where both tables exist, merge the rows first.
 ## K10 Schema name breaks every apply after the first
 
 **Retired in 1.1.** K10 warned, below Weasel 9.47.1, of a `DatabaseSchemaName` or events schema that is a reserved word or
-needs quoting: the old index readback never saw such a schema's indexes (weasel#750), so every schema apply after the first
+needs quoting: the old index readback never saw such a schema's indexes (JasperFx/weasel#750), so every schema apply after the first
 failed with `42P07`. It left nothing in a database, and Marten 9.57, the floor from 1.1, needs a Weasel.Postgresql that
 reads such an index back (9.48.0 or later), so the hazard cannot arise. The row stays in [codes.md](codes.md), and the code
 is never reassigned. The Schema screen's Apply area no longer shows the notice either. An `AcceptedChecks` entry for K10 is

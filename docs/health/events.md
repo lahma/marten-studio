@@ -232,7 +232,7 @@ the configuration does not know about.
 `null`.
 
 A stream its own aggregate deleted (`ShouldDelete`, `DeleteEvent<T>`) folds to no aggregate. Before **Marten 9.57**
-(#5797) compaction wrote that nothing as the snapshot all the same: it deleted the stream's whole history and put one
+(JasperFx/marten#5797) compaction wrote that nothing as the snapshot all the same: it deleted the stream's whole history and put one
 `Compacted<T>` event holding `null` in its place. No projection and no replay can make anything of it, and Marten
 cannot rebuild the events it replaced. From 9.57 the stream is left alone - Marten logs an information line and
 queues nothing - so a compaction run by Marten 9.57.0 or later, the studio's included, never does this. E09 finds the

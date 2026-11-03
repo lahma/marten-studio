@@ -5,7 +5,9 @@ using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
 
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.DependencyInjection;
 
 using QueryPage = MartenStudio.Components.Pages.Query.Query;
 using PostgresStudio.Services;
@@ -38,6 +40,54 @@ public class LinqQueryPanelTests
             requested == typeof(IQueryService) ? queries
             : requested == typeof(ILinqQueryService) ? linq
             : null;
+    }
+
+    /// <summary>
+    /// 1.1-FINAL-POLISH C1: editing the predicate and then pressing Ctrl+Enter from the Order-by box is one navigation, with both
+    /// values. A push on the predicate's `change` and another for the Run began a second enhanced navigation while the first
+    /// was in flight, and the browser aborted the first (net::ERR_ABORTED).
+    /// </summary>
+    [Fact]
+    public async Task Editing_the_predicate_and_pressing_Ctrl_Enter_from_Order_by_navigates_once_with_both_values()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        using StudioComponentContext context = CreateContext(linq);
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-linq-where").Should().ContainSingle());
+
+        NavigationManager navigation = context.Services.GetRequiredService<NavigationManager>();
+        List<string> locations = [];
+        navigation.LocationChanged += (_, args) => locations.Add(args.Location);
+
+        page.Find("#ms-query-linq-where").Change("Total > 5");
+        locations.Should().BeEmpty("an edited box keeps its draft and does not touch the address");
+
+        await page.FindComponent<LinqQueryPanel>().InvokeAsync(() => page.FindComponent<LinqQueryPanel>().Instance.RunFromOrderByAsync("Total desc"));
+
+        locations.Should().ContainSingle("the Run pushes the address once, after both boxes are bound");
+        locations[0].Should().Contain("predicate=Total%20%3E%205").And.Contain("orderby=Total%20desc");
+        linq.Requests.Should().ContainSingle().Which.OrderBy.Should().Be("Total desc");
+    }
+
+    [Fact]
+    public async Task A_draft_survives_leaving_LINQ_mode_without_a_navigation()
+    {
+        using StudioComponentContext context = CreateContext(new FakeLinqQueryService().WithType("order"));
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-linq-where").Should().ContainSingle());
+        page.Find("#ms-query-linq-where").Change("Total > 5");
+        await page.Find("#ms-query-linq-orderby").ChangeAsync(new ChangeEventArgs { Value = "Total desc" });
+
+        page.Find("#ms-query-mode-marten").Click();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-linq-where").Should().ContainSingle());
+
+        page.Find("#ms-query-linq-where").GetAttribute("value").Should().Be("Total > 5");
+        page.Find("#ms-query-linq-orderby").GetAttribute("value").Should().Be("Total desc");
     }
 
     [Fact]

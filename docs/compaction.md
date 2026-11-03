@@ -7,7 +7,7 @@ with `CompactStreams` named. Every attempt is written to the audit log, whether 
 
 This page is the longer version of what the confirmation dialog says. Everything here was read from
 Marten's `EventStore.StreamCompacting.cs` at 9.57.0, which is the studio's floor and the latest Marten it is
-tested at. The studio needs 9.57 for one reason that matters here: from 9.57 (#5797) Marten leaves a stream
+tested at. The studio needs 9.57 for one reason that matters here: from 9.57 (JasperFx/marten#5797) Marten leaves a stream
 that folds to no aggregate alone, where every older Marten replaced its history with an empty snapshot. That is
 [its own section](#a-stream-that-folds-to-nothing) below.
 
@@ -147,7 +147,7 @@ is voided by its own aggregate, so its dialog shows that it folds to no `OrderSu
 An aggregate can delete its own stream: `ShouldDelete`, or `DeleteEvent<T>` in a projection. Folding such a
 stream produces no `T`, so there is no state to snapshot.
 
-**What Marten does.** From 9.57 (#5797) it logs an information line ("Left stream ... alone. Its events through
+**What Marten does.** From 9.57 (JasperFx/marten#5797) it logs an information line ("Left stream ... alone. Its events through
 version N fold to no T ...") and returns without queuing anything. The stream's events, its watermark and the
 archiver, if any, are untouched. Every older Marten went on regardless and replaced the stream's whole history with
 one `Compacted<T>` event holding `null`, and deleted the rest.

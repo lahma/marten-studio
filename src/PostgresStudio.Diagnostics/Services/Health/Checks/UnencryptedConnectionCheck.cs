@@ -4,15 +4,23 @@ using PostgresStudio.Services.Server;
 namespace PostgresStudio.Services.Health.Checks;
 
 /// <summary>What S05 reads.</summary>
-/// <param name="Posture">The source's connection: whether it is encrypted, and how it came.</param>
+/// <param name="Posture">
+/// The source's connection: whether it is encrypted, and how it came; <see langword="null" /> when <paramref name="FromSslMode" />
+/// decided it and the server was not asked.
+/// </param>
 /// <param name="ServerSsl">The server's <c>ssl</c> setting, or <see langword="null" /> when not read.</param>
 /// <param name="EnvironmentName">The host's environment, or <see langword="null" />.</param>
 /// <param name="PoolerSigns">The signs of a connection pooler in the data source's hosts and ports, or <see langword="null" /> when none were read.</param>
+/// <param name="FromSslMode">
+/// Whether the data source's <c>SSL Mode=Disable</c> and a remote host decided it, without the server's <c>pg_stat_ssl</c> row: the
+/// application's own connection is then plaintext for certain, whatever sits in front of the server.
+/// </param>
 internal sealed record UnencryptedConnectionFacts(
-    ServerConnectionPosture Posture,
+    ServerConnectionPosture? Posture,
     string? ServerSsl,
     string? EnvironmentName,
-    IReadOnlyList<PoolerSign>? PoolerSigns = null)
+    IReadOnlyList<PoolerSign>? PoolerSigns = null,
+    bool FromSslMode = false)
 {
     /// <summary>Whether the host says this is Production.</summary>
     public bool IsProduction => HostEnvironmentName.IsProduction(EnvironmentName);
@@ -33,10 +41,13 @@ internal sealed record UnencryptedConnectionFacts(
 /// setting: the client decides whether it encrypts and whether it checks the certificate.
 /// </para>
 /// <para>
-/// <b>Not applicable behind a pooler.</b> The server's <c>pg_stat_ssl</c> row behind a pooler (PgBouncer, an Amazon RDS Proxy,
-/// Supavisor) describes the pooler's own connection to the server, not the application's connection to the pooler, so it says
-/// nothing about the application's leg; any pooler sign in the data source's hosts and ports (<see cref="PoolerSigns" />) makes
-/// the check not applicable, as it does S11. The Connection page's TLS hint judges <c>SSL Mode</c> instead.
+/// <b>Not applicable behind a pooler, except for <c>SSL Mode=Disable</c>.</b> The server's <c>pg_stat_ssl</c> row behind a pooler
+/// (PgBouncer, an Amazon RDS Proxy, Supavisor) describes the pooler's own connection to the server, not the application's
+/// connection to the pooler, so it says nothing about the application's leg; any pooler sign in the data source's hosts and ports
+/// (<see cref="PoolerSigns" />) makes the check not applicable, as it does S11. The Connection page's TLS hint judges <c>SSL Mode</c>
+/// instead. A port alone is no proof of a pooler (6432 and 6543 are also where a plain server can listen), and <c>SSL Mode=Disable</c>
+/// with a remote host needs no row: the application's own connection is plaintext for certain, to the server or to a pooler in front
+/// of it, so behind a pooler sign the check fires from the setting instead of standing down (<see cref="JudgedFromSslMode" />).
 /// </para>
 /// </remarks>
 [HealthCheck("S05", HealthArea.Server, HealthCostTier.Catalog, "Connection without TLS")]
@@ -49,6 +60,12 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
 
         // The signs come from the data source's hosts and ports, which the sweep's one connection read has already parsed.
         ConnectionFacts connection = await ConnectionFacts.SharedAsync(context).ConfigureAwait(false);
+
+        if (JudgedFromSslMode(connection))
+        {
+            // Plaintext by the setting itself: the server is not asked, and the finding says it was judged from SSL Mode=Disable.
+            return new UnencryptedConnectionFacts(null, null, HostEnvironmentName.Of(context), connection.Settings.PoolerSigns, FromSslMode: true);
+        }
 
         if (NotApplicableReason(connection.Settings.PoolerSigns) is { } reason)
         {
@@ -63,11 +80,21 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
 
     /// <summary>Why this check does not apply to the data source (it reaches a connection pooler), or <see langword="null" /> when it does.</summary>
     /// <param name="poolerSigns">The data source's pooler signs, or <see langword="null" /> when none were read.</param>
-    public static string? NotApplicableReason(IReadOnlyList<PoolerSign>? poolerSigns) =>
-        poolerSigns is { Count: > 0 }
-            ? "The data source reaches a connection pooler, so the server's pg_stat_ssl row is the pooler's own connection, not the application's; "
-              + "the Connection page's TLS hint judges SSL Mode."
-            : null;
+    public static string? NotApplicableReason(IReadOnlyList<PoolerSign>? poolerSigns) => PoolerSigns.TlsStandDownReason(poolerSigns);
+
+    /// <summary>
+    /// Whether a pooler sign would stand the check down, and <c>SSL Mode=Disable</c> with a remote host makes it fire from the setting
+    /// instead: the settings were read, a host is remote, a pooler sign is present and the mode is <c>Disable</c>. Then the
+    /// application's own connection is plaintext for certain, to the server or to a pooler in front of it. With no pooler sign the
+    /// server's own row decides, as it did in 1.0.
+    /// </summary>
+    /// <param name="facts">The connection facts.</param>
+    public static bool JudgedFromSslMode(ConnectionFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        return facts.Settings.Readable && facts.Settings.PoolerSigns.Count > 0 && facts.Settings.Values.SslDisabled && facts.HasRemoteHost;
+    }
 
     /// <inheritdoc />
     public override HealthVerdict Evaluate(UnencryptedConnectionFacts facts, HealthEvaluation evaluation)
@@ -75,8 +102,13 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(evaluation);
 
-        ServerConnectionPosture posture = facts.Posture;
-        string source = evaluation.Text.SourcePossessive;
+        if (facts.FromSslMode)
+        {
+            return FromSslModeVerdict(facts, evaluation);
+        }
+
+        ServerConnectionPosture posture = facts.Posture
+            ?? throw new ArgumentException("A finding not judged from SSL Mode carries the server's posture.", nameof(facts));
 
         switch (posture.Kind)
         {
@@ -120,6 +152,45 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
                     ? "This is Production."
                     : "Info rather than Warning: the environment is " + HostEnvironmentName.Describe(facts.EnvironmentName) + "."),
             Remedy = new HealthRemedy("SSL Mode=VerifyFull", RemedyText(serverOff, SourceWords.DataSource(evaluation.Text))),
+        });
+    }
+
+    /// <summary>
+    /// The finding for <c>SSL Mode=Disable</c> with a remote host, judged from the setting. The evidence and the caveat say so, and when a
+    /// pooler sign is present that the connection is "to the server or to a pooler in front of it". No host is named.
+    /// </summary>
+    /// <param name="facts">The facts.</param>
+    /// <param name="evaluation">The evaluation.</param>
+    private static HealthVerdict FromSslModeVerdict(UnencryptedConnectionFacts facts, HealthEvaluation evaluation)
+    {
+        bool pooler = facts.PoolerSigns is { Count: > 0 };
+        string reach = pooler ? "to the server or to a pooler in front of it" : "to the server";
+        string dataSource = SourceWords.DataSource(evaluation.Text);
+
+        return HealthVerdict.Of(new HealthFinding
+        {
+            Code = "S05",
+            Severity = facts.IsProduction ? HealthSeverity.Warning : HealthSeverity.Info,
+            Title = "Connections from " + dataSource + " reach Postgres unencrypted",
+            WhyItMatters =
+                "SSL Mode=Disable means the connection is never encrypted, " + reach + ": every statement, " + evaluation.Text.ConnectionCarries + ", and "
+                + "the login itself, where the server does not ask for SCRAM, cross the network in plain text. Anybody on the path - a shared network, a compromised "
+                + "host, a load balancer's mirror - can read it, and can also stand in for the server.",
+            Evidence =
+            [
+                new("Connection", "not encrypted (SSL Mode=Disable), " + reach),
+                new("Judged from", "SSL Mode=Disable in the data source's connection string"),
+                new("Environment", HostEnvironmentName.Describe(facts.EnvironmentName)),
+            ],
+            Caveat =
+                "Judged from SSL Mode=Disable in the connection string " + dataSource + " is built from, not from the server's pg_stat_ssl row"
+                + (pooler
+                    ? ": a connection pooler may sit in front of the server, and the server's row would then describe the pooler's own connection, not the application's. "
+                    : ". ")
+                + (facts.IsProduction
+                    ? "This is Production."
+                    : "Info rather than Warning: the environment is " + HostEnvironmentName.Describe(facts.EnvironmentName) + "."),
+            Remedy = new HealthRemedy("SSL Mode=VerifyFull", RemedyText(serverOff: false, dataSource)),
         });
     }
 

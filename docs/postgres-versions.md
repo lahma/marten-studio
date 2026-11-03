@@ -120,7 +120,7 @@ sits behind the gate its page or check already has: 19 adds no capability and no
   ago is not unused"): no check judges an object over a window of its own. The matrix asserts the single-table behaviour on
   the 19 leg, so a change at 19's general availability is noticed.
   - **Storage** and **Maintenance** show a *Stats since* column where they show per-table counters: when that table's
-    counters were last reset, which `pg_stat_reset()` sets for every table. A dash means no reset time is recorded for it.
+    counters were last reset, which `pg_stat_reset()` sets for every table. "never reset" means no reset time is recorded for it (a dash on Storage is a table whose name is withheld).
 - **Autovacuum's own score** (`pg_stat_autovacuum_scores`), for the tables the studio judges and no others: the largest of
   the parts autovacuum weighs (dead rows, inserts, changes since the last analyze, transaction-id age, multixact age), each
   a counter against its trigger, so 1 or more is a table autovacuum takes at its next look. **Maintenance › Next for

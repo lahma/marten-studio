@@ -116,6 +116,25 @@ public sealed class ConnectionSnapshotAndSentinelTests
         page.Find("tr#conn-row-options .ms-conn-value").TextContent.Should().Contain("app.secret=(value withheld)");
     }
 
+    [Fact]
+    public async Task No_withheld_sentinel_is_in_the_overviews_connection_line_with_every_setting_shown()
+    {
+        await using PostgresStudioComponentContext context = new();
+        context.Connection.View = SentinelView();
+        await context.ReadyAsync();
+
+        IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
+        line.WaitForAssertion(() => line.FindAll(".ms-overview-connection").Should().ContainSingle());
+
+        string text = line.Markup;
+        foreach (string sentinel in Withheld)
+        {
+            text.Should().NotContain(sentinel);
+        }
+
+        text.Should().NotContain("S3NT1NEL", "no keyword's value reaches the line, a shown one included");
+    }
+
     // -------------------------------------------------------------------------------------------------
     // The snapshot's connection section
     // -------------------------------------------------------------------------------------------------

@@ -156,7 +156,8 @@ internal static class ConnectionComparer
 
         if (news.Count == 0 && gone.Count == 0)
         {
-            sentences.Add("Same advice as the connection in effect.");
+            // Compare judges the page's hints only; a health finding (S05, S12) needs the real data source.
+            sentences.Add("The page's hints are the same for both. Health findings such as S05 or S12 are judged only for the connection in effect.");
         }
         else
         {

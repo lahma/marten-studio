@@ -14914,9 +14914,9 @@ a.ms-schema-health-mark:focus-visible {
     }
 }
 
-/* ==========================================================================
-   ===== 1.1-UX-FIX-B Skip link, and dark-theme contrast =====
+/* ===== 1.1-UX-FIX-B Skip link, and dark-theme contrast ===== */
 
+/* --------------------------------------------------------------------------
    Appended in D26 order. Two things the 1.1 admin validation found:
 
    - There was no way past the navigation by keyboard. The shell's first focusable element is now "Skip to content", hidden
@@ -14927,7 +14927,7 @@ a.ms-schema-health-mark:focus-visible {
      in the original token's own section (D26): #8796ac is 4.87:1 on the surface and 5.94:1 on the page, and the badge's
      #93c5fd is 6.38:1 on its #1e3a5f. The light theme declares nothing here; its own muted grey
      (#94a3b8, 2.56:1 on white) is raised in the 1.1-UX-FIX-B2 section below.
-   ========================================================================== */
+   -------------------------------------------------------------------------- */
 
 .ms-skip-link {
     position: fixed;
@@ -14976,9 +14976,9 @@ a.ms-schema-health-mark:focus-visible {
     color: #93c5fd;
 }
 
-/* ==========================================================================
-   ===== 1.1-UX-FIX-B2 light-theme contrast =====
+/* ===== 1.1-UX-FIX-B2 light-theme contrast ===== */
 
+/* --------------------------------------------------------------------------
    Appended in D26 order. The light theme's muted grey (#94a3b8) is 2.56:1 on white, and the Connection page's "advice" badge
    (#2563eb on #dbeafe) is 4.24:1. The 1.1-UX-FIX-B section above raised the dark theme's; these are the light theme's:
 
@@ -14990,7 +14990,7 @@ a.ms-schema-health-mark:focus-visible {
    system (`not all and (prefers-color-scheme: dark)`, the spelling every browser reads) and for the explicit light theme, and for nothing else; the badge likewise
    follows the explicit theme first and the system second. Dark is untouched in both its spellings (system dark and
    data-theme="dark"); a light theme chosen under a dark system takes these light values.
-   ========================================================================== */
+   -------------------------------------------------------------------------- */
 
 @media not all and (prefers-color-scheme: dark) {
     :root {
@@ -15008,4 +15008,14 @@ a.ms-schema-health-mark:focus-visible {
 
 .ms-studio[data-theme="light"] .ms-conn-advice {
     color: var(--ms-color-primary-hover);
+}
+
+/* ===== 1.1-FINAL-POLISH LINQ "Not offered here, and why" at 390 px ===== */
+
+/* A member such as StoreOptions.Events.MetadataConfig.UserNameEnabled has no break opportunity, so at 390 px it pushed the
+   content region 25 px wider than the viewport. It may break anywhere, and the list item may shrink below its content. */
+.ms-query-linq-withheld-list li,
+.ms-query-linq-withheld-list code {
+    overflow-wrap: anywhere;
+    min-width: 0;
 }

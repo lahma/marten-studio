@@ -194,8 +194,8 @@ public class StoragePageTests
     }
 
     /// <summary>
-    /// 1.1-PG19: on PostgreSQL 19 the grid has a "Stats since" column - the time a table's counters were last reset, a dash for a table
-    /// with none recorded, nothing for a withheld table's name or time - and below 19 there is no such column at all.
+    /// 1.1-PG19: on PostgreSQL 19 the grid has a "Stats since" column - the time a table's counters were last reset, "never reset" for a table
+    /// with none recorded, a dash and nothing else for a withheld table's name or time - and below 19 there is no such column at all.
     /// </summary>
     [Theory]
     [InlineData(190_000, true)]
@@ -235,7 +235,9 @@ public class StoragePageTests
         since.Should().HaveCount(3);
         since[0].Should().Be("2026-10-24 08:30", "orders' counters were last reset then");
         since[1].Should().Be("–", "salaries' name is withheld, and so is when it was reset");
-        since[2].Should().Be("–", "no reset time is recorded for qrtz_triggers");
+        since[2].Should().Be("never reset", "no reset time is recorded for qrtz_triggers");
+        page.FindAll(".ms-storage-table tbody td.ms-storage-since")[2].GetAttribute("title").Should().Be("never reset");
+        page.FindAll(".ms-storage-table tbody td.ms-storage-since")[1].HasAttribute("title").Should().BeFalse("a withheld table's dash says nothing");
         page.Markup.Should().NotContain("2026-10-25", "the withheld table's reset time is not drawn");
     }
 

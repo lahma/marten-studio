@@ -93,6 +93,112 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         });
     }
 
+    /// <summary>
+    /// 1.1-FINAL-POLISH C1: typing a predicate, moving to the Order-by box and pressing Ctrl+Enter there pushed the address twice -
+    /// once on the predicate's `change` (without the ordering), once for the run - and the first enhanced navigation was aborted.
+    /// The address is now written once per Run.
+    /// </summary>
+    [BrowserFact]
+    public async Task A_predicate_then_Ctrl_Enter_from_the_Order_by_box_rewrites_the_address_once_and_aborts_nothing()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "linq-single-push", fixture.Root, "admin", async studio =>
+        {
+            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+
+            await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
+            await studio.Page.Locator("#ms-query-linq-orderby").FillAsync("Sequence");
+
+            // The predicate lost focus on the way to the Order-by box: nothing was written to the address yet.
+            studio.Page.Url.Should().NotContain("predicate=", "an edited box keeps its draft; the address follows the Run");
+
+            await studio.Page.Locator("#ms-query-linq-orderby").PressAsync("Control+Enter");
+
+            await studio.Page.WaitForFunctionAsync(
+                "() => window.location.search.includes('predicate=Version') && window.location.search.includes('orderby=Sequence')",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+            await studio.Page.Locator(".ms-query-linq-events .ms-event-card").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+
+            studio.FailedRequests.Should().BeEmpty("one rewrite of the address per Run: " + string.Join(" | ", studio.FailedRequests));
+            studio.AssertClean("editing a predicate and running from the Order-by box");
+        });
+    }
+
+    /// <summary>
+    /// 1.1-FINAL-POLISH C1, by construction rather than by timing: the first Run's navigation request is held in the browser, the
+    /// second Run (Ctrl+Enter from the Order-by box) is asked for while it is in flight, and only then is the first let through.
+    /// A page that began the second navigation at once would abort the held one; this one waits for the first to land and
+    /// pushes the second after it, so nothing is cancelled however slow the server is.
+    /// </summary>
+    [BrowserFact]
+    public async Task A_second_Run_waits_for_the_first_ones_navigation_instead_of_aborting_it()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "linq-serialised-push", fixture.Root, "admin", async studio =>
+        {
+            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+
+            TaskCompletionSource<bool> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            TaskCompletionSource<bool> held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            await studio.Page.RouteAsync(
+                static url => url.Contains("predicate=Version", StringComparison.Ordinal) && !url.Contains("orderby=", StringComparison.Ordinal),
+                async route =>
+                {
+                    held.TrySetResult(true);
+                    await release.Task;
+                    await route.ContinueAsync();
+                });
+
+            await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
+            await studio.Page.Locator(".ms-query-run").ClickAsync();
+            await held.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // The first navigation is in flight, and the first run has finished (a run in progress ignores the chord).
+            await studio.Page.Locator(".ms-query-linq-events .ms-event-card").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.Page.Locator(".ms-query-run").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.Page.WaitForFunctionAsync(
+                "() => document.querySelector('.ms-query-run') !== null && !document.querySelector('.ms-query-run').disabled",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            // The second Run is asked for now, while the first one's request is still held.
+            await studio.Page.Locator("#ms-query-linq-orderby").FillAsync("Sequence");
+            await studio.Page.Locator("#ms-query-linq-orderby").PressAsync("Control+Enter");
+            await studio.Page.WaitForFunctionAsync(
+                "() => { const s = document.querySelector('.ms-query-linq-events .ms-event-card-seq'); return s !== null && s.textContent.trim() === '#1'; }",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            release.TrySetResult(true);
+
+            await studio.Page.WaitForFunctionAsync(
+                "() => window.location.search.includes('predicate=Version') && window.location.search.includes('orderby=Sequence')",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            studio.FailedRequests.Should().BeEmpty("the second push waits for the first to land: " + string.Join(" | ", studio.FailedRequests));
+            studio.AssertClean("two Runs while the first one's navigation is in flight");
+        });
+    }
+
+    /// <summary>1.1-FINAL-POLISH C2: the list of members the events target withholds does not push the content wider than a phone.</summary>
+    [BrowserFact]
+    public async Task The_events_Not_offered_list_does_not_scroll_sideways_at_390_px()
+    {
+        await BrowserScenario.RunAsync(fixture.Browser, "linq-withheld-390", fixture.Root, "admin", async studio =>
+        {
+            await studio.Page.SetViewportSizeAsync(390, 844);
+            await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await studio.Page.Locator(".ms-query-linq-withheld").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+
+            (await studio.Page.Locator(".ms-query-linq-withheld").GetAttributeAsync("open")).Should().NotBeNull();
+            await studio.AssertNoSidewaysScrollAsync("the LINQ tab over events at 390 px");
+            studio.AssertClean("the LINQ events list at 390 px");
+        });
+    }
+
     [BrowserFact]
     public async Task The_samples_typed_streams_offer_Compact_and_the_voided_one_says_it_folds_to_nothing()
     {

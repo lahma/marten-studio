@@ -41,6 +41,12 @@ internal sealed record PoolerSign(string Host, int Port, PoolerSignKind Kind, st
 
     /// <summary>Whether the sign is a pooler that works by transaction and holds a session-scoped advisory lock where it does not pin (K04).</summary>
     public bool IsTransactionMode => Kind != PoolerSignKind.RdsProxy;
+
+    /// <summary>
+    /// Whether the sign is a port alone, with no host the studio recognises (6543, or 6432 outside Azure): PgBouncer's and
+    /// Supabase's ports are also what a plain PostgreSQL server can listen on, so the data source <i>may</i> reach a pooler.
+    /// </summary>
+    public bool IsPortOnly => Kind is PoolerSignKind.SupabaseTransaction or PoolerSignKind.PgBouncerPort;
 }
 
 /// <summary>
@@ -129,6 +135,26 @@ internal static partial class PoolerSigns
     /// <param name="endpoints">The data source's hosts, each with its port.</param>
     public static IReadOnlyList<string> TransactionModeTexts(IEnumerable<(string Host, int Port)> endpoints) =>
         [.. Find(endpoints).Where(static x => x.IsTransactionMode).Select(static x => x.Text)];
+
+    /// <summary>
+    /// Why S05 and S11 do not judge a data source from the server's <c>pg_stat_ssl</c> row when <paramref name="signs" /> holds a
+    /// pooler sign, or <see langword="null" /> when it holds none. When every sign is a port alone the data source <i>may</i> reach a
+    /// pooler, and the sentence says so.
+    /// </summary>
+    /// <param name="signs">The data source's pooler signs, or <see langword="null" /> when none were read.</param>
+    public static string? TlsStandDownReason(IReadOnlyList<PoolerSign>? signs)
+    {
+        if (signs is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        return signs.All(static x => x.IsPortOnly)
+            ? "The data source may reach a connection pooler (its port is a pooler's usual one), and if it does the server's pg_stat_ssl row is the pooler's own connection, "
+              + "not the application's; the Connection page's TLS hint judges SSL Mode."
+            : "The data source reaches a connection pooler, so the server's pg_stat_ssl row is the pooler's own connection, not the application's; "
+              + "the Connection page's TLS hint judges SSL Mode.";
+    }
 
     /// <summary>Whether <paramref name="host" /> is an Amazon RDS Proxy endpoint.</summary>
     /// <param name="host">A host name, any case, with or without a trailing dot.</param>

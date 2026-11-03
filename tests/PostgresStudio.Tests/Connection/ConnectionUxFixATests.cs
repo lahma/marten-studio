@@ -29,7 +29,7 @@ public sealed class ConnectionUxFixATests
     {
         ConnectionCompareView view = Compare("Host=db.example;SSL Mode=Prefer;Username=svc", "Host=db.example;SSL Mode=Prefer;Username=svc");
 
-        view.Verdict.Should().Be("Same advice as the connection in effect.");
+        view.Verdict.Should().Be("The page's hints are the same for both. Health findings such as S05 or S12 are judged only for the connection in effect.");
     }
 
     [Fact]

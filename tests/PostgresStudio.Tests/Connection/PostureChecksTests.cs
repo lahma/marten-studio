@@ -174,6 +174,148 @@ public sealed class PostureChecksTests
         ServerCertificateCheck.PoolerReason(Facts("Host=db.example", observed: null, notRead: "x")).Should().BeNull();
     }
 
+    // ---- FINAL-POLISH A1: a port alone must not switch S05 off, nor S11's require variant ----
+
+    private static HealthVerdict S05(ConnectionFacts facts, string environment = "Production") =>
+        new UnencryptedConnectionCheck()
+            .Evaluate(
+                new UnencryptedConnectionFacts(null, null, environment, facts.Settings.PoolerSigns, UnencryptedConnectionCheck.JudgedFromSslMode(facts)),
+                Evaluation())
+            .ShouldBeWellFormedFor<UnencryptedConnectionCheck>();
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=db.example;Port=6543;SSL Mode=disable")]
+    [InlineData("Host=myserver.postgres.database.azure.com;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=ep-cool-123-pooler.us-east-2.aws.neon.tech;SSL Mode=Disable")]
+    [InlineData("Host=" + ProxyHost + ";SSL Mode=Disable")]
+    public void SSL_Mode_Disable_to_a_remote_host_fires_S05_from_the_setting_whatever_the_pooler_signs_say(string connectionString)
+    {
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: false));
+
+        facts.Settings.PoolerSigns.Should().NotBeEmpty();
+        UnencryptedConnectionCheck.JudgedFromSslMode(facts).Should().BeTrue();
+
+        HealthFinding finding = S05(facts).Findings.Should().ContainSingle().Subject;
+
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Should().Contain(x => x.Label == "Connection" && x.Value.Contains("SSL Mode=Disable", StringComparison.Ordinal)
+                                                  && x.Value.Contains("to the server or to a pooler in front of it", StringComparison.Ordinal));
+        finding.Evidence.Should().Contain(x => x.Label == "Judged from");
+        finding.Caveat.Should().Contain("Judged from SSL Mode=Disable").And.Contain("may sit in front of the server");
+        Everything(finding).Should().NotContain("db.example").And.NotContain("neon.tech").And.NotContain("azure.com").And.NotContain("amazonaws.com");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable", "Production", "Warning")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable", "Development", "Info")]
+    public void The_S05_finding_from_the_setting_keeps_the_environment_severity(string connectionString, string environment, string severity)
+    {
+        S05(Facts(connectionString), environment).Findings.Single().Severity.ToString().Should().Be(severity);
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Prefer")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Require")]
+    [InlineData("Host=db.example;Port=6432")]
+    [InlineData("Host=localhost;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=db.example;Port=5432;SSL Mode=Disable")]
+    public void S05_stands_down_behind_a_pooler_for_every_other_mode_and_is_the_servers_to_judge_without_a_sign(string connectionString)
+    {
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: false));
+
+        UnencryptedConnectionCheck.JudgedFromSslMode(facts).Should().BeFalse();
+
+        if (facts.Settings.PoolerSigns.Count > 0)
+        {
+            UnencryptedConnectionCheck.NotApplicableReason(facts.Settings.PoolerSigns).Should().NotBeNull();
+        }
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Require", "require")]
+    [InlineData("Host=db.example;Port=6543;SSL Mode=require", "require")]
+    [InlineData("Host=ep-cool-123-pooler.us-east-2.aws.neon.tech;SSL Mode=Require", "require")]
+    public void SSL_Mode_Require_behind_a_pooler_fires_S11_require_from_the_setting(string connectionString, string variant)
+    {
+        // The server saw the pooler's own connection (here unencrypted); the setting alone decides.
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: false), PostgresPlatformKind.AmazonRds);
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeTrue();
+        ServerCertificateCheck.PoolerReason(facts).Should().BeNull();
+        ServerCertificateCheck.NotApplicableReason(facts).Should().BeNull();
+
+        HealthFinding finding = S11(facts).Findings.Should().ContainSingle().Subject;
+
+        finding.Key.Should().Be("S11|" + variant);
+        finding.Severity.Should().Be(HealthSeverity.Warning);
+        finding.Evidence.Should().Contain(x => x.Label == "Connection" && x.Value.Contains("judged from the setting", StringComparison.Ordinal));
+        finding.Caveat.Should().Contain("Judged from SSL Mode=Require").And.Contain("may sit in front of the server");
+        Everything(finding).Should().NotContain("db.example").And.NotContain("neon.tech");
+    }
+
+    [Fact]
+    public void S11_require_from_the_setting_needs_no_observation_of_the_server()
+    {
+        ConnectionFacts facts = Facts("Host=db.example;Port=6432;SSL Mode=Require", observed: null, notRead: "the connection read failed");
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeTrue();
+        S11(facts).Findings.Should().ContainSingle().Which.Variant.Should().Be("require");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Prefer")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Allow")]
+    [InlineData("Host=db.example;Port=6432")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=Disable")]
+    [InlineData("Host=db.example;Port=6432;SSL Mode=VerifyFull")]
+    public void S11_behind_a_pooler_stays_not_applicable_for_every_mode_but_Require(string connectionString)
+    {
+        ConnectionFacts facts = Facts(connectionString, Observed(ssl: true));
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeFalse();
+        ServerCertificateCheck.NotApplicableReason(facts).Should().Contain("connection pooler");
+    }
+
+    [Fact]
+    public void An_RDS_Proxy_with_Require_gets_the_ACM_remedy_through_the_setting_path()
+    {
+        ConnectionFacts facts = Facts("Host=" + ProxyHost + ";SSL Mode=Require", Observed(ssl: false), PostgresPlatformKind.AmazonRds);
+
+        ServerCertificateCheck.JudgedFromSslMode(facts).Should().BeTrue();
+
+        HealthFinding finding = S11(facts).Findings.Single();
+
+        finding.Variant.Should().Be("require");
+        finding.Remedy!.Code.Should().Contain("SSL Mode=VerifyFull").And.NotContain("Root Certificate").And.NotContain("RootCertificate");
+        finding.Remedy.Explanation.Should().Contain("AWS Certificate Manager").And.NotContain("global-bundle.pem");
+    }
+
+    [Fact]
+    public void A_port_alone_says_may_reach_a_pooler_and_a_recognised_host_says_reaches()
+    {
+        string?[] port =
+        [
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=db.example;Port=6432").Settings.PoolerSigns),
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=db.example;Port=6543").Settings.PoolerSigns),
+            ServerCertificateCheck.PoolerReason(Facts("Host=db.example;Port=6432")),
+        ];
+
+        port.Should().OnlyContain(x => x != null && x.Contains("may reach a connection pooler", StringComparison.Ordinal)
+                                       && x.Contains("pg_stat_ssl row is the pooler's own connection, not the application's", StringComparison.Ordinal));
+
+        string?[] recognised =
+        [
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=" + ProxyHost).Settings.PoolerSigns),
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=ep-cool-123-pooler.us-east-2.aws.neon.tech").Settings.PoolerSigns),
+            UnencryptedConnectionCheck.NotApplicableReason(Facts("Host=myserver.postgres.database.azure.com;Port=6432").Settings.PoolerSigns),
+            ServerCertificateCheck.PoolerReason(Facts("Host=" + ProxyHost)),
+        ];
+
+        recognised.Should().OnlyContain(x => x != null && x.Contains("reaches a connection pooler", StringComparison.Ordinal)
+                                             && !x.Contains("may reach", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void Without_a_pooler_sign_S05_and_S11_apply()
     {

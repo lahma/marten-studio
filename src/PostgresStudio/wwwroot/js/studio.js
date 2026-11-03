@@ -609,6 +609,53 @@
             return true;
         },
 
+        /*
+         * Tells a page when an enhanced navigation it started has been served and applied (1.1): Blazor's `enhancedload` event,
+         * answered by the component's [JSInvokable] NavigationLanded. The server's NavigationManager reports a new location as the
+         * navigation begins, not when its request has been answered, and a second navigation begun in between aborts the first
+         * request (net::ERR_ABORTED), so a page that pushes its own address calls this to push one at a time. Answers false where
+         * Blazor's event API is not there; the page then goes by the location change. One page at a time.
+         */
+        watchNavigation: function (dotNetRef) {
+            if (!dotNetRef || !window.Blazor || typeof window.Blazor.addEventListener !== "function") {
+                return false;
+            }
+
+            window.martenStudio.query.releaseNavigation();
+
+            const landed = function () {
+                try {
+                    const pending = dotNetRef.invokeMethodAsync("NavigationLanded");
+
+                    if (pending && typeof pending.catch === "function") {
+                        pending.catch(function () { });
+                    }
+                }
+                catch {
+                }
+            };
+
+            window.Blazor.addEventListener("enhancedload", landed);
+            window.martenStudio.query.navigationListener = landed;
+            return true;
+        },
+
+        releaseNavigation: function () {
+            const landed = window.martenStudio.query.navigationListener;
+
+            if (!landed) {
+                return false;
+            }
+
+            window.martenStudio.query.navigationListener = null;
+
+            if (window.Blazor && typeof window.Blazor.removeEventListener === "function") {
+                window.Blazor.removeEventListener("enhancedload", landed);
+            }
+
+            return true;
+        },
+
         releaseRunField: function (field) {
             if (!field || !field.msRunFieldHandlers) {
                 return false;

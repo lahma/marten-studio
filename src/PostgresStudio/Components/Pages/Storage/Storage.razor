@@ -158,7 +158,7 @@
                                 <th scope="col" class="ms-storage-number" title="@HotTitle(view)">HOT</th>
                                 @if (view.StatsResetPerTableRead)
                                 {
-                                    <th scope="col" class="ms-storage-since" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. A dash means no reset time is recorded for the table.">Stats since</th>
+                                    <th scope="col" class="ms-storage-since" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. Never reset means no reset time is recorded for the table; a dash means its name is withheld, and so is its reset time.">Stats since</th>
                                 }
                             </tr>
                         </thead>
@@ -197,7 +197,7 @@
                                     <td class="ms-storage-number" title="@NewPageTitle(row)">@(row.HotUpdateRatio is { } hot ? Percent(hot) : "–")</td>
                                     @if (view.StatsResetPerTableRead)
                                     {
-                                        <td class="ms-storage-since">@(row.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "–")</td>
+                                        <td class="ms-storage-since" title="@(!row.Withheld && row.CountersReset is null ? "never reset" : null)">@(row.Withheld ? "–" : row.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
                                     }
                                 </tr>
                             }

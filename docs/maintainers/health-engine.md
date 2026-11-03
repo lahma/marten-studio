@@ -86,24 +86,30 @@ withheld, and its reason is shown on the check's row only beside a finding the v
 list (the Server page, Marten Studio's Configuration page) is configuration, shown to anyone who may open that page.
 
 **The connection-settings checks** (1.1: C16, C17, C18, S11, S12, S13) judge one memoized `ConnectionFacts` per sweep
-(`ConnectionFacts.SharedAsync`: the redacted settings, what the server saw of the studio's connection as a new session of
-the login starts with it, the platform, the session statistics when pooling is off, and the count of this process's pools to
-the database). All six are `Database` checks, none shows a value of a secret keyword, a path, a host, a pool name or an
-`Options` value (`ConnectionChecksSentinelTests`, `ConnectionSettingChecksLiveTests`), and a remedy shows the
+(`ConnectionFacts.SharedAsync`: the redacted settings, what the server saw of the studio's connection as a new session
+of the login starts with it, the platform, the session statistics when pooling is off, and the count of this process's
+pools to the database). All six are `Database` checks, none shows a value of a secret keyword, a path, a host, a pool
+name or an `Options` value (`ConnectionChecksSentinelTests`, `ConnectionSettingChecksLiveTests`), and a remedy shows the
 connection-string form and the `NpgsqlDataSourceBuilder` form through `StudioText.DataSourceBuilderRemedy`, which Marten
-Studio wraps in `opts.ConfigureNpgsqlDataSourceBuilder`. A stand-down that is the data source's design (pooling off for C16,
-a pooler for C17, the Cloud SQL Auth Proxy or an unreadable TLS row for S11) is `HealthCheckNotApplicableException`; an
-unread server is `HealthCheckUnavailableException`. The six rethrow the connection read's failure
-(`ConnectionFacts.ObservedFailure`, captured once, thrown by `ConnectionCheckSupport.ReadAsync`) when the server never
-answered or refused the login, so `Reached` stays meaningful: a database the studio cannot reach is not "reached" by checks
-that judge settings, while a stand-down the connection string alone decides still wins. S05 and S11 are also not applicable behind a pooler sign (a Neon pooled
-endpoint, port 6543, Azure's built-in PgBouncer, port 6432, an Amazon RDS Proxy): the server's `pg_stat_ssl` row is then
-the pooler's own connection, not the application's. S05 reads the signs from the same `ConnectionFacts`, so it adds no
-statement, and S11 asks for the pooler before it asks whether the server could be read, so a pooler data source whose
-connection could not be read is not applicable rather than unavailable. C16 skips its server variant behind an Amazon RDS
-Proxy with `No Reset On Close=true`, where the server's cut reaches the client only on a pinned connection. K10 was retired in
-1.1 with the Marten 9.57 floor: its row stays in `docs/health/codes.md`, and an `AcceptedChecks` entry for it is ignored
-with one Information line.
+Studio wraps in `opts.ConfigureNpgsqlDataSourceBuilder`. A stand-down that is the data source's design (pooling off for
+C16, a pooler for C17, the Cloud SQL Auth Proxy or an unreadable TLS row for S11) is
+`HealthCheckNotApplicableException`; an unread server is `HealthCheckUnavailableException`. The six rethrow the
+connection read's failure (`ConnectionFacts.ObservedFailure`, captured once, thrown by
+`ConnectionCheckSupport.ReadAsync`) when the server never answered or refused the login, so `Reached` stays meaningful:
+a database the studio cannot reach is not "reached" by checks that judge settings, while a stand-down the connection
+string alone decides still wins. S05 and S11 are also not applicable behind a pooler sign (a Neon pooled endpoint,
+Supabase's port 6543, any port 6432 (PgBouncer, Azure's built-in included) or an Amazon RDS Proxy): the server's
+`pg_stat_ssl` row is then the pooler's own connection, not the application's. A port alone says only that the data
+source *may* reach a pooler, and the stand-down reason says so (`PoolerSigns.TlsStandDownReason`). Two settings override
+the stand-down, because the setting alone settles the application's own leg: S05 fires behind a pooler sign when `SSL
+Mode=Disable` and a host is remote (plaintext for certain, to the server or to a pooler in front of it), and S11 fires
+its `require` variant when `SSL Mode=Require` (encrypted, never verified); both are `JudgedFromSslMode`, take no server
+row, and say so in their evidence. `Prefer` and `Allow` behind a pooler stay not applicable. S05 reads the signs from
+the same `ConnectionFacts`, so it adds no statement, and S11 asks for the pooler before it asks whether the server could
+be read, so a pooler data source whose connection could not be read is not applicable rather than unavailable. C16 skips
+its server variant behind an Amazon RDS Proxy with `No Reset On Close=true`, where the server's cut reaches the client
+only on a pinned connection. K10 was retired in 1.1 with the Marten 9.57 floor: its row stays in `docs/health/codes.md`,
+and an `AcceptedChecks` entry for it is ignored with one Information line.
 
 **Database › Connection, the page's gates** (1.1, D33). The page and the Overview's line are the `Database` gate (the
 source policy asked with `TenantId = null`); "This application's sessions" and the pool peak counted by application name

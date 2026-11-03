@@ -269,7 +269,9 @@ tests/PostgresStudio.Integration.Tests/Replication/  Live primary and standby pa
 src/PostgresStudio/Components/Pages/Server/  System › Server: the server's facts, what the studio can see, the curated
                                          settings, the extension chips, the security posture and the platform slot
 tests/PostgresStudio.Integration.Tests/Server/  Live S04-S10 and K05-K07: each fires and stays quiet, the server facts on
-                                         15-19 as app and probe, and their no-lock, no-DDL reads
+                                         15-19 as app and probe, and their no-lock, no-DDL reads; also the connection
+                                         live tests (ConnectionObservedLiveTests, ConnectionSettingChecksLiveTests,
+                                         ConnectionTlsLiveTests, ConnectionCompareLiveTests, ConnectionPageLiveTests)
 src/PostgresStudio.Diagnostics/Services/Aurora/  Aurora (W5-AUR, issue #8 A1-A8): its own reads by name, the replica status, the wait
                                          profile and its samples, the parameter reference and the host's capacity reader
 src/PostgresStudio/Services/Aurora/       The Server page Aurora section's per-visitor view

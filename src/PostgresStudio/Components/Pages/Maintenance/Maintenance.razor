@@ -116,7 +116,7 @@
                                 }
                                 @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
                                 {
-                                    <th scope="col" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. A dash means no reset time is recorded for the table.">Stats since</th>
+                                    <th scope="col" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. Never reset means no reset time is recorded for the table.">Stats since</th>
                                 }
                                 <th scope="col">Bloat</th>
                             </tr>
@@ -166,7 +166,7 @@
                                     }
                                     @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
                                     {
-                                        <td class="ms-table-cell ms-maint-since">@(table.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "-")</td>
+                                        <td class="ms-table-cell ms-maint-since" title="@(table.CountersReset is null ? "never reset" : null)">@(table.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
                                     }
                                     <td class="ms-table-cell">
                                         @if (table.Measurable)
