@@ -59,6 +59,16 @@ public sealed class PoolerSignsTests
         PoolerSigns.Find([("the-proxy.proxy-demo.us-east-1.rds.amazonaws.com", 5432)]).Single().IsPgBouncerFamily.Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(6432)]
+    [InlineData(6543)]
+    public void An_RDS_Proxy_shaped_host_on_a_pooler_port_is_the_RDS_Proxy_and_no_longer_a_K04_sign(int port)
+    {
+        // Before the move to the engine such a host was a K04 sign by its port; the proxy- label wins now, and it is not transaction mode.
+        PoolerSigns.Find([("the-proxy.proxy-demo.us-east-1.rds.amazonaws.com", port)]).Single().Kind.Should().Be(PoolerSignKind.RdsProxy);
+        PoolerSigns.TransactionModeTexts([("the-proxy.proxy-demo.us-east-1.rds.amazonaws.com", port)]).Should().BeEmpty();
+    }
+
     [Fact]
     public void Every_host_of_a_multi_host_data_source_is_looked_at()
     {

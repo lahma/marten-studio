@@ -518,21 +518,36 @@ internal sealed class HealthSqlRunner
     }
 
     /// <summary>
-    /// Hands <paramref name="read" /> the sweep's open connection, for the one thing it holds that no statement is needed for:
-    /// the parameters the server reported at start-up (<c>NpgsqlConnection.PostgresParameters</c>, the Connection page's
-    /// NP-DESIGN §4). It sends nothing: <paramref name="read" /> reads a property of the connection, and the connection is
-    /// opened (once per sweep) if no statement has yet.
+    /// The parameters the server reported at start-up (<c>NpgsqlConnection.PostgresParameters</c>: <c>server_version</c>,
+    /// <c>is_superuser</c>, <c>client_encoding</c> and the like), as a <b>copy</b> taken while the sweep's connection is open
+    /// (the Connection page's NP-DESIGN §4). It sends nothing, and the connection is opened (once per sweep) if no statement
+    /// has yet.
     /// </summary>
     /// <remarks>
-    /// Fenced: only <c>ConnectionFacts</c> calls it, with a property read. It is not a statement, so it is not recorded in
-    /// "Show SQL"; a caller that ran a statement first has the connection already.
+    /// <para>
+    /// Fenced: only <c>ConnectionFacts</c> calls it. It is not a statement, so it is not recorded in "Show SQL"; a caller that
+    /// ran a statement first has the connection already. The read-only session no longer hands out the
+    /// <see cref="NpgsqlConnection" /> itself.
+    /// </para>
+    /// <para>
+    /// <b>A copy, never Npgsql's dictionary.</b> <c>PostgresParameters</c> is the connector's own table: Npgsql clears it when the
+    /// connection is returned to its pool and a later session of a pooled source writes to it, so keeping the reference would
+    /// show another session's values, or none, once the sweep connection is closed (<see cref="CopyReported" />).
+    /// </para>
     /// </remarks>
-    internal async Task<T> InspectConnectionAsync<T>(Func<NpgsqlConnection, T> read, CancellationToken cancellationToken)
+    internal async Task<IReadOnlyDictionary<string, string>> ReportedParametersAsync(CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(read);
-
         NpgsqlConnection open = await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return read(open);
+        return CopyReported(open.PostgresParameters);
+    }
+
+    /// <summary>A snapshot of the parameters the server reported, independent of the connection they were read from.</summary>
+    /// <param name="reported">Npgsql's live table (<c>NpgsqlConnection.PostgresParameters</c>).</param>
+    internal static IReadOnlyDictionary<string, string> CopyReported(IReadOnlyDictionary<string, string> reported)
+    {
+        ArgumentNullException.ThrowIfNull(reported);
+
+        return new Dictionary<string, string>(reported, StringComparer.Ordinal);
     }
 
     /// <summary>Runs <paramref name="query" /> and reads the first column of its first row.</summary>

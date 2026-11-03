@@ -122,7 +122,9 @@ internal static partial class PoolerSigns
 
     /// <summary>
     /// The signs K04 and C10 read: <see cref="Find" /> without the RDS Proxy (see the type's remarks), as the words K04's
-    /// evidence carries. What <c>PooledDaemonLockCheck.SignsOf</c> returned before the move, byte for byte.
+    /// evidence carries. What <c>PooledDaemonLockCheck.SignsOf</c> returned before the move, for every host but one shape:
+    /// an RDS-Proxy-shaped host (<c>proxy-</c> label) on port 6432 or 6543 was a K04 sign by its port and now is not, because
+    /// the RDS Proxy is matched first and is not a transaction-mode sign.
     /// </summary>
     /// <param name="endpoints">The data source's hosts, each with its port.</param>
     public static IReadOnlyList<string> TransactionModeTexts(IEnumerable<(string Host, int Port)> endpoints) =>

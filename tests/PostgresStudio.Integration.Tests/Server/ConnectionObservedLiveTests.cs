@@ -73,6 +73,19 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         observed.ReportedParameters.Should().ContainKey("server_version");
         observed.ReportedParameters["is_superuser"].Should().Be("off");
 
+        // A copy, not Npgsql's table: the connector clears its own when the connection goes back to the pool, and a later
+        // session of the pooled source would write to it. Close the sweep's connection, open and close another on the same
+        // pooled source, and the facts still hold what the server said.
+        await connection.DisposeAsync();
+        await using (HealthConnection another = new(host.Resolved.Target))
+        {
+            await another.OpenAsync(Token);
+        }
+
+        observed.ReportedParameters.Should().ContainKey("server_version");
+        observed.ReportedParameters["is_superuser"].Should().Be("off");
+        observed.ReportedParameters["server_version"].Should().NotBeNullOrWhiteSpace();
+
         facts.Platform.Kind.Should().Be(PostgresPlatformKind.SelfHosted);
         facts.Sessions.Should().BeNull("pooling is on, so the session statistics are not asked");
         facts.Settings.Readable.Should().BeTrue();

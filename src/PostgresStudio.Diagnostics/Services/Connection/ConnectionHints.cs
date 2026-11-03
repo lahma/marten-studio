@@ -143,10 +143,17 @@ internal static class ConnectionHints
             return;
         }
 
+        string text = "Connection Lifetime=0 means connections never recycle, so they do not rebalance after a failover or a scale-out. Npgsql's default is 3600.";
+
+        if (settings.PoolerSigns.Any(static x => x.Kind == PoolerSignKind.RdsProxy))
+        {
+            text += " An Amazon RDS Proxy ends a client connection after 24 hours at most, whatever the client does (Amazon RDS User Guide, RDS Proxy connection considerations), so a pooled connection that lives longer is cut under the application.";
+        }
+
         hints.Add(new(
             ConnectionHintIds.Lifetime,
             "Connection Lifetime",
-            "Connection Lifetime=0 means connections never recycle, so they do not rebalance after a failover or a scale-out. Npgsql's default is 3600.",
+            text,
             "Connection Lifetime=3600",
             "builder.ConnectionStringBuilder.ConnectionLifetime = 3600;"));
     }
@@ -184,10 +191,17 @@ internal static class ConnectionHints
         int? cut = ShortestIdleCut(settings, observed);
         string fix = "Keepalive=" + (cut is { } seconds ? Math.Max(seconds / 2, 1) : 30).ToString(CultureInfo.InvariantCulture);
 
+        string text = "Idle connections can be dropped by the network silently. A Keepalive shorter than the shortest idle cut (an RDS Proxy's 1800 s, the server's idle_session_timeout) keeps them alive. Npgsql recommends Keepalive over the TCP variants.";
+
+        if (settings.PoolerSigns.Any(static x => x.Kind == PoolerSignKind.RdsProxy))
+        {
+            text += " An Amazon RDS Proxy ends a client connection that has been idle for its IdleClientTimeout (1800 s by default); Amazon advises a pool idle timeout shorter than it, so set Connection Idle Lifetime below it too, and keep in mind that a client connection lives 24 hours at most (Amazon RDS User Guide, RDS Proxy connection considerations).";
+        }
+
         hints.Add(new(
             ConnectionHintIds.Keepalive,
             "Keepalive",
-            "Idle connections can be dropped by the network silently. A Keepalive shorter than the shortest idle cut (an RDS Proxy's 1800 s, the server's idle_session_timeout) keeps them alive. Npgsql recommends Keepalive over the TCP variants.",
+            text,
             fix,
             "builder.ConnectionStringBuilder.KeepAlive = " + fix["Keepalive=".Length..] + ";"));
     }
@@ -268,11 +282,36 @@ internal static class ConnectionHints
         }
     }
 
+    /// <summary>
+    /// RESET: Npgsql's reset on release, against a pooler it does not suit. Two cases. <b>PgBouncer family</b>: Npgsql's
+    /// compatibility page asks for <c>No Reset On Close=true</c>, because the <c>DISCARD ALL</c> sent when a connection returns
+    /// to its pool makes no sense in a pooler's transaction or statement mode. <b>Amazon RDS Proxy</b>: the Amazon RDS User Guide,
+    /// <i>Avoiding pinning an RDS Proxy</i> (PostgreSQL list), says "Discarding session state. If you use connection pooling
+    /// libraries with DISCARD ALL query configured as a reset query, RDS Proxy pins your client connection on release." Npgsql
+    /// is such a library: on release it sends <c>DISCARD ALL</c>, or <c>RESET ALL</c> and <c>DISCARD TEMP</c> when the connection
+    /// has prepared statements (<c>NpgsqlConnector.Reset</c>, 9.0.4 and 10.0.3), and does so only while <c>Pooling</c> is on
+    /// and <c>No Reset On Close</c> is not.
+    /// </summary>
     private static void Reset(ConnectionSettings settings, List<ConnectionHint> hints)
     {
         ConnectionValues v = settings.Values;
 
-        if (!v.Pooling || v.Bool("No Reset On Close") != false || !settings.PoolerSigns.Any(static x => x.IsPgBouncerFamily))
+        if (!v.Pooling || v.Bool("No Reset On Close") != false)
+        {
+            return;
+        }
+
+        string text;
+
+        if (settings.PoolerSigns.Any(static x => x.IsPgBouncerFamily))
+        {
+            text = "Npgsql's compatibility page, for a connection through PgBouncer: specify No Reset On Close=true, because the DISCARD ALL Npgsql sends when a connection returns to its pool makes no sense in a pooler's transaction or statement mode (it also advises turning Npgsql's own pool off with Pooling=false).";
+        }
+        else if (settings.PoolerSigns.Any(static x => x.Kind == PoolerSignKind.RdsProxy))
+        {
+            text = "Npgsql resets a pooled connection when it is released (DISCARD ALL, or RESET ALL and DISCARD TEMP when it has prepared statements), and an Amazon RDS Proxy pins a client connection on release after a DISCARD ALL reset query (Amazon RDS User Guide, Avoiding pinning an RDS Proxy): every reused connection then holds a database connection of its own while it is idle, which is what the proxy is there to avoid. No Reset On Close=true stops the reset; session state (SET values, temporary tables, advisory locks) then carries over to the next borrower of that connection, so use it only where the application leaves none.";
+        }
+        else
         {
             return;
         }
@@ -280,7 +319,7 @@ internal static class ConnectionHints
         hints.Add(new(
             ConnectionHintIds.Reset,
             "No Reset On Close",
-            "Npgsql's compatibility page, for a connection through PgBouncer: specify No Reset On Close=true, because the DISCARD ALL Npgsql sends when a connection returns to its pool makes no sense in a pooler's transaction or statement mode (it also advises turning Npgsql's own pool off with Pooling=false).",
+            text,
             "No Reset On Close=true",
             "builder.ConnectionStringBuilder.NoResetOnClose = true;"));
     }
@@ -333,11 +372,26 @@ internal static class ConnectionHints
         int client = v.CommandTimeout;
         string clientText = client == 0 ? "Command Timeout=0 (Npgsql never cancels a command itself)" : "Command Timeout=" + client.ToString(CultureInfo.InvariantCulture) + " s";
 
-        string winner = observed.StatementTimeoutMs is > 0 && (client == 0 || observed.StatementTimeoutMs.Value < client * 1000L)
-            ? "the server's statement_timeout cancels a long command first"
+        // The server cuts a running command at the smaller of statement_timeout and transaction_timeout (PostgreSQL 17+; absent
+        // below). idle_in_transaction_session_timeout only ends a session that is idle inside a transaction: it never cuts a
+        // running command, so it is context in the sentence and not part of the verdict.
+        long? serverCutMs = (observed.StatementTimeoutMs, observed.TransactionTimeoutMs) switch
+        {
+            (> 0 and var statement, > 0 and var transaction) => Math.Min(statement, transaction),
+            (> 0 and var statement, _) => statement,
+            (_, > 0 and var transaction) => transaction,
+            _ => null,
+        };
+
+        string cutter = observed.StatementTimeoutMs is > 0 && observed.StatementTimeoutMs == serverCutMs ? "statement_timeout" : "transaction_timeout";
+
+        string winner = serverCutMs is { } cut
+            ? client == 0 || cut < client * 1000L
+                ? "the server's " + cutter + " cancels a long command first"
+                : "Npgsql's Command Timeout cancels a long command first"
             : client > 0
                 ? "Npgsql's Command Timeout cancels a long command first"
-                : "a long command is cut by the server's settings";
+                : "nothing cuts a long running command: idle_in_transaction_session_timeout only ends a session that sits idle inside a transaction";
 
         hints.Add(new(
             ConnectionHintIds.CommandTimeout,

@@ -191,10 +191,36 @@ public sealed class ConnectionHintsTests
     [InlineData("Host=db.example;Port=6432;No Reset On Close=true", false)]
     [InlineData("Host=db.example;Port=6432;Pooling=false", false)]
     [InlineData("Host=db.example", false)]
-    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com", false)]
-    public void RESET_is_a_PgBouncer_family_pooler_with_Npgsqls_reset_on(string connectionString, bool expected)
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com", true)]
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;No Reset On Close=true", false)]
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;Pooling=false", false)]
+    public void RESET_is_a_PgBouncer_family_pooler_or_an_RDS_Proxy_with_Npgsqls_reset_on(string connectionString, bool expected)
     {
         (Hint(Settings(connectionString), ConnectionHintIds.Reset) is not null).Should().Be(expected);
+    }
+
+    [Fact]
+    public void RESET_for_an_RDS_Proxy_says_it_pins_on_release_and_what_the_fix_costs()
+    {
+        ConnectionHint hint = Hint(Settings("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com"), ConnectionHintIds.Reset)!;
+
+        hint.Text.Should().Contain("pins a client connection on release").And.Contain("Avoiding pinning an RDS Proxy")
+            .And.Contain("DISCARD ALL").And.Contain("carries over to the next borrower");
+        hint.ConnectionStringFix.Should().Be("No Reset On Close=true");
+        hint.BuilderFix.Should().Contain("NoResetOnClose = true");
+
+        Hint(Settings("Host=db.example;Port=6432"), ConnectionHintIds.Reset)!.Text.Should().Contain("PgBouncer").And.NotContain("RDS Proxy");
+    }
+
+    [Fact]
+    public void RDS_Proxy_adds_its_24_hour_life_and_idle_timeout_to_the_LIFETIME_and_KEEPALIVE_texts()
+    {
+        ConnectionSettings settings = Settings("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;Connection Lifetime=0;Load Balance Hosts=true");
+
+        Hint(settings, ConnectionHintIds.Lifetime)!.Text.Should().Contain("24 hours");
+        Hint(settings, ConnectionHintIds.Keepalive)!.Text.Should().Contain("IdleClientTimeout").And.Contain("24 hours");
+        Hint(Settings("Host=a,b;Connection Lifetime=0"), ConnectionHintIds.Lifetime)!.Text.Should().NotContain("RDS Proxy");
+        Hint(Settings("Host=db.example", PostgresPlatformKind.AmazonRds), ConnectionHintIds.Keepalive)!.Text.Should().NotContain("IdleClientTimeout");
     }
 
     // ---- ENLIST ----------------------------------------------------------------------------------------------------
@@ -228,6 +254,37 @@ public sealed class ConnectionHintsTests
 
         Hint(Settings("Host=db.example;Command Timeout=0", observed: Observed(statementMs: 1_500)), ConnectionHintIds.CommandTimeout)!.Text
             .Should().Contain("Command Timeout=0").And.Contain("statement_timeout 1500 ms");
+    }
+
+    [Fact]
+    public void CMDTIMEOUT_compares_the_command_timeout_with_the_smaller_of_statement_and_transaction_timeout()
+    {
+        // transaction_timeout (PostgreSQL 17+) alone: 5 s against Command Timeout=30 - the server cuts first, and names the right one.
+        Hint(Settings("Host=db.example", observed: Observed(transactionMs: 5_000)), ConnectionHintIds.CommandTimeout)!.Text
+            .Should().Contain("the server's transaction_timeout cancels a long command first").And.NotContain("statement_timeout cancels");
+
+        // The smaller of the two wins, either way round.
+        Hint(Settings("Host=db.example", observed: Observed(statementMs: 60_000, transactionMs: 5_000)), ConnectionHintIds.CommandTimeout)!.Text
+            .Should().Contain("the server's transaction_timeout cancels a long command first");
+        Hint(Settings("Host=db.example", observed: Observed(statementMs: 5_000, transactionMs: 60_000)), ConnectionHintIds.CommandTimeout)!.Text
+            .Should().Contain("the server's statement_timeout cancels a long command first");
+
+        // A transaction_timeout longer than Command Timeout loses to it.
+        Hint(Settings("Host=db.example;Command Timeout=10", observed: Observed(transactionMs: 120_000)), ConnectionHintIds.CommandTimeout)!.Text
+            .Should().Contain("Npgsql's Command Timeout cancels a long command first");
+    }
+
+    [Fact]
+    public void CMDTIMEOUT_leaves_idle_in_transaction_out_of_the_verdict()
+    {
+        // idle_in_transaction_session_timeout never cuts a running command: with Command Timeout=0 nothing does.
+        Hint(Settings("Host=db.example;Command Timeout=0", observed: Observed(idleInTransactionMs: 30_000)), ConnectionHintIds.CommandTimeout)!.Text
+            .Should().Contain("idle_in_transaction_session_timeout 30 s").And.Contain("nothing cuts a long running command")
+            .And.NotContain("cancels a long command first");
+
+        // ... and it does not beat a Command Timeout that is set.
+        Hint(Settings("Host=db.example", observed: Observed(idleInTransactionMs: 1_000)), ConnectionHintIds.CommandTimeout)!.Text
+            .Should().Contain("Npgsql's Command Timeout cancels a long command first");
     }
 
     // ---- COLDSTART -------------------------------------------------------------------------------------------------

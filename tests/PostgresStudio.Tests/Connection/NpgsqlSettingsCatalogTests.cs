@@ -8,10 +8,22 @@ using PostgresStudio.Services.Connection;
 namespace PostgresStudio.Tests.Connection;
 
 /// <summary>
+/// The tests that set real <c>PG*</c> environment variables process-wide, run alone: xunit runs a collection that disables
+/// parallelization after every parallel one, so no other test sees a variable set for a moment.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ProcessEnvironmentSuite
+{
+    /// <summary>The collection's name.</summary>
+    public const string Name = "Process environment (PG* variables)";
+}
+
+/// <summary>
 /// NP1: the catalogue is the loaded Npgsql's keyword list and its environment table, held to the real assembly - run in
 /// both Npgsql passes (the floor, 9.0.4, in the whole-solution pass; 10.0.3 in the pass over <c>postgres-studio.slnf</c>),
 /// so a keyword or a <c>PG*</c> variable a newer Npgsql adds fails here rather than going unlisted.
 /// </summary>
+[Collection(ProcessEnvironmentSuite.Name)]
 public sealed class NpgsqlSettingsCatalogTests
 {
     /// <summary>The keywords Npgsql 10 added: the loaded 9.x builder does not have them.</summary>

@@ -117,7 +117,7 @@ internal static class NpgsqlSettingsCatalog
         Shown("Write Coalescing Buffer Threshold Bytes", "MUX"),
         Shown("Load Table Composites", "OBSOLETE"),
         Shown("Server Compatibility Mode", "OBSOLETE"),
-        Shown("Trust Server Certificate", "OBSOLETE", "S11"),
+        Shown("Trust Server Certificate", "OBSOLETE"),
         Shown("Internal Command Timeout", "OBSOLETE"),
     ];
 

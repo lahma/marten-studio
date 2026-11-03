@@ -226,7 +226,7 @@ internal sealed record ConnectionFacts
 
             // The parameters the server reported at start-up are on the open connection already: no statement.
             IReadOnlyDictionary<string, string> reported = await context.Sql
-                .InspectConnectionAsync(static connection => connection.PostgresParameters, cancellationToken)
+                .ReportedParametersAsync(cancellationToken)
                 .ConfigureAwait(false);
 
             return (rows[0] with { ReportedParameters = reported }, null);
