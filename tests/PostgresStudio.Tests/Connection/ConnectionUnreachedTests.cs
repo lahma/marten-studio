@@ -1,3 +1,5 @@
+using System.Runtime.ExceptionServices;
+
 using Microsoft.Extensions.DependencyInjection;
 
 using Npgsql;
@@ -41,6 +43,96 @@ public sealed class ConnectionUnreachedTests
         facts.ObservedNotRead.Should().NotBeNullOrWhiteSpace();
         facts.ObservedFailure.Should().NotBeNull("the server never answered");
 
+        await EveryCheckThrows(context, facts.ObservedFailure!.SourceException);
+    }
+
+    /// <summary>
+    /// Npgsql raises a login the server refused (28P01 after a password rotation, 28000 from pg_hba, 3D000, 53300, 57P03 during a
+    /// failover) as a <see cref="PostgresException" /> while the connection opens, and <c>PostgresFailure.OpenAsync</c> marks it as a
+    /// connection failure: the server did not answer the read, and the checks say so.
+    /// </summary>
+    [Theory]
+    [InlineData("28P01")]
+    [InlineData("28000")]
+    [InlineData("3D000")]
+    [InlineData("53300")]
+    [InlineData("57P03")]
+    public async Task A_login_the_server_refused_is_kept_as_the_failure_and_every_connection_check_throws_it(string sqlState)
+    {
+        PostgresException refused = new("refused", "FATAL", "FATAL", sqlState);
+        PostgresFailure.MarkAsConnectionFailure(refused);
+
+        ConnectionFacts.ServerDidNotAnswer(refused).Should().BeTrue();
+
+        await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        await using NpgsqlDataSource source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=orders;Username=none");
+        (HealthCheckContext context, HealthConnection connection) = Context(source, services);
+        await using HealthConnection _ = connection;
+
+        ConnectionFacts facts = ConnectionCheckFacts.Facts("Host=db.example") with { ObservedFailure = ExceptionDispatchInfo.Capture(refused) };
+        await context.Shared(ConnectionObservedQueries.FactsKey, _ => Task.FromResult(facts));
+
+        await EveryCheckThrows(context, refused);
+    }
+
+    /// <summary>A statement the role may not run is Postgres answering: the database was reached, and the settings stand alone.</summary>
+    [Fact]
+    public async Task A_statement_Postgres_refused_is_not_a_failure_to_answer_and_the_checks_still_judge_the_settings()
+    {
+        ConnectionFacts.ServerDidNotAnswer(new PostgresException("denied", "ERROR", "ERROR", "42501")).Should().BeFalse();
+        ConnectionFacts.ServerDidNotAnswer(new NpgsqlException("wrapped", new PostgresException("denied", "ERROR", "ERROR", "42501"))).Should().BeFalse();
+        ConnectionFacts.ServerDidNotAnswer(new ObjectDisposedException("source")).Should().BeTrue();
+        ConnectionFacts.ServerDidNotAnswer(new NpgsqlException("Failed to connect", new TimeoutException())).Should().BeTrue();
+
+        await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        await using NpgsqlDataSource source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=orders;Username=none");
+        (HealthCheckContext context, HealthConnection connection) = Context(source, services);
+        await using HealthConnection _ = connection;
+
+        ConnectionFacts facts = ConnectionCheckFacts.Facts("Host=db.example", notRead: "the connection read failed (SQLSTATE 42501)");
+        facts.ObservedFailure.Should().BeNull();
+        await context.Shared(ConnectionObservedQueries.FactsKey, _ => Task.FromResult(facts));
+
+        (await new PoolIdleCutCheck().GatherAsync(context, Token)).Should().BeSameAs(facts);
+        Func<Task> driver = () => new DriverLoggingSettingsCheck().GatherAsync(context, Token);
+        await driver.Should().NotThrowAsync();
+    }
+
+    /// <summary>
+    /// What the connection string alone decides stands a check down whether or not the server answered: S11 behind a pooler (as S05
+    /// is), C16 with pooling off, C17 behind a pooler. A check that needs what the server reported is not asked to.
+    /// </summary>
+    [Theory]
+    [InlineData("S11", "Host=pgbouncer.example;Port=6432")]
+    [InlineData("C16", "Host=db.example;Pooling=false")]
+    [InlineData("C17", "Host=pgbouncer.example;Port=6432;Pooling=false")]
+    public async Task What_the_connection_string_alone_decides_stands_a_check_down_on_an_unreachable_server(string code, string connectionString)
+    {
+        PostgresException refused = new("refused", "FATAL", "FATAL", "28P01");
+        PostgresFailure.MarkAsConnectionFailure(refused);
+
+        await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        await using NpgsqlDataSource source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=orders;Username=none");
+        (HealthCheckContext context, HealthConnection connection) = Context(source, services);
+        await using HealthConnection _ = connection;
+
+        ConnectionFacts facts = ConnectionCheckFacts.Facts(connectionString) with { ObservedFailure = ExceptionDispatchInfo.Capture(refused) };
+        facts.Settings.Readable.Should().BeTrue();
+        await context.Shared(ConnectionObservedQueries.FactsKey, _ => Task.FromResult(facts));
+
+        IHealthCheck check = code switch
+        {
+            "S11" => new ServerCertificateCheck(),
+            "C16" => new PoolIdleCutCheck(),
+            _ => new PoolingOffCheck(),
+        };
+
+        Func<Task> gather = () => check.GatherAsync(context, Token);
+        (await gather.Should().ThrowAsync<HealthCheckNotApplicableException>(code)).Which.Message.Should().NotBeNullOrWhiteSpace();
+    }
+
+    private static async Task EveryCheckThrows(HealthCheckContext context, Exception failure)
+    {
         IHealthCheck[] checks =
         [
             new PoolIdleCutCheck(),
@@ -56,7 +148,7 @@ public sealed class ConnectionUnreachedTests
             Func<Task> gather = () => check.GatherAsync(context, Token);
 
             Exception thrown = (await gather.Should().ThrowAsync<Exception>(check.GetType().Name + " reads a database that did not answer")).Which;
-            thrown.Should().BeSameAs(facts.ObservedFailure);
+            thrown.Should().BeSameAs(failure);
 
             HealthSweeper.Classify(thrown, budgetExpired: false).Outcome.Should().Be(
                 HealthCheckOutcome.Failed,

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.ExceptionServices;
 
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Settings;
@@ -27,23 +26,32 @@ internal static class ConnectionCheckSupport
     /// (<see cref="ConnectionFacts.SharedAsync" />), refused when the connection string cannot be read.
     /// </summary>
     /// <param name="context">The sweep's context.</param>
+    /// <param name="standDown">
+    /// Why the check does not apply, judged from the data source's connection string alone (a pooler sign, pooling off), or
+    /// <see langword="null" /> when it does. It is asked before the connection read's failure is thrown again: a check that does
+    /// not apply to this data source does not apply to it whether or not the server answers.
+    /// </param>
     /// <exception cref="HealthCheckUnavailableException">The data source's connection string could not be parsed, or there is none.</exception>
+    /// <exception cref="HealthCheckNotApplicableException"><paramref name="standDown" /> answered.</exception>
     /// <remarks>
     /// <b>A database the server did not answer is not read as in good order.</b> The facts keep the settings of a database that
     /// could not be reached (the Connection page shows them), but a check judging them would report on a database the sweep never
     /// reached, and <c>PostgresDiagnosticsService.Reached</c> counts a catalog check that did not fail as proof that it was. So the
-    /// failure the connection read met is thrown again here, and the sweep classifies it as it does every other check's.
+    /// failure the connection read met is thrown again here (captured once, so its trace does not grow check after check), and the
+    /// sweep classifies it as it does every other check's.
     /// </remarks>
-    public static async Task<ConnectionFacts> ReadAsync(HealthCheckContext context)
+    public static async Task<ConnectionFacts> ReadAsync(HealthCheckContext context, Func<ConnectionFacts, string?>? standDown = null)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         ConnectionFacts facts = await ConnectionFacts.SharedAsync(context).ConfigureAwait(false);
 
-        if (facts.ObservedFailure is { } failure)
+        if (facts.Settings.Readable && standDown?.Invoke(facts) is { } reason)
         {
-            ExceptionDispatchInfo.Capture(failure).Throw();
+            throw new HealthCheckNotApplicableException(reason);
         }
+
+        facts.ObservedFailure?.Throw();
 
         if (!facts.Settings.Readable)
         {

@@ -39,14 +39,8 @@ internal sealed class PoolingOffCheck : HealthCheck<ConnectionFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        ConnectionFacts facts = await ConnectionCheckSupport.ReadAsync(context).ConfigureAwait(false);
-
-        if (NotApplicableReason(facts) is { } reason)
-        {
-            throw new HealthCheckNotApplicableException(reason);
-        }
-
-        return facts;
+        // A pooler is the connection string's to say, so it stands the check down whether or not the server answered.
+        return await ConnectionCheckSupport.ReadAsync(context, NotApplicableReason).ConfigureAwait(false);
     }
 
     /// <summary>Why this check does not apply to the data source (a pooler stands in front of it), or <see langword="null" /> when it does.</summary>

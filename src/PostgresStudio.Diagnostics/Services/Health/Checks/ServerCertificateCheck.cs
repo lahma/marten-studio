@@ -25,7 +25,8 @@ namespace PostgresStudio.Services.Health.Checks;
 /// the server, not the application's connection to the pooler, so it cannot say whether the application's leg uses TLS or checks a
 /// certificate; any pooler sign (<see cref="ConnectionSettings.PoolerSigns" />) makes the check not applicable, and the Connection
 /// page's TLS hint, which judges <c>SSL Mode</c> alone, is what speaks for that leg. The pooler stand-down runs first, before the
-/// unread-server check, so a pooler data source whose connection could not be read is not applicable rather than unavailable. The
+/// unread-server check and before an unreachable server's failure is thrown again, so a pooler data source whose connection could
+/// not be read is not applicable rather than unavailable or failed. The
 /// Amazon RDS Proxy remedy in <c>Evaluate</c> (<c>VerifyFull</c> with no <c>Root Certificate</c>) is therefore unreachable through a
 /// sweep, since an RDS Proxy is a pooler sign; it is kept, for the tests that call <c>Evaluate</c> directly and for a future sign
 /// that stops standing the check down.
@@ -55,14 +56,10 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        ConnectionFacts facts = await ConnectionCheckSupport.ReadAsync(context).ConfigureAwait(false);
-
-        // A pooler stands the check down before anything else: behind one, an unread connection says nothing about the application's
-        // leg either, so "not applicable" is the truer answer than "unavailable".
-        if (PoolerReason(facts) is { } pooler)
-        {
-            throw new HealthCheckNotApplicableException(pooler);
-        }
+        // A pooler stands the check down before anything else, the connection read's failure included: behind one, an unread or
+        // unreachable connection says nothing about the application's leg either, so "not applicable" is the truer answer than
+        // "unavailable" or "failed". What the server reported (a Unix socket, loopback, the TLS state) is only known once it answered.
+        ConnectionFacts facts = await ConnectionCheckSupport.ReadAsync(context, PoolerReason).ConfigureAwait(false);
 
         if (UnavailableReason(facts) is { } unavailable)
         {

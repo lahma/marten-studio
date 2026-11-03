@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -146,12 +147,14 @@ internal sealed record ConnectionFacts
 
     /// <summary>
     /// The failure behind <see cref="ObservedNotRead" /> when the server never answered the read - a connection that could not be
-    /// opened, a data source that was disposed, a timeout, the studio's own share of the pool in use - or <see langword="null" />
-    /// when it was read or Postgres answered with an error of its own (a missing grant). The connection checks rethrow it, so the
-    /// sweep classifies it as it does every other check's (<c>ConnectionCheckSupport.ReadAsync</c>); it is never shown or logged
-    /// by the facts themselves.
+    /// opened (a login refused included: Npgsql raises those as a <see cref="PostgresException" />, which
+    /// <c>PostgresFailure.OpenAsync</c> marks as a connection failure), a data source that was disposed, a timeout, the studio's own
+    /// share of the pool in use - or <see langword="null" /> when it was read or Postgres answered a statement with an error of its
+    /// own (a missing grant). Captured once; the connection checks throw it again (<c>ConnectionCheckSupport.ReadAsync</c>), so the
+    /// sweep classifies it as it does every other check's and one trace is not extended check after check. It is never shown or
+    /// logged by the facts themselves.
     /// </summary>
-    public Exception? ObservedFailure { get; init; }
+    public ExceptionDispatchInfo? ObservedFailure { get; init; }
 
     /// <summary>Who runs the server; <see cref="PostgresPlatform.SelfHosted" /> when it could not be told.</summary>
     public PostgresPlatform Platform { get; init; } = PostgresPlatform.SelfHosted;
@@ -207,7 +210,7 @@ internal sealed record ConnectionFacts
         IReadOnlyList<string> optionNames = NpgsqlSettingsReader.OptionNames(connectionString, environment);
         string? identity = ConnectionPoolSiblings.IdentityOf(connectionString);
 
-        (ConnectionObserved? observed, string? notRead, Exception? failure) = await ReadObservedAsync(context, optionNames, cancellationToken).ConfigureAwait(false);
+        (ConnectionObserved? observed, string? notRead, ExceptionDispatchInfo? failure) = await ReadObservedAsync(context, optionNames, cancellationToken).ConfigureAwait(false);
         PostgresPlatform platform = await ReadPlatformAsync(context).ConfigureAwait(false);
 
         ConnectionReadContext read = new()
@@ -239,7 +242,7 @@ internal sealed record ConnectionFacts
         };
     }
 
-    private static async Task<(ConnectionObserved? Observed, string? NotRead, Exception? Failure)> ReadObservedAsync(
+    private static async Task<(ConnectionObserved? Observed, string? NotRead, ExceptionDispatchInfo? Failure)> ReadObservedAsync(
         HealthCheckContext context,
         IReadOnlyList<string> optionNames,
         CancellationToken cancellationToken)
@@ -269,16 +272,30 @@ internal sealed record ConnectionFacts
                 throw;
             }
 
-            PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
-
-            // Postgres answered with an error of its own: the database was reached, and the settings stand on their own. Anything
-            // else - no connection, a disposed data source, a timeout - is the server not answering, which the checks must not
-            // read as a database in good order.
+            // Postgres answered a statement with an error of its own: the database was reached, and the settings stand on their own.
+            // Anything else - no connection, a disposed data source, a timeout, a login the server refused (a PostgresException too,
+            // raised while the connection opened and marked so) - is the server not answering, which the checks must not read as a
+            // database in good order.
             return (
                 null,
-                "the connection read failed (" + (postgres is null ? exception.GetType().Name : "SQLSTATE " + postgres.SqlState) + ")",
-                postgres is null ? exception : null);
+                "the connection read failed (" + (PostgresOf(exception) is { } postgres ? "SQLSTATE " + postgres.SqlState : exception.GetType().Name) + ")",
+                ServerDidNotAnswer(exception) ? ExceptionDispatchInfo.Capture(exception) : null);
         }
+    }
+
+    private static PostgresException? PostgresOf(Exception exception) => exception as PostgresException ?? exception.InnerException as PostgresException;
+
+    /// <summary>
+    /// Whether the server never answered the read: anything but a Postgres error to a statement. A login the server refused
+    /// (28P01, 28000, 3D000, 53300, 57P03) is a <see cref="PostgresException" /> too - Npgsql raises it from the connection's
+    /// open - and is marked as a connection failure by <c>PostgresFailure.OpenAsync</c>, so it is told from a statement's error
+    /// (42501, a missing grant) by that mark.
+    /// </summary>
+    /// <param name="exception">What the connection read threw.</param>
+    internal static bool ServerDidNotAnswer(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return PostgresOf(exception) is null || PostgresFailure.IsConnectionFailure(exception);
     }
 
     private static async Task<PostgresPlatform> ReadPlatformAsync(HealthCheckContext context)
