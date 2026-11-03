@@ -40,12 +40,15 @@ public class ConfigurationConnectionRowsTests
         StoreConfiguration card = ConfigurationDescriber.DescribeStore("default", "Default", store.Options, null, null, [], null, store.Storage.Database);
 
         Value(card, "Command timeout").Should().Be("77 s");
-        Member(card, "Command timeout").Should().Contain("StoreOptions.CommandTimeout, which differs from Marten's default of 5 s and so wins");
+        Member(card, "Command timeout").Should().Be("StoreOptions.CommandTimeout", "the member column holds the member path and nothing else");
+        Note(card, "Command timeout").Should().Contain("Both say the same, so it does not matter which one Marten reads");
         Value(card, "Command timeout in the connection string").Should().Be("77 s");
-        Member(card, "Command timeout in the connection string").Should().Contain("IMartenDatabase.ConfiguredCommandTimeout");
+        Member(card, "Command timeout in the connection string").Should().Be("IMartenDatabase.ConfiguredCommandTimeout");
         Value(card, "Sticky connection lifetimes").Should().Be("yes");
         Member(card, "Sticky connection lifetimes").Should().Be("StoreOptions.UseStickyConnectionLifetimes");
         Value(card, "Npgsql logging disabled").Should().Be("no");
+        Member(card, "Npgsql logging disabled").Should().Be("StoreOptions.DisableNpgsqlLogging (data sources Marten builds)");
+        Note(card, "Npgsql logging disabled").Should().Contain("Applies only to a data source Marten builds");
         Value(card, "Connection tracing").Should().Be("None");
         Member(card, "Connection tracing").Should().Be("StoreOptions.OpenTelemetry.TrackConnections");
         Value(card, "Hi-lo block size").Should().Be("250");
@@ -60,8 +63,48 @@ public class ConfigurationConnectionRowsTests
         ConfigurationValue rls = card.Connections.Single(static x => x.Name == "Row-level security");
         rls.Value.Should().Be("configured", "the setting's name is the host's, and the page says only that one is set");
         rls.Member.Should().NotContain("tenant_id");
+        rls.Note.Should().NotContain("tenant_id");
 
         card.Connections.Should().OnlyContain(static x => x.Member.Length > 0);
+
+        // F8: a member is a path (at most with a short qualifier), never a sentence.
+        card.Connections.Select(static x => x.Member).Should().OnlyContain(
+            static member => !member.Contains(',', StringComparison.Ordinal) && !member.Contains(':', StringComparison.Ordinal) && !member.Contains(" wins", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_command_timeout_that_is_not_the_default_says_who_set_it_and_that_it_wins_in_the_note()
+    {
+        using DocumentStore store = DocumentStore.For(static options =>
+        {
+            options.Connection(Remote + ";Command Timeout=77");
+            options.CommandTimeout = 12;
+            options.DatabaseSchemaName = "np4_config";
+        });
+
+        StoreConfiguration card = ConfigurationDescriber.DescribeStore("default", "Default", store.Options, null, null, [], null, store.Storage.Database);
+
+        Value(card, "Command timeout").Should().Be("12 s");
+        Note(card, "Command timeout").Should().Contain("so it was set, by the application or by Connection(string) / UseNpgsqlDataSource()")
+            .And.Contain("(Npgsql's 30 s when the string names none), and it wins");
+    }
+
+    [Fact]
+    public void A_default_timeout_is_marten_s_default_or_the_same_number_set_on_purpose()
+    {
+        using DocumentStore store = DocumentStore.For(static options =>
+        {
+            options.Connection(Remote);
+            options.CommandTimeout = 5;
+            options.DatabaseSchemaName = "np4_config";
+        });
+
+        StoreConfiguration card = ConfigurationDescriber.DescribeStore("default", "Default", store.Options, null, null, [], null, store.Storage.Database);
+
+        Value(card, "Command timeout").Should().Be("5 s");
+        Note(card, "Command timeout").Should().Contain("5 s: Marten's default, or the same number set on purpose")
+            .And.Contain("so either way 5 s, not Npgsql's 30 s")
+            .And.NotContain("nothing sets it", "it may have been set on purpose");
     }
 
     [Fact]
@@ -93,7 +136,22 @@ public class ConfigurationConnectionRowsTests
 
         Value(card, "Command timeout in the connection string").Should().Be("not reported");
         Value(card, "Command timeout").Should().Be("77 s");
-        Member(card, "Command timeout").Should().Contain("which differs from Marten's default");
+        Note(card, "Command timeout").Should().Contain("It is not Marten's default of 5 s").And.Contain("and it wins");
+    }
+
+    [Fact]
+    public void Without_a_database_a_default_timeout_claims_nothing_about_the_connection_string()
+    {
+        using DocumentStore store = DocumentStore.For(static options =>
+        {
+            options.Connection(Remote);
+            options.CommandTimeout = 5;
+            options.DatabaseSchemaName = "np4_config";
+        });
+
+        StoreConfiguration card = ConfigurationDescriber.DescribeStore("default", "Default", store.Options, null, null, [], null);
+
+        Note(card, "Command timeout").Should().Be("Marten's default is 5 s; the connection string's Command Timeout was not read.");
     }
 
     [Fact]
@@ -147,6 +205,13 @@ public class ConfigurationConnectionRowsTests
         page.Find("#config-connections").TextContent.Should().Contain("Command timeout").And.Contain("77 s").And.Contain("StoreOptions.UseStickyConnectionLifetimes");
 
         page.Find("a[href*='database/connection']").GetAttribute("href").Should().Contain("#conn-marten");
+
+        // The explanation is drawn under the member, with the link to the section, and the member column stays a path.
+        page.FindAll("#config-connections .ms-config-note a").Should().NotBeEmpty()
+            .And.OnlyContain(static a => a.GetAttribute("href")!.Contains("#conn-marten", StringComparison.Ordinal));
+        page.Find("#config-connections .ms-config-note").TextContent.Should().Contain("Both say the same");
+        page.FindAll("#config-connections .ms-config-member").Select(static x => x.TextContent)
+            .Should().OnlyContain(static member => !member.Contains("wins", StringComparison.Ordinal) && !member.Contains(',', StringComparison.Ordinal));
     }
 
     [Fact]
@@ -166,6 +231,8 @@ public class ConfigurationConnectionRowsTests
     private static string Value(StoreConfiguration card, string name) => Row(card, name).Value;
 
     private static string Member(StoreConfiguration card, string name) => Row(card, name).Member;
+
+    private static string Note(StoreConfiguration card, string name) => Row(card, name).Note ?? throw new InvalidOperationException($"The row '{name}' has no note.");
 
     private static ConfigurationValue Row(StoreConfiguration card, string name) =>
         card.Connections.SingleOrDefault(x => x.Name == name)

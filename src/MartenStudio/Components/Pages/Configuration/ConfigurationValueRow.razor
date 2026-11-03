@@ -17,6 +17,16 @@
     <span class="ms-config-value">
         @Value
         <code class="ms-config-member">@Member</code>
+        @if (Note is { Length: > 0 })
+        {
+            <span class="ms-config-note">
+                @Note
+                @if (NoteHref is { Length: > 0 })
+                {
+                    <a href="@NoteHref">How Marten uses this connection</a>
+                }
+            </span>
+        }
     </span>
     <button type="button"
             class="ms-copy-inline"
@@ -41,6 +51,17 @@
     [Parameter]
     [EditorRequired]
     public string Member { get; set; } = string.Empty;
+
+    /// <summary>
+    /// A sentence about what the value means or which value wins, drawn under the member path (1.1-NP4-FIX); the member column
+    /// holds the member path and nothing else.
+    /// </summary>
+    [Parameter]
+    public string? Note { get; set; }
+
+    /// <summary>Where the note's "How Marten uses this connection" link goes; no link when it is empty.</summary>
+    [Parameter]
+    public string? NoteHref { get; set; }
 
     protected override void OnParametersSet() => label = "Copy";
 

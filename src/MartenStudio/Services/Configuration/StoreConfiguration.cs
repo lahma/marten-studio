@@ -11,7 +11,15 @@ namespace MartenStudio.Services.Configuration;
 /// <param name="Name">What the value is, in the studio's words.</param>
 /// <param name="Value">What it is set to, already formatted.</param>
 /// <param name="Member">The <c>StoreOptions</c> member it was read from.</param>
-internal sealed record ConfigurationValue(string Name, string Value, string Member);
+internal sealed record ConfigurationValue(string Name, string Value, string Member)
+{
+    /// <summary>
+    /// A sentence for an administrator about what the value means or which value wins, drawn under the member (1.1-NP4-FIX). The
+    /// member column holds the member path and nothing else; anything that needs a sentence goes here. <see langword="null" /> for a
+    /// value the member path explains.
+    /// </summary>
+    public string? Note { get; init; }
+}
 
 /// <summary>
 /// One database of the store, described from <c>ITenancy.DescribeDatabasesAsync()</c>.

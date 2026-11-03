@@ -52,8 +52,11 @@ public class MartenConnectionLiveTests(PostgresFixture postgres)
 
         ConnectionContributedSection section = await host.SectionAsync();
 
-        Row(section, "Data source").Value.Should().Be("the application's NpgsqlDataSource");
-        Row(section, "Data source").Note.Should().Contain("draw on one pool");
+        // The registration is a factory (as AddNpgsqlDataSource() makes it), so no instance is compared and nothing is built to compare:
+        // Marten did not build the data source, and that is the whole answer.
+        Row(section, "Data source").Value.Should().Be("the application's own data source, handed to Marten directly");
+        Row(section, "Data source").Note.Should().Contain("Marten did not build this NpgsqlDataSource").And.Contain("none of its own");
+        Row(section, "Npgsql logging").Value.Should().Be("no effect here");
         section.Cards.Should().BeEmpty("there is no second pool to point out");
 
         // A Solo daemon runs its shards in this process: one connection for the daemon, one per running shard.
@@ -68,6 +71,8 @@ public class MartenConnectionLiveTests(PostgresFixture postgres)
 
         // Connection(dataSource) stored the data source's own timeout (Npgsql's 30 s, since the string names none) into the option.
         Row(section, "Command timeout").Value.Should().Be("30 s");
+        Row(section, "Command timeout").Note.Should().Contain("so it was set, by the application or by Connection(string) / UseNpgsqlDataSource()")
+            .And.Contain("(Npgsql's 30 s when the string names none), and it wins");
     }
 
     [PostgresFact]
@@ -90,7 +95,8 @@ public class MartenConnectionLiveTests(PostgresFixture postgres)
         await using LiveHost host = await LiveHost.StartAsync(postgres, "np4_buffer", useRegisteredDataSource: true, daemon: false);
 
         // Before any deeper run there is nothing to judge a buffer by.
-        (await host.ViewAsync()).Cards.Concat((await host.ViewAsync()).Notes).Should().NotContain(static x => x.Code == ConnectionHintIds.Buffer);
+        ConnectionPageView before = await host.ViewAsync();
+        before.Cards.Concat(before.Notes).Should().NotContain(static x => x.Code == ConnectionHintIds.Buffer);
 
         IDocumentStore store = host.Store;
         await using (IDocumentSession session = store.LightweightSession())

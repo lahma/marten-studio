@@ -6,6 +6,7 @@ using MartenStudio.Services;
 using MartenStudio.Services.Connection;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using Npgsql;
 
@@ -17,8 +18,8 @@ namespace MartenStudio.Tests.Connection;
 
 /// <summary>
 /// "How Marten uses this connection" (1.1-NP4): the real contributor, built by <c>AddMartenStudio()</c>, over real Marten stores that
-/// never connect. The command timeout is Marten's resolution or an honest pair of figures, the data source's origin is a reference
-/// comparison over the container's registrations, the hints get Marten's sentence, and no connection string reaches any of it.
+/// never connect. The command timeout is Marten's resolution or an honest pair of figures, the data source's origin is Marten's own
+/// <c>OwnsDataSource</c> and the container's descriptors (nothing is built to compare), the hints get Marten's sentence, and no connection string reaches any of it.
 /// </summary>
 public class MartenConnectionInsightTests
 {
@@ -39,6 +40,8 @@ public class MartenConnectionInsightTests
     [InlineData(45, 120, "StoreOption", 45)]
     [InlineData(5, null, "Default", 5)]
     [InlineData(5, 5, "Agreed", 5)]
+    [InlineData(30, 30, "Agreed", 30)]
+    [InlineData(77, 77, "Agreed", 77)]
     [InlineData(5, 120, "Undetermined", null)]
     public void The_timeout_is_resolved_where_public_members_can_prove_it_and_is_not_claimed_where_they_cannot(int store, int? named, string basis, int? effective)
     {
@@ -65,7 +68,20 @@ public class MartenConnectionInsightTests
     [Fact]
     public void A_default_timeout_is_marten_s_five_seconds_and_not_npgsql_s_thirty()
     {
-        new MartenCommandTimeout(5, null).Explanation.Should().Contain("Nothing sets it").And.Contain("5 s, not Npgsql's 30 s");
+        MartenCommandTimeout timeout = new(5, null);
+
+        timeout.Explanation.Should().Contain("5 s: Marten's default, or the same number set on purpose")
+            .And.Contain("The connection string names none, so either way 5 s, not Npgsql's 30 s");
+        timeout.Explanation.Should().NotContain("Nothing sets it", "an application can set the default on purpose, which looks the same");
+    }
+
+    [Fact]
+    public void A_timeout_that_is_not_the_default_was_set_by_the_application_or_copied_from_the_connection_string_by_Marten()
+    {
+        // The common case: Connection(string) and UseNpgsqlDataSource() copy the string's timeout, or Npgsql's 30, into the option.
+        new MartenCommandTimeout(30, null).Rule.Should().Contain("so it was set, by the application or by Connection(string) / UseNpgsqlDataSource()")
+            .And.Contain("copy the connection string's Command Timeout into it (Npgsql's 30 s when the string names none), and it wins");
+        new MartenCommandTimeout(45, 120).Rule.Should().Contain("and it wins");
     }
 
     [Fact]
@@ -77,7 +93,8 @@ public class MartenConnectionInsightTests
         ConnectionObservedLine row = Row(contribution, "Command timeout");
 
         row.Value.Should().Be("77 s");
-        row.Note.Should().Contain("StoreOptions.CommandTimeout is 77 s").And.Contain("names a Command Timeout of 77 s");
+        row.Note.Should().Contain("StoreOptions.CommandTimeout is 77 s").And.Contain("names a Command Timeout of 77 s")
+            .And.Contain("does not matter which one Marten reads", "the option and the string say the same, whatever copied one into the other");
     }
 
     [Fact]
@@ -88,7 +105,9 @@ public class MartenConnectionInsightTests
         ConnectionObservedLine row = Row(await rig.ContributeAsync(), "Command timeout");
 
         row.Value.Should().Be("30 s");
-        row.Note.Should().Contain("names no Command Timeout");
+        row.Note.Should().Contain("names no Command Timeout")
+            .And.Contain("so it was set, by the application or by Connection(string) / UseNpgsqlDataSource()")
+            .And.Contain("(Npgsql's 30 s when the string names none), and it wins");
     }
 
     [Fact]
@@ -103,7 +122,7 @@ public class MartenConnectionInsightTests
         ConnectionObservedLine row = Row(await rig.ContributeAsync(), "Command timeout");
 
         row.Value.Should().Be("12 s");
-        row.Note.Should().Contain("was set on purpose, so it wins");
+        row.Note.Should().Contain("so it was set").And.Contain("and it wins");
     }
 
     // ----------------------------------------------------------------------------------------------
@@ -165,7 +184,7 @@ public class MartenConnectionInsightTests
     }
 
     [Fact]
-    public void Only_a_singleton_registration_can_be_the_one_marten_was_handed()
+    public void Only_a_singleton_registration_can_be_the_one_marten_was_handed_and_the_container_is_never_asked_for_one()
     {
         ServiceCollection services = new();
         NpgsqlDataSource singleton = NpgsqlDataSource.Create(Remote);
@@ -173,23 +192,137 @@ public class MartenConnectionInsightTests
         services.AddScoped(static _ => NpgsqlDataSource.Create(Remote + "-scoped"));
         services.AddKeyedTransient<NpgsqlDataSource>("t", static (_, _) => NpgsqlDataSource.Create(Remote + "-transient"));
 
-        using ServiceProvider provider = services.BuildServiceProvider();
-
         // The last unkeyed descriptor is the scoped one, which is what the container resolves, and it is not Marten's.
-        new MartenDataSourceRegistry(services).Registered(provider).Should().BeEmpty();
+        MartenDataSourceRegistrations first = new MartenDataSourceRegistry(services).Read();
+        first.Instances.Should().BeEmpty();
+        first.Count.Should().Be(0);
 
         ServiceCollection singletonLast = new();
         singletonLast.AddScoped(static _ => NpgsqlDataSource.Create(Remote + "-scoped"));
         singletonLast.AddSingleton(singleton);
+        singletonLast.AddKeyedSingleton<NpgsqlDataSource>("factory", static (_, _) => throw new InvalidOperationException("A registration is never resolved to be compared."));
 
-        using ServiceProvider second = singletonLast.BuildServiceProvider();
-        new MartenDataSourceRegistry(singletonLast).Registered(second).Should().ContainSingle().Which.DataSource.Should().BeSameAs(singleton);
+        MartenDataSourceRegistrations second = new MartenDataSourceRegistry(singletonLast).Read();
+        second.Instances.Should().ContainSingle().Which.Instance.Should().BeSameAs(singleton);
+        second.Count.Should().Be(2, "a factory is counted, and never called");
     }
 
     [Fact]
     public void A_database_with_no_data_source_to_compare_is_not_known_rather_than_marten_s_own()
     {
-        MartenDataSourceOrigin.Of(null, []).Kind.Should().Be(MartenDataSourceOriginKind.Unknown);
+        MartenDataSourceOrigin.Of(null, null, MartenDataSourceRegistrations.None).Kind.Should().Be(MartenDataSourceOriginKind.Unknown);
+    }
+
+    [Fact]
+    public void A_data_source_marten_built_is_marten_s_own_whatever_the_container_registers()
+    {
+        NpgsqlDataSource marten = NpgsqlDataSource.Create(Remote);
+        ServiceCollection services = new();
+        services.AddSingleton(marten);
+
+        MartenDataSourceOrigin.Of(marten, ownedByMarten: true, new MartenDataSourceRegistry(services).Read()).Kind
+            .Should().Be(MartenDataSourceOriginKind.Marten, "OwnsDataSource is asked first, so no instance is compared");
+    }
+
+    [Fact]
+    public async Task A_data_source_the_application_handed_to_marten_is_said_to_be_handed_directly_and_no_UseNpgsqlDataSource_advice_is_given()
+    {
+        // Registered by a factory, as AddNpgsqlDataSource() does: there is no instance to compare, and OwnsDataSource says it all.
+        await using Rig factory = Rig.Create(
+            static _ => { },
+            static (services, marten) =>
+            {
+                services.AddSingleton<NpgsqlDataSource>(static _ => NpgsqlDataSource.Create(Remote));
+                marten.UseNpgsqlDataSource();
+            });
+
+        ConnectionContribution contribution = await factory.ContributeAsync();
+        ConnectionObservedLine row = Row(contribution, "Data source");
+
+        row.Value.Should().Be("the application's own data source, handed to Marten directly");
+        row.Note.Should().Contain("Marten did not build this NpgsqlDataSource").And.Contain("C18");
+        row.Note.Should().NotContain("makes Marten use", "it already does");
+        contribution.Sections.Single().Cards.Should().BeEmpty();
+
+        // Connection(NpgsqlDataSource) with nothing in the container at all.
+        await using Rig direct = Rig.Create(static options => options.Connection(NpgsqlDataSource.Create(Remote)));
+
+        Row(await direct.ContributeAsync(), "Data source").Value.Should().Be("the application's own data source, handed to Marten directly");
+    }
+
+    [Fact]
+    public void When_ownership_cannot_be_told_and_the_application_registers_data_sources_the_studio_says_it_could_not_tell_without_building_one()
+    {
+        ServiceCollection services = new();
+        services.AddSingleton<NpgsqlDataSource>(static _ => NpgsqlDataSource.Create(Remote));
+        MartenDataSourceOrigin origin = MartenDataSourceOrigin.Of(NpgsqlDataSource.Create(Remote), ownedByMarten: null, new MartenDataSourceRegistry(services).Read());
+
+        origin.Kind.Should().Be(MartenDataSourceOriginKind.Unknown);
+
+        ConnectionObservedLine row = MartenConnectionSection.Build(Options(), origin, null, null).Rows.Single(static x => x.Label == "Data source");
+        row.Value.Should().Be("not known");
+        row.Note.Should().Contain("The application registers 1 NpgsqlDataSource; whether Marten uses one of them could not be told without building it");
+    }
+
+    [Fact]
+    public async Task Reading_the_page_never_builds_a_data_source_of_the_applications()
+    {
+        int built = 0;
+        int builtKeyed = 0;
+
+        await using Rig rig = Rig.Create(
+            static _ => { },
+            (services, marten) =>
+            {
+                services.AddSingleton<NpgsqlDataSource>(_ =>
+                {
+                    Interlocked.Increment(ref built);
+                    return NpgsqlDataSource.Create(Remote);
+                });
+                services.AddKeyedSingleton<NpgsqlDataSource>("other", (_, _) =>
+                {
+                    Interlocked.Increment(ref builtKeyed);
+                    return NpgsqlDataSource.Create(Remote + ";Application Name=other");
+                });
+                marten.UseNpgsqlDataSource();
+            });
+
+        // Marten resolved the unkeyed one to build the store; nothing has asked for the keyed one.
+        int before = Volatile.Read(ref built);
+        before.Should().Be(1);
+        Volatile.Read(ref builtKeyed).Should().Be(0);
+
+        for (int i = 0; i < 3; i++)
+        {
+            ConnectionContribution contribution = await rig.ContributeAsync();
+            Row(contribution, "Data source").Value.Should().Be("the application's own data source, handed to Marten directly");
+        }
+
+        Volatile.Read(ref built).Should().Be(before, "the studio compares nothing it would have to construct");
+        Volatile.Read(ref builtKeyed).Should().Be(0, "a registration nothing asked for stays unbuilt");
+    }
+
+    [Fact]
+    public async Task The_fix_for_a_pool_of_marten_s_own_says_what_to_remove_and_names_the_service_key_of_a_keyed_registration()
+    {
+        await using Rig keyed = Rig.Create(
+            static options => options.Connection(Remote),
+            static (services, _) => services.AddKeyedSingleton("analytics", NpgsqlDataSource.Create(Remote + "2")));
+
+        ConnectionCard card = (await keyed.ContributeAsync()).Sections.Single().Cards.Should().ContainSingle().Which;
+        string code = card.Fixes.Should().ContainSingle().Which.Code;
+
+        code.Should().Contain("Remove options.Connection(...) and the connection-string argument of AddMarten(...)")
+            .And.Contain("UseNpgsqlDataSource(\"analytics\") supplies it")
+            .And.Contain(".UseNpgsqlDataSource(\"analytics\");");
+        card.Text.Should().Contain("so both pools stay open: remove the connection string");
+
+        await using Rig plain = Rig.Create(
+            static options => options.Connection(Remote),
+            static (services, _) => services.AddSingleton(NpgsqlDataSource.Create(Remote + "2")));
+
+        (await plain.ContributeAsync()).Sections.Single().Cards.Single().Fixes.Single().Code
+            .Should().Contain("UseNpgsqlDataSource() supplies it").And.Contain(".UseNpgsqlDataSource();");
     }
 
     // ----------------------------------------------------------------------------------------------
@@ -258,6 +391,76 @@ public class MartenConnectionInsightTests
             .And.Contain("WriteSessionPreference Any can send a write to a standby");
         contribution.HintNotes[ConnectionHintIds.MultiHost].Should().Contain("reads ReadWrite and writes Any")
             .And.Contain("can send a write to a standby: set WriteSessionPreference to ReadWrite or Primary");
+    }
+
+    [Theory]
+    [InlineData(TargetSessionAttributes.PreferPrimary, true)]
+    [InlineData(TargetSessionAttributes.PreferStandby, true)]
+    [InlineData(TargetSessionAttributes.Standby, true)]
+    [InlineData(TargetSessionAttributes.ReadOnly, true)]
+    [InlineData(TargetSessionAttributes.Any, true)]
+    [InlineData(TargetSessionAttributes.Primary, false)]
+    [InlineData(TargetSessionAttributes.ReadWrite, false)]
+    public async Task The_multi_host_note_says_a_write_goes_to_a_primary_only_for_the_preferences_that_always_mean_one(TargetSessionAttributes write, bool canReachStandby)
+    {
+        await using Rig rig = Rig.Create(
+            options => options.Advanced.MultiHostSettings.WriteSessionPreference = write,
+            static (services, marten) =>
+            {
+                services.AddSingleton<NpgsqlDataSource>(new NpgsqlDataSourceBuilder("Host=a.invalid,b.invalid;Database=np4;Username=svc").BuildMultiHost());
+                marten.UseNpgsqlDataSource();
+            });
+
+        string note = (await rig.ContributeAsync()).HintNotes[ConnectionHintIds.MultiHost];
+
+        if (canReachStandby)
+        {
+            note.Should().Contain("can send a write to a standby").And.NotContain("Marten's writes go to a primary");
+        }
+        else
+        {
+            note.Should().Contain("Marten's writes go to a primary").And.NotContain("can send a write to a standby");
+        }
+    }
+
+    [Fact]
+    public async Task PreferPrimary_is_called_out_as_falling_back_to_a_standby_when_no_primary_answers()
+    {
+        await using Rig rig = Rig.Create(
+            static options => options.Advanced.MultiHostSettings.WriteSessionPreference = TargetSessionAttributes.PreferPrimary,
+            static (services, marten) =>
+            {
+                services.AddSingleton<NpgsqlDataSource>(new NpgsqlDataSourceBuilder("Host=a.invalid,b.invalid;Database=np4;Username=svc").BuildMultiHost());
+                marten.UseNpgsqlDataSource();
+            });
+
+        ConnectionContribution contribution = await rig.ContributeAsync();
+
+        contribution.HintNotes[ConnectionHintIds.MultiHost].Should().Contain("PreferPrimary can send a write to a standby when no primary answers");
+        Row(contribution, "Session preference on several hosts").Note.Should().Contain("WriteSessionPreference PreferPrimary can send a write to a standby when no primary answers");
+    }
+
+    [Fact]
+    public async Task Npgsql_logging_is_an_option_for_data_sources_marten_builds_and_has_no_effect_on_one_the_application_handed_over()
+    {
+        await using Rig own = Rig.Create(static options => options.Connection(Remote));
+
+        ConnectionObservedLine builtByMarten = Row(await own.ContributeAsync(), "Npgsql logging");
+        builtByMarten.Value.Should().Be("disabled");
+        builtByMarten.Note.Should().Contain("applies only to data sources Marten builds from a connection string");
+
+        await using Rig handed = Rig.Create(
+            static options => options.DisableNpgsqlLogging = false,
+            static (services, marten) =>
+            {
+                services.AddSingleton<NpgsqlDataSource>(static _ => NpgsqlDataSource.Create(Remote));
+                marten.UseNpgsqlDataSource();
+            });
+
+        ConnectionObservedLine given = Row(await handed.ContributeAsync(), "Npgsql logging");
+        given.Value.Should().Be("no effect here");
+        given.Note.Should().Contain("Marten did not build this data source, so its logging is what the application's builder set")
+            .And.Contain("the option is enabled and changes nothing for it");
     }
 
     [Fact]
@@ -417,18 +620,27 @@ public class MartenConnectionInsightTests
         string connection = "Host=marten-np4.invalid;Port=5432;Database=np4;Username=svc;Password=" + Sentinel + "-password;SSL Password=" + Sentinel + "-sslpassword"
             + ";Passfile=/tmp/" + Sentinel + "-passfile;Options=-c app.secret=" + Sentinel + "-opt;Command Timeout=77;Application Name=" + Sentinel + "-app";
 
-        await using Rig rig = Rig.Create(options =>
-        {
-            options.Connection(connection);
-            options.UseRowLevelSecurity("app." + Sentinel + "_tenant");
-            options.Schema.For<Note>();
-        });
+        CapturingLogs logs = new();
+
+        await using Rig rig = Rig.Create(
+            options =>
+            {
+                options.Connection(connection);
+                options.UseRowLevelSecurity("app." + Sentinel + "_tenant");
+                options.Schema.For<Note>();
+            },
+            (services, _) => services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs)));
 
         ConnectionContribution contribution = await rig.ContributeAsync(observed: Observed(statementTimeoutMs: 10_000));
         string dump = JsonSerializer.Serialize(contribution, DumpOptions);
 
         dump.Should().Contain("Command timeout", "a vacuous grep is a broken test");
         dump.Should().NotContain(Sentinel);
+
+        // ...and neither does anything the contributor logged, even at Trace.
+        string logged = logs.Text;
+        logged.Should().Contain("connection section", "the contributor's Trace line was captured, so this is not a vacuous grep");
+        logged.Should().NotContain(Sentinel).And.NotContainEquivalentOf("password=").And.NotContain("Host=");
 
         // The Configuration page's rows are made from the same figures.
         IReadOnlyList<MartenStudio.Services.Configuration.ConfigurationValue> rows =
@@ -475,7 +687,7 @@ public class MartenConnectionInsightTests
         section.Rows.Single(x => x.Label == label);
 
     private static MartenConnectionOptions Options() => new(
-        new MartenCommandTimeout(30, null), false, TargetSessionAttributes.ReadWrite, TargetSessionAttributes.ReadWrite, true, "None", 1000, 30, 500, 4004, false, true, true);
+        new MartenCommandTimeout(30, null), false, TargetSessionAttributes.ReadWrite, TargetSessionAttributes.ReadWrite, true, "None", 1000, 30, 500, 4004, false);
 
     private static MartenDataSourceOrigin Own() => new(MartenDataSourceOriginKind.Marten, null, 0, false);
 
@@ -556,6 +768,37 @@ public class MartenConnectionInsightTests
         {
             await circuit.DisposeAsync();
             await provider.DisposeAsync();
+        }
+    }
+
+    /// <summary>Every line written at any level, with its structured state, so a secret hidden in a log argument is found as well.</summary>
+    private sealed class CapturingLogs : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> lines = new();
+
+        public string Text => string.Join('\n', lines);
+
+        public ILogger CreateLogger(string categoryName) => new Capture(categoryName, lines);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Capture(string category, System.Collections.Concurrent.ConcurrentQueue<string> lines) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state)
+                where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                string arguments = state is IEnumerable<KeyValuePair<string, object?>> pairs
+                    ? string.Join(' ', pairs.Select(static x => x.Key + "=" + x.Value))
+                    : string.Empty;
+
+                lines.Enqueue(category + " " + logLevel + " " + formatter(state, exception) + " " + arguments + " " + exception);
+            }
         }
     }
 

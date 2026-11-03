@@ -14690,4 +14690,14 @@ a.ms-schema-health-mark:focus-visible {
     .ms-conn-compare-actions .ms-button {
         flex: 1 1 8rem;
     }
+
+/* ===== 1.1-NP4-FIX Configuration rows: a note under the member path ===== */
+
+.ms-config-note {
+    display: block;
+    margin-top: var(--ms-space-xs);
+    font-family: var(--ms-font-family);
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+    word-break: break-word;
 }

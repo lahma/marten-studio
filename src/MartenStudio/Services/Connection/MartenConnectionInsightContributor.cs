@@ -29,26 +29,25 @@ namespace MartenStudio.Services.Connection;
 /// called; the figures it shows are database-wide, never a tenant's or a type's.
 /// </para>
 /// <para>
-/// <b>No connection string.</b> The contributor is handed the redacted settings only; the data source is compared by reference.
+/// <b>No connection string, and no data source built.</b> The contributor is handed the redacted settings only; whether Marten built
+/// its data source is Weasel's <c>OwnsDataSource</c>, and the container is read as descriptors, never resolved (a registration nothing
+/// had asked for would build a pool of the studio's own).
 /// </para>
 /// </remarks>
 internal sealed class MartenConnectionInsightContributor : IConnectionInsightContributor
 {
     private readonly MartenDataSourceRegistry dataSources;
-    private readonly IServiceProvider services;
     private readonly HealthSweepCache sweeps;
     private readonly MartenRowSizeCache rowSizes;
     private readonly ILogger<MartenConnectionInsightContributor> logger;
 
     public MartenConnectionInsightContributor(
         MartenDataSourceRegistry dataSources,
-        IServiceProvider services,
         HealthSweepCache sweeps,
         MartenRowSizeCache rowSizes,
         ILogger<MartenConnectionInsightContributor> logger)
     {
         this.dataSources = dataSources;
-        this.services = services;
         this.sweeps = sweeps;
         this.rowSizes = rowSizes;
         this.logger = logger;
@@ -66,7 +65,10 @@ internal sealed class MartenConnectionInsightContributor : IConnectionInsightCon
         }
 
         MartenConnectionOptions options = MartenConnectionOptions.Read(storeOptions, scope.Database);
-        MartenDataSourceOrigin origin = MartenDataSourceOrigin.Of(scope.Target.DataSource, dataSources.Registered(services));
+
+        // Whether Marten built the data source is a public fact of Weasel's database; the container is only read as descriptors.
+        bool? ownedByMarten = scope.Database is Weasel.Postgresql.PostgresqlDatabase postgres ? postgres.OwnsDataSource : null;
+        MartenDataSourceOrigin origin = MartenDataSourceOrigin.Of(scope.Target.DataSource, ownedByMarten, dataSources.Read());
 
         string storeKey = scope.Source.Key;
         string databaseId = scope.Target.Identity;

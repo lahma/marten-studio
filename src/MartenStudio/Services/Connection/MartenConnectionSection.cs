@@ -60,13 +60,7 @@ internal static class MartenConnectionSection
                 options.UpdateBatchSize.ToString("N0", CultureInfo.InvariantCulture),
                 "StoreOptions.UpdateBatchSize, default " + MartenConnectionOptions.Defaults.UpdateBatchSize.ToString("N0", CultureInfo.InvariantCulture)
                 + ". SaveChanges sends at most this many document changes to the database in one batch, so a unit of work larger than this takes more than one round trip."),
-            new(
-                "Npgsql logging",
-                options.NpgsqlLoggingDisabled ? "disabled" : "enabled",
-                "StoreOptions.DisableNpgsqlLogging, default true (Marten 9). "
-                + (options.NpgsqlLoggingDisabled
-                    ? "Npgsql's own log lines are not forwarded to the application's loggers."
-                    : "Npgsql's own log lines are forwarded to the application's loggers, which is noisy on a busy application; set it to true for quieter logs.")),
+            NpgsqlLogging(options, origin),
             new(
                 "Connection tracing",
                 options.TrackConnections,
@@ -107,7 +101,7 @@ internal static class MartenConnectionSection
             notes[ConnectionHintIds.MultiHost] = "For Marten's own sessions this does not decide: Marten asks the data source for a host by StoreOptions.Advanced.MultiHostSettings, "
                 + "reads " + options.ReadPreference + " and writes " + options.WritePreference + " (default " + MartenConnectionOptions.Defaults.SessionPreference + " for both), "
                 + (options.WritesCanLandOnAStandby
-                    ? "and " + options.WritePreference + " can send a write to a standby: set WriteSessionPreference to ReadWrite or Primary."
+                    ? "and " + options.WritePreference + " " + options.WriteStandbyClause + ": set WriteSessionPreference to ReadWrite or Primary."
                     : "so Marten's writes go to a primary even though this connection string would accept any host.");
         }
         else
@@ -155,6 +149,11 @@ internal static class MartenConnectionSection
             "the application's NpgsqlDataSource" + (origin.ServiceKey is { } key ? " (service key " + key + ")" : string.Empty),
             "Marten uses an NpgsqlDataSource this application registered in its container (UseNpgsqlDataSource()), so Marten and the application draw on one pool. "
             + "That is what check C18, Several pools to one database in this process, recommends when several pools reach one database."),
+        MartenDataSourceOriginKind.HandedIn => new(
+            "Data source",
+            "the application's own data source, handed to Marten directly",
+            "Marten did not build this NpgsqlDataSource: the application gave it to Marten (UseNpgsqlDataSource(), or StoreOptions.Connection(dataSource)), so Marten draws on the application's pool "
+            + "and has none of its own. That is what check C18, Several pools to one database in this process, recommends when several pools reach one database."),
         MartenDataSourceOriginKind.Marten => new(
             "Data source",
             "Marten's own",
@@ -166,8 +165,42 @@ internal static class MartenConnectionSection
         _ => new(
             "Data source",
             "not known",
-            "Marten does not expose this database's data source, so the studio cannot say whether it is one the application registered."),
+            "Marten does not say whether this database's data source is one it built or one it was handed, so the studio cannot say where it came from."
+            + (origin.Registered > 0
+                ? " The application registers " + origin.Registered.ToString(CultureInfo.InvariantCulture) + " NpgsqlDataSource" + (origin.Registered == 1 ? string.Empty : "s")
+                  + "; whether Marten uses one of them could not be told without building it, and the studio never builds one."
+                : string.Empty)),
     };
+
+    /// <summary>
+    /// <c>DisableNpgsqlLogging</c> is applied only inside Marten's own data-source factory, so it says nothing about a data source
+    /// the application built or handed over: that one logs as its own builder was told (<c>AddNpgsqlDataSource</c> forwards Npgsql's log
+    /// lines to the application's logger factory).
+    /// </summary>
+    private static ConnectionObservedLine NpgsqlLogging(MartenConnectionOptions options, MartenDataSourceOrigin origin)
+    {
+        string state = options.NpgsqlLoggingDisabled ? "disabled" : "enabled";
+        string line = "StoreOptions.DisableNpgsqlLogging, default true (Marten 9), applies only to data sources Marten builds from a connection string. ";
+
+        return origin.Kind switch
+        {
+            MartenDataSourceOriginKind.Application or MartenDataSourceOriginKind.HandedIn => new(
+                "Npgsql logging",
+                "no effect here",
+                line + "Marten did not build this data source, so its logging is what the application's builder set (AddNpgsqlDataSource forwards Npgsql's log lines to the application's loggers); "
+                + "the option is " + state + " and changes nothing for it."),
+            MartenDataSourceOriginKind.Marten => new(
+                "Npgsql logging",
+                state,
+                line + (options.NpgsqlLoggingDisabled
+                    ? "Npgsql's own log lines are not forwarded to the application's loggers."
+                    : "Npgsql's own log lines are forwarded to the application's loggers, which is noisy on a busy application; set it to true for quieter logs.")),
+            _ => new(
+                "Npgsql logging",
+                state,
+                line + "The studio could not tell whether Marten built this database's data source, so it cannot say whether the option reaches it."),
+        };
+    }
 
     private static ConnectionObservedLine Sticky(MartenConnectionOptions options, int? poolMax)
     {
@@ -190,7 +223,7 @@ internal static class MartenConnectionSection
         + (origin.MultiHost
             ? "Marten's data source names several hosts, so these choose the host of each session."
             : "Marten's data source names one host, so they have no effect here.")
-        + (origin.MultiHost && options.WritesCanLandOnAStandby ? " WriteSessionPreference " + options.WritePreference + " can send a write to a standby." : string.Empty));
+        + (origin.MultiHost && options.WritesCanLandOnAStandby ? " WriteSessionPreference " + options.WritePreference + " " + options.WriteStandbyClause + "." : string.Empty));
 
     private static ConnectionObservedLine Daemon(MartenDaemonNeeds? daemon, int? poolMax)
     {
@@ -198,7 +231,7 @@ internal static class MartenConnectionSection
 
         if (daemon is null)
         {
-            return new(Label, "not known yet", "The health sweep has not looked at the daemon for this database yet; it has by the next refresh. Check C09, Async shards against the pool, weighs it against the pool.");
+            return new(Label, "not known yet", "No health sweep has looked at the daemon for this database yet; this row is filled in as of the last health sweep once there is one. Check C09, Async shards against the pool, weighs it against the pool.");
         }
 
         if (!daemon.Hosted)
@@ -230,10 +263,15 @@ internal static class MartenConnectionSection
             ConnectionCardKind.Note,
             "Marten has a pool of its own beside the application's data source",
             "If the NpgsqlDataSource the application registers connects to this database too, the process holds two pools to it: each may open up to its own Maximum Pool Size, "
-            + "and each retires idle connections separately. Pointing Marten at the registered data source gives both one pool.",
+            + "and each retires idle connections separately. Pointing Marten at the registered data source gives both one pool. "
+            + "Keep a connection string beside " + origin.UseCall + " and a Connection(...) that is applied after it replaces the shared data source with a pool Marten builds, "
+            + "so both pools stay open: remove the connection string.",
             [],
             [],
-            [new ConnectionFix("Marten registration", "services.AddMarten(options =>\n    {\n        // ...\n    })\n    .UseNpgsqlDataSource();")])
+            [new ConnectionFix(
+                "Marten registration",
+                "services.AddMarten(options =>\n    {\n        // Remove options.Connection(...) and the connection-string argument of AddMarten(...):\n"
+                + "        // " + origin.UseCall + " supplies it.\n        // ...\n    })\n    ." + origin.UseCall + ";")])
         {
             Code = "C18",
         };

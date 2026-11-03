@@ -162,7 +162,8 @@ public sealed class ConnectionPageBuilderTests
             .Should().NotContain(static x => x.Contains("not on this page", StringComparison.Ordinal));
 
         // Without the contribution the hint is exactly its own.
-        View(Facts("Host=a.example,b.example;Database=app;Username=svc", Observed())).Cards.Concat(view.Notes).Single(static x => x.Code == ConnectionHintIds.MultiHost)
+        ConnectionPageView plain = View(Facts("Host=a.example,b.example;Database=app;Username=svc", Observed()));
+        plain.Cards.Concat(plain.Notes).Single(static x => x.Code == ConnectionHintIds.MultiHost)
             .Text.Should().NotContain("The studio's own sentence.");
     }
 

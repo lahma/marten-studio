@@ -109,37 +109,40 @@ internal static class ConfigurationDescriber
 
         return
         [
-            new("Command timeout", timeout.Value, TimeoutMember(timeout, database is not null)),
+            new("Command timeout", timeout.Value, "StoreOptions.CommandTimeout") { Note = TimeoutNote(timeout, database is not null) },
             new(
                 "Command timeout in the connection string",
                 database is null ? "not reported" : timeout.ConnectionStringValue,
-                "the Command Timeout of the connection string Marten connects with (IMartenDatabase.ConfiguredCommandTimeout); Npgsql's own default of 30 s does not count as named"),
+                "IMartenDatabase.ConfiguredCommandTimeout")
+            {
+                Note = "The Command Timeout of the connection string Marten connects with. \"Not named\" means the string has none; Npgsql's own default of 30 s does not count as named.",
+            },
             new("Sticky connection lifetimes", YesNo(connection.StickyConnections), "StoreOptions.UseStickyConnectionLifetimes"),
-            new("Npgsql logging disabled", YesNo(connection.NpgsqlLoggingDisabled), "StoreOptions.DisableNpgsqlLogging"),
+            new("Npgsql logging disabled", YesNo(connection.NpgsqlLoggingDisabled), "StoreOptions.DisableNpgsqlLogging (data sources Marten builds)")
+            {
+                Note = "Applies only to a data source Marten builds from a connection string. A data source the application hands to Marten (UseNpgsqlDataSource()) logs as the application's own builder set it.",
+            },
             new("Connection tracing", connection.TrackConnections, "StoreOptions.OpenTelemetry.TrackConnections"),
             new("Hi-lo block size", Number(connection.HiloMaxLo), "StoreOptions.Advanced.HiloSequenceDefaults.MaxLo"),
             new("Hi-lo attempts to advance", Number(connection.HiloMaxAdvanceAttempts), "StoreOptions.Advanced.HiloSequenceDefaults.MaxAdvanceToNextHiAttempts"),
             new("Read session preference", connection.ReadPreference.ToString(), "StoreOptions.Advanced.MultiHostSettings.ReadSessionPreference"),
             new("Write session preference", connection.WritePreference.ToString(), "StoreOptions.Advanced.MultiHostSettings.WriteSessionPreference"),
             new("Schema apply lock id", Number(connection.ApplyChangesLockId), "StoreOptions.ApplyChangesLockId"),
-            new("Row-level security", connection.RlsConfigured ? "configured" : "not configured", "StoreOptions.UseRowLevelSecurity(...) sets StoreOptions.RlsTenantSessionSetting"),
+            new("Row-level security", connection.RlsConfigured ? "configured" : "not configured", "StoreOptions.UseRowLevelSecurity(...)")
+            {
+                Note = "Configured when UseRowLevelSecurity(...) has set StoreOptions.RlsTenantSessionSetting. The setting's name is the application's own and is never shown here.",
+            },
         ];
     }
 
-    /// <summary>Where the command timeout comes from, in words a person can act on.</summary>
-    private static string TimeoutMember(MartenCommandTimeout timeout, bool databaseKnown) => timeout.Basis switch
-    {
-        MartenCommandTimeoutBasis.StoreOption =>
-            "StoreOptions.CommandTimeout, which differs from Marten's default of " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s and so wins",
-        MartenCommandTimeoutBasis.Undetermined =>
-            "StoreOptions.CommandTimeout is " + timeout.StoreSeconds.ToString(CultureInfo.InvariantCulture) + " s and the connection string names " + timeout.ConnectionStringValue
-            + ": Marten uses the connection string's when the option was left alone and the option's when it was set on purpose, and does not say which. Set StoreOptions.CommandTimeout explicitly to remove the doubt",
-        MartenCommandTimeoutBasis.Agreed =>
-            "StoreOptions.CommandTimeout and the connection string's Command Timeout, which agree",
-        _ => databaseKnown
-            ? "StoreOptions.CommandTimeout, left at Marten's default of " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s: nothing sets it"
-            : "StoreOptions.CommandTimeout (Marten's default is " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s); the connection string's was not read",
-    };
+    /// <summary>
+    /// Where the command timeout comes from, in words a person can act on - the same sentence the Connection page says, so the two
+    /// never disagree. Without a database the connection string was not read, and nothing is said about it.
+    /// </summary>
+    private static string TimeoutNote(MartenCommandTimeout timeout, bool databaseKnown) =>
+        timeout.Basis == MartenCommandTimeoutBasis.Default && !databaseKnown
+            ? "Marten's default is " + StoreOptions.DefaultTimeout.ToString(CultureInfo.InvariantCulture) + " s; the connection string's Command Timeout was not read."
+            : timeout.Rule;
 
     /// <summary>
     /// The five safe fields of a <see cref="DatabaseDescriptor" />.

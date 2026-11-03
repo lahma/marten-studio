@@ -25,8 +25,6 @@ namespace MartenStudio.Services.Connection;
 /// <param name="UpdateBatchSize"><c>UpdateBatchSize</c>.</param>
 /// <param name="ApplyChangesLockId"><c>ApplyChangesLockId</c>.</param>
 /// <param name="RlsConfigured">Whether <c>RlsTenantSessionSetting</c> is set.</param>
-/// <param name="UseIdentityMapForAggregates"><c>Events.UseIdentityMapForAggregates</c>.</param>
-/// <param name="AutoDiscoverTagTypes"><c>Events.AutoDiscoverTagTypes</c>.</param>
 internal sealed record MartenConnectionOptions(
     MartenCommandTimeout CommandTimeout,
     bool StickyConnections,
@@ -38,9 +36,7 @@ internal sealed record MartenConnectionOptions(
     int HiloMaxAdvanceAttempts,
     int UpdateBatchSize,
     int ApplyChangesLockId,
-    bool RlsConfigured,
-    bool UseIdentityMapForAggregates,
-    bool AutoDiscoverTagTypes)
+    bool RlsConfigured)
 {
     /// <summary>Marten's defaults (9.57), which the rows print beside the value.</summary>
     internal static class Defaults
@@ -61,9 +57,17 @@ internal sealed record MartenConnectionOptions(
         public const int ApplyChangesLockId = 4004;
     }
 
-    /// <summary>Whether a write preference can send a write to a standby: <c>Any</c>, <c>Standby</c>, <c>PreferStandby</c> and <c>ReadOnly</c> can.</summary>
+    /// <summary>
+    /// Whether a write preference can send a write to a standby: <c>Any</c>, <c>Standby</c>, <c>PreferStandby</c> and <c>ReadOnly</c>
+    /// can, and so can <c>PreferPrimary</c>, which falls back to a standby when no primary answers. Only <c>ReadWrite</c> and
+    /// <c>Primary</c> always mean a primary.
+    /// </summary>
     public bool WritesCanLandOnAStandby => WritePreference is TargetSessionAttributes.Any
-        or TargetSessionAttributes.Standby or TargetSessionAttributes.PreferStandby or TargetSessionAttributes.ReadOnly;
+        or TargetSessionAttributes.Standby or TargetSessionAttributes.PreferStandby or TargetSessionAttributes.ReadOnly
+        or TargetSessionAttributes.PreferPrimary;
+
+    /// <summary>The phrase that says a write can reach a standby, and under what condition when the preference is only a preference.</summary>
+    public string WriteStandbyClause => "can send a write to a standby" + (WritePreference == TargetSessionAttributes.PreferPrimary ? " when no primary answers" : string.Empty);
 
     /// <summary>Reads the options that bear on connections.</summary>
     /// <param name="options">The store's options.</param>
@@ -83,8 +87,6 @@ internal sealed record MartenConnectionOptions(
             options.Advanced.HiloSequenceDefaults.MaxAdvanceToNextHiAttempts,
             options.UpdateBatchSize,
             options.ApplyChangesLockId,
-            options.RlsTenantSessionSetting is { Length: > 0 },
-            options.Events.UseIdentityMapForAggregates,
-            options.Events.AutoDiscoverTagTypes);
+            options.RlsTenantSessionSetting is { Length: > 0 });
     }
 }
