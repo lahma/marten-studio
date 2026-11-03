@@ -275,8 +275,8 @@ where mt_dotnet_type like 'JasperFx.Events.Compacted%'
 
 The finding names up to five streams, with the version each was compacted at. On a conjoined event store a stream
 belongs to one tenant, so there is **one finding per tenant** that holds a damaged stream (its subject is the tenant,
-up to ten tenants; the finding's caveat says when that cap was hit), and each is shown only to a visitor through `ViewDatabaseActivity` whom the store policy lets see
-that tenant, as E03's is. Elsewhere the finding is the database's and names its streams at the check's own gate.
+up to ten tenants; the finding's caveat says when that cap was hit), and each is shown only to a visitor through
+`ViewDatabaseActivity` whom the store policy lets see that tenant, as E03's is. Elsewhere the finding is the database's and names its streams at the check's own gate.
 
 ## Not covered
 

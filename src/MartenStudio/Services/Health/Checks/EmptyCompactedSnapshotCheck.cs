@@ -150,7 +150,8 @@ internal sealed class EmptyCompactedSnapshotCheck : HealthCheck<EmptySnapshotFac
         if (facts.Damaged == 0)
         {
             return HealthVerdict.Quiet(
-                "The event at the compaction watermark of " + Probed(facts) + " holds a snapshot: no stream was compacted into an empty one.");
+                "The event at the compaction watermark of " + Probed(facts) + " holds a snapshot: none of them was compacted into an empty one. "
+                + "Streams compacted by a Marten before 9.32 have no watermark and are not seen.");
         }
 
         if (!facts.Conjoined)

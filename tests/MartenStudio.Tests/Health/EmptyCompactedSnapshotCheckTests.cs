@@ -40,7 +40,7 @@ public class EmptyCompactedSnapshotCheckTests
         HealthVerdict verdict = Evaluate([Summary(1_234, 0)]);
 
         verdict.Findings.Should().BeEmpty("a healthy compacted stream is not a finding");
-        verdict.Note.Should().Contain("1,234 compacted streams").And.Contain("holds a snapshot");
+        verdict.Note.Should().Contain("1,234 compacted streams").And.Contain("holds a snapshot").And.Contain("9.32");
     }
 
     [Fact]
