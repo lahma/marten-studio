@@ -25,7 +25,7 @@
 
     <p class="ms-muted ms-overview-connection">
         <a href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope)">Connection</a>:
-        TLS @read.Tls.Text
+        @read.Tls.Summary
         @if (read.PoolMax is { } pool)
         {
             <text> · pool @pool.ToString(CultureInfo.InvariantCulture)</text>
@@ -67,7 +67,8 @@
 
         try
         {
-            ConnectionPageView read = await Insights.GetAsync(scope, lifetime.Token);
+            // The line shows no peak: it must neither read the history nor record a reveal of application-grade data.
+            ConnectionPageView read = await Insights.GetGlanceAsync(scope, lifetime.Token);
 
             // A read for a scope the Overview has since moved on from is dropped: the newer read draws its own.
             if (loaded == asked)

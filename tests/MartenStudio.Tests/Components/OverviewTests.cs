@@ -68,7 +68,7 @@ public class OverviewTests
 
         var page = context.Render<Overview>();
 
-        page.WaitForAssertion(() => context.Connection.Requests.Should().NotBeEmpty());
+        page.WaitForAssertion(() => context.Connection.GlanceRequests.Should().NotBeEmpty());
         page.FindAll(".ms-overview-connection").Should().BeEmpty();
     }
 

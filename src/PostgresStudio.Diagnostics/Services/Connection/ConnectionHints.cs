@@ -286,12 +286,15 @@ internal static class ConnectionHints
             return;
         }
 
-        string text = "The pool peaked at " + peak.Peak.ToString(CultureInfo.InvariantCulture) + " of " + peak.Max.ToString(CultureInfo.InvariantCulture)
-            + " connections in the last " + peak.Window + ".";
+        // The history counts sessions per server by application_name: every process, replica and database using the name, which is
+        // more than this process's pool. Say so, and never call it the pool's peak.
+        string text = "Sessions named '" + peak.Application + "' peaked at " + peak.Peak.ToString(CultureInfo.InvariantCulture)
+            + " on this server in the last " + peak.Window + " (every process using this Application Name, in every database); this process's pool allows "
+            + peak.Max.ToString(CultureInfo.InvariantCulture) + ".";
 
         if (context.TightHeadroom)
         {
-            text += " The server's connection headroom is tight (C03), so a lower Maximum Pool Size is worth weighing against the application's peak.";
+            text += " The server's connection headroom is tight (C03), so a lower Maximum Pool Size is worth weighing against how many connections this application needs.";
         }
 
         hints.Add(new(ConnectionHintIds.PoolSize, "Maximum Pool Size", text, null, null));

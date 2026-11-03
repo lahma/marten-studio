@@ -57,9 +57,11 @@ public class ConnectionPageLiveTests(PostgresFixture postgres)
             StudioScope scope = new("default", "default", null);
             IConnectionInsightService service = circuit.Get<IConnectionInsightService>();
 
+            DateTimeOffset before = DateTimeOffset.UtcNow;
             ConnectionPageView view = await service.GetAsync(scope, Token);
 
             view.Refusal.Should().Be(ConnectionRefusal.None, view.Reason);
+            view.MeasuredAt.Should().BeOnOrAfter(before.AddSeconds(-1)).And.BeOnOrBefore(DateTimeOffset.UtcNow, "the read time is the facts' own, taken when they were read");
             view.Readable.Should().BeTrue();
             view.Header.Single(static x => x.Label == "Role").Value.Should().Be(Login);
             view.Header.Single(static x => x.Label == "Database").Value.Should().Be(Database);

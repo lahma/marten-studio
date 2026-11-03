@@ -96,15 +96,80 @@ public sealed class ConnectionPageBuilderTests
     }
 
     [Fact]
+    public void Gssapi_encryption_is_called_encryption_and_never_tls()
+    {
+        ConnectionPageView view = View(Facts(Remote, Observed(ssl: false, gssEncrypted: true)));
+
+        view.Header.Select(static x => x.Label).Should().Contain("Encryption").And.NotContain("TLS");
+        Fact(view, "Encryption").Should().Be("GSSAPI");
+        view.Tls.Summary.Should().Be("Encryption: GSSAPI");
+        View(Facts(Remote, Observed(ssl: true))).Tls.Summary.Should().StartWith("TLS ");
+    }
+
+    [Fact]
+    public void Settings_that_could_not_be_read_never_claim_a_certificate_check_or_an_ssl_mode()
+    {
+        ConnectionFacts facts = Facts("Host=db.example;Maximum Pool Size=not-a-number", Observed(ssl: true));
+
+        facts.Settings.Readable.Should().BeFalse();
+
+        ConnectionPageView encrypted = View(facts);
+
+        encrypted.Tls.State.Should().Be(ConnectionTlsState.EncryptedVerificationUnknown);
+        encrypted.Tls.Text.Should().Be("encrypted; whether the certificate is checked could not be read");
+        encrypted.Tls.Detail.Should().NotContain("SSL Mode").And.NotContain("is not checked");
+        Fact(encrypted, "TLS").Should().Be(encrypted.Tls.Text);
+
+        ConnectionPageView plain = View(Facts("Host=db.example;Maximum Pool Size=not-a-number", Observed(ssl: false)));
+
+        plain.Tls.State.Should().Be(ConnectionTlsState.NotEncrypted);
+        plain.Tls.Detail.Should().NotContain("SSL Mode", "no mode was read, so none is named");
+    }
+
+    [Fact]
+    public void The_platform_is_a_name_and_the_poolers_are_names_for_the_snapshot()
+    {
+        ConnectionPageView none = View(Facts("Host=db.example", Observed()));
+
+        none.PlatformName.Should().BeNull();
+        none.Poolers.Should().BeEmpty();
+
+        ConnectionPageView proxied = View(Facts("Host=app.proxy-abc123.eu-west-1.rds.amazonaws.com", Observed(), PostgresPlatformKind.AmazonRds));
+
+        proxied.PlatformName.Should().Be("Amazon RDS for PostgreSQL");
+        proxied.Poolers.Should().Equal("Amazon RDS Proxy");
+    }
+
+    [Fact]
+    public void Contributions_with_a_repeated_id_are_made_distinct_so_the_page_never_repeats_a_key()
+    {
+        ConnectionCard card(string id) => new(id, ConnectionCardKind.Contributed, "Advice", "text", ["X"], [], []);
+        ConnectionContribution first = new()
+        {
+            Cards = [card("conn-card-x"), card("conn-card-x")],
+            Sections = [new("conn-extra", "One", null, [], [card("conn-card-x")]), new("conn-extra", "Two", null, [], []), new("conn-settings", "Three", null, [], [])],
+        };
+        ConnectionContribution second = new() { Cards = [card("conn-card-x")] };
+
+        ConnectionPageView view = View(Facts("Host=db.example", Observed()), contributions: [first, second]);
+
+        string[] cardIds = [.. view.Cards.Concat(view.Notes).Concat(view.Contributed.SelectMany(static x => x.Cards)).Select(static x => x.Id)];
+        cardIds.Should().OnlyHaveUniqueItems();
+        cardIds.Should().Contain(["conn-card-x", "conn-card-x-2", "conn-card-x-3", "conn-card-x-4"]);
+        view.Contributed.Select(static x => x.Id).Should().OnlyHaveUniqueItems().And.NotContain("conn-settings");
+        view.Contributed.Select(static x => x.Id).Should().Equal("conn-extra", "conn-extra-2", "conn-settings-2");
+    }
+
+    [Fact]
     public void The_pool_fact_says_what_the_pool_is_doing_now_and_what_it_peaked_at()
     {
         ConnectionFacts facts = Facts("Host=db.example;Maximum Pool Size=100", Observed());
 
         Fact(View(facts, pool: new SessionPoolSummary(true, 3, 2, 100, true)), "Pool").Should().Be("max 100 · 3 in use, 2 idle");
-        Fact(View(facts, pool: new SessionPoolSummary(true, 3, 2, 100, true), peak: new ConnectionPoolPeak(41, 100, "7 days")), "Pool")
-            .Should().Be("max 100 · 3 in use, 2 idle · peak 41 in the last 7 days");
+        Fact(View(facts, pool: new SessionPoolSummary(true, 3, 2, 100, true), peak: new ConnectionPoolPeak(41, 100, "7 days", "orders")), "Pool")
+            .Should().Be("max 100 · 3 in use, 2 idle · peak 41 named 'orders', 7 days", "the peak is the sessions with this name on the server, not this pool's");
         Fact(View(facts, pool: new SessionPoolSummary(false, null, null, 100, true, Ambiguous: true)), "Pool")
-            .Should().Contain("not told apart");
+            .Should().Be("max 100 · live counts unavailable: several pools in this process share this connection string");
         Fact(View(Facts("Host=db.example;Pooling=false", Observed())), "Pool").Should().Be("no pool (Pooling=false)");
         View(Facts("Host=db.example;Pooling=false", Observed())).PoolMax.Should().BeNull();
     }
@@ -262,10 +327,11 @@ public sealed class ConnectionPageBuilderTests
     public void A_pool_peak_is_a_note_until_the_servers_headroom_is_tight_and_then_it_counts()
     {
         ConnectionFacts facts = Facts("Host=db.example;Maximum Pool Size=100;Application Name=orders", Observed());
-        ConnectionPoolPeak peak = new(41, 100, "7 days, counted by application name");
+        ConnectionPoolPeak peak = new(41, 100, "7 days", "orders");
 
         View(facts, peak: peak).Notes.Single(static x => x.Code == ConnectionHintIds.PoolSize).Text
-            .Should().Contain("peaked at 41 of 100").And.Contain("counted by application name");
+            .Should().Be("Sessions named 'orders' peaked at 41 on this server in the last 7 days (every process using this Application Name, in every database); this process's pool allows 100.")
+            .And.NotContain("The pool peaked");
 
         View(facts, Report(0, null, Finding("C03", HealthSeverity.Warning, "Headroom is tight")), peak: peak).Cards
             .Should().Contain(static x => x.Code == ConnectionHintIds.PoolSize, "C03 reports tight headroom, the one case lowering is weighed");

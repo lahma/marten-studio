@@ -276,6 +276,18 @@ internal sealed class FakeConnectionInsightService : PostgresStudio.Services.Con
 
     public List<StudioScope> ApplicationRequests { get; } = [];
 
+    /// <summary>Every scope the Overview's line asked the glance of (no peak).</summary>
+    public List<StudioScope> GlanceRequests { get; } = [];
+
+    public Task<PostgresStudio.Services.Connection.ConnectionPageView> GetGlanceAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        GlanceRequests.Add(scope);
+
+        return Failure is not null
+            ? Task.FromException<PostgresStudio.Services.Connection.ConnectionPageView>(Failure)
+            : Task.FromResult(View);
+    }
+
     public Task<PostgresStudio.Services.Connection.ConnectionPageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         Requests.Add(scope);

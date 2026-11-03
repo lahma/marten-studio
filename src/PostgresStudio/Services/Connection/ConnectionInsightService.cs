@@ -25,6 +25,15 @@ internal interface IConnectionInsightService
     Task<ConnectionPageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The same view for a caller that shows no peak - the Overview's one line. The pool's peak, counted by application name, is
+    /// neither read nor recorded as a reveal of application-grade data: only a caller that draws it asks for it
+    /// (<see cref="GetAsync" />).
+    /// </summary>
+    /// <param name="scope">The visitor's scope; its tenant is dropped, because a connection belongs to no tenant.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait, never the shared read.</param>
+    Task<ConnectionPageView> GetGlanceAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// "This application's sessions": the sessions the studio's login has in this database, by application. The activity gate's -
     /// <c>ViewDatabaseActivity</c>, then the store policy and the write policy for the database as a whole - refused with a value
     /// and audited; the first read in a circuit is one ring entry.
@@ -54,8 +63,9 @@ internal interface IConnectionInsightService
 /// <para>
 /// <b>Not audited, but for the sessions.</b> The page is a read of configuration, like Marten Studio's Configuration page, and
 /// records nothing. What names other programs' activity - the sessions, and the pool's peak counted by application name - is one
-/// ring entry under <c>ViewDatabaseActivity</c> for the first reveal per circuit, per store and database; every refusal of it is
-/// audited (hard rule 5).
+/// ring entry each under <c>ViewDatabaseActivity</c> for the first reveal per circuit, per store and database (each has its own
+/// ledger key and signature, so one never shadows the other, and the Overview's glance, which shows no peak, records neither);
+/// every refusal of it is audited (hard rule 5).
 /// </para>
 /// <para>
 /// <b>No connection string leaves the facts.</b> This service sees redacted records only; a contributor is handed the same.
@@ -69,10 +79,18 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
     /// <summary>What the audit ring says was shown.</summary>
     internal const string ApplicationsTarget = "this application's sessions by application name";
 
+    /// <summary>What the audit ring says was shown when it was the pool's peak.</summary>
+    internal const string PoolPeakTarget = "the pool's peak, counted by application name";
+
     private const string LedgerSchema = "(connection)";
-    private const string LedgerRelation = "applications";
     private const string LedgerKind = "details";
-    private const string Signature = "applications";
+
+    // The sessions and the pool's peak are two reveals with a ledger entry each: one key and one signature would let the first
+    // shadow the second, so a reveal of the sessions after a peak (or the other way round) would never be recorded.
+    private const string SessionsRelation = "applications";
+    private const string SessionsSignature = "applications";
+    private const string PeakRelation = "pool-peak";
+    private const string PeakSignature = "pool-peak";
 
     private readonly IStudioSettings settings;
     private readonly StudioCapabilityGuard capabilities;
@@ -120,7 +138,14 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
     internal int RecordedReads => ledger.Count;
 
     /// <inheritdoc />
-    public async Task<ConnectionPageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public Task<ConnectionPageView> GetAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        ReadAsync(scope, includePoolPeak: true, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<ConnectionPageView> GetGlanceAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
+        ReadAsync(scope, includePoolPeak: false, cancellationToken);
+
+    private async Task<ConnectionPageView> ReadAsync(StudioScope scope, bool includePoolPeak, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -182,7 +207,9 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
                     : "The connection settings could not be read (" + Describe(exception) + ").");
         }
 
-        ConnectionPoolPeak? peak = await PoolPeakAsync(resolved, whole, read.Settings, activity, cancellationToken).ConfigureAwait(false);
+        ConnectionPoolPeak? peak = includePoolPeak
+            ? await PoolPeakAsync(resolved, whole, read.Settings, activity, cancellationToken).ConfigureAwait(false)
+            : null;
 
         List<ConnectionContribution> contributions = [];
         ConnectionContributorContext context = new(resolved, read.Settings, read.Observed);
@@ -215,7 +242,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
             PoolPeak = peak,
             Contributions = contributions,
             Activity = activity,
-            MeasuredAt = DateTimeOffset.UtcNow,
+            MeasuredAt = read.ReadAt,
         });
     }
 
@@ -279,7 +306,13 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
             ConnectionApplicationsRead read = await facts.ReadApplicationsAsync(resolved, cancellationToken).ConfigureAwait(false);
             ConnectionFacts connection = await facts.GetAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-            RecordFirstReveal(resolved, whole, "Application sessions shown: " + read.Rows.Count.ToString(CultureInfo.InvariantCulture) + " of "
+            RecordFirstReveal(
+                resolved,
+                whole,
+                SessionsRelation,
+                SessionsSignature,
+                ApplicationsTarget,
+                "Application sessions shown: " + read.Rows.Count.ToString(CultureInfo.InvariantCulture) + " of "
                 + read.ApplicationCount.ToString(CultureInfo.InvariantCulture) + " applications.");
 
             return new ConnectionApplicationsView
@@ -337,9 +370,9 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
             return null;
         }
 
-        RecordFirstReveal(resolved, whole, "The pool's peak shown, counted by application name.");
+        RecordFirstReveal(resolved, whole, PeakRelation, PeakSignature, PoolPeakTarget, "The pool's peak shown, counted by application name.");
 
-        return new ConnectionPoolPeak(own.Peak, connection.Values.MaxPoolSize, WindowText(read.Window) + ", counted by application name");
+        return new ConnectionPoolPeak(own.Peak, connection.Values.MaxPoolSize, WindowText(read.Window), application);
     }
 
     /// <summary>"7 days", "36 hours".</summary>
@@ -385,15 +418,15 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
             && string.Equals(asked.DatabaseId, whole.DatabaseId, StringComparison.Ordinal))
         || await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false);
 
-    /// <summary>One ring entry and one event 9245-style line for the first reveal of application-grade data in this circuit.</summary>
-    private void RecordFirstReveal(ResolvedSource resolved, StudioScope whole, string message)
+    /// <summary>One ring entry for the first reveal, in this circuit, of one kind of application-grade data.</summary>
+    private void RecordFirstReveal(ResolvedSource resolved, StudioScope whole, string relation, string signature, string target, string message)
     {
-        if (!ledger.TryRecord(TableRowAuditLedger.Key(resolved.Source.Key, resolved.Target.Identity, LedgerSchema, LedgerRelation, LedgerKind), Signature, out _))
+        if (!ledger.TryRecord(TableRowAuditLedger.Key(resolved.Source.Key, resolved.Target.Identity, LedgerSchema, relation, LedgerKind), signature, out _))
         {
             return;
         }
 
-        audit.Record(ApplicationsAction, ApplicationsTarget, succeeded: true, message, StudioCapability.ViewDatabaseActivity, whole);
+        audit.Record(ApplicationsAction, target, succeeded: true, message, StudioCapability.ViewDatabaseActivity, whole);
     }
 
     private string StorePolicyDenial()

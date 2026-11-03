@@ -130,6 +130,12 @@ internal sealed record ConnectionFacts
     /// <summary>The redacted settings, with the hints evaluated against what the server saw.</summary>
     public required ConnectionSettings Settings { get; init; }
 
+    /// <summary>
+    /// When the facts were read (the sweep's or the page's own read), by the clock the context was given - not when somebody looked
+    /// at them, which can be up to a <c>HealthInterval</c> later.
+    /// </summary>
+    public DateTimeOffset ReadAt { get; init; }
+
     /// <summary>What the server saw, or <see langword="null" /> when it was not read (see <see cref="ObservedNotRead" />).</summary>
     public ConnectionObserved? Observed { get; init; }
 
@@ -211,6 +217,7 @@ internal sealed record ConnectionFacts
         return new ConnectionFacts
         {
             Settings = settings,
+            ReadAt = context.Now,
             Observed = observed,
             ObservedNotRead = notRead,
             Platform = platform,

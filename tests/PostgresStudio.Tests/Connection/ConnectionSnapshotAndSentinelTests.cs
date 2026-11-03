@@ -148,7 +148,8 @@ public sealed class ConnectionSnapshotAndSentinelTests
 
         connection.GetProperty("tls").GetString().Should().Be("encryptedNotVerified");
         connection.GetProperty("npgsqlVersion").GetString().Should().Be(NpgsqlSettingsReader.LoadedVersion);
-        connection.GetProperty("platform").GetString().Should().Be("no managed platform or pooler detected");
+        connection.GetProperty("platform").ValueKind.Should().Be(JsonValueKind.Null, "no managed platform was detected, and a name is not a sentence");
+        connection.GetProperty("pooler").ValueKind.Should().Be(JsonValueKind.Null);
 
         JsonElement host = connection.GetProperty("settings").EnumerateArray().Single(static x => x.GetProperty("keyword").GetString() == "Host");
         host.GetProperty("value").GetString().Should().Be("db.example");
@@ -163,6 +164,21 @@ public sealed class ConnectionSnapshotAndSentinelTests
         JsonElement hint = connection.GetProperty("hints").EnumerateArray().Single(static x => x.GetProperty("id").GetString() == "TLS");
         hint.GetProperty("connectionStringFix").GetString().Should().StartWith("SSL Mode=VerifyFull");
         hint.GetProperty("builderFix").GetString().Should().Contain("SslMode.VerifyFull");
+    }
+
+    [Fact]
+    public void The_snapshot_names_the_platform_and_lists_the_poolers_in_front_of_the_server()
+    {
+        ConnectionPageView view = View(
+            Facts("Host=app.proxy-abc123.eu-west-1.rds.amazonaws.com", Observed(), PostgresPlatformKind.AmazonRds),
+            Report(),
+            GateClosed);
+
+        using JsonDocument document = JsonDocument.Parse(Json(view, applications: null));
+        JsonElement connection = document.RootElement.GetProperty("connection");
+
+        connection.GetProperty("platform").GetString().Should().Be("Amazon RDS for PostgreSQL");
+        connection.GetProperty("pooler").EnumerateArray().Select(static x => x.GetString()).Should().Equal("Amazon RDS Proxy");
     }
 
     [Fact]

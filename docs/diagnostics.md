@@ -458,7 +458,7 @@ Adding a key keeps the version. Removing or renaming one, changing its type or c
 
 | `schemaVersion` | Written by | What changed |
 |---|---|---|
-| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. 1.0.1 added `connectionHistory`. 1.1 added `connection`, which only the studio's own Snapshot menu fills (the Connection page's settings, as the visitor's page shows them, passwords never among them); a snapshot a host asks `IPostgresDiagnostics` for writes `"connection": null`. |
+| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. 1.0.1 added `connectionHistory`. 1.1 added `connection`, which only the studio's own Snapshot menu fills (the Connection page's settings, as the visitor's page shows them, passwords never among them; `connection.platform` is the managed platform's name or `null`, `connection.pooler` the poolers detected in front of the server as an array of names or `null`, and `connection.tls` one of `verified`, `encryptedNotVerified`, `encryptedVerificationUnknown`, `encryptedByProxy`, `encryptedGss`, `notEncrypted`, `notEncryptedLocal`, `notVisible` or `notRead`); a snapshot a host asks `IPostgresDiagnostics` for writes `"connection": null`. |
 
 ## The Snapshot menu
 

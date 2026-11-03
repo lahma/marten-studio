@@ -134,12 +134,16 @@ internal static class ConnectionPageBuilder
             (card.Counts ? cards : notes).Add(card);
         }
 
-        foreach (ConnectionContribution contribution in inputs.Contributions)
+        // A contributor's ids are its own: two cards or sections with one id would end the circuit (a duplicate @key) and repeat an
+        // element id, so they are made distinct here, against each other and against the page's own.
+        IReadOnlyList<ConnectionContribution> contributions = Distinct(inputs.Contributions, [.. cards, .. notes]);
+
+        foreach (ConnectionContribution contribution in contributions)
         {
             cards.AddRange(contribution.Cards);
         }
 
-        IReadOnlyList<ConnectionCard> everyCard = [.. cards, .. notes, .. inputs.Contributions.SelectMany(static x => x.Sections).SelectMany(static x => x.Cards)];
+        IReadOnlyList<ConnectionCard> everyCard = [.. cards, .. notes, .. contributions.SelectMany(static x => x.Sections).SelectMany(static x => x.Cards)];
         List<ConnectionSettingView> rows = [.. settings.Rows.Select(row => SettingView(row, everyCard))];
 
         ConnectionTls tls = TlsOf(facts);
@@ -149,6 +153,8 @@ internal static class ConnectionPageBuilder
         {
             MeasuredAt = inputs.MeasuredAt,
             Header = Header(facts, tls, inputs),
+            PlatformName = facts.Platform.IsManaged ? facts.Platform.Name : null,
+            Poolers = PoolerNames(facts),
             Tls = tls,
             PoolMax = settings.Readable ? settings.Values.Pooling ? settings.Values.MaxPoolSize : null : null,
             Readable = settings.Readable,
@@ -164,10 +170,51 @@ internal static class ConnectionPageBuilder
             Observed = ObservedOf(facts),
             SettingsNotes = settings.Notes,
             NotVisible = NotVisible(),
-            Contributed = [.. inputs.Contributions.SelectMany(static x => x.Sections)],
+            Contributed = [.. contributions.SelectMany(static x => x.Sections)],
             Activity = inputs.Activity,
             Statements = [ObservedStatement()],
         };
+    }
+
+    /// <summary>The ids the page's own sections and notes use: a contributed section must not take one.</summary>
+    private static readonly string[] PageIds =
+        ["conn-not-visible", "conn-observed", "conn-sessions", "conn-settings", "conn-worth", "conn-notes", "conn-toggle-note"];
+
+    private static List<ConnectionContribution> Distinct(IReadOnlyList<ConnectionContribution> contributions, IEnumerable<ConnectionCard> own)
+    {
+        HashSet<string> ids = [.. PageIds, .. own.Select(static x => x.Id)];
+        List<ConnectionContribution> result = [];
+
+        foreach (ConnectionContribution contribution in contributions)
+        {
+            result.Add(contribution with
+            {
+                Cards = [.. contribution.Cards.Select(card => card with { Id = Unique(card.Id, ids) })],
+                Sections =
+                [
+                    .. contribution.Sections.Select(section => section with
+                    {
+                        Id = Unique(section.Id, ids),
+                        Cards = [.. section.Cards.Select(card => card with { Id = Unique(card.Id, ids) })],
+                    }),
+                ],
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary><paramref name="id" />, or the first <c>id-2</c>, <c>id-3</c> not yet taken; the result is taken.</summary>
+    private static string Unique(string id, HashSet<string> taken)
+    {
+        string candidate = id;
+
+        for (int n = 2; !taken.Add(candidate); n++)
+        {
+            candidate = id + "-" + n.ToString(CultureInfo.InvariantCulture);
+        }
+
+        return candidate;
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -191,7 +238,7 @@ internal static class ConnectionPageBuilder
             header.Add(new("Server", "not readable", "conn-settings"));
         }
 
-        header.Add(new("TLS", tls.Text, RowAnchor("SSL Mode"), TlsTone(tls.State)));
+        header.Add(new(tls.Label, tls.State == ConnectionTlsState.EncryptedGss ? "GSSAPI" : tls.Text, RowAnchor("SSL Mode"), TlsTone(tls.State)));
 
         if (settings.Readable)
         {
@@ -215,7 +262,10 @@ internal static class ConnectionPageBuilder
             : x.Host + ":" + x.Port.ToString(CultureInfo.InvariantCulture)));
     }
 
-    /// <summary>"max 100 · 3 in use, 2 idle · peak 41 in the last 7 days" - or why there is no pool to speak of.</summary>
+    /// <summary>
+    /// "max 100 · 3 in use, 2 idle · peak 41 named 'billing', 7 days" - or why there is no pool to speak of. The peak is the history's,
+    /// counted by <c>application_name</c> on the server: every process using the name, not this pool's.
+    /// </summary>
     internal static string PoolText(ConnectionSettings settings, SessionPoolSummary? pool, ConnectionPoolPeak? peak)
     {
         ConnectionValues v = settings.Values;
@@ -233,12 +283,12 @@ internal static class ConnectionPageBuilder
         }
         else if (pool is { Ambiguous: true })
         {
-            parts.Add("live numbers not told apart: more than one pool in this process uses this connection string");
+            parts.Add("live counts unavailable: several pools in this process share this connection string");
         }
 
         if (peak is not null)
         {
-            parts.Add("peak " + peak.Peak.ToString(CultureInfo.InvariantCulture) + " in the last " + peak.Window);
+            parts.Add("peak " + peak.Peak.ToString(CultureInfo.InvariantCulture) + " named '" + peak.Application + "', " + peak.Window);
         }
 
         return string.Join(" · ", parts);
@@ -253,18 +303,14 @@ internal static class ConnectionPageBuilder
             parts.Add(facts.Platform.Name);
         }
 
-        foreach (PoolerSign sign in facts.Settings.PoolerSigns)
-        {
-            string name = PoolerName(sign.Kind);
-
-            if (!parts.Contains(name))
-            {
-                parts.Add(name);
-            }
-        }
+        parts.AddRange(PoolerNames(facts));
 
         return parts.Count == 0 ? "no managed platform or pooler detected" : string.Join(" · ", parts);
     }
+
+    /// <summary>The poolers the settings show signs of, each once, in words.</summary>
+    private static List<string> PoolerNames(ConnectionFacts facts) =>
+        [.. facts.Settings.PoolerSigns.Select(static x => PoolerName(x.Kind)).Distinct(StringComparer.Ordinal)];
 
     /// <summary>The pooler a sign points at, in words.</summary>
     internal static string PoolerName(PoolerSignKind kind) => kind switch
@@ -302,18 +348,28 @@ internal static class ConnectionPageBuilder
                 : "The server was not asked.");
         }
 
-        string mode = settings.Readable ? settings.Values.SslMode : "Prefer";
+        // The mode is only ever the connection string's: where it could not be read, no sentence names one.
+        string mode = settings.Readable ? settings.Values.SslMode : string.Empty;
+        string modeText = settings.Readable ? " (SSL Mode=" + mode + ")" : string.Empty;
 
         if (observed.Ssl is true)
         {
             string protocol = observed.SslVersion is { Length: > 0 } version ? version : "TLS";
 
-            return settings.Readable && !settings.Values.CertificateNotVerified
-                ? new(ConnectionTlsState.Verified, "verified (" + mode + ")", protocol + ", and the server's certificate is checked (SSL Mode=" + mode + ").")
+            if (!settings.Readable)
+            {
+                return new(
+                    ConnectionTlsState.EncryptedVerificationUnknown,
+                    "encrypted; whether the certificate is checked could not be read",
+                    protocol + ", but the connection string could not be read, so whether the server's certificate is checked is not known.");
+            }
+
+            return !settings.Values.CertificateNotVerified
+                ? new(ConnectionTlsState.Verified, "verified (" + mode + ")", protocol + ", and the server's certificate is checked" + modeText + ".")
                 : new(
                     ConnectionTlsState.EncryptedNotVerified,
                     "encrypted, not verified",
-                    protocol + ", but the server's certificate is not checked (SSL Mode=" + mode + "), so anything between here and the server can pretend to be it.");
+                    protocol + ", but the server's certificate is not checked" + modeText + ", so anything between here and the server can pretend to be it.");
         }
 
         if (observed.Ssl is false)
@@ -336,7 +392,7 @@ internal static class ConnectionPageBuilder
                 return new(ConnectionTlsState.NotEncryptedLocal, "not encrypted (local)", "The host is a socket or loopback, so the connection never leaves this machine.");
             }
 
-            return new(ConnectionTlsState.NotEncrypted, "not encrypted", "The server reports no TLS on this connection (SSL Mode=" + mode + ").");
+            return new(ConnectionTlsState.NotEncrypted, "not encrypted", "The server reports no TLS on this connection" + modeText + ".");
         }
 
         return new(
@@ -418,7 +474,7 @@ internal static class ConnectionPageBuilder
         ConnectionHintIds.Lifetime => "Connections never recycle",
         ConnectionHintIds.MultiHost => "Writes can land on a standby",
         ConnectionHintIds.Keepalive => "Idle connections can be dropped without the pool noticing",
-        ConnectionHintIds.PoolSize => "How busy the pool gets, against its size",
+        ConnectionHintIds.PoolSize => "How many sessions carry this application's name, against the pool's size",
         ConnectionHintIds.Buffer => "Rows are larger than the read buffer",
         ConnectionHintIds.Prepare => settings.Values.MaxAutoPrepare > 0
             ? "Auto-prepare can break behind this pooler"

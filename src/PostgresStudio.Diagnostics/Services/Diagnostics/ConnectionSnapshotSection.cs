@@ -24,13 +24,22 @@ internal sealed record ConnectionSnapshotSection
     /// <summary>The loaded Npgsql's version, <c>9.0.4</c>.</summary>
     public string NpgsqlVersion { get; init; } = string.Empty;
 
-    /// <summary>The platform's name ("Amazon RDS", "self-hosted"), or <see langword="null" /> when it was not read.</summary>
+    /// <summary>The managed platform's name ("Amazon RDS"), or <see langword="null" /> when none was detected. A name, never a sentence.</summary>
     public string? Platform { get; init; }
 
-    /// <summary>What looks like a pooler in front of the server, in words, or <see langword="null" /> for none.</summary>
-    public string? Pooler { get; init; }
+    /// <summary>
+    /// The poolers detected in front of the server, by name ("Amazon RDS Proxy"), or <see langword="null" /> when none was. In the
+    /// JSON an array of strings.
+    /// </summary>
+    public IReadOnlyList<string>? Pooler { get; init; }
 
-    /// <summary>The TLS state: <c>verified</c>, <c>encryptedNotVerified</c>, <c>notEncrypted</c>, <c>notVisible</c> or <c>notRead</c>.</summary>
+    /// <summary>
+    /// How the connection is protected: <c>verified</c> (TLS, the server's certificate is checked), <c>encryptedNotVerified</c> (TLS,
+    /// the certificate is not checked), <c>encryptedVerificationUnknown</c> (TLS, but the settings could not be read, so whether the
+    /// certificate is checked is not known), <c>encryptedByProxy</c> (the Cloud SQL Auth Proxy wraps the way onward in TLS),
+    /// <c>encryptedGss</c> (GSSAPI encryption, not TLS), <c>notEncrypted</c>, <c>notEncryptedLocal</c> (a socket or loopback host),
+    /// <c>notVisible</c> (the reading role cannot see its own connection's state) or <c>notRead</c> (the server was not asked).
+    /// </summary>
     public string Tls { get; init; } = "notRead";
 
     /// <summary>Every keyword, in the page's order.</summary>

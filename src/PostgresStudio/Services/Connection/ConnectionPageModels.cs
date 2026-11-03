@@ -31,6 +31,9 @@ internal enum ConnectionTlsState
     /// <summary>TLS, and the server's certificate is not checked.</summary>
     EncryptedNotVerified,
 
+    /// <summary>TLS, but the settings could not be read, so whether the server's certificate is checked is not known.</summary>
+    EncryptedVerificationUnknown,
+
     /// <summary>Not on TLS, and not a local connection.</summary>
     NotEncrypted,
 
@@ -48,7 +51,16 @@ internal enum ConnectionTlsState
 /// <param name="State">What it is.</param>
 /// <param name="Text">The header strip's words: "verified", "encrypted, not verified", "not encrypted".</param>
 /// <param name="Detail">The sentence behind it.</param>
-internal sealed record ConnectionTls(ConnectionTlsState State, string Text, string Detail);
+internal sealed record ConnectionTls(ConnectionTlsState State, string Text, string Detail)
+{
+    /// <summary>
+    /// What the strip calls the fact: "TLS", or "Encryption" where the connection is encrypted with GSSAPI, which is not TLS.
+    /// </summary>
+    public string Label => State == ConnectionTlsState.EncryptedGss ? "Encryption" : "TLS";
+
+    /// <summary>The Overview's words for it: "TLS verified (VerifyFull)", "Encryption: GSSAPI".</summary>
+    public string Summary => State == ConnectionTlsState.EncryptedGss ? "Encryption: GSSAPI" : "TLS " + Text;
+}
 
 /// <summary>One fact of the header strip, with the in-page anchor its detail is at.</summary>
 /// <param name="Label">What the fact is about.</param>
@@ -158,6 +170,12 @@ internal sealed record ConnectionPageView
 
     /// <summary>The header strip's facts, in order.</summary>
     public IReadOnlyList<ConnectionFact> Header { get; init; } = [];
+
+    /// <summary>The platform's name ("Amazon RDS"), or <see langword="null" /> when no managed platform was detected.</summary>
+    public string? PlatformName { get; init; }
+
+    /// <summary>The poolers detected in front of the server, by name; empty when none was.</summary>
+    public IReadOnlyList<string> Poolers { get; init; } = [];
 
     /// <summary>The TLS fact, for the Overview's line and the snapshot.</summary>
     public ConnectionTls Tls { get; init; } = new(ConnectionTlsState.NotRead, "not read", "The connection was not read.");

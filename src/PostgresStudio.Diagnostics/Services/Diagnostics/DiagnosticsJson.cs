@@ -455,7 +455,23 @@ internal static class DiagnosticsJson
         Time(json, "measuredAt", connection.MeasuredAt);
         json.WriteString("npgsqlVersion", connection.NpgsqlVersion);
         Text(json, "platform", connection.Platform);
-        Text(json, "pooler", connection.Pooler);
+
+        json.WritePropertyName("pooler");
+        if (connection.Pooler is null)
+        {
+            json.WriteNullValue();
+        }
+        else
+        {
+            json.WriteStartArray();
+            foreach (string pooler in connection.Pooler)
+            {
+                json.WriteStringValue(pooler);
+            }
+
+            json.WriteEndArray();
+        }
+
         json.WriteString("tls", connection.Tls);
 
         json.WriteStartArray("settings");

@@ -236,11 +236,16 @@ internal static class ConnectionHintIds
     public const string Local = "LOCAL";
 }
 
-/// <summary>The in-process pool's busiest moment over a window (C15's history), for the POOLSIZE hint.</summary>
-/// <param name="Peak">The most connections in use at once.</param>
-/// <param name="Max">The pool's <c>Maximum Pool Size</c>.</param>
+/// <summary>
+/// The most sessions the connection history counted under this application's <c>Application Name</c> on the server (C15's history),
+/// for the POOLSIZE hint. <b>Not this pool's peak:</b> the history counts sessions per server by <c>application_name</c>, so it
+/// includes every process, replica and database that uses the name.
+/// </summary>
+/// <param name="Peak">The most sessions named <paramref name="Application" /> at once.</param>
+/// <param name="Max">This pool's <c>Maximum Pool Size</c>.</param>
 /// <param name="Window">The window the peak is over, in words ("7 days").</param>
-internal sealed record ConnectionPoolPeak(int Peak, int Max, string Window);
+/// <param name="Application">The <c>Application Name</c> the sessions were counted under.</param>
+internal sealed record ConnectionPoolPeak(int Peak, int Max, string Window, string Application);
 
 /// <summary>What the reader is given besides the connection string: the environment, the loaded Npgsql, and the facts the hints need.</summary>
 internal sealed record ConnectionReadContext

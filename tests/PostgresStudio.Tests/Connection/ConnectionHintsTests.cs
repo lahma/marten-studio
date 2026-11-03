@@ -150,13 +150,13 @@ public sealed class ConnectionHintsTests
     {
         Hint(Settings("Host=db.example"), ConnectionHintIds.PoolSize).Should().BeNull();
 
-        ConnectionPoolPeak peak = new(42, 100, "7 days");
+        ConnectionPoolPeak peak = new(42, 100, "7 days", "orders");
         ConnectionHint calm = Hint(Settings("Host=db.example", peak: peak), ConnectionHintIds.PoolSize)!;
-        calm.Text.Should().Be("The pool peaked at 42 of 100 connections in the last 7 days.");
+        calm.Text.Should().Be("Sessions named 'orders' peaked at 42 on this server in the last 7 days (every process using this Application Name, in every database); this process's pool allows 100.");
         calm.ConnectionStringFix.Should().BeNull();
 
         Hint(Settings("Host=db.example", peak: peak, tight: true), ConnectionHintIds.PoolSize)!.Text
-            .Should().Contain("peaked at 42 of 100").And.Contain("headroom is tight (C03)").And.Contain("lower Maximum Pool Size");
+            .Should().Contain("peaked at 42 on this server").And.Contain("headroom is tight (C03)").And.Contain("lower Maximum Pool Size");
     }
 
     // ---- BUFFER ----------------------------------------------------------------------------------------------------

@@ -65,7 +65,7 @@
 
         @if (view.AcceptedFindings > 0)
         {
-            <p class="ms-muted ms-conn-note">@HealthPresentation.Count(view.AcceptedFindings, "finding") accepted by the host, and counted nowhere; the Health page says why.</p>
+            <p class="ms-muted ms-conn-note">@HealthPresentation.Count(view.AcceptedFindings, "finding") accepted by the host and left out of every count; the Health page says why.</p>
         }
 
         @if (notes.Count > 0)
@@ -128,7 +128,7 @@
                 <dl class="ms-health-evidence">
                     @foreach (HealthEvidence item in withEvidence.Evidence.Take(5))
                     {
-                        <div class="ms-health-evidence-row" @key="item.Label">
+                        <div class="ms-health-evidence-row">
                             <dt>@item.Label</dt>
                             <dd class="ms-mono">@item.Value</dd>
                         </div>
@@ -143,14 +143,14 @@
                     @for (int i = 0; i < card.Keywords.Count; i++)
                     {
                         string keyword = card.Keywords[i];
-                        <a class="ms-conn-about-link" href="@RowLink(keyword)" @key="keyword">@keyword</a>@(i < card.Keywords.Count - 1 ? "," : string.Empty)
+                        <a class="ms-conn-about-link" href="@RowLink(keyword)" @key="(i, keyword)">@keyword</a>@(i < card.Keywords.Count - 1 ? "," : string.Empty)
                     }
                 </p>
             }
 
-            @foreach (ConnectionFix fix in card.Fixes)
+            @foreach ((int index, ConnectionFix fix) in card.Fixes.Index())
             {
-                <div class="ms-health-remedy ms-conn-fix" @key="fix.Label">
+                <div class="ms-health-remedy ms-conn-fix" @key="(index, fix.Label)">
                     <div class="ms-health-remedy-header">
                         <span class="ms-health-remedy-title">@fix.Label</span>
                         <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + (card.Code ?? card.Heading) + ")")" />

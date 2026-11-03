@@ -312,11 +312,13 @@ internal sealed class VisitorSnapshotBuilder
         {
             MeasuredAt = view.MeasuredAt,
             NpgsqlVersion = view.NpgsqlVersion,
-            Platform = view.Header.FirstOrDefault(static x => x.Label == "Platform")?.Value,
+            Platform = view.PlatformName,
+            Pooler = view.Poolers.Count == 0 ? null : view.Poolers,
             Tls = view.Tls.State switch
             {
                 ConnectionTlsState.Verified => "verified",
                 ConnectionTlsState.EncryptedNotVerified => "encryptedNotVerified",
+                ConnectionTlsState.EncryptedVerificationUnknown => "encryptedVerificationUnknown",
                 ConnectionTlsState.NotEncrypted => "notEncrypted",
                 ConnectionTlsState.NotEncryptedLocal => "notEncryptedLocal",
                 ConnectionTlsState.EncryptedByProxy => "encryptedByProxy",

@@ -344,6 +344,48 @@ public sealed class ConnectionPageTests
     }
 
     [Fact]
+    public async Task A_contributor_that_repeats_a_label_an_id_or_a_fix_cannot_end_the_circuit()
+    {
+        ConnectionCard card(string id) => new(id, ConnectionCardKind.Contributed, "Advice", "text", ["X"], ["Command Timeout", "Command Timeout"], [new("StoreOptions", "a = 1;"), new("StoreOptions", "b = 2;")]);
+        ConnectionContribution contribution = new()
+        {
+            Cards = [card("conn-card-dup"), card("conn-card-dup")],
+            Sections =
+            [
+                new("conn-dup", "One", null, [new("Same", "1"), new("Same", "2")], [card("conn-card-dup")]),
+                new("conn-dup", "Two", null, [], []),
+            ],
+        };
+
+        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts(Policy, Observed()), contributions: contribution));
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        page.FindAll(".ms-conn-contributed").Should().HaveCount(2);
+        page.FindAll("#conn-dup, #conn-dup-2").Should().HaveCount(2, "the second section took another id");
+        page.FindAll("dt").Count(static x => x.TextContent == "Same").Should().Be(2);
+        page.FindAll("[id^='conn-card-dup']").Select(static x => x.Id).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task The_lead_says_what_refresh_does_and_how_often_the_server_is_asked()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        Normalize(page.Find(".ms-conn-lead").TextContent).Should().Contain("Refresh shows the latest read; the server is asked at most once per health interval.");
+    }
+
+    [Fact]
+    public async Task The_strip_calls_gssapi_encryption_encryption()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts(Policy, Observed(ssl: false, gssEncrypted: true))));
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        page.FindAll(".ms-conn-fact dt").Select(static x => x.TextContent).Should().Contain("Encryption").And.NotContain("TLS");
+        page.FindAll(".ms-conn-fact").Single(static x => x.QuerySelector("dt")!.TextContent == "Encryption").TextContent.Should().Contain("GSSAPI");
+    }
+
+    [Fact]
     public async Task A_connection_string_that_could_not_be_read_is_an_alert_and_the_server_section_stays()
     {
         await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=db.example;Maximum Pool Size=not-a-number", Observed())));
@@ -464,6 +506,22 @@ public sealed class ConnectionPageTests
         line.WaitForAssertion(() => line.Find(".ms-overview-connection").TextContent.Should().Contain("Connection"));
         Normalize(line.Find(".ms-overview-connection").TextContent).Should().Be("Connection: TLS verified (VerifyFull) · pool 100 · 2 things worth a look");
         line.Find(".ms-overview-connection a").GetAttribute("href").Should().Contain("database/connection");
+        context.Connection.GlanceRequests.Should().NotBeEmpty("the line asks for the glance, which shows no peak and so neither reads nor records one");
+        context.Connection.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_overviews_line_calls_gssapi_encryption_encryption_and_not_tls()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(View(
+            Facts("Host=db.example", Observed(ssl: false, gssEncrypted: true)),
+            Report(),
+            pool: null));
+
+        IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
+
+        line.WaitForAssertion(() => Normalize(line.Find(".ms-overview-connection").TextContent).Should().StartWith("Connection: Encryption: GSSAPI"));
+        Normalize(line.Find(".ms-overview-connection").TextContent).Should().NotContain("TLS");
     }
 
     [Fact]
@@ -487,7 +545,7 @@ public sealed class ConnectionPageTests
 
         await using PostgresStudioComponentContext refused = await ContextAsync(ConnectionPageView.Refused(ConnectionRefusal.StorePolicy, "no"));
         IRenderedComponent<ConnectionGlanceLine> none = refused.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
-        refused.Connection.Requests.Should().NotBeEmpty();
+        refused.Connection.GlanceRequests.Should().NotBeEmpty();
         none.FindAll(".ms-overview-connection").Should().BeEmpty();
     }
 

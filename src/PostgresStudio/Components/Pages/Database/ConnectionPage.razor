@@ -49,8 +49,8 @@
 
     <p class="ms-conn-lead">
         How this application connects to this database: what its Npgsql settings are and where each value came from, what the server
-        saw, and what is worth changing. A password is only ever shown as set or not set. Read when this page opens, once per
-        <code>HealthInterval</code> while it stays open, and on Refresh. It changes nothing.
+        saw, and what is worth changing. A password is only ever shown as set or not set. Refresh shows the latest read; the server is
+        asked at most once per health interval. It changes nothing.
     </p>
 
     @if (!interactive || (loading && view is null))
@@ -66,7 +66,7 @@
     {
         <div class="ms-empty">
             <p class="ms-empty-title">No database selected</p>
-            <p class="ms-empty-description">Pick @Settings.Text.PickInTheHeader in the header to see how it is connected to.</p>
+            <p class="ms-empty-description">Pick @Settings.Text.PickInTheHeader in the header to see how the application connects to it.</p>
         </div>
     }
     else if (view.Refusal != ConnectionRefusal.None)

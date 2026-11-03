@@ -262,8 +262,9 @@ public class CapabilityGatingMatrixTests
         // H3: the summary is the store policy's for the database as a whole; the details are a gated read.
         [typeof(ISessionActivityService)] = ["GetDetailsAsync", "GetSummaryAsync"],
 
-        // 1.1-NP3: the Connection page reads (GetAsync, the store policy's) and its application sessions (a gated read, above).
-        [typeof(IConnectionInsightService)] = ["GetApplicationsAsync", "GetAsync"],
+        // 1.1-NP3: the Connection page reads (GetAsync, and the Overview's GetGlanceAsync without a peak: the store policy's) and its
+        // application sessions (a gated read, above).
+        [typeof(IConnectionInsightService)] = ["GetApplicationsAsync", "GetAsync", "GetGlanceAsync"],
     };
 
     /// <summary>

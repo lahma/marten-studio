@@ -9,12 +9,17 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 
+using Microsoft.Extensions.Options;
+
 using Npgsql;
 
+using PostgresStudio;
 using PostgresStudio.Services;
+using PostgresStudio.Services.ConnectionHistory;
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Database;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
 
 namespace MartenStudio.Tests.Database;
@@ -233,6 +238,77 @@ public class ConnectionInsightServiceTests
         harness.Ring.Should().BeEmpty("nothing was revealed");
     }
 
+    // ----------------------------------------------------------------------------------------------
+    // The pool's peak and the sessions: two reveals, each recorded once
+    // ----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_overviews_read_asks_for_no_peak_and_so_reads_and_records_nothing()
+    {
+        FakeHistoryStore history = new();
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), history: history);
+
+        ConnectionPageView glance = await harness.Service.GetGlanceAsync(Scope, Token);
+
+        glance.Refusal.Should().Be(ConnectionRefusal.None);
+        glance.Header.Single(static x => x.Label == "Pool").Value.Should().NotContain("peak");
+        history.Reads.Should().Be(0, "the Overview shows no peak, so the history is not read for it");
+        harness.Ring.Should().BeEmpty("nothing application-grade was shown");
+    }
+
+    [Fact]
+    public async Task The_page_records_the_peak_it_shows_once_and_a_later_sessions_reveal_is_recorded_on_its_own_signature()
+    {
+        FakeHistoryStore history = new();
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), history: history);
+
+        ConnectionPageView page = await harness.Service.GetAsync(Scope, Token);
+        await harness.Service.GetAsync(Scope, Token);
+
+        page.Header.Single(static x => x.Label == "Pool").Value.Should().EndWith("peak 12 named 'billing-api', 7 days");
+        harness.Ring.Should().ContainSingle("a second read repeats the signature").Which.Target.Should().Be(ConnectionInsightService.PoolPeakTarget);
+
+        await harness.Service.GetApplicationsAsync(Scope, Token);
+        await harness.Service.GetApplicationsAsync(Scope, Token);
+        await harness.Service.GetAsync(Scope, Token);
+
+        harness.Ring.Select(static x => x.Target).Should().BeEquivalentTo([ConnectionInsightService.PoolPeakTarget, ConnectionInsightService.ApplicationsTarget]);
+        harness.Ring.Should().OnlyContain(static x => x.Succeeded && x.Capability == nameof(StudioCapability.ViewDatabaseActivity));
+        harness.Ring.Select(static x => x.Message).Should().NotContain(static x => x != null && x.Contains("billing-api"));
+    }
+
+    [Fact]
+    public async Task Opening_the_overview_does_not_use_up_the_sessions_reveal()
+    {
+        FakeHistoryStore history = new();
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), history: history);
+
+        await harness.Service.GetGlanceAsync(Scope, Token);
+        await harness.Service.GetApplicationsAsync(Scope, Token);
+
+        harness.Ring.Should().ContainSingle().Which.Target.Should().Be(ConnectionInsightService.ApplicationsTarget);
+    }
+
+    // ----------------------------------------------------------------------------------------------
+    // The read time
+    // ----------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_page_says_when_the_facts_were_read_and_not_when_somebody_looked()
+    {
+        DateTimeOffset readAt = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
+        FakeTimeProvider clock = new(readAt);
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All(), clock: clock);
+        harness.Facts.ReadAt = readAt;
+
+        // The facts are shared for up to a health interval; the page is opened well after they were read.
+        clock.Advance(TimeSpan.FromMinutes(4));
+        ConnectionPageView view = await harness.Service.GetAsync(Scope, Token);
+
+        view.MeasuredAt.Should().Be(readAt);
+        clock.GetUtcNow().Should().Be(readAt.AddMinutes(4));
+    }
+
     [Theory]
     [InlineData(7, 0, "7 days")]
     [InlineData(1, 0, "1 day")]
@@ -269,7 +345,7 @@ public class ConnectionInsightServiceTests
 
     private sealed class FakeFactsSource : IConnectionFactsSource
     {
-        private static readonly DateTimeOffset ReadAt = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
+        private static readonly DateTimeOffset ReadTime = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
 
         private int reads;
         private int applicationReads;
@@ -280,12 +356,14 @@ public class ConnectionInsightServiceTests
 
         public Exception? Throws { get; set; }
 
+        public DateTimeOffset ReadAt { get; set; } = ReadTime;
+
         public Exception? ApplicationsThrow { get; set; }
 
         public ConnectionFacts Facts { get; } = new()
         {
             Settings = NpgsqlSettingsReader.Read(
-                "Host=db.example;Database=app;Username=svc;Password=" + PasswordSentinel + ";Persist Security Info=true",
+                "Host=db.example;Database=app;Username=svc;Application Name=billing-api;Password=" + PasswordSentinel + ";Persist Security Info=true",
                 new ConnectionReadContext()),
             Observed = new ConnectionObserved(
                 "svc", "svc", "app", "10.0.0.5", 5432, false, "UTC", "UTF8", "public", "PostgresStudio",
@@ -296,7 +374,7 @@ public class ConnectionInsightServiceTests
         public Task<ConnectionFacts> GetAsync(ResolvedSource resolved, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref reads);
-            return Throws is not null ? Task.FromException<ConnectionFacts>(Throws) : Task.FromResult(Facts);
+            return Throws is not null ? Task.FromException<ConnectionFacts>(Throws) : Task.FromResult(Facts with { ReadAt = ReadAt });
         }
 
         public Task<ConnectionApplicationsRead> ReadApplicationsAsync(ResolvedSource resolved, CancellationToken cancellationToken)
@@ -306,9 +384,36 @@ public class ConnectionInsightServiceTests
             return ApplicationsThrow is not null
                 ? Task.FromException<ConnectionApplicationsRead>(ApplicationsThrow)
                 : Task.FromResult(new ConnectionApplicationsRead(
-                    ReadAt,
+                    ReadTime,
                     2,
-                    [new ConnectionApplicationRow("billing-api", 12, ReadAt, 12, 12), new ConnectionApplicationRow(string.Empty, 2, null, 0, 0)]));
+                    [new ConnectionApplicationRow("billing-api", 12, ReadTime, 12, 12), new ConnectionApplicationRow(string.Empty, 2, null, 0, 0)]));
+        }
+    }
+
+    /// <summary>A connection history holding one sample of the harness's server: 12 sessions named billing-api.</summary>
+    private sealed class FakeHistoryStore : IPostgresConnectionHistoryStore
+    {
+        private int reads;
+
+        public int Reads => Volatile.Read(ref reads);
+
+        public ValueTask AppendAsync(PostgresConnectionSample sample, CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public ValueTask<IReadOnlyList<PostgresConnectionSample>> ReadAsync(string server, DateTimeOffset since, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref reads);
+
+            return ValueTask.FromResult<IReadOnlyList<PostgresConnectionSample>>(
+            [
+                new PostgresConnectionSample
+                {
+                    Server = server,
+                    At = DateTimeOffset.UtcNow.AddHours(-1),
+                    Connections = 30,
+                    ClientLimit = 100,
+                    ByApplication = [new PostgresConnectionCounts { ApplicationName = "billing-api", Total = 12 }],
+                },
+            ]);
         }
     }
 
@@ -340,7 +445,9 @@ public class ConnectionInsightServiceTests
         public static Harness Create(
             Action<MartenStudioOptions> configure,
             bool policies = false,
-            IReadOnlyList<IConnectionInsightContributor>? contributors = null)
+            IReadOnlyList<IConnectionInsightContributor>? contributors = null,
+            FakeHistoryStore? history = null,
+            TimeProvider? clock = null)
         {
             TestAuthenticationStateProvider users = new();
             users.SignIn("operator");
@@ -373,6 +480,20 @@ public class ConnectionInsightServiceTests
             services.AddScoped<AuthenticationStateProvider>(_ => users);
             services.AddSingleton<IConnectionFactsSource>(facts);
             services.AddSingleton<IHealthService>(health);
+
+            if (history is not null)
+            {
+                services.AddSingleton<IPostgresConnectionHistoryStore>(history);
+                services.AddSingleton(static provider => new ConnectionHistoryReader(
+                    provider.GetRequiredService<IPostgresConnectionHistoryStore>(),
+                    Options.Create(new PostgresConnectionHistoryOptions()),
+                    provider.GetRequiredService<IDiagnosticsSettings>()));
+            }
+
+            if (clock is not null)
+            {
+                services.AddSingleton(clock);
+            }
 
             foreach (IConnectionInsightContributor contributor in contributors ?? [])
             {

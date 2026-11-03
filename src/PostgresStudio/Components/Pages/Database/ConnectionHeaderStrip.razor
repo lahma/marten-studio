@@ -23,7 +23,7 @@
                 <div class="@("ms-conn-fact ms-conn-fact-" + fact.Tone)" @key="fact.Label">
                     <dt>@fact.Label</dt>
                     <dd>
-                        <a href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, fact.Anchor)" title="@(fact.Label == "TLS" ? view.Tls.Detail : "Show the detail below")">@fact.Value</a>
+                        <a href="@ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, fact.Anchor)" title="@(fact.Label == view.Tls.Label ? view.Tls.Detail : "Show the detail below")">@fact.Value</a>
                     </dd>
                 </div>
             }

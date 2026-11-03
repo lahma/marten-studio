@@ -21,9 +21,9 @@
             @if (section.Rows.Count > 0)
             {
                 <dl class="ms-conn-observed-list">
-                    @foreach (ConnectionObservedLine line in section.Rows)
+                    @foreach ((int index, ConnectionObservedLine line) in section.Rows.Index())
                     {
-                        <div class="ms-conn-observed-row" @key="line.Label">
+                        <div class="ms-conn-observed-row" @key="(index, line.Label)">
                             <dt>@line.Label</dt>
                             <dd>
                                 <span class="ms-mono">@line.Value</span>
@@ -45,9 +45,9 @@
                         <h3 class="ms-health-finding-title" id="@(card.Id + "-title")">@card.Heading</h3>
                     </header>
                     <p class="ms-health-why">@card.Text</p>
-                    @foreach (ConnectionFix fix in card.Fixes)
+                    @foreach ((int index, ConnectionFix fix) in card.Fixes.Index())
                     {
-                        <div class="ms-health-remedy ms-conn-fix" @key="fix.Label">
+                        <div class="ms-health-remedy ms-conn-fix" @key="(index, fix.Label)">
                             <div class="ms-health-remedy-header">
                                 <span class="ms-health-remedy-title">@fix.Label</span>
                                 <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + card.Heading + ")")" />

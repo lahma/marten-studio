@@ -280,7 +280,8 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
 
             // A fact links to its row: the link scrolls the page to it and the studio stays on this page.
             await page.Locator(".ms-conn-fact a", new PageLocatorOptions { HasTextString = "max" }).ClickAsync();
-            page.Url.Should().Contain("database/connection").And.Contain("#conn-row-maximum-pool-size");
+            await page.WaitForURLAsync(new System.Text.RegularExpressions.Regex("database/connection.*#conn-row-maximum-pool-size$"));
+            page.Url.Should().Contain("database/connection").And.EndWith("#conn-row-maximum-pool-size");
 
             // The application's sessions are the activity gate's: a table, or the sentence naming the option.
             await page.Locator("#conn-sessions table, #conn-sessions .ms-capability-disabled").First.WaitForAsync();
