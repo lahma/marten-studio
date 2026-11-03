@@ -298,6 +298,28 @@ public class HealthCodesTests
         problems.Should().BeEmpty(string.Join(" | ", problems));
     }
 
+    /// <summary>
+    /// A retired check keeps its row (rule 2), and a studio that retired one must say so in its descriptor
+    /// (<c>DiagnosticsDescriptor.RetiredCheckCodes</c>): without it, a host's <c>AcceptedChecks</c> entry for the retired
+    /// code is refused at start-up. So each descriptor lists exactly the rows codes.md marks retired for its studio - a row
+    /// retired in <c>both</c> in each - and the next retirement cannot miss one.
+    /// </summary>
+    [Fact]
+    public void Each_studios_descriptor_lists_exactly_the_checks_codes_md_marks_retired_for_that_studio()
+    {
+        IReadOnlyList<CodeRow> rows = Table();
+
+        Dictionary<string, string> RetiredFor(string studio) => rows
+            .Where(x => x.Retired is not null && x.Area != PlanInsights.Area && (x.Studios == "both" || x.Studios == studio))
+            .ToDictionary(static x => x.Code, static x => x.Retired!, StringComparer.OrdinalIgnoreCase);
+
+        RetiredFor("Marten").Should().NotBeEmpty("K10 was retired in 1.1, or this compares nothing");
+
+        MartenStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Marten"), "Marten Studio's descriptor");
+        PostgresStudioDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "Postgres Studio's descriptor");
+        PostgresDiagnosticsDescriptor.Instance.RetiredCheckCodes.Should().BeEquivalentTo(RetiredFor("Postgres"), "the diagnostics engine's descriptor");
+    }
+
     [Fact]
     public void Both_studios_checks_are_in_the_table()
     {

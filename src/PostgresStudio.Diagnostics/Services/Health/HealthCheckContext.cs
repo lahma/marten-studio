@@ -530,9 +530,10 @@ internal sealed class HealthSqlRunner
     /// <see cref="NpgsqlConnection" /> itself.
     /// </para>
     /// <para>
-    /// <b>A copy, never Npgsql's dictionary.</b> <c>PostgresParameters</c> is the connector's own table: Npgsql clears it when the
-    /// connection is returned to its pool and a later session of a pooled source writes to it, so keeping the reference would
-    /// show another session's values, or none, once the sweep connection is closed (<see cref="CopyReported" />).
+    /// <b>A copy, never Npgsql's dictionary.</b> <c>PostgresParameters</c> is the connector's own table: Npgsql empties it in
+    /// <c>NpgsqlConnector.Cleanup()</c> when the physical connection is closed or broken (not when it returns to the pool, where the
+    /// table stays), and the connector's next session rewrites it, so keeping the reference could show another session's values,
+    /// or none, once the connection is gone (<see cref="CopyReported" />).
     /// </para>
     /// </remarks>
     internal async Task<IReadOnlyDictionary<string, string>> ReportedParametersAsync(CancellationToken cancellationToken)

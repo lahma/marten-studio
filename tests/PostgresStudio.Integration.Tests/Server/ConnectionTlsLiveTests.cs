@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -58,6 +61,112 @@ public class ConnectionTlsLiveTests(PostgresFixture postgres, TlsServerFixture t
 }
 
 /// <summary>
+/// S11 (1.1-NP2) on a real TLS server: the connection is encrypted and the data source does not check the certificate, so it
+/// fires at <c>SSL Mode=Require</c>; at <c>VerifyCA</c> with the server's own certificate as the root it is quiet; and a loopback
+/// host never leaves the machine, so it is quiet whatever the mode. The data source must name a host that is not loopback for
+/// the check to judge it, so the container's published port is reached through this machine's own address - the test skips,
+/// saying so, where Docker publishes it on loopback only.
+/// </summary>
+public class ServerCertificateLiveTests(TlsServerFixture tls) : IClassFixture<TlsServerFixture>
+{
+    private static CancellationToken Token => TestContext.Current.CancellationToken;
+
+    [PostgresFact]
+    [HealthFires("S11")]
+    public async Task S11_fires_for_an_encrypted_connection_that_does_not_check_the_certificate()
+    {
+        tls.SkipIfUnavailable();
+        string connectionString = await RemoteAsync(tls, SslMode.Require);
+
+        await using PostureHost host = await PostureHost.CreateAsync(connectionString, environment: "Production");
+        HealthCheckResult result = PostureHost.Result(await host.SweepAsync(), "S11");
+
+        result.Outcome.Should().Be(HealthCheckOutcome.Checked, result.Problem?.Reason);
+        HealthFinding finding = result.Findings.Should().ContainSingle().Subject;
+        finding.Variant.Should().Be("require");
+        finding.Severity.Should().Be(HealthSeverity.Info, "no managed platform marks this server");
+        finding.Evidence.Should().Contain(x => x.Label == "Connection" && x.Value.StartsWith("encrypted (TLS", StringComparison.Ordinal));
+        finding.Remedy!.Code.Should().Contain("SSL Mode=VerifyFull;Root Certificate=");
+        finding.Remedy.Code.Should().Contain("b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;");
+    }
+
+    [PostgresFact]
+    [HealthQuiet("S11")]
+    public async Task S11_is_quiet_when_the_certificate_is_checked_and_when_the_host_is_loopback()
+    {
+        tls.SkipIfUnavailable();
+
+        string root = Path.Combine(Path.GetTempPath(), "ms-s11-" + Guid.NewGuid().ToString("N") + ".pem");
+        await File.WriteAllTextAsync(root, tls.CertificatePem, Token);
+
+        try
+        {
+            string verified = await RemoteAsync(tls, SslMode.VerifyCA, root);
+
+            await using (PostureHost host = await PostureHost.CreateAsync(verified, environment: "Production"))
+            {
+                HealthCheckResult result = PostureHost.Result(await host.SweepAsync(), "S11");
+
+                result.Outcome.Should().Be(HealthCheckOutcome.Checked, result.Problem?.Reason);
+                result.Findings.Should().BeEmpty();
+                result.Note.Should().Contain("checks the server's certificate");
+            }
+
+            string loopback = new NpgsqlConnectionStringBuilder(tls.ConnectionString) { SslMode = SslMode.Require }.ConnectionString;
+
+            await using (PostureHost host = await PostureHost.CreateAsync(loopback, environment: "Production"))
+            {
+                HealthCheckResult result = PostureHost.Result(await host.SweepAsync(), "S11");
+
+                result.Outcome.Should().Be(HealthCheckOutcome.Checked, result.Problem?.Reason);
+                result.Findings.Should().BeEmpty();
+                result.Note.Should().Contain("never leaves it");
+            }
+        }
+        finally
+        {
+            File.Delete(root);
+        }
+    }
+
+    /// <summary>The TLS server's connection string with its host replaced by this machine's own address, or a skip.</summary>
+    private static async Task<string> RemoteAsync(TlsServerFixture tls, SslMode mode, string? rootCertificate = null)
+    {
+        NpgsqlConnectionStringBuilder builder = new(tls.ConnectionString) { SslMode = mode, Pooling = true };
+
+        IPAddress? address = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(static x => x.OperationalStatus == OperationalStatus.Up && x.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .SelectMany(static x => x.GetIPProperties().UnicastAddresses)
+            .Select(static x => x.Address)
+            .FirstOrDefault(static x => x.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(x) && !x.ToString().StartsWith("169.254.", StringComparison.Ordinal));
+
+        if (address is null)
+        {
+            Assert.Skip("This machine has no non-loopback IPv4 address, so S11 cannot be shown a remote host.");
+        }
+
+        builder.Host = address.ToString();
+
+        if (rootCertificate is not null)
+        {
+            builder.RootCertificate = rootCertificate;
+        }
+
+        try
+        {
+            await using NpgsqlConnection probe = new(builder.ConnectionString);
+            await probe.OpenAsync(Token);
+        }
+        catch (Exception exception) when (exception is NpgsqlException or SocketException or IOException)
+        {
+            Assert.Skip("The TLS container's published port is not reachable on this machine's own address (" + exception.GetType().Name + "), so S11 cannot be shown a remote host.");
+        }
+
+        return builder.ConnectionString;
+    }
+}
+
+/// <summary>
 /// A <c>postgres:17-alpine</c> of the class's own with TLS on: a self-signed certificate and key made with
 /// <see cref="CertificateRequest" />, copied into the container owned by the image's <c>postgres</c> user (uid 70) with the
 /// key at <c>0600</c>, as Postgres demands, and named by <c>ssl_cert_file</c> and <c>ssl_key_file</c>. Never reused.
@@ -72,6 +181,9 @@ public sealed class TlsServerFixture : IAsyncLifetime
 
     /// <summary>The superuser's connection string, once the server is up.</summary>
     public string ConnectionString => container?.GetConnectionString() ?? throw new InvalidOperationException(unavailable ?? "The TLS server is not running.");
+
+    /// <summary>The server's self-signed certificate, PEM: the root a <c>VerifyCA</c> data source trusts.</summary>
+    public string CertificatePem { get; private set; } = string.Empty;
 
     /// <summary>Skips the test when the server could not start here.</summary>
     public void SkipIfUnavailable()
@@ -97,7 +209,8 @@ public sealed class TlsServerFixture : IAsyncLifetime
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         using X509Certificate2 certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
 
-        byte[] certificatePem = Encoding.ASCII.GetBytes(certificate.ExportCertificatePem() + "\n");
+        CertificatePem = certificate.ExportCertificatePem() + "\n";
+        byte[] certificatePem = Encoding.ASCII.GetBytes(CertificatePem);
         byte[] keyPem = Encoding.ASCII.GetBytes(key.ExportPkcs8PrivateKeyPem() + "\n");
 
         container = new PostgreSqlBuilder("postgres:17-alpine")

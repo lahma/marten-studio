@@ -466,6 +466,30 @@ internal sealed class StudioText
     public required string JitRemedyExplanation { get; init; }
 
     /// <summary>
+    /// The connection checks' remedies (C16, C17, S11, S12, S13): how a studio's host changes a data source's
+    /// <c>NpgsqlConnectionStringBuilder</c> in code, as a template whose <c>{statements}</c> line is replaced by the statements
+    /// (<c>b.ConnectionStringBuilder.KeepAlive = 30;</c>, one per line). MartenStudio's wraps them in
+    /// <c>opts.ConfigureNpgsqlDataSourceBuilder</c>, which every data source Marten builds from a connection string passes through
+    /// (<see cref="JitShareCheck.RemedyCode" />); Postgres Studio names the <c>NpgsqlDataSourceBuilder</c> itself.
+    /// </summary>
+    public required string DataSourceBuilderRemedy { get; init; }
+
+    /// <summary>
+    /// C16: what else the same idle timeout does to the studio's own process, starting with a space after the finding's last
+    /// sentence - MartenStudio's HotCold leader's idle stretch (K08) - or empty for a studio with no daemon.
+    /// </summary>
+    public required string PoolIdleTimeoutLeaderClause { get; init; }
+
+    /// <summary>
+    /// C18's remedy: the lines that give a process one <c>NpgsqlDataSource</c>, registered once and used wherever a connection is
+    /// wanted - MartenStudio's hand it to Marten with <c>UseNpgsqlDataSource()</c>.
+    /// </summary>
+    public required string SharedDataSourceRemedyCode { get; init; }
+
+    /// <summary>C18's remedy: what sharing the data source changes, and what it does not.</summary>
+    public required string SharedDataSourceRemedyExplanation { get; init; }
+
+    /// <summary>
     /// The Health page's reason a finding behind the database gate is withheld from a visitor: what the scope policy must
     /// allow.
     /// </summary>
@@ -700,7 +724,30 @@ internal sealed class StudioText
             + "leaves the server's setting alone for everybody else. A data source the host builds itself (UseNpgsqlDataSource) "
             + "takes the same Options on its own NpgsqlDataSourceBuilder. To keep JIT for the occasional long query, a DBA can "
             + "raise jit_above_cost for the store's role instead.",
-        DatabaseGateReason = "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
+        DataSourceBuilderRemedy =
+            """
+            // For every data source Marten builds from a connection string:
+            opts.ConfigureNpgsqlDataSourceBuilder(b =>
+            {
+                {statements}
+            });
+            """,
+        PoolIdleTimeoutLeaderClause =
+            " K08 judges the same idle_session_timeout against the HotCold daemon's leadership connection, which this finding does not cover.",
+        SharedDataSourceRemedyCode =
+            """
+            // One NpgsqlDataSource for the process: register it once ...
+            services.AddNpgsqlDataSource(connectionString);
+
+            // ... and hand it to Marten instead of a connection string of its own:
+            services.AddMarten(opts => { /* ... */ })
+                .UseNpgsqlDataSource();
+            """,
+        SharedDataSourceRemedyExplanation =
+            "Every part of the process that opens connections - Marten, Wolverine, a repository of the host's own - then shares "
+            + "one pool and one Maximum Pool Size, so the server sees one ceiling for the process instead of one per data source. "
+            + "A pool per tenant database is not a duplicate and is not counted.",
+        DatabaseGateReason ="needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
         ExportSourceNoun = "store",
         PickInTheHeader = "a store and database",
         PlanIndexRemedy =

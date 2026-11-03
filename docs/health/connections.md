@@ -5,9 +5,10 @@ pool (C01, C09), the server's connection budget (C02, C03), sessions and stateme
 C05, C06, C07), the session at the head of a blocking chain (C12), who holds the whole server's connections (C13, C14),
 the database's own counters (C08), whether a
 transaction-mode pooler stands between the HotCold daemon and its lock (C10), and how much of what the database reads its
-shared buffers hold (C11). Back to the [index](../health.md).
+shared buffers hold (C11). Since 1.1, three more look at the data source's own pool settings: an idle cut the pool does not
+outlast (C16), a pool switched off (C17) and several pools to one database (C18). Back to the [index](../health.md).
 
-**Studios.** C01, C03 to C08, C11 and C12 to C14 read Postgres alone and run in both studios, with the data source in place of
+**Studios.** C01, C03 to C08, C11, C12 to C18 read Postgres alone and run in both studios, with the data source in place of
 the store in Postgres Studio. C02, C09 and C10 read a Marten store's configuration and daemon, and run only in Marten
 Studio. The list of every code and its studios is [codes.md](codes.md).
 
@@ -660,6 +661,84 @@ host that has reasons to run close to the limit accepts C15 and keeps C03.
 > close to its limit and keeps a connection history. Accept the check with `AcceptedChecks` to keep the health check as it was.
 
 Runs in both studios, from the connection history and C03's own read of the server's settings.
+
+## C16 Server or proxy ends idle pooled connections first
+
+**Warning**, both studios. Two variants. The data source's pool holds idle connections that something ends before the pool lets
+go of them, and the pool is not keeping them alive:
+
+- **`idle-session-timeout`**: the server's `idle_session_timeout` (PostgreSQL 14) is above zero as a new session of the login
+  starts with it - a value set with `ALTER ROLE … SET` or `ALTER DATABASE … SET` counts; a `SET` the application issues for
+  itself is not seen.
+- **`proxy-idle-timeout`**: the data source's host is an Amazon RDS Proxy (`<name>.proxy-<id>.<region>.rds.amazonaws.com`),
+  which ends a client connection that has been idle for its idle client timeout, **1800 s by default** (*RDS Proxy connection
+  considerations*, Amazon RDS User Guide). The studio cannot read the proxy's own setting, so it judges the default and says so.
+
+**The pool outlasts the cut** when `Minimum Pool Size` is above zero (the pool keeps that many connections open however long
+they idle), or `Connection Idle Lifetime` (300 s by default) is not shorter than the cut - and `Keepalive` does not cover it:
+a `Keepalive` above zero and shorter than the cut sends a message on an idle connection often enough to count as activity.
+
+Npgsql does not check a connection when it hands it out of the pool, so the application learns that the connection was cut
+from the next command on it, which fails (SQLSTATE `57P05` for the server's timeout, or an I/O error), instead of the pool
+opening a fresh connection.
+
+What to change, in the connection string the data source is built from, or on its `NpgsqlDataSourceBuilder` (in Marten Studio
+through `opts.ConfigureNpgsqlDataSourceBuilder`, which every data source Marten builds from a connection string passes through):
+
+```text
+Keepalive=30
+```
+
+or retire the connections before the cut, which needs no pool floor: `Connection Idle Lifetime=<below the cut>;Minimum Pool
+Size=0`. The finding shows both with the numbers worked out. Npgsql refuses an idle lifetime shorter than its pruning interval
+(`Connection Pruning Interval`, 10 s), so for a cut that short only `Keepalive` is offered.
+
+**Behind PgBouncer or a service built on it** the variant `idle-session-timeout` is not judged: the server's timeout ends the
+pooler's own server connection, which the pooler replaces, and the client's connection to the pooler is the pooler's to end.
+**Not applicable** when `Pooling` is off (C17 judges that). Quiet when the server has no `idle_session_timeout` (older than
+PostgreSQL 14, or 0), or when `Keepalive` or `Connection Idle Lifetime` already covers the cut.
+
+In Marten Studio, K08 judges the same `idle_session_timeout` against the HotCold daemon's leadership connection, which this check
+does not cover.
+
+## C17 Connection pooling switched off
+
+**Warning** when the database's sessions last under a second on average, **Info** otherwise, or when that is not known. Both
+studios. `Pooling=false` and no connection pooler in front of the data source: every connection the application opens is a new TCP
+connection, a TLS handshake where TLS is on, an authentication exchange and a new PostgreSQL backend process, and the cost lands on
+the request that needed the connection. The server's connection count then follows the request rate instead of a pool's size.
+
+The evidence is the database's own session statistics (`pg_stat_database.sessions` and `session_time`, PostgreSQL 14): the average
+session length and how many sessions it is over. They count **every** client of this database, not only this data source, since the
+statistics were last reset, and the finding says so. An average under a second is about one connection per request.
+
+**Not applicable behind a pooler.** Npgsql's compatibility page advises, for PgBouncer, to "turn off Npgsql's internal connection
+pool by specifying `Pooling=false`", so a data source that reaches Neon's `-pooler` endpoint, Supabase's port 6543, Azure's built-in
+PgBouncer or a PgBouncer's port 6432 is the advised configuration. An Amazon RDS Proxy pools the server's connections itself and is
+not judged either. A pooler on a port the studio does not recognise is not seen: accept the check with `AcceptedChecks`.
+
+What to change: `Pooling=true` (Npgsql's default), in the connection string or `b.ConnectionStringBuilder.Pooling = true;` on the
+data source builder. Size the pool with `Maximum Pool Size` (C01, C03) once it is on. Database › Sessions shows who holds the
+connections.
+
+## C18 Several pools to one database in this process
+
+**Info**, both studios. Two or more Npgsql pools of this process connect to the data source's database as the same login, by host,
+port, database and login: each may open up to its own `Maximum Pool Size`, so together the process can hold the sum, which C01's
+saturation and C03's headroom - one pool at a time - do not add up.
+
+It is counted from the pool names Npgsql reports to its meter (`pool.name`, the data source's connection string unless the data
+source was given a `Name`). Each name is parsed in memory and compared, and **only counts are kept**: the finding shows how many
+pools and the sum of their `Maximum Pool Size`, never a name, a host, a connection string or a password. A pool name that is not a
+connection string - a data source the host gave a `Name` - cannot be compared and is left out; the evidence says how many there
+were. A pool per tenant database, or per login, is a different database or login and is not counted.
+
+Several pools are sometimes deliberate - a separate pool for a long-running job - in which case accept the check with
+`AcceptedChecks`. Otherwise the remedy is one shared `NpgsqlDataSource` for the process: register it once
+(`services.AddNpgsqlDataSource(connectionString)`) and resolve it wherever a connection is wanted; in Marten Studio, hand it to
+Marten with `AddMarten(...).UseNpgsqlDataSource()`. Database › Sessions › Holders shows who holds the connections.
+
+Not checked where the process's Npgsql pools cannot be observed. Quiet with one pool.
 
 ## Database › Sessions
 

@@ -79,7 +79,12 @@ public sealed class ConnectionHintsTests
     [InlineData("Host=a;Connection Lifetime=0", PostgresPlatformKind.SelfHosted, false)]
     [InlineData("Host=a,b", PostgresPlatformKind.SelfHosted, false)]
     [InlineData("Host=a,b;Connection Lifetime=600", PostgresPlatformKind.SelfHosted, false)]
-    public void LIFETIME_is_zero_lifetime_with_several_hosts_load_balancing_or_Aurora(string connectionString, PostgresPlatformKind platform, bool expected)
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;Connection Lifetime=0", PostgresPlatformKind.SelfHosted, true)]
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;Connection Lifetime=86401", PostgresPlatformKind.SelfHosted, true)]
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;Connection Lifetime=86400", PostgresPlatformKind.SelfHosted, false)]
+    [InlineData("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com", PostgresPlatformKind.SelfHosted, false)]
+    [InlineData("Host=a;Connection Lifetime=86401", PostgresPlatformKind.SelfHosted, false)]
+    public void LIFETIME_is_zero_lifetime_with_several_hosts_load_balancing_or_Aurora_or_an_RDS_Proxy_that_ends_a_connection_first(string connectionString, PostgresPlatformKind platform, bool expected)
     {
         (Hint(Settings(connectionString, platform), ConnectionHintIds.Lifetime) is not null).Should().Be(expected);
     }

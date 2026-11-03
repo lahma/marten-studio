@@ -10,6 +10,8 @@ using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Replication;
 using PostgresStudio.Services.Server;
 using PostgresStudio.Services.Sources;
+using PostgresStudio.Services.Connection;
+using PostgresStudio.Tests.Connection;
 using PostgresStudio.Tests.Replication;
 
 using static PostgresStudio.Tests.Server.ServerTestFacts;
@@ -181,7 +183,7 @@ internal static class CheckWordCases
         History((held, [(sweptSeries, 1), (conditionSeries, 1)]), (TimeSpan.Zero, [(sweptSeries, 1), (conditionSeries, 1)]));
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Connections: C01, C03-C08, C11-C15.
+    // Connections: C01, C03-C08, C11-C18.
 
     private static IEnumerable<CheckWordCase> Connections()
     {
@@ -338,6 +340,16 @@ internal static class CheckWordCases
         yield return Case<ConnectionNearMissCheck>("a peak over the Warning line", NearMiss(85));
         yield return Case<ConnectionNearMissCheck>("a peak over the Critical line", NearMiss(97));
         yield return Case<ConnectionNearMissCheck>("a peak that a resize has since made room for", NearMiss(97, limitNow: 300));
+
+        // C16-C18 (1.1) - the data source's own pool settings, against what the server and a proxy do to idle connections.
+        yield return Case<PoolIdleCutCheck>("a 60 s idle cut under the default pool", ConnectionCheckFacts.Facts("Host=db.example", ConnectionCheckFacts.Observed(60_000)));
+        yield return Case<PoolIdleCutCheck>("an RDS Proxy under a long idle lifetime", ConnectionCheckFacts.Facts("Host=" + ConnectionCheckFacts.ProxyHost + ";Connection Idle Lifetime=3600", ConnectionCheckFacts.Observed(0)));
+        yield return Case<PoolIdleCutCheck>("a pool kept alive", ConnectionCheckFacts.Facts("Host=db.example;Keepalive=30", ConnectionCheckFacts.Observed(60_000)));
+        yield return Case<PoolingOffCheck>("pooling off, sessions under a second", ConnectionCheckFacts.Facts("Host=db.example;Pooling=false", sessions: new ConnectionSessionStatistics(1000, 500_000, At.AddDays(-2))));
+        yield return Case<PoolingOffCheck>("pooling off, no session statistics", ConnectionCheckFacts.Facts("Host=db.example;Pooling=false"));
+        yield return Case<PoolingOffCheck>("pooling on", ConnectionCheckFacts.Facts("Host=db.example"));
+        yield return Case<SiblingPoolsCheck>("three pools to one database", ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(3, 300, 1)));
+        yield return Case<SiblingPoolsCheck>("one pool", ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(1, 100, 0)));
 
         // C07 - a forgotten prepared transaction.
         yield return Case<PreparedTransactionCheck>("none prepared", new PreparedTransactionFacts(At, 10, []));
@@ -507,7 +519,7 @@ internal static class CheckWordCases
     }
 
     // ---------------------------------------------------------------------------------------------------------------
-    // Server: S01-S10.
+    // Server: S01-S13.
 
     private static IEnumerable<CheckWordCase> Server()
     {
@@ -632,6 +644,21 @@ internal static class CheckWordCases
             new ReadOnlyStoreFacts(Setting("default_transaction_read_only", "on", source: "configuration file", boot: "off"), false, Platform(PostgresPlatformKind.Azure)));
         yield return Case<ReadOnlyStoreCheck>("a primary that writes", new ReadOnlyStoreFacts(Setting("default_transaction_read_only", "off"), false, SelfHosted));
         yield return Case<ReadOnlyStoreCheck>("the setting not shown", new ReadOnlyStoreFacts(null, false, SelfHosted));
+
+        // S11-S13 (1.1) - the data source's TLS mode, the credentials it keeps readable, and the driver settings that copy values.
+        yield return Case<ServerCertificateCheck>("Prefer over TLS on RDS", ConnectionCheckFacts.Facts("Host=db.example", ConnectionCheckFacts.Observed(ssl: true, sslVersion: "TLSv1.3"), PostgresPlatformKind.AmazonRds));
+        yield return Case<ServerCertificateCheck>("Require over TLS, self-hosted", ConnectionCheckFacts.Facts("Host=db.example;SSL Mode=Require", ConnectionCheckFacts.Observed(ssl: true, sslVersion: "TLSv1.3")));
+        yield return Case<ServerCertificateCheck>("VerifyFull", ConnectionCheckFacts.Facts("Host=db.example;SSL Mode=VerifyFull", ConnectionCheckFacts.Observed(ssl: true)));
+        yield return Case<ReadableCredentialCheck>(
+            "every credential readable",
+            ConnectionCheckFacts.Facts("Host=db.example;Password=x;Persist Security Info=true;SSL Password=y", environment: new FakeEnvironment(("PGPASSWORD", "z"))));
+        yield return Case<ReadableCredentialCheck>("none readable", ConnectionCheckFacts.Facts("Host=db.example"));
+        yield return Case<DriverLoggingSettingsCheck>(
+            "Log Parameters and Include Error Detail in Production",
+            new DriverLoggingFacts(ConnectionCheckFacts.Facts("Host=db.example;Log Parameters=true;Include Error Detail=true"), "Production"));
+        yield return Case<DriverLoggingSettingsCheck>(
+            "Log Parameters in Development",
+            new DriverLoggingFacts(ConnectionCheckFacts.Facts("Host=db.example;Log Parameters=true"), "Development"));
     }
 
     // ---------------------------------------------------------------------------------------------------------------

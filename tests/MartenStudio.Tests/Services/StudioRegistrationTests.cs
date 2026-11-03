@@ -272,8 +272,17 @@ public class StudioRegistrationTests
 
         foreach ((Type service, Type made) in FactoryResults)
         {
-            circuit.ServiceProvider.GetServices(service).Select(static x => x!.GetType())
-                .Should().Contain(made, service.Name + "'s factory");
+            if (service.IsGenericType && service.GetGenericTypeDefinition() == typeof(IValidateOptions<>))
+            {
+                // One of several validators of the options, so it is found among them.
+                circuit.ServiceProvider.GetServices(service).Select(static x => x!.GetType())
+                    .Should().Contain(made, service.Name + "'s factory");
+            }
+            else
+            {
+                // Registered once: the factory makes exactly the type it made before the move.
+                circuit.ServiceProvider.GetRequiredService(service).Should().BeOfType(made, service.Name + "'s factory");
+            }
         }
 
         circuit.ServiceProvider.GetRequiredService<ISqlConsoleService>()

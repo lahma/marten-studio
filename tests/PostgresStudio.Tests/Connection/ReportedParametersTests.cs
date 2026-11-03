@@ -8,8 +8,8 @@ public sealed class ReportedParametersTests
     [Fact]
     public void The_copy_survives_Npgsql_clearing_and_rewriting_its_own_table()
     {
-        // NpgsqlConnector.Cleanup() clears PostgresParameters when the connection returns to the pool, and the next session
-        // of a pooled source writes to the same dictionary.
+        // NpgsqlConnector.Cleanup() empties PostgresParameters when the physical connection is closed or broken (not when it goes
+        // back to the pool), and the connector's next session writes to the same dictionary.
         Dictionary<string, string> live = new() { ["server_version"] = "17.2", ["is_superuser"] = "off" };
 
         IReadOnlyDictionary<string, string> copy = HealthSqlRunner.CopyReported(live);

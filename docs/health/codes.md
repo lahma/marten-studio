@@ -43,6 +43,9 @@ baseline, so editing or deleting a row is a reviewed change.
 | [C13](connections.md#c13-idle-connections-hoarded-near-the-limit) | Idle connections hoarded near the limit | Connections | - | - | both | 0.8 | - |
 | [C14](connections.md#c14-connections-with-no-application-name) | Connections with no application name | Connections | - | - | both | 0.8 | - |
 | [C15](connections.md#c15-connections-came-close-to-the-limit) | Connections came close to the limit | Connections | - | - | both | 1.0.1 | - |
+| [C16](connections.md#c16-server-or-proxy-ends-idle-pooled-connections-first) | Server or proxy ends idle pooled connections first | Connections | `idle-session-timeout`, `proxy-idle-timeout` | - | both | 1.1 | - |
+| [C17](connections.md#c17-connection-pooling-switched-off) | Connection pooling switched off | Connections | - | - | both | 1.1 | - |
+| [C18](connections.md#c18-several-pools-to-one-database-in-this-process) | Several pools to one database in this process | Connections | - | - | both | 1.1 | - |
 | [D01](daemon.md#d01-high-water-mark-pinned-behind-a-gap) | High-water mark pinned behind a gap | Daemon | - | - | Marten | 0.4 | - |
 | [D02](daemon.md#d02-async-projections-behind-and-nothing-runs-the-daemon) | Async projections behind, and nothing runs the daemon | Daemon | `no-daemon`, `lock-held-idle` | - | Marten | 0.4 | - |
 | [D03](daemon.md#d03-shard-alive-but-not-moving) | Shard alive but not moving | Daemon | - | shard | Marten | 0.4 | - |
@@ -113,6 +116,9 @@ baseline, so editing or deleting a row is a reviewed change.
 | [S08](server.md#s08-connecting-roles-password-expires) | Connecting role's password expires | Server | - | - | both | 0.5 | - |
 | [S09](server.md#s09-planner-method-switched-off) | Planner method switched off | Server | - | setting | both | 0.5 | - |
 | [S10](server.md#s10-store-connections-cannot-write) | Store connections cannot write | Server | `read-only`, `standby` | - | both | 0.5 | - |
+| [S11](server.md#s11-server-certificate-not-verified) | Server certificate not verified | Server | `prefer`, `require` | - | both | 1.1 | - |
+| [S12](server.md#s12-a-credential-is-readable-from-configuration) | A credential is readable from configuration | Server | `persist-security-info`, `ssl-password`, `pgpassword-env` | - | both | 1.1 | - |
+| [S13](server.md#s13-driver-settings-that-copy-values-into-logs-or-exceptions) | Driver settings that copy values into logs or exceptions | Server | `log-parameters`, `include-error-detail`, `include-failed-batched-command` | - | both | 1.1 | - |
 | [T01](tables.md#t01-sequential-scans-on-a-large-table) | Sequential scans on a large table | Tables | - | table | both | 0.4 | - |
 | [T02](tables.md#t02-expensive-statements) | Expensive statements | Tables | - | statement | both | 0.4 | - |
 | [T03](tables.md#t03-invalid-index) | Invalid index | Tables | `index`, `partitions` | `index`: index; `partitions`: table | both | 0.4 | - |

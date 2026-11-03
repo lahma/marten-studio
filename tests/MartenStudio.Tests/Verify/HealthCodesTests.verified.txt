@@ -13,6 +13,9 @@ C12 | Connections | idle-head, long-chain | - | both | since 0.6 | current
 C13 | Connections | - | - | both | since 0.8 | current
 C14 | Connections | - | - | both | since 0.8 | current
 C15 | Connections | - | - | both | since 1.0.1 | current
+C16 | Connections | idle-session-timeout, proxy-idle-timeout | - | both | since 1.1 | current
+C17 | Connections | - | - | both | since 1.1 | current
+C18 | Connections | - | - | both | since 1.1 | current
 D01 | Daemon | - | - | Marten | since 0.4 | current
 D02 | Daemon | no-daemon, lock-held-idle | - | Marten | since 0.4 | current
 D03 | Daemon | - | shard | Marten | since 0.4 | current
@@ -83,6 +86,9 @@ S07 | Server | - | extension | both | since 0.5 | current
 S08 | Server | - | - | both | since 0.5 | current
 S09 | Server | - | setting | both | since 0.5 | current
 S10 | Server | read-only, standby | - | both | since 0.5 | current
+S11 | Server | prefer, require | - | both | since 1.1 | current
+S12 | Server | persist-security-info, ssl-password, pgpassword-env | - | both | since 1.1 | current
+S13 | Server | log-parameters, include-error-detail, include-failed-batched-command | - | both | since 1.1 | current
 T01 | Tables | - | table | both | since 0.4 | current
 T02 | Tables | - | statement | both | since 0.4 | current
 T03 | Tables | index, partitions | `index`: index; `partitions`: table | both | since 0.4 | current

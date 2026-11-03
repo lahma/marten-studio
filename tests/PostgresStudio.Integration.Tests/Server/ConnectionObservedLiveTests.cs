@@ -73,19 +73,6 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         observed.ReportedParameters.Should().ContainKey("server_version");
         observed.ReportedParameters["is_superuser"].Should().Be("off");
 
-        // A copy, not Npgsql's table: the connector clears its own when the connection goes back to the pool, and a later
-        // session of the pooled source would write to it. Close the sweep's connection, open and close another on the same
-        // pooled source, and the facts still hold what the server said.
-        await connection.DisposeAsync();
-        await using (HealthConnection another = new(host.Resolved.Target))
-        {
-            await another.OpenAsync(Token);
-        }
-
-        observed.ReportedParameters.Should().ContainKey("server_version");
-        observed.ReportedParameters["is_superuser"].Should().Be("off");
-        observed.ReportedParameters["server_version"].Should().NotBeNullOrWhiteSpace();
-
         facts.Platform.Kind.Should().Be(PostgresPlatformKind.SelfHosted);
         facts.Sessions.Should().BeNull("pooling is on, so the session statistics are not asked");
         facts.Settings.Readable.Should().BeTrue();
@@ -96,6 +83,41 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         facts.Siblings.Should().NotBeNull();
         facts.Siblings!.Pools.Should().Be(1);
         facts.Siblings.SumMaxPoolSize.Should().Be(100);
+    }
+
+    /// <summary>
+    /// A copy, not Npgsql's table: the connector empties its own (<c>NpgsqlConnector.Cleanup()</c>) when the physical connection
+    /// is closed or broken. This host has <c>Pooling</c> off, so disposing the sweep's connection really closes it, and the facts
+    /// still hold what the server said - which they could not if they were the connector's own table. With pooling off the
+    /// session statistics are asked (C17's).
+    /// </summary>
+    [PostgresFact]
+    public async Task The_reported_parameters_outlive_the_physical_connection_they_were_read_from()
+    {
+        MatrixServer server = await matrix.ServerAsync(17);
+        server.SkipIfUnavailable();
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, connection: static b => b.Pooling = false);
+        (HealthCheckContext context, HealthConnection connection) = host.Context();
+        await using HealthConnection _ = connection;
+
+        ConnectionFacts facts = await ConnectionFacts.ReadAsync(context, Token);
+        ConnectionObserved observed = facts.Observed!;
+
+        observed.ReportedParameters.Should().ContainKey("server_version");
+
+        await connection.DisposeAsync();
+        await using (HealthConnection another = new(host.Resolved.Target))
+        {
+            await another.OpenAsync(Token);
+        }
+
+        observed.ReportedParameters.Should().ContainKey("server_version");
+        observed.ReportedParameters["is_superuser"].Should().Be("off");
+        observed.ReportedParameters["server_version"].Should().NotBeNullOrWhiteSpace();
+
+        facts.Settings.Values.Pooling.Should().BeFalse();
+        facts.Sessions.Should().NotBeNull("pooling is off, so the session statistics are asked");
     }
 
     /// <summary>Which of the option names exist as settings is the server's answer, by equality: a made-up name and a dotted one are not.</summary>

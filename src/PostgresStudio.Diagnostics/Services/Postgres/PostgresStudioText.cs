@@ -277,7 +277,23 @@ internal static class PostgresStudioText
         JitRemedyExplanation =
             "Turns JIT off for this data source's own connections only, and leaves the server's setting alone for everybody else. "
             + "To keep JIT for the occasional long query, a DBA can raise jit_above_cost for the data source's role instead.",
-        DatabaseGateReason = "needs the source policy to allow this data source and database",
+        DataSourceBuilderRemedy =
+            """
+            // On the NpgsqlDataSourceBuilder the data source is built with:
+            {statements}
+            """,
+        PoolIdleTimeoutLeaderClause = string.Empty,
+        SharedDataSourceRemedyCode =
+            """
+            // One NpgsqlDataSource for the process: register it once ...
+            services.AddNpgsqlDataSource(connectionString);
+
+            // ... and resolve it wherever a connection is wanted, instead of building another from a connection string.
+            """,
+        SharedDataSourceRemedyExplanation =
+            "Every part of the process that opens connections then shares one pool and one Maximum Pool Size, so the server sees "
+            + "one ceiling for the process instead of one per data source. A pool per database is not a duplicate and is not counted.",
+        DatabaseGateReason ="needs the source policy to allow this data source and database",
         ExportSourceNoun = "data source",
         PickInTheHeader = "a database",
         PlanIndexRemedy =

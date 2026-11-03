@@ -28,6 +28,9 @@ namespace PostgresStudio.Services.Connection;
 /// </remarks>
 internal static class ConnectionHints
 {
+    /// <summary>The age at which an Amazon RDS Proxy closes a client connection, in seconds (24 hours).</summary>
+    private const int RdsProxyMaxClientConnectionSeconds = 86400;
+
     /// <summary>The hints that apply to <paramref name="settings" /> given <paramref name="context" />, in the order NP-DESIGN §6 lists them.</summary>
     /// <param name="settings">The redacted settings.</param>
     /// <param name="context">The facts the hints need beside the settings.</param>
@@ -137,18 +140,40 @@ internal static class ConnectionHints
     {
         ConnectionValues v = settings.Values;
 
-        if (v.ConnectionLifetime != 0
-            || !(settings.IsMultiHost || v.Bool("Load Balance Hosts") == true || platform == PostgresPlatformKind.AmazonAurora))
+        bool rdsProxy = settings.PoolerSigns.Any(static x => x.Kind == PoolerSignKind.RdsProxy);
+
+        // Two independent reasons. Never recycling matters where a failover or a scale-out should move the pool (several hosts,
+        // load balancing, Aurora). An RDS Proxy ends a client connection at 24 hours (86400 s) whatever the client does, and
+        // Npgsql does not check a connection it hands out of the pool, so a lifetime of 0 or past 24 hours is a cut connection
+        // waiting for the next command (Amazon RDS User Guide, RDS Proxy connection considerations).
+        bool neverRecycles = v.ConnectionLifetime == 0
+            && (settings.IsMultiHost || v.Bool("Load Balance Hosts") == true || platform == PostgresPlatformKind.AmazonAurora);
+        bool outlivesProxy = rdsProxy && (v.ConnectionLifetime == 0 || v.ConnectionLifetime > RdsProxyMaxClientConnectionSeconds);
+
+        if (!neverRecycles && !outlivesProxy)
         {
             return;
         }
 
-        string text = "Connection Lifetime=0 means connections never recycle, so they do not rebalance after a failover or a scale-out. Npgsql's default is 3600.";
+        List<string> sentences = [];
 
-        if (settings.PoolerSigns.Any(static x => x.Kind == PoolerSignKind.RdsProxy))
+        if (neverRecycles)
         {
-            text += " An Amazon RDS Proxy ends a client connection after 24 hours at most, whatever the client does (Amazon RDS User Guide, RDS Proxy connection considerations), so a pooled connection that lives longer is cut under the application.";
+            sentences.Add("Connection Lifetime=0 means connections never recycle, so they do not rebalance after a failover or a scale-out. Npgsql's default is 3600.");
         }
+
+        if (outlivesProxy)
+        {
+            sentences.Add(
+                "An Amazon RDS Proxy closes a client connection when it is 24 hours old, whatever the client does (Amazon RDS User Guide, RDS Proxy connection considerations), "
+                + "and Npgsql does not check a connection it hands out of the pool, so the next command on a cut one fails. "
+                + (v.ConnectionLifetime == 0
+                    ? "Connection Lifetime=0 lets a pooled connection live that long."
+                    : "Connection Lifetime=" + v.ConnectionLifetime.ToString(CultureInfo.InvariantCulture) + " is longer than that.")
+                + " Npgsql's default is 3600.");
+        }
+
+        string text = string.Join(' ', sentences);
 
         hints.Add(new(
             ConnectionHintIds.Lifetime,

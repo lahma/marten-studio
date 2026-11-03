@@ -5,7 +5,7 @@ supports it, the settings that blind the store's maintenance or trade its safety
 checksums failed. They read `pg_settings`, `pg_stat_database` and the server's version, once per regular sweep,
 in the studio's read-only transaction, and lock nothing they read. Back to the [index](../health.md).
 
-**Studios.** S01 to S10 read Postgres alone and run in both studios, with the data source in place of the store in
+**Studios.** S01 to S13 read Postgres alone and run in both studios, with the data source in place of the store in
 Postgres Studio ([codes.md](codes.md)).
 
 ## Managed platforms
@@ -296,3 +296,73 @@ Both studios. Two variants:
   answered `pg_is_in_recovery() = true`. A standby accepts no write. The remedy is the connection string's
   `Target Session Attributes=read-write`, with every host of the cluster listed, so Npgsql opens connections only to the one
   that writes. If the store only ever reads there, mute it.
+
+## S11 Server certificate not verified
+
+Both studios. The connection is encrypted - the connection's own `pg_stat_ssl` row says `ssl = true` - but the data source's `SSL Mode`
+is below `VerifyCA`, so Npgsql accepts whatever certificate the server presents and anything on the path that answers as the server
+is believed. Two variants:
+
+- **`prefer`**: `SSL Mode=Prefer` or `Allow`. They also fall back to plaintext, without saying so, when the server offers no TLS
+  (and `Allow` tries plaintext first); S05 flags the connection that does.
+- **`require`**: `SSL Mode=Require`. It encrypts without checking the certificate, which stops a listener but not an impostor.
+
+`Trust Server Certificate` is obsolete and does nothing at Npgsql 9 or 10, so it is not a variant. A `Root Certificate` is read only at
+`VerifyCA` and `VerifyFull`; when one is set under `Prefer` or `Require` the evidence says it is ignored.
+
+**Warning on a detected cloud platform, Info anywhere else**: the studio can tell that the certificate is not checked, not that the
+network is hostile. The connection is the data source's own, so it negotiates TLS as the application's connections do.
+
+What to change, in the connection string the data source is built from or on its `NpgsqlDataSourceBuilder`:
+
+```text
+SSL Mode=VerifyFull;Root Certificate=<path to the provider's CA bundle>
+```
+
+Where the studio has a source for the provider's bundle, the finding names it: on **Amazon RDS** `VerifyFull` needs the AWS CA bundle
+(`global-bundle.pem`) as `Root Certificate` (*Using SSL with a PostgreSQL DB instance*, Amazon RDS User Guide); on **Azure Database for
+PostgreSQL** it needs DigiCert Global Root G2, Microsoft RSA Root CA 2017 and, for older servers, DigiCert Global Root CA in the trust
+bundle (*security-tls*, Microsoft Learn). Nothing is claimed about Aurora's `rds.force_ssl`, whose default differs from RDS's.
+
+**Stands down** (the row says why, and the check never runs its own reads): a host that is a Unix socket or loopback, where the
+connection never leaves the machine; and **Cloud SQL through the Auth Proxy** - a Cloud SQL server reached on a local socket or loopback
+host - because the proxy wraps its connection to the instance in TLS itself (per Google's Cloud SQL Auth Proxy design), so the server
+sees no TLS from the application. It also stands down, as S05 does, when the studio's role cannot see its own backend's `pg_stat_ssl` row:
+that view needs the privileges of the login role, which a narrowed `SqlConsoleRole` lacks, and the row says so.
+
+## S12 A credential is readable from configuration
+
+Both studios. Three variants, none of which shows a value: the evidence says a credential is **set**, never what it is.
+
+- **`persist-security-info`, Warning**: `Persist Security Info=true` with a `Password` in the connection string. Npgsql removes the
+  password from `NpgsqlDataSource.ConnectionString` unless this is on, and names the pool by that string (the `pool.name` tag of its
+  metrics), so the password reaches any code that prints the connection string and any OpenTelemetry exporter. Remedy:
+  `Persist Security Info=false`, Npgsql's default.
+- **`ssl-password`, Warning**: `SSL Password` is set. Npgsql keeps `SSL Password` in `NpgsqlDataSource.ConnectionString` and in the
+  pool name it reports to metrics whatever `Persist Security Info` says (it removes only `Password`), so the client key's password reaches
+  any code that prints the connection string and any OpenTelemetry exporter. Remedy: load the client certificate in code from a secrets
+  manager (`NpgsqlDataSourceBuilder.UseSslClientAuthenticationOptionsCallback(...)`; `UseClientCertificate` is obsolete in Npgsql 9 and
+  10), or use a key file without a password and restrict its permissions.
+- **`pgpassword-env`, Info**: `PGPASSWORD` is set in the process's environment, which Npgsql falls back to when the data source has no
+  password of its own. The PostgreSQL documentation advises against it, because some operating systems let other users see a process's
+  environment; a password file is the advised alternative (`Passfile`). With `Persist Security Info` off the studio cannot tell whether
+  the connection string has a password of its own - in which case `PGPASSWORD` is ignored - and the finding says so.
+
+The default password file (`~/.pgpass`, `%APPDATA%\postgresql\pgpass.conf`) is never probed. Quiet when none applies.
+
+## S13 Driver settings that copy values into logs or exceptions
+
+**Info**, both studios, **only in Production** (`IHostEnvironment.EnvironmentName`, as K01 and S04 read it; a host that registers none is not
+Production). Three variants, one per setting, each off by default and a development aid:
+
+- **`log-parameters`**: `Log Parameters=true` writes every command's parameter values to the log.
+- **`include-error-detail`**: `Include Error Detail=true` puts PostgreSQL's error and notice details on `PostgresException.Detail` and
+  `PostgresNotice.Detail`; they often quote the offending row (a unique violation's `Key (email)=(a@b.example) already exists`), and
+  Npgsql warns that they can contain sensitive data.
+- **`include-failed-batched-command`** (Npgsql 10): `Include Failed Batched Command=true` puts the statement that failed in a batch on
+  `NpgsqlException.BatchCommand`.
+
+Each can carry personal or secret data into a log line, an error page or a telemetry export. Info rather than Warning, because whether the
+values are sensitive is the application's knowledge. The remedy is the setting back to `false` (or leaving it out), the connection string's
+`Log Parameters=false` or `b.ConnectionStringBuilder.LogParameters = false;`; turn it on for a development environment through that
+environment's own configuration.

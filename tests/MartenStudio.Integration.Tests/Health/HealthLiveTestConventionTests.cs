@@ -48,6 +48,12 @@ public class HealthLiveTestConventionTests
         ["C13"] = "an application's idle pool on a server with max_connections lowered, in two databases, and the same pool below the line - Database/ConnectionHoldersLiveTests",
         ["C14"] = "connections with no application name in two databases, and every connection named - Database/ConnectionHoldersLiveTests",
         ["C15"] = "a store holding a 96-of-100 peak three hours old, and the same peak after a resize - Sources/ConnectionHistoryLiveTests",
+        ["C16"] = "a role-level idle_session_timeout of 60 s under the default pool, and the same pool with Keepalive or a shorter idle lifetime - Server/ConnectionChecksLiveTests",
+        ["C17"] = "a data source with Pooling=false and sessions churning, and the same one with pooling on - Server/ConnectionChecksLiveTests",
+        ["C18"] = "two data sources to one database in one process, and one - Server/ConnectionChecksLiveTests",
+        ["S11"] = "a TLS server reached over a non-loopback address at Require, and at VerifyFull - Server/ConnectionTlsLiveTests",
+        ["S12"] = "Persist Security Info with a password, an SSL Password and PGPASSWORD, and a clean data source - Server/ConnectionSettingChecksLiveTests",
+        ["S13"] = "Log Parameters and Include Error Detail in Production, and the same data source in Development - Server/ConnectionSettingChecksLiveTests",
     };
 
     [Fact]

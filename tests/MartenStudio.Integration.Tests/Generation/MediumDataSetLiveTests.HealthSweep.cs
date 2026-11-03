@@ -98,8 +98,16 @@ public partial class MediumDataSetLiveTests
     /// The reads wave 5 makes only on a condition this set does not meet are not counted: R02's WAL directory (archiving on,
     /// and <c>pg_monitor</c>), S07's update paths (an extension behind its default).
     /// </para>
+    /// <para>
+    /// 1.1-NP2's C16, C17, C18, S11, S12 and S13 add 1 between them: the connection read
+    /// (<c>ConnectionObservedQueries.Observed</c>: the settings a new session starts with and this connection's TLS row), which they
+    /// share through <c>ConnectionFacts</c>. C17's session statistics (<c>ConnectionObservedQueries.Sessions</c>) are read only with
+    /// pooling off, which this set's store does not have, and the pools and the settings themselves are read in process. The
+    /// count stood at 53 before it (reads added since 0.6's 51 had used the slack); it is measured at 54 now, and the constant is
+    /// that count, so the two of slack are the conditional reads again.
+    /// </para>
     /// </remarks>
-    private const int MeasuredSweepStatements = 51;
+    private const int MeasuredSweepStatements = 54;
 
     /// <summary>
     /// The statement budget: the measured count plus two. A check that adds a statement on a path this data set takes is
