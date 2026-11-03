@@ -151,9 +151,10 @@ internal static class MartenConnectionSection
             + "That is what check C18, Several pools to one database in this process, recommends when several pools reach one database."),
         MartenDataSourceOriginKind.HandedIn => new(
             "Data source",
-            "the application's own data source, handed to Marten directly",
-            "Marten did not build this NpgsqlDataSource: the application gave it to Marten (UseNpgsqlDataSource(), or StoreOptions.Connection(dataSource)), so Marten draws on the application's pool "
-            + "and has none of its own. That is what check C18, Several pools to one database in this process, recommends when several pools reach one database."),
+            "the application's data source, handed to Marten by the application",
+            "Marten did not build this NpgsqlDataSource: the application gave it to Marten (UseNpgsqlDataSource(), or StoreOptions.Connection(dataSource)), so Marten draws on the application's pool, "
+            + "unless a connection string was also given (AddMarten(connectionString) or options.Connection(...)), from which Marten may still build one of its own; C18 counts the pools. "
+            + "Handing Marten one shared data source is what check C18, Several pools to one database in this process, recommends when several pools reach one database."),
         MartenDataSourceOriginKind.Marten => new(
             "Data source",
             "Marten's own",
@@ -264,8 +265,8 @@ internal static class MartenConnectionSection
             "Marten has a pool of its own beside the application's data source",
             "If the NpgsqlDataSource the application registers connects to this database too, the process holds two pools to it: each may open up to its own Maximum Pool Size, "
             + "and each retires idle connections separately. Pointing Marten at the registered data source gives both one pool. "
-            + "Keep a connection string beside " + origin.UseCall + " and a Connection(...) that is applied after it replaces the shared data source with a pool Marten builds, "
-            + "so both pools stay open: remove the connection string.",
+            + "If a connection string stays beside " + origin.UseCall + " (options.Connection(...) or AddMarten(connectionString)), Marten can still build a pool of its own from it "
+            + "and both pools stay open: remove the connection string.",
             [],
             [],
             [new ConnectionFix(

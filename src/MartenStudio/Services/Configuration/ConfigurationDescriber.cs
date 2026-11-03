@@ -109,18 +109,20 @@ internal static class ConfigurationDescriber
 
         return
         [
-            new("Command timeout", timeout.Value, "StoreOptions.CommandTimeout") { Note = TimeoutNote(timeout, database is not null) },
+            new("Command timeout", timeout.Value, "StoreOptions.CommandTimeout") { Note = TimeoutNote(timeout, database is not null), NoteLinksToConnection = true },
             new(
                 "Command timeout in the connection string",
                 database is null ? "not reported" : timeout.ConnectionStringValue,
                 "IMartenDatabase.ConfiguredCommandTimeout")
             {
                 Note = "The Command Timeout of the connection string Marten connects with. \"Not named\" means the string has none; Npgsql's own default of 30 s does not count as named.",
+                NoteLinksToConnection = true,
             },
             new("Sticky connection lifetimes", YesNo(connection.StickyConnections), "StoreOptions.UseStickyConnectionLifetimes"),
             new("Npgsql logging disabled", YesNo(connection.NpgsqlLoggingDisabled), "StoreOptions.DisableNpgsqlLogging (data sources Marten builds)")
             {
                 Note = "Applies only to a data source Marten builds from a connection string. A data source the application hands to Marten (UseNpgsqlDataSource()) logs as the application's own builder set it.",
+                NoteLinksToConnection = true,
             },
             new("Connection tracing", connection.TrackConnections, "StoreOptions.OpenTelemetry.TrackConnections"),
             new("Hi-lo block size", Number(connection.HiloMaxLo), "StoreOptions.Advanced.HiloSequenceDefaults.MaxLo"),

@@ -239,15 +239,16 @@ public class MartenConnectionInsightTests
         ConnectionContribution contribution = await factory.ContributeAsync();
         ConnectionObservedLine row = Row(contribution, "Data source");
 
-        row.Value.Should().Be("the application's own data source, handed to Marten directly");
-        row.Note.Should().Contain("Marten did not build this NpgsqlDataSource").And.Contain("C18");
+        row.Value.Should().Be("the application's data source, handed to Marten by the application");
+        row.Note.Should().Contain("Marten did not build this NpgsqlDataSource").And.Contain("C18 counts the pools")
+            .And.Contain("unless a connection string was also given").And.NotContain("none of its own");
         row.Note.Should().NotContain("makes Marten use", "it already does");
         contribution.Sections.Single().Cards.Should().BeEmpty();
 
         // Connection(NpgsqlDataSource) with nothing in the container at all.
         await using Rig direct = Rig.Create(static options => options.Connection(NpgsqlDataSource.Create(Remote)));
 
-        Row(await direct.ContributeAsync(), "Data source").Value.Should().Be("the application's own data source, handed to Marten directly");
+        Row(await direct.ContributeAsync(), "Data source").Value.Should().Be("the application's data source, handed to Marten by the application");
     }
 
     [Fact]
@@ -295,7 +296,7 @@ public class MartenConnectionInsightTests
         for (int i = 0; i < 3; i++)
         {
             ConnectionContribution contribution = await rig.ContributeAsync();
-            Row(contribution, "Data source").Value.Should().Be("the application's own data source, handed to Marten directly");
+            Row(contribution, "Data source").Value.Should().Be("the application's data source, handed to Marten by the application");
         }
 
         Volatile.Read(ref built).Should().Be(before, "the studio compares nothing it would have to construct");
@@ -315,7 +316,8 @@ public class MartenConnectionInsightTests
         code.Should().Contain("Remove options.Connection(...) and the connection-string argument of AddMarten(...)")
             .And.Contain("UseNpgsqlDataSource(\"analytics\") supplies it")
             .And.Contain(".UseNpgsqlDataSource(\"analytics\");");
-        card.Text.Should().Contain("so both pools stay open: remove the connection string");
+        card.Text.Should().Contain("If a connection string stays beside UseNpgsqlDataSource(\"analytics\") (options.Connection(...) or AddMarten(connectionString))")
+            .And.Contain("Marten can still build a pool of its own from it and both pools stay open: remove the connection string");
 
         await using Rig plain = Rig.Create(
             static options => options.Connection(Remote),

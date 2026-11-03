@@ -19,6 +19,12 @@ internal sealed record ConfigurationValue(string Name, string Value, string Memb
     /// value the member path explains.
     /// </summary>
     public string? Note { get; init; }
+
+    /// <summary>
+    /// Whether the note links to Database › Connection's "How Marten uses this connection": true for the timeout and logging rows,
+    /// which that section explains, and false for a note it has nothing to add to.
+    /// </summary>
+    public bool NoteLinksToConnection { get; init; }
 }
 
 /// <summary>

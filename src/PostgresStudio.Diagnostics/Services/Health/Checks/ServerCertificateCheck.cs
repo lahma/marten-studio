@@ -24,7 +24,11 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <b>Not applicable behind a pooler.</b> The server's <c>pg_stat_ssl</c> row behind a pooler describes the pooler's own connection to
 /// the server, not the application's connection to the pooler, so it cannot say whether the application's leg uses TLS or checks a
 /// certificate; any pooler sign (<see cref="ConnectionSettings.PoolerSigns" />) makes the check not applicable, and the Connection
-/// page's TLS hint, which judges <c>SSL Mode</c> alone, is what speaks for that leg.
+/// page's TLS hint, which judges <c>SSL Mode</c> alone, is what speaks for that leg. The pooler stand-down runs first, before the
+/// unread-server check, so a pooler data source whose connection could not be read is not applicable rather than unavailable. The
+/// Amazon RDS Proxy remedy in <c>Evaluate</c> (<c>VerifyFull</c> with no <c>Root Certificate</c>) is therefore unreachable through a
+/// sweep, since an RDS Proxy is a pooler sign; it is kept, for the tests that call <c>Evaluate</c> directly and for a future sign
+/// that stops standing the check down.
 /// </para>
 /// <para>
 /// <b>Stands down where nothing can sit between.</b> A host that is a Unix socket or loopback never leaves the machine, and a
@@ -53,6 +57,13 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
 
         ConnectionFacts facts = await ConnectionCheckSupport.ReadAsync(context).ConfigureAwait(false);
 
+        // A pooler stands the check down before anything else: behind one, an unread connection says nothing about the application's
+        // leg either, so "not applicable" is the truer answer than "unavailable".
+        if (PoolerReason(facts) is { } pooler)
+        {
+            throw new HealthCheckNotApplicableException(pooler);
+        }
+
         if (UnavailableReason(facts) is { } unavailable)
         {
             throw new HealthCheckUnavailableException(unavailable);
@@ -77,16 +88,27 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
             : null;
     }
 
+    /// <summary>Why a pooler in front of the data source makes this check not applicable, or <see langword="null" /> when no pooler sign is present.</summary>
+    /// <param name="facts">The connection facts.</param>
+    public static string? PoolerReason(ConnectionFacts facts)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+
+        return facts.Settings.PoolerSigns.Count > 0
+            ? "The data source reaches a connection pooler, so the server's pg_stat_ssl row is the pooler's own connection, not the application's; "
+              + "the Connection page's TLS hint judges SSL Mode."
+            : null;
+    }
+
     /// <summary>Why this check does not apply to the data source, or <see langword="null" /> when it does.</summary>
     /// <param name="facts">The connection facts.</param>
     public static string? NotApplicableReason(ConnectionFacts facts)
     {
         ArgumentNullException.ThrowIfNull(facts);
 
-        if (facts.Settings.PoolerSigns.Count > 0)
+        if (PoolerReason(facts) is { } pooler)
         {
-            return "The data source reaches a connection pooler, so the server's pg_stat_ssl row is the pooler's own connection, not the application's; "
-                   + "the Connection page's TLS hint judges SSL Mode.";
+            return pooler;
         }
 
         if (facts.IsCloudSqlProxyCase)

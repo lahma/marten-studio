@@ -520,8 +520,8 @@ public sealed class ConnectionPageTests
 
         IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
 
-        line.WaitForAssertion(() => Normalize(line.Find(".ms-overview-connection").TextContent).Should().StartWith("Connection: Encryption: GSSAPI"));
-        Normalize(line.Find(".ms-overview-connection").TextContent).Should().NotContain("TLS");
+        line.WaitForAssertion(() => Normalize(line.Find(".ms-overview-connection").TextContent).Should().StartWith("Connection: encrypted with GSSAPI (not TLS)"));
+        Normalize(line.Find(".ms-overview-connection").TextContent).Should().NotContain("TLS verified").And.NotContain("TLS encrypted");
     }
 
     [Fact]

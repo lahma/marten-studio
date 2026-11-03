@@ -161,6 +161,19 @@ public sealed class PostureChecksTests
             .And.Contain("Connection page's TLS hint judges SSL Mode");
     }
 
+    [Theory]
+    [MemberData(nameof(PoolerHosts))]
+    public void Behind_a_pooler_S11_stands_down_as_not_applicable_even_when_the_connection_could_not_be_read(string connectionString)
+    {
+        // GatherAsync asks the pooler first (PoolerReason), then the unread connection (UnavailableReason): an unread server behind a pooler
+        // is not applicable, not unavailable.
+        ConnectionFacts facts = Facts(connectionString, observed: null, notRead: "the connection read failed (SQLSTATE 57014)");
+
+        ServerCertificateCheck.PoolerReason(facts).Should().Contain("connection pooler");
+        ServerCertificateCheck.UnavailableReason(facts).Should().Contain("SQLSTATE 57014");
+        ServerCertificateCheck.PoolerReason(Facts("Host=db.example", observed: null, notRead: "x")).Should().BeNull();
+    }
+
     [Fact]
     public void Without_a_pooler_sign_S05_and_S11_apply()
     {

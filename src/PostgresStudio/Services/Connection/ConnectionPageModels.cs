@@ -58,8 +58,10 @@ internal sealed record ConnectionTls(ConnectionTlsState State, string Text, stri
     /// </summary>
     public string Label => State == ConnectionTlsState.EncryptedGss ? "Encryption" : "TLS";
 
-    /// <summary>The Overview's words for it: "TLS verified (VerifyFull)", "Encryption: GSSAPI".</summary>
-    public string Summary => State == ConnectionTlsState.EncryptedGss ? "Encryption: GSSAPI" : "TLS " + Text;
+    /// <summary>
+    /// The Overview's words for it, after "Connection: ": "TLS verified (VerifyFull)", "encrypted with GSSAPI (not TLS)".
+    /// </summary>
+    public string Summary => State == ConnectionTlsState.EncryptedGss ? "encrypted with GSSAPI (not TLS)" : "TLS " + Text;
 }
 
 /// <summary>One fact of the header strip, with the in-page anchor its detail is at.</summary>

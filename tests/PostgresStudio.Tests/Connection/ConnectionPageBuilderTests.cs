@@ -102,7 +102,7 @@ public sealed class ConnectionPageBuilderTests
 
         view.Header.Select(static x => x.Label).Should().Contain("Encryption").And.NotContain("TLS");
         Fact(view, "Encryption").Should().Be("GSSAPI");
-        view.Tls.Summary.Should().Be("Encryption: GSSAPI");
+        view.Tls.Summary.Should().Be("encrypted with GSSAPI (not TLS)");
         View(Facts(Remote, Observed(ssl: true))).Tls.Summary.Should().StartWith("TLS ");
     }
 

@@ -54,8 +54,8 @@ public class MartenConnectionLiveTests(PostgresFixture postgres)
 
         // The registration is a factory (as AddNpgsqlDataSource() makes it), so no instance is compared and nothing is built to compare:
         // Marten did not build the data source, and that is the whole answer.
-        Row(section, "Data source").Value.Should().Be("the application's own data source, handed to Marten directly");
-        Row(section, "Data source").Note.Should().Contain("Marten did not build this NpgsqlDataSource").And.Contain("none of its own");
+        Row(section, "Data source").Value.Should().Be("the application's data source, handed to Marten by the application");
+        Row(section, "Data source").Note.Should().Contain("Marten did not build this NpgsqlDataSource").And.Contain("C18 counts the pools");
         Row(section, "Npgsql logging").Value.Should().Be("no effect here");
         section.Cards.Should().BeEmpty("there is no second pool to point out");
 

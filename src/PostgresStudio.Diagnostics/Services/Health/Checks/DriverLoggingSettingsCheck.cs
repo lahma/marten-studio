@@ -86,7 +86,7 @@ internal sealed class DriverLoggingSettingsCheck : HealthCheck<DriverLoggingFact
                 evaluation,
                 LogParametersVariant,
                 "Log Parameters",
-                "Every command's parameter values are written to the log",
+                "Every command's parameter values can be written to the log",
                 "Where the data source has a logger factory, Npgsql logs the parameter values of every command it runs, at the log level it uses "
                 + "for commands. Those values are the application's data - names, email addresses, tokens, whatever the query takes - and they "
                 + "end up in log files and log services that are kept, searched and shared more widely than the database."

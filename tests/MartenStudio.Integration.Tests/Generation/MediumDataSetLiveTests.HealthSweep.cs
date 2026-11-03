@@ -107,7 +107,8 @@ public partial class MediumDataSetLiveTests
     /// pools and the settings themselves are read in process. The count stood at 53 before it, and the two reads that took it from
     /// 0.6's 51 to 53 had used up the slack: K09's read of the document names that fold differently under a Turkish or Azerbaijani
     /// culture (0.10, <c>DotlessNameQueries</c>) and the one read of the connections' holders that C13 and C14 share (0.8,
-    /// <c>ServerConnectionHolders</c>). E09's compaction probe (1.1) is not among the distinct statements this set's sweep lists. It is measured at 54 now, and the constant is that count, so the two of slack are the conditional reads again.
+    /// <c>ServerConnectionHolders</c>). E09's compaction probe (1.1) is not among the distinct statements this set's sweep lists. It
+    /// is measured at 54 now, and the constant is that count, so the two of slack are the conditional reads again.
     /// </para>
     /// </remarks>
     private const int MeasuredSweepStatements = 54;

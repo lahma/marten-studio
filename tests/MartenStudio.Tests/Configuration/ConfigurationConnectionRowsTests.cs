@@ -210,6 +210,13 @@ public class ConfigurationConnectionRowsTests
         page.FindAll("#config-connections .ms-config-note a").Should().NotBeEmpty()
             .And.OnlyContain(static a => a.GetAttribute("href")!.Contains("#conn-marten", StringComparison.Ordinal));
         page.Find("#config-connections .ms-config-note").TextContent.Should().Contain("Both say the same");
+
+        // The link is on the timeout and logging rows only: the section says nothing more about row-level security.
+        page.FindAll("#config-connections .ms-config-row").Where(static row => row.QuerySelector(".ms-config-note a") is not null)
+            .Select(static row => row.QuerySelector(".ms-config-name")!.TextContent)
+            .Should().BeEquivalentTo("Command timeout", "Command timeout in the connection string", "Npgsql logging disabled");
+        page.FindAll("#config-connections .ms-config-row").Single(static row => row.QuerySelector(".ms-config-name")!.TextContent == "Row-level security")
+            .QuerySelector(".ms-config-note")!.TextContent.Should().Contain("never shown here");
         page.FindAll("#config-connections .ms-config-member").Select(static x => x.TextContent)
             .Should().OnlyContain(static member => !member.Contains("wins", StringComparison.Ordinal) && !member.Contains(',', StringComparison.Ordinal));
     }
