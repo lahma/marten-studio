@@ -123,6 +123,7 @@ internal class StudioComponentContext : BunitContext
         // 1.1-NP3: the Overview's one line about the connection, and Database > Connection itself.
         Connection = new FakeConnectionInsightService();
         Services.AddSingleton<PostgresStudio.Services.Connection.IConnectionInsightService>(Connection);
+        Services.AddSingleton<PostgresStudio.Services.Connection.IConnectionCompareService>(new UnusedConnectionCompareService());
 
         Services.AddSingleton<IAuthorizationService>(AuthorizationService);
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
