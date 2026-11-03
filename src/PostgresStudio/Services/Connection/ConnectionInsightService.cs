@@ -407,13 +407,18 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
             : new SessionDetailsAccess(true, false, false, DatabaseRefusal.WritePolicy, settings.Text.SessionsWritePolicyDenial);
     }
 
-    private static StudioScope WholeDatabase(ResolvedSource resolved) => new(resolved.Source.Key, resolved.Target.Identity, null);
+    /// <summary>The database as a whole, by the names the resolver gave it and no tenant. Shared with the paste-to-compare service.</summary>
+    internal static StudioScope WholeDatabase(ResolvedSource resolved) => new(resolved.Source.Key, resolved.Target.Identity, null);
+
+    private ValueTask<bool> StorePolicyPassesAsync(StudioScope asked, StudioScope whole, CancellationToken cancellationToken) =>
+        StorePolicyPassesAsync(authorization, asked, whole, cancellationToken);
 
     /// <summary>
     /// The source policy for the resolved source and database. The resolver has asked it already when the visitor spelt both
-    /// that way, so it is asked again only when either spelling was another - an empty database, or another case.
+    /// that way, so it is asked again only when either spelling was another - an empty database, or another case. Shared with the
+    /// paste-to-compare service, which is the same gate.
     /// </summary>
-    private async ValueTask<bool> StorePolicyPassesAsync(StudioScope asked, StudioScope whole, CancellationToken cancellationToken) =>
+    internal static async ValueTask<bool> StorePolicyPassesAsync(StudioAuthorization authorization, StudioScope asked, StudioScope whole, CancellationToken cancellationToken) =>
         (string.Equals(asked.StoreKey, whole.StoreKey, StringComparison.Ordinal)
             && string.Equals(asked.DatabaseId, whole.DatabaseId, StringComparison.Ordinal))
         || await authorization.IsAuthorizedAsync(whole, capability: null, cancellationToken).ConfigureAwait(false);
@@ -429,7 +434,10 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
         audit.Record(ApplicationsAction, target, succeeded: true, message, StudioCapability.ViewDatabaseActivity, whole);
     }
 
-    private string StorePolicyDenial()
+    private string StorePolicyDenial() => StorePolicyDenial(settings);
+
+    /// <summary>The sentence for a visitor the source policy refused. Shared with the paste-to-compare service.</summary>
+    internal static string StorePolicyDenial(IStudioSettings settings)
     {
         StudioText text = settings.Text;
         string policy = text.Product == StudioProduct.PostgresStudio ? text.OptionName("SourceAuthorizationPolicy") : text.OptionName("StoreAuthorizationPolicy");
@@ -439,7 +447,7 @@ internal sealed class ConnectionInsightService : IConnectionInsightService
     }
 
     /// <summary>An exception as the page may say it: its SQLSTATE, or its type - never its message, which can name what a gate withholds.</summary>
-    private static string Describe(Exception exception) =>
+    internal static string Describe(Exception exception) =>
         (exception as PostgresException ?? exception.InnerException as PostgresException) is { } postgres
             ? "SQLSTATE " + postgres.SqlState
             : exception.GetType().Name;

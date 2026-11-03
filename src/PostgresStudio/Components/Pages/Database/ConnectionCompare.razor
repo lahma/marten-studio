@@ -1,0 +1,405 @@
+@using System.Text
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services.Connection
+@using PostgresStudio.Services.Live
+@using PostgresStudio.Services.Settings
+@implements IAsyncDisposable
+@inject IConnectionCompareService Comparer
+@inject IStudioSettings Settings
+@inject StudioDescriptor Descriptor
+@inject StudioState State
+@inject IJSRuntime JsRuntime
+
+@*
+    "Compare a connection string" (1.1, PASTE): an admin pastes a candidate Npgsql connection string - the one in the new
+    configuration, the one a colleague sent, the one the cloud console shows - and sees how it differs from the one in effect and
+    what the page's advice would be if the application switched to it.
+
+    What the text is allowed to do: nothing. Passwords are taken out of it on the server before anything is read; it is parsed and
+    never connected to; it is not logged, audited, stored, put in the snapshot or handed to IPostgresDiagnostics. The component keeps
+    no copy past the call: the textarea is not bound (it is read from the browser when Compare is pressed, in chunks well under the
+    circuit's 32 KB receive limit - PlanPaste's hand-over), the chunks are assembled into a buffer that is emptied as the call
+    returns, and what stays on the page is the service's answer, which holds redacted records and the names of keywords.
+    Clear throws the textarea away (a new element) and the answer with it; leaving the page disposes both.
+
+    A refusal says a keyword's name and never its value. "Npgsql could not read this connection string" says nothing more.
+
+    The disclosure is the platform's <details>: nothing to track, nothing to restore, and it works before the circuit is up.
+*@
+
+<section class="ms-section ms-conn-compare" id="conn-compare" aria-labelledby="conn-compare-title">
+    <details class="ms-conn-compare-details">
+        <summary class="ms-conn-compare-summary">
+            <h2 class="ms-section-title" id="conn-compare-title">Compare a connection string</h2>
+        </summary>
+
+        <div class="ms-conn-compare-body">
+            <p class="ms-conn-compare-promise" id="conn-compare-promise">@ConnectionCompareView.Promise</p>
+
+            <label class="ms-conn-compare-label" for="conn-compare-input">A connection string to compare with the one in effect</label>
+            <textarea @ref="textArea"
+                      @key="generation"
+                      id="conn-compare-input"
+                      class="ms-conn-compare-input ms-input ms-input-mono"
+                      rows="4"
+                      spellcheck="false"
+                      autocapitalize="off"
+                      autocomplete="off"
+                      autocorrect="off"
+                      placeholder="Host=db.example.com;Port=5432;Database=app;Username=svc;SSL Mode=VerifyFull;Maximum Pool Size=50"
+                      aria-describedby="conn-compare-promise conn-compare-help"></textarea>
+
+            <div class="ms-conn-compare-actions">
+                <button type="button" class="ms-button ms-conn-compare-run" disabled="@busy" @onclick="CompareAsync">@(busy ? "Reading…" : "Compare")</button>
+                <button type="button" class="ms-button ms-conn-compare-clear" disabled="@busy" @onclick="ClearAsync">Clear</button>
+            </div>
+
+            <p class="ms-muted ms-conn-compare-help" id="conn-compare-help">
+                An Npgsql connection string, up to @PastedConnectionString.MaxCharacters.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) characters.
+                Nothing is connected to: it is only read, so what the server says about the connection in effect is what the advice
+                is judged against. The comparison is not audited, because it reads nothing and runs nothing.
+            </p>
+
+            @if (failure is { Length: > 0 })
+            {
+                <p class="ms-alert ms-alert-error ms-conn-compare-error" role="alert">@failure</p>
+            }
+
+            @if (result is { } shown)
+            {
+                <div class="ms-conn-compare-result" id="conn-compare-result" aria-live="polite">
+                    @if (shown.Outcome != ConnectionCompareOutcome.Compared)
+                    {
+                        <p class="@("ms-alert ms-conn-compare-refusal " + (shown.Outcome is ConnectionCompareOutcome.Refused or ConnectionCompareOutcome.Unavailable ? "ms-alert-warning" : "ms-alert-info"))" role="status">@shown.Reason</p>
+                    }
+                    else
+                    {
+                        @ResultView(shown)
+                    }
+                </div>
+            }
+        </div>
+    </details>
+</section>
+
+@code {
+    /// <summary>The characters a chunk carries: a SignalR message is 32 KB by default, and a character is up to four bytes of it.</summary>
+    internal const int ChunkCharacters = 6_000;
+
+    /// <summary>What <c>sendInChunks</c> answers for text longer than the limit.</summary>
+    internal const int PastedTooLarge = -1;
+
+    private readonly StringBuilder received = new();
+    private readonly CancellationTokenSource lifetime = new();
+
+    private ElementReference textArea;
+    private DotNetObjectReference<ConnectionCompare>? self;
+    private ConnectionCompareView? result;
+    private string? failure;
+    private bool busy;
+    private bool showAll;
+    private bool disposed;
+
+    /// <summary>The textarea is replaced, not emptied, to clear it: it is not bound, so the server has no value to reset.</summary>
+    private int generation;
+
+    /// <summary>A chunked hand-over begins: whatever an earlier one left is dropped. Called by studio.js.</summary>
+    [JSInvokable]
+    public Task BeginPaste()
+    {
+        received.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>One chunk of the text, in order. Called by studio.js; the total is bounded here as well, whatever the script says.</summary>
+    [JSInvokable]
+    public Task PasteChunk(string chunk)
+    {
+        if (received.Length + (chunk?.Length ?? 0) <= PastedConnectionString.MaxCharacters + ChunkCharacters)
+        {
+            received.Append(chunk);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task CompareAsync()
+    {
+        if (busy || disposed)
+        {
+            return;
+        }
+
+        busy = true;
+        failure = null;
+        result = null;
+        showAll = false;
+        self ??= DotNetObjectReference.Create(this);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+
+            // The text goes over in chunks (see the remarks above); what the helper answers is the length it sent.
+            int length;
+
+            try
+            {
+                length = await JsRuntime.InvokeAsync<int>(
+                    "martenStudio.query.sendInChunks",
+                    textArea,
+                    self,
+                    ChunkCharacters,
+                    PastedConnectionString.MaxCharacters);
+            }
+            catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+            {
+                failure = "The text did not reach the server: the browser's connection to it ended.";
+                return;
+            }
+
+            if (length == PastedTooLarge)
+            {
+                result = ConnectionCompareView.Of(ConnectionCompareOutcome.TooLong, ConnectionCompareView.TooLongSentence());
+            }
+            else if (length <= 0 || received.Length == 0 || scope is null)
+            {
+                result = ConnectionCompareView.Of(
+                    scope is null ? ConnectionCompareOutcome.Unavailable : ConnectionCompareOutcome.Empty,
+                    scope is null ? "No database is selected." : ConnectionCompareView.EmptySentence);
+            }
+            else
+            {
+                // The text is an argument and is dropped by the service; the buffer is emptied below, whatever happens.
+                result = await Comparer.CompareAsync(scope, received.ToString(), lifetime.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // On the page, not only in a log: a failure the visitor cannot see is a button that does nothing. The type only.
+            failure = "The comparison failed (" + exception.GetType().Name + ").";
+        }
+        finally
+        {
+            received.Clear();
+            busy = false;
+        }
+    }
+
+    private Task ClearAsync()
+    {
+        received.Clear();
+        result = null;
+        failure = null;
+        showAll = false;
+        generation++;
+        return Task.CompletedTask;
+    }
+
+    private Task ToggleShowAllAsync()
+    {
+        showAll = !showAll;
+        return Task.CompletedTask;
+    }
+
+    private string RowLink(string id) => ConnectionLinks.To(Settings, Descriptor, State.ActiveScope, id);
+
+    private RenderFragment ResultView(ConnectionCompareView view) => __builder =>
+    {
+        int differing = view.DifferenceCount;
+        List<ConnectionCompareRow> rows = [.. view.Rows.Where(x => showAll || x.Differs)];
+
+        <p class="ms-conn-compare-summary-line" id="conn-compare-summary">
+            @if (differing == 0)
+            {
+                <strong>The pasted string sets nothing differently from the connection in effect.</strong>
+            }
+            else
+            {
+                <strong>@(differing == 1 ? "1 setting differs" : differing + " settings differ")</strong>
+                @(" from the connection in effect.")
+            }
+            @if (!view.CurrentReadable)
+            {
+                @(" The connection in effect could not be read, so there is nothing to compare with: every setting is listed.")
+            }
+        </p>
+
+        @if (view.RemovedSecrets.Count > 0)
+        {
+            <p class="ms-muted ms-conn-note ms-conn-compare-removed">
+                The text carried @(view.RemovedSecrets.Count == 1 ? "a secret" : "secrets") (@string.Join(", ", view.RemovedSecrets)); it was removed before anything was read.
+            </p>
+        }
+
+        <div class="ms-conn-toolbar">
+            <button type="button"
+                    class="@("ms-button ms-conn-toggle ms-conn-compare-toggle" + (showAll ? " ms-conn-toggle-on" : string.Empty))"
+                    aria-pressed="@(showAll ? "true" : "false")"
+                    @onclick="ToggleShowAllAsync">
+                Show every setting
+            </button>
+            <span class="ms-muted ms-conn-toolbar-note">
+                @(showAll
+                    ? "Showing every setting of Npgsql " + view.NpgsqlVersion + ", the ones that differ marked."
+                    : "Showing only what differs. A setting spelled out at Npgsql's default is not a difference.")
+            </span>
+        </div>
+
+        @foreach (IGrouping<string, ConnectionCompareRow> group in rows.GroupBy(static x => x.Category, StringComparer.Ordinal))
+        {
+            <div class="ms-conn-group" @key="group.Key">
+                <h3 class="ms-conn-group-title ms-conn-compare-group">@group.Key</h3>
+
+                <TableScroll Label="@(group.Key + " settings compared")">
+                    <table class="ms-table ms-conn-table ms-conn-compare-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Setting</th>
+                                <th scope="col">In effect now</th>
+                                <th scope="col">Pasted</th>
+                                <th scope="col">Change</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (ConnectionCompareRow row in group)
+                            {
+                                <tr id="@row.Anchor" class="@("ms-conn-row ms-conn-compare-row" + (row.Differs ? " ms-conn-compare-diff" : string.Empty))" @key="row.Keyword">
+                                    <th scope="row" class="ms-conn-keyword">
+                                        @row.Keyword
+                                        @if (row.AdviceId is { } advice)
+                                        {
+                                            <a class="ms-conn-advice" href="@RowLink(advice)" aria-label="@("Advice about " + row.Keyword + " if you switched to the pasted settings")">advice</a>
+                                        }
+                                    </th>
+                                    <td class="ms-conn-value">@ValueCell(row.Current)</td>
+                                    <td class="ms-conn-value">@ValueCell(row.Pasted)</td>
+                                    <td class="ms-conn-compare-change">
+                                        <span class="@("ms-conn-compare-mark" + (row.Differs ? " ms-conn-compare-mark-diff" : string.Empty))">@(row.Differs ? "changed" : "same")</span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            </div>
+        }
+
+        <h3 class="ms-conn-subtitle" id="conn-compare-advice-title">If you switched to the pasted settings</h3>
+
+        @if (view.Cards.Count == 0)
+        {
+            <p class="ms-conn-nothing ms-conn-compare-nothing">Nothing to change in the pasted settings.</p>
+        }
+
+        @foreach (ConnectionCompareCard card in view.Cards.Concat(view.Notes))
+        {
+            @AdviceCard(card)
+        }
+
+        @if (view.Resolved.Count > 0)
+        {
+            <div class="ms-conn-compare-resolved">
+                <p class="ms-conn-compare-resolved-title"><strong>No longer applies:</strong></p>
+                <ul>
+                    @foreach (string heading in view.Resolved)
+                    {
+                        <li @key="heading">@heading</li>
+                    }
+                </ul>
+            </div>
+        }
+
+        <p class="ms-muted ms-conn-note ms-conn-compare-limits">
+            This is the page's own advice, judged against what the server reported about the connection in effect and the platform it
+            detected. The health advisor's findings run on the application's real data source only.
+        </p>
+    };
+
+    private RenderFragment ValueCell(ConnectionSettingRow? row) => __builder =>
+    {
+        if (row is null)
+        {
+            <span class="ms-muted">–</span>
+        }
+        else
+        {
+            <span class="ms-mono">@row.Value</span>
+            <span class="@("ms-conn-from ms-conn-from-" + row.Origin.ToString().ToLowerInvariant())">@ConnectionPageBuilder.FromText(row)</span>
+
+            @if (row.Note is { Length: > 0 } note)
+            {
+                <span class="ms-conn-row-note">@note</span>
+            }
+        }
+    };
+
+    private RenderFragment AdviceCard(ConnectionCompareCard entry) => __builder =>
+    {
+        ConnectionCard card = entry.Card;
+        string title = card.Id + "-title";
+
+        <article class="@("ms-health-finding ms-conn-card ms-conn-compare-card ms-conn-card-" + card.Kind.ToString().ToLowerInvariant() + " ms-health-finding-info")"
+                 id="@card.Id"
+                 aria-labelledby="@title"
+                 @key="card.Id">
+            <header class="ms-health-finding-header">
+                <span class="ms-health-severity ms-health-severity-info ms-conn-kind">@(entry.Change == ConnectionCompareChange.New ? "New" : "Also today")</span>
+                @if (card.Code is { Length: > 0 } label)
+                {
+                    <code class="ms-health-code">@label</code>
+                }
+
+                <h4 class="ms-health-finding-title" id="@title">@card.Heading</h4>
+            </header>
+
+            <p class="ms-health-why">@card.Text</p>
+
+            @if (card.Keywords.Count > 0)
+            {
+                <p class="ms-conn-about">About: <span class="ms-mono">@string.Join(", ", card.Keywords)</span></p>
+            }
+
+            @foreach ((int index, ConnectionFix fix) in card.Fixes.Index())
+            {
+                <div class="ms-health-remedy ms-conn-fix" @key="(index, fix.Label)">
+                    <div class="ms-health-remedy-header">
+                        <span class="ms-health-remedy-title">@fix.Label</span>
+                        <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + (card.Code ?? card.Heading) + ")")" />
+                    </div>
+                    <pre class="ms-code ms-health-remedy-code"><code>@fix.Code</code></pre>
+                </div>
+            }
+        </article>
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
+        // The page is going: the answer and any half-received text go with it.
+        received.Clear();
+        result = null;
+        self?.Dispose();
+        self = null;
+
+        try
+        {
+            await lifetime.CancelAsync();
+        }
+        finally
+        {
+            lifetime.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

@@ -14551,3 +14551,143 @@ a.ms-schema-health-mark:focus-visible {
         flex-basis: 100%;
     }
 }
+
+/* ===== 1.1-PASTE compare a connection string ===== */
+
+/* ==========================================================================
+   1.1-PASTE. Database > Connection > Compare a connection string
+
+   Appended in D26 order, after 1.1-NP3. The settings table's own classes (.ms-conn-table, .ms-conn-from, .ms-conn-row-note) and the
+   Health page's cards (.ms-health-finding and its parts) are reused; what is new here is the disclosure, the box, the second value
+   column and the way a row that differs is marked. A changed row is marked with the word "changed" and an edge, never with colour
+   alone. At 390 px the actions wrap and the table scrolls inside its own region.
+   ========================================================================== */
+
+.ms-conn-compare-details {
+    border-top: 1px solid var(--ms-color-border);
+    padding-top: var(--ms-space-sm);
+}
+
+.ms-conn-compare-summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    cursor: pointer;
+    list-style: none;
+}
+
+.ms-conn-compare-summary::-webkit-details-marker {
+    display: none;
+}
+
+.ms-conn-compare-summary::before {
+    content: "▸";
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-compare-details[open] > .ms-conn-compare-summary::before {
+    content: "▾";
+}
+
+.ms-conn-compare-summary:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+}
+
+.ms-conn-compare-summary .ms-section-title {
+    margin: 0;
+}
+
+.ms-conn-compare-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    margin-top: var(--ms-space-md);
+}
+
+.ms-conn-compare-promise {
+    max-width: 80ch;
+    margin: 0;
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-conn-compare-label {
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-conn-compare-input {
+    width: 100%;
+}
+
+.ms-conn-compare-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ms-space-sm);
+}
+
+.ms-conn-compare-help {
+    max-width: 80ch;
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-conn-compare-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-conn-compare-summary-line {
+    margin: 0;
+}
+
+.ms-conn-compare-group {
+    margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-conn-from-pasted {
+    border-color: var(--ms-color-primary);
+    background: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+}
+
+/* A row that differs: an edge on its first cell, a tint across it, and the word in its last. */
+.ms-conn-compare-diff > th,
+.ms-conn-compare-diff > td {
+    background-color: var(--ms-color-warning-bg);
+}
+
+.ms-conn-compare-diff > th:first-child {
+    box-shadow: inset 4px 0 0 var(--ms-color-warning);
+}
+
+.ms-conn-compare-mark {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-conn-compare-mark-diff {
+    color: var(--ms-color-text);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-conn-compare-table .ms-conn-value {
+    min-width: 10rem;
+}
+
+.ms-conn-compare-resolved ul {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+}
+
+.ms-conn-compare-resolved-title {
+    margin: 0 0 var(--ms-space-xs);
+}
+
+@media (max-width: 640px) {
+    .ms-conn-compare-actions .ms-button {
+        flex: 1 1 8rem;
+    }
+}

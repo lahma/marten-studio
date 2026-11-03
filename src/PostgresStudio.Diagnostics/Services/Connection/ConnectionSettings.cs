@@ -22,6 +22,9 @@ internal enum ConnectionSettingOrigin
 
     /// <summary>The loaded Npgsql's getter threw; only the exception's type is kept.</summary>
     Unreadable,
+
+    /// <summary>The visitor pasted a connection string that says so (1.1, PASTE): the provenance <see cref="ConnectionString" /> has for the data source's own.</summary>
+    Pasted,
 }
 
 /// <summary>One keyword of the connection string, already redacted: nothing here can be a secret.</summary>
@@ -276,7 +279,19 @@ internal sealed record ConnectionReadContext
 
     /// <summary>The average row or document size in bytes, from T09 or E04 (BUFFER), when known.</summary>
     public long? AverageRowBytes { get; init; }
+
+    /// <summary>
+    /// What was removed from a connection string a visitor pasted, or <see langword="null" /> for the data source's own. When set, the
+    /// text was sanitised first (<see cref="PastedConnectionString" />): the rows say <see cref="ConnectionSettingOrigin.Pasted" />
+    /// where the data source's say <see cref="ConnectionSettingOrigin.ConnectionString" />, a secret is only <c>set</c> when it was
+    /// in the text and has been removed, and an <c>Options</c> value is never shown.
+    /// </summary>
+    public PastedStrip? Pasted { get; init; }
 }
+
+/// <summary>What the sanitiser took out of a pasted connection string: the canonical keywords of the secrets, never their values.</summary>
+/// <param name="RemovedSecrets">The canonical keywords (<c>Password</c>, <c>SSL Password</c>) that were in the text and are gone.</param>
+internal sealed record PastedStrip(IReadOnlySet<string> RemovedSecrets);
 
 /// <summary>
 /// The connection settings of one data source, already redacted (NP-DESIGN §2): every row, the effective values the

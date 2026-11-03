@@ -100,6 +100,9 @@
             <ConnectionSettingsTable Model="view" OnlyDiffersChanged="OnOnlyDiffersChangedAsync" />
         }
 
+        @* 1.1-PASTE: a candidate connection string, compared with the one above. It keeps nothing of what is pasted. *@
+        <ConnectionCompare />
+
         <ConnectionObservedSection Model="view" />
 
         <ConnectionApplicationsSection Model="apps" Access="view.Activity" Failure="@appsFailure" />

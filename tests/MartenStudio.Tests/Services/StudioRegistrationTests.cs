@@ -201,6 +201,9 @@ public class StudioRegistrationTests
         (typeof(PostgresStudio.Services.Connection.IConnectionFactsSource), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Connection.ConnectionFactsSource)),
         (typeof(PostgresStudio.Services.Connection.IConnectionInsightService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Connection.ConnectionInsightService)),
 
+        // 1.1-PASTE: "Compare a connection string" on that page - the same gate, no logger, nothing kept.
+        (typeof(PostgresStudio.Services.Connection.IConnectionCompareService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Connection.ConnectionCompareService)),
+
         // W5-Q1: Statements - the facts are the statement sweep's, the view the circuit's.
         (typeof(PostgresStudio.Services.Statements.IStatementFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Statements.StatementFactsReader)),
         // 0.6 (X1): the Statements drill-in's planner, stateless and the process's.

@@ -95,6 +95,8 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         // 1.1-NP3: Database > Connection, and the Overview's one line about it.
         Connection = new FakeConnectionInsightService();
         Services.AddSingleton<PostgresStudio.Services.Connection.IConnectionInsightService>(Connection);
+        ConnectionCompare = new FakeConnectionCompareService();
+        Services.AddSingleton<PostgresStudio.Services.Connection.IConnectionCompareService>(ConnectionCompare);
 
         Services.AddSingleton<HealthMutes>();
         Services.AddSingleton<HealthAlerts>();
@@ -139,6 +141,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
 
     /// <summary>Database › Connection and the Overview's connection line (NP3).</summary>
     public FakeConnectionInsightService Connection { get; }
+
+    /// <summary>"Compare a connection string" on that page (1.1-PASTE).</summary>
+    public FakeConnectionCompareService ConnectionCompare { get; }
 
     public FakeSessions Sessions { get; }
 

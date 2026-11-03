@@ -526,6 +526,7 @@ internal static class ConnectionPageBuilder
     internal static string FromText(ConnectionSettingRow row) => row.Origin switch
     {
         ConnectionSettingOrigin.ConnectionString => "connection string",
+        ConnectionSettingOrigin.Pasted => "pasted",
         ConnectionSettingOrigin.Environment => row.EnvironmentVariable ?? "environment",
         ConnectionSettingOrigin.NotVisible => "not visible",
         ConnectionSettingOrigin.Withheld => "withheld",

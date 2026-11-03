@@ -304,6 +304,33 @@ internal sealed class FakeConnectionInsightService : PostgresStudio.Services.Con
     }
 }
 
+/// <summary>
+/// "Compare a connection string" (1.1-PASTE): the comparison said outright by a test, or computed by a function it hands over (the
+/// real sanitiser and comparer over stated facts). Records every request - scope and text - so a test can say what was asked and
+/// that the text reached the service only through the call.
+/// </summary>
+internal sealed class FakeConnectionCompareService : PostgresStudio.Services.Connection.IConnectionCompareService
+{
+    public PostgresStudio.Services.Connection.ConnectionCompareView View { get; set; } =
+        PostgresStudio.Services.Connection.ConnectionCompareView.Of(PostgresStudio.Services.Connection.ConnectionCompareOutcome.Unavailable, "No comparison in this test.");
+
+    /// <summary>When set, the answer to a request, from its text.</summary>
+    public Func<string?, PostgresStudio.Services.Connection.ConnectionCompareView>? Answer { get; set; }
+
+    public Exception? Failure { get; set; }
+
+    public List<(StudioScope Scope, string? Text)> Requests { get; } = [];
+
+    public Task<PostgresStudio.Services.Connection.ConnectionCompareView> CompareAsync(StudioScope scope, string? pasted, CancellationToken cancellationToken = default)
+    {
+        Requests.Add((scope, pasted));
+
+        return Failure is not null
+            ? Task.FromException<PostgresStudio.Services.Connection.ConnectionCompareView>(Failure)
+            : Task.FromResult(Answer is { } answer ? answer(pasted) : View);
+    }
+}
+
 /// <summary>The sidebar's badges: none.</summary>
 internal sealed class FakeNavIndicators : INavIndicatorService
 {

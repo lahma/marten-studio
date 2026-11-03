@@ -59,7 +59,7 @@ public sealed class ConnectionPageTests
 
         page.Find(".ms-page-title").TextContent.Should().Be("Connection");
         page.FindAll("h2.ms-section-title").Select(static x => x.TextContent.Trim().Split('\n')[0].Trim())
-            .Should().Equal("Worth a look", "Settings", "What the server saw", "This application's sessions", "Not visible from here");
+            .Should().Equal("Worth a look", "Settings", "Compare a connection string", "What the server saw", "This application's sessions", "Not visible from here");
 
         page.FindAll(".ms-conn-fact").Select(static x => x.QuerySelector("dt")!.TextContent)
             .Should().Equal("Server", "Database", "Role", "TLS", "Pool", "Npgsql", "Platform");

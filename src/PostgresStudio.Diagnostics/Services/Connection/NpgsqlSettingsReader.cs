@@ -205,6 +205,12 @@ internal static class NpgsqlSettingsReader
         bool sslPasswordSet = false;
         bool persistSecurityInfo = ReadOrDefault(builder, "Persist Security Info") is true;
 
+        // A pasted string's explicit keywords say "pasted" where the data source's say "connection string", and its Options
+        // values are never looked up against the server: the sanitiser has taken them out already (PastedConnectionString).
+        PastedStrip? pasted = context.Pasted;
+        ConnectionSettingOrigin explicitOrigin = pasted is null ? ConnectionSettingOrigin.ConnectionString : ConnectionSettingOrigin.Pasted;
+        IReadOnlySet<string>? optionServerNames = pasted is null ? context.ServerSettingNames : null;
+
         // The hosts first: PGTARGETSESSIONATTRS applies only to a data source with more than one.
         string? hostText = ReadOrDefault(builder, "Host") as string;
         int port = ReadOrDefault(builder, "Port") is int p ? p : 5432;
@@ -218,7 +224,7 @@ internal static class NpgsqlSettingsReader
 
             if (entry is null)
             {
-                rows.Add(new(property.Keyword, property.Category, explicitly ? ConnectionSettingOrigin.ConnectionString : ConnectionSettingOrigin.Default,
+                rows.Add(new(property.Keyword, property.Category, explicitly ? explicitOrigin : ConnectionSettingOrigin.Default,
                     "value withheld: this studio does not know this setting", null, null, null, property.Obsolete, explicitly, hintIds));
                 continue;
             }
@@ -229,7 +235,7 @@ internal static class NpgsqlSettingsReader
             switch (entry.Exposure)
             {
                 case NpgsqlSettingExposure.Secret:
-                    rows.Add(SecretRow(property, entry, builder, explicitly, persistSecurityInfo, environment, variable, hintIds, out bool environmentSet));
+                    rows.Add(SecretRow(property, entry, builder, explicitly, persistSecurityInfo, pasted, environment, variable, hintIds, out bool environmentSet));
 
                     if (string.Equals(property.Keyword, "Password", StringComparison.OrdinalIgnoreCase))
                     {
@@ -237,7 +243,9 @@ internal static class NpgsqlSettingsReader
                     }
                     else
                     {
-                        sslPasswordSet = explicitly && HasText(SafeGet(property, builder, out _));
+                        sslPasswordSet = pasted is null
+                            ? explicitly && HasText(SafeGet(property, builder, out _))
+                            : pasted.RemovedSecrets.Contains(property.Keyword);
                     }
 
                     continue;
@@ -245,7 +253,7 @@ internal static class NpgsqlSettingsReader
                 case NpgsqlSettingExposure.Options:
                 {
                     string? written = explicitly ? builder.Options : null;
-                    ConnectionSettingOrigin origin = ConnectionSettingOrigin.ConnectionString;
+                    ConnectionSettingOrigin origin = explicitOrigin;
 
                     if (string.IsNullOrWhiteSpace(written) && variable is not null && environment.Get(variable) is { Length: > 0 } fromEnvironment)
                     {
@@ -259,11 +267,13 @@ internal static class NpgsqlSettingsReader
                         continue;
                     }
 
-                    options = ParseOptions(written, context.ServerSettingNames);
+                    options = ParseOptions(written, optionServerNames);
                     rows.Add(new(property.Keyword, property.Category, origin, options.Render(), entry.Exposure,
                         origin == ConnectionSettingOrigin.Environment ? variable : null,
-                        "A setting's name is always shown; its value only for a server setting, never for a custom one (a name with a dot).",
-                        property.Obsolete, origin == ConnectionSettingOrigin.ConnectionString, hintIds));
+                        pasted is not null && origin == explicitOrigin
+                            ? "A setting's name is shown; the value of one in a pasted string never is."
+                            : "A setting's name is always shown; its value only for a server setting, never for a custom one (a name with a dot).",
+                        property.Obsolete, origin == explicitOrigin, hintIds));
                     continue;
                 }
             }
@@ -277,7 +287,7 @@ internal static class NpgsqlSettingsReader
             if (explicitly && HasValue(property.Keyword, explicitValue))
             {
                 effective = explicitValue;
-                from = ConnectionSettingOrigin.ConnectionString;
+                from = explicitOrigin;
                 unreadable = explicitValue is UnreadableValue;
             }
             else if (variable is not null
@@ -315,7 +325,7 @@ internal static class NpgsqlSettingsReader
                 from == ConnectionSettingOrigin.Environment ? variable : null,
                 note,
                 property.Obsolete,
-                from == ConnectionSettingOrigin.ConnectionString,
+                from == explicitOrigin,
                 hintIds));
         }
 
@@ -360,13 +370,35 @@ internal static class NpgsqlSettingsReader
         NpgsqlConnectionStringBuilder builder,
         bool explicitly,
         bool persistSecurityInfo,
+        PastedStrip? pasted,
         IProcessEnvironment environment,
         string? variable,
         IReadOnlyList<string> hintIds,
         out bool environmentSet)
     {
-        bool setHere = explicitly && HasText(SafeGet(property, builder, out _));
         environmentSet = variable is not null && environment.Get(variable) is { Length: > 0 };
+
+        if (pasted is not null)
+        {
+            // The text had its secrets removed before the builder saw it, so what is known is only that it carried one: "set" says
+            // so and nothing else, and the "not visible" of the data source's own Password row does not apply.
+            if (pasted.RemovedSecrets.Contains(property.Keyword))
+            {
+                return new(property.Keyword, property.Category, ConnectionSettingOrigin.Pasted, "set", entry.Exposure, null,
+                    "It was in the pasted text and was removed before anything was read.", property.Obsolete, true, hintIds);
+            }
+
+            if (environmentSet)
+            {
+                return new(property.Keyword, property.Category, ConnectionSettingOrigin.Environment, "set (" + variable + ")", entry.Exposure, variable, null, property.Obsolete, false, hintIds);
+            }
+
+            return new(property.Keyword, property.Category, ConnectionSettingOrigin.Default, "not set", entry.Exposure, null,
+                string.Equals(property.Keyword, "Password", StringComparison.OrdinalIgnoreCase) ? DefaultFileNote(property.Keyword) : null,
+                property.Obsolete, false, hintIds);
+        }
+
+        bool setHere = explicitly && HasText(SafeGet(property, builder, out _));
 
         if (string.Equals(property.Keyword, "Password", StringComparison.OrdinalIgnoreCase) && !persistSecurityInfo)
         {

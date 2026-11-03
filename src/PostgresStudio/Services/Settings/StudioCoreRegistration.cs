@@ -191,6 +191,10 @@ internal static class StudioCoreRegistration
         // knowledge through IConnectionInsightContributor, which the service takes as any number of.
         services.TryAddSingleton<Connection.IConnectionFactsSource, Connection.ConnectionFactsSource>();
         services.TryAddScoped<Connection.IConnectionInsightService, Connection.ConnectionInsightService>();
+
+        // 1.1-PASTE: "Compare a connection string" on that page. The same gate, no audit, no logger: the pasted text is a parameter
+        // that is parsed and dropped.
+        services.TryAddScoped<Connection.IConnectionCompareService, Connection.ConnectionCompareService>();
         // W5-Q1: the Statements page. The facts are the engine's; what a visitor is shown of them, and which first read this
         // circuit has audited, are the circuit's.
         // X1: the drill-in's planner - stateless, its plans the visitor's own, run as SqlConsoleRole on a connection of each
