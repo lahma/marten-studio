@@ -142,23 +142,25 @@ public class LinqEventPanelTests
         panel.Find(".ms-query-linq-event-members").TextContent.Should().Contain("Members of an event: Sequence, Timestamp, EventTypeName, StreamId");
 
         string withheld = panel.Find(".ms-query-linq-withheld").TextContent;
-        withheld.Should().Contain("Not offered here: IsArchived, CausationId, Data, Headers, Tags, EventType");
+        withheld.Should().Contain("Not offered here, and why");
         withheld.Should().Contain("Use the Archived selector").And.Contain("CausationIdEnabled is false").And.Contain("docs/linq-mode.md#events");
         panel.FindAll(".ms-query-linq-withheld-list li").Should().HaveCount(3);
+        panel.FindAll(".ms-query-linq-withheld-list li code").Select(static x => x.TextContent)
+            .Should().Equal("IsArchived", "CausationId", "Data, Headers, Tags, EventType");
     }
 
     [Fact]
-    public void The_not_offered_list_is_closed_until_a_refusal_names_a_withheld_member()
+    public void The_not_offered_list_is_open_by_default_so_an_admin_never_has_to_look_for_it()
     {
         using StudioComponentContext context = CreateContext(WithEvents(new FakeLinqQueryService()));
 
         var panel = context.Render<LinqQueryPanel>();
 
-        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeFalse();
+        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeTrue();
     }
 
     [Fact]
-    public async Task The_not_offered_list_opens_when_the_refusal_named_a_withheld_member()
+    public async Task The_not_offered_list_stays_open_and_the_refusal_carries_its_reason()
     {
         LinqWithheldMember archived = Info.Withheld[0];
         var linq = WithEvents(new FakeLinqQueryService());
@@ -177,27 +179,38 @@ public class LinqEventPanelTests
         await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
 
         panel.Markup.Should().Contain(archived.Reason);
-        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeTrue("the refusal named a member the list explains");
+        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeTrue();
     }
 
     [Fact]
-    public async Task A_refusal_that_names_no_withheld_member_leaves_the_not_offered_list_closed()
+    public void The_Order_by_box_asks_the_browser_for_Ctrl_Enter_as_the_predicate_editor_does()
+    {
+        using StudioComponentContext context = CreateContext(WithEvents(new FakeLinqQueryService()));
+
+        context.Render<LinqQueryPanel>();
+
+        context.JSInterop.Invocations["martenStudio.query.enhanceRunField"].Should().ContainSingle(
+            "the Order-by box is a plain input, so the browser recognises Ctrl+Enter there and sends its live text");
+    }
+
+    [Fact]
+    public async Task Ctrl_Enter_in_the_Order_by_box_runs_the_query_with_the_text_the_box_holds()
     {
         var linq = WithEvents(new FakeLinqQueryService());
-        linq.Result = LinqQueryResult.Refused(
-            LinqQueryService.EventsAlias,
-            new LinqRefusal(LinqStage.Screen, LinqClause.Where, "The predicate names 'Nonsense', which is not a member LINQ mode can query here.", 6),
-            offset: 0,
-            pageSize: 50);
+        linq.Result = Result(new LinqEventScope(null, CrossTenant: true, ArchivedFilter.Exclude, WholeDatabase: false, PerTenantSequences: false), Row(7));
 
         using StudioComponentContext context = CreateContext(linq);
 
         var panel = context.Render<LinqQueryPanel>();
         panel.Find("#ms-query-linq-type").Change(LinqQueryPanel.EventsToken);
-        panel.Find("#ms-query-linq-where").Change("Nonsense == 1");
-        await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+        panel.Find("#ms-query-linq-where").Change("Version > 0");
 
-        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeFalse();
+        await panel.InvokeAsync(() => panel.Instance.RunFromOrderByAsync("Timestamp desc"));
+
+        LinqQueryRequest request = linq.Requests.Should().ContainSingle().Subject;
+        request.OrderBy.Should().Be("Timestamp desc", "the chord carries the live text, because `change` has not fired yet");
+        request.Where.Should().Be("Version > 0");
+        panel.FindAll(".ms-query-linq-events .ms-event-card").Should().HaveCount(1);
     }
 
     [Fact]
@@ -419,6 +432,35 @@ public class LinqEventPanelTests
         page.Find("#ms-query-linq-archived").GetAttribute("value").Should().Be(nameof(ArchivedFilter.Only));
         page.Find("#ms-query-linq-where").GetAttribute("value").Should().Be("EventTypeName == \"a\"");
         linq.Requests.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The studio's router is its own, so every <c>NavigateTo</c> is an enhanced navigation (a GET of the page), and one begun
+    /// while another is in flight aborts it. Editing a box and clicking Run is exactly that: the box's <c>change</c> pushes the
+    /// address as the click lands, and Run pushed the same address again. Now it pushes once.
+    /// </summary>
+    [Fact]
+    public async Task Editing_the_predicate_and_clicking_Run_rewrites_the_address_once_not_twice()
+    {
+        var linq = WithEvents(new FakeLinqQueryService().WithType("order"));
+        linq.Result = Result(new LinqEventScope(null, CrossTenant: true, ArchivedFilter.Exclude, WholeDatabase: false, PerTenantSequences: false), Row(1));
+
+        using StudioComponentContext context = CreateContext(linq);
+        context.Navigate("marten/query?mode=linq&target=events");
+
+        var page = context.Render<QueryPage>();
+
+        var navigation = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>(context.Services);
+        List<string> pushed = [];
+        navigation.LocationChanged += (_, args) => pushed.Add(args.Location);
+
+        page.Find("#ms-query-linq-where").Change("Version > 0");
+        await page.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+
+        linq.Requests.Should().ContainSingle();
+        pushed.Should().ContainSingle("the second push would have been the same address, and a navigation begun while one is in flight aborts it")
+            .Which.Should().Contain("predicate=Version%20%3E%200");
     }
 
     // ------------------------------------------------------------------------------------------------

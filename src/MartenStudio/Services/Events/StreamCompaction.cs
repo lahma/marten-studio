@@ -801,7 +801,7 @@ internal static class StreamCompactionRules
         CompactionUnavailableReason.Archived =>
             "This stream is archived, and Marten's stream fetch never returns archived events, so compacting it would do nothing.",
         CompactionUnavailableReason.Untyped =>
-            "This stream was started without an aggregate type, so there is nothing to fold it into.",
+            "Compact is offered for streams of a known aggregate type; this stream has none.",
         CompactionUnavailableReason.AggregateNotRegistered =>
             "This stream's aggregate type is not one this store registers a single-stream projection for, so Marten has nothing it can fold the stream into here.",
         CompactionUnavailableReason.AggregateAmbiguous =>

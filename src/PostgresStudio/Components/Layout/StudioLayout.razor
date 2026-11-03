@@ -18,6 +18,9 @@
    happens before this layout has registered any section content - removed it from the live DOM. *@
 
 <div class="ms-studio" data-theme="@State.SelectedTheme">
+    @* 1.1: the first focusable element of every page, hidden until it has focus. Its fragment is handled in studio.js, not by the
+       browser: the document's <base href> would send a bare #fragment to the studio's front page. *@
+    <a class="ms-skip-link" href="#ms-main-content">Skip to content</a>
     @if (MappedEndpoints.ServedAnonymously)
     {
         @* Not a toast and not dismissible. A studio that anyone can open looks exactly like one behind a
@@ -54,7 +57,7 @@
                 </div>
             </header>
 
-            <main class="ms-content" role="main">
+            <main class="ms-content" role="main" id="ms-main-content" tabindex="-1">
                 @* The page frame is where a per-store refusal belongs: a page that is never rendered never
                    runs its OnInitializedAsync, so nothing about a store the visitor may not see is read on
                    their behalf. The header above stays, so they can pick one they may. *@

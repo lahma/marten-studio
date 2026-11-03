@@ -9,6 +9,7 @@
 @using PostgresStudio.Components.Pages.Query
 @using PostgresStudio.Components.Shared
 @using PostgresStudio.Services
+@using PostgresStudio.Services.Live
 @using PostgresStudio.Services.Query
 @implements IAsyncDisposable
 @inject ILinqQueryService Linq
@@ -16,6 +17,7 @@
 @inject ToastService Toasts
 @inject IOptions<MartenStudioOptions> Options
 @inject ILogger<LinqQueryPanel> Logger
+@inject IJSRuntime JsRuntime
 
 @*
     LINQ mode (F7): the predicate the host's own code would write, parsed by JasperFx's Dynamic LINQ under the
@@ -124,7 +126,8 @@
 
         <div class="ms-query-linq-order">
             <label class="ms-form-label" for="ms-query-linq-orderby">Order by</label>
-            <input id="ms-query-linq-orderby"
+            <input @ref="orderByInput"
+                   id="ms-query-linq-orderby"
                    class="ms-input ms-input-mono ms-query-linq-orderby"
                    type="text"
                    spellcheck="false"
@@ -156,8 +159,9 @@
 
             @if (eventInfo.Withheld.Count > 0)
             {
-                <details class="ms-muted ms-query-note ms-query-linq-withheld" open="@NamedAWithheldMember(eventInfo)">
-                    <summary>Not offered here: @(string.Join(", ", eventInfo.Withheld.Select(static x => x.Name)))</summary>
+                @* Open by default (1.1): an admin who does not know why a member is missing should not have to find a disclosure. *@
+                <details class="ms-muted ms-query-note ms-query-linq-withheld" open>
+                    <summary>Not offered here, and why</summary>
                     <ul class="ms-query-linq-withheld-list">
                         @for (int ordinal = 0; ordinal < eventInfo.Withheld.Count; ordinal++)
                         {
@@ -438,12 +442,9 @@
             },
         };
 
-    /// <summary>Whether the last refusal explained a withheld member, so the list that says why every other one is left out opens.</summary>
-    private bool NamedAWithheldMember(LinqEventTargetInfo info) =>
-        info.Withheld.Any(member =>
-            (whereError?.Contains(member.Reason, StringComparison.Ordinal) ?? false)
-            || (orderError?.Contains(member.Reason, StringComparison.Ordinal) ?? false)
-            || (generalError?.Contains(member.Reason, StringComparison.Ordinal) ?? false));
+    private ElementReference orderByInput;
+    private DotNetObjectReference<LinqQueryPanel>? orderByReference;
+    private LinqModeStatus? orderByRegisteredFor;
 
     private string? whereError;
     private int whereErrorPosition = -1;
@@ -503,9 +504,73 @@
         await LoadAsync();
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The Order-by box is a plain input bound on `change`, so Ctrl+Enter there is recognised in the browser, as the
+        // predicate editor's is, and sent with the box's live text. The box exists only once the mode is available, and
+        // is built again when the status is, so the registration follows the status: the script is idempotent per element.
+        if (status is not { IsAvailable: true } || ReferenceEquals(orderByRegisteredFor, status))
+        {
+            return;
+        }
+
+        orderByRegisteredFor = status;
+        orderByReference ??= DotNetObjectReference.Create(this);
+
+        try
+        {
+            await JsRuntime.InvokeAsync<bool>("martenStudio.query.enhanceRunField", new object?[] { orderByInput, orderByReference });
+        }
+        catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+        {
+            // Prerendering, a circuit that closed between the render and this call, or a helper script that does not
+            // carry the helper yet: the Run button still works, and the predicate box's chord is registered separately.
+        }
+    }
+
+    /// <summary>Ctrl+Enter in the Order-by box, from the browser, with the box's live text.</summary>
+    [JSInvokable]
+    public async Task RunFromOrderByAsync(string? value)
+    {
+        await InvokeAsync(async () =>
+        {
+            try
+            {
+                if (running || status is not { IsAvailable: true })
+                {
+                    return;
+                }
+
+                orderBy = value ?? string.Empty;
+                await NotifyAsync();
+                await ExecuteAsync(offset: 0);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                generalError = "LINQ mode failed (" + exception.GetType().Name + "). The application log has the details.";
+                StateHasChanged();
+            }
+        });
+    }
+
     public async ValueTask DisposeAsync()
     {
         State.ScopeChanged -= OnScopeChangedAsync;
+
+        if (orderByRegisteredFor is not null)
+        {
+            try
+            {
+                await JsRuntime.InvokeVoidAsync("martenStudio.query.releaseRunField", new object?[] { orderByInput });
+            }
+            catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
+            {
+                // The circuit is already gone, which is the usual way a page is disposed.
+            }
+        }
+
+        orderByReference?.Dispose();
+        orderByReference = null;
 
         await panelCts.CancelAsync();
         panelCts.Dispose();

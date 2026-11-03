@@ -405,7 +405,11 @@
     {
         pageSize = Settings.DefaultPageSize;
         State.ScopeChanged += OnScopeChangedAsync;
+        Navigation.LocationChanged += OnLocationChanged;
     }
+
+    /// <summary>Whatever moved the address - this page's own push, the scope selector, Back - the address is known again.</summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => pendingUri = null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -490,6 +494,7 @@
     public async ValueTask DisposeAsync()
     {
         State.ScopeChanged -= OnScopeChangedAsync;
+        Navigation.LocationChanged -= OnLocationChanged;
 
         await pageCts.CancelAsync();
         pageCts.Dispose();
@@ -930,20 +935,36 @@
         appliedTarget = targetValue;
         appliedArchived = archivedValue;
 
-        Navigation.NavigateTo(
-            Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["mode"] = modeValue,
-                ["type"] = typeValue,
-                ["where"] = whereValue,
-                ["sql"] = sqlValue,
-                ["predicate"] = predicateValue,
-                ["orderby"] = orderByValue,
-                ["target"] = targetValue,
-                ["archived"] = archivedValue,
-            }),
-            replace: true);
+        string uri = Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["mode"] = modeValue,
+            ["type"] = typeValue,
+            ["where"] = whereValue,
+            ["sql"] = sqlValue,
+            ["predicate"] = predicateValue,
+            ["orderby"] = orderByValue,
+            ["target"] = targetValue,
+            ["archived"] = archivedValue,
+        });
+
+        // 1.1-UX-FIX-B: never navigate to the address the page is already at, or is already on its way to. The studio's router
+        // is its own, so Blazor carries every NavigateTo as an enhanced navigation - a GET of this whole page - and a second
+        // one begun while the first is in flight aborts it (net::ERR_ABORTED in the network panel). Clicking Run after
+        // editing a box is exactly that: the box's `change` pushes the address as the click lands, and Run pushes the same
+        // one again. NavigationManager.Uri is not yet the first push's address when the second arrives (the server's manager
+        // sets it after an awaited location-changing round), so the address pushed last is remembered until the location
+        // changes.
+        if (string.Equals(uri, pendingUri ?? Navigation.Uri, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        pendingUri = uri;
+        Navigation.NavigateTo(uri, replace: true);
     }
+
+    /// <summary>The address this page has pushed and the navigation manager has not yet reported, or <see langword="null" />.</summary>
+    private string? pendingUri;
 
     /// <summary>The LINQ panel's type, predicate or ordering moved: keep the deep link in step.</summary>
     private Task OnLinqChangedAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) changed)

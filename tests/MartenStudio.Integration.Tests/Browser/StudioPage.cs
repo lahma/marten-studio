@@ -42,6 +42,7 @@ internal sealed class StudioPage : IAsyncDisposable
     private readonly List<string> pageErrors = [];
     private readonly List<string> failedResponses = [];
     private readonly List<string> webSockets = [];
+    private readonly List<string> failedRequests = [];
     private readonly Dictionary<string, int> expected = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
 
@@ -56,6 +57,23 @@ internal sealed class StudioPage : IAsyncDisposable
         page.PageError += OnPageError;
         page.Response += OnResponse;
         page.WebSocket += OnWebSocket;
+        page.RequestFailed += OnRequestFailed;
+    }
+
+    /// <summary>
+    /// Every request the browser itself gave up on (<c>net::ERR_ABORTED</c> and its kin), as <c>METHOD url failure</c>.
+    /// Not part of <see cref="AssertClean" />: a page navigated away from mid-request aborts legitimately, so a scenario
+    /// that is about a request asks for the list itself.
+    /// </summary>
+    public IReadOnlyList<string> FailedRequests
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. failedRequests];
+            }
+        }
     }
 
     /// <summary>The Playwright page.</summary>
@@ -473,6 +491,7 @@ internal sealed class StudioPage : IAsyncDisposable
         Page.PageError -= OnPageError;
         Page.Response -= OnResponse;
         Page.WebSocket -= OnWebSocket;
+        Page.RequestFailed -= OnRequestFailed;
 
         await context.CloseAsync();
     }
@@ -524,6 +543,14 @@ internal sealed class StudioPage : IAsyncDisposable
                 "{0} {1}",
                 response.Status,
                 response.Url));
+        }
+    }
+
+    private void OnRequestFailed(object? sender, IRequest request)
+    {
+        lock (gate)
+        {
+            failedRequests.Add(request.Method + " " + request.Url + " " + request.Failure);
         }
     }
 

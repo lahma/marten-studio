@@ -88,6 +88,26 @@ public class StudioLayoutTests
         layout.Find(".ms-empty-title").TextContent.Should().Be("Not authorized");
     }
 
+    /// <summary>1.1: the first focusable element of the shell is "Skip to content", and it points at the content region.</summary>
+    [Fact]
+    public void The_first_focusable_element_is_a_skip_link_to_the_content_region()
+    {
+        using var context = new StudioComponentContext().WithPolicy("default");
+        context.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+
+        var layout = RenderLayout(context);
+
+        IElement first = layout.FindAll("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])")
+            .First(static x => !x.HasAttribute("disabled"));
+        first.ClassList.Should().Contain("ms-skip-link");
+        first.TextContent.Trim().Should().Be("Skip to content");
+        first.GetAttribute("href").Should().Be("#ms-main-content");
+
+        IElement main = layout.Find("main");
+        main.Id.Should().Be("ms-main-content");
+        main.GetAttribute("tabindex").Should().Be("-1", "it takes focus from the link without being a tab stop of its own");
+    }
+
     [Fact]
     public void The_rail_ends_with_the_product_its_licence_and_its_author()
     {

@@ -33,3 +33,11 @@ public sealed record OrderShipped(string Carrier, DateTimeOffset OccurredAt) : I
 
 /// <summary>The order was cancelled before it shipped.</summary>
 public sealed record OrderCancelled(string Reason, DateTimeOffset OccurredAt) : IOrderEvent;
+
+/// <summary>
+/// The order was entered by mistake and voided (1.1). <see cref="OrderSummaryProjection" /> answers it by deleting the order's
+/// summary, so a stream that ends with it folds to no aggregate: Marten leaves such a stream alone when it is compacted, and
+/// the studio's Compact dialog says so before the click. Deliberately not an <see cref="IOrderEvent" />: a voided order is not
+/// part of the daily sales roll-up.
+/// </summary>
+public sealed record OrderVoided(string Reason, DateTimeOffset OccurredAt);

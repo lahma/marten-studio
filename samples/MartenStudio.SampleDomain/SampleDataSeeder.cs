@@ -354,11 +354,19 @@ public sealed class SampleDataSeeder : IInitialData
     /// </remarks>
     /// <param name="store">The store to append to.</param>
     /// <param name="cancellation">Cancels the seeding.</param>
-    /// <returns>How many streams were appended - zero when the events were already there.</returns>
+    /// <returns>How many streams were appended - zero when the events were already there. The untyped orders and the typed ones each have their own guard.</returns>
     public static async Task<int> SeedEventsAsync(IDocumentStore store, CancellationToken cancellation = default)
     {
         ArgumentNullException.ThrowIfNull(store);
 
+        int appended = await SeedUntypedOrderStreamsAsync(store, cancellation);
+
+        // Its own guard, so a store an earlier build seeded - which has the untyped orders and not these - still gets them.
+        return appended + await SeedTypedOrderStreamsAsync(store, cancellation);
+    }
+
+    private static async Task<int> SeedUntypedOrderStreamsAsync(IDocumentStore store, CancellationToken cancellation)
+    {
         await using (IQuerySession probe = store.QuerySession())
         {
             StreamState? existing = await probe.Events.FetchStreamStateAsync(OrderStreamId(1), cancellation);
@@ -418,8 +426,75 @@ public sealed class SampleDataSeeder : IInitialData
         return OrderStreamCount;
     }
 
-    /// <summary>How many order streams <see cref="SeedEventsAsync" /> appends.</summary>
+    /// <summary>
+    /// Appends the demo's <em>typed</em> order streams (1.1): started with <c>StartStream&lt;OrderSummary&gt;</c>, so the
+    /// stream's type is the aggregate <see cref="OrderSummaryProjection" /> folds, and the studio offers to compact them.
+    /// One of them ends with <see cref="OrderVoided" />, which the projection answers by deleting its aggregate - the
+    /// stream folds to nothing, and the Compact dialog says so before the click.
+    /// </summary>
+    /// <remarks>
+    /// Every event is one of the untyped orders' own kinds on the same days (and none is <see cref="OrderShipped" />, which
+    /// <c>ShipmentTracker</c> would turn into a shipment), so the daily roll-up simply has a few more orders. Deterministic:
+    /// stream ids and times come from the index alone.
+    /// </remarks>
+    private static async Task<int> SeedTypedOrderStreamsAsync(IDocumentStore store, CancellationToken cancellation)
+    {
+        await using (IQuerySession probe = store.QuerySession())
+        {
+            if (await probe.Events.FetchStreamStateAsync(TypedOrderStreamId(1), cancellation) is not null)
+            {
+                return 0;
+            }
+        }
+
+        DateTimeOffset day = new(2026, 2, 3, 14, 0, 0, TimeSpan.Zero);
+
+        await using IDocumentSession session = store.LightweightSession();
+
+        session.CorrelationId = "sample-seed";
+        session.CausationId = "SampleDataSeeder.SeedEventsAsync";
+        session.SetHeader("source", "marten-studio-sample");
+
+        for (int i = 1; i <= TypedOrderStreamCount; i++)
+        {
+            DateTimeOffset placedAt = day.AddHours(i);
+
+            List<object> events =
+            [
+                new OrderPlaced(TypedOrderStreamId(i), $"Customer {i + 20:00}", placedAt),
+                new ItemAdded($"SKU-T{i:00}", 2, 12.50m + i, placedAt.AddMinutes(1)),
+            ];
+
+            switch (i)
+            {
+                case TypedOrderStreamCount:
+                    // The last one is voided: the projection deletes the aggregate, so the stream folds to nothing.
+                    events.Add(new OrderVoided("Entered twice", placedAt.AddMinutes(5)));
+                    break;
+                case 2:
+                    events.Add(new OrderCancelled("Customer changed their mind", placedAt.AddMinutes(30)));
+                    break;
+                default:
+                    events.Add(new ItemAdded($"SKU-T{i:00}-B", 1, 4.25m, placedAt.AddMinutes(3)));
+                    break;
+            }
+
+            session.Events.StartStream<OrderSummary>(TypedOrderStreamId(i), events);
+        }
+
+        await session.SaveChangesAsync(cancellation);
+
+        return TypedOrderStreamCount;
+    }
+
+    /// <summary>How many untyped order streams <see cref="SeedEventsAsync" /> appends.</summary>
     public const int OrderStreamCount = 25;
+
+    /// <summary>How many typed order streams <see cref="SeedEventsAsync" /> appends; the last one is voided, so it folds to nothing.</summary>
+    public const int TypedOrderStreamCount = 4;
+
+    /// <summary>The stream id of typed demo order <paramref name="index" />, stable across runs.</summary>
+    public static Guid TypedOrderStreamId(int index) => DeterministicGuid("typed-order", index);
 
     /// <summary>The order whose stream carries the poisoned item.</summary>
     public const int PoisonedOrderIndex = 13;
@@ -492,6 +567,7 @@ public sealed class SampleDataSeeder : IInitialData
     /// <summary>
     /// The same id on every run, so re-seeding replaces rows rather than adding a second set of them.
     /// </summary>
+    /// <remarks>The kind is written into the id's first twelve bytes, so it is at most twelve UTF-8 bytes long.</remarks>
     private static Guid DeterministicGuid(string kind, int index)
     {
         byte[] bytes = new byte[16];

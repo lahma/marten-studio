@@ -66,4 +66,10 @@ public sealed partial class OrderSummaryProjection : SingleStreamProjection<Orde
         view.Status = "Cancelled";
         view.CancelledReason = cancelled.Reason;
     }
+
+    /// <summary>
+    /// A voided order is not a summary at all: the aggregate deletes itself, so a stream that ends with the event folds to
+    /// nothing (Marten 9.57 leaves such a stream alone when it is compacted).
+    /// </summary>
+    public static bool ShouldDelete(OrderVoided voided) => voided is not null;
 }

@@ -30,15 +30,48 @@ public class StreamCompactionPageTests
     private const string ConfirmButton = ".ms-confirm-actions button.ms-button-danger";
 
     [Fact]
-    public async Task A_stream_the_plan_does_not_offer_has_no_compact_section_at_all()
+    public async Task A_stream_the_plan_does_not_offer_says_why_where_the_button_would_be()
     {
         using StudioComponentContext context = await ContextAsync(static _ => true);
         context.EventData.StreamStates[StreamId] = Stream();
 
         IRenderedComponent<StreamDetail> page = Render(context);
 
-        page.FindAll(".ms-stream-compact").Should().BeEmpty(
-            "the fake's default plan is an untyped stream, and compaction means nothing for one");
+        page.Find(".ms-stream-compact .ms-section-title").TextContent.Should().Be("Compact");
+        page.Find(".ms-stream-compact-unavailable").TextContent.Should().Be(
+            "Compact is offered for streams of a known aggregate type; this stream has none.",
+            "the fake's default plan is an untyped stream");
+        page.FindAll(CompactButton).Should().BeEmpty("there is nothing to click, and the sentence says why");
+    }
+
+    [Theory]
+    [InlineData(nameof(CompactionUnavailableReason.Archived), "archived")]
+    [InlineData(nameof(CompactionUnavailableReason.AggregateNotRegistered), "single-stream projection")]
+    [InlineData(nameof(CompactionUnavailableReason.AggregateAmbiguous), "More than one registered aggregate")]
+    [InlineData(nameof(CompactionUnavailableReason.NothingToFold), "nothing to fold")]
+    [InlineData(nameof(CompactionUnavailableReason.AggregateHidden), "configured not to show")]
+    public async Task Every_reason_a_stream_is_not_offered_has_its_sentence_on_the_page(string reasonName, string fragment)
+    {
+        var reason = Enum.Parse<CompactionUnavailableReason>(reasonName);
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = CompactionPlan.NotOffered(StreamId, reason);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        page.Find(".ms-stream-compact-unavailable").TextContent.Should().Be(StreamCompactionRules.Explain(reason)).And.Contain(fragment);
+    }
+
+    [Fact]
+    public async Task An_offered_stream_has_no_unavailable_sentence()
+    {
+        using StudioComponentContext context = await ContextAsync(static _ => true);
+        context.EventData.StreamStates[StreamId] = Stream();
+        context.EventData.CompactionPlans[StreamId] = FakeEventDataService.Offered(StreamId, version: 3);
+
+        IRenderedComponent<StreamDetail> page = Render(context);
+
+        page.FindAll(".ms-stream-compact-unavailable").Should().BeEmpty();
     }
 
     [Fact]

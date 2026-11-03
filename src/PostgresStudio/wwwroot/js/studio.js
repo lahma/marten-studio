@@ -263,6 +263,27 @@
         }
     }, true);
 
+    // The skip link (1.1). Its href is a bare fragment, and the studio's document has a <base href> at its own root, so the
+    // browser would resolve `#ms-main-content` against that base - the studio's front page - and Blazor would navigate there.
+    // The click is handled here instead, in the capture phase and before Blazor's own listener sees it: the content region
+    // takes focus (it has tabindex="-1" for exactly this) and scrolls into view, and nothing navigates.
+    document.addEventListener("click", function (event) {
+        const link = event.target && event.target.closest ? event.target.closest("a.ms-skip-link") : null;
+        if (!link) {
+            return;
+        }
+
+        const id = (link.getAttribute("href") || "").replace(/^#/, "");
+        const target = id ? document.getElementById(id) : null;
+
+        event.preventDefault();
+
+        if (target) {
+            target.focus({ preventScroll: true });
+            target.scrollIntoView({ block: "start" });
+        }
+    }, true);
+
     // JSON toolkit helpers (folded in from the W1 packet). Every C# call site degrades when these
     // are missing (prerender), so each function is defensive and idempotent.
     window.martenStudio.json = window.martenStudio.json || {
@@ -553,6 +574,49 @@
             textarea.addEventListener("keydown", onKeyDown);
             textarea.dataset.msQueryEnhanced = "true";
             textarea.msQueryHandlers = { keydown: onKeyDown };
+            return true;
+        },
+
+        /*
+         * Ctrl+Enter in a one-line field that sits beside an editor (the LINQ tab's Order-by box, 1.1): the same chord the
+         * editor answers, sent as "RunFromOrderByAsync" with the field's live text, because the field binds on `change`,
+         * which has not fired when the chord arrives. Idempotent per element, like enhanceEditor.
+         */
+        enhanceRunField: function (field, dotNetRef) {
+            if (!field || !dotNetRef || field.dataset.msRunFieldEnhanced === "true") {
+                return false;
+            }
+
+            const onKeyDown = function (event) {
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
+
+                    try {
+                        const pending = dotNetRef.invokeMethodAsync("RunFromOrderByAsync", field.value);
+
+                        if (pending && typeof pending.catch === "function") {
+                            pending.catch(function () { });
+                        }
+                    }
+                    catch {
+                    }
+                }
+            };
+
+            field.addEventListener("keydown", onKeyDown);
+            field.dataset.msRunFieldEnhanced = "true";
+            field.msRunFieldHandlers = { keydown: onKeyDown };
+            return true;
+        },
+
+        releaseRunField: function (field) {
+            if (!field || !field.msRunFieldHandlers) {
+                return false;
+            }
+
+            field.removeEventListener("keydown", field.msRunFieldHandlers.keydown);
+            delete field.msRunFieldHandlers;
+            delete field.dataset.msRunFieldEnhanced;
             return true;
         },
 

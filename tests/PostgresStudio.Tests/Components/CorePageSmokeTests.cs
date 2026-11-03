@@ -55,6 +55,23 @@ public class CorePageSmokeTests
     }
 
     [Fact]
+    public async Task The_shell_starts_with_a_skip_link_to_the_content_region()
+    {
+        await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();
+
+        var layout = context.Render<StudioLayout>(parameters => parameters.Add(x => x.Body, static builder => builder.AddContent(0, "the page")));
+
+        IElement first = layout.FindAll("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1'])")
+            .First(static x => !x.HasAttribute("disabled"));
+        first.ClassList.Should().Contain("ms-skip-link");
+        first.TextContent.Trim().Should().Be("Skip to content");
+        first.GetAttribute("href").Should().Be("#ms-main-content");
+
+        layout.Find("main").Id.Should().Be("ms-main-content");
+        layout.Find("main").GetAttribute("tabindex").Should().Be("-1");
+    }
+
+    [Fact]
     public async Task The_overview_reads_once_interactive_and_shows_the_server_the_tables_and_the_connections()
     {
         await using PostgresStudioComponentContext context = await new PostgresStudioComponentContext().ReadyAsync();

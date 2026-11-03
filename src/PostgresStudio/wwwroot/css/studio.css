@@ -14913,3 +14913,65 @@ a.ms-schema-health-mark:focus-visible {
         max-width: none;
     }
 }
+
+/* ==========================================================================
+   ===== 1.1-UX-FIX-B Skip link, and dark-theme contrast =====
+
+   Appended in D26 order. Two things the 1.1 admin validation found:
+
+   - There was no way past the navigation by keyboard. The shell's first focusable element is now "Skip to content", hidden
+     until it has focus, and it moves focus to the content region (studio.js handles the click: the document's <base href>
+     would otherwise send a bare #fragment to the studio's front page).
+   - In the dark theme `.ms-muted`'s grey (#64748b) is 3.07:1 on the surface (#1e293b), and the Connection page's "advice" badge
+     (#3b82f6 on #1e3a5f) is 3.13:1. Both are raised to at least 4.5:1 against the background they are drawn on, here and not
+     in the original token's own section (D26): #8796ac is 4.87:1 on the surface and 5.94:1 on the page, and the badge's
+     #93c5fd is 6.38:1 on its #1e3a5f. The light theme declares nothing here and is as it was; its own muted grey
+     (#94a3b8, 2.56:1 on white) is the next pass's.
+   ========================================================================== */
+
+.ms-skip-link {
+    position: fixed;
+    top: var(--ms-space-sm);
+    left: var(--ms-space-sm);
+    z-index: 1000;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border: 2px solid var(--ms-color-primary);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-base);
+    font-weight: var(--ms-font-weight-semibold);
+    text-decoration: none;
+    box-shadow: var(--ms-shadow-md);
+    transform: translateY(calc(-100% - var(--ms-space-md) - var(--ms-space-sm)));
+}
+
+.ms-skip-link:focus,
+.ms-skip-link:focus-visible {
+    transform: none;
+}
+
+/* The content region takes focus from the skip link and from nothing else; a ring round the whole page body would say nothing. */
+.ms-content:focus {
+    outline: none;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --ms-color-text-muted: #8796ac;
+    }
+
+    .ms-studio:not([data-theme="light"]) .ms-conn-advice {
+        background: var(--ms-color-info-bg);
+        color: #93c5fd;
+    }
+}
+
+.ms-studio[data-theme="dark"] {
+    --ms-color-text-muted: #8796ac;
+}
+
+.ms-studio[data-theme="dark"] .ms-conn-advice {
+    background: var(--ms-color-info-bg);
+    color: #93c5fd;
+}
