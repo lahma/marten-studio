@@ -42,6 +42,8 @@ What a minor or patch release will not break:
 - **The studio's own SQL** - what "Show SQL" shows - can change in any release, within the rules in
   [docs/security.md](security.md) (catalog reads lock nothing they list; the console's transaction is read-only).
 - **Internal types**, which the packages share through `InternalsVisibleTo`: they change whenever the code needs them to.
+- **Razor components**: the pages and their parts are public types only because Razor makes them so. Their parameters
+  change whenever a page needs them to; a host renders the studio by mapping it, never by placing one of its components.
 
 ## What it runs on
 

@@ -188,7 +188,11 @@ then tag that commit.
 restores that version of each package from nuget.org and fails on a breaking change to the public surface (a removed or
 changed member, an interface member without a default body). In the pull request that lands a release's CHANGELOG section,
 move the baseline to the release before it, so the next release is compared with the last one shipped. A deliberate break
-is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline.
+is a major version, and its `CompatibilitySuppressions.xml` is a reviewed file like a Verify baseline. A change to a Razor
+component's members is not a break: components are public only because Razor makes them so, and no baseline lists them
+(D20, `docs/stability.md`). Package validation still reports one, so suppress it in the project's
+`CompatibilitySuppressions.xml` (generate it with `-p:GenerateCompatibilitySuppressionFile=true`, then make it LF without a
+BOM and say why in its comment), reviewed the same way. 1.1.0 suppresses `LinqQueryPanel.OnChanged` (user, 2026-11-03).
 
 The GitHub Release carries **no assets** (`ICreateGitHubRelease.AssetFiles => []`). All three packages are consumed
 by `PackageReference`; there is nothing a user could usefully download, and attaching a copy of a .nupkg
