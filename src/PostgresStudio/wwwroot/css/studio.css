@@ -14711,15 +14711,16 @@ a.ms-schema-health-mark:focus-visible {
    Appended in D26 order, after 1.1-NP4-FIX. What is here: the same four column widths in every group table (they were sized by
    their own content, so each group's columns sat somewhere else); the Compare disclosure's heading at the size of the page's other
    section titles (it is not a direct child of its section, so `.ms-section > h2` never reached it); the verdict line; the fix blocks
-   wrapping instead of being cut at 390 px; a disclosure for the small print; and, below 600 px, every settings row as a stacked card -
+   wrapping instead of being cut at 390 px; a disclosure for the small print; and, below 720 px, every settings row as a stacked card -
    the setting, then its value, then "From:" and "Default:" - because a table that scrolls sideways hides exactly the two columns
-   that say where a value came from. Wider than that the tables are unchanged and stay in their TableScroll (D25).
+   that say where a value came from. Wider than that the tables are unchanged (36rem at the least, which a tablet's region holds
+   without scrolling) and stay in their TableScroll (D25).
    ========================================================================== */
 
 .ms-conn-settings-table,
 .ms-conn-compare-table {
     table-layout: fixed;
-    min-width: 50rem;
+    min-width: 36rem;
 }
 
 .ms-conn-col-setting {
@@ -14781,6 +14782,12 @@ a.ms-schema-health-mark:focus-visible {
 }
 
 /* A fix is something to read as well as copy: its explanation above it, and the text wrapping rather than scrolling. */
+.ms-conn-fix-note,
+.ms-health-remedy-explanation {
+    /* A remedy's steps ("1. ..." and "2. ...") are on lines of their own: the text has a newline between them. */
+    white-space: pre-line;
+}
+
 .ms-conn-fix-note {
     max-width: 80ch;
     margin: 0;
@@ -14827,7 +14834,7 @@ a.ms-schema-health-mark:focus-visible {
     border-radius: var(--ms-radius-sm);
 }
 
-@media (max-width: 599px) {
+@media (max-width: 719px) {
     .ms-conn-table,
     .ms-conn-table tbody,
     .ms-conn-table tbody tr,

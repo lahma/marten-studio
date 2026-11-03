@@ -125,13 +125,14 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
 
     /// <summary>
     /// What the remedy says around its one line. With the server's <c>ssl</c> off the line alone would be advice that cannot work yet,
-    /// so there are two steps, the server's first; with it on, one. Either way <c>Prefer</c> and <c>Require</c> are said not to check.
+    /// so there are two steps, the server's first, on lines of their own (a newline between them: the pages draw a remedy's explanation
+    /// with <c>white-space: pre-line</c>); with it on, one. Either way <c>Prefer</c> and <c>Require</c> are said not to check.
     /// </summary>
     /// <param name="serverOff">Whether the server's <c>ssl</c> setting is <c>off</c>.</param>
     /// <param name="dataSource">The words for the data source whose connection string it is.</param>
     internal static string RemedyText(bool serverOff, string dataSource) =>
         (serverOff
-            ? "1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). "
+            ? "1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already).\n"
               + "2. Then set SSL Mode=VerifyFull (and Root Certificate= if the CA is private) in the connection string " + dataSource + " is built from - a client setting. "
             : "In the connection string " + dataSource + " is built from - a client setting, not a server one. ")
         + "VerifyFull encrypts and checks that the server's certificate chains to a trusted authority and names the host. "

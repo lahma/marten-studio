@@ -32,7 +32,7 @@
             Worth a look
             @if (notes.Count > 0)
             {
-                <span class="ms-tab-count ms-conn-count" id="conn-worth-count">@ConnectionPageBuilder.CountLabel(shown.Count, notes.Count)</span>
+                <span class="ms-tab-count ms-conn-count" id="conn-worth-count">@ConnectionPageBuilder.CountLabel(shown.Count(static x => x.Finding is not null), shown.Count(static x => x.Finding is null), notes.Count)</span>
             }
             else if (shown.Count > 0)
             {

@@ -329,43 +329,99 @@ public sealed class ConnectionPageTests
         IElement details = page.Find("#conn-not-visible details.ms-conn-disclosure");
         details.HasAttribute("open").Should().BeFalse("closed by default");
         page.Find("#conn-not-visible > h2.ms-section-title").TextContent.Should().Be("Not visible from here");
-        details.QuerySelector("summary")!.TextContent.Trim().Should().Be("Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it (6 things)");
+        details.QuerySelector("summary")!.TextContent.Trim().Should().Be(
+            "Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it: password providers, certificate callbacks, "
+            + "logging and tracing, type mappings, a script per connection, the default password file");
         details.QuerySelectorAll("dt").Should().HaveCount(6, "the content is still all there, for whoever opens it");
     }
 
+    // The platform opens and closes the <details>; the component follows its `toggle` event and asks the element whether it is open.
+    private static Task ToggledAsync(IRenderedComponent<ConnectionPage> page) =>
+        page.Find("#conn-not-visible details").TriggerEventAsync("ontoggle", EventArgs.Empty);
+
+    private static void ElementSays(PostgresStudioComponentContext context, bool open) =>
+        context.JSInterop.Setup<bool>("martenStudio.disclosure.isOpen", static _ => true).SetResult(open);
+
+    private static IEnumerable<string?> Remembered(PostgresStudioComponentContext context) =>
+        context.JSInterop.Invocations
+            .Where(static x => x.Identifier == "martenStudio.prefs.set" && x.Arguments.Count == 2 && (string?) x.Arguments[0] == "ms_conn_not_visible_open")
+            .Select(static x => (string?) x.Arguments[1]);
+
     [Fact]
-    public async Task Opening_the_disclosure_is_remembered_and_a_browser_that_remembered_it_open_starts_open()
+    public async Task A_disclosure_the_browser_opens_itself_is_followed_and_remembered_as_open()
     {
         await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
-        IRenderedComponent<ConnectionPage> page = Open(context);
+        ElementSays(context, true);
 
-        page.Find("#conn-not-visible summary").Click();
+        IRenderedComponent<ConnectionPage> page = Open(context);
+        page.Find("#conn-not-visible details").HasAttribute("open").Should().BeFalse();
+
+        await ToggledAsync(page);
 
         page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
-        context.JSInterop.Invocations.Should().Contain(static x => x.Identifier == "martenStudio.prefs.set"
-            && x.Arguments.Count == 2 && (string?) x.Arguments[0] == "ms_conn_not_visible_open" && (string?) x.Arguments[1] == "1");
+        Remembered(context).Should().Equal("1");
+    }
 
-        page.Find("#conn-not-visible summary").Click();
-        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeFalse());
-
+    [Fact]
+    public async Task A_disclosure_the_browser_closes_is_followed_and_remembered_as_closed_and_a_remembered_open_starts_open()
+    {
         await using PostgresStudioComponentContext remembered = await ContextAsync(DefaultView());
         remembered.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_not_visible_open").SetResult("1");
 
-        IRenderedComponent<ConnectionPage> again = Open(remembered);
+        IRenderedComponent<ConnectionPage> page = Open(remembered);
+        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
 
-        again.WaitForAssertion(() => again.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
+        // The element is shut by the browser: asked, it says so (a loose JS runtime answers false).
+        await ToggledAsync(page);
+
+        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeFalse());
+        Remembered(remembered).Should().Equal("0");
+    }
+
+    [Fact]
+    public async Task The_toggle_event_the_components_own_render_raises_changes_and_remembers_nothing()
+    {
+        await using PostgresStudioComponentContext remembered = await ContextAsync(DefaultView());
+        remembered.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_not_visible_open").SetResult("1");
+        ElementSays(remembered, true);
+
+        IRenderedComponent<ConnectionPage> page = Open(remembered);
+        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
+
+        await ToggledAsync(page);
+
+        page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue();
+        Remembered(remembered).Should().BeEmpty("the element and the component already agree");
     }
 
     [Fact]
     public async Task A_browser_that_refuses_to_remember_the_disclosure_still_opens_it_for_the_page()
     {
         await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        ElementSays(context, true);
         context.JSInterop.SetupVoid("martenStudio.prefs.set", _ => true).SetException(new Microsoft.JSInterop.JSException("storage refused"));
 
         IRenderedComponent<ConnectionPage> page = Open(context);
-        page.Find("#conn-not-visible summary").Click();
+        await ToggledAsync(page);
 
         page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task The_settings_table_keeps_its_table_roles_for_assistive_technology_where_the_cards_are_blocks()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        // Safari drops the semantics of a table whose parts are display: block (the phone's stacked cards), so they are said outright.
+        IElement table = page.Find("table.ms-conn-settings-table");
+        table.GetAttribute("role").Should().Be("table");
+        table.QuerySelector("thead")!.GetAttribute("role").Should().Be("rowgroup");
+        table.QuerySelector("tbody")!.GetAttribute("role").Should().Be("rowgroup");
+        table.QuerySelectorAll("tr").Should().OnlyContain(static x => x.GetAttribute("role") == "row");
+        table.QuerySelectorAll("thead th").Should().OnlyContain(static x => x.GetAttribute("role") == "columnheader");
+        table.QuerySelectorAll("tbody th").Should().OnlyContain(static x => x.GetAttribute("role") == "rowheader");
+        table.QuerySelectorAll("tbody td").Should().OnlyContain(static x => x.GetAttribute("role") == "cell");
     }
 
     [Fact]
@@ -381,8 +437,11 @@ public sealed class ConnectionPageTests
         await using PostgresStudioComponentContext context = await ContextAsync(withNotes);
         IRenderedComponent<ConnectionPage> page = Open(context);
 
-        page.Find("#conn-worth-count").TextContent.Should().Be(ConnectionPageBuilder.CountLabel(withNotes.Cards.Count, notes));
+        int findings = withNotes.Cards.Count(static x => x.Finding is not null);
+
+        page.Find("#conn-worth-count").TextContent.Should().Be(ConnectionPageBuilder.CountLabel(findings, withNotes.Cards.Count - findings, notes));
         page.Find("#conn-worth-count").TextContent.Should().Contain(" · ").And.Contain("finding");
+        page.Find("#conn-worth-count").TextContent.Should().Contain("1 finding").And.NotContain("1 findings", "a hint is not a finding");
 
         // No notes at all: the count is the plain number it always was.
         ConnectionPageView noNotes = View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(0, null, Finding("C16", HealthSeverity.Warning, "x"))) with { Notes = [] };
@@ -396,7 +455,7 @@ public sealed class ConnectionPageTests
     [Fact]
     public async Task The_notice_for_findings_a_visitor_may_not_see_is_a_sentence_and_count_aware()
     {
-        string policy = "needs your account's write policy to allow ViewDatabaseActivity for this database";
+        string policy = PostgresStudio.Services.Health.HealthService.ActivityPolicyRefusal;
 
         await using PostgresStudioComponentContext one = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(1, policy)));
         Open(one).Find(".ms-conn-withheld").TextContent.Should().Be("1 finding is hidden because your account may not see activity on this database.");
@@ -418,7 +477,7 @@ public sealed class ConnectionPageTests
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         IElement fix = page.Find("#conn-card-finding-s05 .ms-conn-fix");
-        fix.QuerySelector(".ms-conn-fix-note")!.TextContent.Should().StartWith("1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). 2. Then set SSL Mode=VerifyFull");
+        fix.QuerySelector(".ms-conn-fix-note")!.TextContent.Should().StartWith("1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already).\n2. Then set SSL Mode=VerifyFull");
         fix.QuerySelector(".ms-health-remedy-code")!.TextContent.Should().Be("SSL Mode=VerifyFull");
         page.FindComponents<CopyButton>().Select(static x => x.Instance.Value).Should().Contain("SSL Mode=VerifyFull");
     }

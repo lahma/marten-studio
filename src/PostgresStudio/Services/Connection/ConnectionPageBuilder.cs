@@ -177,19 +177,18 @@ internal static class ConnectionPageBuilder
     }
 
     /// <summary>
-    /// "3 findings · 2 notes": the "Worth a look" count where there are notes too, each with its noun in the right number. With no
-    /// findings it is "2 notes" alone: "0 findings" beside "Nothing to change." says it twice.
+    /// "1 finding · 2 hints · 2 notes": the "Worth a look" count where there are notes too, each kind with its noun in the right
+    /// number and a kind with none left out ("0 findings" beside "Nothing to change." says it twice). A hint is any advice card that
+    /// is not the advisor's finding, a contributor's included: the cards say "Hint" of themselves.
     /// </summary>
-    /// <param name="findings">The cards that count.</param>
+    /// <param name="findings">The advisor's findings that are shown.</param>
+    /// <param name="hints">The hints (and contributed cards) that are shown.</param>
     /// <param name="notes">The "Good to know" cards.</param>
-    internal static string CountLabel(int findings, int notes) =>
-        findings == 0 ? Plural(notes, "note") : Plural(findings, "finding") + " · " + Plural(notes, "note");
+    internal static string CountLabel(int findings, int hints, int notes) =>
+        string.Join(" · ", new[] { (findings, "finding"), (hints, "hint"), (notes, "note") }.Where(static x => x.Item1 > 0).Select(static x => Plural(x.Item1, x.Item2)));
 
     private static string Plural(int count, string noun) =>
         count.ToString(CultureInfo.InvariantCulture) + " " + noun + (count == 1 ? string.Empty : "s");
-
-    /// <summary>The refusal the write policy gives for a visitor who may not read other people's activity (HealthService's own words).</summary>
-    private const string ActivityPolicyReason = "needs your account's write policy to allow ViewDatabaseActivity for this database";
 
     /// <summary>
     /// The notice for findings the visitor is not shown: "1 finding is hidden because your account may not see activity on this
@@ -204,7 +203,7 @@ internal static class ConnectionPageBuilder
         return reason switch
         {
             null or "" => lead + " from your account.",
-            ActivityPolicyReason => lead + " because your account may not see activity on this database.",
+            HealthService.ActivityPolicyRefusal => lead + " because your account may not see activity on this database.",
             _ => lead + ": " + reason + ".",
         };
     }
@@ -431,8 +430,10 @@ internal static class ConnectionPageBuilder
             }
 
             // The address itself is never printed: only that the server sees a TCP peer.
+            // A pooler on the host (a sidecar on loopback) is the likelier reason for a loopback host with a TCP peer, so "a container
+            // network" is not guessed when the connection string shows one.
             bool tcpPeer = observed.ClientAddress is not null;
-            bool container = hostLocal && tcpPeer;
+            bool container = hostLocal && tcpPeer && settings.PoolerSigns.Count == 0;
             string text = "not encrypted" + (tcpPeer ? " · the server sees a TCP peer" : string.Empty) + (container ? " (likely a container network)" : string.Empty);
 
             return new(

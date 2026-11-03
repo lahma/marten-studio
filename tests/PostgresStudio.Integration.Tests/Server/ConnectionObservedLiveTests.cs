@@ -11,6 +11,7 @@ using PostgresStudio.Integration.Tests.Versions;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Health;
+using PostgresStudio.Services.Server;
 
 namespace PostgresStudio.Integration.Tests.Server;
 
@@ -100,6 +101,33 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         ConnectionFacts both = await ConnectionFacts.ReadAsync(context, Token);
         both.Siblings!.Pools.Should().Be(2);
         both.Siblings.SumMaxPoolSize.Should().Be(200);
+    }
+
+    /// <summary>
+    /// The tile's "local" is the real server's peer, told by the one rule: the expectation is computed from the facts' own
+    /// <c>ClientAddress</c> through <c>ServerConnectionPosture.KindOf</c>, so a wrong rule or a peer the test did not foresee
+    /// cannot agree with the tile by construction. <c>PeerIsLocal</c> is that rule, not a copy of it.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_tls_tile_is_local_only_when_the_real_servers_peer_is_loopback_by_the_one_rule()
+    {
+        MatrixServer server = await matrix.ServerAsync(17);
+        server.SkipIfUnavailable();
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App);
+        (HealthCheckContext context, HealthConnection connection) = host.Context();
+        await using HealthConnection _ = connection;
+
+        ConnectionFacts facts = await ConnectionFacts.ReadAsync(context, Token);
+        ConnectionObserved observed = facts.Observed!;
+
+        ServerConnectionKind kind = ServerConnectionPosture.KindOf(observed.ClientAddress);
+        bool hostLocal = facts.Settings.Readable && facts.Settings.Endpoints.Count > 0 && facts.Settings.RemoteEndpoints.Count == 0;
+
+        observed.PeerIsLocal.Should().Be(kind != ServerConnectionKind.Network, "the model asks the one rule about '" + observed.ClientAddress + "'");
+        ConnectionPageBuilder.TlsOf(facts).State.Should().Be(
+            hostLocal && kind != ServerConnectionKind.Network ? ConnectionTlsState.NotEncryptedLocal : ConnectionTlsState.NotEncrypted,
+            "the server saw the peer '" + observed.ClientAddress + "' (" + kind + ")");
     }
 
     /// <summary>

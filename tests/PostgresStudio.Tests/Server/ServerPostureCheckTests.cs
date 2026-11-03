@@ -117,7 +117,7 @@ public class ServerPostureCheckTests
 
         remedy.Code.Should().Be("SSL Mode=VerifyFull", "what the copy button copies stays the one line");
         remedy.Explanation.Should().StartWith(
-            "1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). "
+            "1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already).\n"
             + "2. Then set SSL Mode=VerifyFull (and Root Certificate= if the CA is private)");
         remedy.Explanation.Should().Contain("SSL Mode=Prefer or Require encrypts but does not check the server's certificate.");
     }

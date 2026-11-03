@@ -789,6 +789,19 @@
         }
     };
 
+    // Whether a <details> is open. Its `toggle` event carries no state, and the browser opens one without being asked (a click, the
+    // keyboard, find-in-page showing a match), so a component that remembers the state asks the element when the event arrives.
+    if (typeof window.martenStudio.disclosure.isOpen !== "function") {
+        window.martenStudio.disclosure.isOpen = function (element) {
+            try {
+                return !!element && element.open === true;
+            }
+            catch {
+                return false;
+            }
+        };
+    }
+
     // The edge cue on a table that scrolls sideways (UX-1).
     //
     // The scrolling itself is `overflow-x: auto` in studio.css and needs nothing from here. What

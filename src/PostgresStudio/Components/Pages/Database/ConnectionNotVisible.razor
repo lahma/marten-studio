@@ -10,8 +10,10 @@
     summary that says what is in it.
 
     Open or closed is remembered per browser in local storage, as the settings table's groups are (a convenience: a browser that
-    refuses is drawn the default, closed). The summary's own click is taken over - the platform's toggle is cancelled and the state is
-    the component's - so what is drawn and what is remembered are one value.
+    refuses is drawn the default, closed). The platform opens and closes the element itself - a click, the keyboard, or the browser's
+    find-in-page opening it to show a match - and the component follows its `toggle` event, asking the element whether it is open
+    (the event carries no state), so what is drawn and what is remembered stay one value whoever changed it. Its own restoring of
+    a remembered "open" raises the same event and finds nothing to change.
 *@
 
 @if (Model is ConnectionPageView view)
@@ -19,9 +21,9 @@
     <section class="ms-section ms-conn-hidden" id="conn-not-visible" aria-labelledby="conn-not-visible-title">
         <h2 class="ms-section-title" id="conn-not-visible-title">Not visible from here</h2>
 
-        <details class="ms-conn-disclosure" id="conn-not-visible-details" open="@open">
-            <summary class="ms-conn-disclosure-summary" @onclick="ToggleAsync" @onclick:preventDefault="true">
-                Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it (@view.NotVisible.Count things)
+        <details class="ms-conn-disclosure" id="conn-not-visible-details" open="@open" @ref="details" @ontoggle="OnToggledAsync">
+            <summary class="ms-conn-disclosure-summary">
+                @Summary
             </summary>
 
             <p class="ms-conn-note">
@@ -45,6 +47,12 @@
 @code {
     internal const string OpenKey = "ms_conn_not_visible_open";
 
+    /// <summary>What is in the disclosure, by name, so a closed one still says what it holds (the six lines inside, in order).</summary>
+    internal const string Summary =
+        "Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it: password providers, certificate callbacks, "
+        + "logging and tracing, type mappings, a script per connection, the default password file";
+
+    private ElementReference details;
     private bool open;
     private bool prefsLoaded;
 
@@ -77,17 +85,27 @@
         }
     }
 
-    private async Task ToggleAsync()
+    /// <summary>
+    /// The element opened or closed, by whatever means. The event has no state of its own, so the element is asked; when it agrees
+    /// with the component (the echo of the component's own render) there is nothing to do.
+    /// </summary>
+    private async Task OnToggledAsync()
     {
-        open = !open;
-
         try
         {
+            bool actual = await JsRuntime.InvokeAsync<bool>("martenStudio.disclosure.isOpen", new object?[] { details });
+
+            if (actual == open)
+            {
+                return;
+            }
+
+            open = actual;
             await JsRuntime.InvokeVoidAsync("martenStudio.prefs.set", new object?[] { OpenKey, open ? "1" : "0" });
         }
         catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
-            // A browser that would not remember it: the choice lasts until the page is closed, which is all it was asked for.
+            // A closed circuit, or a browser that would not remember it: what is drawn is the element's own, which is all it was asked for.
         }
     }
 }

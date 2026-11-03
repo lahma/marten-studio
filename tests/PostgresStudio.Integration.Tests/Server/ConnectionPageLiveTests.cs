@@ -7,6 +7,7 @@ using Npgsql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Server;
 
 namespace PostgresStudio.Integration.Tests.Server;
 
@@ -68,9 +69,15 @@ public class ConnectionPageLiveTests(PostgresFixture postgres)
             view.Header.Single(static x => x.Label == "Pool").Value.Should().StartWith("max 30");
             view.Tls.Text.Should().StartWith("not encrypted", "a plain container has no TLS, and the role can see its own pg_stat_ssl row");
 
-            // The tile follows S05's rule: a loopback host is "local" only while the server also sees a loopback peer. Through the
-            // container's published port the peer is the engine's gateway, so a loopback host is "likely a container network".
-            view.Tls.State.Should().Be(view.Tls.Text.EndsWith("(local)", StringComparison.Ordinal) ? ConnectionTlsState.NotEncryptedLocal : ConnectionTlsState.NotEncrypted);
+            // The tile follows S05's rule: a loopback host is "local" only while the server also sees a loopback peer. The expectation
+            // is the real server's: the peer it reports to a connection of the same login over the same route (inet_client_addr()),
+            // told by the one rule the Server page's tile uses, and the host the data source names - not the tile's own text.
+            await using NpgsqlCommand ask = new("select inet_client_addr()::text", extra);
+            string? peer = await ask.ExecuteScalarAsync(Token) is string text ? text : null;
+            bool hostLocal = ConnectionHosts.IsLocal(application.Host!);
+            bool peerLocal = ServerConnectionPosture.KindOf(peer?.Split('/')[0]) != ServerConnectionKind.Network;
+
+            view.Tls.State.Should().Be(hostLocal && peerLocal ? ConnectionTlsState.NotEncryptedLocal : ConnectionTlsState.NotEncrypted, "the server saw the peer '" + peer + "' and the host is '" + application.Host + "'");
             view.Tls.Text.Should().NotContainAny("172.", "192.168.", "10."); // the server's view of the peer is never printed
 
             ConnectionSettingView name = view.Settings.Single(static x => x.Row.Keyword == "Application Name");

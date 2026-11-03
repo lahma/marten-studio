@@ -110,6 +110,12 @@ internal sealed class HealthService : IHealthService
     /// <summary>What the audit ring says was shown.</summary>
     internal const string ActivityTarget = "health findings' session evidence";
 
+    /// <summary>
+    /// The refusal the write policy gives a visitor who may not read other people's activity on a database - the reason a withheld
+    /// finding carries. The Connection page matches on this one value to say it as a sentence, so a wording change here reaches it.
+    /// </summary>
+    internal const string ActivityPolicyRefusal = "needs your account's write policy to allow ViewDatabaseActivity for this database";
+
     // The audit ledger is keyed by store, database and what was read, as the Sessions page's is; these name "what".
     private const string ActivityLedgerSchema = "(health)";
     private const string ActivityLedgerRelation = "findings";
@@ -1041,7 +1047,7 @@ internal sealed class HealthService : IHealthService
 
             if (activity == false)
             {
-                activityRefusal = "needs your account's write policy to allow ViewDatabaseActivity for this database";
+                activityRefusal = ActivityPolicyRefusal;
             }
 
             return activity.Value;

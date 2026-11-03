@@ -16,8 +16,10 @@ worth a look" - that links to it.
   not verified, not encrypted, or - for a GSSAPI connection - "encrypted with GSSAPI (not TLS)"). An unencrypted connection
   is "(local)", in green, only when the data source's host is a socket or loopback **and** the server also sees the
   connection come over a socket or from loopback. Otherwise it is amber - "not encrypted · the server sees a TCP peer", with
-  "(likely a container network)" added when the host is loopback but the server's peer is not (Docker, NAT). The address is
-  never printed. The Overview's line says the same words, and S05 uses the same rule;
+  "(likely a container network)" added when the host is loopback but the server's peer is not (Docker, NAT) and no pooler
+  is in front of it. The address is never printed. The Overview's line says the same words. S05 reads the same server-side
+  peer but judges only the server side: a remote host whose peer the server sees as loopback is amber on the tile and quiet
+  in S05;
 - the **pool**: `Maximum Pool Size`, and the peak of this application's sessions on the server;
 - the **Npgsql** version loaded, and the **platform** or **pooler** in front of the server when one is recognised (Amazon
   RDS and Aurora, Azure, Cloud SQL, Neon, Supabase, PgBouncer-family poolers and Amazon RDS Proxy).
@@ -25,7 +27,9 @@ worth a look" - that links to it.
 **Worth a look** lists the health advisor's findings about the connection (C13 to C18, S05, S11 to S13, K04, K08) and the
 page's own hints, most severe first. Each is a card with the settings it is about and the change to make, written twice: as
 a connection string and as `NpgsqlDataSourceBuilder` code (in Marten Studio, inside `opts.ConfigureNpgsqlDataSourceBuilder`),
-with a copy button for each. A hint is a sentence, never a finding: hints are not counted, ranked or exported.
+with a copy button for each. A hint is a sentence, never a finding: hints are not counted, ranked or exported by the advisor.
+Where there are "Good to know" notes the heading counts each kind apart - "1 finding · 2 hints · 2 notes" (a kind with none is
+left out); with none it is the number of things worth a look.
 
 **Settings** lists every keyword of the Npgsql that is loaded, by category, with:
 
@@ -35,7 +39,7 @@ with a copy button for each. A hint is a sentence, never a finding: hints are no
 - **Npgsql's default**.
 
 "Only what differs from the default" is on by default; it, and which groups are open, are remembered per browser. Every group
-has the same column widths. Below 600 px each setting is a card (the setting, its value, then "From:" and "Default:") instead
+has the same column widths. Below 720 px each setting is a card (the setting, its value, then "From:" and "Default:") instead
 of a table that scrolls sideways. Where `PGAPPNAME` (or `PGGSSENCMODE` or `PGREQUIREAUTH`) is set in the process and the loaded
 Npgsql is below 10, the row says Npgsql does not read it and names the connection-string keyword to set; the variable's value is
 never shown.

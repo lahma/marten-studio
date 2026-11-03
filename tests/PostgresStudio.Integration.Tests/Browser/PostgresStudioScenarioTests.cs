@@ -307,6 +307,12 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
                 "() => [...document.querySelectorAll('#conn-worth pre.ms-health-remedy-code')].every(p => p.scrollWidth <= p.clientWidth + 1)"))
                 .Should().BeTrue("a fix block has no sideways scroll of its own at 390 px");
             (await page.Locator("#conn-worth .ms-conn-fix").First.Locator("button").CountAsync()).Should().BeGreaterThan(0, "the copy button is still there");
+            // A tablet (UX-FIX-A2): the table is still a table, and its region holds it - no sideways scroll, From and Default on screen.
+            await page.SetViewportSizeAsync(820, 1000);
+            await studio.AssertNoSidewaysScrollAsync("Database › Connection at 820 px");
+            (await page.EvaluateAsync<bool>(
+                "() => { const t = document.querySelector('table.ms-conn-settings-table'); const region = t.closest('[role=\"region\"]') || t.parentElement; const row = t.querySelector('tbody tr'); const f = row.querySelector('td[data-label=\"From\"]').getBoundingClientRect(); const d = row.querySelector('td[data-label=\"Default\"]').getBoundingClientRect(); return getComputedStyle(t).display === 'table' && region.scrollWidth <= region.clientWidth + 1 && f.width > 0 && d.width > 0 && f.right <= window.innerWidth && d.right <= window.innerWidth; }"))
+                .Should().BeTrue("at 820 px the settings table fits its region: From and Default are visible without a sideways scroll");
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, StudioPage.ViewportHeight);
 
             // A tenant database has its own connection; the page reads it the same way.

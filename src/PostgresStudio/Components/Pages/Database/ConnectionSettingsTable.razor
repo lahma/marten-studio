@@ -74,28 +74,28 @@
                     @if (open)
                     {
                         <TableScroll Label="@(group.Key + " settings")">
-                            <table class="ms-table ms-conn-table ms-conn-settings-table">
+                            <table class="ms-table ms-conn-table ms-conn-settings-table" role="table">
                                 <colgroup>
                                     <col class="ms-conn-col-setting" />
                                     <col class="ms-conn-col-effect" />
                                     <col class="ms-conn-col-from" />
                                     <col class="ms-conn-col-default" />
                                 </colgroup>
-                                <thead>
-                                    <tr>
-                                        <th scope="col">Setting</th>
-                                        <th scope="col">In effect</th>
-                                        <th scope="col">From</th>
-                                        <th scope="col">Default</th>
+                                <thead role="rowgroup">
+                                    <tr role="row">
+                                        <th scope="col" role="columnheader">Setting</th>
+                                        <th scope="col" role="columnheader">In effect</th>
+                                        <th scope="col" role="columnheader">From</th>
+                                        <th scope="col" role="columnheader">Default</th>
                                     </tr>
                                 </thead>
-                                <tbody>
+                                <tbody role="rowgroup">
                                     @foreach (ConnectionSettingView setting in rows)
                                     {
                                         ConnectionSettingRow row = setting.Row;
 
-                                        <tr id="@setting.Anchor" class="@("ms-conn-row" + (row.Origin == ConnectionSettingOrigin.Default ? string.Empty : " ms-conn-row-set"))" @key="row.Keyword">
-                                            <th scope="row" class="ms-conn-keyword" title="@BuilderTitle(row)">
+                                        <tr id="@setting.Anchor" class="@("ms-conn-row" + (row.Origin == ConnectionSettingOrigin.Default ? string.Empty : " ms-conn-row-set"))" role="row" @key="row.Keyword">
+                                            <th scope="row" role="rowheader" class="ms-conn-keyword" title="@BuilderTitle(row)">
                                                 @row.Keyword
                                                 @if (setting.AdviceCard is { } card)
                                                 {
@@ -105,7 +105,7 @@
                                                        title="@card.Heading">advice</a>
                                                 }
                                             </th>
-                                            <td class="ms-conn-value" data-label="In effect">
+                                            <td class="ms-conn-value" role="cell" data-label="In effect">
                                                 <span class="ms-mono">@row.Value</span>
                                                 @if (row.Note is { Length: > 0 } note)
                                                 {
@@ -122,8 +122,8 @@
                                                     <span class="ms-conn-row-note">The same as the default.</span>
                                                 }
                                             </td>
-                                            <td class="ms-conn-from-cell" data-label="From"><span class="@("ms-conn-from ms-conn-from-" + row.Origin.ToString().ToLowerInvariant())">@setting.From</span></td>
-                                            <td class="ms-conn-default" data-label="Default"><span class="ms-mono">@(row.DefaultValue ?? "–")</span></td>
+                                            <td class="ms-conn-from-cell" role="cell" data-label="From"><span class="@("ms-conn-from ms-conn-from-" + row.Origin.ToString().ToLowerInvariant())">@setting.From</span></td>
+                                            <td class="ms-conn-default" role="cell" data-label="Default"><span class="ms-mono">@(row.DefaultValue ?? "–")</span></td>
                                         </tr>
                                     }
                                 </tbody>

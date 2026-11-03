@@ -1,3 +1,5 @@
+using PostgresStudio.Services.Server;
+
 namespace PostgresStudio.Services.Connection;
 
 /// <summary>
@@ -80,11 +82,11 @@ internal sealed record ConnectionObserved(
     /// </summary>
     public string? ClientAddress { get; init; }
 
-    /// <summary>Whether the server sees the connection come over a socket or from the loopback interface, so nothing leaves the machine.</summary>
-    public bool PeerIsLocal =>
-        ClientAddress is null
-        || (System.Net.IPAddress.TryParse(ClientAddress, out System.Net.IPAddress? peer)
-            && System.Net.IPAddress.IsLoopback(peer.IsIPv4MappedToIPv6 ? peer.MapToIPv4() : peer));
+    /// <summary>
+    /// Whether the server sees the connection come over a socket or from the loopback interface, so nothing leaves the machine. It is
+    /// <see cref="ServerConnectionPosture.KindOf" />'s rule (the Server page's tile and S05 read the same one), not a second copy of it.
+    /// </summary>
+    public bool PeerIsLocal => ServerConnectionPosture.KindOf(ClientAddress) != ServerConnectionKind.Network;
 
     /// <summary>
     /// The server's own idle cut for a session, in whole seconds (rounded down, but at least 1: a cut of under a second is still a cut,

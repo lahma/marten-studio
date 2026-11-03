@@ -270,35 +270,35 @@
                 <h3 class="ms-conn-group-title ms-conn-compare-group">@group.Key</h3>
 
                 <TableScroll Label="@(group.Key + " settings compared")">
-                    <table class="ms-table ms-conn-table ms-conn-compare-table">
+                    <table class="ms-table ms-conn-table ms-conn-compare-table" role="table">
                         <colgroup>
                             <col class="ms-conn-col-setting" />
                             <col class="ms-conn-col-now" />
                             <col class="ms-conn-col-pasted" />
                             <col class="ms-conn-col-change" />
                         </colgroup>
-                        <thead>
-                            <tr>
-                                <th scope="col">Setting</th>
-                                <th scope="col">In effect now</th>
-                                <th scope="col">Pasted</th>
-                                <th scope="col">Change</th>
+                        <thead role="rowgroup">
+                            <tr role="row">
+                                <th scope="col" role="columnheader">Setting</th>
+                                <th scope="col" role="columnheader">In effect now</th>
+                                <th scope="col" role="columnheader">Pasted</th>
+                                <th scope="col" role="columnheader">Change</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody role="rowgroup">
                             @foreach (ConnectionCompareRow row in group)
                             {
-                                <tr id="@row.Anchor" class="@("ms-conn-row ms-conn-compare-row" + (row.Differs ? " ms-conn-compare-diff" : string.Empty))" @key="row.Keyword">
-                                    <th scope="row" class="ms-conn-keyword">
+                                <tr id="@row.Anchor" class="@("ms-conn-row ms-conn-compare-row" + (row.Differs ? " ms-conn-compare-diff" : string.Empty))" role="row" @key="row.Keyword">
+                                    <th scope="row" role="rowheader" class="ms-conn-keyword">
                                         @row.Keyword
                                         @if (row.AdviceId is { } advice)
                                         {
                                             <a class="ms-conn-advice" href="@RowLink(advice)" aria-label="@("Advice about " + row.Keyword + " if you switched to the pasted settings")">advice</a>
                                         }
                                     </th>
-                                    <td class="ms-conn-value" data-label="In effect now">@ValueCell(row.Current)</td>
-                                    <td class="ms-conn-value" data-label="Pasted">@ValueCell(row.Pasted)</td>
-                                    <td class="ms-conn-compare-change" data-label="Change">
+                                    <td class="ms-conn-value" role="cell" data-label="In effect now">@ValueCell(row.Current)</td>
+                                    <td class="ms-conn-value" role="cell" data-label="Pasted">@ValueCell(row.Pasted)</td>
+                                    <td class="ms-conn-compare-change" role="cell" data-label="Change">
                                         <span class="@("ms-conn-compare-mark" + (row.Differs ? " ms-conn-compare-mark-diff" : string.Empty))">@(row.Differs ? "changed" : "same")</span>
                                     </td>
                                 </tr>

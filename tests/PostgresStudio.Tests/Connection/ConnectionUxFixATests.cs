@@ -100,16 +100,18 @@ public sealed class ConnectionUxFixATests
     // -------------------------------------------------------------------------------------------------
 
     [Theory]
-    [InlineData(3, 2, "3 findings · 2 notes")]
-    [InlineData(1, 1, "1 finding · 1 note")]
-    [InlineData(0, 2, "2 notes")]
-    [InlineData(0, 1, "1 note")]
-    public void The_worth_a_look_count_names_its_findings_and_its_notes(int findings, int notes, string expected) =>
-        ConnectionPageBuilder.CountLabel(findings, notes).Should().Be(expected);
+    [InlineData(3, 0, 2, "3 findings · 2 notes")]
+    [InlineData(1, 2, 2, "1 finding · 2 hints · 2 notes")]
+    [InlineData(1, 1, 1, "1 finding · 1 hint · 1 note")]
+    [InlineData(0, 3, 1, "3 hints · 1 note")]
+    [InlineData(0, 0, 2, "2 notes")]
+    [InlineData(0, 0, 1, "1 note")]
+    public void The_worth_a_look_count_names_its_findings_hints_and_notes_and_leaves_out_a_kind_with_none(int findings, int hints, int notes, string expected) =>
+        ConnectionPageBuilder.CountLabel(findings, hints, notes).Should().Be(expected);
 
     [Theory]
-    [InlineData(1, "needs your account's write policy to allow ViewDatabaseActivity for this database", "1 finding is hidden because your account may not see activity on this database.")]
-    [InlineData(3, "needs your account's write policy to allow ViewDatabaseActivity for this database", "3 findings are hidden because your account may not see activity on this database.")]
+    [InlineData(1, HealthService.ActivityPolicyRefusal, "1 finding is hidden because your account may not see activity on this database.")]
+    [InlineData(3, HealthService.ActivityPolicyRefusal, "3 findings are hidden because your account may not see activity on this database.")]
     [InlineData(2, "needs PostgresStudioOptions.Capabilities.ViewDatabaseActivity", "2 findings are hidden: needs PostgresStudioOptions.Capabilities.ViewDatabaseActivity.")]
     [InlineData(1, null, "1 finding is hidden from your account.")]
     public void The_notice_for_withheld_findings_is_count_aware_and_keeps_a_reason_it_has_no_sentence_for(int count, string? reason, string expected) =>
@@ -147,7 +149,7 @@ public sealed class ConnectionUxFixATests
         string off = UnencryptedConnectionCheck.RemedyText(serverOff: true, "the data source");
         string on = UnencryptedConnectionCheck.RemedyText(serverOff: false, "the data source");
 
-        off.Should().StartWith("1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). 2. Then set SSL Mode=VerifyFull (and Root Certificate= if the CA is private)");
+        off.Should().StartWith("1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already).\n2. Then set SSL Mode=VerifyFull (and Root Certificate= if the CA is private)");
         on.Should().NotContain("1. Enable TLS");
         on.Should().StartWith("In the connection string the data source is built from - a client setting, not a server one.");
 
@@ -162,7 +164,7 @@ public sealed class ConnectionUxFixATests
     // -------------------------------------------------------------------------------------------------
 
     [Fact]
-    public void The_stylesheet_has_the_ux_fix_a_section_with_the_stacked_cards_below_600_pixels_and_the_column_widths()
+    public void The_stylesheet_has_the_ux_fix_a_section_with_the_stacked_cards_below_720_pixels_and_the_column_widths()
     {
         string css = File.ReadAllText(RepositoryRoot.Combine("src", "PostgresStudio", "wwwroot", "css", "studio.css"));
         int start = css.IndexOf("/* ===== 1.1-UX-FIX-A", StringComparison.Ordinal);
@@ -170,7 +172,10 @@ public sealed class ConnectionUxFixATests
         start.Should().BeGreaterThan(0, "D26: the section is appended");
         string section = css[start..];
 
-        section.Should().Contain("@media (max-width: 599px)");
+        section.Should().Contain("@media (max-width: 719px)", "the stylesheet's own 720 px step: a tablet's region would otherwise scroll sideways");
+        section.Should().Contain("min-width: 36rem");
+        section.Should().NotContain("min-width: 50rem");
+        section.Should().Contain("white-space: pre-line");
         section.Should().Contain("content: attr(data-label)");
         section.Should().Contain(".ms-conn-fix .ms-health-remedy-code");
         section.Should().Contain("white-space: pre-wrap");
