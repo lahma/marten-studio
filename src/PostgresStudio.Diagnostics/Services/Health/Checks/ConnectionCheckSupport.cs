@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 
 using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Settings;
@@ -27,11 +28,22 @@ internal static class ConnectionCheckSupport
     /// </summary>
     /// <param name="context">The sweep's context.</param>
     /// <exception cref="HealthCheckUnavailableException">The data source's connection string could not be parsed, or there is none.</exception>
+    /// <remarks>
+    /// <b>A database the server did not answer is not read as in good order.</b> The facts keep the settings of a database that
+    /// could not be reached (the Connection page shows them), but a check judging them would report on a database the sweep never
+    /// reached, and <c>PostgresDiagnosticsService.Reached</c> counts a catalog check that did not fail as proof that it was. So the
+    /// failure the connection read met is thrown again here, and the sweep classifies it as it does every other check's.
+    /// </remarks>
     public static async Task<ConnectionFacts> ReadAsync(HealthCheckContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
         ConnectionFacts facts = await ConnectionFacts.SharedAsync(context).ConfigureAwait(false);
+
+        if (facts.ObservedFailure is { } failure)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
 
         if (!facts.Settings.Readable)
         {

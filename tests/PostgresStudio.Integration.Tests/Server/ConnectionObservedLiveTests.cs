@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
+using Npgsql;
+
 using PostgresStudio.Integration.Tests.Storage;
 using PostgresStudio.Integration.Tests.Versions;
 using PostgresStudio.Internal.Sql;
@@ -37,7 +39,12 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         MatrixServer server = await matrix.ServerAsync(major);
         server.SkipIfUnavailable();
 
-        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App);
+        // A database of this test's own. C18 counts every pool of the process that shares the data source's host, port, database and
+        // login - whatever its Application Name - because Npgsql's meter is the process's: another class's host of the same role in
+        // the seeded database, alive while this one runs, is a sibling by design. No other test connects here.
+        string database = await server.CreateDatabaseAsync("ms_connobs_siblings", Token);
+
+        await using MatrixHost host = await MatrixHost.CreateAsync(server, MatrixRole.App, database);
         (HealthCheckContext context, HealthConnection connection) = host.Context();
         await using HealthConnection _ = connection;
 
@@ -48,7 +55,7 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
 
         observed.SessionUser.Should().Be("app");
         observed.CurrentUser.Should().Be("app");
-        observed.Database.Should().Be(MatrixServer.Database);
+        observed.Database.Should().Be(database);
         observed.ServerAddress.Should().NotBeNullOrWhiteSpace();
         observed.ServerPort.Should().Be(5432);
         observed.InRecovery.Should().BeFalse();
@@ -79,10 +86,19 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         facts.Settings.Rows.Single(static x => x.Keyword == "Application Name").Origin.Should().Be(ConnectionSettingOrigin.ConnectionString);
         facts.Settings.Rows.Single(static x => x.Keyword == "Password").Origin.Should().Be(ConnectionSettingOrigin.NotVisible);
 
-        // The pool the host warmed is the only one of this connection string in the process.
+        // The pool the host warmed is the only one to this host, port, database and login in the process.
         facts.Siblings.Should().NotBeNull();
         facts.Siblings!.Pools.Should().Be(1);
         facts.Siblings.SumMaxPoolSize.Should().Be(100);
+
+        // A second pool to the same host, port, database and login is a sibling whatever its Application Name: the meter is the process's.
+        await using NpgsqlDataSource second = NpgsqlDataSource.Create(
+            new NpgsqlConnectionStringBuilder(server.ConnectionString(MatrixRole.App, database)) { ApplicationName = "ms-connobs-second" }.ConnectionString);
+        await using NpgsqlConnection warm = await second.OpenConnectionAsync(Token);
+
+        ConnectionFacts both = await ConnectionFacts.ReadAsync(context, Token);
+        both.Siblings!.Pools.Should().Be(2);
+        both.Siblings.SumMaxPoolSize.Should().Be(200);
     }
 
     /// <summary>

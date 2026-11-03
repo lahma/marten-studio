@@ -122,7 +122,9 @@ internal sealed record ConnectionPoolSiblings(int Pools, int? SumMaxPoolSize, in
 /// </para>
 /// <para>
 /// <b>A failed read is a value.</b> The settings need no connection, so a server that cannot be reached still yields them,
-/// with <see cref="ObservedNotRead" /> saying why the rest is missing.
+/// with <see cref="ObservedNotRead" /> saying why the rest is missing. The page shows them; the checks do not judge them
+/// when the server never answered (<see cref="ObservedFailure" />), because a sweep that reached nothing must not find a
+/// database in good order.
 /// </para>
 /// </remarks>
 internal sealed record ConnectionFacts
@@ -141,6 +143,15 @@ internal sealed record ConnectionFacts
 
     /// <summary>Why <see cref="Observed" /> is <see langword="null" />, or <see langword="null" /> when it was read.</summary>
     public string? ObservedNotRead { get; init; }
+
+    /// <summary>
+    /// The failure behind <see cref="ObservedNotRead" /> when the server never answered the read - a connection that could not be
+    /// opened, a data source that was disposed, a timeout, the studio's own share of the pool in use - or <see langword="null" />
+    /// when it was read or Postgres answered with an error of its own (a missing grant). The connection checks rethrow it, so the
+    /// sweep classifies it as it does every other check's (<c>ConnectionCheckSupport.ReadAsync</c>); it is never shown or logged
+    /// by the facts themselves.
+    /// </summary>
+    public Exception? ObservedFailure { get; init; }
 
     /// <summary>Who runs the server; <see cref="PostgresPlatform.SelfHosted" /> when it could not be told.</summary>
     public PostgresPlatform Platform { get; init; } = PostgresPlatform.SelfHosted;
@@ -196,7 +207,7 @@ internal sealed record ConnectionFacts
         IReadOnlyList<string> optionNames = NpgsqlSettingsReader.OptionNames(connectionString, environment);
         string? identity = ConnectionPoolSiblings.IdentityOf(connectionString);
 
-        (ConnectionObserved? observed, string? notRead) = await ReadObservedAsync(context, optionNames, cancellationToken).ConfigureAwait(false);
+        (ConnectionObserved? observed, string? notRead, Exception? failure) = await ReadObservedAsync(context, optionNames, cancellationToken).ConfigureAwait(false);
         PostgresPlatform platform = await ReadPlatformAsync(context).ConfigureAwait(false);
 
         ConnectionReadContext read = new()
@@ -220,6 +231,7 @@ internal sealed record ConnectionFacts
             ReadAt = context.Now,
             Observed = observed,
             ObservedNotRead = notRead,
+            ObservedFailure = failure,
             Platform = platform,
             Sessions = sessions,
             Siblings = identity is null ? null : ObserveSiblings(context, identity),
@@ -227,7 +239,7 @@ internal sealed record ConnectionFacts
         };
     }
 
-    private static async Task<(ConnectionObserved? Observed, string? NotRead)> ReadObservedAsync(
+    private static async Task<(ConnectionObserved? Observed, string? NotRead, Exception? Failure)> ReadObservedAsync(
         HealthCheckContext context,
         IReadOnlyList<string> optionNames,
         CancellationToken cancellationToken)
@@ -240,7 +252,7 @@ internal sealed record ConnectionFacts
 
             if (rows.Count != 1)
             {
-                return (null, "the server answered " + rows.Count.ToString(CultureInfo.InvariantCulture) + " rows to the connection read");
+                return (null, "the server answered " + rows.Count.ToString(CultureInfo.InvariantCulture) + " rows to the connection read", null);
             }
 
             // The parameters the server reported at start-up are on the open connection already: no statement.
@@ -248,7 +260,7 @@ internal sealed record ConnectionFacts
                 .ReportedParametersAsync(cancellationToken)
                 .ConfigureAwait(false);
 
-            return (rows[0] with { ReportedParameters = reported }, null);
+            return (rows[0] with { ReportedParameters = reported }, null, null);
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
@@ -259,7 +271,13 @@ internal sealed record ConnectionFacts
 
             PostgresException? postgres = exception as PostgresException ?? exception.InnerException as PostgresException;
 
-            return (null, "the connection read failed (" + (postgres is null ? exception.GetType().Name : "SQLSTATE " + postgres.SqlState) + ")");
+            // Postgres answered with an error of its own: the database was reached, and the settings stand on their own. Anything
+            // else - no connection, a disposed data source, a timeout - is the server not answering, which the checks must not
+            // read as a database in good order.
+            return (
+                null,
+                "the connection read failed (" + (postgres is null ? exception.GetType().Name : "SQLSTATE " + postgres.SqlState) + ")",
+                postgres is null ? exception : null);
         }
     }
 
