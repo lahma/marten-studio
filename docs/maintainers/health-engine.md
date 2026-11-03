@@ -84,3 +84,43 @@ banners (all through `HealthReportFinding.Counts` and the one list `CachedAsync`
 `Unhealthy` (counted apart under `accepted`). It changes no gate: a withheld accepted finding is still counted as
 withheld, and its reason is shown on the check's row only beside a finding the visitor may see. The *Accepted checks*
 list (the Server page, Marten Studio's Configuration page) is configuration, shown to anyone who may open that page.
+
+**The connection-settings checks** (1.1: C16, C17, C18, S11, S12, S13) judge one memoized `ConnectionFacts` per sweep
+(`ConnectionFacts.SharedAsync`: the redacted settings, what the server saw of the studio's connection as a new session of
+the login starts with it, the platform, the session statistics when pooling is off, and the count of this process's pools to
+the database). All six are `Database` checks, none shows a value of a secret keyword, a path, a host, a pool name or an
+`Options` value (`ConnectionChecksSentinelTests`, `ConnectionSettingChecksLiveTests`), and a remedy shows the
+connection-string form and the `NpgsqlDataSourceBuilder` form through `StudioText.DataSourceBuilderRemedy`, which Marten
+Studio wraps in `opts.ConfigureNpgsqlDataSourceBuilder`. A stand-down that is the data source's design (pooling off for C16,
+a pooler for C17, the Cloud SQL Auth Proxy or an unreadable TLS row for S11) is `HealthCheckNotApplicableException`; an
+unread server is `HealthCheckUnavailableException`. S05 and S11 are also not applicable behind a pooler sign (a Neon pooled
+endpoint, port 6543, Azure's built-in PgBouncer, port 6432, an Amazon RDS Proxy): the server's `pg_stat_ssl` row is then
+the pooler's own connection, not the application's. S05 reads the signs from the same `ConnectionFacts`, so it adds no
+statement, and S11 asks for the pooler before it asks whether the server could be read, so a pooler data source whose
+connection could not be read is not applicable rather than unavailable. C16 skips its server variant behind an Amazon RDS
+Proxy with `No Reset On Close=true`, where the server's cut reaches the client only on a pinned connection. K10 was retired in
+1.1 with the Marten 9.57 floor: its row stays in `docs/health/codes.md`, and an `AcceptedChecks` entry for it is ignored
+with one Information line.
+
+**Database › Connection, the page's gates** (1.1, D33). The page and the Overview's line are the `Database` gate (the
+source policy asked with `TenantId = null`); "This application's sessions" and the pool peak counted by application name
+are the `Activity` gate (`ViewDatabaseActivity`, then the source and write policies), audited by signature like Sessions'
+details and refused as a value. The pool peak and the sessions are recorded separately, and the Overview's line asks for
+neither. The page itself is a read of configuration and is not audited. Its model holds only redacted records: no
+connection string reaches a page, a contributor (`IConnectionInsightContributor`, internal, the same pattern as D32's
+`IPlanInsightContributor`; a contribution may carry `HintNotes`, a sentence per hint id that the page appends to that
+hint's card), the snapshot, a log or the audit. The snapshot's `connection` section is internal to the studio's own
+download and is not part of the D31 read model. **Paste-to-compare** ("Compare a connection string") is the page's
+`Database` gate, asked before the text is looked at, and is not audited: it reads and runs nothing. The pasted text is a
+parameter, never a field: `PastedConnectionString` removes every catalogue `Secret` keyword (resolved through Npgsql's own
+canonicalisation, never an alias list) and every `Options` value before `NpgsqlSettingsReader` reads it, re-checks the
+result, and refuses a keyword by name only; `ConnectionCompareService` has no logger and no audit call, and nothing is
+connected to. The only server facts it uses are the connection in effect's own cached ones. **Marten Studio's contributor**
+(`MartenConnectionInsightContributor`, internal) adds a section and hint notes to the same page behind the same `Database`
+gate. It reads only in-memory options, `IMartenDatabase.ConfiguredCommandTimeout` (a number parsed inside Marten), the
+regular sweep's own daemon lookup and `MartenRowSizeCache`, and learns whether Marten built its data source from Weasel's
+public `OwnsDataSource`, reading the container's `NpgsqlDataSource` registrations only as service descriptors (an instance
+registered as an instance is compared by reference; nothing is ever resolved, so no data source is built). It opens no
+session, calls nothing that ensures storage, and is handed no connection string. `MartenRowSizeCache` holds one average
+size per kind (events, documents) per database, written by E04 and T09, bounded by `HealthDatabaseBound` and honoured for as
+long as a deeper sweep's results are shown.

@@ -135,7 +135,9 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
     `LoadAsync`, `LoadManyAsync` or a `session.Events` read such as `FetchStreamAsync` or `AggregateStreamAsync`: each
     calls `EnsureStorageExistsAsync`, which creates or migrates its type's storage (below 9.50.3, `mt_hilo` too) when
     the process first asks. Reads use the studio's own SQL; `StorageEnsuringCallTests` allows those calls only in the
-    capability-gated writes and F7's LINQ composition, which `MartenLinqCommand` builds into SQL without it. From 9.52
+    capability-gated writes and F7's LINQ composition (documents, and from 1.1 `QueryRawEvents()`, which is called only with
+    no argument, never a tenant: `QueryRawEventsTakesNoTenantTests`), which `MartenLinqCommand` builds into SQL without
+    it. From 9.52
     the projection-floor seam (`FetchProjectionFloorAsync` and its two setters) and the high-water advance ensure the
     event storage too: the rebuild dialog reads `mt_event_projection_floors` with the studio's own SQL, and the advance
     is a gated write. Schema names, declared indexes, managed tables, installed functions and what Marten owns (its kind

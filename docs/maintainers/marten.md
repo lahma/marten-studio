@@ -44,3 +44,9 @@ one mode. Since the floor moved to 9.57 (1.1, *Package budget changes* 2026-11-0
 and the mode is unconditional; the adapter is still reached by reflection and still fails closed, pinned by
 `DynamicLinqAdapterTests` and `MartenLinqCommandTests`, and its absence is now only a JasperFx whose shape the studio
 does not recognise. `docs/linq-mode.md` is the threat model.
+
+Since 1.1 it also queries the event log through `IReadOnlyEventStore.QueryRawEvents()`, called with no tenant
+argument on the same pinned session (the overload with one opens an unpinned `QuerySession`), built by the same
+`BuildLinqParser`/`BuildDiagnosticCommand` path. The members are a closed list mirroring Marten's `EventQueryMapping`
+columns from `IReadOnlyStoreOptions.Events`, because every other `IEvent` member reads the JSON body and matches
+nothing. The statement must stay on the studio's session and read no `d.data`, or it is refused.

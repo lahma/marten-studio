@@ -15,6 +15,19 @@ release, and move the two dependencies first if your application is below either
   **Postgres Studio host that registers its own `NpgsqlDataSource` on Npgsql 8 must move to 9.0.4 or later**; Npgsql 9 keeps
   the connection string keywords and the pool metrics Postgres Studio reads (`db.client.connections.*`; Npgsql 10 renamed
   them and is read too), and from 9.0 its `Connection Lifetime` defaults to 3600 seconds.
+- **K10 is retired.** The check (a schema name that breaks every apply after the first) went with the Marten 9.57 floor,
+  whose Weasel reads such an index back. A host that accepted it in `AcceptedChecks` keeps starting: the entry is ignored,
+  with one Information line saying it can be removed. Its row stays in [health/codes.md](health/codes.md).
+- **New checks may fire on upgrade.** C16 (a server or proxy ends idle pooled connections first), C17 (pooling switched
+  off), C18 (several pools to one database in this process), S11 (server certificate not verified), S12 (a credential is
+  readable from configuration) and S13 (driver settings that copy values into logs or exceptions), all described on
+  [Database › Connection](connection.md#the-checks-it-surfaces), and, in Marten Studio, E09 (a stream compacted into an
+  empty snapshot, behind "Run deeper checks"). They are findings about your configuration, not regressions; accept one with
+  `AcceptedChecks` and a reason, or fix it.
+- **S05 now stands down behind a pooler.** Behind a Neon pooled endpoint, port 6543, Azure's built-in PgBouncer (port
+  6432) or an Amazon RDS Proxy, the server's TLS row is the pooler's own connection, so S05 is "not applicable" there; the
+  Connection page's TLS hint judges `SSL Mode` instead.
+- **PostgreSQL 14** is no longer tested. It still works.
 - **Nothing else changes for you.** No public API moved.
 
 # Upgrading to 1.0

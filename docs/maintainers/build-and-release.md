@@ -108,8 +108,9 @@ so `dotnet test … -p:MartenStudioMartenVersion=9.57.0` followed by `dotnet pac
 otherwise pass a property check and still ship `Marten >= 9.57.0`. A missing assets file is a refusal,
 not a pass (a package packed at a newer Marten would raise every host's floor). To bump the
 latest-tested version: change `MartenStudioMartenLatest`, run both suites with `--marten-version latest`,
-and fix or record every difference in the same pull request. Raising the floor is a *Package budget
-changes* entry, never a side effect.
+and fix or record every difference in the same pull request. Read the release's "Action needed after upgrading" notes,
+and turn each that leaves state a host may still carry into a health check or a page note (E09 is the first, from Marten
+9.57.0). Raising the floor is a *Package budget changes* entry, never a side effect.
 
 **PostgresStudio's Npgsql is `Directory.Packages.props`'s too, and anything but its floor gets a pass of its own.**
 `PostgresStudioNpgsqlFloor` (9.0.4, what the PostgresStudio package depends on; never above the Npgsql that Marten's

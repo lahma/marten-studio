@@ -742,12 +742,15 @@ should not have been typed is on the record either way.
 - **Never replaces your `StoreOptions.Logger`.** A live SQL tail would require it, which is exactly the
   "registration changes host behaviour" failure this project refuses. Every generated grid carries a
   "Show SQL" disclosure instead.
-- **Never shows a connection string or a credential.** A database is identified by server, port, name
+- **Never shows a raw connection string or a credential.** A database is identified by server, port, name
   and schema, everywhere — in the Overview, in the Configuration dump, in the audit log and in
-  `MartenStoreResource.DatabaseIdentifier`.
-- **Never keeps or logs what you paste, and cannot stop your host's logging of what the browser sends.** The pasted
-  text of Database › Connection's "Compare a connection string" (1.1) is a call's argument and nothing more: passwords
-  are removed on the server before anything is read, and the studio logs, audits, stores and connects to nothing of it.
+  `MartenStoreResource.DatabaseIdentifier`. The Connection page (1.1) lists the data source's settings one by one as
+  Npgsql parsed them, with every password and every value the studio does not know withheld; see
+  [`connection.md`](connection.md) for what it shows and why.
+- **The studio keeps and logs nothing you paste, and cannot stop your host's logging of what the browser sends.** The
+  pasted text of Database › Connection's "Compare a connection string" (1.1) is a call's argument and nothing more:
+  passwords are removed on the server before anything is read, and the studio logs, audits, stores and connects to
+  nothing of it.
   But a Blazor Server circuit is SignalR, and ASP.NET Core's SignalR logs every hub invocation's arguments at Debug
   (`ReceivedHubInvocation`): with `Microsoft.AspNetCore.SignalR` logged at Debug, every message a circuit receives
   is written to your log before the studio sees it - typed SQL in the console, pasted plans and pasted connection

@@ -361,7 +361,7 @@ mapped studio is a read-only browser of Marten's own data.
 | `ViewDefinitions` | Read the definitions alone - a view's or materialized view's query, a function's or procedure's body, a trigger's definition, a type's description - of the non-Marten objects in the schemas `BrowsableSchemas` names *exactly*, and see those schemas' structure; never a row, never a sequence's current value (data, so `BrowseDatabase`'s), and never a schema only `"*"` admits. For a host that keeps rows off the screen and still wants the SQL its own migrations wrote. A read, authorized like `BrowseDatabase` as a write (the write policy asked with this name, always with `TenantId = null`). Off by default, in `All()` |
 | `ViewDatabaseActivity` | See who and what is using the database: other sessions' process ids, roles, client addresses, application names and statements, on the Health page, on Database › Sessions and in the Projections screen's high-water Explain, and run the health advisor's statement checks over `pg_stat_statements`. Without it the counts, ages and states are still shown. A read, authorized like `RunSql` as a write, and always with `TenantId = null`. Off by default, in `All()` |
 | `CompactStreams` | Compact an event stream from Stream detail: Marten's own `CompactStreamAsync<T>` replaces its events up to a version with a snapshot of its aggregate, and the folded events are deleted. Authorized for the scope as selected, tenant included - and, on an event store that is not conjoined, for the database as a whole when the stream also holds an event another tenant's session appended. Off by default, in `All()` — see [`docs/compaction.md`](docs/compaction.md) |
-| `RunLinqQueries` | Run LINQ mode on the Query page: a typed predicate parsed in this process and applied to Marten's own `Query<T>()`. A read, authorized like a write — with the tenant for a conjoined collection, with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
+| `RunLinqQueries` | Run LINQ mode on the Query page: a typed predicate parsed in this process and applied to Marten's own `Query<T>()`, or to the event log through `QueryRawEvents()`. A read, authorized like a write — with the tenant for a conjoined collection (or conjoined events), with `TenantId = null` for one not divided by tenant and for the plan. It also governs What if? beside LINQ mode's and the Documents list's index advice. Off by default, in `All()` — see [`docs/linq-mode.md`](docs/linq-mode.md) |
 
 ```csharp
 options.Capabilities = MartenStudioCapabilities.All();   // everything: the one-line, greppable opt-in
@@ -427,7 +427,8 @@ fails the host with a message that names the option.
 **Overview** — one card per registered store: databases, document types, event types, the PostgreSQL
 version, tenancy, stream identity, event append mode and the schemas in play. A store that will not
 build gets its own error region rather than blanking the page for the ones that do. A Health tile and the
-three worst findings of the selected database sit beside the store cards.
+three worst findings of the selected database sit beside the store cards, and one line, "Connection: TLS verified · pool
+100 · 2 things worth a look", links to Database › Connection.
 
 **Health** — the health advisor, at `/marten/health` (the long form is
 [`docs/health.md`](docs/health.md), and every code, its variants and what its subject names are in
@@ -542,6 +543,29 @@ directly or through a view, never shows a hidden document type or anything built
 of a schema the visitor may not see as `‹withheld›` wherever Postgres prints it. A `vector`, `halfvec` or
 `sparsevec` value is shown collapsed to its type and first components, with Expand and Copy.
 
+**Database › Connection** (1.1; Postgres Studio's page, shared by both studios; the long form is
+[`docs/connection.md`](docs/connection.md)) shows how your application actually connects. A strip of facts gives the
+server and database, the role, whether the connection is encrypted and whether the server's certificate is checked, the
+pool, the Npgsql version loaded and any managed platform or pooler in front. "Worth a look" lists what the health advisor
+found about the connection and what Postgres Studio would change - each with the setting it is about and the fix as a
+connection string and as `NpgsqlDataSourceBuilder` code, ready to copy. Below that, every Npgsql setting with its value in
+effect, where the value came from (the connection string, an environment variable such as `PGUSER`, or Npgsql's default)
+and the default; by default only what differs from the default is shown. It then shows what the server saw of the studio's
+own connection, and - with `ViewDatabaseActivity` - which applications this login has sessions for, how old the oldest is
+and how many are on TLS. A password is only ever shown as set or not set; the connection string itself is never shown,
+logged or exported. Marten Studio adds "How Marten uses this connection": the command timeout Marten applies, whether the
+data source is Marten's own or the application's, the store options that bear on connections and the connections the
+hosted async daemon needs. The page reads and changes nothing. Under "Compare a connection string" you can paste another
+Npgsql connection string - the one in a new configuration, one a colleague sent - to see which of its settings differ from
+the connection in effect and what the page's advice would be if the application switched to it. Passwords are removed
+before anything is read, an option's value is never shown, and the studio keeps, logs, audits and connects to nothing you
+paste; it is read in this page only, so it is not part of the audit log. A password with a `;` in it must be quoted, or
+the keyword that follows it is refused without a name. The advice is the page's own hints, judged against what the server
+reported about the connection in effect; the health advisor's findings run on the application's real data source only.
+What you paste travels to the server over SignalR like every other input in a Blazor Server page, so if your application
+logs `Microsoft.AspNetCore.SignalR` at Debug level that log records it (typed SQL in the console included): keep that
+category at Information or above in production.
+
 **Relationships** — the document types of the store as a graph: one node per registered type with its
 collection colour, its .NET type and a `reltuples` estimate, one arrow per foreign key. What
 `StoreOptions` declares and what `pg_constraint` actually holds are cross-checked, so an arrow is
@@ -578,7 +602,10 @@ with JasperFx's Dynamic LINQ under its allow-list and the studio's own, and appl
 `Query<T>()` on a session pinned to the scope, so tenancy, soft deletes and hierarchies are Marten's. It
 shows the rows, the SQL Marten built, its plan (`EXPLAIN`, never `ANALYZE`) and index advice with the
 `StoreOptions` line that would declare the index. It builds Marten's statement without `ToCommand`, so it
-never creates a table, and it runs in the same read-only transaction as the console.
+never creates a table, and it runs in the same read-only transaction as the console. Since 1.1 it also queries the
+event log: pick *Events* (or "Query these events with LINQ" on the Feed) to filter and order events by sequence, time,
+type, stream, version, tenant and, where the store records them, correlation id, causation id and user name, through
+Marten's own `IReadOnlyEventStore.QueryRawEvents()`; archived events are left out unless asked for.
 
 The console's **Explain** and **Explain analyze** buttons draw a plan as a tree - each node's type and what it reads,
 estimated and actual rows and loops, its share of the plan's time or cost, buffers and I/O - and so does an
@@ -687,10 +714,13 @@ to a visitor past that same gate.
 > Drift tabs say this on screen, and name the index.
 
 **Configuration** — everything your application told Marten, read back out: serializer, tenancy, schema
-names, metadata columns, projections, the databases. Never a connection string and never a credential; a
-database is identified by server, port, name and schema. The studio changes nothing here. A Runtime card
+names, metadata columns, projections, the databases. Never a raw connection string and never a credential (Database ›
+Connection lists a data source's settings one by one, with every password and every value the studio does not know
+withheld); a database is identified by server, port, name and schema. The studio changes nothing here. A Runtime card
 names the Marten, JasperFx, Weasel and Npgsql versions the host runs, the host's environment, and which of
-the features newer Marten releases add this host has.
+the features newer Marten releases add this host has. It also lists the command timeout, sticky connections, Npgsql
+logging, connection tracing, the hi-lo settings, the multi-host session preferences and whether row-level security is
+configured (never its setting); [Database › Connection](docs/connection.md) explains how each bears on the pool.
 
 **Activity** — the last 500 actions taken through the studio in this process, newest first, with user,
 scope, action, target, outcome, capability and message. It is in memory and goes away with the process.
@@ -946,7 +976,8 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 - **What the studio never does:** start a second projection daemon, execute DDL on a read or navigation path
   of its own (the exception is Marten's: the first enumeration of a master-table, sharded or single-server
   tenancy, under *Current limitations*), write document DML of its own, replace your `StoreOptions.Logger`,
-  or show a connection string or a credential anywhere.
+  or show a raw connection string or a credential anywhere: the Connection page lists settings one by one as Npgsql parsed
+  them, with every password and every value the studio does not know withheld (D33).
 
 ## Current limitations
 

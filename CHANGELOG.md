@@ -1,3 +1,159 @@
+# 1.1.0
+
+1.1.0 moves the floors to the latest Marten and Npgsql (Marten 9.57.0, Npgsql 9.0.4), supports PostgreSQL 19, adds
+Database › Connection to both studios with six checks about how an application connects, queries the event log in LINQ
+mode, and makes compaction safe on streams that fold to nothing.
+
+- The floors moved to the latest releases: Marten Studio needs Marten 9.57.0 or later (it was 9.39.0), and Postgres Studio
+  and Postgres Studio Diagnostics need Npgsql 9.0.4 or later (it was 8.0.3), the Npgsql Marten 9.57.0 itself uses. Marten
+  9.57.0 fixes compaction replacing the whole history of a stream that folds to nothing with an empty snapshot (#5797),
+  which Compact stream exposed on every host below it. A Postgres Studio host on Npgsql 8 must move to 9.0.4 or later;
+  see docs/upgrading.md.
+- PostgreSQL 19 is supported, tested on its release candidate (`postgres:19rc1-alpine`) until its general availability
+  image replaces it. The version matrix runs 15 to 19, 19 as a leg that fails a run, and a leg is a preview only when
+  `MatrixVersion` says so.
+- PostgreSQL 14 leaves the test matrix, the month of its end of life (2026-11-12). The studio keeps every read it makes on
+  14 and health check S01 still names its end of life, but no release is tested against it any more, and a later minor
+  release may stop supporting it outright.
+- Database › Connection, a new page in both studios (`/postgres/database/connection`, `/marten/database/connection`),
+  shows how the application connects: the server, database and role, whether the connection is encrypted and whether the
+  server's certificate is checked, the pool, the Npgsql loaded and the platform or pooler in front, as a strip of facts
+  that each link to their detail. It is built on a new connection-insights engine in the diagnostics package (internal, no
+  API change) that reads the active Npgsql settings of a data source - every keyword of the loaded Npgsql, where each
+  value came from (connection string, environment variable for that Npgsql major, or default) and what the server saw of
+  the studio's own connection - with passwords never read out and only set or not set shown. Pooler detection moved into
+  the engine and gained Amazon RDS Proxy endpoints; K04 is unchanged, because an RDS Proxy keeps a session-level advisory
+  lock with its holder.
+- "Worth a look" on the Connection page lists the advisor's findings about the connection (C13 to C18, S05, S11 to S13,
+  K04, K08) and Postgres Studio's own hints, most severe first, each a card with the settings it is about and the change
+  to make as a connection string and as `NpgsqlDataSourceBuilder` code, with a copy button for each.
+- Every Npgsql setting is listed by category with its value in effect, where it came from (the connection string, an
+  environment variable Npgsql falls back to, or its default) and Npgsql's default; "Only what differs from the default" is
+  on by default and, like each group's open state, is remembered per browser. A password is only ever shown as set or not
+  set, and the connection string is never shown.
+- The Connection page also shows what the server saw of the studio's own connection (what a new session of the login
+  starts with), this application's sessions by application name with the oldest connection and the TLS share (behind
+  `ViewDatabaseActivity`), and what no page can see: settings made in code on the data source builder, and the default
+  password file. The pool peak shown in the strip is counted by Application Name on the server, across every process and
+  database using that name.
+- Both Overviews gain one line, "Connection: TLS verified · pool 100 · 2 things worth a look", linking to the page.
+- The Health page's Snapshot download gains a `connection` section (the page's settings, as the visitor's page shows
+  them; `schemaVersion` stays 1). `connection.platform` is the managed platform's name or `null`, `connection.pooler` the
+  poolers detected in front of the server as an array of names or `null`. A snapshot a host asks `IPostgresDiagnostics`
+  for writes `"connection": null`.
+- Database › Connection can compare a connection string: under "Compare a connection string" an admin pastes a candidate
+  Npgsql connection string and sees, beside the settings in effect, which settings differ and what the page's advice would
+  be "if you switched to the pasted settings" (what is new, what is also true today, and what no longer applies).
+  Passwords (`Password`, its aliases and `SSL Password`) are removed on the server before anything is read, an option's
+  value is never shown, a keyword Npgsql rejects is named and its value never repeated (a keyword straight after a
+  password that was not quoted is not named at all, because it may be the rest of the password), and the studio keeps,
+  logs, audits and connects to nothing you paste. It is behind the same `Database` gate as the page and is not audited.
+  Like every Blazor Server page it travels over SignalR, which logs what a circuit receives when the host logs
+  `Microsoft.AspNetCore.SignalR` at Debug: keep that category at Information or above in production (docs/security.md).
+- Marten Studio's Database › Connection gains "How Marten uses this connection": the command timeout Marten applies to its
+  sessions (worked out as Marten does, or, where only a numeric default and a different connection-string value are left
+  to tell apart, both numbers with a sentence that says Marten does not say which applies), whether the data source is
+  Marten's own or the application's (one it handed to Marten directly, found without building any data source), the store
+  options that bear on connections each with its StoreOptions line and its default (sticky connections, session
+  preferences on several hosts, Npgsql logging for the data sources Marten builds, connection tracing, hi-lo block size,
+  update batch size), and the connections the hosted async daemon needs.
+- On Marten Studio the page's hints say what is different for Marten: the multi-host hint says which host Marten picks for
+  its reads and its writes, and that a write preference such as PreferPrimary, Any or PreferStandby can still send a write
+  to a standby, and the command-timeout hint says the timeout that counts is Marten's. The "rows are larger than the read
+  buffer" hint can now fire, from the average event or document size the deeper checks E04 and T09 measured.
+- The Marten Studio Configuration page lists the command timeout (and the one in the connection string), sticky
+  connections, Npgsql logging, connection tracing, the hi-lo block size and retry limit, the multi-host session
+  preferences, the schema apply lock id and whether row-level security is configured (never its setting), and the
+  identity-map and tag-type options of the event store.
+- The Connection page's LIFETIME hint also fires for an Amazon RDS Proxy when `Connection Lifetime` is 0 or above 24
+  hours, because the proxy closes a client connection at 24 hours and Npgsql does not check a connection it hands out of
+  the pool. Its TLS hint behind an Amazon RDS Proxy advises `SSL Mode=VerifyFull` with no `Root Certificate` (the proxy's
+  certificates come from AWS Certificate Manager), never the RDS `global-bundle.pem`.
+- New check C16, "Server or proxy ends idle pooled connections first": Warning when the server's `idle_session_timeout`
+  (as a new session of the login starts with it) or an Amazon RDS Proxy's default 1800 s idle client timeout would end an
+  idle connection before the data source's pool lets go of it, because `Minimum Pool Size` is above zero or
+  `Connection Idle Lifetime` is not shorter than the cut, and no `Keepalive` shorter than the cut covers it. Variants
+  `idle-session-timeout` and `proxy-idle-timeout`. Not judged against a PgBouncer-family pooler, and the
+  `idle-session-timeout` variant is not judged behind an RDS Proxy with `No Reset On Close=true`, where the server's cut
+  reaches the client only on a pinned connection. Not applicable with `Pooling` off. The remedy is `Keepalive`, or an idle
+  lifetime below the cut with no pool floor.
+- New check C17, "Connection pooling switched off": `Pooling=false` with no connection pooler in front of the data
+  source, Warning when the database's sessions last under a second on average (`pg_stat_database`, PostgreSQL 14) and
+  Info otherwise. Not applicable behind a pooler, as Npgsql's compatibility page advises `Pooling=false` there.
+- New check C18, "Several pools to one database in this process": Info when two or more Npgsql pools of the process
+  connect to the data source's host, port, database and login, with their count and the sum of their `Maximum Pool Size`.
+  Only counts are kept; a pool name, host or connection string is never shown. When the data source's own host, database
+  and login cannot be read from its connection string, the check says it cannot compare pools. The remedy is one shared
+  `NpgsqlDataSource` (in Marten Studio, `UseNpgsqlDataSource()`).
+- New check S11, "Server certificate not verified": the connection uses TLS but `SSL Mode` is below `VerifyCA`, so Npgsql
+  accepts any certificate. Variants `prefer` (Allow and Prefer) and `require`; Warning on a detected cloud platform, Info
+  elsewhere. Stands down behind a connection pooler (the server's `pg_stat_ssl` row is then the pooler's own connection,
+  not the application's), for a loopback or socket host, the Cloud SQL Auth Proxy, and a role that cannot see its own
+  `pg_stat_ssl` row. The remedy is `VerifyFull` with the provider's CA bundle where the studio has a source for it; behind
+  an Amazon RDS Proxy it is `VerifyFull` with no `Root Certificate`, because the proxy uses AWS Certificate Manager
+  certificates and not the RDS bundle.
+- New check S12, "A credential is readable from configuration": `persist-security-info` (Warning: the password stays in
+  `NpgsqlDataSource.ConnectionString` and the pool's name), `ssl-password` (Warning: `SSL Password` is never removed from
+  either; the remedy leaves `SSL Certificate`, `SSL Key` and `SSL Password` out of the connection string and loads the
+  certificate in `UseSslClientAuthenticationOptionsCallback`, because Npgsql loads those keywords before the callback
+  runs) and `pgpassword-env` (Info; a password provider the data source was built with is not seen). The evidence says a
+  credential is set, never what it is.
+- New check S13, "Driver settings that copy values into logs or exceptions": Info, in Production only, for
+  `Log Parameters` (which logs only where the data source has a logger factory; `EnableParameterLogging()` turns it on
+  whatever the keyword says), `Include Error Detail` and (Npgsql 10) `Include Failed Batched Command`.
+- LINQ mode now queries the event store: pick "Events" on the Query page's LINQ tab (or "Query these events with LINQ" on
+  the Feed) to filter and order events by sequence, time, type, stream, version, tenant and, where the store records them,
+  correlation id, causation id and user name, through Marten's own IReadOnlyEventStore.QueryRawEvents(). Same
+  RunLinqQueries capability and gate; archived events are left out unless asked for; no table is ever created.
+- Compaction under Marten 9.57: the Compact dialog folds the stream through its version when it opens, and says when the
+  events fold to no aggregate (the stream was deleted by its own aggregate). Marten 9.57 (#5797) leaves such a stream as it
+  is, so the Compact button is disabled with the reason as its title; if the fold cannot be run in advance the dialog says
+  so and still offers the compaction. After a save that moved nothing the service folds again and reports a stream Marten
+  left alone as a success with nothing compacted, with the reason in the message and in the audit entry; an archive that
+  landed in between, or a skipped tail, is still the failure it was. `docs/compaction.md` is rewritten for the 9.57 floor.
+- New health check E09, Stream compacted into an empty snapshot (Events, Marten Studio, Warning, behind "Run deeper
+  checks"): finds streams an older Marten compacted into a `Compacted<T>` whose snapshot is JSON null, by probing the one
+  event at each compacted stream's watermark by key (at most 10,000 streams, never a scan of `mt_events` by type). It sees
+  the streams Marten recorded a compaction watermark for, which it does since 9.32; for older compactions,
+  `docs/health/events.md` gives the release notes' query to run by hand. On a store tenanted per event there is a finding
+  per tenant, shown only through the activity gate to a visitor who may see that tenant, as E03's streams are. The remedy
+  is to restore the streams from a backup or wherever an archiver copied them. `docs/health/codes.md` gains the E09 row
+  and the `tenant` subject kind.
+- Health check S05, "Connection without TLS", is now not applicable when the data source reaches a connection pooler (a
+  Neon pooled endpoint, port 6543, Azure's built-in PgBouncer, port 6432 or an Amazon RDS Proxy): the server's
+  `pg_stat_ssl` row behind a pooler is the pooler's own connection, not the application's. The Connection page's TLS hint
+  judges `SSL Mode` there.
+- Health check K10 (a schema name that breaks every apply after the first) is retired. Its hazard was Weasel's old index
+  readback (weasel#750), which left nothing in a database, and Marten 9.57, the new floor, needs a Weasel that reads such
+  an index back. The check, and the notice it put on the Schema screen's Apply area, are gone; its row stays in
+  docs/health/codes.md, marked retired in 1.1, and the code is never reassigned. A host that accepted K10 keeps starting:
+  the entry is ignored, with one Information line saying it can be removed.
+- Health check K09 (document storage named under a Turkish or Azerbaijani culture) no longer reasons about the Marten
+  version. Every supported Marten writes invariant names, so a healthy table such as `mt_doc_kayıt` is never flagged, even
+  when the Marten version cannot be read under tr-TR, and the finding and its remedy ("with the application stopped") no
+  longer speak of upgrading.
+- Health check T05 no longer holds back an index whose own counters were reset on PostgreSQL 19, which could not happen:
+  any reset there also moves the database's reset time, and the usage guard already covers it. D07's caveat about
+  server-wide gap evidence below Marten 9.47 is gone with that floor.
+- Everything the studio lit up at run time from Marten 9.31 to 9.53 is unconditional: LINQ mode, the storage-parameter and
+  fill-factor remedies and drift, D03's and D02's reading of the high-water agent's liveness stamp, the daemon's own word
+  that a projection is being rebuilt, Skip event and Rewind subscription on a store that numbers events per tenant,
+  compaction of tagged streams, the Schema screen's buttons creating nothing, rebuilds from a projection's start floor,
+  D05's systemic database errors, the high-water advance's storage check and Marten's own preview of an edit. The screens
+  no longer say "needs Marten 9.xx; this host runs ..." about them, and the Configuration page's "Newer than the studio's
+  floor" table is empty until the next Marten release adds to it.
+- On PostgreSQL 19, Storage and Maintenance show a "Stats since" column: when each table's counters were last reset. T01
+  and T05 add nothing for it, because on 19 any reset also restarts the database's own `stats_reset`, so the seven-day
+  usage guard already covers an object reset an hour ago.
+- On PostgreSQL 19, Maintenance lists "Next for autovacuum" - the ten tables with the highest `pg_stat_autovacuum_scores`
+  score, with the parts it is made of - and T07's evidence carries the table's score. Only the tables the studio judges
+  are read.
+- On PostgreSQL 19, T13's evidence adds the multixact members from `pg_get_multixact_stats()` (it shows "not shown" to a
+  role outside `pg_read_all_stats`), and T19's evidence adds `pg_stat_lock`'s fast-path figure. No check, code, threshold
+  or variant changed.
+- Docs: `docs/connection.md` describes the Connection page for administrators, `docs/upgrading.md` has a 1.0 → 1.1
+  section, and `docs/security.md` states the page's promise: never a raw connection string or a credential.
+
 # 1.0.1
 
 1.0.1 handles the six issues opened after 1.0.0. The studio's share of a pool never exceeds the pool itself (#49), the

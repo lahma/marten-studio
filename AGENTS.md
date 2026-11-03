@@ -54,6 +54,7 @@ document for your area before writing code in it. All documents are in `docs/mai
 | Authorization, capabilities, the audit log | [authorization.md](docs/maintainers/authorization.md) (D4, D5), [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27) (the browser's gate, "Reach, not scope"), [health-engine.md](docs/maintainers/health-engine.md) (D29's gates), [architecture.md](docs/maintainers/architecture.md#d30) (`PostgresStudioResource`) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5, 14 and 15 |
 | UI, CSS, JS, Blazor components and circuits | [ui.md](docs/maintainers/ui.md) (D22-D26), [architecture.md](docs/maintainers/architecture.md) (D10, D11, D30's *Words* and assets) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 3, 6 and 15 (interop loss); D9 and D14 are whole above |
 | The plan analyzer, Explain, plan insights | [plan-analyzer.md](docs/maintainers/plan-analyzer.md) (D32), [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md) (D13, D27's masking) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5 and 7 |
+| The Connection page, the connection-settings checks (C16-C18, S11-S13), paste-to-compare | [architecture.md](docs/maintainers/architecture.md#d33) (D33), [health-engine.md](docs/maintainers/health-engine.md) (the connection-settings checks and the page's gates) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 5 and 16 |
 | The PostgresStudio / MartenStudio split, routes, assets, the data seam, samples | [architecture.md](docs/maintainers/architecture.md) (D1, D2, D11, D12, D17, D18, D20, D30) and [hard-rules.md](docs/maintainers/hard-rules.md) rule 16 (D1, D15 and D20 are whole above) |
 | Build, packages, versions, CI, release, agent routing | [build-and-release.md](docs/maintainers/build-and-release.md) (D3, D15, D21) and [hard-rules.md](docs/maintainers/hard-rules.md) rules 1, 2, 8, 9 and 16 (D1, D15 and D20 are whole above) |
 | Tests | [testing.md](docs/maintainers/testing.md) (D16, D19) |
@@ -149,7 +150,9 @@ Each rule's full text, with its lists of events, tests and history, is in
     migrations* when a document type has a numeric or HiLo id; the rule stands at every version. **Nor does a read path
     run a Marten LINQ terminal**, `ToCommand`, `ExplainAsync`, `ToPreviewCommand`, `LoadAsync`, `LoadManyAsync` or a
     `session.Events` read, nor (from 9.52) `FetchProjectionFloorAsync`, its setters or the high-water advance: each
-    ensures storage, which creates or migrates it. Reads use the studio's own SQL (`StorageEnsuringCallTests`), and
+    ensures storage, which creates or migrates it. Reads use the studio's own SQL (`StorageEnsuringCallTests`; LINQ
+    mode's composition builds its statement without ensuring storage, and from 1.1 that covers `QueryRawEvents()`, never
+    passed a tenant), and
     schema names, declared indexes and what Marten owns come from `SchemaDeclarationReader`, without a connection.
     Enumerating a dynamic tenancy's databases is not read-only either (`TenancyEnumerationCallTests`). Time travel and
     the stepper fold only through `IAggregateFolder.FoldAsync`. **`AutoCreate.CreateOrUpdate` is not additive**; no
@@ -180,7 +183,7 @@ Each rule's full text, with its lists of events, tests and history, is in
     of a studio, below that assembly's own compile-time root (`/postgres`, `/marten`), and the route table refuses a
     route two pages claim. Full text: hard rule 16.
 
-## Design decisions (D1–D32)
+## Design decisions (D1–D33)
 
 Every one of these was taken deliberately. Reversing one is allowed; doing it without reading the rationale is not. D1,
 D8, D9, D14, D15 and D20 are short enough to stand whole here; every other entry is the decision itself, with a pointer
@@ -336,11 +339,13 @@ tenant's, never on a sharded tenancy; the SQL console, the Mode A subquery lift 
 `TenantId = null`. Full text, with *D27 in PostgresStudio*:
 [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d27).
 
-**D28 — LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and lit up at run
-time from Marten 9.48.** It sits behind `RunLinqQueries` (off by default, authorized like a write), parsed by JasperFx's
+**D28 — LINQ mode is its own capability, parsed by JasperFx's Dynamic LINQ, built without `ToCommand`, and unconditional
+since the 9.57 floor.** It sits behind `RunLinqQueries` (off by default, authorized like a write), parsed by JasperFx's
 `DynamicQuery` under `DynamicQueryPolicy` behind a lexical screen and the studio's own walk of the parsed tree, and
-built from `BuildLinqParser()` and `BuildDiagnosticCommand`, never `ToCommand`. From Marten 9.48 it is a run-time
-light-up behind the `DynamicLinqQuery` probe, not a floor. `docs/linq-mode.md` is the threat model. Full text:
+built from `BuildLinqParser()` and `BuildDiagnosticCommand`, never `ToCommand`. It was a run-time light-up from Marten
+9.48 until the 1.1 floor of 9.57 made it unconditional; the adapter is reached by reflection and still fails closed on a
+JasperFx shape it does not recognise. Since 1.1 it also targets the event log through `QueryRawEvents()`, never passed a
+tenant. `docs/linq-mode.md` is the threat model. Full text:
 [marten.md](docs/maintainers/marten.md#d28).
 
 **D29 — The health advisor: one shared sweep, three gates, and two deliberate exceptions.** A sweep is the database's,
@@ -353,7 +358,9 @@ counted, never described. The two deliberate exceptions: T02, T22 and T23 (and t
 health read and console statement stays under `SqlConsoleRole`; and the opt-in ASP.NET Core health check runs with no
 visitor and reports only codes, outcomes, severities and counts, never a name, a tenant, a statement or anything
 Postgres said. An accepted check (`AcceptedChecks`, #35) still runs and is shown on its check's row, out of every count
-and state; acceptance changes no gate. Full text: [health-engine.md](docs/maintainers/health-engine.md#d29).
+and state; acceptance changes no gate. **Since 1.1 Database › Connection (D33) is the `Database` gate**, as is its
+paste-to-compare; only its sessions part and the pool peak counted by application name are `Activity`, recorded
+separately, and the Overview's line asks for neither. Full text: [health-engine.md](docs/maintainers/health-engine.md#d29).
 
 **D30 — PostgresStudio: the core is a package of its own, and Marten Studio is built on it.** PostgresStudio is
 everything about a PostgreSQL database rather than a Marten store, Marten-free (hard rule 16); Marten Studio is built on
@@ -393,6 +400,15 @@ Studio's own insights (1.0, P26 to P28) come through an internal seam, `IPlanIns
 and MartenStudio registers: pure evaluators over (plan, facts, the tables the store declares from `StoreOptions`, never a
 storage-ensuring call), for visible document types only, whose remedies are `StoreOptions` lines. Full text:
 [plan-analyzer.md](docs/maintainers/plan-analyzer.md).
+
+**D33 — The Connection page shows a data source's settings one by one, never its connection string.** A catalogue of the
+loaded Npgsql's keywords decides what is shown. A `Secret` keyword shows only "set" or "not set"; an unknown keyword's
+value is withheld; `PG*` environment values are shown on the same terms as their keyword, except `PGPASSWORD`; an
+`Options` value is shown only for real server settings; paths are shown and files are never read. The raw string and the
+meter's pool names never leave the reader, so no page, contributor, snapshot, log or audit entry can hold one, and the
+sentinel tests hold all of this. The gate is D29's `Database` (the sessions part is `Activity`), and paste-to-compare
+removes every secret before anything is read and keeps, logs and audits nothing. Full text:
+[architecture.md](docs/maintainers/architecture.md#d33).
 
 ## Package budget
 

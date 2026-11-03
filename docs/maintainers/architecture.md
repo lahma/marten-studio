@@ -1,6 +1,6 @@
 # Architecture
 
-This is the full text of D2, D10 to D12, D17, D18, D30 and D31: the two packages, routing and assets, the data seam, the samples and the diagnostics API, moved word for word from AGENTS.md on 2026-10-31. AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
+This is the full text of D2, D10 to D12, D17, D18, D30, D31 and D33: the two packages, routing and assets, the data seam, the samples, the diagnostics API and the Connection page's promise, moved word for word from AGENTS.md on 2026-10-31 (D33 written for 1.1). AGENTS.md states each rule in brief; this document holds the detail and wins where they differ.
 
 ## D2
 
@@ -183,3 +183,43 @@ and a cache hit waits behind nothing. Listing never enumerates a tenancy that bu
 ones (D27, hard rule 14). A host's database source must list without creating anything, and its names (D30's identities)
 survive a database moving server. Per-database state is kept for at most 64 databases, least recently used forgotten
 first (`HealthDatabaseBound`).
+
+## D33
+
+**D33 — The Connection page shows a data source's settings one by one, never its connection string.** Database ›
+Connection (1.1, both studios) answers "how does this application actually connect, and what would I change". The
+question is answered from a connection string, and a connection string is where passwords live, so the page's design is
+that the string never reaches it.
+
+*The catalogue decides what is shown.* `NpgsqlSettingsCatalog` lists the keywords of the Npgsql that is loaded (read from
+`NpgsqlConnectionStringBuilder`, so a newer Npgsql's keywords appear without a release of ours), each with a category, a
+type, Npgsql's default and an exposure (`NpgsqlSettingExposure`: shown as it is, a `Path`, `Options`, or `Secret`). `NpgsqlSettingsReader` parses the data source's
+string with Npgsql's own builder, walks the catalogue, and emits one redacted record per keyword: its value in effect, where
+it came from (the connection string, the environment variable that Npgsql major falls back to, or its default; explicit
+versus default is `ShouldSerialize` on the canonical keyword, never `ContainsKey`) and the default.
+
+*What is withheld.*
+- A `Secret` keyword (`Password`, `SSL Password`, and whatever the catalogue marks) shows only "set" or "not set", resolved
+  through Npgsql's own canonicalisation, never an alias list of ours.
+- A keyword the catalogue does not know has its value withheld: the page says it is present and not what it holds.
+- `PG*` environment values are shown on the same terms as their keyword (`PGUSER` as `Username`), except `PGPASSWORD`,
+  which is only ever "set".
+- An `Options` value is shown only when it sets real server settings (`-c name=value` for a name PostgreSQL knows); any other
+  text is withheld, since it is free text the studio cannot judge.
+- Paths (`Root Certificate`, `SSL Certificate`, `Passfile`) are shown, and the studio never reads a file: it names the path
+  and says nothing of what is in it.
+- The raw string, and the meter's pool names (which Npgsql builds from the connection string), never leave the reader.
+  C18 counts pools and keeps only counts.
+
+*Held by tests, not by care.* `ConnectionSentinelTests`, `ConnectionChecksSentinelTests`,
+`ConnectionSnapshotAndSentinelTests` and the Marten section's sentinel test in `MartenConnectionInsightTests` run a data
+source whose every secret, path, host and option is a sentinel string through the reader, the page builder, the checks, the
+contributors, the snapshot, the log and the audit, and fail if a sentinel appears anywhere. A new keyword, row or card that could carry a value is a change to the catalogue and the sentinel set together.
+
+*The gate.* `Database` (D29): the source policy asked with `TenantId = null`, before anything is read. The sessions part
+(this application's sessions by application name, and the pool peak counted by application name) is `Activity`
+(`ViewDatabaseActivity`). The page reads and changes nothing and is not audited; paste-to-compare is the same gate, removes
+every secret before the text is read, and keeps, logs, audits and connects to nothing (D29, health-engine.md).
+
+*What it cannot see* is said on the page rather than guessed: settings made in code on the `NpgsqlDataSourceBuilder`, a
+`NpgsqlDataSource` built by a host's own factory, and the default password file.

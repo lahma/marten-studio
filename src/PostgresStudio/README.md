@@ -210,11 +210,12 @@ schema only `"*"` admits `BrowseDatabase`, each with the write policy. A name in
 
 ## Screens
 
-**Overview** - the server, the health glance, the largest tables, the connections by state and the latest studio
-activity. **Query** - the SQL console, inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK` under
+**Overview** - the server, the health glance, the largest tables, the connections by state, the latest studio
+activity and one line on the connection ("Connection: TLS verified · pool 100 · 2 things worth a look"). **Query** - the SQL console, inside `BEGIN; SET TRANSACTION READ ONLY; …; ROLLBACK` under
 `QueryTimeout`, a 3-second lock timeout and `SqlConsoleRole`. **Database** - **Tables** (the browser: kind tabs, object
 detail, a Rows tab with keyset paging and an index verdict for a filter), **Sessions** (sessions, locks and prepared
-transactions, sessions per application) and **Relationships** (the foreign keys, drawn on the server). **Operations** -
+transactions, sessions per application), **Connection** (how the application connects: its Npgsql settings, the TLS and
+pool facts, and what to change) and **Relationships** (the foreign keys, drawn on the server). **Operations** -
 **Health** (the advisor: findings by area, each with its evidence, how sure it is and a remedy, which for a table is
 migration SQL "for your own migrations - the studio never runs this"), **Statements** (where the database's time goes,
 statement by statement, grouped by verb and table), **Maintenance** (autovacuum's triggers per table, what runs now, the
@@ -222,6 +223,27 @@ workers, the freeze forecast and the vacuum horizon), **Storage** (size, growth 
 catalog's page counts) and **Replication** (slots, standbys, the archiver, WAL, checkpoints and I/O). **System** -
 **Server** (version, platform, what the reading role can see, settings, extensions and the security posture) and
 **Activity** (the last 500 actions taken through the studio).
+
+**Database › Connection** (1.1; the long form is
+[`docs/connection.md`](https://github.com/lahma/marten-studio/blob/main/docs/connection.md)) shows how your application
+actually connects. A strip of facts gives the server and database, the role, whether the connection is encrypted and
+whether the server's certificate is checked, the pool, the Npgsql version loaded and any managed platform or pooler in
+front. "Worth a look" lists what the health advisor found about the connection and what Postgres Studio would change -
+each with the setting it is about and the fix as a connection string and as `NpgsqlDataSourceBuilder` code, ready to
+copy. Below that, every Npgsql setting with its value in effect, where the value came from (the connection string, an
+environment variable such as `PGUSER`, or Npgsql's default) and the default; by default only what differs from the default
+is shown. It then shows what the server saw of the studio's own connection, and - with `ViewDatabaseActivity` - which
+applications this login has sessions for, how old the oldest is and how many are on TLS. A password is only ever shown as
+set or not set; the connection string itself is never shown, logged or exported. The page reads and changes nothing.
+Under "Compare a connection string" you can paste another Npgsql connection string - the one in a new configuration, one a
+colleague sent - to see which of its settings differ from the connection in effect and what the page's advice would be if
+the application switched to it. Passwords are removed before anything is read, an option's value is never shown, and the
+studio keeps, logs, audits and connects to nothing you paste; it is read in this page only, so it is not part of the audit
+log. A password with a `;` in it must be quoted, or the keyword that follows it is refused without a name. The advice is
+the page's own hints, judged against what the server reported about the connection in effect; the health advisor's
+findings run on the application's real data source only. What you paste travels to the server over SignalR like every
+other input in a Blazor Server page, so if your application logs `Microsoft.AspNetCore.SignalR` at Debug level that log
+records it (typed SQL in the console included): keep that category at Information or above in production.
 
 The health advisor runs only while a Health page or the Overview is open, or the health check is probed, at most once
 per `HealthInterval` per database, in a read-only transaction, without DDL and without a lock beyond what a read takes.
