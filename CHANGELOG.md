@@ -136,9 +136,8 @@ mode, and makes compaction safe on streams that fold to nothing.
 - LINQ over events: the "Not offered here, and why" list is open by default, with the reason for each member the store
   withholds, and Ctrl+Enter runs the query from the Order-by box as well as the predicate box. The list wraps its long
   member names, so it no longer scrolls the page sideways on a phone. The Query page's address follows the Run, not each
-  box's change: it is written once per Run with both boxes in it, never pushed twice for the same query, and a push waits
-  for the previous one's page to land instead of aborting its request (net::ERR_ABORTED); an edit that is not run is
-  kept as a draft when you switch mode and come back.
+  box's change: it is written once per Run with both boxes in it and never pushed twice for the same query; an edit that
+  is not run is kept as a draft when you switch mode and come back.
 - Compaction under Marten 9.57: the Compact dialog folds the stream through its version when it opens, and says when the
   events fold to no aggregate (the stream was deleted by its own aggregate). Marten 9.57 (JasperFx/marten#5797) leaves
   such a stream as it is, so the Compact button is disabled with the reason as its title; if the fold cannot be run in
