@@ -54,4 +54,12 @@ internal class DiagnosticsDescriptor
     /// package that runs them.
     /// </summary>
     public string CheckCodeOwner { get; init; } = "of this studio";
+
+    /// <summary>
+    /// The check codes this studio once ran and no longer does, each with the release that retired it (<c>K10</c> to
+    /// <c>1.1</c>): plain strings, compared ignoring case. An <c>AcceptedChecks</c> entry for one is accepted and ignored, with
+    /// one Information line saying so, so that a host that accepted a check never fails to start because a release retired it.
+    /// A code that is neither registered nor listed here is still refused. Empty unless the studio retired a check of its own.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RetiredCheckCodes { get; init; } = new Dictionary<string, string>();
 }

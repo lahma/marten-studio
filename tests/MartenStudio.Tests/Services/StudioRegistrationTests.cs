@@ -134,7 +134,7 @@ public class StudioRegistrationTests
         // 1.0 (#44): MaxStudioConnections and StudioApplicationName, two more of the shared bounds.
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
-        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(AcceptedChecksValidator<MartenStudioOptions>)),
+        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Factory, typeof(IValidateOptions<MartenStudioOptions>)),
         (typeof(MartenStoreRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenStoreRegistry)),
         (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenStudioSourceProvider)),
         (typeof(IStudioLinks), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioLinks)),
@@ -243,6 +243,10 @@ public class StudioRegistrationTests
         [typeof(IStudioRuntime)] = typeof(MartenStudioRuntime),
         [typeof(ISqlConsoleService)] = typeof(SqlConsoleService),
         [typeof(HealthMuteKeys)] = typeof(HealthMuteKeys),
+
+        // 1.1 (K10's retirement): the accepted-checks validator takes the container's logger factory, to say once that an entry
+        // names a retired check. One of several validators of the options, so it is found among them.
+        [typeof(IValidateOptions<MartenStudioOptions>)] = typeof(AcceptedChecksValidator<MartenStudioOptions>),
     };
 
     /// <summary>
@@ -268,7 +272,8 @@ public class StudioRegistrationTests
 
         foreach ((Type service, Type made) in FactoryResults)
         {
-            circuit.ServiceProvider.GetRequiredService(service).Should().BeOfType(made, service.Name + "'s factory");
+            circuit.ServiceProvider.GetServices(service).Select(static x => x!.GetType())
+                .Should().Contain(made, service.Name + "'s factory");
         }
 
         circuit.ServiceProvider.GetRequiredService<ISqlConsoleService>()

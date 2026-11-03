@@ -305,4 +305,6 @@ dotless table inside its body. Where both tables exist, merge the rows first.
 needs quoting: the old index readback never saw such a schema's indexes (weasel#750), so every schema apply after the first
 failed with `42P07`. It left nothing in a database, and Marten 9.57, the floor from 1.1, needs a Weasel.Postgresql that
 reads such an index back (9.48.0 or later), so the hazard cannot arise. The row stays in [codes.md](codes.md), and the code
-is never reassigned. The Schema screen's Apply area no longer shows the notice either.
+is never reassigned. The Schema screen's Apply area no longer shows the notice either. An `AcceptedChecks` entry for K10 is
+accepted and ignored, so a host that accepted it keeps starting: one `Information` line at startup (event 9490) says the
+entry has no effect and can be removed, and the Configuration page does not list it.

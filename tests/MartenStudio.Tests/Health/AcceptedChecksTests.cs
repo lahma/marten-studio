@@ -4,6 +4,7 @@ using MartenStudio.Components.Pages;
 using MartenStudio.Services.Configuration;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Configuration;
+using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -83,6 +84,67 @@ public class AcceptedChecksTests
 
         refusal.Failures.Should().ContainSingle().Which.Should()
             .Be("MartenStudioOptions.AcceptedChecks key '" + key + "' is not a health check code of this studio");
+    }
+
+    [Theory]
+    [InlineData("K10")]
+    [InlineData("k10")]
+    public void An_entry_for_a_retired_check_is_accepted_and_ignored_so_a_host_that_accepted_it_still_starts(string key)
+    {
+        MartenStudioOptions options = Resolve(x =>
+        {
+            x.AcceptedChecks[key] = "the schema is named with a hyphen on purpose";
+            x.AcceptedChecks["K05"] = "managed roles";
+        });
+
+        options.AcceptedChecks.Should().HaveCount(2, "the entry is kept, and nothing reads it");
+    }
+
+    [Fact]
+    public void A_retired_entry_is_logged_once_per_code_at_Information_with_event_9490_however_often_the_options_are_validated()
+    {
+        CapturingLoggerProvider captured = new();
+        ServiceCollection services = new();
+        services.AddSingleton(captured.CreateFactory());
+        services.AddMartenStudio(static x =>
+        {
+            x.AcceptedChecks["K10"] = "an old reason";
+            x.AcceptedChecks["k10"] = "the same code again";
+        });
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+        _ = provider.GetRequiredService<IOptionsMonitor<MartenStudioOptions>>().CurrentValue;
+        using (IServiceScope scope = provider.CreateScope())
+        {
+            _ = scope.ServiceProvider.GetRequiredService<IOptionsSnapshot<MartenStudioOptions>>().Value;
+        }
+
+        CapturedLogEntry line = captured.Entries.Where(static x => x.EventId.Id == 9490).Should().ContainSingle().Subject;
+        line.Level.Should().Be(Microsoft.Extensions.Logging.LogLevel.Information);
+        line.Message.Should().Be("AcceptedChecks lists K10, which was retired in 1.1 and no longer runs; the entry has no effect and can be removed.");
+    }
+
+    [Fact]
+    public void No_retired_entry_means_no_9490_line_and_an_unknown_code_is_still_refused_beside_one()
+    {
+        CapturingLoggerProvider captured = new();
+        ServiceCollection services = new();
+        services.AddSingleton(captured.CreateFactory());
+        services.AddMartenStudio(static x => x.AcceptedChecks["K05"] = "managed roles");
+        using ServiceProvider provider = services.BuildServiceProvider();
+        _ = provider.GetRequiredService<IOptions<MartenStudioOptions>>().Value;
+
+        captured.Entries.Should().NotContain(static x => x.EventId.Id == 9490);
+
+        Action both = () => Resolve(static x =>
+        {
+            x.AcceptedChecks["K10"] = "retired";
+            x.AcceptedChecks["X99"] = "a typo";
+        });
+
+        both.Should().Throw<OptionsValidationException>().Which.Failures.Should().ContainSingle()
+            .Which.Should().Be("MartenStudioOptions.AcceptedChecks key 'X99' is not a health check code of this studio");
     }
 
     [Theory]
@@ -338,6 +400,19 @@ public class AcceptedChecksTests
         rows.Select(static r => r[0]).Should().Equal("D01", "K05");
         rows.Single(static r => r[0] == "K05")[2].Should().Be("<i>managed</i>");
         page.FindAll(".ms-accepted-checks i").Should().BeEmpty("the reason is encoded, never markup");
+    }
+
+    [Fact]
+    public void The_configuration_page_does_not_list_a_retired_entry_as_a_check_that_runs()
+    {
+        using StudioComponentContext context = NewConfigurationContext();
+        context.Options.AcceptedChecks["K10"] = "an old reason";
+        context.Options.AcceptedChecks["K05"] = "managed roles";
+
+        var page = context.Render<ConfigurationPage>();
+
+        page.WaitForAssertion(() => page.FindAll(".ms-accepted-checks").Should().ContainSingle());
+        page.FindAll(".ms-accepted-checks-table tbody tr").Select(static r => r.QuerySelector("td")!.TextContent.Trim()).Should().Equal("K05");
     }
 
     [Fact]

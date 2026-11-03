@@ -384,6 +384,7 @@ public class PostgresStudioOptionsTests
     [InlineData("  ")]
     [InlineData("D01")]
     [InlineData("K01")]
+    [InlineData("K10")]
     public void An_accepted_key_that_is_not_a_check_of_this_studio_is_refused_naming_the_key_and_nothing_else(string key)
     {
         // D01 and K01 are Marten Studio's checks: in Postgres Studio's registry they do not exist.

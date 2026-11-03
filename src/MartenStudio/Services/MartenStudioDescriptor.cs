@@ -62,6 +62,7 @@ internal static class MartenStudioDescriptor
         OverviewComponent = typeof(Components.Pages.Overview),
         QueryComponent = typeof(Components.Pages.Query.Query),
         SourceQueryParameter = SourceQueryParameter,
+        RetiredCheckCodes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["K10"] = "1.1" },
         SourceNoun = "Marten store",
         SourceLabel = "Store",
         ExposedContent = "every document, event stream and schema in this process",

@@ -1,7 +1,7 @@
 # PostgreSQL versions
 
 Marten Studio and Postgres Studio are **tested on PostgreSQL 15 to 19**, and every release is tested on each of them -
-19 on its release candidate until its general availability. **14 works but is past its end of life and untested from
+19 on its release candidate until its general availability. **14 works but reaches its end of life on 2026-11-12 and is untested from
 1.1:** the studio keeps every read it makes on 14, and warns about its end of life, but no release is run against it any
 more. The studio reads every server it is pointed at; the floor is what it promises, not what it refuses.
 

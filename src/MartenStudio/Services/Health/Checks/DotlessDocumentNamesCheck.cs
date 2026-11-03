@@ -293,7 +293,7 @@ internal sealed class DotlessDocumentNamesCheck : HealthCheck<DotlessDocumentNam
             Evidence = evidence,
             Caveat =
                 "Read from the catalog: tables and functions of the store's own schemas named mt_, with a dotless ı (U+0131) in the name. "
-                + "A name that a document type this process knows declares today, in a Marten that writes that name itself, is left out "
+                + "A name that a document type this process knows declares today is left out "
                 + "(a type called Kayıt keeps its ı at every version). For a name no known type claims, the studio judges the letters "
                 + "alone: rename only where the ı came from a capital I. "
                 + "A function the studio cannot attribute to a document type is listed on its own. Only document tables and the "

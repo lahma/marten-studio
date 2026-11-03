@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 using PostgresStudio.Services.Database;
@@ -120,7 +121,7 @@ internal static partial class DiagnosticsOptionsValidation
         ArgumentNullException.ThrowIfNull(accepted);
 
         builder.Services.AddSingleton<IValidateOptions<TOptions>>(
-            new AcceptedChecksValidator<TOptions>(builder.Name, optionsType, descriptor, accepted));
+            provider => new AcceptedChecksValidator<TOptions>(builder.Name, optionsType, descriptor, accepted, provider.GetService<ILoggerFactory>()));
 
         return builder;
     }
@@ -140,15 +141,20 @@ internal static partial class DiagnosticsOptionsValidation
 /// <summary>
 /// Validates <c>AcceptedChecks</c> (issue #35) against the studio's own check codes: an unknown key, a blank reason and a
 /// reason over <see cref="DiagnosticsOptionsValidation.MaxAcceptedReasonLength" /> are each a failure naming the key and nothing
-/// else. A type of its own, not a lambda, because the message names the offending key.
+/// else. A type of its own, not a lambda, because the message names the offending key. A key naming a code the studio retired
+/// (<see cref="DiagnosticsDescriptor.RetiredCheckCodes" />) is neither: it is accepted and ignored, and logged once per code at
+/// Information, so a release that retires a check never stops a host that accepted it from starting.
 /// </summary>
 internal sealed class AcceptedChecksValidator<TOptions>(
     string name,
     string optionsType,
     DiagnosticsDescriptor descriptor,
-    Func<TOptions, IEnumerable<KeyValuePair<string, string>>> accepted) : IValidateOptions<TOptions>
+    Func<TOptions, IEnumerable<KeyValuePair<string, string>>> accepted,
+    ILoggerFactory? loggerFactory = null) : IValidateOptions<TOptions>
     where TOptions : class
 {
+    private readonly HashSet<string> reported = new(StringComparer.OrdinalIgnoreCase);
+
     public ValidateOptionsResult Validate(string? optionsName, TOptions options)
     {
         if (optionsName is not null && !string.Equals(optionsName, name, StringComparison.Ordinal))
@@ -163,7 +169,11 @@ internal sealed class AcceptedChecksValidator<TOptions>(
         {
             codes ??= StudioCheckCodes.Of(descriptor);
 
-            if (!codes.Contains(key))
+            if (!codes.Contains(key) && Retired(key) is { } retired)
+            {
+                ReportRetired(retired.Key, retired.Value);
+            }
+            else if (!codes.Contains(key))
             {
                 failures.Add(optionsType + ".AcceptedChecks key '" + key + "' is not a health check code " + descriptor.CheckCodeOwner);
             }
@@ -178,5 +188,35 @@ internal sealed class AcceptedChecksValidator<TOptions>(
         }
 
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+    }
+
+    private KeyValuePair<string, string>? Retired(string key)
+    {
+        foreach (KeyValuePair<string, string> retired in descriptor.RetiredCheckCodes)
+        {
+            if (string.Equals(retired.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return retired;
+            }
+        }
+
+        return null;
+    }
+
+    // Options are validated again wherever the container resolves a snapshot, so the memory is the validator's, which is the
+    // registration's: once per code for the life of the container, not once per validation.
+    private void ReportRetired(string code, string release)
+    {
+        bool first;
+
+        lock (reported)
+        {
+            first = reported.Add(code);
+        }
+
+        if (first && loggerFactory is not null)
+        {
+            loggerFactory.CreateLogger("PostgresStudio.Services.Settings.AcceptedChecks").AcceptedCheckRetired(code, release);
+        }
     }
 }

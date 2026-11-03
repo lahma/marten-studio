@@ -67,8 +67,8 @@ public class UpgradeHazardLiveTests(PostgresFixture postgres)
     [HealthQuiet("K09")]
     public async Task A_document_type_with_a_literal_dotless_i_in_its_name_is_healthy_and_never_a_K09_finding()
     {
-        // Marten lowers with ToLowerInvariant from 9.55, which leaves the letter alone, and the test process lowers I to i, so
-        // before 9.55 too: the table is mt_doc_healthkayıt at every Marten, and renaming it would lose its documents.
+        // Marten lowers with ToLowerInvariant, which leaves a literal ı alone: the table is mt_doc_healthkayıt, written by Marten
+        // itself, and renaming it would lose its documents.
         await using HealthLiveHost host = await HostAsync(postgres, "health_k09_kayit", new ManualClock(Start), static o => o.Schema.For<HealthKayıt>());
         await ApplyAsync(host.Store);
 

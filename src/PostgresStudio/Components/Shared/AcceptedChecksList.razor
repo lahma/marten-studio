@@ -9,7 +9,7 @@
     Blazor encodes it - and nothing a visitor shapes. Absent when the host accepted nothing.
 *@
 
-@if (Settings.AcceptedChecks.Count > 0)
+@if (Rows().Any())
 {
     <section class="ms-section ms-accepted-checks" aria-label="Accepted checks">
         <h3 class="ms-config-group-title">Accepted checks</h3>
@@ -45,8 +45,13 @@
 @code {
     private IEnumerable<(string Code, string Reason)> Rows() =>
         Settings.AcceptedChecks
+            .Where(x => !IsRetired(x.Key))
             .Select(static x => (Code: x.Key.ToUpperInvariant(), Reason: x.Value))
             .OrderBy(static x => x.Code, StringComparer.Ordinal);
+
+    /// <summary>A retired check's entry is ignored by the studio (startup accepts it): it is not listed as a check that runs.</summary>
+    private bool IsRetired(string checkCode) => Services.GetService<StudioDescriptor>()?.RetiredCheckCodes
+        .Keys.Any(x => string.Equals(x, checkCode, StringComparison.OrdinalIgnoreCase)) == true;
 
     /// <summary>
     /// The check's title as this studio words it, or nothing for a code the registry does not hold. The registry is asked for

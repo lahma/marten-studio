@@ -83,7 +83,9 @@ builder.Services.AddMartenStudio(options =>   // or AddPostgresStudio
 
 The key is a check's code (compared ignoring case) and the value is the reason, in your own words: up to 500 characters,
 never empty. Startup refuses a key that is not a check of that studio - a typo can never silently accept nothing, and a
-Marten check's code is unknown to Postgres Studio - and a reason that is blank or too long.
+Marten check's code is unknown to Postgres Studio - and a reason that is blank or too long. The one exception is a code a
+release retired (K10, retired in 1.1): an entry for it is accepted and ignored, so a host never fails to start because of an
+upgrade, and one `Information` line (event 9490) says the entry can be removed.
 
 An accepted check **still runs**, and its finding is still **shown**, but it counts for nothing:
 

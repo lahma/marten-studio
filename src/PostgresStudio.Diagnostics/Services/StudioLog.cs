@@ -44,7 +44,8 @@ namespace PostgresStudio.Services;
 /// in a circuit (Information, the audit line).</item>
 /// <item>9460-9489 are held for plan insights, hypothetical indexes and the Partitions page, which were cut to 0.6, and
 /// are unused.</item>
-/// <item>9490-9499 (the index and browser lints) are reserved and unused: those checks log nothing of their own.</item>
+/// <item>9490 is options validation's: an <c>AcceptedChecks</c> entry for a retired check, accepted and ignored, once per code
+/// at Information. 9491-9499 (the index and browser lints) are reserved and unused: those checks log nothing of their own.</item>
 /// <item>9500 and 9501 are Aurora's (9500-9509): the host's capacity source that threw, and Aurora's own reads that
 /// failed, both throttled.</item>
 /// <item>9510-9519 (MartenStudio's whole-database table set) are reserved and unused.</item>
