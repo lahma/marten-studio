@@ -139,7 +139,7 @@ public sealed class PastedConnectionStringTests
     [Fact]
     public void A_keyword_npgsql_does_not_know_is_refused_by_name_and_its_value_is_never_said()
     {
-        PastedConnection read = Read("Host=db.example;Password=" + Sentinel + ";Bogus Keyword=" + Sentinel + ";Database=app");
+        PastedConnection read = Read("Host=db.example;Password='" + Sentinel + "';Bogus Keyword=" + Sentinel + ";Database=app");
 
         read.Outcome.Should().Be(PastedConnectionOutcome.Rejected);
         read.Settings.Should().BeNull("a refused string is not read at all");
@@ -158,6 +158,77 @@ public sealed class PastedConnectionStringTests
         read.Rejected.Should().OnlyContain(static x => x.Known);
         ConnectionCompareView.Sentence(read.Rejected[0]).Should().Be("Npgsql did not accept the value given for \"Port\".");
         Everything(read).Should().NotContain(Sentinel);
+    }
+
+    [Fact]
+    public void A_keyword_after_an_unquoted_password_is_refused_without_its_name_because_it_may_be_the_rest_of_the_password()
+    {
+        // Npgsql ends an unquoted password at the first ';': "ghi" is the password's tail, and "def..." the start of it.
+        PastedConnection read = Read("Host=x;Password=abc;def" + Sentinel + "=ghi");
+
+        read.Outcome.Should().Be(PastedConnectionOutcome.Rejected);
+        read.Rejected.Should().ContainSingle().Which.Should().Be(new PastedRejection(string.Empty, Known: false, AfterPassword: true));
+        ConnectionCompareView.Sentence(read.Rejected[0]).Should().Be("A keyword after a password could not be read: a password with ';' in it must be quoted.");
+        Everything(read).Should().NotContain(Sentinel).And.NotContain("abc").And.NotContain("ghi");
+    }
+
+    [Fact]
+    public void Every_segment_refused_after_an_unquoted_password_is_one_unnamed_refusal_and_the_alias_counts()
+    {
+        PastedConnection read = Read("Host=x;Pwd=abc;one" + Sentinel + "=1;two" + Sentinel + "=2");
+
+        read.Outcome.Should().Be(PastedConnectionOutcome.Rejected);
+        read.Rejected.Should().ContainSingle().Which.AfterPassword.Should().BeTrue();
+        Everything(read).Should().NotContain(Sentinel);
+    }
+
+    [Fact]
+    public void A_value_refused_after_an_unquoted_ssl_password_is_not_named_either()
+    {
+        PastedConnection read = Read("Host=x;SSL Password=abc;Port=" + Sentinel);
+
+        read.Rejected.Should().ContainSingle().Which.Should().Be(new PastedRejection(string.Empty, Known: false, AfterPassword: true));
+        Everything(read).Should().NotContain(Sentinel);
+    }
+
+    [Fact]
+    public void A_keyword_after_a_quoted_password_is_still_refused_by_name_because_the_password_was_whole()
+    {
+        PastedConnection read = Read("Host=x;Password='abc;def';Bogus=" + Sentinel);
+
+        read.Rejected.Should().ContainSingle().Which.Should().Be(new PastedRejection("Bogus", Known: false));
+        Everything(read).Should().NotContain(Sentinel);
+    }
+
+    [Fact]
+    public void A_keyword_after_a_setting_that_followed_an_unquoted_password_is_named_again()
+    {
+        PastedConnection read = Read("Host=x;Password=abc;Port=5432;Bogus=" + Sentinel);
+
+        read.Rejected.Should().ContainSingle().Which.Should().Be(new PastedRejection("Bogus", Known: false), "Port was read, so the password ended before it");
+    }
+
+    [Theory]
+    [InlineData("Host=x;Password=;Database=y")]
+    [InlineData("Host=x;Options=;Database=y")]
+    [InlineData("Host=x;SSL Password=;Database=y")]
+    [InlineData("Host=x;Pwd=;Database=y")]
+    [InlineData("Host=x;Password='';Database=y")]
+    public void An_empty_value_sets_nothing_and_the_rest_of_the_string_is_read(string text)
+    {
+        PastedConnection read = Read(text);
+
+        read.Outcome.Should().Be(PastedConnectionOutcome.Read, "Npgsql reads a string with an empty value");
+        read.Settings!.Values.Text("Database").Should().Be("y");
+        read.Settings.Values.Text("Host").Should().Be("x");
+    }
+
+    [Fact]
+    public void An_empty_password_is_not_a_removed_secret_and_does_not_make_the_next_refusal_unnamed()
+    {
+        PastedConnection read = Read("Host=x;Password=;Bogus=" + Sentinel);
+
+        read.Rejected.Should().ContainSingle().Which.Should().Be(new PastedRejection("Bogus", Known: false));
     }
 
     [Theory]
@@ -248,6 +319,7 @@ public sealed class PastedConnectionStringTests
             Path.Combine(root, "src", "PostgresStudio.Diagnostics", "Services", "Connection", "PastedConnectionString.cs"),
             Path.Combine(root, "src", "PostgresStudio", "Services", "Connection", "ConnectionComparer.cs"),
             Path.Combine(root, "src", "PostgresStudio", "Services", "Connection", "ConnectionCompareService.cs"),
+            Path.Combine(root, "src", "PostgresStudio", "Components", "Pages", "Database", "ConnectionCompare.razor"),
         ];
 
         foreach (string file in files)

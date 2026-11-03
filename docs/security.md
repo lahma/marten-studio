@@ -745,6 +745,15 @@ should not have been typed is on the record either way.
 - **Never shows a connection string or a credential.** A database is identified by server, port, name
   and schema, everywhere — in the Overview, in the Configuration dump, in the audit log and in
   `MartenStoreResource.DatabaseIdentifier`.
+- **Never keeps or logs what you paste, and cannot stop your host's logging of what the browser sends.** The pasted
+  text of Database › Connection's "Compare a connection string" (1.1) is a call's argument and nothing more: passwords
+  are removed on the server before anything is read, and the studio logs, audits, stores and connects to nothing of it.
+  But a Blazor Server circuit is SignalR, and ASP.NET Core's SignalR logs every hub invocation's arguments at Debug
+  (`ReceivedHubInvocation`): with `Microsoft.AspNetCore.SignalR` logged at Debug, every message a circuit receives
+  is written to your log before the studio sees it - typed SQL in the console, pasted plans and pasted connection
+  strings included (the password too: it is removed on the server, after the transport). That is the host's logging,
+  not the studio's, and it is true of every Blazor Server page. A production host should not log
+  `Microsoft.AspNetCore.SignalR` below Information.
 - **Never serializes with a serializer of its own.** Everything round-trips through
   `store.Options.Serializer()`, so a document is written back with the settings Marten wrote it with.
 - **Never adds a form.** There is no `<form>` and no `<EditForm>` anywhere in the studio's components;

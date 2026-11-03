@@ -86,9 +86,10 @@ public sealed class ConnectionCompareTests
         IElement details = page.Find("section#conn-compare details.ms-conn-compare-details");
         details.HasAttribute("open").Should().BeFalse("a disclosure starts closed");
         details.QuerySelector("summary h2.ms-section-title")!.TextContent.Should().Be("Compare a connection string");
-        page.Find("#conn-compare-promise").TextContent.Should().Be("Passwords are removed before anything is read, and nothing you paste is kept or logged.");
+        page.Find("#conn-compare-promise").TextContent.Should().Be("Passwords are removed before anything is read, and the studio keeps and logs nothing you paste.");
         page.Find("label.ms-conn-compare-label").GetAttribute("for").Should().Be("conn-compare-input");
-        page.Find("#conn-compare-help").TextContent.Should().Contain("not audited").And.Contain("Nothing is connected to");
+        page.Find("#conn-compare-help").TextContent.Should().Contain("not audited").And.Contain("Nothing is connected to")
+            .And.Contain("If your application logs ASP.NET Core's SignalR at Debug level, that log records what the browser sends, as it does for every page.");
         page.FindAll(".ms-conn-compare-result").Should().BeEmpty();
     }
 
@@ -236,6 +237,21 @@ public sealed class ConnectionCompareTests
         await PasteAsync(context, page, Candidate);
 
         Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("a secret (Password)").And.Contain("removed before anything was read"), page);
+    }
+
+    [Fact]
+    public async Task When_the_connection_in_effect_cannot_be_read_no_difference_count_is_claimed()
+    {
+        // A connection string Npgsql cannot read: the first column is empty, so "N settings differ" would be a count of everything.
+        await using PostgresStudioComponentContext context = await ContextAsync(current: "Port=not-a-port");
+        IRenderedComponent<ConnectionCompare> page = Open(context);
+
+        await PasteAsync(context, page, "Host=db.example;Database=app");
+
+        Wait(() => page.FindAll("#conn-compare-summary").Should().ContainSingle(), page);
+        string summary = page.Find("#conn-compare-summary").TextContent;
+        summary.Should().Contain("could not be read").And.Contain("every setting is listed");
+        summary.Should().NotContain("differ");
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -429,6 +445,7 @@ public sealed class ConnectionCompareTests
     [InlineData(Everything + ";Port=" + Sentinel + "-port", "Rejected")]
     [InlineData("postgres://svc:" + Sentinel + "-url@db.example/app", "Unreadable")]
     [InlineData(Everything + ";" + Sentinel + "-stray", "Unreadable")]
+    [InlineData("Host=x;Password=abc;def" + Sentinel + "-tail=ghi", "Rejected")]
     public async Task No_sentinel_is_in_the_markup_a_log_line_at_trace_the_audit_ring_the_model_or_anything_sent_to_the_browser(string pasted, string outcome)
     {
         ConnectionCompareOutcome expected = Enum.Parse<ConnectionCompareOutcome>(outcome);
@@ -455,6 +472,11 @@ public sealed class ConnectionCompareTests
         dumped.Should().NotContain(Sentinel);
         page.Markup.Should().NotContain(Sentinel);
         string.Join('\n', logs.Lines).Should().NotContain(Sentinel);
+
+        // The page's snapshot section, composed after the compare: the comparison is in no part of it.
+        context.Connection.View = View(Facts(InEffect, Observed()), null, GateClosed);
+        string snapshot = ConnectionSnapshotAndSentinelTests.Json(context.Connection.View);
+        snapshot.Should().NotContain(Sentinel).And.Contain("billing", "not vacuous: the connection in effect is in the snapshot");
         context.Services.GetRequiredService<PostgresStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a comparison is not audited");
 
         // What .NET sent to the browser: element references, a reference to itself and two numbers - and no local storage write.

@@ -24,9 +24,13 @@ internal enum PastedConnectionOutcome
 }
 
 /// <summary>A keyword Npgsql rejected: its name, and nothing it was given.</summary>
-/// <param name="Keyword">The keyword as the visitor wrote it (a name that looks like one, at most 40 characters).</param>
+/// <param name="Keyword">The keyword as the visitor wrote it (a name that looks like one, at most 40 characters); empty when <paramref name="AfterPassword" />.</param>
 /// <param name="Known">Whether Npgsql knows the keyword and refused its value (<see langword="true" />), or does not know it at all.</param>
-internal sealed record PastedRejection(string Keyword, bool Known);
+/// <param name="AfterPassword">
+/// Whether the rejected segment followed a password whose value was not quoted. A password with <c>;</c> in it, unquoted, ends at
+/// the <c>;</c> and the rest of it reads as a segment of its own, so the "keyword" is password text: it is refused without a name.
+/// </param>
+internal sealed record PastedRejection(string Keyword, bool Known, bool AfterPassword = false);
 
 /// <summary>A pasted connection string after the sanitiser and the reader: the settings, or why there are none.</summary>
 /// <param name="Outcome">What became of it.</param>
@@ -105,6 +109,9 @@ internal static class PastedConnectionString
         List<PastedRejection> rejected = [];
         NpgsqlConnectionStringBuilder known = new();
 
+        // Set by an unquoted secret and kept through the segments refused after it: they may be the rest of the password.
+        bool afterUnquotedSecret = false;
+
         foreach (Segment segment in segments)
         {
             string[] canonical;
@@ -118,11 +125,26 @@ internal static class PastedConnectionString
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
                 // The exception is dropped unread: Npgsql's text quotes the value it refused.
-                if (rejected.Count < MaxRejections && !rejected.Exists(x => string.Equals(x.Keyword, segment.Key, StringComparison.OrdinalIgnoreCase)))
+                if (afterUnquotedSecret)
+                {
+                    // What follows a password that ended at a ';' may be the rest of the password: no name, no value.
+                    if (!rejected.Exists(static x => x.AfterPassword))
+                    {
+                        rejected.Add(new(string.Empty, Known: false, AfterPassword: true));
+                    }
+                }
+                else if (rejected.Count < MaxRejections && !rejected.Exists(x => string.Equals(x.Keyword, segment.Key, StringComparison.OrdinalIgnoreCase)))
                 {
                     rejected.Add(new(segment.Key, known.ContainsKey(segment.Key)));
                 }
 
+                continue;
+            }
+
+            if (canonical.Length == 0)
+            {
+                // An empty value (Password=; Options=) sets nothing, and Npgsql reads the string without it.
+                afterUnquotedSecret = false;
                 continue;
             }
 
@@ -133,6 +155,8 @@ internal static class PastedConnectionString
             }
 
             string keyword = NpgsqlSettingsCatalog.Find(canonical[0])?.Keyword ?? canonical[0];
+
+            afterUnquotedSecret = IsSecret(keyword) && !segment.Quoted;
 
             if (IsSecret(keyword))
             {
@@ -220,7 +244,7 @@ internal static class PastedConnectionString
         return true;
     }
 
-    private readonly record struct Segment(string Key, string Raw);
+    private readonly record struct Segment(string Key, string Raw, bool Quoted);
 
     /// <summary>
     /// Cuts the text into <c>keyword=value</c> segments the way <see cref="DbConnectionStringBuilder" /> reads them: separated by
@@ -272,7 +296,9 @@ internal static class PastedConnectionString
                 i++;
             }
 
-            if (i < n && text[i] is '\'' or '"')
+            bool quoted = i < n && text[i] is '\'' or '"';
+
+            if (quoted)
             {
                 char quote = text[i++];
                 bool closed = false;
@@ -318,7 +344,7 @@ internal static class PastedConnectionString
                 }
             }
 
-            segments.Add(new Segment(key, text[start..i].Trim()));
+            segments.Add(new Segment(key, text[start..i].Trim(), quoted));
         }
 
         return segments.Count == 0 ? null : segments;

@@ -72,7 +72,10 @@ internal sealed record ConnectionCompareView
     public const string EmptySentence = "Paste a connection string first.";
 
     /// <summary>What the page says about passwords above the box.</summary>
-    public const string Promise = "Passwords are removed before anything is read, and nothing you paste is kept or logged.";
+    public const string Promise = "Passwords are removed before anything is read, and the studio keeps and logs nothing you paste.";
+
+    /// <summary>What the disclosure's help says of the host's own logging, which the studio does not control.</summary>
+    public const string LoggingNote = "If your application logs ASP.NET Core's SignalR at Debug level, that log records what the browser sends, as it does for every page.";
 
     /// <summary>What happened.</summary>
     public ConnectionCompareOutcome Outcome { get; init; }
@@ -116,8 +119,13 @@ internal sealed record ConnectionCompareView
     {
         ArgumentNullException.ThrowIfNull(rejection);
 
+        if (rejection.AfterPassword)
+        {
+            return "A keyword after a password could not be read: a password with ';' in it must be quoted.";
+        }
+
         return rejection.Known
-            ? "Npgsql did not accept the value given for \"" + rejection.Keyword + "\"."
+            ?"Npgsql did not accept the value given for \"" + rejection.Keyword + "\"."
             : "Npgsql does not know the keyword \"" + rejection.Keyword + "\".";
     }
 
