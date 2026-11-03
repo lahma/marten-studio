@@ -247,6 +247,8 @@
             {
                 @* F7: a component of its own, with its own service, so the two modes above never resolve it. *@
                 <LinqQueryPanel Alias="@linqAlias"
+                                Events="linqEvents"
+                                Archived="@linqArchived"
                                 Where="@linqWhere"
                                 OrderBy="@linqOrderBy"
                                 OnChanged="OnLinqChangedAsync" />
@@ -333,6 +335,10 @@
     private string? appliedOrderBy;
 
     private string? linqAlias;
+    private bool linqEvents;
+    private string? linqArchived;
+    private string? appliedTarget;
+    private string? appliedArchived;
     private string linqWhere = string.Empty;
     private string linqOrderBy = string.Empty;
 
@@ -365,6 +371,16 @@
     [Parameter]
     [SupplyParameterFromQuery(Name = "orderby")]
     public string? OrderByParameter { get; set; }
+
+    /// <summary>What LINQ mode queries from the deep link: <c>events</c> for the event log (1.1); anything else is a document type.</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "target")]
+    public string? TargetParameter { get; set; }
+
+    /// <summary>The archived selector of an event query from the deep link: <c>include</c> or <c>only</c> (1.1).</summary>
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "archived")]
+    public string? ArchivedParameter { get; set; }
 
     /// <summary>
     /// The picked document type, which is what says whether this collection is tenanted or soft-deleted.
@@ -416,6 +432,18 @@
                 alias = TypeParameter;
                 linqAlias = TypeParameter;
             }
+        }
+
+        if (!string.Equals(TargetParameter, appliedTarget, StringComparison.Ordinal))
+        {
+            appliedTarget = TargetParameter;
+            linqEvents = string.Equals(TargetParameter, "events", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.Equals(ArchivedParameter, appliedArchived, StringComparison.Ordinal))
+        {
+            appliedArchived = ArchivedParameter;
+            linqArchived = ArchivedParameter;
         }
 
         if (!string.Equals(PredicateParameter, appliedPredicate, StringComparison.Ordinal))
@@ -883,6 +911,13 @@
         string? sqlValue = mode == QueryMode.Sql ? Capped(sqlSession.Text) : null;
         string? predicateValue = mode == QueryMode.Linq ? Capped(linqWhere) : null;
         string? orderByValue = mode == QueryMode.Linq ? Capped(linqOrderBy) : null;
+        string? targetValue = mode == QueryMode.Linq && linqEvents ? "events" : null;
+        string? archivedValue = mode == QueryMode.Linq && linqEvents ? linqArchived : null;
+
+        if (linqEvents && mode == QueryMode.Linq)
+        {
+            typeValue = null;
+        }
 
         // Recorded before navigating, so OnParametersSet sees its own values arrive and leaves the editor
         // alone - including when the text was too long to travel and the parameter is absent.
@@ -892,6 +927,8 @@
         appliedSql = sqlValue;
         appliedPredicate = predicateValue;
         appliedOrderBy = orderByValue;
+        appliedTarget = targetValue;
+        appliedArchived = archivedValue;
 
         Navigation.NavigateTo(
             Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -902,14 +939,18 @@
                 ["sql"] = sqlValue,
                 ["predicate"] = predicateValue,
                 ["orderby"] = orderByValue,
+                ["target"] = targetValue,
+                ["archived"] = archivedValue,
             }),
             replace: true);
     }
 
     /// <summary>The LINQ panel's type, predicate or ordering moved: keep the deep link in step.</summary>
-    private Task OnLinqChangedAsync((string? Alias, string Where, string OrderBy) changed)
+    private Task OnLinqChangedAsync((string? Alias, bool Events, string Where, string OrderBy, string? Archived) changed)
     {
         linqAlias = changed.Alias;
+        linqEvents = changed.Events;
+        linqArchived = changed.Archived;
         linqWhere = changed.Where;
         linqOrderBy = changed.OrderBy;
 

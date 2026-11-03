@@ -495,7 +495,9 @@ internal static partial class LinqTextScreen
                     if (Reserved.Contains(token.Text) || OrderKeywords.Contains(token.Text) || graph.Bind(receiver, token.Text) is not { } member)
                     {
                         return Refuse(LinqClause.OrderBy, token.Position,
-                            $"names '{token.Text}', which is not a member of this document type that can be ordered by.");
+                            graph.IsEvents
+                                ? $"names '{token.Text}', which is not an event member that can be ordered by."
+                                : $"names '{token.Text}', which is not a member of this document type that can be ordered by.");
                     }
 
                     if (ReferenceEquals(receiver, graph.Root))

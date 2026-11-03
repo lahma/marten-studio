@@ -17,7 +17,7 @@ namespace MartenStudio.Internal.Sql;
 /// carries anything a visitor typed, and Marten's statement carries what they typed only as parameters.
 /// </para>
 /// </remarks>
-internal static class LinqQuerySql
+internal static partial class LinqQuerySql
 {
     /// <summary>
     /// The identity column of the document table Marten aliases <c>d</c> in every LINQ statement - the tie-breaker
@@ -27,6 +27,36 @@ internal static class LinqQuerySql
 
     /// <summary>The tenant column, ordered after the id when a conjoined collection is read across tenants.</summary>
     public const string TenantTieBreaker = "d.tenant_id";
+
+    /// <summary>
+    /// The event table's global sequence, newest first, ordered by <c>OrderBySql</c> when an event query has no ordering of
+    /// its own (1.1). Marten aliases <c>mt_events</c> as <c>d</c>, as it does a document table.
+    /// </summary>
+    public const string EventSequenceDescending = "d.seq_id desc";
+
+    /// <summary>
+    /// The event table's timestamp, newest first: the default across tenants whose sequences are per tenant, where a
+    /// counter orders nothing between tenants (1.1).
+    /// </summary>
+    public const string EventTimestampDescending = "d.timestamp desc";
+
+    /// <summary>
+    /// Whether Marten's statement reads any of the event's JSON body in its predicate or ordering - <c>d.data -&gt;&gt; 'X'</c>
+    /// - which is what Marten does with an <c>IEvent</c> member it keeps no column for, and which matches nothing (1.1). Only
+    /// the text after the first <c>from</c> is looked at: the select list names <c>data</c> because the studio reads it.
+    /// </summary>
+    /// <param name="statement">Marten's statement, character for character.</param>
+    public static bool ReadsJsonBody(string statement)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+
+        int from = statement.IndexOf(" from ", StringComparison.OrdinalIgnoreCase);
+
+        return from >= 0 && BodyRead().IsMatch(statement.AsSpan(from));
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\bd\.data\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex BodyRead();
 
     /// <summary>The plan of Marten's statement: <c>EXPLAIN (FORMAT JSON)</c>, and never <c>ANALYZE</c>.</summary>
     /// <param name="statement">Marten's statement, character for character.</param>

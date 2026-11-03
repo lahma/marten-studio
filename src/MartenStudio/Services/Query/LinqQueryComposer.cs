@@ -3,7 +3,10 @@ using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
+using JasperFx.Events;
+
 using Marten;
+using Marten.Events.Archiving;
 using Marten.Linq.SoftDeletes;
 using Marten.Services;
 
@@ -44,7 +47,17 @@ internal sealed record LinqComposition(
     bool CrossTenant,
     int Offset,
     int PageSize,
-    Func<IReadOnlyList<string>, bool>? TimestampTz = null);
+    Func<IReadOnlyList<string>, bool>? TimestampTz = null)
+{
+    /// <summary>1.1: what is queried. For <see cref="LinqQueryTarget.Events" />, <see cref="ClrType" /> is <c>IEvent</c> and <see cref="Deleted" /> is not read.</summary>
+    public LinqQueryTarget Target { get; init; } = LinqQueryTarget.Documents;
+
+    /// <summary>1.1: what to do about archived events; read only for the events.</summary>
+    public ArchivedFilter Archived { get; init; } = ArchivedFilter.Exclude;
+
+    /// <summary>1.1: whether sequences are counted per tenant, which changes the default order across tenants.</summary>
+    public bool PerTenantSequences { get; init; }
+}
 
 /// <summary>What composition produced: Marten's command and the expressions the advice reads, or a refusal.</summary>
 /// <param name="Command">Marten's statement - built, never executed by Marten.</param>
@@ -96,7 +109,9 @@ internal static class LinqQueryComposer
 
         try
         {
-            return (ComposedLinqQuery) ComposeOfT.MakeGenericMethod(composition.ClrType).Invoke(null, [composition])!;
+            return composition.Target == LinqQueryTarget.Events
+                ? ComposeEvents(composition)
+                : (ComposedLinqQuery) ComposeOfT.MakeGenericMethod(composition.ClrType).Invoke(null, [composition])!;
         }
         catch (TargetInvocationException wrapped) when (wrapped.InnerException is { } inner)
         {
@@ -124,6 +139,111 @@ internal static class LinqQueryComposer
             query = query.Where(static x => x.AnyTenant());
         }
 
+        return Finish(
+            composition,
+            session.TenantId,
+            query,
+            static (composed, request) =>
+            {
+                IQueryable<T> ordered = string.IsNullOrWhiteSpace(request.OrderBy)
+                    ? composed.OrderBySql(LinqQuerySql.IdTieBreaker)
+                    : composed.ThenBySql(LinqQuerySql.IdTieBreaker);
+
+                return request.CrossTenant ? ordered.ThenBySql(LinqQuerySql.TenantTieBreaker) : ordered;
+            },
+            static (statement, _) => statement.DocumentTypes.Any(static x => x != typeof(T))
+                ? new LinqRefusal(LinqStage.Guard, LinqClause.None,
+                    "The query would read another document type besides " + typeof(T).Name + ", which LINQ mode does not allow.")
+                : null);
+    }
+
+    /// <summary>
+    /// The events (1.1): Marten's own <c>QueryRawEvents()</c> - called with no argument, so it is the session's own
+    /// <c>Query&lt;IEvent&gt;()</c> - the studio's archive and tenant terms, then the one pipeline both targets share.
+    /// </summary>
+    private static ComposedLinqQuery ComposeEvents(LinqComposition composition)
+    {
+        using IDocumentSession session = composition.Store.LightweightSession(composition.SessionOptions);
+
+        // No tenant argument, ever: for another tenant Marten opens QuerySession(tenant) behind the returned queryable,
+        // which ignores the database the studio pinned, throws on a multi-tenanted-databases store and is never disposed
+        // (QueryRawEventsTakesNoTenantTests holds the call site to this).
+        IQueryable<IEvent> query = ((IReadOnlyEventStore) session.Events).QueryRawEvents();
+
+        // The second wall behind the first: whatever the no-argument overload becomes, the query must be on this session.
+        if (!MartenLinqCommand.IsOnSession(query, session))
+        {
+            return ComposedLinqQuery.Refused(new LinqRefusal(LinqStage.Unavailable, LinqClause.None, QueryNotOnSessionMessage));
+        }
+
+        query = composition.Archived switch
+        {
+            ArchivedFilter.Include => query.Where(static x => x.MaybeArchived()),
+            ArchivedFilter.Only => query.Where(static x => x.IsArchived),
+            _ => query,
+        };
+
+        if (composition.CrossTenant)
+        {
+            query = query.Where(static x => x.AnyTenant());
+        }
+
+        return Finish(
+            composition,
+            session.TenantId,
+            query,
+            static (composed, request) =>
+            {
+                bool typed = !string.IsNullOrWhiteSpace(request.OrderBy);
+
+                IQueryable<IEvent> ordered = typed
+                    ? composed.ThenBySql(LinqQuerySql.EventSequenceDescending)
+                    : request.PerTenantSequences && request.CrossTenant
+                        ? composed.OrderBySql(LinqQuerySql.EventTimestampDescending).ThenBySql(LinqQuerySql.EventSequenceDescending)
+                        : composed.OrderBySql(LinqQuerySql.EventSequenceDescending);
+
+                return request.CrossTenant ? ordered.ThenBySql(LinqQuerySql.TenantTieBreaker) : ordered;
+            },
+            static (statement, _) =>
+            {
+                if (statement.DocumentTypes is not [var only] || only != typeof(IEvent))
+                {
+                    return new LinqRefusal(LinqStage.Guard, LinqClause.None,
+                        "The query would read something other than the event log, which LINQ mode does not allow.");
+                }
+
+                return LinqQuerySql.ReadsJsonBody(statement.Command.CommandText)
+                    ? new LinqRefusal(LinqStage.Translate, LinqClause.None, ReadsEventBodyMessage)
+                    : null;
+            });
+    }
+
+    /// <summary>What a refusal says when Marten's event query is not on the studio's own session.</summary>
+    internal const string QueryNotOnSessionMessage =
+        "This Marten's QueryRawEvents() did not return a query on the studio's own session, so LINQ mode over events is off.";
+
+    /// <summary>What a refusal says when Marten would read the event's JSON body for part of the query.</summary>
+    internal const string ReadsEventBodyMessage =
+        "Marten reads part of this query from the event's JSON body rather than a column; LINQ mode over events filters " +
+        "and orders on the event's columns only.";
+
+    /// <summary>
+    /// The middle and the tail both targets share: the visitor's text through JasperFx and the guard, the dates, the
+    /// in-lists, the studio's ordering and the page, Marten's SQL for all of it, and the statement checks.
+    /// </summary>
+    /// <param name="composition">The request.</param>
+    /// <param name="tenantId">The session's tenant, which is what Marten's own tenant filter binds.</param>
+    /// <param name="query">Marten's query with the studio's own terms already on it.</param>
+    /// <param name="tieBreak">The studio's ordering, composed after the guard.</param>
+    /// <param name="verify">What must hold of the statement Marten built, or the refusal.</param>
+    private static ComposedLinqQuery Finish<T>(
+        LinqComposition composition,
+        string tenantId,
+        IQueryable<T> query,
+        Func<IQueryable<T>, LinqComposition, IQueryable<T>> tieBreak,
+        Func<MartenLinqStatement, LinqComposition, LinqRefusal?> verify)
+        where T : notnull
+    {
         // Everything above this point is the studio's; everything composed onto it is the visitor's, and every walk
         // of the visitor's half stops here.
         Expression source = query.Expression;
@@ -179,33 +299,23 @@ internal static class LinqQueryComposer
             return ComposedLinqQuery.Refused(new LinqRefusal(LinqStage.Guard, LinqClause.None, "The query " + adapted));
         }
 
-        IQueryable<T> ordered = string.IsNullOrWhiteSpace(composition.OrderBy)
-            ? composedQuery.OrderBySql(LinqQuerySql.IdTieBreaker)
-            : composedQuery.ThenBySql(LinqQuerySql.IdTieBreaker);
-
-        if (composition.CrossTenant)
-        {
-            ordered = ordered.ThenBySql(LinqQuerySql.TenantTieBreaker);
-        }
-
-        IQueryable<T> page = ordered.Skip(composition.Offset).Take(composition.PageSize + 1);
+        IQueryable<T> page = tieBreak(composedQuery, composition).Skip(composition.Offset).Take(composition.PageSize + 1);
 
         MartenLinqStatement statement;
 
         try
         {
             // The first time Marten sees the expression.
-            statement = MartenLinqCommand.Build(page, session.TenantId);
+            statement = MartenLinqCommand.Build(page, tenantId);
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
             return TranslationFailure(exception);
         }
 
-        if (statement.DocumentTypes.Any(static x => x != typeof(T)))
+        if (verify(statement, composition) is { } unverified)
         {
-            return ComposedLinqQuery.Refused(new LinqRefusal(LinqStage.Guard, LinqClause.None,
-                "The query would read another document type besides " + typeof(T).Name + ", which LINQ mode does not allow."));
+            return ComposedLinqQuery.Refused(unverified);
         }
 
         return new ComposedLinqQuery(statement.Command, expression, source, null, null);

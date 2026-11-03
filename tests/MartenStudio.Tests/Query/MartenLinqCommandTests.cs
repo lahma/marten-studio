@@ -102,6 +102,37 @@ public class MartenLinqCommandTests
         MartenLinqCommand.Build(query, session.TenantId).Command.CommandText.Should().Be(query.ToCommand().CommandText);
     }
 
+    /// <summary>
+    /// 1.1: <c>QueryRawEvents()</c> with no argument is the session's own <c>Query&lt;IEvent&gt;()</c>, so Marten builds the
+    /// same statement for both - with no database, and reading the one document type the events are.
+    /// </summary>
+    [Fact]
+    public void QueryRawEvents_with_no_argument_builds_the_statement_Query_of_IEvent_builds_with_no_database()
+    {
+        using DocumentStore store = LinqEventTestSupport.ConjoinedStore();
+        using IDocumentSession session = store.LightweightSession(SessionOptions.ForDatabase("acme", store.Storage.Database));
+
+        MartenLinqStatement raw = MartenLinqCommand.Build(
+            ((JasperFx.Events.IReadOnlyEventStore) session.Events).QueryRawEvents().Where(static x => x.Version > 1), session.TenantId);
+        MartenLinqStatement direct = MartenLinqCommand.Build(session.Query<JasperFx.Events.IEvent>().Where(static x => x.Version > 1), session.TenantId);
+
+        raw.Command.CommandText.Should().Be(direct.Command.CommandText).And.Contain(LinqTestStore.Schema + ".mt_events as d");
+        raw.DocumentTypes.Should().Equal(typeof(JasperFx.Events.IEvent));
+        raw.Command.Parameters.Cast<NpgsqlParameter>().Select(static x => x.Value).Should().Contain("acme",
+            "a conjoined store binds the session's tenant into Marten's own tenant filter");
+    }
+
+    [Fact]
+    public void A_single_tenanted_event_store_has_no_tenant_term()
+    {
+        using DocumentStore store = LinqTestStore.Create();
+        using IDocumentSession session = store.LightweightSession(SessionOptions.ForDatabase("acme", store.Storage.Database));
+
+        MartenLinqStatement raw = MartenLinqCommand.Build(((JasperFx.Events.IReadOnlyEventStore) session.Events).QueryRawEvents(), session.TenantId);
+
+        raw.Command.CommandText.Should().NotContain("d.tenant_id");
+    }
+
     [Fact]
     public void A_query_another_session_type_made_is_refused()
     {

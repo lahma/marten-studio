@@ -1,7 +1,10 @@
 using System.Globalization;
 using System.Text;
 
+using JasperFx.Events;
+
 using MartenStudio.Components;
+using MartenStudio.Services.Query;
 using PostgresStudio.Components;
 using PostgresStudio.Services;
 
@@ -138,6 +141,86 @@ internal static class EventLinks
     /// <summary>A link to the feed, filtered to one DCB tag: <c>?tag=type=value</c>.</summary>
     public static string ToFeedForTag(MartenStudioOptions options, StudioScope? scope, string tagType, string value) =>
         To(options, FeedRoute, scope, [new("tag", EventTagFilter.Format(tagType, value))]);
+
+    /// <summary>The Query page, relative to the studio root.</summary>
+    public const string QueryRoute = "query";
+
+    /// <summary>
+    /// A link to the Query page's LINQ tab over the event log (1.1): <c>?mode=linq&amp;target=events&amp;predicate=…</c>. It fills
+    /// the boxes and never runs (D9), so the visitor reads the predicate before it does anything.
+    /// </summary>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="predicate">The predicate to prefill, or <see langword="null" /> for none.</param>
+    /// <param name="archived">What to do about archived events.</param>
+    public static string ToLinqQuery(MartenStudioOptions options, StudioScope? scope, string? predicate, ArchivedFilter archived = ArchivedFilter.Exclude) =>
+        To(options, QueryRoute, scope,
+        [
+            new("mode", "linq"),
+            new("target", "events"),
+            new("predicate", predicate),
+            new("archived", ArchivedToken(archived)),
+        ]);
+
+    /// <summary>The archived selector as <c>?archived=</c> spells it, or <see langword="null" /> for the default.</summary>
+    public static string? ArchivedToken(ArchivedFilter filter) => filter switch
+    {
+        ArchivedFilter.Include => "include",
+        ArchivedFilter.Only => "only",
+        _ => null,
+    };
+
+    /// <summary>Reads <c>?archived=</c> back, defaulting to live events only.</summary>
+    public static ArchivedFilter ParseArchived(string? token) => token?.ToLowerInvariant() switch
+    {
+        "include" => ArchivedFilter.Include,
+        "only" => ArchivedFilter.Only,
+        _ => ArchivedFilter.Exclude,
+    };
+
+    /// <summary>
+    /// The LINQ predicate that says what the Feed's filters say (1.1), or <see langword="null" /> when they say nothing.
+    /// </summary>
+    /// <remarks>
+    /// A clause whose value holds a <c>"</c> or a <c>\</c> is left out, because the text screen would refuse the literal; the tag
+    /// filter has no LINQ equivalent and is left out. The result never runs anything - it is only text in a box.
+    /// </remarks>
+    /// <param name="identity">How this store identifies streams: <c>StreamId</c> for a Guid, <c>StreamKey</c> for a string.</param>
+    /// <param name="stream">The stream filter.</param>
+    /// <param name="eventTypes">The event types ticked.</param>
+    /// <param name="from">The start of the time range, or <see langword="null" />.</param>
+    public static string? FeedPredicate(StreamIdentity identity, string? stream, IReadOnlyList<string> eventTypes, DateTimeOffset? from)
+    {
+        List<string> clauses = [];
+
+        if (Quotable(stream))
+        {
+            clauses.Add((identity == StreamIdentity.AsString ? "StreamKey" : "StreamId") + " == \"" + stream!.Trim() + "\"");
+        }
+
+        List<string> types = [.. eventTypes.Where(Quotable).Select(static x => "\"" + x + "\"")];
+
+        if (types.Count == 1)
+        {
+            clauses.Add("EventTypeName == " + types[0]);
+        }
+        else if (types.Count > 1)
+        {
+            clauses.Add("EventTypeName in (" + string.Join(", ", types) + ")");
+        }
+
+        if (from is { } start)
+        {
+            clauses.Add("Timestamp >= \"" + start.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture) + "\"");
+        }
+
+        string text = string.Join(" and ", clauses);
+
+        return text.Length == 0 || text.Length > LinqQueryLimits.MaxWhereLength ? null : text;
+
+        static bool Quotable(string? value) =>
+            !string.IsNullOrWhiteSpace(value) && value.Length <= LinqQueryLimits.MaxLiteralLength && value.IndexOfAny(['"', '\\']) < 0;
+    }
 
     /// <summary>A number as a query-string value, or null when it is the default the page would use anyway.</summary>
     public static string? Number(long? value) =>

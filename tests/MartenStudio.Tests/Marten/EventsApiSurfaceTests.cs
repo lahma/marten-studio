@@ -9,10 +9,12 @@ using JasperFx.MultiTenancy;
 
 using Marten;
 using Marten.Events;
+using Marten.Events.Archiving;
 using Marten.Services;
 using Marten.Storage;
 
 using MartenStudio.Services.Configuration;
+using MartenStudio.Services.Query;
 using MartenStudio.Tests.Events;
 using MartenStudio.Tests.Sql;
 
@@ -144,6 +146,19 @@ public class EventsApiSurfaceTests
         ITagTypeRegistration? found = tagTypes.FindByTagName("customer");
         _ = (mode, alias, found?.TagType, found?.SimpleType, found?.TableSuffix, found?.AggregateType);
 
+        // LINQ over events (1.1): the source, Marten's own archive and tenant extensions, the studio's ordering, and the facts
+        // the member list is computed from.
+        IQueryable<IEvent> raw = ((IReadOnlyEventStore) session.Events).QueryRawEvents();
+        raw = raw.Where(static x => x.MaybeArchived()).Where(static x => x.IsArchived).Where(static x => x.AnyTenant());
+        raw = raw.OrderBySql("d.seq_id desc").ThenBySql("d.tenant_id");
+        StreamIdentity identity = events.StreamIdentity;
+        bool correlation = events.MetadataConfig.CorrelationIdEnabled;
+        bool causation = events.MetadataConfig.CausationIdEnabled;
+        bool userName = events.MetadataConfig.UserNameEnabled;
+        bool perTenant = events.UseTenantPartitionedEvents;
+        string eventsSchema = events.DatabaseSchemaName;
+        _ = (identity, correlation, causation, userName, perTenant, eventsSchema, raw);
+
         // Natural keys.
         foreach (IAggregateProjection aggregate in projections.OfType<IAggregateProjection>())
         {
@@ -154,25 +169,16 @@ public class EventsApiSurfaceTests
 
     /// <summary>
     /// <c>IReadOnlyEventStore.QueryRawEvents(string? tenantId = null)</c> (jasperfx#1094, marten#5792) is the
-    /// raw-event <c>IQueryable&lt;IEvent&gt;</c> from Marten 9.56.0 with JasperFx 2.97.0. It is a default interface
-    /// member on the JasperFx interface, so below JasperFx 2.97 there is no such member and Marten's
-    /// internal <c>QueryEventStore</c> does not implement it. The studio does not use it in 0.10 (the 0.11 packets start
-    /// from this shape); there is no <c>RuntimeFeature</c> for it yet. Read at <c>v9.56.0</c> and JasperFx
-    /// <c>v2.97.0</c>; absent at <c>V9.39.0</c> / <c>V2.74.0</c> and at <c>v9.54.2</c> / <c>V2.95.1</c>.
+    /// raw-event <c>IQueryable&lt;IEvent&gt;</c>: a default interface member on the JasperFx interface, implemented by
+    /// Marten's internal <c>QueryEventStore</c>. LINQ mode over events (1.1) is built on it, so it is unconditional: the
+    /// floor is Marten 9.57.0 with JasperFx 2.98.0, and there is no <c>RuntimeFeature</c> probe for it. Read at
+    /// <c>V9.57.0</c> (<c>QueryEventStore.cs:671-685</c>) and JasperFx <c>V2.98.0</c>.
     /// </summary>
     [Fact]
-    public void Query_raw_events_is_on_the_read_only_event_store_from_JasperFx_2_97_and_not_below()
+    public void Query_raw_events_is_on_the_read_only_event_store_and_implemented_by_Marten()
     {
-        Version jasperFx = MartenRuntime.Current.VersionOf(RuntimePackage.JasperFxEvents)!;
         MethodInfo? member = typeof(IReadOnlyEventStore).GetMethod("QueryRawEvents");
         Type queryEventStore = typeof(IDocumentStore).Assembly.GetType("Marten.Events.QueryEventStore", throwOnError: true)!;
-
-        if (jasperFx < new Version(2, 97, 0))
-        {
-            member.Should().BeNull("JasperFx.Events {0} predates jasperfx#1094", jasperFx);
-            queryEventStore.GetMethod("QueryRawEvents").Should().BeNull();
-            return;
-        }
 
         member.Should().NotBeNull();
         member!.ReturnType.Should().Be<IQueryable<IEvent>>();
@@ -182,6 +188,50 @@ public class EventsApiSurfaceTests
 
         queryEventStore.GetMethod("QueryRawEvents", BindingFlags.Public | BindingFlags.Instance).Should().NotBeNull(
             "Marten {0} implements it on QueryEventStore", MartenRuntime.Current.VersionOf(RuntimePackage.Marten));
+    }
+
+    /// <summary>
+    /// With no argument it is the caller's own session's <c>Query&lt;IEvent&gt;()</c> - the one the studio pinned to the
+    /// resolved database and tenant - and that is what <c>MartenLinqCommand.IsOnSession</c> checks at run time.
+    /// </summary>
+    [Fact]
+    public void Query_raw_events_with_no_argument_is_a_Marten_query_on_the_callers_own_session()
+    {
+        using DocumentStore store = Store(static options => options.Events.TenancyStyle = TenancyStyle.Conjoined);
+        using IDocumentSession session = store.LightweightSession(SessionOptions.ForDatabase("a", store.Storage.Database));
+        using IDocumentSession other = store.LightweightSession(SessionOptions.ForDatabase("a", store.Storage.Database));
+
+        IQueryable<IEvent> raw = ((IReadOnlyEventStore) session.Events).QueryRawEvents();
+
+        MartenLinqCommand.IsOnSession(raw, session).Should().BeTrue();
+        MartenLinqCommand.IsOnSession(raw, other).Should().BeFalse("a different session is a different answer");
+    }
+
+    /// <summary>
+    /// Why the studio never passes the argument: for a tenant other than the session's, Marten returns a query on
+    /// <c>_store.QuerySession(tenantId)</c> - another session, which ignores the database the studio resolved and is never
+    /// disposed. (<c>QueryRawEventsTakesNoTenantTests</c> holds the call sites to the empty list.)
+    /// </summary>
+    [Fact]
+    public void Query_raw_events_with_another_tenant_is_on_another_session_and_that_is_why_it_is_never_passed()
+    {
+        using DocumentStore store = Store(static options => options.Events.TenancyStyle = TenancyStyle.Conjoined);
+        using IDocumentSession session = store.LightweightSession(SessionOptions.ForDatabase("a", store.Storage.Database));
+
+        IQueryable<IEvent> other = ((IReadOnlyEventStore) session.Events).QueryRawEvents("b");
+
+        MartenLinqCommand.IsOnSession(other, session).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Query_raw_events_with_a_tenant_on_events_with_no_tenant_dimension_throws()
+    {
+        using DocumentStore store = Store(static _ => { });
+        using IDocumentSession session = store.LightweightSession(SessionOptions.ForDatabase("a", store.Storage.Database));
+
+        Action call = () => ((IReadOnlyEventStore) session.Events).QueryRawEvents("b");
+
+        call.Should().Throw<NotSupportedException>();
     }
 
     private static DocumentStore Store(Action<StoreOptions> configure) =>

@@ -362,6 +362,13 @@ migrates its table and, through `AllObjects()`, `mt_hilo`. The studio builds Mar
 that changes it makes the mode absent rather than falling back to `ToCommand`. Marten's statement must then
 pass the console's `ReadOnlySqlGuard` as well.
 
+**Events (since 1.1).** The same capability queries the event log, through Marten's own
+`IReadOnlyEventStore.QueryRawEvents()` called with no tenant argument (the overload with one opens a session the
+studio did not pin). The members are a closed list computed from `StoreOptions.Events` — the columns Marten keeps —
+and the tenant and archive filters are Marten's. On events nothing divides by tenant, a read from a tenant scope
+reaches the whole database's event log, so it is asked and audited as the database as a whole, unless the database is
+exclusively that tenant's. Event data (the JSON body) is not queryable. See [`linq-mode.md`](linq-mode.md#events).
+
 Every refusal, and the first run of each query in a circuit, is audited (events 9260 to 9262), and the
 predicate is in your logs from then on. **Grant `RunLinqQueries` to people you would trust with the store's
 data.**
@@ -814,7 +821,8 @@ a statement out of the record.
 The Activity ring also records, under 9200 and 9201, the reads that reveal other people's details for the first time
 in a circuit - "Read replication names", "Read Aurora session waits", the Health page's first evidence behind the
 activity gate - and every "Measure bloat", every Statements drill-in plan ("Plan database statement") and every What
-if? ("RunSql what-if", "ExplainQuery what-if", "LinqWhatIf", "DocumentsWhatIf" and "What-if database statement"). A
+if? ("RunSql what-if", "ExplainQuery what-if", "LinqWhatIf", "DocumentsWhatIf" and "What-if database statement"). LINQ
+mode over events records "LinqEventQuery" (a run, success and failure) and "LinqEventExplain" (a refused plan). A
 diagnostics API call is not audited (event 9250, at Debug, codes and counts only).
 
 ## Reporting a vulnerability

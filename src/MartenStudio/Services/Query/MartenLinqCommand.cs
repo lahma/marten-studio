@@ -94,6 +94,36 @@ internal static class MartenLinqCommand
         return new MartenLinqStatement(command, [.. types]);
     }
 
+    /// <summary>
+    /// Whether <paramref name="queryable" /> is Marten's query on exactly <paramref name="session" /> - the one the studio
+    /// pinned to the resolved database and tenant - by reference (1.1).
+    /// </summary>
+    /// <remarks>
+    /// <c>QueryRawEvents(tenantId)</c> for another tenant returns a query on a session Marten opened with
+    /// <c>QuerySession(tenantId)</c>, which ignores the resolved database. The studio never passes the argument; this is
+    /// the second wall, for a Marten whose no-argument overload changes. <c>IMartenLinqQueryable.Session</c> is internal, so
+    /// it is reached by reflection beside <c>BuildLinqParser</c>; where the property is missing the answer is no.
+    /// </remarks>
+    public static bool IsOnSession(object queryable, object session)
+    {
+        ArgumentNullException.ThrowIfNull(queryable);
+        ArgumentNullException.ThrowIfNull(session);
+
+        if (Resolved.Value is not { Session: { } property } members || !members.Queryable.IsInstanceOfType(queryable))
+        {
+            return false;
+        }
+
+        try
+        {
+            return ReferenceEquals(property.GetValue(queryable), session);
+        }
+        catch (Exception exception) when (exception is TargetInvocationException or InvalidOperationException or MethodAccessException)
+        {
+            return false;
+        }
+    }
+
     private static object? Invoke(MethodInfo method, object target, object?[] arguments)
     {
         try
@@ -132,7 +162,9 @@ internal static class MartenLinqCommand
                 return null;
             }
 
-            return new Members(queryable, buildParser, diagnostic, documentTypes);
+            PropertyInfo? session = queryable.GetProperty("Session", BindingFlags.Public | BindingFlags.Instance);
+
+            return new Members(queryable, buildParser, diagnostic, documentTypes, session is { CanRead: true } ? session : null);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -140,5 +172,10 @@ internal static class MartenLinqCommand
         }
     }
 
-    private sealed record Members(Type Queryable, MethodInfo BuildParser, MethodInfo BuildDiagnosticCommand, MethodInfo DocumentTypes);
+    private sealed record Members(
+        Type Queryable,
+        MethodInfo BuildParser,
+        MethodInfo BuildDiagnosticCommand,
+        MethodInfo DocumentTypes,
+        PropertyInfo? Session);
 }

@@ -1,6 +1,8 @@
 @using System.Globalization
 @using Microsoft.Extensions.Logging
 @using Microsoft.Extensions.Options
+@using MartenStudio.Components.Pages.Events
+@using MartenStudio.Services.Events
 @using MartenStudio.Services.Query
 @using PostgresStudio.Components
 @using PostgresStudio.Components.Json
@@ -57,15 +59,23 @@
         <WriteRefusal Refused="@(!status.MayRun)" Capability="@nameof(StudioCapability.RunLinqQueries)" />
 
         <div class="ms-query-toolbar">
-            <label class="ms-form-label" for="ms-query-linq-type">Document type</label>
-            <select id="ms-query-linq-type" class="ms-select ms-query-type" value="@alias" @onchange="OnTypeChangedAsync">
-                @for (int ordinal = 0; ordinal < status.Types.Count; ordinal++)
+            <label class="ms-form-label" for="ms-query-linq-type">Query</label>
+            <select id="ms-query-linq-type" class="ms-select ms-query-type" value="@(eventsTarget ? EventsToken : alias)" @onchange="OnTypeChangedAsync">
+                @if (status.Types.Count > 0)
                 {
-                    LinqDocumentTypeInfo type = status.Types[ordinal];
-                    <option value="@type.Alias" title="@type.FullTypeName" @key="ordinal">
-                        @OptionLabel(type)
-                    </option>
+                    <optgroup label="Documents">
+                        @for (int ordinal = 0; ordinal < status.Types.Count; ordinal++)
+                        {
+                            LinqDocumentTypeInfo type = status.Types[ordinal];
+                            <option value="@type.Alias" title="@type.FullTypeName" @key="ordinal">
+                                @OptionLabel(type)
+                            </option>
+                        }
+                    </optgroup>
                 }
+                <optgroup label="Event store">
+                    <option value="@EventsToken" title="The event log, through Marten's QueryRawEvents()">Events (mt_events)</option>
+                </optgroup>
             </select>
 
             <label class="ms-form-label" for="ms-query-linq-page-size">Rows</label>
@@ -76,7 +86,16 @@
                 }
             </select>
 
-            @if (SelectedType is { SoftDeleted: true })
+            @if (eventsTarget)
+            {
+                <label class="ms-form-label" for="ms-query-linq-archived">Archived</label>
+                <select id="ms-query-linq-archived" class="ms-select ms-query-deleted" value="@archived" @onchange="OnArchivedChangedAsync">
+                    <option value="@nameof(ArchivedFilter.Exclude)">Live events only</option>
+                    <option value="@nameof(ArchivedFilter.Include)">Live and archived</option>
+                    <option value="@nameof(ArchivedFilter.Only)">Archived only</option>
+                </select>
+            }
+            else if (SelectedType is { SoftDeleted: true })
             {
                 <label class="ms-form-label" for="ms-query-linq-deleted">Deleted</label>
                 <select id="ms-query-linq-deleted" class="ms-select ms-query-deleted" value="@deleted" @onchange="OnDeletedChangedAsync">
@@ -89,13 +108,13 @@
 
         <QueryEditor EditorId="ms-query-linq-where"
                      Label="LINQ predicate"
-                     Placeholder="@WherePlaceholder"
+                     Placeholder="@(eventsTarget ? EventsWherePlaceholder : WherePlaceholder)"
                      Rows="4"
                      Value="@where"
                      ValueChanged="OnWhereChangedAsync"
                      Running="running"
                      ElapsedMilliseconds="elapsedMilliseconds"
-                     Disabled="@(status.Types.Count == 0)"
+                     Disabled="@(!eventsTarget && status.Types.Count == 0)"
                      ErrorMessage="@whereError"
                      ErrorPosition="whereErrorPosition"
                      Status="@statusText"
@@ -110,7 +129,7 @@
                    type="text"
                    spellcheck="false"
                    autocomplete="off"
-                   placeholder="Total desc, Name"
+                   placeholder="@OrderByPlaceholder"
                    value="@orderBy"
                    aria-describedby="ms-query-linq-orderby-status"
                    @onchange="OnOrderByChangedAsync" />
@@ -129,6 +148,36 @@
             </div>
         </div>
 
+        @if (eventsTarget && status.Events is { } eventInfo)
+        {
+            <p class="ms-muted ms-query-note ms-query-linq-members ms-query-linq-event-members">
+                Members of an event: @(string.Join(", ", eventInfo.Members) + ".")
+            </p>
+
+            @if (eventInfo.Withheld.Count > 0)
+            {
+                <details class="ms-muted ms-query-note ms-query-linq-withheld">
+                    <summary>Not offered here: @(string.Join(", ", eventInfo.Withheld.Select(static x => x.Name)))</summary>
+                    <ul class="ms-query-linq-withheld-list">
+                        @for (int ordinal = 0; ordinal < eventInfo.Withheld.Count; ordinal++)
+                        {
+                            LinqWithheldMember member = eventInfo.Withheld[ordinal];
+                            <li @key="ordinal"><code>@member.Name</code>: @member.Reason</li>
+                        }
+                    </ul>
+                </details>
+            }
+
+            <p class="ms-muted ms-query-note ms-query-linq-note ms-query-linq-event-note">
+                The predicate is handed to Marten's own <code>IReadOnlyEventStore.@EventsSourceName</code>, the
+                <code>IQueryable&lt;IEvent&gt;</code> your code gets, so the tenant and archive filters are Marten's. It filters
+                and orders on the event's columns, not its JSON body. Newest first unless you order it. Pages are read with
+                <code>OFFSET</code> and stop at row @LinqQueryLimits.MaxOffset.ToString("N0", CultureInfo.InvariantCulture), inside a
+                read-only transaction with a statement timeout.
+            </p>
+        }
+        else
+        {
         @if (SelectedType is { Members.Count: > 0 } picked)
         {
             <p class="ms-muted ms-query-note ms-query-linq-members">
@@ -148,6 +197,7 @@
             @LinqQueryLimits.MaxOffset.ToString("N0", CultureInfo.InvariantCulture), inside a read-only transaction with a
             statement timeout.
         </p>
+        }
 
         @if (generalError is { Length: > 0 })
         {
@@ -156,19 +206,9 @@
             </div>
         }
 
-        @if (status.Types.Count == 0)
+        @if (result is { } current)
         {
-            <div class="ms-empty ms-query-empty">
-                <p class="ms-empty-title">No document type to query</p>
-                <p class="ms-empty-description">
-                    This store registered no document type you are allowed to see. Marten learns them from the host's
-                    <code>StoreOptions</code>; <code>MartenStudioOptions.IsDocumentTypeVisible</code> can also be hiding them.
-                </p>
-            </div>
-        }
-        else if (result is { } current)
-        {
-            <QueryStats RowCount="current.Rows.Count"
+            <QueryStats RowCount="current.RowCount"
                         DurationMilliseconds="current.Duration.TotalMilliseconds"
                         Truncated="current.HasMore"
                         Chips="@Chips(current)"
@@ -219,7 +259,52 @@
 
             @if (current.Succeeded)
             {
-                @if (current.Rows.Count == 0)
+                @if (current.EventScope is { } eventScope)
+                {
+                    @if (current.EventRows.Count == 0)
+                    {
+                        <div class="ms-empty ms-query-empty">
+                            <p class="ms-empty-title">No event matched</p>
+                            <p class="ms-empty-description">The query ran; nothing this session can see satisfies it.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        @* The Feed's own card, so the rows read the way admins already know. Keyed by position, never by
+                           sequence: with per-tenant sequences two rows of one page can share one, and a repeated @key
+                           ends the circuit. *@
+                        <div class="ms-timeline ms-query-linq-events">
+                            @for (int ordinal = 0; ordinal < current.EventRows.Count; ordinal++)
+                            {
+                                LinqEventRow row = current.EventRows[ordinal];
+                                StudioScope? rowScope = EventRowScope(eventScope, row);
+
+                                <div class="ms-timeline-item" @key="current.Offset + ordinal">
+                                    <EventCard Sequence="row.Sequence"
+                                               Version="row.Version"
+                                               EventType="@row.EventTypeName"
+                                               DotNetType="@row.DotNetTypeName"
+                                               Timestamp="@(row.Timestamp ?? default)"
+                                               StreamId="@row.StreamId"
+                                               StreamHref="@EventLinks.ToStream(Options.Value, rowScope, row.StreamId)"
+                                               TypeHref="@EventLinks.ToFeedForType(Options.Value, rowScope, row.EventTypeName)"
+                                               ShowStream="true"
+                                               ShowVersion="true"
+                                               IsArchived="row.IsArchived"
+                                               HasBinary="row.HasBinary"
+                                               Json="@row.Json"
+                                               Metadata="EventMetadata(row)" />
+
+                                    @if (row.NotInlined is { Length: > 0 } notInlined)
+                                    {
+                                        <p class="ms-muted ms-query-linq-not-inlined">@notInlined</p>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                else if (current.Rows.Count == 0)
                 {
                     <div class="ms-empty ms-query-empty">
                         <p class="ms-empty-title">No document matched</p>
@@ -297,7 +382,25 @@
     /// <summary>What an empty predicate box shows.</summary>
     internal const string WherePlaceholder = "Status == \"Open\" && Total > 100 && Customer.Name.StartsWith(\"A\")";
 
+    /// <summary>What an empty predicate box shows for the event log (1.1).</summary>
+    internal const string EventsWherePlaceholder = "EventTypeName == \"order_placed\" && Timestamp > \"2026-11-01T00:00:00Z\"";
+
+    /// <summary>
+    /// The picker's value for the event log (1.1): a token the service never reads - it decides on
+    /// <see cref="LinqQueryTarget.Events" />, never on an alias string.
+    /// </summary>
+    internal const string EventsToken = "(events)";
+
+    /// <summary>
+    /// The member the events are read through, as the note names it. A constant rather than markup so that the storage-ensuring
+    /// call scan (<c>StorageEnsuringCallTests</c>), which reads markup as code, sees prose and not a call.
+    /// </summary>
+    private const string EventsSourceName = "QueryRawEvents()";
+
     private static readonly int[] PageSizes = [25, 50, 100, 250, 500];
+
+    private bool eventsTarget;
+    private ArchivedFilter archived = ArchivedFilter.Exclude;
 
     private readonly CancellationTokenSource panelCts = new();
 
@@ -357,17 +460,31 @@
     [Parameter]
     public string? OrderBy { get; set; }
 
-    /// <summary>Raised when the type, the predicate or the ordering changes, so the page can keep its deep link in step.</summary>
+    /// <summary>Whether the page's deep link names the event log (<c>?target=events</c>, 1.1).</summary>
     [Parameter]
-    public EventCallback<(string? Alias, string Where, string OrderBy)> OnChanged { get; set; }
+    public bool Events { get; set; }
+
+    /// <summary>The archived selector the deep link carries (<c>include</c> or <c>only</c>), or <see langword="null" />.</summary>
+    /// <remarks>Text rather than <see cref="ArchivedFilter" />: a component's parameters are public and the enum is internal.</remarks>
+    [Parameter]
+    public string? Archived { get; set; }
+
+    /// <summary>Raised when the target, the type, the predicate, the ordering or the archived selector changes, so the page can keep its deep link in step.</summary>
+    [Parameter]
+    public EventCallback<(string? Alias, bool Events, string Where, string OrderBy, string? Archived)> OnChanged { get; set; }
 
     private LinqDocumentTypeInfo? SelectedType =>
-        status?.Types.FirstOrDefault(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase));
+        eventsTarget ? null : status?.Types.FirstOrDefault(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase));
+
+    private string OrderByPlaceholder =>
+        eventsTarget ? (status?.Events?.DefaultOrdering ?? LinqEventMembers.SequenceDescending) + " (the default)" : "Total desc, Name";
 
     protected override void OnInitialized()
     {
         pageSize = Options.Value.DefaultPageSize;
         alias = Alias;
+        eventsTarget = Events;
+        archived = EventLinks.ParseArchived(Archived);
         where = Where ?? string.Empty;
         orderBy = OrderBy ?? string.Empty;
         State.ScopeChanged += OnScopeChangedAsync;
@@ -427,6 +544,12 @@
         {
             status = await Linq.DescribeAsync(scope, panelCts.Token);
 
+            // With no document type to query the event log is the default: it is always there (1.1).
+            if (status.IsAvailable && status.Types.Count == 0)
+            {
+                eventsTarget = true;
+            }
+
             if (status.Types.Count > 0 && !status.Types.Any(x => string.Equals(x.Alias, alias, StringComparison.OrdinalIgnoreCase)))
             {
                 alias = status.Types[0].Alias;
@@ -465,11 +588,31 @@
 
     private async Task OnTypeChangedAsync(ChangeEventArgs args)
     {
-        alias = args.Value?.ToString();
+        string? picked = args.Value?.ToString();
+
+        if (string.Equals(picked, EventsToken, StringComparison.Ordinal))
+        {
+            eventsTarget = true;
+        }
+        else
+        {
+            eventsTarget = false;
+            alias = picked;
+        }
+
         deleted = DeletedFilter.Exclude;
+        archived = ArchivedFilter.Exclude;
         result = null;
         plan = null;
         advice = null;
+
+        await NotifyAsync();
+    }
+
+    private async Task OnArchivedChangedAsync(ChangeEventArgs args)
+    {
+        archived = Enum.TryParse(args.Value?.ToString(), ignoreCase: true, out ArchivedFilter parsed) ? parsed : ArchivedFilter.Exclude;
+        result = null;
 
         await NotifyAsync();
     }
@@ -516,7 +659,7 @@
     {
         try
         {
-            await OnChanged.InvokeAsync((alias, where, orderBy));
+            await OnChanged.InvokeAsync((alias, eventsTarget, where, orderBy, EventLinks.ArchivedToken(archived)));
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -541,7 +684,7 @@
     {
         StudioScope? scope = State.ActiveScope;
 
-        if (scope is null || string.IsNullOrWhiteSpace(alias) || running)
+        if (scope is null || (!eventsTarget && string.IsNullOrWhiteSpace(alias)) || running)
         {
             return;
         }
@@ -561,7 +704,10 @@
 
         try
         {
-            LinqQueryRequest request = new(alias, where, orderBy, pageSize, offset, deleted, IncludePlan: offset == 0 && status?.MayExplain == true);
+            LinqQueryRequest request = eventsTarget
+                ? new(LinqQueryService.EventsAlias, where, orderBy, pageSize, offset, IncludePlan: offset == 0 && status?.MayExplain == true,
+                    Target: LinqQueryTarget.Events, Archived: archived)
+                : new(alias!, where, orderBy, pageSize, offset, deleted, IncludePlan: offset == 0 && status?.MayExplain == true);
             LinqQueryResult run = await Linq.RunAsync(scope, request, cts.Token);
 
             result = run;
@@ -599,7 +745,7 @@
             }
             else
             {
-                statusText = run.Rows.Count.ToString(CultureInfo.InvariantCulture) + " documents in " +
+                statusText = run.RowCount.ToString(CultureInfo.InvariantCulture) + (eventsTarget ? " events in " : " documents in ") +
                              run.Duration.TotalMilliseconds.ToString("0.##", CultureInfo.InvariantCulture) + " ms";
             }
         }
@@ -614,9 +760,11 @@
         }
         catch (StudioNotAuthorizedException)
         {
-            generalError = SelectedType is { Conjoined: false } && scope.TenantId is { Length: > 0 }
-                ? LinqQueryService.WholeDatabaseRefusedMessage
-                : WritePolicyRefusal.For(nameof(StudioCapability.RunLinqQueries));
+            generalError = eventsTarget && status?.Events is { Conjoined: false } && scope.TenantId is { Length: > 0 }
+                ? LinqQueryService.EventsWholeDatabaseRefusedMessage
+                : SelectedType is { Conjoined: false } && scope.TenantId is { Length: > 0 }
+                    ? LinqQueryService.WholeDatabaseRefusedMessage
+                    : WritePolicyRefusal.For(nameof(StudioCapability.RunLinqQueries));
         }
         catch (KeyNotFoundException exception)
         {
@@ -713,6 +861,37 @@
         List<(string Text, bool Warning)> chips = [];
         MartenQueryScope scope = result.Scope ?? MartenQueryScope.Plain;
 
+        if (result.EventScope is { } events)
+        {
+            if (events.CrossTenant)
+            {
+                chips.Add(("all tenants", true));
+            }
+            else if (events.TenantId is { Length: > 0 } eventTenant)
+            {
+                chips.Add(("tenant " + eventTenant, false));
+            }
+
+            chips.Add(events.Archived switch
+            {
+                ArchivedFilter.Only => ("archived only", true),
+                ArchivedFilter.Include => ("live and archived", true),
+                _ => ("live only", false),
+            });
+
+            if (events.WholeDatabase)
+            {
+                chips.Add(("whole database", true));
+            }
+
+            if (result.BudgetSpent)
+            {
+                chips.Add(("text budget spent", true));
+            }
+
+            return chips;
+        }
+
         if (scope.CrossTenant)
         {
             chips.Add(("all tenants", true));
@@ -749,7 +928,10 @@
 
         string note = "This is the statement Marten built from your LINQ, character for character, and the one that ran - " +
                       "inside the studio's read-only transaction, never through Marten's own execution path, which would " +
-                      "also create the table if it were missing. The tenant, soft-delete and subclass terms are Marten's.";
+                      "also create the table if it were missing. " +
+                      (result.EventScope is null
+                          ? "The tenant, soft-delete and subclass terms are Marten's."
+                          : "The tenant and archive terms are Marten's.");
 
         return result.Parameters.Count == 0
             ? note
@@ -775,6 +957,54 @@
     {
         List<string> messages = [];
         MartenQueryScope scope = result.Scope ?? MartenQueryScope.Plain;
+
+        if (result.EventScope is { } events)
+        {
+            if (events.CrossTenant)
+            {
+                messages.Add("No tenant is selected: Marten read every tenant's events (AnyTenant()).");
+            }
+            else if (events.TenantId is { Length: > 0 } eventTenant)
+            {
+                messages.Add("Marten narrowed this to tenant " + eventTenant + ".");
+            }
+
+            if (events.WholeDatabase)
+            {
+                messages.Add(
+                    "This store's events are not divided by tenant: the query read the whole database's event log, whatever " +
+                    "tenant is selected.");
+            }
+
+            messages.Add(events.Archived switch
+            {
+                ArchivedFilter.Include => "Archived events are included (Marten's MaybeArchived()); each one carries an 'archived' flag.",
+                ArchivedFilter.Only => "Only archived events are shown.",
+                _ => "Archived events are left out, as Marten leaves them out by default.",
+            });
+
+            if (events.PerTenantSequences)
+            {
+                messages.Add("Sequences are counted per tenant here, so across tenants the default order is by timestamp.");
+            }
+
+            if (result.BudgetSpent)
+            {
+                messages.Add("Some events are listed without their body: this page's budget for event text was spent.");
+            }
+
+            if (result.Refusal is { } eventRefusal)
+            {
+                messages.Add(eventRefusal.Message);
+            }
+
+            if (result.Error is { } eventError)
+            {
+                messages.Add(eventError.SqlState + ": " + eventError.Message);
+            }
+
+            return messages;
+        }
 
         if (scope.CrossTenant)
         {
@@ -806,6 +1036,43 @@
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// The scope an event's links carry: the active one, with the tenant replaced by the row's own when the query read across
+    /// tenants - the stream page re-validates any scope through <see cref="StudioState.SetScopeAsync" />.
+    /// </summary>
+    private StudioScope? EventRowScope(LinqEventScope eventScope, LinqEventRow row) =>
+        State.ActiveScope is { } active && eventScope.CrossTenant && row.TenantId is { Length: > 0 } rowTenant
+            ? new StudioScope(active.StoreKey, active.DatabaseId, rowTenant)
+            : State.ActiveScope;
+
+    /// <summary>The optional columns an event row carries, as the Feed's chips name them.</summary>
+    private static Dictionary<string, string?> EventMetadata(LinqEventRow row)
+    {
+        var metadata = new Dictionary<string, string?>(StringComparer.Ordinal);
+
+        if (row.TenantId is { Length: > 0 })
+        {
+            metadata["tenant_id"] = row.TenantId;
+        }
+
+        if (row.CorrelationId is { Length: > 0 })
+        {
+            metadata["correlation_id"] = row.CorrelationId;
+        }
+
+        if (row.CausationId is { Length: > 0 })
+        {
+            metadata["causation_id"] = row.CausationId;
+        }
+
+        if (row.UserName is { Length: > 0 })
+        {
+            metadata["user_name"] = row.UserName;
+        }
+
+        return metadata;
     }
 
     /// <summary>The line an ordering error is on and a caret under it, the way the editor points at a predicate's.</summary>

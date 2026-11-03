@@ -84,7 +84,7 @@ public class StorageEnsuringCallTests
         "StreamPagedJsonArray", "ToJsonArray", "ToJsonFirst", "ToJsonFirstOrDefault", "ToJsonSingle", "ToJsonSingleOrDefault",
         "ToPagedListAsync", "ToJsonPageByCursorAsync", "AggregateToAsync", "AggregateToManyAsync",
         "ToCommand", "ToPreviewCommand", "ExplainAsync",
-        "QueryAllRawEvents", "QueryRawEventDataOnly",
+        "QueryAllRawEvents", "QueryRawEventDataOnly", "QueryRawEvents",
 
         // The session.
         "LoadManyAsync", "CheckExistsAsync", "MetadataForAsync", "CreateBatchQuery", "SaveChangesAsync", "SaveChanges",
@@ -200,6 +200,10 @@ public class StorageEnsuringCallTests
         new("src/MartenStudio/Services/Query/LinqQueryComposer.cs", "Query",
             ["ComposeCore"],
             "F7: the LINQ source the visitor's predicate is composed onto - built by MartenLinqCommand without "
+            + "EnsureStorageExists and run by the studio, never by Marten"),
+        new("src/MartenStudio/Services/Query/LinqQueryComposer.cs", "QueryRawEvents",
+            ["ComposeEvents"],
+            "LEV: the event LINQ source the visitor's predicate is composed onto - built by MartenLinqCommand without "
             + "EnsureStorageExists and run by the studio, never by Marten"),
     ];
 
@@ -415,6 +419,7 @@ public class StorageEnsuringCallTests
     [InlineData("await resolved.Database.EnsureStorageExistsAsync(typeof(Order), token);", "EnsureStorageExistsAsync")]
     [InlineData("await session.SaveChangesAsync(token).ConfigureAwait(false);", "SaveChangesAsync")]
     [InlineData("var raw = session.Events.QueryAllRawEvents();", "QueryAllRawEvents")]
+    [InlineData("var raw = ((IReadOnlyEventStore) session.Events).QueryRawEvents();", "QueryRawEvents")]
     [InlineData("var page = await queryable.ToPagedListAsync(1, 50, token);", "ToPagedListAsync")]
     [InlineData("string? json = await session.Json.FindByIdAsync<Order>(id, token);", "FindByIdAsync")]
     [InlineData("bool found = await session.Json.StreamById<Order>(id, stream, token);", "StreamById")]

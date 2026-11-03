@@ -14,12 +14,19 @@
 @inject IJSRuntime JsRuntime
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IOptions<MartenStudioOptions> Options
+@inject StudioCapabilityGuard Capabilities
 
 <PageTitle>Event feed</PageTitle>
 
 <div class="ms-page" id="ms-feed-top">
     <div class="ms-page-header">
         <h1 class="ms-page-title">Event feed</h1>
+
+        @if (Capabilities.IsEnabled(StudioCapability.RunLinqQueries) && State.ActiveScope is not null)
+        {
+            @* 1.1: the feed's own filters, written as a LINQ predicate in the Query page's boxes. A link only - it never runs. *@
+            <a class="ms-button ms-feed-linq-link" href="@LinqHref()">Query these events with LINQ</a>
+        }
     </div>
 
     <EventFilters AvailableTypes="availableTypes"
@@ -826,6 +833,20 @@
                 new("after", EventLinks.Number(after)),
                 new("follow", after is null ? EventLinks.Flag(EventLinks.ReadFlag(Follow)) : null),
             ]);
+
+    /// <summary>
+    /// The Query page's LINQ tab over the event log, prefilled with what this feed's filters say (1.1): a link, never a run.
+    /// </summary>
+    private string LinqHref() =>
+        EventLinks.ToLinqQuery(
+            Options.Value,
+            State.ActiveScope,
+            EventLinks.FeedPredicate(
+                shape?.StreamIdentity ?? JasperFx.Events.StreamIdentity.AsGuid,
+                Stream,
+                SelectedTypes,
+                EventFilters.ResolveFrom(Range, DateTimeOffset.UtcNow)),
+            ArchivedFlag ? MartenStudio.Services.Query.ArchivedFilter.Include : MartenStudio.Services.Query.ArchivedFilter.Exclude);
 
     private string StreamHref(string streamId) =>
         EventLinks.ToStream(Options.Value, State.ActiveScope, streamId);

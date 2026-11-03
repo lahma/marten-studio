@@ -4,7 +4,9 @@ namespace MartenStudio.Services.Query;
 
 /// <summary>
 /// LINQ mode on the Query page: a typed predicate over one document type, parsed under the studio's
-/// allow-list and translated by Marten's own <c>Query&lt;T&gt;()</c> (F7).
+/// allow-list and translated by Marten's own <c>Query&lt;T&gt;()</c> (F7) - or, from 1.1, a typed predicate over the
+/// event log, translated by Marten's own <c>IReadOnlyEventStore.QueryRawEvents()</c>, chosen by
+/// <see cref="LinqQueryRequest.Target" /> and never by an alias.
 /// </summary>
 /// <remarks>
 /// <para>

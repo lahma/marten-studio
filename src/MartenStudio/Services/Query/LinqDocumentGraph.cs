@@ -98,13 +98,22 @@ internal sealed class LinqDocumentGraph
     private readonly Structure structure;
     private readonly IReadOnlySet<Type> hidden;
     private readonly Lazy<IReadOnlySet<string>> names;
+    private readonly IReadOnlyList<string>? offeredRootMembers;
+    private readonly HashSet<string>? offeredRootSet;
 
-    private LinqDocumentGraph(Structure structure, IReadOnlySet<Type> hidden)
+    private LinqDocumentGraph(Structure structure, IReadOnlySet<Type> hidden, IReadOnlyList<string>? offeredRootMembers = null)
     {
         this.structure = structure;
         this.hidden = hidden;
+        this.offeredRootMembers = offeredRootMembers;
+        offeredRootSet = offeredRootMembers is null ? null : new HashSet<string>(offeredRootMembers, StringComparer.Ordinal);
         names = new Lazy<IReadOnlySet<string>>(ReachableNames, LazyThreadSafetyMode.None);
     }
+
+    /// <summary>
+    /// Whether this is the event graph (1.1): the root restricted to the members one store's event options offer.
+    /// </summary>
+    public bool IsEvents => offeredRootMembers is not null;
 
     /// <summary>The document type the predicate is about.</summary>
     public Type Root => structure.Root;
@@ -121,7 +130,7 @@ internal sealed class LinqDocumentGraph
     public IReadOnlySet<string> MemberNames => names.Value;
 
     /// <summary>A few of the root's own scalar members, for the predicate box's hint.</summary>
-    public IReadOnlyList<string> HintMembers => structure.Hint;
+    public IReadOnlyList<string> HintMembers => offeredRootMembers ?? structure.Hint;
 
     /// <summary>
     /// The graph for <paramref name="root" />, with <paramref name="hiddenDocumentTypes" /> left out.
@@ -137,6 +146,18 @@ internal sealed class LinqDocumentGraph
         ArgumentNullException.ThrowIfNull(hiddenDocumentTypes);
 
         return new LinqDocumentGraph(Structures.GetOrAdd(root, Build), hiddenDocumentTypes);
+    }
+
+    /// <summary>
+    /// The graph of <c>IEvent</c> (1.1), its root restricted to <paramref name="offered" />: a root member not on the
+    /// list is not in the graph, so the screen cannot bind it and the guard refuses it, whatever else <c>IEvent</c> has.
+    /// </summary>
+    /// <param name="offered">The members <see cref="LinqEventMembers" /> offers this store, in the hint's order.</param>
+    public static LinqDocumentGraph ForEvents(IReadOnlyList<string> offered)
+    {
+        ArgumentNullException.ThrowIfNull(offered);
+
+        return new LinqDocumentGraph(Structures.GetOrAdd(typeof(JasperFx.Events.IEvent), Build), new HashSet<Type>(), offered);
     }
 
     /// <summary>
@@ -156,6 +177,7 @@ internal sealed class LinqDocumentGraph
         allowed = null!;
 
         if (IsHidden(owner)
+            || (offeredRootSet is not null && owner == structure.Root && !offeredRootSet.Contains(member.Name))
             || !structure.Members.TryGetValue(owner, out Dictionary<string, LinqMember>? own)
             || !own.TryGetValue(member.Name, out LinqMember? candidate)
             || candidate.Member.Module != member.Module
@@ -436,6 +458,11 @@ internal sealed class LinqDocumentGraph
             foreach (LinqMember member in own.Values)
             {
                 if (IsHidden(member.MemberType) || (member.ElementType is { } element && IsHidden(element)))
+                {
+                    continue;
+                }
+
+                if (offeredRootSet is not null && type == structure.Root && !offeredRootSet.Contains(member.Member.Name))
                 {
                     continue;
                 }

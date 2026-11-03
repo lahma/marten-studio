@@ -13,6 +13,8 @@ The studio parses it with JasperFx's Dynamic LINQ (`JasperFx.Linq.DynamicQuery`)
 soft-delete filter, a subclass's `mt_doc_type` filter, enum storage and duplicated fields are therefore Marten's,
 exactly as your application gets them.
 
+Since 1.1 the same tab also queries the event log: see [Events](#events).
+
 The page shows the rows, the statement Marten built, its plan (`EXPLAIN`, never `ANALYZE`), and index advice: the
 member each condition reads, whether an index can serve it, and the `StoreOptions` line that would declare one,
 such as `options.Schema.For<Order>().Duplicate(x => x.Customer.Name);`.
@@ -150,6 +152,110 @@ A visitor the policies refuse the plan still gets the rows. The panel says why t
   database as a whole (`TenantId = null`), because that is the read it was.
 - A refused plan is its own entry, `LinqExplain`, recorded against `(store, database, null)`.
 - The read and its plan each run in a `ReadOnlySqlSession`, so both are counted in the Health page's studio-cost line.
+
+## Events
+
+Since 1.1 the same tab queries the **event log**. Pick **Events (mt_events)** in the **Query** list, or press **Query these
+events with LINQ** on the Event feed, which carries the feed's stream, type and time filters over as a predicate (a link
+only: it fills the boxes and never runs).
+
+```text
+EventTypeName == "order_placed" && Timestamp > "2026-11-01T00:00:00Z"
+Timestamp desc
+```
+
+The studio calls `IReadOnlyEventStore.QueryRawEvents()` - the `IQueryable<IEvent>` your own code gets - on the same
+pinned session documents use, **with no tenant argument** (the overload with one opens a session of its own, see the threat
+model), applies your predicate to it, and runs the SQL Marten builds. The tenant filter and the archive filter are Marten's.
+It is the same capability (`RunLinqQueries`), the same gate and the same audit as documents; nothing new has to be granted.
+
+### Members
+
+The members are a closed list computed from `StoreOptions.Events`: the ones Marten keeps a column for. Anything else
+`IEvent` has is read by Marten from the event's JSON body and matches nothing, so the page does not offer it. The
+**Not offered here** note under the boxes says why for the store you are looking at.
+
+| Member | Column | Offered when |
+|---|---|---|
+| `Sequence` | `seq_id` | always |
+| `Timestamp` | `timestamp` | always (a date with an offset is that instant; with none, UTC) |
+| `EventTypeName` | `type` | always |
+| `StreamId` | `stream_id` | streams are identified by Guid |
+| `StreamKey` | `stream_id` | streams are identified by string |
+| `Version` | `version` | always |
+| `TenantId` | `tenant_id` | not when events are conjoined and a tenant is selected: Marten already narrows to it |
+| `CorrelationId` | `correlation_id` | `Events.MetadataConfig.CorrelationIdEnabled` |
+| `CausationId` | `causation_id` | `Events.MetadataConfig.CausationIdEnabled` |
+| `UserName` | `user_name` | `Events.MetadataConfig.UserNameEnabled` |
+| `DotNetTypeName` | `mt_dotnet_type` | always |
+| `Id` | `id` | always |
+
+Not offered, each with the sentence the page shows:
+
+- `IsArchived`: "Use the Archived selector: Marten drops its own archive filter when a predicate names IsArchived."
+- The other stream member: "This store identifies streams by {Guid|string}; use {StreamId|StreamKey}."
+- `CorrelationId`, `CausationId`, `UserName` where they are not recorded: "Not recorded by this store:
+  StoreOptions.Events.MetadataConfig.CorrelationIdEnabled is false."
+- `TenantId` where a tenant is selected on conjoined events: "Marten already narrows this query to tenant {t}."
+- `IsSkipped`: "Marten reads it from the event body, not the is_skipped column."
+- `AggregateTypeName`: "Not stored in a column."
+- `Data`, `Headers`, `Tags`, `EventType`: "The event body and headers are not queryable here: see docs/linq-mode.md#events."
+
+The dialect is the documents' (`==`, `!=`, comparisons, `and`, `or`, `not`, `StartsWith`, `EndsWith`, `Contains`, `ToLower`,
+`in ("a", "b")` on text, `== null` on the optional metadata). `StreamId in ("…", "…")` is not accepted by Dynamic LINQ for a
+Guid; write `StreamId == "…" or StreamId == "…"`. Marten refuses `EventTypeName.Length` and the page shows Marten's refusal.
+
+**Event data (the body) is not queryable, deliberately.** `IEvent.Data` is `object`, so there is no expression to write.
+A typed body predicate needs `QueryEventData<T>()`, which registers the event type on the host's `EventGraph` from a read
+path; it would also read a JSON key that an event stored in an older shape does not have, and silently drop it. Filtering on
+the body is unindexed JSON extraction over the biggest table in the store anyway.
+
+### Archived, order and paging
+
+- **Archived** defaults to **Live events only**: Marten's own `is_archived = FALSE` stays, exactly as for your code's
+  `QueryRawEvents()`. **Live and archived** adds Marten's `MaybeArchived()`; **Archived only** adds `IsArchived`. The
+  archive is not an access boundary, so the selector needs no extra permission. It travels in the address (`archived=include|only`).
+- **The default order is newest first** (`Sequence desc`), and a typed ordering is broken by it. Across tenants whose
+  sequences are per tenant (`Events.UseTenantPartitionedEvents`) a counter orders nothing between tenants, so the default is
+  `Timestamp desc` and the tenant is the last tie-breaker; the ordering box's placeholder names whichever applies. Pages are
+  disjoint either way, and rows are keyed by position, never by sequence.
+- Paging is the documents': `OFFSET`, one row past the page, stopping at row 10,000, no count.
+- Each event is shown with the Feed's own card. The body is read as text and capped (`MaxInlineDocumentBytes` per event,
+  8 MiB per page); an event past either is listed with a note and its stream's page. The binary payload (`bdata`) is
+  asked only whether it is null, and `headers` is not read at all.
+- There is **no index advice and no What if?** for events: their indexes are Marten's own, with no `StoreOptions` line to
+  suggest. A what-if over the events is audited as a failed `LinqWhatIf` after the same gate.
+
+### Who may run what, for events
+
+The events' tenancy is `StoreOptions.Events.TenancyStyle`, not any document's.
+
+| Events | Scope | Marten's own predicate | Asked as `(store, database, tenant)` |
+|---|---|---|---|
+| Conjoined | a tenant | `tenant_id = :p`, bound to it | `(s, db, t)`: store policy, then write policy with `RunLinqQueries` |
+| Conjoined | none | none; the studio adds `AnyTenant()` | `(s, db, null)` |
+| Single (not divided by tenant) | a tenant | none | `(s, db, t)`, then `(s, db, null)` unless the database is exclusively that tenant's |
+| Single | none | none | `(s, db, null)` |
+| Separate database per tenant | a tenant | none; the session is pinned to that tenant's database | as the row above: not asked as the whole database when it is exclusively the tenant's |
+
+A tenant-only visitor on single-tenanted events is therefore refused with: "Your account may not run LINQ queries against
+this database as a whole, and this store's events are not divided by tenant, so a query reads the whole database's event
+log, not only the tenant you selected. The event feed lists your tenant's events." The studio does not narrow such events
+by their `tenant_id` column itself: that would invent tenancy semantics Marten does not have, and would hide events
+appended under `*DEFAULT*` in a database-per-tenant store. The plan is always asked as `(s, db, null)`.
+
+A database whose event tables were never created answers: "This database has no event store tables yet (`schema.mt_events`).
+Nothing has appended an event here, and LINQ mode never creates them." The role in `SqlConsoleRole`, if set, needs `SELECT`
+on `mt_events`.
+
+### Audit, for events
+
+An event run is recorded as **`LinqEventQuery`** (run, success and failure) and a refused plan as **`LinqEventExplain`**
+(against `(store, database, null)`). The ring's target is `events: <predicate> order by <ordering>`, with
+`(archived: include|only)` when the selector is not the default; the capability refusal records `(events)` and no text.
+A success is recorded once per signature (store, database, tenant, `(events)`, predicate, ordering, archived choice).
+Events 9260 to 9263 carry the alias `(events)`; there is no new event id. Correlation ids and user names are the typical
+literals in an event predicate, and they are in the ring and the log like any other literal (see above).
 
 ## Error text
 
@@ -368,7 +474,40 @@ It leaves out:
 A refusal never names a type the graph leaves out or the host hides. It says "a type LINQ mode does not query"
 instead, because the refusal is shown to whoever typed the text.
 
+#### The event graph (1.1)
+
+The same three walls, with a different graph. `IEvent` is an interface Marten maps only partly, so reflection alone would
+offer members that mean something else:
+
+- **The event graph is a closed list from `IReadOnlyStoreOptions.Events`**, not reflection alone
+  (`LinqEventMembers`). `LinqDocumentGraph.ForEvents` restricts the root, and the screen and the guard both read it, so one
+  restriction holds both walls. `Data`, `EventType`, `Headers` and `Tags` are already outside any graph (`object`,
+  `System.Type`, a dictionary, a JasperFx collection).
+- **`QueryRawEvents(tenantId)` is never called.** For a tenant other than the session's, Marten returns
+  `_store.QuerySession(tenantId).Events.QueryAllRawEvents()`: a session that ignores the database the studio resolved
+  (hard rule 15), throws on a multi-tenanted-databases store, and is never disposed. A convention test
+  (`QueryRawEventsTakesNoTenantTests`) holds every call in `src/` to an empty argument list.
+- **Two run-time checks fail closed.** Before the statement is built, `MartenLinqCommand.IsOnSession` requires that the
+  queryable belongs to the studio's own session (by reference), or the events target is off: "This Marten's
+  `QueryRawEvents()` did not return a query on the studio's own session, so LINQ mode over events is off." After it is
+  built, a statement whose predicate or ordering reads `d.data` is refused: "Marten reads part of this query from the
+  event's JSON body rather than a column; LINQ mode over events filters and orders on the event's columns only." The closed
+  list means the second never fires today; it is there for a newer Marten that moves a member out of its `EventQueryMapping`,
+  and `LinqEventMembersTests` fails at the next latest-tested bump first.
+- **`TenantId` and `IsArchived` are withheld, and why.** `IsArchived` because Marten *replaces* its own archive filter when
+  a predicate names it. `TenantId`, when a tenant is selected on conjoined events, because Marten already narrows the query
+  and a Marten that dropped its tenant term when a predicate named the column could otherwise widen it. At this Marten it
+  does not (the tenant term survives `==`, `!=`, `not`, `or` and `in`), and a test pins that.
+- **`AnyTenant()`, `TenantIsOneOf()`, `MaybeArchived()` and `HasTag()` are extension methods**: the screen refuses a method
+  with no receiver and Dynamic LINQ has no custom types.
+
 ### What remains, and why it is accepted
+
+- **A hidden document type's events stay visible**, as in the Event feed: the studio has no event-type visibility, and
+  `IsDocumentTypeVisible` hides document types. LINQ over events widens nothing the feed shows, and narrows it with a stronger
+  gate (`RunLinqQueries`, asked like a write).
+- **The binary payload and the headers are transferred and skipped, never kept.** They are part of the statement Marten
+  builds; sequential access skips them, and the page is bounded by its size.
 
 - **The parse runs a few framework conversions on literals.** These are Guid, the date and time types, the numbers,
   enum parsing, a `Uri` object built from a string, and a string's own indexer on a string literal. Each only parses
@@ -429,6 +568,17 @@ instead, because the refusal is shown to whoever typed the text.
   - `ToCommand` reaches for the database to create the table, and the studio's builder does not;
   - with nothing to create, both build the same statement;
   - Marten binds the session's tenant.
+- For the events (1.1):
+  - `LinqEventMembersTests` pins Marten's `EventQueryMapping`: every offered member's predicate and ordering builds to a
+    column, every withheld one is a body read or replaces the archive filter, and Marten's tenant term survives a predicate
+    that names `TenantId`;
+  - `LinqEventScreenTests` and `LinqEventHostileInputTests` run the event graph through the screen, the parse and the guard,
+    and the hostile list three ways;
+  - `QueryRawEventsTakesNoTenantTests` and `StorageEnsuringCallTests` hold the call sites;
+  - `EventsApiSurfaceTests` pins `QueryRawEvents()` and the session it returns;
+  - `LinqEventQueryServiceTests` and `LinqEventPanelTests` cover the gate, the audit and the page;
+  - `LinqEventQueryLiveTests` and its siblings run against a real Postgres: conjoined, single-tenanted, separate databases,
+    per-tenant sequences, string identity, and a database with no event tables, which is still without them afterwards.
 - `LinqQueryLiveTests` runs against a real Postgres. It covers:
   - tenant isolation, soft deletes and hierarchies;
   - no table created for a type nothing has stored;
@@ -445,3 +595,5 @@ instead, because the refusal is shown to whoever typed the text.
 - **Saved and recent queries do not cover LINQ mode yet.** A LINQ query is two texts and the saved-query store keeps
   one. The address bar keeps the query (`?mode=linq&type=…&predicate=…&orderby=…`).
 - **No `@n` arguments.** Values are literals, so `in @0` is written `in ("a", "b")`.
+- **No predicates on an event's body.** A follow-up may offer LINQ over one *registered* event type's body, with the
+  upcaster caveat on screen.

@@ -1,6 +1,31 @@
+using JasperFx.Events;
+
 using PostgresStudio.Services.Query;
 
 namespace MartenStudio.Services.Query;
+
+/// <summary>What a LINQ query reads: a document type, or the event log through Marten's <c>QueryRawEvents()</c> (1.1).</summary>
+internal enum LinqQueryTarget
+{
+    /// <summary>One document type, picked by alias.</summary>
+    Documents,
+
+    /// <summary>The event log (<c>mt_events</c>). The request's alias is not read: the target decides.</summary>
+    Events,
+}
+
+/// <summary>What to do about archived events, through Marten's own filters (1.1).</summary>
+internal enum ArchivedFilter
+{
+    /// <summary>Leave them out: Marten's own <c>is_archived = FALSE</c> stays, as it does for the host's <c>QueryRawEvents()</c>.</summary>
+    Exclude,
+
+    /// <summary>Live and archived, through Marten's <c>MaybeArchived()</c>.</summary>
+    Include,
+
+    /// <summary>Archived only, through <c>IsArchived</c> composed by the studio.</summary>
+    Only,
+}
 
 /// <summary>Which half of a LINQ query a refusal is about.</summary>
 internal enum LinqClause
@@ -76,6 +101,11 @@ internal sealed record LinqRefusal(LinqStage Stage, LinqClause Clause, string Me
 /// Ignored on a collection that is not soft-deleted.
 /// </param>
 /// <param name="IncludePlan">Whether to fetch the plan with <c>EXPLAIN</c> (never <c>ANALYZE</c>).</param>
+/// <param name="Target">
+/// What is queried (1.1). The service decides on this field, never on an alias string: for
+/// <see cref="LinqQueryTarget.Events" /> the alias is replaced by <see cref="LinqQueryService.EventsAlias" />.
+/// </param>
+/// <param name="Archived">What to do about archived events; read only when <paramref name="Target" /> is the events.</param>
 internal sealed record LinqQueryRequest(
     string Alias,
     string? Where,
@@ -83,7 +113,9 @@ internal sealed record LinqQueryRequest(
     int? PageSize = null,
     int Offset = 0,
     DeletedFilter Deleted = DeletedFilter.Exclude,
-    bool IncludePlan = true);
+    bool IncludePlan = true,
+    LinqQueryTarget Target = LinqQueryTarget.Documents,
+    ArchivedFilter Archived = ArchivedFilter.Exclude);
 
 /// <summary>One document LINQ mode returned.</summary>
 /// <param name="Id">The document's id as text, so it can go into a link; empty when Marten did not select it.</param>
@@ -101,6 +133,74 @@ internal sealed record LinqQueryRow(
     string? TenantId = null,
     bool? IsDeleted = null,
     string? NotInlined = null);
+
+/// <summary>One event LINQ mode returned (1.1). The binary payload and the headers are never read.</summary>
+/// <param name="Sequence">The global sequence. Not unique under per-tenant sequences: rows are keyed by position.</param>
+/// <param name="Id">The event's own id.</param>
+/// <param name="StreamId">The stream's id or key as text, either identity.</param>
+/// <param name="Version">The version within its stream.</param>
+/// <param name="EventTypeName">The event type name.</param>
+/// <param name="DotNetTypeName">The .NET type name the store recorded.</param>
+/// <param name="Timestamp">When it was appended.</param>
+/// <param name="TenantId">The row's tenant.</param>
+/// <param name="IsArchived">Whether its stream is archived.</param>
+/// <param name="CorrelationId">The correlation id, when the store records it.</param>
+/// <param name="CausationId">The causation id, when the store records it.</param>
+/// <param name="UserName">The user name, when the store records it.</param>
+/// <param name="HasBinary">Whether the row carries a binary payload (only its nullness is read).</param>
+/// <param name="Json">The body as Postgres holds it; <see langword="null" /> when it was not inlined.</param>
+/// <param name="NotInlined">Why <paramref name="Json" /> is missing.</param>
+internal sealed record LinqEventRow(
+    long Sequence,
+    string Id,
+    string StreamId,
+    long Version,
+    string EventTypeName,
+    string? DotNetTypeName,
+    DateTimeOffset? Timestamp,
+    string? TenantId,
+    bool IsArchived,
+    string? CorrelationId,
+    string? CausationId,
+    string? UserName,
+    bool HasBinary,
+    string? Json,
+    string? NotInlined);
+
+/// <summary>What the tenant and archive terms of an event query meant, so the page can say it (1.1).</summary>
+/// <param name="TenantId">The tenant Marten narrowed the query to, when it did.</param>
+/// <param name="CrossTenant">Whether Marten was told to read every tenant (<c>AnyTenant()</c>).</param>
+/// <param name="Archived">What was done about archived events.</param>
+/// <param name="WholeDatabase">Whether the events are not divided by tenant, so the query read the whole database's log.</param>
+/// <param name="PerTenantSequences">Whether sequences are counted per tenant, so two rows can share one.</param>
+internal sealed record LinqEventScope(
+    string? TenantId,
+    bool CrossTenant,
+    ArchivedFilter Archived,
+    bool WholeDatabase,
+    bool PerTenantSequences);
+
+/// <summary>An event member LINQ mode does not offer, and the sentence that says why.</summary>
+/// <param name="Name">The member, or the members the sentence covers together.</param>
+/// <param name="Reason">One sentence.</param>
+internal sealed record LinqWithheldMember(string Name, string Reason);
+
+/// <summary>What the Query page needs to draw the events target (1.1).</summary>
+/// <param name="Conjoined">Whether the store's events are conjoined-tenanted.</param>
+/// <param name="PerTenantSequences">Whether sequences are counted per tenant.</param>
+/// <param name="StreamIdentity">Whether streams are identified by Guid or by string.</param>
+/// <param name="Members">The members a predicate may name, in the hint's order.</param>
+/// <param name="Withheld">Each member a visitor might expect that is not offered here, with why.</param>
+/// <param name="DefaultOrdering">The ordering used when the box is empty, as the box's placeholder spells it.</param>
+/// <param name="EventsSchema">The schema the event tables live in.</param>
+internal sealed record LinqEventTargetInfo(
+    bool Conjoined,
+    bool PerTenantSequences,
+    StreamIdentity StreamIdentity,
+    IReadOnlyList<string> Members,
+    IReadOnlyList<LinqWithheldMember> Withheld,
+    string DefaultOrdering,
+    string EventsSchema);
 
 /// <summary>One parameter of the statement Marten built, described without its value (D14).</summary>
 /// <param name="Name">The parameter's name as the statement spells it (<c>:p0</c>).</param>
@@ -186,6 +286,15 @@ internal sealed record LinqQueryResult(
     /// <summary>X2: what a what-if came to, for a run made to compare plans rather than to read rows.</summary>
     public WhatIfResult? WhatIf { get; init; }
 
+    /// <summary>1.1: the events, for a run over the event log; <see cref="Rows" /> is empty then.</summary>
+    public IReadOnlyList<LinqEventRow> EventRows { get; init; } = [];
+
+    /// <summary>1.1: what the tenant and archive terms of an event run meant; <see langword="null" /> for documents.</summary>
+    public LinqEventScope? EventScope { get; init; }
+
+    /// <summary>How many rows came back, documents or events.</summary>
+    public int RowCount => Rows.Count + EventRows.Count;
+
     /// <summary>Whether the query ran and Postgres was happy with it.</summary>
     public bool Succeeded => Refusal is null && Error is null;
 
@@ -253,6 +362,9 @@ internal sealed record LinqModeStatus(
     bool MayRun = false,
     bool MayExplain = false)
 {
+    /// <summary>1.1: the events target, always offered when the mode is available; computed from options, never by connecting.</summary>
+    public LinqEventTargetInfo? Events { get; init; }
+
     /// <summary>Whether the mode can be used at all.</summary>
     public bool IsAvailable => Availability == LinqAvailability.Available;
 }

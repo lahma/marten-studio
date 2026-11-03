@@ -7,6 +7,7 @@ using System.Text.Json;
 
 using JasperFx.MultiTenancy;
 
+using Marten.Events;
 using Marten.Schema;
 using Marten.Services;
 using Marten.Storage;
@@ -119,6 +120,31 @@ internal sealed class LinqQueryService : ILinqQueryService
     /// <summary>What the audit ring calls a plan the policies refused.</summary>
     internal const string LinqExplainAction = "LinqExplain";
 
+    /// <summary>What the audit ring calls an event LINQ query (1.1): a run over the event log, success and failure.</summary>
+    internal const string LinqEventQueryAction = "LinqEventQuery";
+
+    /// <summary>What the audit ring calls a plan of an event query the policies refused (1.1).</summary>
+    internal const string LinqEventExplainAction = "LinqEventExplain";
+
+    /// <summary>
+    /// The alias an event run carries in the ring and in events 9260 to 9263 (1.1): the service decides on
+    /// <see cref="LinqQueryRequest.Target" />, never on this string, and a visitor's alias is never recorded for an event run.
+    /// </summary>
+    internal const string EventsAlias = "(events)";
+
+    /// <summary>What a visitor is told when the database-wide question for events nothing divides by tenant is refused (1.1).</summary>
+    internal const string EventsWholeDatabaseRefusedMessage =
+        "Your account may not run LINQ queries against this database as a whole, and this store's events are not divided " +
+        "by tenant, so a query reads the whole database's event log, not only the tenant you selected. The event feed " +
+        "lists your tenant's events.";
+
+    /// <summary>What a what-if says of the events (1.1): the studio imagines document indexes only.</summary>
+    internal const string EventsWhatIfMessage = "Not compared: What if? compares document indexes.";
+
+    /// <summary>What Postgres' 42P01 means for an event run: the event tables were never created, and LINQ mode never creates them.</summary>
+    internal static string NoEventTablesMessage(string schema) =>
+        $"This database has no event store tables yet ({schema}.mt_events). Nothing has appended an event here, and LINQ mode never creates them.";
+
     /// <summary>What a visitor is told when a plan is refused them.</summary>
     internal const string PlanRefusedMessage =
         "No plan: a plan describes the table as a whole - its estimates count every tenant's rows, and a table " +
@@ -230,7 +256,12 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         bool mayRun = await authorization.IsAuthorizedAsync(named, StudioCapability.RunLinqQueries, cancellationToken).ConfigureAwait(false);
 
-        return new LinqModeStatus(LinqAvailability.Available, null, types, mayRun, mayRun && await MayExplainAsync(named, cancellationToken).ConfigureAwait(false));
+        // 1.1: the events are always offered, and nothing about them needs a connection - the members come from the
+        // store's options, so a database whose event tables were never created is answered at run time, not hidden here.
+        return new LinqModeStatus(LinqAvailability.Available, null, types, mayRun, mayRun && await MayExplainAsync(named, cancellationToken).ConfigureAwait(false))
+        {
+            Events = LinqEventMembers.Describe(resolved.Store.Options.Events, resolved.TenantId),
+        };
     }
 
     // ---------------------------------------------------------------------------------------------------
@@ -294,7 +325,8 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (StudioNotAuthorizedException)
         {
-            return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy, WholeDatabaseRefusedMessage);
+            return WhatIfResult.Refused(index, DatabaseRefusal.WritePolicy,
+                request.Target == LinqQueryTarget.Events ? EventsWholeDatabaseRefusedMessage : WholeDatabaseRefusedMessage);
         }
         catch (Exception exception) when (exception is KeyNotFoundException or StudioStoreUnavailableException)
         {
@@ -305,6 +337,12 @@ internal sealed class LinqQueryService : ILinqQueryService
     private async Task<Run> NewRunAsync(StudioScope scope, LinqQueryRequest request)
     {
         MartenStudioOptions value = options.Value;
+
+        // An event run is identified by its target and by nothing the visitor typed: whatever alias came with it is dropped.
+        if (request.Target == LinqQueryTarget.Events)
+        {
+            request = request with { Alias = EventsAlias, Deleted = DeletedFilter.Exclude };
+        }
 
         return new Run(
             scope,
@@ -359,27 +397,43 @@ internal sealed class LinqQueryService : ILinqQueryService
         // 3. The type: a visible root or a visible subclass, by alias. A hidden one is the same answer as none - and
         //    so is one the host's IsDocumentTypeVisible threw for, which fails closed rather than escaping unaudited.
         //    The hidden set is taken here too, for the same reason: it asks the same delegate of every type.
-        LinqTarget? found;
-        IReadOnlySet<Type> hidden;
+        //    1.1: the events are a target of their own, always present - there is no alias to look up, no visibility
+        //    delegate to ask, and their tenancy is the event store's, not any document mapping's.
+        bool eventsTarget = request.Target == LinqQueryTarget.Events;
+        LinqTarget? target = null;
+        DocumentTableInfo? table = null;
+        IReadOnlySet<Type> hidden = new HashSet<Type>();
+        bool conjoined;
 
-        try
+        if (eventsTarget)
         {
-            found = FindType(resolved, request.Alias);
-            hidden = HiddenDocumentTypes(resolved);
+            conjoined = resolved.Store.Options.Events.TenancyStyle == TenancyStyle.Conjoined;
         }
-        catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+        else
         {
-            logger.LinqQueryUnexpected(exception, run.LoggedAlias, run.LoggedStoreKey);
-            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(run)));
+            LinqTarget? found;
+
+            try
+            {
+                found = FindType(resolved, request.Alias);
+                hidden = HiddenDocumentTypes(resolved);
+            }
+            catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
+            {
+                logger.LinqQueryUnexpected(exception, run.LoggedAlias, run.LoggedStoreKey);
+                return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(run)));
+            }
+
+            if (found is not { } documents)
+            {
+                return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(run)));
+            }
+
+            target = documents;
+            table = DocumentTableInfo.FromDocumentType(documents.Root);
+            conjoined = table.TenancyStyle == TenancyStyle.Conjoined;
         }
 
-        if (found is not { } target)
-        {
-            return Refuse(run, new LinqRefusal(LinqStage.Unavailable, LinqClause.None, NoVisibleType(run)));
-        }
-
-        DocumentTableInfo table = DocumentTableInfo.FromDocumentType(target.Root);
-        bool conjoined = table.TenancyStyle == TenancyStyle.Conjoined;
         string? tenant = resolved.TenantId is { Length: > 0 } selected ? selected : null;
         bool crossTenant = conjoined && tenant is null;
 
@@ -417,11 +471,18 @@ internal sealed class LinqQueryService : ILinqQueryService
         {
             return Refuse(run, new LinqRefusal(LinqStage.Screen, LinqClause.None,
                 "LINQ mode pages with OFFSET and stops at row " + LinqQueryLimits.MaxOffset.ToString("N0", CultureInfo.InvariantCulture) +
-                ": narrow the predicate, or order it so that the documents you want come first."));
+                ": narrow the predicate, or order it so that the " + (request.Target == LinqQueryTarget.Events ? "events" : "documents") + " you want come first."));
         }
 
-        // 7. The screen, over both boxes, against the document's own graph.
-        LinqDocumentGraph graph = LinqDocumentGraph.For(target.ClrType, hidden);
+        // 7. The screen, over both boxes, against the document's own graph - or the event graph, a closed list of the
+        //    members this store's event options say Marten keeps a column for (LinqEventMembers).
+        IReadOnlyEventStoreOptions? eventOptions = eventsTarget ? resolved.Store.Options.Events : null;
+        bool tenantNarrowed = eventsTarget && conjoined && tenant is not null;
+        bool perTenantSequences = eventOptions is not null && LinqEventMembers.IsPerTenantSequences(eventOptions);
+
+        LinqDocumentGraph graph = eventOptions is not null
+            ? LinqDocumentGraph.ForEvents(LinqEventMembers.Offered(eventOptions, tenantNarrowed))
+            : LinqDocumentGraph.For(target!.ClrType, hidden);
 
         if ((LinqTextScreen.Check(LinqClause.Where, run.Where, graph)
              ?? LinqTextScreen.Check(LinqClause.OrderBy, run.OrderBy, graph)) is { } screened)
@@ -430,28 +491,52 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
 
         // 8. The parse and the guard, then Marten's statement - built, never executed by Marten.
-        var guard = new LinqExpressionGuard(
-            graph,
-            path => DuplicatedEnumAsName(table, path),
-            target.Root.EnumStorage == EnumStorage.AsString);
+        var guard = eventsTarget
+            ? new LinqExpressionGuard(graph, static _ => null, jsonEnumsAsName: false)
+            : new LinqExpressionGuard(
+                graph,
+                path => DuplicatedEnumAsName(table!, path),
+                target!.Root.EnumStorage == EnumStorage.AsString);
 
         ComposedLinqQuery composed;
 
         try
         {
-            composed = LinqQueryComposer.Compose(new LinqComposition(
-                resolved.Store,
-                tenant is null ? SessionOptions.ForDatabase(resolved.Database) : SessionOptions.ForDatabase(tenant, resolved.Database),
-                target.ClrType,
-                adapter,
-                guard,
-                run.Where,
-                run.OrderBy,
-                table.SoftDeleteEnabled ? request.Deleted : DeletedFilter.Exclude,
-                crossTenant,
-                request.Offset,
-                run.PageSize,
-                path => table.FindDuplicated(path) is { DbType: NpgsqlDbType.TimestampTz }));
+            SessionOptions sessionOptions = tenant is null
+                ? SessionOptions.ForDatabase(resolved.Database)
+                : SessionOptions.ForDatabase(tenant, resolved.Database);
+
+            composed = LinqQueryComposer.Compose(eventsTarget
+                ? new LinqComposition(
+                    resolved.Store,
+                    sessionOptions,
+                    typeof(JasperFx.Events.IEvent),
+                    adapter,
+                    guard,
+                    run.Where,
+                    run.OrderBy,
+                    DeletedFilter.Exclude,
+                    crossTenant,
+                    request.Offset,
+                    run.PageSize)
+                {
+                    Target = LinqQueryTarget.Events,
+                    Archived = request.Archived,
+                    PerTenantSequences = perTenantSequences,
+                }
+                : new LinqComposition(
+                    resolved.Store,
+                    sessionOptions,
+                    target!.ClrType,
+                    adapter,
+                    guard,
+                    run.Where,
+                    run.OrderBy,
+                    table!.SoftDeleteEnabled ? request.Deleted : DeletedFilter.Exclude,
+                    crossTenant,
+                    request.Offset,
+                    run.PageSize,
+                    path => table.FindDuplicated(path) is { DbType: NpgsqlDbType.TimestampTz }));
         }
         catch (Exception exception) when (exception is not (OperationCanceledException or OutOfMemoryException))
         {
@@ -484,16 +569,41 @@ internal sealed class LinqQueryService : ILinqQueryService
                 "The statement Marten built did not pass the studio's read-only statement guard: " + checkedStatement.Message), sql, parameters);
         }
 
+        if (eventsTarget)
+        {
+            var eventScope = new LinqEventScope(
+                conjoined && !crossTenant ? tenant : null,
+                crossTenant,
+                request.Archived,
+                WholeDatabase: !conjoined,
+                perTenantSequences);
+
+            // 1.1: What if? compares document indexes. Refused here, after the same gate as a run and audited as a failed what-if.
+            if (run.WhatIf is { } eventIndex)
+            {
+                audit.Record(run.Action, run.Target, succeeded: false, EventsWhatIfMessage, StudioCapability.RunLinqQueries, run.AuditScope);
+
+                return new LinqQueryResult(run.Request.Alias, [], false, 0, run.PageSize, sql, parameters, TimeSpan.Zero)
+                {
+                    WhatIf = WhatIfResult.NotCompared(eventIndex, EventsWhatIfMessage),
+                    EventScope = eventScope,
+                };
+            }
+
+            return await ExecuteAsync(run, resolved, null, null, composed, sql, parameters, MartenQueryScope.Plain, value, cancellationToken, eventScope)
+                .ConfigureAwait(false);
+        }
+
         var scopeFacts = new MartenQueryScope(
             conjoined && !crossTenant ? tenant : null,
             crossTenant,
-            table.SoftDeleteEnabled ? request.Deleted : DeletedFilter.Exclude,
+            table!.SoftDeleteEnabled ? request.Deleted : DeletedFilter.Exclude,
             table.SoftDeleteEnabled);
 
         // X2: a what-if plans the statement, twice, and reads nothing.
         if (run.WhatIf is { } index)
         {
-            return await WhatIfCoreAsync(run, resolved, target, table, composed, sql, parameters, value, index, cancellationToken).ConfigureAwait(false);
+            return await WhatIfCoreAsync(run, resolved, target!, table, composed, sql, parameters, value, index, cancellationToken).ConfigureAwait(false);
         }
 
         // 10. The read, in the studio's read-only transaction.
@@ -596,14 +706,15 @@ internal sealed class LinqQueryService : ILinqQueryService
     private async Task<LinqQueryResult> ExecuteAsync(
         Run run,
         ResolvedScope resolved,
-        LinqTarget target,
-        DocumentTableInfo table,
+        LinqTarget? target,
+        DocumentTableInfo? table,
         ComposedLinqQuery composed,
         string sql,
         IReadOnlyList<LinqParameterInfo> parameters,
         MartenQueryScope scopeFacts,
         MartenStudioOptions value,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        LinqEventScope? eventScope = null)
     {
         NpgsqlCommand marten = composed.Command!;
         int commandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds) + 5;
@@ -635,7 +746,9 @@ internal sealed class LinqQueryService : ILinqQueryService
                         await using NpgsqlDataReader reader = await command
                             .ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
 
-                        LinqPage read = await ReadPageAsync(reader, run.PageSize, value.MaxInlineDocumentBytes, token).ConfigureAwait(false);
+                        LinqPage read = eventScope is null
+                            ? await ReadPageAsync(reader, run.PageSize, value.MaxInlineDocumentBytes, token).ConfigureAwait(false)
+                            : await ReadEventPageAsync(reader, run.PageSize, value.MaxInlineDocumentBytes, token).ConfigureAwait(false);
 
                         stopwatch.Stop();
                         return read;
@@ -645,7 +758,7 @@ internal sealed class LinqQueryService : ILinqQueryService
         }
         catch (OperationCanceledException)
         {
-            audit.Record(LinqQueryAction, run.Target, succeeded: false, "cancelled", StudioCapability.RunLinqQueries, run.AuditScope);
+            audit.Record(run.Action, run.Target, succeeded: false, "cancelled", StudioCapability.RunLinqQueries, run.AuditScope);
             throw;
         }
         catch (Exception exception) when (QueryService.FindPostgresException(exception) is { } postgres)
@@ -653,6 +766,13 @@ internal sealed class LinqQueryService : ILinqQueryService
             stopwatch.Stop();
             error = await MaskAsync(run.Scope, resolved, postgres.SqlState, postgres.MessageText, postgres.Detail, marten, cancellationToken)
                 .ConfigureAwait(false);
+
+            // 1.1: for the events 42P01 is "the event tables were never created here" - said in the studio's own words, with the
+            // schema the Configuration page already shows, and never fixed by creating them.
+            if (eventScope is not null && postgres.SqlState == "42P01")
+            {
+                error = new LinqQueryError("42P01", NoEventTablesMessage(resolved.Store.Options.Events.DatabaseSchemaName));
+            }
         }
         catch (Exception exception) when (exception is NpgsqlException or SocketException)
         {
@@ -676,17 +796,26 @@ internal sealed class LinqQueryService : ILinqQueryService
             logger.LinqQueryFailed(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, error.SqlState);
 
             return new LinqQueryResult(run.Request.Alias, [], false, run.Request.Offset, run.PageSize, sql, parameters, TimeSpan.Zero,
-                Error: error, Scope: scopeFacts);
+                Error: error, Scope: scopeFacts)
+            {
+                EventScope = eventScope,
+            };
         }
 
         // The plan and the advice belong to the query rather than to a page, so they are fetched with the first one.
+        // An event run has no advice (its indexes are Marten's own, with no StoreOptions line to suggest), and a run that
+        // found no event tables has nothing to plan: the plan would fail the same way.
         ExplainResult? plan = null;
         LinqIndexAdvice? advice = null;
 
-        if (run.Request.Offset == 0)
+        if (run.Request.Offset == 0 && error?.SqlState != "42P01")
         {
             plan = await PlanAsync(run, resolved, session, connection, marten, sql, commandTimeout, cancellationToken).ConfigureAwait(false);
-            advice = await AdviseAsync(target, table, connection, composed, plan?.PlanJson, cancellationToken).ConfigureAwait(false);
+
+            if (eventScope is null)
+            {
+                advice = await AdviseAsync(target!, table!, connection, composed, plan?.PlanJson, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         if (error is not null)
@@ -695,11 +824,14 @@ internal sealed class LinqQueryService : ILinqQueryService
             logger.LinqQueryFailed(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, error.SqlState);
 
             return new LinqQueryResult(run.Request.Alias, [], false, run.Request.Offset, run.PageSize, sql, parameters,
-                stopwatch.Elapsed, Error: error, Plan: plan, Advice: advice, Scope: scopeFacts);
+                stopwatch.Elapsed, Error: error, Plan: plan, Advice: advice, Scope: scopeFacts)
+            {
+                EventScope = eventScope,
+            };
         }
 
         LinqPage done = page!;
-        AuditSuccess(run, resolved, done.Rows.Count, stopwatch.Elapsed, plan);
+        AuditSuccess(run, resolved, done.Rows.Count + done.EventRows.Count, stopwatch.Elapsed, plan);
 
         return new LinqQueryResult(
             run.Request.Alias,
@@ -713,7 +845,11 @@ internal sealed class LinqQueryService : ILinqQueryService
             Plan: plan,
             Advice: advice,
             Scope: scopeFacts,
-            BudgetSpent: done.BudgetSpent);
+            BudgetSpent: done.BudgetSpent)
+        {
+            EventRows = done.EventRows,
+            EventScope = eventScope,
+        };
     }
 
     /// <summary>
@@ -809,6 +945,175 @@ internal sealed class LinqQueryService : ILinqQueryService
         return new LinqPage(rows, more, spent);
     }
 
+    private static readonly HashSet<string> EventColumns = new(StringComparer.Ordinal)
+    {
+        "data", "bdata", "seq_id", "id", "stream_id", "version", "type", "mt_dotnet_type", "timestamp", "tenant_id",
+        "correlation_id", "causation_id", "user_name", "is_archived",
+    };
+
+    /// <summary>
+    /// One page of events (1.1), read the way <see cref="ReadPageAsync" /> reads documents: sequential access, columns by
+    /// name from Marten's select list (it varies with the store's metadata), the body as capped text and never
+    /// deserialized, the page's text budgeted, and one row past the page read only far enough to know it is there.
+    /// </summary>
+    /// <remarks>
+    /// <c>bdata</c> is asked only whether it is null - its bytes are never read, and sequential access skips them - and
+    /// <c>headers</c> is not read at all. Both are transferred by the statement Marten built, bounded by the page size.
+    /// </remarks>
+    private static async Task<LinqPage> ReadEventPageAsync(NpgsqlDataReader reader, int pageSize, int maxInline, CancellationToken cancellationToken)
+    {
+        List<(int Ordinal, string Name)> columns = [];
+
+        for (int i = 0; i < reader.FieldCount; i++)
+        {
+            string name = reader.GetName(i);
+
+            if (EventColumns.Contains(name) && columns.All(x => x.Name != name))
+            {
+                columns.Add((i, name));
+            }
+        }
+
+        if (columns.All(static x => x.Name != "data") || columns.All(static x => x.Name != "seq_id"))
+        {
+            throw new InvalidOperationException("Marten's statement selected no data or no seq_id column.");
+        }
+
+        int documentCap = Math.Clamp(maxInline, 1, LinqQueryLimits.PageTextBudget);
+        long budget = LinqQueryLimits.PageTextBudget;
+        bool spent = false;
+        List<LinqEventRow> rows = [];
+        bool more = false;
+        char[] buffer = new char[8 * 1024];
+
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (rows.Count >= pageSize)
+            {
+                more = true;
+                break;
+            }
+
+            long sequence = 0;
+            long version = 0;
+            string id = string.Empty;
+            string streamId = string.Empty;
+            string typeName = string.Empty;
+            string? dotNetType = null;
+            DateTimeOffset? timestamp = null;
+            string? tenant = null;
+            bool archived = false;
+            string? correlation = null;
+            string? causation = null;
+            string? user = null;
+            bool hasBinary = false;
+            string? json = null;
+            string? notInlined = null;
+
+            // Sequential access reads columns in ordinal order, and never twice.
+            foreach ((int ordinal, string name) in columns)
+            {
+                bool isNull = await reader.IsDBNullAsync(ordinal, cancellationToken).ConfigureAwait(false);
+
+                if (name == "bdata")
+                {
+                    hasBinary = !isNull;
+                    continue;
+                }
+
+                if (isNull)
+                {
+                    continue;
+                }
+
+                switch (name)
+                {
+                    case "seq_id":
+                        sequence = Convert.ToInt64(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+                        break;
+
+                    case "id":
+                        id = Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? string.Empty;
+                        break;
+
+                    case "stream_id":
+                        streamId = Convert.ToString(reader.GetValue(ordinal), CultureInfo.InvariantCulture) ?? string.Empty;
+                        break;
+
+                    case "version":
+                        version = Convert.ToInt64(reader.GetValue(ordinal), CultureInfo.InvariantCulture);
+                        break;
+
+                    case "type":
+                        typeName = reader.GetString(ordinal);
+                        break;
+
+                    case "mt_dotnet_type":
+                        dotNetType = reader.GetString(ordinal);
+                        break;
+
+                    case "timestamp":
+                        timestamp = reader.GetFieldValue<DateTimeOffset>(ordinal);
+                        break;
+
+                    case "tenant_id":
+                        tenant = reader.GetString(ordinal);
+                        break;
+
+                    case "correlation_id":
+                        correlation = reader.GetString(ordinal);
+                        break;
+
+                    case "causation_id":
+                        causation = reader.GetString(ordinal);
+                        break;
+
+                    case "user_name":
+                        user = reader.GetString(ordinal);
+                        break;
+
+                    case "is_archived":
+                        archived = reader.GetBoolean(ordinal);
+                        break;
+
+                    case "data" when budget <= 0:
+                        spent = true;
+                        notInlined = "Not shown: this page's " + Kibibytes(LinqQueryLimits.PageTextBudget) +
+                                     " budget for event text was spent on the rows above it. Open its stream page.";
+                        break;
+
+                    case "data":
+                    {
+                        int limit = (int) Math.Min(documentCap, budget);
+                        (string? text, bool truncated) = await ReadTextAsync(reader, ordinal, limit, buffer, cancellationToken).ConfigureAwait(false);
+
+                        if (truncated)
+                        {
+                            spent |= limit < documentCap;
+                            notInlined = limit < documentCap
+                                ? "Not shown in full: this page's budget for event text ran out inside it. Open its stream page."
+                                : "Not shown: it is larger than MartenStudioOptions.MaxInlineDocumentBytes (" + Kibibytes(documentCap) +
+                                  "). Open its stream page.";
+                            budget -= limit;
+                        }
+                        else
+                        {
+                            json = text;
+                            budget -= text?.Length ?? 0;
+                        }
+
+                        break;
+                    }
+                }
+            }
+
+            rows.Add(new LinqEventRow(sequence, id, streamId, version, typeName, dotNetType, timestamp, tenant, archived,
+                correlation, causation, user, hasBinary, json, notInlined));
+        }
+
+        return new LinqPage([], more, spent) { EventRows = rows };
+    }
+
     /// <summary>Up to <paramref name="limit" /> characters of a text column, and whether there was more.</summary>
     /// <remarks>
     /// Streamed, so a document larger than the cap is never materialised: sequential access reads the column off the
@@ -886,7 +1191,9 @@ internal sealed class LinqQueryService : ILinqQueryService
         if (!await MayExplainAsync(named, cancellationToken).ConfigureAwait(false))
         {
             // An explicit request the gate refused: one 9203, the same entry any other refused read writes.
-            audit.RecordScopeDenied(explainScope, WritePolicyName(options.Value), LinqExplainAction, run.Target, StudioCapability.RunLinqQueries);
+            audit.RecordScopeDenied(explainScope, WritePolicyName(options.Value),
+                run.Request.Target == LinqQueryTarget.Events ? LinqEventExplainAction : LinqExplainAction,
+                run.Target, StudioCapability.RunLinqQueries);
             return ExplainResult.Unavailable(PlanRefusedMessage);
         }
 
@@ -1177,7 +1484,8 @@ internal sealed class LinqQueryService : ILinqQueryService
         // first read, and one audit entry (D29, H1).
         string key = resolved.Registration.Key + Separator + resolved.Database.Id.Identity + Separator + (run.Scope.TenantId ?? string.Empty) +
                      Separator + run.Request.Alias.ToLowerInvariant();
-        string signature = run.Where + Separator + run.OrderBy + Separator + run.Request.Deleted;
+        string signature = run.Where + Separator + run.OrderBy + Separator +
+                           (run.Request.Target == LinqQueryTarget.Events ? "archived:" + run.Request.Archived : run.Request.Deleted.ToString());
 
         if (!ledger.TryRecord(key, signature, out _))
         {
@@ -1189,7 +1497,7 @@ internal sealed class LinqQueryService : ILinqQueryService
                          (run.Request.Offset > 0 ? ", starting past the first page" : string.Empty) +
                          (string.Equals(plan?.UnavailableReason, PlanRefusedMessage, StringComparison.Ordinal) ? "; plan withheld" : string.Empty) + ".";
 
-        audit.Record(LinqQueryAction, run.Target, succeeded: true, outcome, StudioCapability.RunLinqQueries, run.AuditScope);
+        audit.Record(run.Action, run.Target, succeeded: true, outcome, StudioCapability.RunLinqQueries, run.AuditScope);
         logger.LinqQueryExecuted(run.LoggedUser, run.LoggedAlias, run.LoggedStoreKey, run.LoggedDatabaseId, run.LoggedTenant,
             elapsed, rows, run.LoggedWhere, run.LoggedOrderBy);
     }
@@ -1205,7 +1513,7 @@ internal sealed class LinqQueryService : ILinqQueryService
     private sealed record Run(StudioScope Scope, LinqQueryRequest Request, string User, string Where, string OrderBy, int PageSize)
     {
         /// <summary>What the audit ring calls this run: a LINQ query, or a what-if over one (X2).</summary>
-        public string Action { get; init; } = LinqQueryAction;
+        public string Action { get; init; } = Request.Target == LinqQueryTarget.Events ? LinqEventQueryAction : LinqQueryAction;
 
         /// <summary>X2: the index to imagine, for a run that compares plans rather than reading rows.</summary>
         public HypotheticalIndex? WhatIf { get; init; }
@@ -1220,7 +1528,11 @@ internal sealed class LinqQueryService : ILinqQueryService
 
         /// <summary>The audit ring's target: the alias and the text, on one line, capped.</summary>
         public string Target { get; } = QueryService.Target(
-            Request.Alias + ": " + (Where.Length == 0 ? "(all)" : Where) + (OrderBy.Length == 0 ? string.Empty : " order by " + OrderBy));
+            (Request.Target == LinqQueryTarget.Events ? "events" : Request.Alias) + ": " + (Where.Length == 0 ? "(all)" : Where) +
+            (OrderBy.Length == 0 ? string.Empty : " order by " + OrderBy) +
+            (Request.Target == LinqQueryTarget.Events && Request.Archived != ArchivedFilter.Exclude
+                ? " (archived: " + Request.Archived.ToString().ToLowerInvariant() + ")"
+                : string.Empty));
 
         /// <summary>
         /// The ring's target for a run refused at the capability stage: the alias alone, capped. Nothing has authorized
@@ -1265,7 +1577,11 @@ internal sealed class LinqQueryService : ILinqQueryService
     private sealed record LinqTarget(IDocumentType Root, Type ClrType, string Alias, string? RootAlias);
 
     /// <summary>One page of rows.</summary>
-    private sealed record LinqPage(IReadOnlyList<LinqQueryRow> Rows, bool HasMore, bool BudgetSpent);
+    private sealed record LinqPage(IReadOnlyList<LinqQueryRow> Rows, bool HasMore, bool BudgetSpent)
+    {
+        /// <summary>1.1: the page's events, for a run over the event log; <see cref="Rows" /> is empty then.</summary>
+        public List<LinqEventRow> EventRows { get; init; } = [];
+    }
 
     private enum ColumnRole
     {
