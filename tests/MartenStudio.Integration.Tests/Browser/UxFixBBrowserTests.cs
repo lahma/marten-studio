@@ -20,6 +20,21 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         "() => { document.activeElement && document.activeElement.blur(); document.body.setAttribute('tabindex', '-1'); "
         + "document.body.focus(); document.body.removeAttribute('tabindex'); }";
 
+    /// <summary>
+    /// Registers the wait for the shell's own first-render rewrite of the scope into the address (<c>store=&amp;db=</c>) - an
+    /// enhanced-navigation GET of the page - which a Query push begun while it is in flight aborts (net::ERR_ABORTED). Called
+    /// before <c>GoAsync</c> so it cannot be missed, and awaited after it, before the first interaction. A real visitor cannot act
+    /// that fast; the test can. The 1.2 navigation work removes the GET. Only for a start address that does not carry
+    /// <c>store=</c> already: the shell rewrites nothing then, and the wait would time out.
+    /// </summary>
+    private static Task<IRequest> ShellScopeRewriteFinished(StudioPage studio) =>
+        studio.Page.WaitForRequestFinishedAsync(new PageWaitForRequestFinishedOptions
+        {
+            Predicate = static request => request.Url.Contains("/marten/query?", StringComparison.Ordinal)
+                                          && request.Url.Contains("store=", StringComparison.Ordinal),
+            Timeout = 30_000,
+        });
+
     [BrowserFact]
     public async Task The_skip_link_is_the_first_Tab_stop_shows_on_focus_and_moves_focus_to_the_content_without_navigating()
     {
@@ -58,7 +73,9 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         {
             const string Refused = "IsArchived == false";
 
+            Task<IRequest> shellRewrite = ShellScopeRewriteFinished(studio);
             await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events&predicate=" + Uri.EscapeDataString(Refused)));
+            await shellRewrite;
 
             ILocator withheld = studio.Page.Locator(".ms-query-linq-withheld");
             (await withheld.GetAttributeAsync("open")).Should().NotBeNull("the list of what is not offered is open without a click");
@@ -103,7 +120,9 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
     {
         await BrowserScenario.RunAsync(fixture.Browser, "linq-single-push", fixture.Root, "admin", async studio =>
         {
+            Task<IRequest> shellRewrite = ShellScopeRewriteFinished(studio);
             await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await shellRewrite;
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
@@ -136,7 +155,9 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
     {
         await BrowserScenario.RunAsync(fixture.Browser, "linq-serialised-push", fixture.Root, "admin", async studio =>
         {
+            Task<IRequest> shellRewrite = ShellScopeRewriteFinished(studio);
             await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
+            await shellRewrite;
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
             TaskCompletionSource<bool> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
