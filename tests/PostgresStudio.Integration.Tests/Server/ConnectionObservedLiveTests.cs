@@ -58,6 +58,7 @@ public class ConnectionObservedLiveTests(PostgresVersionMatrix matrix)
         observed.Database.Should().Be(database);
         observed.ServerAddress.Should().NotBeNullOrWhiteSpace();
         observed.ServerPort.Should().Be(5432);
+        observed.ClientAddress.Should().NotBeNullOrWhiteSpace("the studio reaches the container over TCP, so the server sees a peer: the TLS tile's 'local' needs it to be loopback too");
         observed.InRecovery.Should().BeFalse();
         observed.Ssl.Should().BeFalse("a plain container has no TLS, and pg_stat_ssl has a row for this backend");
         observed.SslVersion.Should().BeNull();

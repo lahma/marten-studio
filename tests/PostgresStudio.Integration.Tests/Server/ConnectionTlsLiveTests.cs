@@ -40,7 +40,7 @@ public class ConnectionTlsLiveTests(PostgresFixture postgres, TlsServerFixture t
         HealthFinding finding = result.Findings.Should().ContainSingle().Subject;
         finding.Severity.Should().Be(HealthSeverity.Warning, "this is Production");
         finding.Remedy!.Code.Should().Be("SSL Mode=VerifyFull");
-        finding.Remedy.Explanation.Should().Contain("ssl = off", "the suite's own server has TLS off, which the finding reads");
+        finding.Remedy.Explanation.Should().StartWith("1. Enable TLS on the server", "the suite's own server has TLS off, which the finding reads, so the server's step comes first");
     }
 
     [PostgresFact]

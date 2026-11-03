@@ -13,7 +13,11 @@ worth a look" - that links to it.
 
 - the server, the database and the role the application connects as;
 - whether the connection is **encrypted** and whether the **server's certificate is checked** (TLS verified, encrypted but
-  not verified, not encrypted, or - for a GSSAPI connection - "encrypted with GSSAPI (not TLS)");
+  not verified, not encrypted, or - for a GSSAPI connection - "encrypted with GSSAPI (not TLS)"). An unencrypted connection
+  is "(local)", in green, only when the data source's host is a socket or loopback **and** the server also sees the
+  connection come over a socket or from loopback. Otherwise it is amber - "not encrypted · the server sees a TCP peer", with
+  "(likely a container network)" added when the host is loopback but the server's peer is not (Docker, NAT). The address is
+  never printed. The Overview's line says the same words, and S05 uses the same rule;
 - the **pool**: `Maximum Pool Size`, and the peak of this application's sessions on the server;
 - the **Npgsql** version loaded, and the **platform** or **pooler** in front of the server when one is recognised (Amazon
   RDS and Aurora, Azure, Cloud SQL, Neon, Supabase, PgBouncer-family poolers and Amazon RDS Proxy).
@@ -30,7 +34,11 @@ with a copy button for each. A hint is a sentence, never a finding: hints are no
   as that Npgsql major reads them), or its own default;
 - **Npgsql's default**.
 
-"Only what differs from the default" is on by default; it, and which groups are open, are remembered per browser.
+"Only what differs from the default" is on by default; it, and which groups are open, are remembered per browser. Every group
+has the same column widths. Below 600 px each setting is a card (the setting, its value, then "From:" and "Default:") instead
+of a table that scrolls sideways. Where `PGAPPNAME` (or `PGGSSENCMODE` or `PGREQUIREAUTH`) is set in the process and the loaded
+Npgsql is below 10, the row says Npgsql does not read it and names the connection-string keyword to set; the variable's value is
+never shown.
 
 **What the server saw** is what a new session of the login starts with (`statement_timeout`, `idle_session_timeout`,
 `password_encryption`, ...) and the TLS row the server holds for the studio's own connection. The studio's connection uses
@@ -41,7 +49,8 @@ connects.
 share on TLS. It is behind `ViewDatabaseActivity` (see "The gates").
 
 **Not visible from here** says what no page can see: settings made in code on the `NpgsqlDataSourceBuilder` (a callback, a
-password provider, a logger factory), and the default password file.
+password provider, a logger factory), and the default password file. It is a closed disclosure with a one-line summary; open
+or closed is remembered per browser.
 
 **In Marten Studio**, "How Marten uses this connection" adds:
 
@@ -116,6 +125,12 @@ checks. Their pages are in [health/](health/):
 Under "Compare a connection string" you can paste another Npgsql connection string - the one in a new configuration, one a
 colleague sent - to see which of its settings differ from the connection in effect and what the page's advice would be if
 the application switched to it: what is new, what is also true today, and what no longer applies.
+
+The result opens with one sentence made only from what the comparison computed: whether the pasted settings check the
+server's certificate or encrypt at all, whether they keep the password readable (`Persist Security Info`), the advice that is new
+and the advice that no longer applies - or "Same advice as the connection in effect." It never says the pasted settings are
+better. The text you pasted stays in the box until you press Clear or leave the page; what the studio reads has the
+passwords taken out.
 
 - Passwords (`Password`, its aliases and `SSL Password`) are removed on the server before anything is read, an option's value
   is never shown, and a keyword Npgsql rejects is named and its value never repeated. A password with a `;` in it must be

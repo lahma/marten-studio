@@ -107,6 +107,62 @@ public sealed class NpgsqlSettingsReaderTests
     }
 
     [Fact]
+    public void A_variable_only_Npgsql_10_reads_is_noted_on_the_row_it_stands_in_for_under_Npgsql_9_and_never_read_out()
+    {
+        FakeEnvironment env = new(("PGAPPNAME", "S3NT1NEL-app"));
+
+        ConnectionSettingRow nine = Row(Read("Host=db.example", env, major: 9), "Application Name");
+
+        nine.EnvironmentIgnored.Should().BeTrue();
+        nine.Note.Should().Be("PGAPPNAME is set, but Npgsql 9 does not read it (Npgsql 10 does): set Application Name in the connection string.");
+        (nine.Note + nine.Value).Should().NotContain("S3NT1NEL", "the note names the variable and says nothing of its value");
+
+        // Npgsql 10 reads it, so there is nothing to warn about; a keyword the connection string sets is not what the variable would set.
+        Row(Read("Host=db.example", env, major: 10), "Application Name").EnvironmentIgnored.Should().BeFalse();
+        Row(Read("Host=db.example;Application Name=billing", env, major: 9), "Application Name").EnvironmentIgnored.Should().BeFalse();
+        Row(Read("Host=db.example", new FakeEnvironment(), major: 9), "Application Name").EnvironmentIgnored.Should().BeFalse("the variable is not set");
+        Row(Read("Host=db.example", new FakeEnvironment(("PGAPPNAME", string.Empty)), major: 9), "Application Name").EnvironmentIgnored.Should().BeFalse("an empty variable says nothing");
+    }
+
+    [Theory]
+    [InlineData("PGGSSENCMODE", "GSS Encryption Mode")]
+    [InlineData("PGREQUIREAUTH", "Require Auth")]
+    public void The_same_rule_holds_for_every_other_variable_Npgsql_10_added(string variable, string keyword)
+    {
+        ConnectionSettings settings = Read("Host=db.example", new FakeEnvironment((variable, "x")), major: 9);
+
+        // The loaded Npgsql's builder is the list of keywords: a 9 build has no such keyword, and so no row to put the note on - the
+        // page says it once above the table, and does not tell anyone to set a keyword their Npgsql does not have.
+        if (settings.Rows.All(x => x.Keyword != keyword))
+        {
+            settings.Notes.Should().Contain(variable + " is set, but Npgsql 9 does not read it (Npgsql 10 does), and this Npgsql has no " + keyword + " setting to put in the connection string instead.");
+            return;
+        }
+
+        ConnectionSettingRow nine = Row(settings, keyword);
+
+        nine.EnvironmentIgnored.Should().BeTrue();
+        nine.Note.Should().Be(variable + " is set, but Npgsql 9 does not read it (Npgsql 10 does): set " + keyword + " in the connection string.");
+        Row(Read("Host=db.example", new FakeEnvironment((variable, "x")), major: 10), keyword).EnvironmentIgnored.Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_variable_Npgsql_9_does_read_is_never_noted_as_ignored()
+    {
+        Row(Read("Host=db.example", new FakeEnvironment(("PGTZ", "UTC")), major: 9), "Timezone").EnvironmentIgnored.Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_row_with_a_variable_that_is_ignored_stays_in_the_only_what_differs_view()
+    {
+        ConnectionSettingRow row = Row(Read("Host=db.example", new FakeEnvironment(("PGAPPNAME", "x")), major: 9), "Application Name");
+        ConnectionSettingView view = new(row, "conn-row-application-name", "default", null, false);
+
+        row.Origin.Should().Be(ConnectionSettingOrigin.Default);
+        view.Differs.Should().BeTrue("the note is the point, and a default row would be hidden");
+    }
+
+    [Fact]
     public void PGUSER_stands_in_for_an_unset_or_empty_Username_and_not_for_a_set_one()
     {
         FakeEnvironment env = new(("PGUSER", "from-env"));

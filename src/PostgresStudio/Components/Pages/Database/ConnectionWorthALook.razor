@@ -30,7 +30,11 @@
     <section class="ms-section ms-conn-worth" id="conn-worth" aria-labelledby="conn-worth-title">
         <h2 class="ms-section-title" id="conn-worth-title">
             Worth a look
-            @if (shown.Count > 0)
+            @if (notes.Count > 0)
+            {
+                <span class="ms-tab-count ms-conn-count" id="conn-worth-count">@ConnectionPageBuilder.CountLabel(shown.Count, notes.Count)</span>
+            }
+            else if (shown.Count > 0)
             {
                 <span class="ms-tab-count" aria-label="@(shown.Count == 1 ? "1 thing" : shown.Count + " things")">@shown.Count</span>
             }
@@ -55,7 +59,7 @@
 
         @if (view.FindingsWithheld > 0)
         {
-            <p class="ms-muted ms-conn-note ms-conn-withheld">@HealthPresentation.Withheld(view.FindingsWithheld, view.FindingsWithheldReason)</p>
+            <p class="ms-muted ms-conn-note ms-conn-withheld">@ConnectionPageBuilder.WithheldNotice(view.FindingsWithheld, view.FindingsWithheldReason)</p>
         }
 
         @if (muted > 0)
@@ -155,6 +159,10 @@
                         <span class="ms-health-remedy-title">@fix.Label</span>
                         <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + (card.Code ?? card.Heading) + ")")" />
                     </div>
+                    @if (fix.Note is { Length: > 0 } fixNote)
+                    {
+                        <p class="ms-conn-fix-note">@fixNote</p>
+                    }
                     <pre class="ms-code ms-health-remedy-code"><code>@fix.Code</code></pre>
                 </div>
             }

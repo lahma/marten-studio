@@ -68,6 +68,11 @@ public class ConnectionPageLiveTests(PostgresFixture postgres)
             view.Header.Single(static x => x.Label == "Pool").Value.Should().StartWith("max 30");
             view.Tls.Text.Should().StartWith("not encrypted", "a plain container has no TLS, and the role can see its own pg_stat_ssl row");
 
+            // The tile follows S05's rule: a loopback host is "local" only while the server also sees a loopback peer. Through the
+            // container's published port the peer is the engine's gateway, so a loopback host is "likely a container network".
+            view.Tls.State.Should().Be(view.Tls.Text.EndsWith("(local)", StringComparison.Ordinal) ? ConnectionTlsState.NotEncryptedLocal : ConnectionTlsState.NotEncrypted);
+            view.Tls.Text.Should().NotContainAny("172.", "192.168.", "10."); // the server's view of the peer is never printed
+
             ConnectionSettingView name = view.Settings.Single(static x => x.Row.Keyword == "Application Name");
             name.Row.Value.Should().Be("np3-live");
             name.From.Should().Be("connection string");

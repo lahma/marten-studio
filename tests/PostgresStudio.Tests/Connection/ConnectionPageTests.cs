@@ -89,7 +89,7 @@ public sealed class ConnectionPageTests
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.Find(".ms-conn-nothing").TextContent.Should().Be("Nothing to change.");
-        page.FindAll(".ms-conn-worth .ms-tab-count").Should().BeEmpty();
+        page.FindAll(".ms-conn-worth .ms-tab-count").Should().OnlyContain(static x => !x.TextContent.Contains("finding", StringComparison.Ordinal), "no findings are counted; the notes may be");
     }
 
     [Fact]
@@ -118,7 +118,7 @@ public sealed class ConnectionPageTests
         card.QuerySelector(".ms-health-remedy-code")!.TextContent.Should().Be("opts.Something = true;");
         card.QuerySelector(".ms-health-link a")!.GetAttribute("href").Should().Contain("health").And.EndWith("#finding-s11");
         card.ClassList.Should().Contain("ms-health-finding-warning");
-        page.Find(".ms-conn-worth .ms-tab-count").TextContent.Should().Be("1", "the finding says what the page's own certificate hint would, so the hint is left out");
+        page.Find(".ms-conn-worth .ms-tab-count").TextContent.Should().StartWith("1 finding", "the finding says what the page's own certificate hint would, so the hint is left out");
         page.FindAll("#conn-card-hint-tls").Should().BeEmpty();
     }
 
@@ -314,6 +314,181 @@ public sealed class ConnectionPageTests
         IRenderedComponent<ConnectionPage> page = Open(context);
 
         page.FindAll("#conn-not-visible dt").Select(static x => x.TextContent).Should().Contain(["Passwords supplied by code", "The default password file"]);
+    }
+
+    // -------------------------------------------------------------------------------------------------
+    // UX-FIX-A
+    // -------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task The_small_print_of_not_visible_from_here_is_a_closed_details_with_a_one_line_summary()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        IElement details = page.Find("#conn-not-visible details.ms-conn-disclosure");
+        details.HasAttribute("open").Should().BeFalse("closed by default");
+        page.Find("#conn-not-visible > h2.ms-section-title").TextContent.Should().Be("Not visible from here");
+        details.QuerySelector("summary")!.TextContent.Trim().Should().Be("Set in code on the NpgsqlDataSourceBuilder, so no connection string shows it (6 things)");
+        details.QuerySelectorAll("dt").Should().HaveCount(6, "the content is still all there, for whoever opens it");
+    }
+
+    [Fact]
+    public async Task Opening_the_disclosure_is_remembered_and_a_browser_that_remembered_it_open_starts_open()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        page.Find("#conn-not-visible summary").Click();
+
+        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
+        context.JSInterop.Invocations.Should().Contain(static x => x.Identifier == "martenStudio.prefs.set"
+            && x.Arguments.Count == 2 && (string?) x.Arguments[0] == "ms_conn_not_visible_open" && (string?) x.Arguments[1] == "1");
+
+        page.Find("#conn-not-visible summary").Click();
+        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeFalse());
+
+        await using PostgresStudioComponentContext remembered = await ContextAsync(DefaultView());
+        remembered.JSInterop.Setup<string?>("martenStudio.prefs.get", static x => x.Arguments.Count == 1 && (string?) x.Arguments[0] == "ms_conn_not_visible_open").SetResult("1");
+
+        IRenderedComponent<ConnectionPage> again = Open(remembered);
+
+        again.WaitForAssertion(() => again.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task A_browser_that_refuses_to_remember_the_disclosure_still_opens_it_for_the_page()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        context.JSInterop.SetupVoid("martenStudio.prefs.set", _ => true).SetException(new Microsoft.JSInterop.JSException("storage refused"));
+
+        IRenderedComponent<ConnectionPage> page = Open(context);
+        page.Find("#conn-not-visible summary").Click();
+
+        page.WaitForAssertion(() => page.Find("#conn-not-visible details").HasAttribute("open").Should().BeTrue());
+    }
+
+    [Fact]
+    public async Task The_worth_a_look_count_says_findings_and_notes_when_there_are_notes_and_stays_a_number_when_there_are_none()
+    {
+        ConnectionPageView withNotes = View(
+            Facts("Host=/var/run/postgresql;SSL Mode=Disable", Observed(ssl: false, clientAddress: null)),
+            Report(0, null, Finding("C16", HealthSeverity.Warning, "Idle pooled connections may be ended first")));
+        int notes = withNotes.Notes.Count(static x => !x.AllSettingsOnly);
+
+        notes.Should().BeGreaterThan(0);
+
+        await using PostgresStudioComponentContext context = await ContextAsync(withNotes);
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        page.Find("#conn-worth-count").TextContent.Should().Be(ConnectionPageBuilder.CountLabel(withNotes.Cards.Count, notes));
+        page.Find("#conn-worth-count").TextContent.Should().Contain(" · ").And.Contain("finding");
+
+        // No notes at all: the count is the plain number it always was.
+        ConnectionPageView noNotes = View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(0, null, Finding("C16", HealthSeverity.Warning, "x"))) with { Notes = [] };
+        await using PostgresStudioComponentContext none = await ContextAsync(noNotes);
+        IRenderedComponent<ConnectionPage> plain = Open(none);
+
+        plain.FindAll("#conn-worth-count").Should().BeEmpty();
+        plain.Find(".ms-conn-worth .ms-tab-count").TextContent.Should().Be("1");
+    }
+
+    [Fact]
+    public async Task The_notice_for_findings_a_visitor_may_not_see_is_a_sentence_and_count_aware()
+    {
+        string policy = "needs your account's write policy to allow ViewDatabaseActivity for this database";
+
+        await using PostgresStudioComponentContext one = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(1, policy)));
+        Open(one).Find(".ms-conn-withheld").TextContent.Should().Be("1 finding is hidden because your account may not see activity on this database.");
+
+        await using PostgresStudioComponentContext two = await ContextAsync(View(Facts("Host=db.example;SSL Mode=VerifyFull", Observed()), Report(2, policy)));
+        Open(two).Find(".ms-conn-withheld").TextContent.Should().Be("2 findings are hidden because your account may not see activity on this database.");
+    }
+
+    [Fact]
+    public async Task A_finding_with_an_explanation_shows_it_above_the_text_to_copy_and_the_copy_is_the_one_line()
+    {
+        HealthReportFinding plain = Finding("S05", HealthSeverity.Warning, "Connections reach Postgres unencrypted");
+        HealthReportFinding s05 = plain with
+        {
+            Finding = plain.Finding with { Remedy = new HealthRemedy("SSL Mode=VerifyFull", UnencryptedConnectionCheckText(serverOff: true)) },
+        };
+
+        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=db.example;SSL Mode=Prefer", Observed(ssl: false)), Report(0, null, s05)));
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        IElement fix = page.Find("#conn-card-finding-s05 .ms-conn-fix");
+        fix.QuerySelector(".ms-conn-fix-note")!.TextContent.Should().StartWith("1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). 2. Then set SSL Mode=VerifyFull");
+        fix.QuerySelector(".ms-health-remedy-code")!.TextContent.Should().Be("SSL Mode=VerifyFull");
+        page.FindComponents<CopyButton>().Select(static x => x.Instance.Value).Should().Contain("SSL Mode=VerifyFull");
+    }
+
+    private static string UnencryptedConnectionCheckText(bool serverOff) =>
+        PostgresStudio.Services.Health.Checks.UnencryptedConnectionCheck.RemedyText(serverOff, "the data source");
+
+    [Fact]
+    public async Task Every_group_table_has_the_same_four_columns_and_labels_its_cells_for_the_stacked_card()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(DefaultView());
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        IReadOnlyList<IElement> tables = page.FindAll("table.ms-conn-settings-table");
+
+        tables.Count.Should().BeGreaterThan(1, "there is more than one group");
+
+        foreach (IElement table in tables)
+        {
+            table.QuerySelectorAll("colgroup > col").Select(static x => x.ClassName).Should().Equal(
+                "ms-conn-col-setting", "ms-conn-col-effect", "ms-conn-col-from", "ms-conn-col-default");
+            table.ParentElement!.ClassList.Should().Contain("ms-table-scroll", "D25: the scroll region is the floor at desktop widths");
+
+            foreach (IElement row in table.QuerySelectorAll("tbody tr"))
+            {
+                row.QuerySelectorAll("td").Select(static x => x.GetAttribute("data-label")).Should().Equal("In effect", "From", "Default");
+                row.QuerySelector("th")!.ClassList.Should().Contain("ms-conn-keyword");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task The_tls_tile_for_a_loopback_host_behind_a_container_network_is_amber_and_says_so()
+    {
+        ConnectionPageView view = View(Facts("Host=localhost;Port=5432;Database=app;Username=svc", Observed(ssl: false, clientAddress: "172.17.0.1")));
+        await using PostgresStudioComponentContext context = await ContextAsync(view);
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        IElement tile = page.FindAll(".ms-conn-fact").Single(static x => x.QuerySelector("dt")!.TextContent == "TLS");
+        tile.ClassList.Should().Contain("ms-conn-fact-warn");
+        tile.QuerySelector("dd")!.TextContent.Trim().Should().Be("not encrypted · the server sees a TCP peer (likely a container network)");
+        page.Markup.Should().NotContain("172.17.0.1", "the address is never printed");
+    }
+
+    [Fact]
+    public async Task The_overviews_line_says_the_same_words_as_the_tile()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(View(Facts("Host=db.example", Observed(ssl: false)), Report()));
+
+        IRenderedComponent<ConnectionGlanceLine> line = context.Render<ConnectionGlanceLine>(p => p.Add(static x => x.Revision, DateTimeOffset.UnixEpoch));
+
+        line.WaitForAssertion(() => Normalize(line.Find(".ms-overview-connection").TextContent).Should().StartWith("Connection: TLS not encrypted · the server sees a TCP peer"));
+    }
+
+    [Fact]
+    public async Task A_variable_npgsql_9_does_not_read_is_noted_on_its_row_and_the_row_stays_in_the_default_view()
+    {
+        ConnectionSettings settings = NpgsqlSettingsReader.Read("Host=db.example;Database=app", new ConnectionReadContext
+        {
+            Environment = new FakeEnvironment(("PGAPPNAME", "S3NT1NEL-app")),
+            NpgsqlMajor = 9,
+        });
+        ConnectionFacts facts = Facts("Host=db.example;Database=app", Observed()) with { Settings = settings };
+
+        await using PostgresStudioComponentContext context = await ContextAsync(View(facts));
+        IRenderedComponent<ConnectionPage> page = Open(context);
+
+        IElement row = page.Find("tr#conn-row-application-name");
+        row.QuerySelector(".ms-conn-row-note")!.TextContent.Should().Be("PGAPPNAME is set, but Npgsql 9 does not read it (Npgsql 10 does): set Application Name in the connection string.");
+        page.Markup.Should().NotContain("S3NT1NEL");
     }
 
     [Fact]

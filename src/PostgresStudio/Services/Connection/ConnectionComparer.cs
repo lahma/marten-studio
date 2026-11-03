@@ -76,6 +76,9 @@ internal static class ConnectionComparer
         HashSet<string> had = [.. before.Cards.Concat(before.Notes).Select(Key)];
         HashSet<string> has = [.. after.Cards.Concat(after.Notes).Select(Key)];
 
+        List<ConnectionCompareCard> cards = [.. after.Cards.Select(card => Cover(card, had))];
+        List<string> resolved = [.. before.Cards.Where(x => !has.Contains(Key(x))).Select(static x => x.Heading)];
+
         return new ConnectionCompareView
         {
             Outcome = ConnectionCompareOutcome.Compared,
@@ -84,11 +87,102 @@ internal static class ConnectionComparer
             RemovedSecrets = pasted.RemovedSecrets,
             RemovedUnquotedSecret = pasted.RemovedUnquotedSecret,
             Rows = rows,
-            Cards = [.. after.Cards.Select(card => Cover(card, had))],
+            Cards = cards,
             Notes = [.. after.Notes.Where(static x => !x.AllSettingsOnly && x.Kind == ConnectionCardKind.Note).Where(x => !had.Contains(Key(x))).Select(card => Cover(card, had))],
-            Resolved = [.. before.Cards.Where(x => !has.Contains(Key(x))).Select(static x => x.Heading)],
+            Resolved = resolved,
+            Verdict = current.Settings.Readable ? VerdictOf(current.Settings, settings, cards, resolved) : null,
         };
     }
+
+    /// <summary>The most headings a verdict names; the rest are counted.</summary>
+    private const int VerdictHeadings = 3;
+
+    /// <summary>
+    /// The one sentence at the top of a comparison, from what the comparer already computed and nothing else: whether the pasted
+    /// settings check the server's certificate or encrypt at all, and whether they keep the password readable (S12's setting),
+    /// each only where the two differ, then the advice that is new and the advice that no longer applies - or that it is the same.
+    /// It never says whether the pasted settings are better.
+    /// </summary>
+    /// <param name="current">The connection in effect, readable.</param>
+    /// <param name="pasted">The pasted settings.</param>
+    /// <param name="cards">The advice about the pasted settings, with whether it is news.</param>
+    /// <param name="resolved">The headings of the advice that no longer applies.</param>
+    internal static string VerdictOf(ConnectionSettings current, ConnectionSettings pasted, IReadOnlyList<ConnectionCompareCard> cards, IReadOnlyList<string> resolved)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(pasted);
+        ArgumentNullException.ThrowIfNull(cards);
+        ArgumentNullException.ThrowIfNull(resolved);
+
+        ConnectionValues was = current.Values;
+        ConnectionValues now = pasted.Values;
+        string mode = " (SSL Mode=" + now.SslMode + ")";
+        List<string> clauses = [];
+
+        if (now.Is("SSL Mode", "Disable") && !was.Is("SSL Mode", "Disable"))
+        {
+            clauses.Add("never encrypt the connection" + mode);
+        }
+        else if (was.CertificateNotVerified && !now.CertificateNotVerified)
+        {
+            clauses.Add("check the server's certificate" + mode);
+        }
+        else if (!was.CertificateNotVerified && now.CertificateNotVerified)
+        {
+            clauses.Add("no longer check the server's certificate" + mode);
+        }
+        else if (was.Is("SSL Mode", "Disable") && !now.Is("SSL Mode", "Disable"))
+        {
+            clauses.Add("can encrypt the connection" + mode);
+        }
+
+        if (current.PersistSecurityInfo && !pasted.PersistSecurityInfo)
+        {
+            clauses.Add("no longer keep the password readable (Persist Security Info)");
+        }
+        else if (!current.PersistSecurityInfo && pasted.PersistSecurityInfo)
+        {
+            clauses.Add("keep the password readable (Persist Security Info)");
+        }
+
+        List<string> news = [.. cards.Where(static x => x.Change == ConnectionCompareChange.New).Select(static x => Plain(x.Card.Heading))];
+        List<string> gone = [.. resolved.Select(Plain)];
+        List<string> sentences = [];
+
+        if (clauses.Count > 0)
+        {
+            sentences.Add("The pasted settings " + Join(clauses, " and ", ", ") + ".");
+        }
+
+        if (news.Count == 0 && gone.Count == 0)
+        {
+            sentences.Add("Same advice as the connection in effect.");
+        }
+        else
+        {
+            if (news.Count > 0)
+            {
+                sentences.Add("New advice: " + Named(news) + ".");
+            }
+
+            if (gone.Count > 0)
+            {
+                sentences.Add("No longer applies: " + Named(gone) + ".");
+            }
+        }
+
+        return string.Join(' ', sentences);
+    }
+
+    private static string Plain(string heading) => heading.TrimEnd('.', ' ');
+
+    private static string Join(List<string> items, string last, string between) =>
+        items.Count == 1 ? items[0] : string.Join(between, items.Take(items.Count - 1)) + last + items[^1];
+
+    private static string Named(List<string> headings) =>
+        headings.Count <= VerdictHeadings
+            ? string.Join("; ", headings)
+            : string.Join("; ", headings.Take(VerdictHeadings)) + " and " + (headings.Count - VerdictHeadings).ToString(System.Globalization.CultureInfo.InvariantCulture) + " more";
 
     private static string Key(ConnectionCard card) => card.Id + "|" + card.Heading;
 

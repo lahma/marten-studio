@@ -74,7 +74,13 @@
                     @if (open)
                     {
                         <TableScroll Label="@(group.Key + " settings")">
-                            <table class="ms-table ms-conn-table">
+                            <table class="ms-table ms-conn-table ms-conn-settings-table">
+                                <colgroup>
+                                    <col class="ms-conn-col-setting" />
+                                    <col class="ms-conn-col-effect" />
+                                    <col class="ms-conn-col-from" />
+                                    <col class="ms-conn-col-default" />
+                                </colgroup>
                                 <thead>
                                     <tr>
                                         <th scope="col">Setting</th>
@@ -99,7 +105,7 @@
                                                        title="@card.Heading">advice</a>
                                                 }
                                             </th>
-                                            <td class="ms-conn-value">
+                                            <td class="ms-conn-value" data-label="In effect">
                                                 <span class="ms-mono">@row.Value</span>
                                                 @if (row.Note is { Length: > 0 } note)
                                                 {
@@ -116,8 +122,8 @@
                                                     <span class="ms-conn-row-note">The same as the default.</span>
                                                 }
                                             </td>
-                                            <td><span class="@("ms-conn-from ms-conn-from-" + row.Origin.ToString().ToLowerInvariant())">@setting.From</span></td>
-                                            <td class="ms-conn-default"><span class="ms-mono">@(row.DefaultValue ?? "–")</span></td>
+                                            <td class="ms-conn-from-cell" data-label="From"><span class="@("ms-conn-from ms-conn-from-" + row.Origin.ToString().ToLowerInvariant())">@setting.From</span></td>
+                                            <td class="ms-conn-default" data-label="Default"><span class="ms-mono">@(row.DefaultValue ?? "–")</span></td>
                                         </tr>
                                     }
                                 </tbody>

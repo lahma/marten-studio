@@ -89,8 +89,8 @@ internal sealed class UnattributedConnectionsCheck : HealthCheck<ConnectionHolde
                 "Every other connection finding - how full the server is, which sessions sit idle in a transaction, which application "
                 + "holds idle connections - can name whose connections they are, and ask whoever owns them to change something. A "
                 + "connection with no application name is nobody's: whatever is wrong with it, nothing says whom to ask. Naming each "
-                + "pool of each container is one connection-string option, and it turns \"somebody holds " + SessionText.Number(total)
-                + " connections\" into a name.",
+                + "pool of each container is one connection-string option, and it turns \"somebody holds " + SessionText.Count(total, "connection")
+                + "\" into a name.",
             Evidence = evidence,
             Caveat =
                 "Counted in pg_stat_activity across every database on the server at " + facts.ReadAt.UtcDateTime.ToString("u", CultureInfo.InvariantCulture)

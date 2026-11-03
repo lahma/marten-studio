@@ -74,7 +74,8 @@ internal sealed record ConnectionFact(string Label, string Value, string Anchor,
 /// <summary>One fix on a card: a label and the text to copy.</summary>
 /// <param name="Label">"Connection string", "NpgsqlDataSourceBuilder", "StoreOptions".</param>
 /// <param name="Code">The text the copy button puts on the clipboard.</param>
-internal sealed record ConnectionFix(string Label, string Code);
+/// <param name="Note">What the change is and what has to be true first, drawn above the text: a finding's remedy explanation (S05's two steps).</param>
+internal sealed record ConnectionFix(string Label, string Code, string? Note = null);
 
 /// <summary>Where a card came from.</summary>
 internal enum ConnectionCardKind
@@ -131,7 +132,7 @@ internal sealed record ConnectionCard(
 internal sealed record ConnectionSettingView(ConnectionSettingRow Row, string Anchor, string From, ConnectionCard? AdviceCard, bool AlwaysShown)
 {
     /// <summary>Whether the row is in the "only what differs" view: something set it, or it has advice, or it is one of the rows that identify the connection.</summary>
-    public bool Differs => Row.Origin != ConnectionSettingOrigin.Default || AdviceCard is { Counts: true } || AlwaysShown;
+    public bool Differs => Row.Origin != ConnectionSettingOrigin.Default || AdviceCard is { Counts: true } || AlwaysShown || Row.EnvironmentIgnored;
 }
 
 /// <summary>One line of "What the server saw".</summary>

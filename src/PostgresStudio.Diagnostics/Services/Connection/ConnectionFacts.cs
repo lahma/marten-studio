@@ -372,7 +372,10 @@ internal sealed record ConnectionFacts
         reader.IsDBNull(18) ? null : reader.GetInt32(18),
         reader.IsDBNull(19) ? null : reader.GetBoolean(19),
         reader.IsDBNull(20) ? null : reader.GetBoolean(20),
-        new HashSet<string>(reader.IsDBNull(21) ? [] : reader.GetFieldValue<string[]>(21), StringComparer.OrdinalIgnoreCase));
+        new HashSet<string>(reader.IsDBNull(21) ? [] : reader.GetFieldValue<string[]>(21), StringComparer.OrdinalIgnoreCase))
+    {
+        ClientAddress = Text(reader, 22),
+    };
 
     private static string? Text(NpgsqlDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
 

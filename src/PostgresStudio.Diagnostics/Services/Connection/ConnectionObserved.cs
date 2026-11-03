@@ -74,6 +74,19 @@ internal sealed record ConnectionObserved(
     public IReadOnlyDictionary<string, string> ReportedParameters { get; init; } = new Dictionary<string, string>(0);
 
     /// <summary>
+    /// <c>inet_client_addr()</c> for the studio's connection: the address the server sees the connection come from, or
+    /// <see langword="null" /> over a Unix-domain socket. It is only ever compared with loopback (the Connection page's TLS fact: a
+    /// loopback host whose peer is not loopback is a container or NAT in between) and is never shown.
+    /// </summary>
+    public string? ClientAddress { get; init; }
+
+    /// <summary>Whether the server sees the connection come over a socket or from the loopback interface, so nothing leaves the machine.</summary>
+    public bool PeerIsLocal =>
+        ClientAddress is null
+        || (System.Net.IPAddress.TryParse(ClientAddress, out System.Net.IPAddress? peer)
+            && System.Net.IPAddress.IsLoopback(peer.IsIPv4MappedToIPv6 ? peer.MapToIPv4() : peer));
+
+    /// <summary>
     /// The server's own idle cut for a session, in whole seconds (rounded down, but at least 1: a cut of under a second is still a cut,
     /// and zero means off), or <see langword="null" /> when it applies none.
     /// </summary>

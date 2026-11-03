@@ -50,7 +50,7 @@ public sealed class ConnectionPageBuilderTests
     [Theory]
     [InlineData(true, "Prefer", nameof(ConnectionTlsState.EncryptedNotVerified), "encrypted, not verified")]
     [InlineData(true, "VerifyCA", nameof(ConnectionTlsState.Verified), "verified (VerifyCA)")]
-    [InlineData(false, "Prefer", nameof(ConnectionTlsState.NotEncrypted), "not encrypted")]
+    [InlineData(false, "Prefer", nameof(ConnectionTlsState.NotEncrypted), "not encrypted · the server sees a TCP peer")]
     public void The_tls_fact_follows_what_the_server_reports_and_what_ssl_mode_checks(bool ssl, string mode, string state, string text)
     {
         ConnectionPageView view = View(Facts("Host=db.example;SSL Mode=" + mode, Observed(ssl)));
@@ -81,12 +81,27 @@ public sealed class ConnectionPageBuilderTests
         view.Observed.Lines.Should().BeEmpty();
     }
 
+    // The TLS tile's one rule, S05's: "local" needs the host to be a socket or loopback AND the server to see a socket or a loopback
+    // peer. A loopback host whose peer is not loopback is a container or a NAT in between (the Docker case the admin validation met).
     [Theory]
-    [InlineData("Host=localhost;SSL Mode=Prefer", nameof(ConnectionTlsState.NotEncryptedLocal))]
-    [InlineData("Host=/var/run/postgresql", nameof(ConnectionTlsState.NotEncryptedLocal))]
-    [InlineData("Host=db.example", nameof(ConnectionTlsState.NotEncrypted))]
-    public void Not_encrypted_on_the_same_machine_is_local_and_otherwise_is_not_encrypted(string connectionString, string expected) =>
-        View(Facts(connectionString, Observed(ssl: false))).Tls.State.ToString().Should().Be(expected);
+    [InlineData("Host=localhost;SSL Mode=Prefer", null, nameof(ConnectionTlsState.NotEncryptedLocal), "not encrypted (local)")]
+    [InlineData("Host=localhost;SSL Mode=Prefer", "127.0.0.1", nameof(ConnectionTlsState.NotEncryptedLocal), "not encrypted (local)")]
+    [InlineData("Host=localhost;SSL Mode=Prefer", "::1", nameof(ConnectionTlsState.NotEncryptedLocal), "not encrypted (local)")]
+    [InlineData("Host=/var/run/postgresql", null, nameof(ConnectionTlsState.NotEncryptedLocal), "not encrypted (local)")]
+    [InlineData("Host=localhost;SSL Mode=Prefer", "172.17.0.1", nameof(ConnectionTlsState.NotEncrypted), "not encrypted · the server sees a TCP peer (likely a container network)")]
+    [InlineData("Host=127.0.0.1", "192.168.65.1", nameof(ConnectionTlsState.NotEncrypted), "not encrypted · the server sees a TCP peer (likely a container network)")]
+    [InlineData("Host=db.example", "10.0.0.9", nameof(ConnectionTlsState.NotEncrypted), "not encrypted · the server sees a TCP peer")]
+    [InlineData("Host=db.example", null, nameof(ConnectionTlsState.NotEncrypted), "not encrypted")]
+    public void The_not_encrypted_tile_is_local_only_when_both_the_host_and_the_servers_peer_are(string connectionString, string? peer, string expected, string text)
+    {
+        ConnectionPageView view = View(Facts(connectionString, Observed(ssl: false, clientAddress: peer)));
+
+        view.Tls.State.ToString().Should().Be(expected);
+        view.Tls.Text.Should().Be(text);
+        view.Header.Single(static x => x.Label == "TLS").Tone.Should().Be(expected == nameof(ConnectionTlsState.NotEncryptedLocal) ? "ok" : "warn");
+        view.Tls.Summary.Should().Be("TLS " + text, "the Overview's line says the same words");
+        (view.Tls.Text + view.Tls.Detail).Should().NotContain(peer ?? "no peer", "the address is never printed");
+    }
 
     [Fact]
     public void The_cloud_sql_auth_proxy_encrypts_onward_and_gss_encrypts_without_tls()

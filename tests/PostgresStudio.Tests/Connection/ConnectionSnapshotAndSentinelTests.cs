@@ -74,7 +74,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
     private static string Dump(ConnectionPageView view) =>
         JsonSerializer.Serialize(view, DumpOptions)
         + string.Join('\n', view.Settings.Select(static x => x.Row.Keyword + "=" + x.Row.Value + " " + x.Row.Note + " " + x.Row.DefaultValue))
-        + string.Join('\n', view.Cards.Concat(view.Notes).Select(static x => x.Heading + x.Text + string.Join('|', x.Fixes.Select(static f => f.Code))))
+        + string.Join('\n', view.Cards.Concat(view.Notes).Select(static x => x.Heading + x.Text + string.Join('|', x.Fixes.Select(static f => f.Code + f.Note))))
         + string.Join('\n', view.Observed.Lines.Select(static x => x.Label + x.Value + x.Note))
         + string.Join('\n', view.Header.Select(static x => x.Label + x.Value))
         + string.Join('\n', view.SettingsNotes);

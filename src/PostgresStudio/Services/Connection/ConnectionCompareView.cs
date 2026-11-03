@@ -107,6 +107,12 @@ internal sealed record ConnectionCompareView
     /// <summary>The headings of the advice the connection in effect has and the pasted settings would no longer trigger.</summary>
     public IReadOnlyList<string> Resolved { get; init; } = [];
 
+    /// <summary>
+    /// The one sentence at the top of the result (what the pasted settings do about the certificate check and the readable password,
+    /// the advice that is new or gone, or that it is the same), or <see langword="null" /> when the connection in effect could not be read.
+    /// </summary>
+    public string? Verdict { get; init; }
+
     /// <summary>The loaded Npgsql's version: both columns are read by it.</summary>
     public string NpgsqlVersion { get; init; } = string.Empty;
 

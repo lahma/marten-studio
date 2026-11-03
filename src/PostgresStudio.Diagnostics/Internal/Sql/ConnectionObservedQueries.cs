@@ -77,7 +77,8 @@ internal static class ConnectionObservedQueries
         "       (select t.bits from ssl t) as ssl_bits,\n" +
         "       (select g.gss_authenticated from gss g) as gss_authenticated,\n" +
         "       (select g.encrypted from gss g) as gss_encrypted,\n" +
-        "       coalesce((select pg_catalog.array_agg(lower(o.name) order by o.name) from pg_catalog.pg_settings o where lower(o.name) = any(@options)), '{}'::text[]) as known_options";
+        "       coalesce((select pg_catalog.array_agg(lower(o.name) order by o.name) from pg_catalog.pg_settings o where lower(o.name) = any(@options)), '{}'::text[]) as known_options,\n" +
+        "       pg_catalog.host(pg_catalog.inet_client_addr()) as client_address";
 
     private const string SessionsSql =
         "select (pg_catalog.to_jsonb(d) ->> 'sessions')::bigint as sessions,\n" +

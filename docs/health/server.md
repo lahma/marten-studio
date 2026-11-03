@@ -224,9 +224,13 @@ What to change, in the connection string the data source is built from - a clien
 SSL Mode=VerifyFull
 ```
 
-`VerifyFull` encrypts and checks that the server's certificate chains to a trusted authority and names the host; `Require`
-encrypts without checking either, which stops a listener but not an impostor. A server with `ssl = off` must be given a
-certificate first, which the finding says when it reads that setting.
+`VerifyFull` encrypts and checks that the server's certificate chains to a trusted authority and names the host.
+`SSL Mode=Prefer` or `Require` encrypts but does not check the server's certificate.
+
+**When the server's `ssl` setting is `off`** (1.1), the connection string alone cannot fix it, so the remedy is two steps, the
+server's first: "1. Enable TLS on the server (`ssl = on` with a certificate; on a managed platform it is usually on already).
+2. Then set `SSL Mode=VerifyFull` (and `Root Certificate=` if the CA is private)." When the server's `ssl` is on and the
+connection is plain anyway (`SSL Mode=Disable` or `Allow`), the remedy stays the one line above.
 
 ## S06 Anyone may create in an application schema
 

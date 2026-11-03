@@ -119,14 +119,21 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
                 + (facts.IsProduction
                     ? "This is Production."
                     : "Info rather than Warning: the environment is " + HostEnvironmentName.Describe(facts.EnvironmentName) + "."),
-            Remedy = new HealthRemedy(
-                "SSL Mode=VerifyFull",
-                "In the connection string " + SourceWords.DataSource(evaluation.Text) + " is built from - a client setting, not a server one. VerifyFull "
-                + "encrypts and checks that the server's certificate chains to a trusted authority and names the host; Require "
-                + "encrypts without checking either, which stops a listener but not an impostor."
-                + (serverOff
-                    ? " The server has TLS off (ssl = off), so it must be given a certificate and ssl = on first - its administrator's change."
-                    : string.Empty)),
+            Remedy = new HealthRemedy("SSL Mode=VerifyFull", RemedyText(serverOff, SourceWords.DataSource(evaluation.Text))),
         });
     }
+
+    /// <summary>
+    /// What the remedy says around its one line. With the server's <c>ssl</c> off the line alone would be advice that cannot work yet,
+    /// so there are two steps, the server's first; with it on, one. Either way <c>Prefer</c> and <c>Require</c> are said not to check.
+    /// </summary>
+    /// <param name="serverOff">Whether the server's <c>ssl</c> setting is <c>off</c>.</param>
+    /// <param name="dataSource">The words for the data source whose connection string it is.</param>
+    internal static string RemedyText(bool serverOff, string dataSource) =>
+        (serverOff
+            ? "1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). "
+              + "2. Then set SSL Mode=VerifyFull (and Root Certificate= if the CA is private) in the connection string " + dataSource + " is built from - a client setting. "
+            : "In the connection string " + dataSource + " is built from - a client setting, not a server one. ")
+        + "VerifyFull encrypts and checks that the server's certificate chains to a trusted authority and names the host. "
+        + "SSL Mode=Prefer or Require encrypts but does not check the server's certificate.";
 }

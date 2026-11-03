@@ -176,6 +176,39 @@ internal static class ConnectionPageBuilder
         };
     }
 
+    /// <summary>
+    /// "3 findings · 2 notes": the "Worth a look" count where there are notes too, each with its noun in the right number. With no
+    /// findings it is "2 notes" alone: "0 findings" beside "Nothing to change." says it twice.
+    /// </summary>
+    /// <param name="findings">The cards that count.</param>
+    /// <param name="notes">The "Good to know" cards.</param>
+    internal static string CountLabel(int findings, int notes) =>
+        findings == 0 ? Plural(notes, "note") : Plural(findings, "finding") + " · " + Plural(notes, "note");
+
+    private static string Plural(int count, string noun) =>
+        count.ToString(CultureInfo.InvariantCulture) + " " + noun + (count == 1 ? string.Empty : "s");
+
+    /// <summary>The refusal the write policy gives for a visitor who may not read other people's activity (HealthService's own words).</summary>
+    private const string ActivityPolicyReason = "needs your account's write policy to allow ViewDatabaseActivity for this database";
+
+    /// <summary>
+    /// The notice for findings the visitor is not shown: "1 finding is hidden because your account may not see activity on this
+    /// database." for the policy refusal, and the Health page's own reason, in the same frame, for any other.
+    /// </summary>
+    /// <param name="count">How many findings are withheld.</param>
+    /// <param name="reason">What it would take to see them, or <see langword="null" />.</param>
+    internal static string WithheldNotice(int count, string? reason)
+    {
+        string lead = Plural(count, "finding") + (count == 1 ? " is" : " are") + " hidden";
+
+        return reason switch
+        {
+            null or "" => lead + " from your account.",
+            ActivityPolicyReason => lead + " because your account may not see activity on this database.",
+            _ => lead + ": " + reason + ".",
+        };
+    }
+
     /// <summary>The ids the page's own sections and notes use: a contributed section must not take one.</summary>
     private static readonly string[] PageIds =
         ["conn-not-visible", "conn-observed", "conn-sessions", "conn-settings", "conn-worth", "conn-notes", "conn-toggle-note"];
@@ -387,12 +420,26 @@ internal static class ConnectionPageBuilder
                     "The server sees no TLS because the Cloud SQL Auth Proxy wraps its leg to the instance in TLS itself; the leg from the application to the proxy is not encrypted.");
             }
 
-            if (settings.Readable && settings.Endpoints.Count > 0 && settings.RemoteEndpoints.Count == 0)
+            // One rule, S05's: "local" needs both halves - the host the data source names is a socket or loopback AND the server sees
+            // the connection come over a socket or from loopback. A loopback host whose peer is not loopback is a container or a NAT in
+            // between: the connection does cross a network, and S05 says so, so the tile must not call it local.
+            bool hostLocal = settings.Readable && settings.Endpoints.Count > 0 && settings.RemoteEndpoints.Count == 0;
+
+            if (hostLocal && observed.PeerIsLocal)
             {
-                return new(ConnectionTlsState.NotEncryptedLocal, "not encrypted (local)", "The host is a socket or loopback, so the connection never leaves this machine.");
+                return new(ConnectionTlsState.NotEncryptedLocal, "not encrypted (local)", "The host is a socket or loopback, and the server sees the connection come from the same machine, so it never leaves it.");
             }
 
-            return new(ConnectionTlsState.NotEncrypted, "not encrypted", "The server reports no TLS on this connection" + modeText + ".");
+            // The address itself is never printed: only that the server sees a TCP peer.
+            bool tcpPeer = observed.ClientAddress is not null;
+            bool container = hostLocal && tcpPeer;
+            string text = "not encrypted" + (tcpPeer ? " · the server sees a TCP peer" : string.Empty) + (container ? " (likely a container network)" : string.Empty);
+
+            return new(
+                ConnectionTlsState.NotEncrypted,
+                text,
+                "The server reports no TLS on this connection" + modeText + "."
+                + (container ? " The host is loopback, but the server sees the connection come from another address: a container or NAT sits between them, and the connection crosses a network." : string.Empty));
         }
 
         return new(
@@ -416,7 +463,7 @@ internal static class ConnectionPageBuilder
             finding.Finding.WhyItMatters,
             [finding.Code],
             KeywordsFor(finding.Code, settings),
-            remedy is null ? [] : [new ConnectionFix(remedy.Heading, remedy.Code)])
+            remedy is null ? [] : [new ConnectionFix(remedy.Heading, remedy.Code, remedy.Explanation)])
         {
             Finding = finding,
             Code = finding.Code,

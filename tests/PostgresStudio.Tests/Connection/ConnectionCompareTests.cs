@@ -237,7 +237,42 @@ public sealed class ConnectionCompareTests
 
         await PasteAsync(context, page, Candidate);
 
-        Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("a secret (Password)").And.Contain("removed before anything was read"), page);
+        Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("a secret (Password)").And.Contain("Removed from what the studio reads; the text stays in this box until you press Clear or leave the page."), page);
+    }
+
+    [Fact]
+    public async Task The_result_opens_with_one_verdict_sentence_above_the_count_and_the_tables_are_labelled_for_the_phone()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync(current: "Host=db.example;SSL Mode=Prefer;Persist Security Info=true;Username=svc");
+        IRenderedComponent<ConnectionCompare> page = Open(context);
+
+        await PasteAsync(context, page, "Host=db.example;SSL Mode=VerifyFull;Root Certificate=/etc/ssl/ca.pem;Username=svc");
+
+        Wait(() => page.FindAll("#conn-compare-verdict").Should().ContainSingle(), page);
+        page.Find("#conn-compare-verdict").TextContent.Should().StartWith(
+            "The pasted settings check the server's certificate (SSL Mode=VerifyFull) and no longer keep the password readable (Persist Security Info).");
+
+        IReadOnlyList<IElement> result = [.. page.Find("#conn-compare-result").Children];
+        result[0].Id.Should().Be("conn-compare-verdict", "the verdict is first");
+        result[1].Id.Should().Be("conn-compare-summary");
+
+        // The changed rows stay (Port, Persist Security Info and Options are real differences), and each cell says what it is.
+        page.FindAll("tr#conn-cmp-row-persist-security-info").Should().ContainSingle();
+        IElement table = page.Find("table.ms-conn-compare-table");
+        table.QuerySelectorAll("colgroup > col").Select(static x => x.ClassName).Should().Equal(
+            "ms-conn-col-setting", "ms-conn-col-now", "ms-conn-col-pasted", "ms-conn-col-change");
+        table.QuerySelectorAll("tbody tr")[0].QuerySelectorAll("td").Select(static x => x.GetAttribute("data-label")).Should().Equal("In effect now", "Pasted", "Change");
+    }
+
+    [Fact]
+    public async Task A_comparison_with_the_same_advice_says_so_in_its_verdict()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync();
+        IRenderedComponent<ConnectionCompare> page = Open(context);
+
+        await PasteAsync(context, page, InEffect + ";Maximum Pool Size=100");
+
+        Wait(() => page.Find("#conn-compare-verdict").TextContent.Should().Be("Same advice as the connection in effect."), page);
     }
 
     [Fact]
@@ -264,13 +299,13 @@ public sealed class ConnectionCompareTests
         IRenderedComponent<ConnectionCompare> page = Open(context);
 
         await PasteAsync(context, page, "Host=a.example;Password=" + Sentinel);
-        Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("removed before anything was read. " + clause), page);
+        Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("until you press Clear or leave the page. " + clause), page);
 
         await using PostgresStudioComponentContext quoted = await ContextAsync();
         IRenderedComponent<ConnectionCompare> second = Open(quoted);
 
         await PasteAsync(quoted, second, "Host=a.example;Password='" + Sentinel + "'");
-        Wait(() => second.Find(".ms-conn-compare-removed").TextContent.Should().Contain("removed before anything was read").And.NotContain("must be quoted"), second);
+        Wait(() => second.Find(".ms-conn-compare-removed").TextContent.Should().Contain("until you press Clear or leave the page.").And.NotContain("must be quoted"), second);
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -560,7 +595,7 @@ public sealed class ConnectionCompareTests
         model.Outcome.Should().Be(expected);
         string dumped = JsonSerializer.Serialize(model, Dump)
             + string.Join('\n', model.Rows.Select(static x => x.Keyword + "=" + x.Pasted.Value + " " + x.Pasted.Note + " " + x.Current?.Value))
-            + string.Join('\n', model.Cards.Concat(model.Notes).Select(static x => x.Card.Heading + x.Card.Text + string.Join('|', x.Card.Fixes.Select(static f => f.Code))))
+            + string.Join('\n', model.Cards.Concat(model.Notes).Select(static x => x.Card.Heading + x.Card.Text + string.Join('|', x.Card.Fixes.Select(static f => f.Code + f.Note))))
             + model.Reason;
 
         dumped.Should().NotContain(Sentinel);

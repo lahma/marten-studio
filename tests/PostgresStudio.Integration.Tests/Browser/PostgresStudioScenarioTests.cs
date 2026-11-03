@@ -287,8 +287,26 @@ public class PostgresStudioScenarioTests(BrowserSuiteFixture fixture)
             await page.Locator("#conn-sessions table, #conn-sessions .ms-capability-disabled").First.WaitForAsync();
 
             await studio.AssertNoSidewaysScrollAsync("Database › Connection");
+
+            // UX-FIX-A: every group table has the same column widths, and the small print is closed until it is asked for.
+            (await page.EvaluateAsync<bool>(
+                "() => { const w = [...document.querySelectorAll('table.ms-conn-settings-table')].map(t => [...t.querySelectorAll('thead th')].map(h => Math.round(h.getBoundingClientRect().width)).join(',')); return w.length > 1 && new Set(w).size === 1; }"))
+                .Should().BeTrue("the Setting, In effect, From and Default columns are the same width in every group");
+            (await page.Locator("#conn-not-visible details").GetAttributeAsync("open")).Should().BeNull("the 'Not visible from here' small print starts closed");
+
             await page.SetViewportSizeAsync(390, 800);
             await studio.AssertNoSidewaysScrollAsync("Database › Connection at 390 px");
+
+            // At 390 px a settings row is a stacked card, so From and Default are on the screen and not behind a sideways scroll.
+            (await page.EvaluateAsync<bool>(
+                "() => { const row = document.querySelector('table.ms-conn-settings-table tbody tr'); const f = row.querySelector('td[data-label=\"From\"]').getBoundingClientRect(); const d = row.querySelector('td[data-label=\"Default\"]').getBoundingClientRect(); return getComputedStyle(row).display === 'block' && f.width > 0 && d.width > 0 && f.right <= window.innerWidth && d.right <= window.innerWidth && d.top > f.top; }"))
+                .Should().BeTrue("each settings row is a card at 390 px: the setting, its value, then From and Default");
+
+            // The fix blocks wrap, so a long line is read and not cut; the copy button stays.
+            (await page.EvaluateAsync<bool>(
+                "() => [...document.querySelectorAll('#conn-worth pre.ms-health-remedy-code')].every(p => p.scrollWidth <= p.clientWidth + 1)"))
+                .Should().BeTrue("a fix block has no sideways scroll of its own at 390 px");
+            (await page.Locator("#conn-worth .ms-conn-fix").First.Locator("button").CountAsync()).Should().BeGreaterThan(0, "the copy button is still there");
             await page.SetViewportSizeAsync(StudioPage.ViewportWidth, StudioPage.ViewportHeight);
 
             // A tenant database has its own connection; the page reads it the same way.

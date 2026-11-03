@@ -221,6 +221,11 @@
         int differing = view.DifferenceCount;
         List<ConnectionCompareRow> rows = [.. view.Rows.Where(x => showAll || x.Differs)];
 
+        @if (view.Verdict is { Length: > 0 } verdict)
+        {
+            <p class="ms-conn-compare-verdict" id="conn-compare-verdict">@verdict</p>
+        }
+
         <p class="ms-conn-compare-summary-line" id="conn-compare-summary">
             @if (!view.CurrentReadable)
             {
@@ -241,7 +246,7 @@
         @if (view.RemovedSecrets.Count > 0)
         {
             <p class="ms-muted ms-conn-note ms-conn-compare-removed">
-                The text carried @(view.RemovedSecrets.Count == 1 ? "a secret" : "secrets") (@string.Join(", ", view.RemovedSecrets)); it was removed before anything was read.@(view.RemovedUnquotedSecret ? " A password with ';' in it must be quoted, or Npgsql reads what follows as settings." : string.Empty)
+                The text carried @(view.RemovedSecrets.Count == 1 ? "a secret" : "secrets") (@string.Join(", ", view.RemovedSecrets)). Removed from what the studio reads; the text stays in this box until you press Clear or leave the page.@(view.RemovedUnquotedSecret ? " A password with ';' in it must be quoted, or Npgsql reads what follows as settings." : string.Empty)
             </p>
         }
 
@@ -266,6 +271,12 @@
 
                 <TableScroll Label="@(group.Key + " settings compared")">
                     <table class="ms-table ms-conn-table ms-conn-compare-table">
+                        <colgroup>
+                            <col class="ms-conn-col-setting" />
+                            <col class="ms-conn-col-now" />
+                            <col class="ms-conn-col-pasted" />
+                            <col class="ms-conn-col-change" />
+                        </colgroup>
                         <thead>
                             <tr>
                                 <th scope="col">Setting</th>
@@ -285,9 +296,9 @@
                                             <a class="ms-conn-advice" href="@RowLink(advice)" aria-label="@("Advice about " + row.Keyword + " if you switched to the pasted settings")">advice</a>
                                         }
                                     </th>
-                                    <td class="ms-conn-value">@ValueCell(row.Current)</td>
-                                    <td class="ms-conn-value">@ValueCell(row.Pasted)</td>
-                                    <td class="ms-conn-compare-change">
+                                    <td class="ms-conn-value" data-label="In effect now">@ValueCell(row.Current)</td>
+                                    <td class="ms-conn-value" data-label="Pasted">@ValueCell(row.Pasted)</td>
+                                    <td class="ms-conn-compare-change" data-label="Change">
                                         <span class="@("ms-conn-compare-mark" + (row.Differs ? " ms-conn-compare-mark-diff" : string.Empty))">@(row.Differs ? "changed" : "same")</span>
                                     </td>
                                 </tr>
@@ -380,6 +391,10 @@
                         <span class="ms-health-remedy-title">@fix.Label</span>
                         <CopyButton Value="@fix.Code" Label="@("Copy " + fix.Label + " (" + (card.Code ?? card.Heading) + ")")" />
                     </div>
+                    @if (fix.Note is { Length: > 0 } fixNote)
+                    {
+                        <p class="ms-conn-fix-note">@fixNote</p>
+                    }
                     <pre class="ms-code ms-health-remedy-code"><code>@fix.Code</code></pre>
                 </div>
             }

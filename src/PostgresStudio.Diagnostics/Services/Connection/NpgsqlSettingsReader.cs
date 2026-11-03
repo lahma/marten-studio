@@ -314,6 +314,18 @@ internal static class NpgsqlSettingsReader
                 note = DefaultFileNote(property.Keyword);
             }
 
+            // A variable only a newer Npgsql reads (PGAPPNAME, PGGSSENCMODE, PGREQUIREAUTH before Npgsql 10): somebody set it believing
+            // it does something. Only its name is said, and only while nothing else sets the keyword; its value is not read out.
+            bool ignored = variable is null
+                && entry.EnvironmentVariable is { } unread
+                && from == ConnectionSettingOrigin.Default
+                && environment.Get(unread) is { Length: > 0 };
+
+            if (ignored)
+            {
+                note = IgnoredEnvironmentNote(entry.EnvironmentVariable!, major, entry.EnvironmentFromMajor, property.Keyword);
+            }
+
             values[property.Keyword] = unreadable ? null : effective;
 
             rows.Add(new(
@@ -326,13 +338,32 @@ internal static class NpgsqlSettingsReader
                 note,
                 property.Obsolete,
                 from == explicitOrigin,
-                hintIds));
+                hintIds,
+                EnvironmentIgnored: ignored));
         }
 
         rows.Sort(static (a, b) => NpgsqlSettingsCatalog.OrderOf(a.Keyword).CompareTo(NpgsqlSettingsCatalog.OrderOf(b.Keyword)));
 
+        // A variable only a newer Npgsql reads, for a keyword this Npgsql does not even have (GSS Encryption Mode and Require Auth
+        // before Npgsql 10): there is no row to put the note on, so the page says it once, above the table.
+        List<string> notes = [.. empty.Notes];
+
+        foreach (NpgsqlSettingEntry entry in NpgsqlSettingsCatalog.Entries)
+        {
+            if (entry.EnvironmentVariable is { } variable
+                && entry.EnvironmentFor(major) is null
+                && !rows.Exists(x => string.Equals(x.Keyword, entry.Keyword, StringComparison.OrdinalIgnoreCase))
+                && environment.Get(variable) is { Length: > 0 })
+            {
+                notes.Add(variable + " is set, but Npgsql " + major.ToString(CultureInfo.InvariantCulture) + " does not read it (Npgsql "
+                    + entry.EnvironmentFromMajor.ToString(CultureInfo.InvariantCulture) + " does), and this Npgsql has no " + entry.Keyword
+                    + " setting to put in the connection string instead.");
+            }
+        }
+
         return empty with
         {
+            Notes = notes,
             Rows = [.. rows.Select(row => WithDefault(row, fresh))],
             Values = new ConnectionValues(values),
             Endpoints = endpoints,
@@ -441,6 +472,11 @@ internal static class NpgsqlSettingsReader
             false,
             hintIds);
     }
+
+    /// <summary>"PGAPPNAME is set, but Npgsql 9 does not read it (Npgsql 10 does): set Application Name in the connection string."</summary>
+    internal static string IgnoredEnvironmentNote(string variable, int loadedMajor, int readsFromMajor, string keyword) =>
+        variable + " is set, but Npgsql " + loadedMajor.ToString(CultureInfo.InvariantCulture) + " does not read it (Npgsql "
+        + readsFromMajor.ToString(CultureInfo.InvariantCulture) + " does): set " + keyword + " in the connection string.";
 
     private static string DefaultFileNote(string keyword)
     {

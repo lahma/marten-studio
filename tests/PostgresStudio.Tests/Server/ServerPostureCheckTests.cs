@@ -103,16 +103,36 @@ public class ServerPostureCheckTests
         finding.Severity.Should().Be(severity);
         finding.Remedy!.Code.Should().Be("SSL Mode=VerifyFull");
         finding.Remedy.Kind.Should().Be(HealthRemedyKind.Configuration, "a connection-string setting, never a server one");
-        finding.Remedy.Explanation.Should().NotContain("ssl = off");
+        finding.Remedy.Explanation.Should().NotContain("1. Enable TLS on the server", "the server has TLS on: one step");
+        finding.Remedy.Explanation.Should().StartWith("In the connection string");
         finding.Evidence.Should().NotContain(x => x.Value.Contains("172.17", StringComparison.Ordinal), "a client address is never shown");
     }
 
     [Fact]
-    public void S05_says_the_server_needs_TLS_first_when_its_ssl_setting_is_off()
+    public void S05_is_two_steps_with_the_servers_first_when_its_ssl_setting_is_off()
     {
-        new UnencryptedConnectionCheck()
+        HealthRemedy remedy = new UnencryptedConnectionCheck()
             .Evaluate(new UnencryptedConnectionFacts(Posture(ssl: false), "off", "Production"), Evaluation())
-            .Findings.Single().Remedy!.Explanation.Should().Contain("ssl = off");
+            .Findings.Single().Remedy!;
+
+        remedy.Code.Should().Be("SSL Mode=VerifyFull", "what the copy button copies stays the one line");
+        remedy.Explanation.Should().StartWith(
+            "1. Enable TLS on the server (ssl = on with a certificate; on a managed platform it is usually on already). "
+            + "2. Then set SSL Mode=VerifyFull (and Root Certificate= if the CA is private)");
+        remedy.Explanation.Should().Contain("SSL Mode=Prefer or Require encrypts but does not check the server's certificate.");
+    }
+
+    [Theory]
+    [InlineData("on")]
+    [InlineData(null)]
+    public void S05_stays_one_step_when_the_server_has_ssl_on_or_it_could_not_be_read_and_still_says_prefer_and_require_do_not_verify(string? serverSsl)
+    {
+        HealthRemedy remedy = new UnencryptedConnectionCheck()
+            .Evaluate(new UnencryptedConnectionFacts(Posture(ssl: false, client: "172.17.0.1"), serverSsl, "Production"), Evaluation())
+            .Findings.Single().Remedy!;
+
+        remedy.Explanation.Should().NotContain("1. Enable TLS").And.NotContain("2. Then");
+        remedy.Explanation.Should().Contain("SSL Mode=Prefer or Require encrypts but does not check the server's certificate.");
     }
 
     [Theory]

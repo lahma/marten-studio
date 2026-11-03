@@ -40,6 +40,7 @@ internal enum ConnectionSettingOrigin
 /// <param name="HintIds">The hints and checks that are about this keyword.</param>
 /// <param name="DefaultValue">Npgsql's own default for the keyword, formatted as <paramref name="Value" /> is (<c>not set</c> for none); <see langword="null" /> for a keyword the studio does not know.</param>
 /// <param name="BuilderProperty">The loaded <c>NpgsqlConnectionStringBuilder</c> property that carries the keyword, <c>MaxPoolSize</c>.</param>
+/// <param name="EnvironmentIgnored">Whether an environment variable a newer Npgsql falls back to for this keyword is set in the process, and the loaded Npgsql does not read it (<c>PGAPPNAME</c> before Npgsql 10).</param>
 internal sealed record ConnectionSettingRow(
     string Keyword,
     string Category,
@@ -52,7 +53,8 @@ internal sealed record ConnectionSettingRow(
     bool IsExplicit,
     IReadOnlyList<string> HintIds,
     string? DefaultValue = null,
-    string? BuilderProperty = null);
+    string? BuilderProperty = null,
+    bool EnvironmentIgnored = false);
 
 /// <summary>
 /// The effective, non-secret values of the settings the hints and checks read: the connection string over the

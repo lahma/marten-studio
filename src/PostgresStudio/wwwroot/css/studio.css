@@ -14702,3 +14702,207 @@ a.ms-schema-health-mark:focus-visible {
     color: var(--ms-color-text-secondary);
     word-break: break-word;
 }
+
+/* ===== 1.1-UX-FIX-A connection page: same columns, stacked cards on a phone, wrapped fixes ===== */
+
+/* ==========================================================================
+   1.1-UX-FIX-A. Database > Connection, from the admin validation
+
+   Appended in D26 order, after 1.1-NP4-FIX. What is here: the same four column widths in every group table (they were sized by
+   their own content, so each group's columns sat somewhere else); the Compare disclosure's heading at the size of the page's other
+   section titles (it is not a direct child of its section, so `.ms-section > h2` never reached it); the verdict line; the fix blocks
+   wrapping instead of being cut at 390 px; a disclosure for the small print; and, below 600 px, every settings row as a stacked card -
+   the setting, then its value, then "From:" and "Default:" - because a table that scrolls sideways hides exactly the two columns
+   that say where a value came from. Wider than that the tables are unchanged and stay in their TableScroll (D25).
+   ========================================================================== */
+
+.ms-conn-settings-table,
+.ms-conn-compare-table {
+    table-layout: fixed;
+    min-width: 50rem;
+}
+
+.ms-conn-col-setting {
+    width: 26%;
+}
+
+.ms-conn-col-effect {
+    width: 40%;
+}
+
+.ms-conn-col-from {
+    width: 18%;
+}
+
+.ms-conn-col-default {
+    width: 16%;
+}
+
+.ms-conn-compare-table .ms-conn-col-now,
+.ms-conn-compare-table .ms-conn-col-pasted {
+    width: 30%;
+}
+
+.ms-conn-compare-table .ms-conn-col-change {
+    width: 14%;
+}
+
+.ms-conn-settings-table .ms-conn-from,
+.ms-conn-compare-table .ms-conn-from {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.ms-conn-default .ms-mono {
+    overflow-wrap: anywhere;
+}
+
+/* The Compare disclosure's heading: the scale of `.ms-section > h2`, which its summary keeps it from. */
+.ms-conn-compare-summary .ms-section-title {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.ms-conn-compare-verdict {
+    max-width: 80ch;
+    margin: 0;
+    padding: var(--ms-space-sm) var(--ms-space-md);
+    border-left: 4px solid var(--ms-color-primary);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-info-bg);
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-conn-count {
+    white-space: nowrap;
+}
+
+/* A fix is something to read as well as copy: its explanation above it, and the text wrapping rather than scrolling. */
+.ms-conn-fix-note {
+    max-width: 80ch;
+    margin: 0;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-fix .ms-health-remedy-code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    overflow-x: visible;
+}
+
+/* Small print, closed by default. */
+.ms-conn-disclosure-summary {
+    display: flex;
+    align-items: baseline;
+    gap: var(--ms-space-sm);
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-conn-disclosure-summary::-webkit-details-marker {
+    display: none;
+}
+
+.ms-conn-disclosure-summary::before {
+    content: "▸";
+}
+
+.ms-conn-disclosure[open] > .ms-conn-disclosure-summary::before {
+    content: "▾";
+}
+
+.ms-conn-disclosure[open] > .ms-conn-disclosure-summary {
+    margin-bottom: var(--ms-space-md);
+}
+
+.ms-conn-disclosure-summary:focus-visible {
+    outline: 2px solid var(--ms-color-primary);
+    outline-offset: 2px;
+    border-radius: var(--ms-radius-sm);
+}
+
+@media (max-width: 599px) {
+    .ms-conn-table,
+    .ms-conn-table tbody,
+    .ms-conn-table tbody tr,
+    .ms-conn-table tbody td,
+    .ms-conn-table tbody th {
+        display: block;
+    }
+
+    .ms-conn-table {
+        min-width: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        overflow: visible;
+    }
+
+    .ms-conn-table colgroup {
+        display: none;
+    }
+
+    /* The header row is said by each cell's own label below; it stays for assistive technology and is not drawn. */
+    .ms-conn-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+    }
+
+    .ms-conn-table tbody tr {
+        margin: 0 0 var(--ms-space-sm);
+        padding: var(--ms-space-sm) var(--ms-space-md);
+        border: 1px solid var(--ms-color-border);
+        border-radius: var(--ms-radius-md);
+        background: var(--ms-color-surface);
+    }
+
+    .ms-conn-table tbody tr:last-child {
+        border-bottom: 1px solid var(--ms-color-border);
+    }
+
+    .ms-conn-table tbody tr th.ms-conn-keyword {
+        width: auto;
+        min-width: 0;
+        padding: 0 0 var(--ms-space-xs);
+        border: 0;
+        background: transparent;
+    }
+
+    .ms-conn-table tbody tr td {
+        min-width: 0;
+        padding: var(--ms-space-xs) 0;
+        border: 0;
+    }
+
+    .ms-conn-table tbody tr td[data-label]::before {
+        content: attr(data-label) ": ";
+        font-size: var(--ms-font-size-xs);
+        color: var(--ms-color-text-secondary);
+    }
+
+    /* The value is the card's body and wants no label; the others do. */
+    .ms-conn-table tbody tr td[data-label="In effect"]::before {
+        content: none;
+    }
+
+    .ms-conn-table .ms-conn-value,
+    .ms-conn-compare-table .ms-conn-value {
+        min-width: 0;
+    }
+
+    .ms-conn-table .ms-conn-row-note {
+        max-width: none;
+    }
+}

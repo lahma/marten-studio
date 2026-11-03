@@ -26,7 +26,8 @@ internal static class ConnectionTestFacts
         long? idleInTransactionMs = 0,
         long? transactionMs = null,
         string? passwordEncryption = "scram-sha-256",
-        bool inRecovery = false) => new(
+        bool inRecovery = false,
+        string? clientAddress = "10.0.0.9") => new(
         CurrentUser: currentUser,
         SessionUser: sessionUser,
         Database: "app",
@@ -51,6 +52,7 @@ internal static class ConnectionTestFacts
         KnownOptionNames: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
     {
         ReportedParameters = new Dictionary<string, string> { ["server_version"] = "17.4", ["is_superuser"] = "off", ["scram_iterations"] = "4096" },
+        ClientAddress = clientAddress,
     };
 
     /// <summary>The facts of a connection string read the way the engine reads it, with a stated environment and platform.</summary>
