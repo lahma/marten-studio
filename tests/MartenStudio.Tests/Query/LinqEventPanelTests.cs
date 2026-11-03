@@ -191,6 +191,10 @@ public class LinqEventPanelTests
 
         context.JSInterop.Invocations["martenStudio.query.enhanceRunField"].Should().ContainSingle(
             "the Order-by box is a plain input, so the browser recognises Ctrl+Enter there and sends its live text");
+
+        context.JSInterop.Invocations["martenStudio.query.enhanceRunField"].Single().Arguments.Should().HaveCount(3)
+            .And.Subject.Last().Should().Be(nameof(LinqQueryPanel.RunFromOrderByAsync),
+                "the shared helper is told which [JSInvokable] to call; it does not know the panel's name");
     }
 
     [Fact]

@@ -519,7 +519,7 @@
 
         try
         {
-            await JsRuntime.InvokeAsync<bool>("martenStudio.query.enhanceRunField", new object?[] { orderByInput, orderByReference });
+            await JsRuntime.InvokeAsync<bool>("martenStudio.query.enhanceRunField", new object?[] { orderByInput, orderByReference, nameof(RunFromOrderByAsync) });
         }
         catch (Exception exception) when (StudioLiveUpdates.IsInteropUnavailable(exception))
         {
@@ -547,7 +547,13 @@
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                generalError = "LINQ mode failed (" + exception.GetType().Name + "). The application log has the details.";
+                // ExecuteAsync and NotifyAsync answer every failure they know of themselves; this is the net under a
+                // [JSInvokable], where an escape would be swallowed by the browser's catch. It logs through the same
+                // path (event 9263) so the sentence it shows is true.
+                StudioScope? scope = State.ActiveScope;
+                generalError = scope is null
+                    ? "LINQ mode failed (" + exception.GetType().Name + ")."
+                    : Unexpected(exception, scope);
                 StateHasChanged();
             }
         });

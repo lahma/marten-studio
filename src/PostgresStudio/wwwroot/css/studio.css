@@ -14925,8 +14925,8 @@ a.ms-schema-health-mark:focus-visible {
    - In the dark theme `.ms-muted`'s grey (#64748b) is 3.07:1 on the surface (#1e293b), and the Connection page's "advice" badge
      (#3b82f6 on #1e3a5f) is 3.13:1. Both are raised to at least 4.5:1 against the background they are drawn on, here and not
      in the original token's own section (D26): #8796ac is 4.87:1 on the surface and 5.94:1 on the page, and the badge's
-     #93c5fd is 6.38:1 on its #1e3a5f. The light theme declares nothing here and is as it was; its own muted grey
-     (#94a3b8, 2.56:1 on white) is the next pass's.
+     #93c5fd is 6.38:1 on its #1e3a5f. The light theme declares nothing here; its own muted grey
+     (#94a3b8, 2.56:1 on white) is raised in the 1.1-UX-FIX-B2 section below.
    ========================================================================== */
 
 .ms-skip-link {
@@ -14974,4 +14974,38 @@ a.ms-schema-health-mark:focus-visible {
 .ms-studio[data-theme="dark"] .ms-conn-advice {
     background: var(--ms-color-info-bg);
     color: #93c5fd;
+}
+
+/* ==========================================================================
+   ===== 1.1-UX-FIX-B2 light-theme contrast =====
+
+   Appended in D26 order. The light theme's muted grey (#94a3b8) is 2.56:1 on white, and the Connection page's "advice" badge
+   (#2563eb on #dbeafe) is 4.24:1. The 1.1-UX-FIX-B section above raised the dark theme's; these are the light theme's:
+
+   - muted text becomes #5e6d83: 5.26:1 on white, 5.03:1 on the page (#f8fafc) and 4.80:1 on a hovered or alternate row (#f1f5f9);
+   - the badge's text becomes the primary hover blue (#1d4ed8): 5.49:1 on its #dbeafe.
+
+   Placement is the point. A bare `:root { --ms-color-text-muted: ... }` here would come later in the file than the section
+   above's system-dark `:root` and win it, bringing the grey back in dark mode. So the muted token is declared for a light
+   system (`not (prefers-color-scheme: dark)`) and for the explicit light theme, and for nothing else; the badge likewise
+   follows the explicit theme first and the system second. Dark is untouched in all three of its spellings (system dark,
+   data-theme="dark", and a light override under a dark system).
+   ========================================================================== */
+
+@media not (prefers-color-scheme: dark) {
+    :root {
+        --ms-color-text-muted: #5e6d83;
+    }
+
+    .ms-studio:not([data-theme="dark"]) .ms-conn-advice {
+        color: var(--ms-color-primary-hover);
+    }
+}
+
+.ms-studio[data-theme="light"] {
+    --ms-color-text-muted: #5e6d83;
+}
+
+.ms-studio[data-theme="light"] .ms-conn-advice {
+    color: var(--ms-color-primary-hover);
 }

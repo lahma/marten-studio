@@ -578,12 +578,12 @@
         },
 
         /*
-         * Ctrl+Enter in a one-line field that sits beside an editor (the LINQ tab's Order-by box, 1.1): the same chord the
-         * editor answers, sent as "RunFromOrderByAsync" with the field's live text, because the field binds on `change`,
-         * which has not fired when the chord arrives. Idempotent per element, like enhanceEditor.
+         * Ctrl+Enter in a one-line field that sits beside an editor (1.1): the same chord the editor answers, sent to the
+         * component's [JSInvokable] method named by `methodName` with the field's live text, because the field binds on
+         * `change`, which has not fired when the chord arrives. Idempotent per element, like enhanceEditor.
          */
-        enhanceRunField: function (field, dotNetRef) {
-            if (!field || !dotNetRef || field.dataset.msRunFieldEnhanced === "true") {
+        enhanceRunField: function (field, dotNetRef, methodName) {
+            if (!field || !dotNetRef || !methodName || field.dataset.msRunFieldEnhanced === "true") {
                 return false;
             }
 
@@ -592,7 +592,7 @@
                     event.preventDefault();
 
                     try {
-                        const pending = dotNetRef.invokeMethodAsync("RunFromOrderByAsync", field.value);
+                        const pending = dotNetRef.invokeMethodAsync(methodName, field.value);
 
                         if (pending && typeof pending.catch === "function") {
                             pending.catch(function () { });

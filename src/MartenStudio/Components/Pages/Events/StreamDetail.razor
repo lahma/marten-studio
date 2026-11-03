@@ -140,10 +140,9 @@
             }
         </section>
 
-        @* F3. Drawn only where compaction means something: a stream that is not archived, whose aggregate type
-           is a registered single-stream aggregate Marten can fold it into, with more than one event left to
-           fold. Everywhere else there is no section at all - the plan's reason is what the service would say
-           if somebody asked anyway, and it refuses regardless of what this page draws (hard rule 5). *@
+        @* F3. The button is drawn only where compaction means something: a stream that is not archived, whose
+           aggregate type is a registered single-stream aggregate Marten can fold it into, with more than one event
+           left to fold. The service refuses regardless of what this page draws (hard rule 5). *@
         @* The section also stays while a compaction's result is on screen: the page reloads after one, and
            a stream it compacted may no longer be offered - its outcome must not vanish with the button. *@
         @* 1.1: where the button is not offered the section says why, in the plan's one sentence, so an admin looking for it is

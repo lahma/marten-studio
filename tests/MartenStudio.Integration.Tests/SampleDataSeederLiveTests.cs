@@ -2,6 +2,7 @@ using Marten;
 
 using MartenStudio.SampleDomain;
 using MartenStudio.SampleDomain.Documents;
+using MartenStudio.SampleDomain.Events;
 
 namespace MartenStudio.Integration.Tests;
 
@@ -51,6 +52,35 @@ public class SampleDataSeederLiveTests(SampleDataSeederLiveTests.Fixture fixture
 
         counts.Events.Should().BeGreaterThan(0);
         counts.Streams.Should().Be(SampleDataSeeder.OrderStreamCount);
+        counts.TypedStreams.Should().Be(
+            SampleDataSeeder.TypedOrderStreamCount,
+            "the four typed order streams (1.1) are what the Compact dialog and the typed-stream screens are shown with");
+    }
+
+    /// <summary>
+    /// The typed streams are typed for a reason: three fold into an <c>OrderSummary</c>, and the last is voided by its own
+    /// aggregate, so it folds into nothing and the Compact dialog can say so.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_voided_typed_stream_folds_to_nothing_and_the_others_do_not()
+    {
+        CancellationToken token = TestContext.Current.CancellationToken;
+
+        for (var i = 1; i <= SampleDataSeeder.TypedOrderStreamCount; i++)
+        {
+            await using IQuerySession session = Store.QuerySession();
+
+            var folded = await session.Events.AggregateStreamAsync<OrderSummary>(SampleDataSeeder.TypedOrderStreamId(i), token: token);
+
+            if (i == SampleDataSeeder.TypedOrderStreamCount)
+            {
+                folded.Should().BeNull("the last typed order is voided, and OrderSummaryProjection deletes a voided order");
+            }
+            else
+            {
+                folded.Should().NotBeNull($"typed order stream {i} is an ordinary order");
+            }
+        }
     }
 
     /// <summary>
@@ -124,18 +154,19 @@ public class SampleDataSeederLiveTests(SampleDataSeederLiveTests.Fixture fixture
             await session.Query<MediaAsset>().CountAsync(token),
             invoices,
             await session.Events.QueryAllRawEvents().CountAsync(token),
-            await CountStreamsAsync(token));
+            await CountStreamsAsync(SampleDataSeeder.OrderStreamCount, SampleDataSeeder.OrderStreamId, token),
+            await CountStreamsAsync(SampleDataSeeder.TypedOrderStreamCount, SampleDataSeeder.TypedOrderStreamId, token));
     }
 
-    private async Task<int> CountStreamsAsync(CancellationToken token)
+    private async Task<int> CountStreamsAsync(int expected, Func<int, Guid> idOf, CancellationToken token)
     {
         var streams = 0;
 
-        for (var i = 1; i <= SampleDataSeeder.OrderStreamCount; i++)
+        for (var i = 1; i <= expected; i++)
         {
             await using IQuerySession session = Store.QuerySession();
 
-            if (await session.Events.FetchStreamStateAsync(SampleDataSeeder.OrderStreamId(i), token) is not null)
+            if (await session.Events.FetchStreamStateAsync(idOf(i), token) is not null)
             {
                 streams++;
             }
@@ -155,5 +186,6 @@ public class SampleDataSeederLiveTests(SampleDataSeederLiveTests.Fixture fixture
         int MediaAssets,
         IReadOnlyList<int> InvoicesByTenant,
         int Events,
-        int Streams);
+        int Streams,
+        int TypedStreams);
 }
