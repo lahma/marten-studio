@@ -306,4 +306,10 @@ src/PostgresStudio.Diagnostics/Services/ConnectionHistory/  The opt-in connectio
                                          the public options, store seam and sample are at the project's root, beside the registration
 tests/PostgresStudio.Tests/ConnectionHistory/  A sample from a holders reading, the server a connection string names, the in-memory
                                          store's window, the page's view and the registration - no database
+src/PostgresStudio.Diagnostics/Services/Connection/  The connection-insights engine (1.1, NP1): the catalogue of Npgsql keywords, the
+                                         reader that redacts a data source's connection string, the pooler signs, the hints and the
+                                         facts the connection checks read (what the server saw of the studio's connection, the
+                                         platform, the pools that share the data source)
+tests/PostgresStudio.Tests/Connection/  The catalogue against the loaded Npgsql, the reader's provenance and redaction, every hint
+                                         each way, the pooler signs and the sentinel test - no database
 ```
