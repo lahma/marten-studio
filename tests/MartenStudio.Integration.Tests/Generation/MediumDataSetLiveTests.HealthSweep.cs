@@ -101,10 +101,13 @@ public partial class MediumDataSetLiveTests
     /// <para>
     /// 1.1-NP2's C16, C17, C18, S11, S12 and S13 add 1 between them: the connection read
     /// (<c>ConnectionObservedQueries.Observed</c>: the settings a new session starts with and this connection's TLS row), which they
-    /// share through <c>ConnectionFacts</c>. C17's session statistics (<c>ConnectionObservedQueries.Sessions</c>) are read only with
-    /// pooling off, which this set's store does not have, and the pools and the settings themselves are read in process. The
-    /// count stood at 53 before it (reads added since 0.6's 51 had used the slack); it is measured at 54 now, and the constant is
-    /// that count, so the two of slack are the conditional reads again.
+    /// share through <c>ConnectionFacts</c>; S05, which reads its TLS row from the posture read, now asks that same
+    /// <c>ConnectionFacts</c> for its pooler signs (in process) and so adds none. C17's session statistics
+    /// (<c>ConnectionObservedQueries.Sessions</c>) are read only with pooling off, which this set's store does not have, and the
+    /// pools and the settings themselves are read in process. The count stood at 53 before it, and the two reads that took it from
+    /// 0.6's 51 to 53 had used up the slack: K09's read of the document names that fold differently under a Turkish or Azerbaijani
+    /// culture (0.10, <c>DotlessNameQueries</c>) and the one read of the connections' holders that C13 and C14 share (0.8,
+    /// <c>ServerConnectionHolders</c>). E09's compaction probe (1.1) is not among the distinct statements this set's sweep lists. It is measured at 54 now, and the constant is that count, so the two of slack are the conditional reads again.
     /// </para>
     /// </remarks>
     private const int MeasuredSweepStatements = 54;

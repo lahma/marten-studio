@@ -481,6 +481,13 @@ internal sealed class StudioText
     public required string PoolIdleTimeoutLeaderClause { get; init; }
 
     /// <summary>
+    /// S13's <c>Log Parameters</c> finding: what decides whether the keyword logs anything in this studio's hosts, starting with a
+    /// space after the finding's last sentence - MartenStudio's: Marten 9 sets <c>DisableNpgsqlLogging</c> on by default, so Npgsql
+    /// has no logger unless the host switched that off - or empty for a studio that knows nothing of how its host builds the logger.
+    /// </summary>
+    public required string LogParametersLoggerClause { get; init; }
+
+    /// <summary>
     /// C18's remedy: the lines that give a process one <c>NpgsqlDataSource</c>, registered once and used wherever a connection is
     /// wanted - MartenStudio's hand it to Marten with <c>UseNpgsqlDataSource()</c>.
     /// </summary>
@@ -732,6 +739,9 @@ internal sealed class StudioText
                 {statements}
             });
             """,
+        LogParametersLoggerClause =
+            " Marten 9 gives the data sources it builds no logger factory while StoreOptions.DisableNpgsqlLogging is on, which is its "
+            + "default, so there the keyword logs nothing unless the host turned that off or built its own data source with a logger factory.",
         PoolIdleTimeoutLeaderClause =
             " K08 judges the same idle_session_timeout against the HotCold daemon's leadership connection, which this finding does not cover.",
         SharedDataSourceRemedyCode =
@@ -747,7 +757,7 @@ internal sealed class StudioText
             "Every part of the process that opens connections - Marten, Wolverine, a repository of the host's own - then shares "
             + "one pool and one Maximum Pool Size, so the server sees one ceiling for the process instead of one per data source. "
             + "A pool per tenant database is not a duplicate and is not counted.",
-        DatabaseGateReason ="needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
+        DatabaseGateReason = "needs the store policy to allow this database as a whole, with no tenant selected in the policy's resource",
         ExportSourceNoun = "store",
         PickInTheHeader = "a store and database",
         PlanIndexRemedy =

@@ -145,6 +145,17 @@ internal sealed record ConnectionFacts
     /// <summary>The pools in this process that share this data source's identity (C18), or <see langword="null" /> when the process's pools cannot be observed.</summary>
     public ConnectionPoolSiblings? Siblings { get; init; }
 
+    /// <summary>
+    /// Why <see cref="Siblings" /> is <see langword="null" /> when the cause is the data source and not the meter - its own host, database
+    /// and login could not be read from its connection string, so there is nothing to compare pool names with - or <see langword="null" />
+    /// when the cause is the meter or there is none.
+    /// </summary>
+    public string? SiblingsNotObserved { get; init; }
+
+    internal const string NoIdentityReason =
+        "The data source's own host, database and login could not be read from its connection string (it names no Host, or does not parse), "
+        + "so there is no identity to compare the process's Npgsql pool names with and its pools are not counted.";
+
     /// <summary>Whether the data source names a host that is neither a socket nor loopback.</summary>
     public bool HasRemoteHost => Settings.RemoteEndpoints.Count > 0;
 
@@ -205,6 +216,7 @@ internal sealed record ConnectionFacts
             Platform = platform,
             Sessions = sessions,
             Siblings = identity is null ? null : ObserveSiblings(context, identity),
+            SiblingsNotObserved = identity is null ? NoIdentityReason : null,
         };
     }
 

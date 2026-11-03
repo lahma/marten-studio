@@ -115,26 +115,59 @@ internal static class ConnectionHints
                   _ => string.Empty,
               });
 
-        string? provider = ProviderCertificates(platform);
+        string? provider = ProviderCertificates(platform, settings.PoolerSigns);
+        bool rootCertificate = !IsRdsProxy(settings.PoolerSigns);
 
         hints.Add(new(
             ConnectionHintIds.Tls,
             "SSL Mode",
             provider is null ? text : text + " " + provider,
-            "SSL Mode=VerifyFull;Root Certificate=<the provider's CA bundle>",
-            "builder.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;\nbuilder.ConnectionStringBuilder.RootCertificate = \"<path to the provider's CA bundle>\";"));
+            rootCertificate ? "SSL Mode=VerifyFull;Root Certificate=<the provider's CA bundle>" : "SSL Mode=VerifyFull",
+            rootCertificate
+                ? "builder.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;\nbuilder.ConnectionStringBuilder.RootCertificate = \"<path to the provider's CA bundle>\";"
+                : "builder.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;"));
     }
 
-    /// <summary>The CA a provider's server certificates chain to, for the TLS hint, or <see langword="null" /> when the studio has no source for the platform.</summary>
-    /// <param name="platform">The platform.</param>
-    internal static string? ProviderCertificates(PostgresPlatformKind platform) => platform switch
+    /// <summary>Whether one of <paramref name="signs" /> is an Amazon RDS Proxy endpoint.</summary>
+    /// <param name="signs">The data source's pooler signs.</param>
+    internal static bool IsRdsProxy(IReadOnlyList<PoolerSign> signs)
     {
-        PostgresPlatformKind.AmazonRds =>
-            "Amazon RDS: VerifyFull needs the AWS CA bundle (global-bundle.pem) as Root Certificate (Amazon RDS User Guide, Using SSL with a PostgreSQL DB instance).",
-        PostgresPlatformKind.Azure =>
-            "Azure Database for PostgreSQL: VerifyFull needs DigiCert Global Root G2, Microsoft RSA Root CA 2017 and, for older servers, DigiCert Global Root CA in the trust bundle (Microsoft Learn, security-tls).",
-        _ => null,
-    };
+        ArgumentNullException.ThrowIfNull(signs);
+        return signs.Any(static x => x.Kind == PoolerSignKind.RdsProxy);
+    }
+
+    /// <summary>
+    /// The CA a provider's server certificates chain to, for the TLS hint, or <see langword="null" /> when the studio has no source for the platform.
+    /// </summary>
+    /// <remarks>
+    /// <b>Behind an Amazon RDS Proxy the RDS bundle is the wrong one.</b> The proxy is its own TLS endpoint, and the Amazon RDS User Guide
+    /// (<i>Using TLS/SSL with RDS Proxy</i>) says: "If you are using RDS Proxy, you don't need to download Amazon RDS certificates"; the
+    /// proxy's certificates are issued through AWS Certificate Manager and chain to the Amazon Trust Services root CAs, which operating
+    /// systems usually already trust. So the advice is <c>SSL Mode=VerifyFull</c> with no <c>Root Certificate</c>, and never the RDS
+    /// <c>global-bundle.pem</c>, even when the server behind the proxy is detected as Amazon RDS.
+    /// </remarks>
+    /// <param name="platform">The platform.</param>
+    /// <param name="signs">The data source's pooler signs: a pooler in front of the server is the endpoint whose certificate is checked.</param>
+    internal static string? ProviderCertificates(PostgresPlatformKind platform, IReadOnlyList<PoolerSign> signs)
+    {
+        ArgumentNullException.ThrowIfNull(signs);
+
+        if (IsRdsProxy(signs))
+        {
+            return "Amazon RDS Proxy: its certificates are issued through AWS Certificate Manager, not by the RDS certificate authority, so VerifyFull needs no Root Certificate "
+                   + "(the Amazon Trust Services root CAs are usually already in the operating system's trust store) and the RDS CA bundle is the wrong one "
+                   + "(Amazon RDS User Guide, Using TLS/SSL with RDS Proxy: \"If you are using RDS Proxy, you don't need to download Amazon RDS certificates\").";
+        }
+
+        return platform switch
+        {
+            PostgresPlatformKind.AmazonRds =>
+                "Amazon RDS: VerifyFull needs the AWS CA bundle (global-bundle.pem) as Root Certificate (Amazon RDS User Guide, Using SSL with a PostgreSQL DB instance).",
+            PostgresPlatformKind.Azure =>
+                "Azure Database for PostgreSQL: VerifyFull needs DigiCert Global Root G2, Microsoft RSA Root CA 2017 and, for older servers, DigiCert Global Root CA in the trust bundle (Microsoft Learn, security-tls).",
+            _ => null,
+        };
+    }
 
     private static void Lifetime(ConnectionSettings settings, PostgresPlatformKind platform, List<ConnectionHint> hints)
     {

@@ -41,7 +41,8 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
         if (facts.Siblings is null)
         {
             throw new HealthCheckUnavailableException(
-                "This process's Npgsql pools cannot be observed (no pool name could be read from Npgsql's meter), so pools that share a database are not counted.");
+                facts.SiblingsNotObserved
+                ?? "This process's Npgsql pools cannot be observed (no pool name could be read from Npgsql's meter), so pools that share a database are not counted.");
         }
 
         return facts;
@@ -57,7 +58,7 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
 
         if (siblings is null)
         {
-            return HealthVerdict.Quiet("This process's Npgsql pools were not observed.");
+            return HealthVerdict.Quiet(facts.SiblingsNotObserved ?? "This process's Npgsql pools were not observed.");
         }
 
         if (siblings.Pools < 2)

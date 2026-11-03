@@ -283,6 +283,7 @@ internal static class PostgresStudioText
             {statements}
             """,
         PoolIdleTimeoutLeaderClause = string.Empty,
+        LogParametersLoggerClause = string.Empty,
         SharedDataSourceRemedyCode =
             """
             // One NpgsqlDataSource for the process: register it once ...
@@ -293,7 +294,7 @@ internal static class PostgresStudioText
         SharedDataSourceRemedyExplanation =
             "Every part of the process that opens connections then shares one pool and one Maximum Pool Size, so the server sees "
             + "one ceiling for the process instead of one per data source. A pool per database is not a duplicate and is not counted.",
-        DatabaseGateReason ="needs the source policy to allow this data source and database",
+        DatabaseGateReason = "needs the source policy to allow this data source and database",
         ExportSourceNoun = "data source",
         PickInTheHeader = "a database",
         PlanIndexRemedy =

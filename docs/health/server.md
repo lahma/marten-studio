@@ -209,6 +209,11 @@ source says `ssl = false`, and the connection came over TCP from another machine
 loopback address (`127.0.0.0/8`, `::1`). A Unix-domain socket, which has no client address, and a loopback connection never
 leave the server's machine and are quiet.
 
+**Not applicable behind a connection pooler** (1.1). When the data source's host or port is a pooler - a Neon pooled endpoint, port
+6543, Azure's built-in PgBouncer or PgBouncer's port 6432, or an Amazon RDS Proxy - the server's `pg_stat_ssl` row is the pooler's own
+connection to the server, not the application's connection to the pooler, so it says nothing about the application's leg. The row says
+so, and the Connection page's TLS hint judges `SSL Mode` instead.
+
 The connection is the data source's own, so it negotiates TLS exactly as the application's connections do. Without TLS,
 every statement, every document and event, and the login itself (where the server does not ask for SCRAM) cross the
 network in plain text.
@@ -322,9 +327,14 @@ SSL Mode=VerifyFull;Root Certificate=<path to the provider's CA bundle>
 Where the studio has a source for the provider's bundle, the finding names it: on **Amazon RDS** `VerifyFull` needs the AWS CA bundle
 (`global-bundle.pem`) as `Root Certificate` (*Using SSL with a PostgreSQL DB instance*, Amazon RDS User Guide); on **Azure Database for
 PostgreSQL** it needs DigiCert Global Root G2, Microsoft RSA Root CA 2017 and, for older servers, DigiCert Global Root CA in the trust
-bundle (*security-tls*, Microsoft Learn). Nothing is claimed about Aurora's `rds.force_ssl`, whose default differs from RDS's.
+bundle (*security-tls*, Microsoft Learn). Nothing is claimed about Aurora's `rds.force_ssl`, whose default differs from RDS's. Behind an
+**Amazon RDS Proxy** the RDS bundle is the wrong one: the proxy's certificates come through AWS Certificate Manager, and the Amazon RDS User
+Guide (*Using TLS/SSL with RDS Proxy*) says "If you are using RDS Proxy, you don't need to download Amazon RDS certificates". There the advice
+is `SSL Mode=VerifyFull` with no `Root Certificate` (the Amazon Trust Services root CAs are usually in the operating system's trust store).
 
-**Stands down** (the row says why, and the check never runs its own reads): a host that is a Unix socket or loopback, where the
+**Stands down** (the row says why, and the check never runs its own reads): a data source that reaches a **connection pooler** (a Neon
+pooled endpoint, port 6543, Azure's built-in PgBouncer or PgBouncer's port 6432, an Amazon RDS Proxy), because the server's `pg_stat_ssl`
+row is then the pooler's own connection, not the application's, and the Connection page's TLS hint judges `SSL Mode` instead; a host that is a Unix socket or loopback, where the
 connection never leaves the machine; and **Cloud SQL through the Auth Proxy** - a Cloud SQL server reached on a local socket or loopback
 host - because the proxy wraps its connection to the instance in TLS itself (per Google's Cloud SQL Auth Proxy design), so the server
 sees no TLS from the application. It also stands down, as S05 does, when the studio's role cannot see its own backend's `pg_stat_ssl` row:
@@ -340,13 +350,18 @@ Both studios. Three variants, none of which shows a value: the evidence says a c
   `Persist Security Info=false`, Npgsql's default.
 - **`ssl-password`, Warning**: `SSL Password` is set. Npgsql keeps `SSL Password` in `NpgsqlDataSource.ConnectionString` and in the
   pool name it reports to metrics whatever `Persist Security Info` says (it removes only `Password`), so the client key's password reaches
-  any code that prints the connection string and any OpenTelemetry exporter. Remedy: load the client certificate in code from a secrets
-  manager (`NpgsqlDataSourceBuilder.UseSslClientAuthenticationOptionsCallback(...)`; `UseClientCertificate` is obsolete in Npgsql 9 and
-  10), or use a key file without a password and restrict its permissions.
+  any code that prints the connection string and any OpenTelemetry exporter. Remedy: leave `SSL Certificate`, `SSL Key` and `SSL Password`
+  out of the connection string (and `PGSSLCERT` and `PGSSLKEY` unset), and load the client certificate in code from a secrets manager
+  (`NpgsqlDataSourceBuilder.UseSslClientAuthenticationOptionsCallback(...)`; `UseClientCertificate` is obsolete in Npgsql 9 and 10). All
+  three keywords go, not only the password: Npgsql loads `SSL Certificate` and `SSL Key` when it connects, before the callback runs, an
+  encrypted key without its password then throws, and on .NET 8 and later a certificate loaded that way becomes the client certificate
+  context, which wins over the callback's `ClientCertificates`. Or use a key file without a password and restrict its permissions.
 - **`pgpassword-env`, Info**: `PGPASSWORD` is set in the process's environment, which Npgsql falls back to when the data source has no
   password of its own. The PostgreSQL documentation advises against it, because some operating systems let other users see a process's
   environment; a password file is the advised alternative (`Passfile`). With `Persist Security Info` off the studio cannot tell whether
-  the connection string has a password of its own - in which case `PGPASSWORD` is ignored - and the finding says so.
+  the connection string has a password of its own - in which case `PGPASSWORD` is ignored - and the finding says so. Nor can it see a
+  password provider (`UsePasswordProvider` or `UsePeriodicPasswordProvider`) the data source was built with, which Npgsql asks first, so
+  `PGPASSWORD` may be unused there as well.
 
 The default password file (`~/.pgpass`, `%APPDATA%\postgresql\pgpass.conf`) is never probed. Quiet when none applies.
 
@@ -355,7 +370,11 @@ The default password file (`~/.pgpass`, `%APPDATA%\postgresql\pgpass.conf`) is n
 **Info**, both studios, **only in Production** (`IHostEnvironment.EnvironmentName`, as K01 and S04 read it; a host that registers none is not
 Production). Three variants, one per setting, each off by default and a development aid:
 
-- **`log-parameters`**: `Log Parameters=true` writes every command's parameter values to the log.
+- **`log-parameters`**: `Log Parameters=true` writes every command's parameter values to the log, where the data source has a logger
+  factory: Npgsql writes parameters only through one, which the studio cannot see. `NpgsqlDataSourceBuilder.EnableParameterLogging()` turns
+  parameter logging on whatever the keyword says, so removing the keyword does not end it where the host calls that. In Marten Studio the
+  finding adds that Marten 9 gives its data sources no logger factory while `StoreOptions.DisableNpgsqlLogging` is on, its default, so there
+  the keyword logs nothing unless the host turned that off or built its own data source with a logger factory.
 - **`include-error-detail`**: `Include Error Detail=true` puts PostgreSQL's error and notice details on `PostgresException.Detail` and
   `PostgresNotice.Detail`; they often quote the offending row (a unique violation's `Key (email)=(a@b.example) already exists`), and
   Npgsql warns that they can contain sensitive data.

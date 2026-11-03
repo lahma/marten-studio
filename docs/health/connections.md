@@ -695,6 +695,11 @@ Size=0`. The finding shows both with the numbers worked out. Npgsql refuses an i
 
 **Behind PgBouncer or a service built on it** the variant `idle-session-timeout` is not judged: the server's timeout ends the
 pooler's own server connection, which the pooler replaces, and the client's connection to the pooler is the pooler's to end.
+**Behind an Amazon RDS Proxy with `No Reset On Close=true`** the variant `idle-session-timeout` is not judged either: the proxy
+multiplexes, so the server's timeout reaches the client only on a connection the proxy has pinned to it. Npgsql's reset when a
+connection returns to its pool pins it by default, and `No Reset On Close=true` - which the Connection page's RESET hint advises behind an
+RDS Proxy - stops the reset and with it the pinning. The quiet note says so. The `proxy-idle-timeout` variant is unaffected: the
+proxy's own idle client timeout applies either way.
 **Not applicable** when `Pooling` is off (C17 judges that). Quiet when the server has no `idle_session_timeout` (older than
 PostgreSQL 14, or 0), or when `Keepalive` or `Connection Idle Lifetime` already covers the cut.
 
@@ -738,7 +743,9 @@ Several pools are sometimes deliberate - a separate pool for a long-running job 
 (`services.AddNpgsqlDataSource(connectionString)`) and resolve it wherever a connection is wanted; in Marten Studio, hand it to
 Marten with `AddMarten(...).UseNpgsqlDataSource()`. Database › Sessions › Holders shows who holds the connections.
 
-Not checked where the process's Npgsql pools cannot be observed. Quiet with one pool.
+Not checked where the process's Npgsql pools cannot be observed, or where the data source's own host, database and login cannot be
+read from its connection string (it names no `Host`), so there is no identity to compare the pool names with; the row says which.
+Quiet with one pool.
 
 ## Database › Sessions
 

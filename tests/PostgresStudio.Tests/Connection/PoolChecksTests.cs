@@ -118,6 +118,50 @@ public sealed class PoolChecksTests
             .Which.Variant.Should().Be("idle-session-timeout");
     }
 
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(1, 1)]
+    [InlineData(500, 1)]
+    [InlineData(999, 1)]
+    [InlineData(1_000, 1)]
+    [InlineData(1_999, 1)]
+    [InlineData(90_000, 90)]
+    public void A_sub_second_idle_session_timeout_is_a_cut_of_one_second_never_zero_which_means_off(long milliseconds, int? seconds)
+    {
+        Observed(milliseconds).IdleSessionTimeoutSeconds.Should().Be(seconds);
+
+        if (seconds is not null)
+        {
+            HealthFinding finding = C16(Facts("Host=db.example;Minimum Pool Size=1", Observed(milliseconds))).Findings.Should().ContainSingle().Subject;
+
+            finding.Evidence.Should().Contain(x => x.Label == "idle_session_timeout" && x.Value.StartsWith(seconds + " s", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void Behind_an_RDS_Proxy_with_No_Reset_On_Close_the_server_cut_is_not_judged_and_the_note_says_why()
+    {
+        // The server's cut reaches the client only on a pinned connection, and Npgsql's reset is what pins it.
+        HealthVerdict verdict = C16(Facts("Host=" + ProxyHost + ";No Reset On Close=true;Connection Idle Lifetime=100", Observed(60_000)));
+
+        verdict.Findings.Should().BeEmpty();
+        verdict.Note.Should().Contain("No Reset On Close=true").And.Contain("pinned").And.Contain("idle_session_timeout is not judged");
+
+        // The proxy's own idle client timeout applies either way.
+        C16(Facts("Host=" + ProxyHost + ";No Reset On Close=true;Minimum Pool Size=1", Observed(60_000))).Findings.Should().ContainSingle()
+            .Which.Variant.Should().Be("proxy-idle-timeout");
+    }
+
+    [Theory]
+    [InlineData("Host=" + ProxyHost + ";No Reset On Close=false;Connection Idle Lifetime=100")]
+    [InlineData("Host=" + ProxyHost + ";Connection Idle Lifetime=100")]
+    [InlineData("Host=db.example;No Reset On Close=true;Connection Idle Lifetime=100")]
+    public void With_the_reset_on_or_without_a_proxy_the_server_cut_is_judged_as_before(string connectionString)
+    {
+        C16(Facts(connectionString, Observed(60_000))).Findings.Should().ContainSingle()
+            .Which.Variant.Should().Be("idle-session-timeout");
+    }
+
     [Fact]
     public void When_the_server_was_not_read_the_proxy_variant_is_still_judged_and_the_server_variant_says_why_not()
     {
@@ -301,6 +345,17 @@ public sealed class PoolChecksTests
 
         verdict.Findings.Should().BeEmpty();
         verdict.Note.Should().Contain("2 pool name(s)");
+    }
+
+    [Fact]
+    public void A_data_source_whose_own_identity_does_not_parse_is_not_checked_for_that_reason_and_not_for_the_meters()
+    {
+        // The facts the sweep builds when the connection string names no Host: no identity, so no sibling can be compared.
+        ConnectionFacts noIdentity = Facts("Host=db.example") with { SiblingsNotObserved = ConnectionFacts.NoIdentityReason };
+
+        C18(noIdentity).Note.Should().Contain("host, database and login").And.NotContain("meter");
+        ConnectionFacts.NoIdentityReason.Should().Contain("names no Host").And.NotContain("meter");
+        C18(Facts("Host=db.example")).Note.Should().Contain("were not observed", "without that reason the meter is the cause, as before");
     }
 
     [Fact]

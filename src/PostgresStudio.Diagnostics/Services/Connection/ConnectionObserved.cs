@@ -74,7 +74,8 @@ internal sealed record ConnectionObserved(
     public IReadOnlyDictionary<string, string> ReportedParameters { get; init; } = new Dictionary<string, string>(0);
 
     /// <summary>
-    /// The server's own idle cut for a session, in whole seconds (rounded down), or <see langword="null" /> when it applies none.
+    /// The server's own idle cut for a session, in whole seconds (rounded down, but at least 1: a cut of under a second is still a cut,
+    /// and zero means off), or <see langword="null" /> when it applies none.
     /// </summary>
-    public int? IdleSessionTimeoutSeconds => IdleSessionTimeoutMs is > 0 ? (int) Math.Min(IdleSessionTimeoutMs.Value / 1000, int.MaxValue) : null;
+    public int? IdleSessionTimeoutSeconds => IdleSessionTimeoutMs is > 0 ? (int) Math.Max(1, Math.Min(IdleSessionTimeoutMs.Value / 1000, int.MaxValue)) : null;
 }

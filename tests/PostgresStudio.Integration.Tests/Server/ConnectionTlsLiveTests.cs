@@ -65,7 +65,7 @@ public class ConnectionTlsLiveTests(PostgresFixture postgres, TlsServerFixture t
 /// fires at <c>SSL Mode=Require</c>; at <c>VerifyCA</c> with the server's own certificate as the root it is quiet; and a loopback
 /// host never leaves the machine, so it is quiet whatever the mode. The data source must name a host that is not loopback for
 /// the check to judge it, so the container's published port is reached through this machine's own address - the test skips,
-/// saying so, where Docker publishes it on loopback only.
+/// saying so, where Docker publishes it on loopback only, and fails there on continuous integration (D19).
 /// </summary>
 public class ServerCertificateLiveTests(TlsServerFixture tls) : IClassFixture<TlsServerFixture>
 {
@@ -142,10 +142,10 @@ public class ServerCertificateLiveTests(TlsServerFixture tls) : IClassFixture<Tl
 
         if (address is null)
         {
-            Assert.Skip("This machine has no non-loopback IPv4 address, so S11 cannot be shown a remote host.");
+            SkipLocallyOrFail("This machine has no non-loopback IPv4 address, so S11 cannot be shown a remote host.");
         }
 
-        builder.Host = address.ToString();
+        builder.Host = address!.ToString();
 
         if (rootCertificate is not null)
         {
@@ -159,10 +159,28 @@ public class ServerCertificateLiveTests(TlsServerFixture tls) : IClassFixture<Tl
         }
         catch (Exception exception) when (exception is NpgsqlException or SocketException or IOException)
         {
-            Assert.Skip("The TLS container's published port is not reachable on this machine's own address (" + exception.GetType().Name + "), so S11 cannot be shown a remote host.");
+            SkipLocallyOrFail("The TLS container's published port is not reachable on this machine's own address (" + exception.GetType().Name + "), so S11 cannot be shown a remote host.");
         }
 
         return builder.ConnectionString;
+    }
+
+    /// <summary>
+    /// D19's rule for a precondition of the machine: locally the test skips, saying why; on continuous integration (<c>CI</c> or
+    /// <c>GITHUB_ACTIONS</c> set) it fails with the same reason, so no run is green without having shown S11 a remote host.
+    /// </summary>
+    /// <param name="reason">What is missing.</param>
+    private static void SkipLocallyOrFail(string reason)
+    {
+        bool continuousIntegration = DockerAvailability.OnContinuousIntegration
+                                     || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CI"));
+
+        if (continuousIntegration)
+        {
+            throw new InvalidOperationException(reason + " This run is on continuous integration, where a skipped live test reported as a pass is worse than a failure.");
+        }
+
+        Assert.Skip(reason);
     }
 }
 

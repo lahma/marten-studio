@@ -131,6 +131,58 @@ public sealed class PostureChecksTests
         ServerCertificateCheck.NotApplicableReason(Facts("Host=127.0.0.1", Observed(ssl: true))).Should().BeNull();
     }
 
+    // One host (or port) per pooler sign: a Neon pooled endpoint, Supabase's 6543, Azure's built-in PgBouncer, PgBouncer's port and an RDS Proxy.
+    public static TheoryData<string> PoolerHosts => new()
+    {
+        "Host=ep-cool-123-pooler.us-east-2.aws.neon.tech",
+        "Host=db.example;Port=6543",
+        "Host=myserver.postgres.database.azure.com;Port=6432",
+        "Host=db.example;Port=6432",
+        "Host=" + ProxyHost,
+    };
+
+    [Theory]
+    [MemberData(nameof(PoolerHosts))]
+    public void Behind_a_pooler_S11_is_not_applicable_because_the_TLS_row_is_the_poolers_own(string connectionString)
+    {
+        string? reason = ServerCertificateCheck.NotApplicableReason(Facts(connectionString, Observed(ssl: true)));
+
+        reason.Should().Contain("connection pooler").And.Contain("pg_stat_ssl row is the pooler's own connection, not the application's")
+            .And.Contain("Connection page's TLS hint judges SSL Mode");
+    }
+
+    [Theory]
+    [MemberData(nameof(PoolerHosts))]
+    public void Behind_a_pooler_S05_is_not_applicable_for_the_same_reason(string connectionString)
+    {
+        string? reason = UnencryptedConnectionCheck.NotApplicableReason(Facts(connectionString, Observed(ssl: false)).Settings.PoolerSigns);
+
+        reason.Should().Contain("connection pooler").And.Contain("pg_stat_ssl row is the pooler's own connection, not the application's")
+            .And.Contain("Connection page's TLS hint judges SSL Mode");
+    }
+
+    [Fact]
+    public void Without_a_pooler_sign_S05_and_S11_apply()
+    {
+        ConnectionFacts facts = Facts("Host=db.example;Port=5432", Observed(ssl: true));
+
+        UnencryptedConnectionCheck.NotApplicableReason(facts.Settings.PoolerSigns).Should().BeNull();
+        UnencryptedConnectionCheck.NotApplicableReason(null).Should().BeNull();
+        ServerCertificateCheck.NotApplicableReason(facts).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(PostgresPlatformKind.AmazonRds)]
+    [InlineData(PostgresPlatformKind.AmazonAurora)]
+    public void The_remedy_behind_an_RDS_Proxy_is_VerifyFull_with_no_Root_Certificate_and_never_the_RDS_bundle(PostgresPlatformKind platform)
+    {
+        HealthFinding finding = S11(Facts("Host=" + ProxyHost, Observed(ssl: true), platform)).Findings.Single();
+
+        finding.Remedy!.Code.Should().Contain("SSL Mode=VerifyFull").And.Contain("b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;")
+            .And.NotContain("Root Certificate").And.NotContain("RootCertificate");
+        finding.Remedy.Explanation.Should().Contain("Using TLS/SSL with RDS Proxy").And.Contain("AWS Certificate Manager").And.NotContain("global-bundle.pem");
+    }
+
     [Fact]
     public void A_role_that_cannot_see_its_own_TLS_row_stands_down_with_a_sentence()
     {
@@ -204,6 +256,28 @@ public sealed class PostureChecksTests
         {
             verdict.Findings.Should().BeEmpty();
         }
+    }
+
+    [Fact]
+    public void The_SSL_Password_remedy_leaves_all_three_certificate_keywords_out_because_Npgsql_loads_them_before_the_callback()
+    {
+        HealthFinding finding = S12(Facts("Host=db.example;SSL Password=S3NT1NEL-key")).Findings.Single();
+
+        finding.Remedy!.Code.Should().Contain("SSL Certificate, SSL Key and SSL Password").And.Contain("PGSSLCERT and PGSSLKEY").And.Contain("UseSslClientAuthenticationOptionsCallback");
+        finding.Remedy.Explanation.Should().Contain("before the callback runs").And.Contain("throws").And.Contain("client certificate context");
+        Everything(finding).Should().NotContain("S3NT1NEL");
+    }
+
+    [Theory]
+    [InlineData("Host=db.example", "ignores PGPASSWORD")]
+    [InlineData("Host=db.example;Persist Security Info=true", "Npgsql uses PGPASSWORD")]
+    public void The_PGPASSWORD_caveat_names_the_password_providers_the_studio_cannot_see(string connectionString, string sentence)
+    {
+        FakeEnvironment environment = new(("PGPASSWORD", "S3NT1NEL-env"));
+
+        HealthFinding finding = S12(Facts(connectionString, environment: environment)).Findings.Single();
+
+        finding.Caveat.Should().Contain(sentence).And.Contain("UsePasswordProvider").And.Contain("UsePeriodicPasswordProvider").And.Contain("cannot see");
     }
 
     [Fact]
@@ -314,6 +388,29 @@ public sealed class PostureChecksTests
         finding.Severity.Should().Be(HealthSeverity.Info);
         finding.WhyItMatters.Should().Contain("NpgsqlException.BatchCommand");
         finding.Remedy!.Code.Should().Contain("Include Failed Batched Command=false").And.Contain("b.ConnectionStringBuilder.IncludeFailedBatchedCommand = false;");
+    }
+
+    [Fact]
+    public void Log_Parameters_says_it_logs_only_through_a_logger_factory_and_that_EnableParameterLogging_overrides_the_keyword()
+    {
+        foreach (bool postgres in new[] { true, false })
+        {
+            HealthFinding finding = S13("Host=db.example;Log Parameters=true", "Production", postgres).Findings.Single();
+
+            finding.WhyItMatters.Should().Contain("Where the data source has a logger factory");
+            finding.Caveat.Should().Contain("only through a logger factory");
+            finding.Remedy!.Explanation.Should().Contain("EnableParameterLogging()").And.Contain("whatever this keyword says");
+        }
+
+        // Marten Studio adds what Marten 9 does by default; Postgres Studio's words know nothing of it.
+        Everything(S13("Host=db.example;Log Parameters=true", "Production").Findings.Single())
+            .Should().Contain("StoreOptions.DisableNpgsqlLogging").And.Contain("logs nothing unless");
+        Everything(S13("Host=db.example;Log Parameters=true", "Production", postgres: true).Findings.Single())
+            .Should().NotContain("DisableNpgsqlLogging");
+
+        // The other two variants carry none of it.
+        Everything(S13("Host=db.example;Include Error Detail=true", "Production").Findings.Single())
+            .Should().NotContain("EnableParameterLogging").And.NotContain("logger factory");
     }
 
     [Fact]

@@ -21,6 +21,12 @@ namespace PostgresStudio.Services.Health.Checks;
 /// stands down as S05 does.
 /// </para>
 /// <para>
+/// <b>Not applicable behind a pooler.</b> The server's <c>pg_stat_ssl</c> row behind a pooler describes the pooler's own connection to
+/// the server, not the application's connection to the pooler, so it cannot say whether the application's leg uses TLS or checks a
+/// certificate; any pooler sign (<see cref="ConnectionSettings.PoolerSigns" />) makes the check not applicable, and the Connection
+/// page's TLS hint, which judges <c>SSL Mode</c> alone, is what speaks for that leg.
+/// </para>
+/// <para>
 /// <b>Stands down where nothing can sit between.</b> A host that is a Unix socket or loopback never leaves the machine, and a
 /// Cloud SQL server reached through the Auth Proxy is a local endpoint whose TLS the proxy provides itself (per Google's Cloud
 /// SQL Auth Proxy design: the proxy "wraps the connection in a SSL/TLS layer that's authorized for a Cloud SQL instance").
@@ -77,6 +83,12 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
     {
         ArgumentNullException.ThrowIfNull(facts);
 
+        if (facts.Settings.PoolerSigns.Count > 0)
+        {
+            return "The data source reaches a connection pooler, so the server's pg_stat_ssl row is the pooler's own connection, not the application's; "
+                   + "the Connection page's TLS hint judges SSL Mode.";
+        }
+
         if (facts.IsCloudSqlProxyCase)
         {
             return "The data source reaches Cloud SQL through the Auth Proxy (a local socket or loopback host). The proxy wraps the connection to the instance in TLS itself, "
@@ -114,7 +126,8 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
 
         string mode = v.SslMode.ToLowerInvariant();
         string variant = mode == "require" ? RequireVariant : PreferVariant;
-        string provider = ConnectionHints.ProviderCertificates(facts.Platform.Kind) is { } bundle ? " " + bundle : string.Empty;
+        string provider = ConnectionHints.ProviderCertificates(facts.Platform.Kind, facts.Settings.PoolerSigns) is { } bundle ? " " + bundle : string.Empty;
+        bool rootCertificate = !ConnectionHints.IsRdsProxy(facts.Settings.PoolerSigns);
         bool cloud = facts.Platform.IsManaged;
 
         List<HealthEvidence> evidence =
@@ -150,12 +163,18 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
                     ? "Warning because " + facts.Platform.Name + " was detected: the path to a managed server crosses networks the application does not run."
                     : "Info because no managed platform was detected; the studio cannot tell whether the path to the server is trusted."),
             Remedy = new HealthRemedy(
-                ConnectionCheckSupport.Block(
-                    evaluation.Text,
-                    "In the connection string the data source is built from:",
-                    "SSL Mode=VerifyFull;Root Certificate=<path to the provider's CA bundle>",
-                    "b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;",
-                    "b.ConnectionStringBuilder.RootCertificate = \"<path to the provider's CA bundle>\";"),
+                rootCertificate
+                    ? ConnectionCheckSupport.Block(
+                        evaluation.Text,
+                        "In the connection string the data source is built from:",
+                        "SSL Mode=VerifyFull;Root Certificate=<path to the provider's CA bundle>",
+                        "b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;",
+                        "b.ConnectionStringBuilder.RootCertificate = \"<path to the provider's CA bundle>\";")
+                    : ConnectionCheckSupport.Block(
+                        evaluation.Text,
+                        "In the connection string the data source is built from:",
+                        "SSL Mode=VerifyFull",
+                        "b.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;"),
                 "VerifyFull checks that the server's certificate chains to a trusted authority and names the host; VerifyCA checks only the "
                 + "chain. Without a Root Certificate Npgsql uses the machine's trusted certificate authorities, which suits a certificate from a public authority "
                 + "and not a provider's own CA." + provider),

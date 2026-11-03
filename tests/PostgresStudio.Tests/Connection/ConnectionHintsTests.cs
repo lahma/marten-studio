@@ -70,6 +70,22 @@ public sealed class ConnectionHintsTests
         Hint(Settings("Host=db.example", PostgresPlatformKind.AmazonAurora), ConnectionHintIds.Tls)!.Text.Should().NotContain("rds.force_ssl");
     }
 
+    [Theory]
+    [InlineData(PostgresPlatformKind.AmazonRds)]
+    [InlineData(PostgresPlatformKind.AmazonAurora)]
+    [InlineData(PostgresPlatformKind.SelfHosted)]
+    public void Behind_an_RDS_Proxy_the_TLS_hint_is_VerifyFull_with_no_Root_Certificate_and_never_the_RDS_bundle(PostgresPlatformKind platform)
+    {
+        // The proxy presents ACM certificates, whatever RDS server it fronts: the RDS bundle is the wrong root (Amazon RDS User Guide,
+        // Using TLS/SSL with RDS Proxy).
+        ConnectionHint hint = Hint(Settings("Host=the-proxy.proxy-demo.us-east-1.rds.amazonaws.com;SSL Mode=Require", platform), ConnectionHintIds.Tls)!;
+
+        hint.Text.Should().Contain("RDS Proxy").And.Contain("AWS Certificate Manager").And.Contain("Amazon Trust Services")
+            .And.Contain("you don't need to download Amazon RDS certificates").And.NotContain("global-bundle.pem");
+        hint.ConnectionStringFix.Should().Be("SSL Mode=VerifyFull");
+        hint.BuilderFix.Should().Be("builder.ConnectionStringBuilder.SslMode = SslMode.VerifyFull;");
+    }
+
     // ---- LIFETIME --------------------------------------------------------------------------------------------------
 
     [Theory]

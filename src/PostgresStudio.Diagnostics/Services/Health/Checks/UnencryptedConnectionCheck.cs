@@ -1,3 +1,4 @@
+using PostgresStudio.Services.Connection;
 using PostgresStudio.Services.Server;
 
 namespace PostgresStudio.Services.Health.Checks;
@@ -6,7 +7,12 @@ namespace PostgresStudio.Services.Health.Checks;
 /// <param name="Posture">The source's connection: whether it is encrypted, and how it came.</param>
 /// <param name="ServerSsl">The server's <c>ssl</c> setting, or <see langword="null" /> when not read.</param>
 /// <param name="EnvironmentName">The host's environment, or <see langword="null" />.</param>
-internal sealed record UnencryptedConnectionFacts(ServerConnectionPosture Posture, string? ServerSsl, string? EnvironmentName)
+/// <param name="PoolerSigns">The signs of a connection pooler in the data source's hosts and ports, or <see langword="null" /> when none were read.</param>
+internal sealed record UnencryptedConnectionFacts(
+    ServerConnectionPosture Posture,
+    string? ServerSsl,
+    string? EnvironmentName,
+    IReadOnlyList<PoolerSign>? PoolerSigns = null)
 {
     /// <summary>Whether the host says this is Production.</summary>
     public bool IsProduction => HostEnvironmentName.IsProduction(EnvironmentName);
@@ -26,6 +32,12 @@ internal sealed record UnencryptedConnectionFacts(ServerConnectionPosture Postur
 /// <b>Warning in Production, Info anywhere else.</b> The remedy is the Npgsql connection-string setting, never a server
 /// setting: the client decides whether it encrypts and whether it checks the certificate.
 /// </para>
+/// <para>
+/// <b>Not applicable behind a pooler.</b> The server's <c>pg_stat_ssl</c> row behind a pooler (PgBouncer, an Amazon RDS Proxy,
+/// Supavisor) describes the pooler's own connection to the server, not the application's connection to the pooler, so it says
+/// nothing about the application's leg; any pooler sign in the data source's hosts and ports (<see cref="PoolerSigns" />) makes
+/// the check not applicable, as it does S11. The Connection page's TLS hint judges <c>SSL Mode</c> instead.
+/// </para>
 /// </remarks>
 [HealthCheck("S05", HealthArea.Server, HealthCostTier.Catalog, "Connection without TLS")]
 internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnectionFacts>
@@ -35,11 +47,27 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        // The signs come from the data source's hosts and ports, which the sweep's one connection read has already parsed.
+        ConnectionFacts connection = await ConnectionFacts.SharedAsync(context).ConfigureAwait(false);
+
+        if (NotApplicableReason(connection.Settings.PoolerSigns) is { } reason)
+        {
+            throw new HealthCheckNotApplicableException(reason);
+        }
+
         ServerConnectionPosture posture = await ServerConnectionPosture.SharedAsync(context).ConfigureAwait(false);
         ServerSettingsRead settings = await ServerSettingsRead.SharedAsync(context).ConfigureAwait(false);
 
-        return new UnencryptedConnectionFacts(posture, settings.Find("ssl")?.Value, HostEnvironmentName.Of(context));
+        return new UnencryptedConnectionFacts(posture, settings.Find("ssl")?.Value, HostEnvironmentName.Of(context), connection.Settings.PoolerSigns);
     }
+
+    /// <summary>Why this check does not apply to the data source (it reaches a connection pooler), or <see langword="null" /> when it does.</summary>
+    /// <param name="poolerSigns">The data source's pooler signs, or <see langword="null" /> when none were read.</param>
+    public static string? NotApplicableReason(IReadOnlyList<PoolerSign>? poolerSigns) =>
+        poolerSigns is { Count: > 0 }
+            ? "The data source reaches a connection pooler, so the server's pg_stat_ssl row is the pooler's own connection, not the application's; "
+              + "the Connection page's TLS hint judges SSL Mode."
+            : null;
 
     /// <inheritdoc />
     public override HealthVerdict Evaluate(UnencryptedConnectionFacts facts, HealthEvaluation evaluation)

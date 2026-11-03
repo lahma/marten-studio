@@ -137,11 +137,14 @@ internal sealed class ReadableCredentialCheck : HealthCheck<ConnectionFacts>
         Remedy = new HealthRemedy(
             ConnectionCheckSupport.CodeBlock(
                 evaluation.Text,
-                "Load the client certificate in code, from a secrets manager, and leave SSL Password out of the connection string:",
+                "Leave SSL Certificate, SSL Key and SSL Password out of the connection string (and PGSSLCERT and PGSSLKEY unset), and load the certificate in code from a secrets manager:",
                 "b.UseSslClientAuthenticationOptionsCallback(options =>",
                 "    options.ClientCertificates = new X509CertificateCollection { certificate });"),
-            "Npgsql 9 and 10 take the certificate through the callback (UseClientCertificate is obsolete). Alternatively use a key file "
-            + "without a password and restrict its permissions to the account the application runs as."),
+            "Npgsql loads SSL Certificate and SSL Key (or PGSSLCERT and PGSSLKEY) when it connects, before the callback runs: an encrypted key "
+            + "without its SSL Password then throws, and on .NET 8 and later a certificate loaded that way is set as the client certificate "
+            + "context, which wins over the callback's ClientCertificates. So the callback replaces all three keywords, not just the password "
+            + "(Npgsql 9 and 10; UseClientCertificate is obsolete). Alternatively use a key file without a password and restrict its permissions "
+            + "to the account the application runs as."),
     };
 
     private static HealthFinding EnvironmentFinding(ConnectionSettings settings, HealthEvaluation evaluation) => new()
@@ -159,9 +162,12 @@ internal sealed class ReadableCredentialCheck : HealthCheck<ConnectionFacts>
             new("PGPASSWORD", "set in this process's environment"),
         ],
         Caveat = settings.PersistSecurityInfo
-            ? "The connection string has no password of its own, so Npgsql uses PGPASSWORD."
+            ? "The connection string has no password of its own, so Npgsql uses PGPASSWORD, unless the data source was built with a password "
+              + "provider (UsePasswordProvider or UsePeriodicPasswordProvider), which Npgsql asks first and the studio cannot see."
             : "Persist Security Info is off, so the studio cannot see whether the connection string has a password of its own; if it does, "
-              + "Npgsql ignores PGPASSWORD. The studio shows that the variable is set and never its value.",
+              + "Npgsql ignores PGPASSWORD, as it does when the data source was built with a password provider (UsePasswordProvider or "
+              + "UsePeriodicPasswordProvider), which Npgsql asks first and the studio cannot see. The studio shows that the variable is set "
+              + "and never its value.",
         Remedy = new HealthRemedy(
             ConnectionCheckSupport.Block(
                 evaluation.Text,

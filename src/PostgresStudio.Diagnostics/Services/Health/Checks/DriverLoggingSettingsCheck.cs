@@ -24,6 +24,14 @@ internal sealed record DriverLoggingFacts(ConnectionFacts Connection, string? En
 /// secret data into a log line, an error page or a telemetry export.
 /// </para>
 /// <para>
+/// <b><c>Log Parameters</c> logs only through a logger factory.</b> The parameters reach a log line only where the data source has one
+/// (<c>NpgsqlCommand.LogExecutingCompleted</c>, Npgsql 9.0.4; <c>LogParameters</c> is read there beside the builder's
+/// <c>EnableParameterLogging()</c>), which the studio cannot see, so the finding says "where the data source has a logger factory" and
+/// that <c>EnableParameterLogging()</c> turns it on whatever the keyword says. Marten 9 defaults <c>StoreOptions.DisableNpgsqlLogging</c>
+/// to <see langword="true" /> (V9.57.0), which leaves its data sources without one: Marten Studio's words say so
+/// (<see cref="Settings.StudioText.LogParametersLoggerClause" />); Postgres Studio's say nothing of it.
+/// </para>
+/// <para>
 /// <b>Only in Production, as the host says.</b> The environment is <c>IHostEnvironment.EnvironmentName</c>, as K01 and S04 read it;
 /// a host that registers none is not Production, and the quiet note says so. Nothing is raised elsewhere: these settings are meant
 /// for development. Severity is Info, because whether the data they copy is sensitive is the application's knowledge.
@@ -79,10 +87,14 @@ internal sealed class DriverLoggingSettingsCheck : HealthCheck<DriverLoggingFact
                 LogParametersVariant,
                 "Log Parameters",
                 "Every command's parameter values are written to the log",
-                "Npgsql logs the parameter values of every command it runs, at the log level it uses for commands. Those values are the "
-                + "application's data - names, email addresses, tokens, whatever the query takes - and they end up in log files and log "
-                + "services that are kept, searched and shared more widely than the database.",
-                "LogParameters"));
+                "Where the data source has a logger factory, Npgsql logs the parameter values of every command it runs, at the log level it uses "
+                + "for commands. Those values are the application's data - names, email addresses, tokens, whatever the query takes - and they "
+                + "end up in log files and log services that are kept, searched and shared more widely than the database."
+                + evaluation.Text.LogParametersLoggerClause,
+                "LogParameters",
+                " Npgsql writes parameters only through a logger factory, which the studio cannot see on the data source.",
+                " NpgsqlDataSourceBuilder.EnableParameterLogging() turns parameter logging on whatever this keyword says, so removing the keyword "
+                + "does not end it where the host calls that; the studio cannot see whether it does."));
         }
 
         if (v.Bool("Include Error Detail") == true)
@@ -122,7 +134,9 @@ internal sealed class DriverLoggingSettingsCheck : HealthCheck<DriverLoggingFact
         string keyword,
         string title,
         string why,
-        string property) => new()
+        string property,
+        string caveatExtra = "",
+        string remedyExtra = "") => new()
     {
         Code = "S13",
         Variant = variant,
@@ -136,13 +150,14 @@ internal sealed class DriverLoggingSettingsCheck : HealthCheck<DriverLoggingFact
         ],
         Caveat =
             "Info rather than Warning: whether the values these settings copy are sensitive is the application's knowledge, not the studio's. "
-            + "The setting is off by default and meant for development.",
+            + "The setting is off by default and meant for development."
+            + caveatExtra,
         Remedy = new HealthRemedy(
             ConnectionCheckSupport.Block(
                 evaluation.Text,
                 "In the connection string the data source is built from (Npgsql's default is off), or leave the keyword out:",
                 keyword + "=false",
                 "b.ConnectionStringBuilder." + property + " = false;"),
-            "Turn it on for a development environment only, through that environment's own configuration."),
+            "Turn it on for a development environment only, through that environment's own configuration." + remedyExtra),
     };
 }

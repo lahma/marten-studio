@@ -37,6 +37,15 @@ namespace PostgresStudio.Services.Health.Checks;
 /// where a PgBouncer-family sign is present. An RDS Proxy is not PgBouncer: its sign gives the <c>proxy-idle-timeout</c> variant.
 /// </para>
 /// <para>
+/// <b>Behind an RDS Proxy the server's cut reaches the client only on a pinned connection.</b> The proxy multiplexes, so the
+/// server's <c>idle_session_timeout</c> ends a database connection the proxy holds for the client only while it is pinned to that
+/// client (<i>Avoiding pinning an RDS Proxy</i>, <c>rds-proxy-pinning</c>). Npgsql's reset when a connection returns to its pool
+/// pins it by default (<see cref="ConnectionHints" />' RESET hint); <c>No Reset On Close=true</c>, which that hint advises behind an
+/// RDS Proxy, stops the reset and with it the pinning, so with an RDS Proxy sign and <c>No Reset On Close=true</c> the
+/// <c>idle-session-timeout</c> variant is not judged and the quiet note says why. The <c>proxy-idle-timeout</c> variant is not
+/// affected: the proxy's own idle client timeout applies either way.
+/// </para>
+/// <para>
 /// <b>Severity is Warning</b> for both; the remedy is the data source's settings. K08 judges the same server timeout against
 /// the HotCold daemon's leadership in Marten Studio (<see cref="Settings.StudioText.PoolIdleTimeoutLeaderClause" />).
 /// </para>
@@ -110,6 +119,12 @@ internal sealed class PoolIdleCutCheck : HealthCheck<ConnectionFacts>
         else if (pgBouncerFamily)
         {
             notes.Add("the data source reaches a connection pooler, which holds the server connection that idle_session_timeout ends, so it is not judged against this pool");
+        }
+        else if (rdsProxy && v.Bool("No Reset On Close") == true)
+        {
+            notes.Add(
+                "the data source reaches an Amazon RDS Proxy with No Reset On Close=true: the server's idle_session_timeout reaches the client only on a connection the proxy has pinned, "
+                + "Npgsql's reset is what pins its connections by default, and without it they are not pinned, so idle_session_timeout is not judged against this pool");
         }
         else if (Outlasts(v, serverCut))
         {
