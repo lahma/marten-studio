@@ -67,6 +67,49 @@ internal static class LinqEventMembers
         ];
     }
 
+    /// <summary>
+    /// The refusal with the reason of the withheld member it names, when the token at its position is one: the screen
+    /// binds names ignoring case, so this does too. Any other refusal comes back unchanged.
+    /// </summary>
+    /// <param name="refusal">The screen's refusal.</param>
+    /// <param name="text">The box's text the refusal's position points into.</param>
+    /// <param name="info">The target's members and what it withholds.</param>
+    public static LinqRefusal WithReason(LinqRefusal refusal, string? text, LinqEventTargetInfo info)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+        ArgumentNullException.ThrowIfNull(info);
+
+        if (text is null || refusal.Position < 0 || refusal.Position >= text.Length)
+        {
+            return refusal;
+        }
+
+        int end = refusal.Position;
+
+        while (end < text.Length && (char.IsLetterOrDigit(text[end]) || text[end] == '_'))
+        {
+            end++;
+        }
+
+        if (end == refusal.Position)
+        {
+            return refusal;
+        }
+
+        string token = text[refusal.Position..end];
+
+        foreach (LinqWithheldMember member in info.Withheld)
+        {
+            if (member.Name.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Any(name => string.Equals(name, token, StringComparison.OrdinalIgnoreCase)))
+            {
+                return refusal with { Message = refusal.Message + " " + member.Reason };
+            }
+        }
+
+        return refusal;
+    }
+
     /// <summary>What the page needs: the list, each omission's sentence, the default order and the schema.</summary>
     /// <param name="events">The store's event options.</param>
     /// <param name="tenant">The tenant selected, or <see langword="null" />.</param>

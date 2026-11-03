@@ -164,6 +164,45 @@ public class LinqEventQueryServiceTests
         harness.Ring.GetLatest()[0].Should().Match<StudioActionLogEntry>(x => !x.Succeeded && x.Action == LinqQueryService.LinqEventQueryAction);
     }
 
+    [DynamicLinqTheory]
+    [InlineData("IsArchived", "Use the Archived selector: Marten drops its own archive filter when a predicate names IsArchived.")]
+    [InlineData("isarchived == false", "Use the Archived selector: Marten drops its own archive filter when a predicate names IsArchived.")]
+    [InlineData("Version > 1 and it.IsArchived", "Use the Archived selector: Marten drops its own archive filter when a predicate names IsArchived.")]
+    [InlineData("Data == null", "The event body and headers are not queryable here: see docs/linq-mode.md#events.")]
+    [InlineData("Tags.Any()", "The event body and headers are not queryable here: see docs/linq-mode.md#events.")]
+    [InlineData("AggregateTypeName == \"a\"", "Not stored in a column.")]
+    public async Task A_refusal_that_names_a_withheld_member_says_why_it_is_withheld(string predicate, string reason)
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+
+        LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(predicate), Token);
+
+        result.Refusal!.Stage.Should().Be(LinqStage.Screen);
+        result.Refusal.Message.Should().Contain("which is not a member LINQ mode can query").And.EndWith(reason);
+        harness.Ring.GetLatest()[0].Message.Should().EndWith(reason, "the audit keeps the sentence the visitor saw");
+    }
+
+    [DynamicLinqFact]
+    public async Task An_ordering_that_names_a_withheld_member_says_why_too()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+
+        LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events(null, orderBy: "IsSkipped desc"), Token);
+
+        result.Refusal!.Clause.Should().Be(LinqClause.OrderBy);
+        result.Refusal.Message.Should().EndWith("Marten reads it from the event body, not the is_skipped column.");
+    }
+
+    [DynamicLinqFact]
+    public async Task A_refusal_that_names_something_that_is_not_withheld_gets_no_reason()
+    {
+        await using Harness harness = Harness.Create(static options => options.Capabilities = MartenStudioCapabilities.All());
+
+        LinqQueryResult result = await harness.Linq.RunAsync(NoTenant, Events("Nonsense == 1"), Token);
+
+        result.Refusal!.Message.Should().EndWith("which is not a member LINQ mode can query here.");
+    }
+
     [DynamicLinqFact]
     public async Task A_page_past_the_offset_cap_is_refused_in_the_events_words()
     {

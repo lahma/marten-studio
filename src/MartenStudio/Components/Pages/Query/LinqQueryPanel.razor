@@ -156,7 +156,7 @@
 
             @if (eventInfo.Withheld.Count > 0)
             {
-                <details class="ms-muted ms-query-note ms-query-linq-withheld">
+                <details class="ms-muted ms-query-note ms-query-linq-withheld" open="@NamedAWithheldMember(eventInfo)">
                     <summary>Not offered here: @(string.Join(", ", eventInfo.Withheld.Select(static x => x.Name)))</summary>
                     <ul class="ms-query-linq-withheld-list">
                         @for (int ordinal = 0; ordinal < eventInfo.Withheld.Count; ordinal++)
@@ -437,6 +437,13 @@
                     : await Linq.WhatIfAsync(scope, request, index, token);
             },
         };
+
+    /// <summary>Whether the last refusal explained a withheld member, so the list that says why every other one is left out opens.</summary>
+    private bool NamedAWithheldMember(LinqEventTargetInfo info) =>
+        info.Withheld.Any(member =>
+            (whereError?.Contains(member.Reason, StringComparison.Ordinal) ?? false)
+            || (orderError?.Contains(member.Reason, StringComparison.Ordinal) ?? false)
+            || (generalError?.Contains(member.Reason, StringComparison.Ordinal) ?? false));
 
     private string? whereError;
     private int whereErrorPosition = -1;

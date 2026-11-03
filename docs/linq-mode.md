@@ -236,7 +236,12 @@ The events' tenancy is `StoreOptions.Events.TenancyStyle`, not any document's.
 | Conjoined | none | none; the studio adds `AnyTenant()` | `(s, db, null)` |
 | Single (not divided by tenant) | a tenant | none | `(s, db, t)`, then `(s, db, null)` unless the database is exclusively that tenant's |
 | Single | none | none | `(s, db, null)` |
-| Separate database per tenant | a tenant | none; the session is pinned to that tenant's database | as the row above: not asked as the whole database when it is exclusively the tenant's |
+| Separate database per tenant | a tenant | none; the session is pinned to that tenant's database | as the row above: not asked as the whole database when it is exclusively the tenant's, except in the default database (below) |
+
+The first-registered (default) database never counts as exclusively one tenant's, whoever is selected in it: it is where the
+default tenant lives and where anything appended outside a tenant ends up, so it is the conservative case (D27). A tenant-only
+visitor who selects their tenant there is asked the whole-database question and refused it, as on single-tenanted events;
+their own tenant's database, if it is a different one, is not asked that way.
 
 A tenant-only visitor on single-tenanted events is therefore refused with: "Your account may not run LINQ queries against
 this database as a whole, and this store's events are not divided by tenant, so a query reads the whole database's event

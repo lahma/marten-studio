@@ -183,6 +183,39 @@ public class LinqEventMembersTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // The second wall: ReadsJsonBody finds the FROM however it is spelled, and fails closed without one
+    // ------------------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("select d.data, d.id from mt_events as d where d.data ->> 'X' = :p0")]
+    [InlineData("select d.data, d.id\nfrom mt_events as d\nwhere d.data ->> 'X' = :p0")]
+    [InlineData("select d.data, d.id\r\nFROM mt_events as d\r\nwhere d.data ->> 'X' = :p0")]
+    [InlineData("select d.data, d.id\tFrom\tmt_events as d where D.DATA ->> 'X' = :p0")]
+    public void A_statement_that_reads_the_body_after_its_from_is_a_body_read_however_the_from_is_spelled(string statement)
+    {
+        LinqQuerySql.ReadsJsonBody(statement).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("select d.data, d.id from mt_events as d where d.seq_id > :p0")]
+    [InlineData("select d.data, d.id\nfrom mt_events as d\nwhere d.seq_id > :p0")]
+    [InlineData("select d.data, d.id\tFROM\tmt_events as d where d.seq_id > :p0 order by d.seq_id desc")]
+    public void A_statement_that_reads_only_columns_after_its_from_is_not_a_body_read(string statement)
+    {
+        LinqQuerySql.ReadsJsonBody(statement).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("select d.data, d.id")]
+    [InlineData("select d.data where d.data ->> 'X' = :p0")]
+    [InlineData("selectd.data,d.id")]
+    [InlineData("")]
+    public void A_statement_with_no_from_at_all_is_refused_rather_than_trusted(string statement)
+    {
+        LinqQuerySql.ReadsJsonBody(statement).Should().BeTrue("a statement the check cannot place is one it cannot vouch for");
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // The pin: every withheld member really is a body read, or Marten's archive filter replaced
     // ------------------------------------------------------------------------------------------------
 
@@ -271,22 +304,25 @@ public class LinqEventMembersTests
     /// </summary>
     [DynamicLinqTheory]
     [InlineData("TenantId == \"b\"")]
-    [InlineData("TenantId != \"a\"")]
-    [InlineData("not (TenantId == \"a\") or Version > 0")]
-    [InlineData("TenantId == \"b\" or TenantId == \"a\"")]
+    [InlineData("TenantId != \"b\"")]
+    [InlineData("not (TenantId == \"b\") or Version > 0")]
+    [InlineData("TenantId == \"b\" or TenantId == \"c\"")]
     [InlineData("TenantId in (\"b\", \"c\")")]
     public void Marten_keeps_its_tenant_term_beside_a_predicate_that_names_TenantId(string predicate)
     {
+        // The session's tenant is spelled differently from every literal a predicate here uses, so a parameter holding it can
+        // only be Marten's own tenant term - never the visitor's literal.
+        const string SessionTenant = "session-tenant";
+
         using DocumentStore store = LinqEventTestSupport.ConjoinedStore();
 
-        ComposedLinqQuery composed = LinqEventTestSupport.Compose(store, "a", predicate, offerTenantId: true);
+        ComposedLinqQuery composed = LinqEventTestSupport.Compose(store, SessionTenant, predicate, offerTenantId: true);
         string sql = LinqEventTestSupport.Sql(composed);
 
         sql.Should().MatchRegex(@"and\s+d\.tenant_id = :p\d+", "Marten's tenant term is a top-level conjunct, whatever the predicate says");
 
         NpgsqlParameter[] parameters = [.. composed.Command!.Parameters.Cast<NpgsqlParameter>()];
-        parameters.Select(static x => x.Value).Should().Contain("a", "the term is bound to the session's tenant");
-        parameters.Count(static x => Equals(x.Value, "a")).Should().BeGreaterThanOrEqualTo(1);
+        parameters.Select(static x => x.Value).Should().Contain(SessionTenant, "the term is bound to the session's tenant");
     }
 
     // ------------------------------------------------------------------------------------------------

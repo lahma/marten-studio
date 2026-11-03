@@ -208,6 +208,25 @@ public class EventsApiSurfaceTests
     }
 
     /// <summary>
+    /// The negative paths of the run-time check: a queryable that is not Marten's at all (LINQ to objects), and a Marten
+    /// queryable built from a different session, are both refused - the check answers yes only for the session it was given.
+    /// </summary>
+    [Fact]
+    public void IsOnSession_refuses_a_queryable_that_is_not_Martens_and_one_from_a_different_session()
+    {
+        using DocumentStore store = Store(static options => options.Events.TenancyStyle = TenancyStyle.Conjoined);
+        using IDocumentSession session = store.LightweightSession(SessionOptions.ForDatabase("a", store.Storage.Database));
+        using IDocumentSession other = store.LightweightSession(SessionOptions.ForDatabase("a", store.Storage.Database));
+
+        IQueryable<IEvent> inMemory = Array.Empty<IEvent>().AsQueryable();
+        IQueryable<IEvent> fromOther = ((IReadOnlyEventStore) other.Events).QueryRawEvents();
+
+        MartenLinqCommand.IsOnSession(inMemory, session).Should().BeFalse("LINQ to objects is not a Marten query at all");
+        MartenLinqCommand.IsOnSession(fromOther, session).Should().BeFalse("it belongs to the other session");
+        MartenLinqCommand.IsOnSession(fromOther, other).Should().BeTrue("and the same queryable is on its own session");
+    }
+
+    /// <summary>
     /// Why the studio never passes the argument: for a tenant other than the session's, Marten returns a query on
     /// <c>_store.QuerySession(tenantId)</c> - another session, which ignores the database the studio resolved and is never
     /// disposed. (<c>QueryRawEventsTakesNoTenantTests</c> holds the call sites to the empty list.)

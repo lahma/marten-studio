@@ -487,7 +487,13 @@ internal sealed class LinqQueryService : ILinqQueryService
         if ((LinqTextScreen.Check(LinqClause.Where, run.Where, graph)
              ?? LinqTextScreen.Check(LinqClause.OrderBy, run.OrderBy, graph)) is { } screened)
         {
-            return Refuse(run, screened);
+            // A visitor who names a member the list withholds is told why, in the refusal itself.
+            return Refuse(run, eventOptions is null
+                ? screened
+                : LinqEventMembers.WithReason(
+                    screened,
+                    screened.Clause == LinqClause.OrderBy ? run.OrderBy : run.Where,
+                    LinqEventMembers.Describe(eventOptions, tenant)));
         }
 
         // 8. The parse and the guard, then Marten's statement - built, never executed by Marten.

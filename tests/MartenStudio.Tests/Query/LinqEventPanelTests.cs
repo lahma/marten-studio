@@ -148,6 +148,59 @@ public class LinqEventPanelTests
     }
 
     [Fact]
+    public void The_not_offered_list_is_closed_until_a_refusal_names_a_withheld_member()
+    {
+        using StudioComponentContext context = CreateContext(WithEvents(new FakeLinqQueryService()));
+
+        var panel = context.Render<LinqQueryPanel>();
+
+        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task The_not_offered_list_opens_when_the_refusal_named_a_withheld_member()
+    {
+        LinqWithheldMember archived = Info.Withheld[0];
+        var linq = WithEvents(new FakeLinqQueryService());
+        linq.Result = LinqQueryResult.Refused(
+            LinqQueryService.EventsAlias,
+            new LinqRefusal(LinqStage.Screen, LinqClause.Where,
+                "The predicate names 'IsArchived', which is not a member LINQ mode can query here. " + archived.Reason, 6),
+            offset: 0,
+            pageSize: 50);
+
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        panel.Find("#ms-query-linq-type").Change(LinqQueryPanel.EventsToken);
+        panel.Find("#ms-query-linq-where").Change("not IsArchived");
+        await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+
+        panel.Markup.Should().Contain(archived.Reason);
+        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeTrue("the refusal named a member the list explains");
+    }
+
+    [Fact]
+    public async Task A_refusal_that_names_no_withheld_member_leaves_the_not_offered_list_closed()
+    {
+        var linq = WithEvents(new FakeLinqQueryService());
+        linq.Result = LinqQueryResult.Refused(
+            LinqQueryService.EventsAlias,
+            new LinqRefusal(LinqStage.Screen, LinqClause.Where, "The predicate names 'Nonsense', which is not a member LINQ mode can query here.", 6),
+            offset: 0,
+            pageSize: 50);
+
+        using StudioComponentContext context = CreateContext(linq);
+
+        var panel = context.Render<LinqQueryPanel>();
+        panel.Find("#ms-query-linq-type").Change(LinqQueryPanel.EventsToken);
+        panel.Find("#ms-query-linq-where").Change("Nonsense == 1");
+        await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
+
+        panel.Find(".ms-query-linq-withheld").HasAttribute("open").Should().BeFalse();
+    }
+
+    [Fact]
     public void The_mode_note_names_the_Marten_source_and_the_limits()
     {
         using StudioComponentContext context = CreateContext(WithEvents(new FakeLinqQueryService()));

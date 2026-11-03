@@ -43,17 +43,22 @@ internal static partial class LinqQuerySql
     /// <summary>
     /// Whether Marten's statement reads any of the event's JSON body in its predicate or ordering - <c>d.data -&gt;&gt; 'X'</c>
     /// - which is what Marten does with an <c>IEvent</c> member it keeps no column for, and which matches nothing (1.1). Only
-    /// the text after the first <c>from</c> is looked at: the select list names <c>data</c> because the studio reads it.
+    /// the text after the first <c>from</c> keyword (any case, any whitespace around it) is looked at: the select list
+    /// names <c>data</c> because the studio reads it. A statement with no <c>from</c> at all is refused: the answer fails
+    /// closed.
     /// </summary>
     /// <param name="statement">Marten's statement, character for character.</param>
     public static bool ReadsJsonBody(string statement)
     {
         ArgumentNullException.ThrowIfNull(statement);
 
-        int from = statement.IndexOf(" from ", StringComparison.OrdinalIgnoreCase);
+        System.Text.RegularExpressions.Match from = FromKeyword().Match(statement);
 
-        return from >= 0 && BodyRead().IsMatch(statement.AsSpan(from));
+        return !from.Success || BodyRead().IsMatch(statement.AsSpan(from.Index));
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\bfrom\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex FromKeyword();
 
     [System.Text.RegularExpressions.GeneratedRegex(@"\bd\.data\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
     private static partial System.Text.RegularExpressions.Regex BodyRead();
