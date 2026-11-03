@@ -63,7 +63,11 @@ internal sealed class UnencryptedConnectionCheck : HealthCheck<UnencryptedConnec
 
         if (JudgedFromSslMode(connection))
         {
-            // Plaintext by the setting itself: the server is not asked, and the finding says it was judged from SSL Mode=Disable.
+            // Plaintext by the setting itself: the server is not asked for a row, and the finding says it was judged from
+            // SSL Mode=Disable. A server that never answered is still Failed, never a finding: Reached counts a catalog check that
+            // did not fail as proof that the database was read.
+            connection.ObservedFailure?.Throw();
+
             return new UnencryptedConnectionFacts(null, null, HostEnvironmentName.Of(context), connection.Settings.PoolerSigns, FromSslMode: true);
         }
 

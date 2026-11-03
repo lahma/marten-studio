@@ -131,6 +131,38 @@ public sealed class ConnectionUnreachedTests
         (await gather.Should().ThrowAsync<HealthCheckNotApplicableException>(code)).Which.Message.Should().NotBeNullOrWhiteSpace();
     }
 
+    /// <summary>
+    /// 1.1-FINAL-POLISH-2: the findings judged from the setting (S05 at <c>SSL Mode=Disable</c>, S11 at <c>Require</c>, both behind a
+    /// pooler sign) need no row from the server, but a server that never answered is still Failed and never a finding, or
+    /// <c>Reached</c> would count a dead database as read.
+    /// </summary>
+    [Theory]
+    [InlineData("S05", "Host=pgbouncer.example;Port=6432;SSL Mode=Disable")]
+    [InlineData("S11", "Host=pgbouncer.example;Port=6432;SSL Mode=Require")]
+    public async Task A_finding_judged_from_the_setting_still_throws_the_failure_of_a_server_that_never_answered(string code, string connectionString)
+    {
+        PostgresException refused = new("refused", "FATAL", "FATAL", "28P01");
+        PostgresFailure.MarkAsConnectionFailure(refused);
+
+        await using ServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        await using NpgsqlDataSource source = NpgsqlDataSource.Create("Host=127.0.0.1;Port=1;Database=orders;Username=none");
+        (HealthCheckContext context, HealthConnection connection) = Context(source, services);
+        await using HealthConnection _ = connection;
+
+        ConnectionFacts facts = ConnectionCheckFacts.Facts(connectionString) with { ObservedFailure = ExceptionDispatchInfo.Capture(refused) };
+        facts.Settings.PoolerSigns.Should().NotBeEmpty();
+        (code == "S05" ? UnencryptedConnectionCheck.JudgedFromSslMode(facts) : ServerCertificateCheck.JudgedFromSslMode(facts))
+            .Should().BeTrue("the from-setting conditions are met: a remote host, a pooler sign and the mode");
+        await context.Shared(ConnectionObservedQueries.FactsKey, _ => Task.FromResult(facts));
+
+        IHealthCheck check = code == "S05" ? new UnencryptedConnectionCheck() : new ServerCertificateCheck();
+        Func<Task> gather = () => check.GatherAsync(context, Token);
+
+        Exception thrown = (await gather.Should().ThrowAsync<Exception>(code)).Which;
+        thrown.Should().BeSameAs(refused);
+        HealthSweeper.Classify(thrown, budgetExpired: false).Outcome.Should().Be(HealthCheckOutcome.Failed);
+    }
+
     private static async Task EveryCheckThrows(HealthCheckContext context, Exception failure)
     {
         IHealthCheck[] checks =

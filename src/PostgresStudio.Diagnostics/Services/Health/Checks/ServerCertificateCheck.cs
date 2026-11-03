@@ -68,7 +68,11 @@ internal sealed class ServerCertificateCheck : HealthCheck<ConnectionFacts>
 
         if (JudgedFromSslMode(shared))
         {
-            // Require behind a pooler: encrypted and never verified by the setting itself, so what the server saw (or failed to say) is not asked.
+            // Require behind a pooler: encrypted and never verified by the setting itself, so what the server saw is not needed. A server
+            // that never answered is still Failed, never a finding: Reached counts a catalog check that did not fail as proof that the
+            // database was read.
+            shared.ObservedFailure?.Throw();
+
             return shared;
         }
 

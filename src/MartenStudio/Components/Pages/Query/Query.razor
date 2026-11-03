@@ -426,6 +426,11 @@
 
     private void NavigationEnded()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         pendingUri = null;
 
         if (pushQueued)
@@ -542,6 +547,13 @@
 
     public async ValueTask DisposeAsync()
     {
+        // First, before anything is awaited: a NavigationLanded the browser already sent (the sidebar link's own enhancedload) or the
+        // grace timer waking while this page is going away must not push this page's mode, type and predicate onto the address of the
+        // page being navigated to.
+        disposed = true;
+        pushQueued = false;
+        pendingUri = null;
+
         State.ScopeChanged -= OnScopeChangedAsync;
         Navigation.LocationChanged -= OnLocationChanged;
 
@@ -972,6 +984,11 @@
 
     private void PushUrl()
     {
+        if (disposed)
+        {
+            return;
+        }
+
         string modeValue = mode.ToString().ToLowerInvariant();
         string? typeValue = mode switch
         {
@@ -1063,6 +1080,9 @@
     /// <summary>Whether an address was asked for while <see cref="pendingUri" /> was in flight, so it is pushed when that one lands.</summary>
     private bool pushQueued;
 
+    /// <summary>Whether <see cref="DisposeAsync" /> has begun: nothing of this page pushes an address any more.</summary>
+    private bool disposed;
+
     /// <summary>
     /// A push that waited must not wait for good: if the navigation in flight never reports that it landed (it was a no-op, or its
     /// request failed), the queued address goes after <see cref="PendingGrace" />.
@@ -1097,7 +1117,7 @@
     /// <summary>Pushes the address that waited for the one in flight, from the state as it is now.</summary>
     private Task FlushQueuedPush()
     {
-        if (pushQueued && pendingUri is null)
+        if (!disposed && pushQueued && pendingUri is null)
         {
             pushQueued = false;
             PushUrl();

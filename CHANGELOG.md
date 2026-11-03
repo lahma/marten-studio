@@ -106,15 +106,15 @@ mode, and makes compaction safe on streams that fold to nothing.
   Only counts are kept; a pool name, host or connection string is never shown. When the data source's own host, database
   and login cannot be read from its connection string, the check says it cannot compare pools. The remedy is one shared
   `NpgsqlDataSource` (in Marten Studio, `UseNpgsqlDataSource()`).
-- New check S11, "Server certificate not verified": the connection uses TLS but `SSL Mode` is below `VerifyCA`, so Npgsql
-  accepts any certificate. Variants `prefer` (Allow and Prefer) and `require`; Warning on a detected cloud platform, Info
-  elsewhere. Stands down behind a connection pooler (the server's `pg_stat_ssl` row is then the pooler's own connection,
-  not the application's) unless `SSL Mode=Require`, which is encrypted and never verified by the setting alone, so the
-  `require` variant fires from the setting there; `Prefer` and `Allow` behind a pooler stay not applicable, because the
-  setting cannot say whether TLS is used. Also stands down for a loopback or socket host, the Cloud SQL Auth Proxy, and a
-  role that cannot see its own `pg_stat_ssl` row. The remedy is `VerifyFull` with the provider's CA bundle where the studio has a source for it; behind
-  an Amazon RDS Proxy it is `VerifyFull` with no `Root Certificate`, because the proxy uses AWS Certificate Manager
-  certificates and not the RDS bundle.
+- New check S11, "Server certificate not verified": the connection uses TLS but `SSL Mode` is below `VerifyCA`, so
+  Npgsql accepts any certificate. Variants `prefer` (Allow and Prefer) and `require`; Warning on a detected cloud
+  platform, Info elsewhere. Stands down behind a connection pooler (the server's `pg_stat_ssl` row is then the pooler's
+  own connection, not the application's) unless `SSL Mode=Require`, which is encrypted and never verified by the setting
+  alone, so the `require` variant fires from the setting there; `Prefer` and `Allow` behind a pooler stay not
+  applicable, because the setting cannot say whether TLS is used. Also stands down for a loopback or socket host, the
+  Cloud SQL Auth Proxy, and a role that cannot see its own `pg_stat_ssl` row. The remedy is `VerifyFull` with the
+  provider's CA bundle where the studio has a source for it; behind an Amazon RDS Proxy it is `VerifyFull` with no `Root
+  Certificate`, because the proxy uses AWS Certificate Manager certificates and not the RDS bundle.
 - New check S12, "A credential is readable from configuration": `persist-security-info` (Warning: the password stays in
   `NpgsqlDataSource.ConnectionString` and the pool's name), `ssl-password` (Warning: `SSL Password` is never removed from
   either; the remedy leaves `SSL Certificate`, `SSL Key` and `SSL Password` out of the connection string and loads the
@@ -142,9 +142,10 @@ mode, and makes compaction safe on streams that fold to nothing.
 - Compaction under Marten 9.57: the Compact dialog folds the stream through its version when it opens, and says when the
   events fold to no aggregate (the stream was deleted by its own aggregate). Marten 9.57 (JasperFx/marten#5797) leaves
   such a stream as it is, so the Compact button is disabled with the reason as its title; if the fold cannot be run in
-  advance the dialog says so and still offers the compaction. After a save that moved nothing the service folds again and reports a stream Marten
-  left alone as a success with nothing compacted, with the reason in the message and in the audit entry; an archive that
-  landed in between, or a skipped tail, is still the failure it was. `docs/compaction.md` is rewritten for the 9.57 floor.
+  advance the dialog says so and still offers the compaction. After a save that moved nothing the service folds again
+  and reports a stream Marten left alone as a success with nothing compacted, with the reason in the message and in the
+  audit entry; an archive that landed in between, or a skipped tail, is still the failure it was. `docs/compaction.md`
+  is rewritten for the 9.57 floor.
 - New health check E09, Stream compacted into an empty snapshot (Events, Marten Studio, Warning, behind "Run deeper
   checks"): finds streams an older Marten compacted into a `Compacted<T>` whose snapshot is JSON null, by probing the one
   event at each compacted stream's watermark by key (at most 10,000 streams, never a scan of `mt_events` by type). It sees
@@ -164,10 +165,10 @@ mode, and makes compaction safe on streams that fold to nothing.
   pooler in front of it), and its evidence says it was judged from `SSL Mode=Disable`. The Connection page's TLS hint
   judges `SSL Mode` otherwise.
 - Health check K10 (a schema name that breaks every apply after the first) is retired. Its hazard was Weasel's old index
-  readback (JasperFx/weasel#750), which left nothing in a database, and Marten 9.57, the new floor, needs a Weasel that reads such
-  an index back. The check, and the notice it put on the Schema screen's Apply area, are gone; its row stays in
-  docs/health/codes.md, marked retired in 1.1, and the code is never reassigned. A host that accepted K10 keeps starting:
-  the entry is ignored, with one Information line saying it can be removed.
+  readback (JasperFx/weasel#750), which left nothing in a database, and Marten 9.57, the new floor, needs a Weasel that
+  reads such an index back. The check, and the notice it put on the Schema screen's Apply area, are gone; its row stays
+  in docs/health/codes.md, marked retired in 1.1, and the code is never reassigned. A host that accepted K10 keeps
+  starting: the entry is ignored, with one Information line saying it can be removed.
 - Health check K09 (document storage named under a Turkish or Azerbaijani culture) no longer reasons about the Marten
   version. Every supported Marten writes invariant names, so a healthy table such as `mt_doc_kayıt` is never flagged, even
   when the Marten version cannot be read under tr-TR, and the finding and its remedy ("with the application stopped") no

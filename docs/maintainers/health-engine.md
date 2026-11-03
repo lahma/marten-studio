@@ -104,12 +104,13 @@ source *may* reach a pooler, and the stand-down reason says so (`PoolerSigns.Tls
 the stand-down, because the setting alone settles the application's own leg: S05 fires behind a pooler sign when `SSL
 Mode=Disable` and a host is remote (plaintext for certain, to the server or to a pooler in front of it), and S11 fires
 its `require` variant when `SSL Mode=Require` (encrypted, never verified); both are `JudgedFromSslMode`, take no server
-row, and say so in their evidence. `Prefer` and `Allow` behind a pooler stay not applicable. S05 reads the signs from
-the same `ConnectionFacts`, so it adds no statement, and S11 asks for the pooler before it asks whether the server could
-be read, so a pooler data source whose connection could not be read is not applicable rather than unavailable. C16 skips
-its server variant behind an Amazon RDS Proxy with `No Reset On Close=true`, where the server's cut reaches the client
-only on a pinned connection. K10 was retired in 1.1 with the Marten 9.57 floor: its row stays in `docs/health/codes.md`,
-and an `AcceptedChecks` entry for it is ignored with one Information line.
+row, and say so in their evidence. `Prefer` and `Allow` behind a pooler stay not applicable. The from-setting findings
+rethrow the connection read's failure too, so a server that never answered is Failed and never a finding. S05 reads the
+signs from the same `ConnectionFacts`, so it adds no statement, and S11 asks for the pooler before it asks whether the
+server could be read, so a pooler data source whose connection could not be read is not applicable rather than
+unavailable. C16 skips its server variant behind an Amazon RDS Proxy with `No Reset On Close=true`, where the server's
+cut reaches the client only on a pinned connection. K10 was retired in 1.1 with the Marten 9.57 floor: its row stays in
+`docs/health/codes.md`, and an `AcceptedChecks` entry for it is ignored with one Information line.
 
 **Database › Connection, the page's gates** (1.1, D33). The page and the Overview's line are the `Database` gate (the
 source policy asked with `TenantId = null`); "This application's sessions" and the pool peak counted by application name

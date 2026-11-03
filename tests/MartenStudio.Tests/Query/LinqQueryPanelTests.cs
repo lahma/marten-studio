@@ -71,6 +71,39 @@ public class LinqQueryPanelTests
         linq.Requests.Should().ContainSingle().Which.OrderBy.Should().Be("Total desc");
     }
 
+    /// <summary>
+    /// 1.1-FINAL-POLISH-2: a push that waited for the one in flight is dropped when the page is disposed. A NavigationLanded the
+    /// browser had already sent (the sidebar link's own enhancedload) must not append this page's mode and predicate to the address
+    /// of the page being navigated to. (The grace timer is cancelled with the page's token, so it cannot push either.)
+    /// </summary>
+    [Fact]
+    public async Task A_queued_push_is_dropped_when_the_page_is_disposed_and_a_late_NavigationLanded_pushes_nothing()
+    {
+        var linq = new FakeLinqQueryService().WithType("order");
+        using StudioComponentContext context = CreateContext(linq);
+        context.JSInterop.Setup<bool>("martenStudio.query.watchNavigation", static _ => true).SetResult(true);
+
+        var page = context.Render<QueryPage>();
+        page.Find("#ms-query-mode-linq").Click();
+        page.WaitForAssertion(() => page.FindAll("#ms-query-linq-where").Should().ContainSingle());
+
+        NavigationManager navigation = context.Services.GetRequiredService<NavigationManager>();
+        List<string> locations = [];
+        navigation.LocationChanged += (_, args) => locations.Add(args.Location);
+
+        // The mode switch's navigation is still in flight (the browser has not said it landed), so this Run's address waits.
+        page.Find("#ms-query-linq-where").Change("Total > 5");
+        await page.FindComponent<LinqQueryPanel>().InvokeAsync(() => page.FindComponent<LinqQueryPanel>().Instance.RunFromOrderByAsync("Total desc"));
+        locations.Should().BeEmpty("the second address waits for the first page to land");
+
+        QueryPage instance = page.Instance;
+        await context.DisposeComponentsAsync();
+        await instance.NavigationLanded();
+        await instance.NavigationLanded();
+
+        locations.Should().BeEmpty("a page that is gone pushes nothing onto the address of the page that replaced it");
+    }
+
     [Fact]
     public async Task A_draft_survives_leaving_LINQ_mode_without_a_navigation()
     {
