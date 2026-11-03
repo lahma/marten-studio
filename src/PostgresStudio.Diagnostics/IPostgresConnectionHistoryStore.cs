@@ -23,9 +23,21 @@ namespace PostgresStudio;
 /// Both calls are made from the sampler's background loop and from the Holders page; a store should keep its own retention (or
 /// let <see cref="ReadAsync" />'s <c>since</c> bound the reads) and answer reads quickly. A failure never stops the sampler or a
 /// page: it is logged, and the sample is kept in the sampling process, per server, for up to an hour of samples at the
-/// configured <c>Interval</c>. Before the next sample the sampler appends what it holds, oldest first, one <see cref="AppendAsync" />
-/// each, and stops at the first that fails; past the hour the oldest is dropped, and a process that stops loses what it held.
+/// configured <c>Interval</c>. Before the next sample the sampler appends what it holds - and, while
+/// <see cref="PostgresConnectionHistoryOptions.ShouldSample" /> answers no, at every round - oldest first, one
+/// <see cref="AppendAsync" /> each, and stops at the first that fails; past the hour the oldest is dropped, and a process that
+/// stops loses what it held.
 /// </para>
+/// <para>
+/// <b>Make the append idempotent.</b> An append that committed and then timed out or lost its connection is retried with the
+/// same sample, so a store may be asked to keep a sample it already kept. A refused sample also holds back every later one until
+/// it is stored or dropped, so a store that rejects a duplicate for good blocks the history behind it. With the table above:
+/// </para>
+/// <code>
+/// insert into connection_history (taken_at, server, instance, connections, client_limit, applications)
+/// values (@taken_at, @server, @instance, @connections, @client_limit, @applications)
+/// on conflict (server, taken_at) do nothing;
+/// </code>
 /// <para>
 /// <b>Reads are incremental.</b> The studio asks <see cref="ReadAsync" /> for the whole window the first time (and after it dropped
 /// a server it had not read for ten minutes, or more than 64 servers), and then only for the samples since its last read of the

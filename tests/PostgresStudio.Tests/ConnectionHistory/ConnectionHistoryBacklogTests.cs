@@ -209,6 +209,57 @@ public class ConnectionHistoryBacklogTests
     }
 
     [Fact]
+    public async Task A_sample_the_store_refuses_for_good_is_dropped_once_it_passes_the_window_while_the_process_is_not_the_sampler()
+    {
+        await using Rig rig = new(shouldSample: _ => ValueTask.FromResult(false));
+
+        // The window is an hour at the minute interval. The store rejects the samples of minutes 1 and 2 for good, as a unique
+        // key does a duplicate; minute 5 it takes.
+        rig.Store.RefuseFor = static x => x.Connections <= 2;
+        await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(2), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(5), Token);
+
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0, "the first is refused and blocks the rest");
+        rig.Sampler.Pending(Server).Should().Be(3, "inside the window nothing is dropped");
+        rig.Logs.Of(9464).Should().BeEmpty();
+
+        // 62 minutes in: the window starts at minute 2, so minute 1 is past it; minute 2 is refused again and blocks minute 5.
+        rig.Clock.Advance(TimeSpan.FromMinutes(62));
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0);
+
+        rig.Sampler.PendingSamples(Server).Select(static x => x.Connections).Should().Equal([2L, 5L]);
+        rig.Logs.Of(9464).Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
+        rig.Logs.Of(9464)[0].Message.Should().Contain("dropped 1 of the oldest samples of server db:5432");
+
+        // Two minutes on, minute 2 passes the window too: dropped (Debug, inside the throttle window), and minute 5 is stored.
+        rig.Clock.Advance(TimeSpan.FromMinutes(2));
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(1);
+
+        rig.Store.Stored.Select(static x => x.Connections).Should().Equal([5L]);
+        rig.Sampler.Pending(Server).Should().Be(0);
+        rig.Logs.Of(9464).Select(static x => x.Level).Should().Equal([LogLevel.Warning, LogLevel.Debug]);
+        rig.Sources.Asked.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_backlog_whose_samples_all_pass_the_window_is_dropped_whole_and_leaves_nothing_held()
+    {
+        await using Rig rig = new(shouldSample: _ => ValueTask.FromResult(false));
+
+        rig.Store.Refusing = true;
+        await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(2), Token);
+
+        rig.Clock.Advance(TimeSpan.FromHours(2));
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0);
+
+        rig.Sampler.Pending(Server).Should().Be(0);
+        rig.Logs.Of(9464).Should().ContainSingle().Which.Message.Should().Contain("dropped 2 of the oldest samples");
+        rig.Logs.Of(9463).Should().BeEmpty("nothing was stored");
+    }
+
+    [Fact]
     public async Task A_store_that_keeps_failing_while_the_process_is_not_the_sampler_holds_no_more_than_the_hour_and_still_drops_once_it_samples_again()
     {
         bool sample = true;
@@ -228,7 +279,8 @@ public class ConnectionHistoryBacklogTests
         rig.Sampler.PendingSamples(Server).Select(static x => x.Connections).Should().Equal([1L, 2L], "at the bound, and a round that takes no sample adds none");
         rig.Logs.Of(9464).Should().BeEmpty();
 
-        // The role comes back with the store still refusing: the bound drops the oldest, as it always did.
+        // A sample is added to the full backlog (the test calls StoreAsync directly; the round is not run again): the count
+        // bound drops the oldest, as it always did.
         await rig.Sampler.StoreAsync(Server, Sample(3), Token);
 
         rig.Sampler.PendingSamples(Server).Select(static x => x.Connections).Should().Equal([2L, 3L]);
@@ -436,11 +488,19 @@ public class ConnectionHistoryBacklogTests
 
         public int Attempts { get; set; }
 
+        /// <summary>When set, a sample it answers true for is refused whatever else is set - as a unique key refuses a duplicate.</summary>
+        public Func<PostgresConnectionSample, bool>? RefuseFor { get; set; }
+
         public IReadOnlyList<PostgresConnectionSample> Stored => stored;
 
         public ValueTask AppendAsync(PostgresConnectionSample sample, CancellationToken cancellationToken)
         {
             Attempts++;
+
+            if (RefuseFor?.Invoke(sample) == true)
+            {
+                throw new InvalidOperationException("The key is taken.");
+            }
 
             if (AcceptNext > 0)
             {

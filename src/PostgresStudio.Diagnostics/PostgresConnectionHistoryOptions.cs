@@ -24,8 +24,9 @@ public sealed class PostgresConnectionHistoryOptions
     /// Whether this process samples now - asked before every round. A service running as several processes on one database
     /// answers it from the leader election or the advisory lock it already has, so one process samples for all of them
     /// (<c>pg_stat_activity</c> is server-wide); the studio takes no lock of its own. <see langword="null" />, the default, samples
-    /// in every process. While it answers <see langword="false" /> the sampler holds no connection and takes no sample, and any samples it still holds from when it
-    /// sampled are offered to the store, oldest first. A process that never samples registers
+    /// in every process. While it answers <see langword="false" /> the sampler holds no connection and takes no sample, and
+    /// any samples it still holds from when it sampled are offered to the store, oldest first, at every round (older than an
+    /// hour of intervals, they are dropped). A process that never samples registers
     /// <see cref="PostgresConnectionHistoryServiceCollectionExtensions.AddPostgresConnectionHistoryReader" /> instead.
     /// </summary>
     public Func<CancellationToken, ValueTask<bool>>? ShouldSample { get; set; }

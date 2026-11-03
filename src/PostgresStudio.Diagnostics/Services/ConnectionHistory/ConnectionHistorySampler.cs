@@ -48,7 +48,8 @@ namespace PostgresStudio.Services.ConnectionHistory;
 /// <para>
 /// <b>Leadership is the host's.</b> <see cref="PostgresConnectionHistoryOptions.ShouldSample" /> is asked before every round; while
 /// it answers no, every kept connection is closed and any samples still held (issue #46) are offered to the store, oldest first -
-/// storing one reads nothing from the server, so no second process samples (issue #54).
+/// storing one reads nothing from the server, so no second process samples (issue #54) - and those older than the hour the backlog
+/// is bounded to are dropped, since nothing is added to push them out.
 /// </para>
 /// </remarks>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA1001:Types that own disposable fields should be disposable", Justification = "The round semaphore is never disposed on purpose (issue #50): its wait handle is never created, so it holds nothing unmanaged, and a Stop or an in-flight round after Dispose must still be able to wait on and release it.")]
@@ -325,6 +326,12 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
     /// Offers the backlog of every server not in <paramref name="except" /> to the store, oldest first and stopping at the first
     /// failure (<see cref="StoreAsync" />), with no sample and no connection. How many were stored.
     /// </summary>
+    /// <remarks>
+    /// No sample is added to these backlogs, so <see cref="PendingBound" /> - which drops at the moment one is added - never drops
+    /// anything here, and a sample the store refuses for good would block every later one for as long as the process runs. So first
+    /// the samples older than the window the bound stands for (<see cref="PendingBound" /> intervals) are dropped, as the bound
+    /// would have dropped them, with the same event.
+    /// </remarks>
     private async Task<int> StoreHeldAsync(HashSet<string> except, CancellationToken cancellationToken)
     {
         string[] held;
@@ -334,14 +341,63 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
             held = [.. backlogs.Keys.Where(x => !except.Contains(x))];
         }
 
+        DateTimeOffset oldest = time.GetUtcNow() - (PendingBound(options.Value.Interval) * options.Value.Interval);
         int stored = 0;
 
         foreach (string server in held)
         {
+            (int dropped, DateTimeOffset since) = DropOlderThan(server, oldest);
+            LogDropped(server, dropped, since);
             stored += await StoreAsync(server, null, cancellationToken).ConfigureAwait(false);
         }
 
         return stored;
+    }
+
+    /// <summary>Drops the samples of the server's backlog taken before <paramref name="oldest" />, from the front; how many, and since when the backlog has been held.</summary>
+    private (int Dropped, DateTimeOffset Since) DropOlderThan(string server, DateTimeOffset oldest)
+    {
+        lock (backlogGate)
+        {
+            if (!backlogs.TryGetValue(server, out Backlog? backlog))
+            {
+                return (0, default);
+            }
+
+            int dropped = 0;
+
+            while (backlog.Samples.Count > 0 && backlog.Samples.Peek().At < oldest)
+            {
+                backlog.Samples.Dequeue();
+                dropped++;
+            }
+
+            if (backlog.Samples.Count == 0 && dropped > 0)
+            {
+                backlogs.Remove(server);
+            }
+
+            return (dropped, backlog.Since);
+        }
+    }
+
+    private void LogDropped(string server, int dropped, DateTimeOffset since)
+    {
+        if (dropped == 0)
+        {
+            return;
+        }
+
+        LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Backlog", server, null, null);
+
+        if (settings.Text.Product == StudioProduct.PostgresStudio)
+        {
+            logger.PostgresStudioConnectionHistoryBacklogDropped(level, dropped, server, since);
+        }
+        else
+        {
+            logger.ConnectionHistoryBacklogDropped(level, dropped, server, since);
+        }
     }
 
     /// <summary>
@@ -419,19 +475,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
             }
         }
 
-        if (dropped > 0)
-        {
-            LogLevel level = throttle.WarningOrDebug("ConnectionHistory.Backlog", server, null, null);
-
-            if (settings.Text.Product == StudioProduct.PostgresStudio)
-            {
-                logger.PostgresStudioConnectionHistoryBacklogDropped(level, dropped, server, since);
-            }
-            else
-            {
-                logger.ConnectionHistoryBacklogDropped(level, dropped, server, since);
-            }
-        }
+        LogDropped(server, dropped, since);
 
         return stored;
     }
