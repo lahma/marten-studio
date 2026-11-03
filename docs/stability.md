@@ -49,7 +49,7 @@ What a minor or patch release will not break:
 
 | | Supported | Tested |
 |---|---|---|
-| .NET | `net10.0` | .NET 10; a .NET 11 host (release candidate 3) runs both studios unchanged |
+| .NET | `net10.0` | .NET 10; on .NET 11 (release candidate 3) a Release build of the host runs both studios, but a Debug build with the 11 SDK does not start the studio's page (a fix is planned for 1.1.1; until then, build the host with `-p:EnableHotReloadInRuntimeConfigDevFile=false`) |
 | Marten (Marten Studio) | 9.x from 9.57.0 | 9.57.0 on every build |
 | Npgsql (Postgres Studio, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
 | PostgreSQL | 15 to 19; 14 works, untested | every major from 15 to 19, 19 on its release candidate until its general availability |
