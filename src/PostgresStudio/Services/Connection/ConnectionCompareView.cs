@@ -89,6 +89,9 @@ internal sealed record ConnectionCompareView
     /// <summary>The canonical keywords of the secrets that were in the text and were removed - never their values.</summary>
     public IReadOnlyList<string> RemovedSecrets { get; init; } = [];
 
+    /// <summary>Whether a removed secret was not in quotes, so a <c>;</c> in it would have been read as the end of it.</summary>
+    public bool RemovedUnquotedSecret { get; init; }
+
     /// <summary>Whether the connection in effect could be read, so there is a first column.</summary>
     public bool CurrentReadable { get; init; }
 
@@ -121,11 +124,11 @@ internal sealed record ConnectionCompareView
 
         if (rejection.AfterPassword)
         {
-            return "A keyword after a password could not be read: a password with ';' in it must be quoted.";
+            return "The keyword after the password could not be read. It is not named, in case it is part of the password; a password with ';' in it must be quoted.";
         }
 
         return rejection.Known
-            ?"Npgsql did not accept the value given for \"" + rejection.Keyword + "\"."
+            ? "Npgsql did not accept the value given for \"" + rejection.Keyword + "\"."
             : "Npgsql does not know the keyword \"" + rejection.Keyword + "\".";
     }
 

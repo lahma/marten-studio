@@ -37,11 +37,13 @@ internal sealed record PastedRejection(string Keyword, bool Known, bool AfterPas
 /// <param name="Settings">The redacted settings, when <paramref name="Outcome" /> is <see cref="PastedConnectionOutcome.Read" />.</param>
 /// <param name="Rejected">The keywords Npgsql rejected, by name only, when <paramref name="Outcome" /> is <see cref="PastedConnectionOutcome.Rejected" />.</param>
 /// <param name="RemovedSecrets">The canonical keywords of the secrets that were in the text and were removed, never their values.</param>
+/// <param name="RemovedUnquotedSecret">Whether a removed secret's value was not in quotes: a <c>;</c> in it would have ended it early.</param>
 internal sealed record PastedConnection(
     PastedConnectionOutcome Outcome,
     ConnectionSettings? Settings,
     IReadOnlyList<PastedRejection> Rejected,
-    IReadOnlyList<string> RemovedSecrets)
+    IReadOnlyList<string> RemovedSecrets,
+    bool RemovedUnquotedSecret = false)
 {
     internal static PastedConnection Failed(PastedConnectionOutcome outcome) => new(outcome, null, [], []);
 }
@@ -111,6 +113,7 @@ internal static class PastedConnectionString
 
         // Set by an unquoted secret and kept through the segments refused after it: they may be the rest of the password.
         bool afterUnquotedSecret = false;
+        bool removedUnquoted = false;
 
         foreach (Segment segment in segments)
         {
@@ -161,6 +164,7 @@ internal static class PastedConnectionString
             if (IsSecret(keyword))
             {
                 removed.Add(keyword);
+                removedUnquoted |= !segment.Quoted;
             }
             else if (NpgsqlSettingsCatalog.Find(keyword)?.Exposure == NpgsqlSettingExposure.Options)
             {
@@ -198,7 +202,7 @@ internal static class PastedConnectionString
         ConnectionSettings settings = NpgsqlSettingsReader.Read(sanitized, context with { Pasted = new PastedStrip(removed) });
 
         return settings.Readable
-            ? new(PastedConnectionOutcome.Read, settings, [], [.. removed.Order(StringComparer.Ordinal)])
+            ? new(PastedConnectionOutcome.Read, settings, [], [.. removed.Order(StringComparer.Ordinal)], removedUnquoted)
             : PastedConnection.Failed(PastedConnectionOutcome.Unreadable);
     }
 

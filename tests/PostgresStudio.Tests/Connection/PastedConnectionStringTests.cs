@@ -88,6 +88,21 @@ public sealed class PastedConnectionStringTests
         read.Settings.Values.Text("Application Name").Should().Be("svc");
     }
 
+    [Theory]
+    [InlineData("Host=x;Password=" + Sentinel, true)]
+    [InlineData("Host=x;SSL Password=" + Sentinel, true)]
+    [InlineData("Host=x;Password='" + Sentinel + "'", false)]
+    [InlineData("Host=x;Password=\"" + Sentinel + "\";Pwd='y'", false)]
+    [InlineData("Host=x;Password='" + Sentinel + "';Pwd=" + Sentinel, true)]
+    [InlineData("Host=x;Database=y", false)]
+    public void The_read_says_whether_a_removed_secret_was_unquoted(string text, bool unquoted)
+    {
+        PastedConnection read = Read(text);
+
+        read.Outcome.Should().Be(PastedConnectionOutcome.Read);
+        read.RemovedUnquotedSecret.Should().Be(unquoted);
+    }
+
     [Fact]
     public void Both_spellings_of_one_password_are_removed_and_the_later_never_wins()
     {
@@ -168,7 +183,7 @@ public sealed class PastedConnectionStringTests
 
         read.Outcome.Should().Be(PastedConnectionOutcome.Rejected);
         read.Rejected.Should().ContainSingle().Which.Should().Be(new PastedRejection(string.Empty, Known: false, AfterPassword: true));
-        ConnectionCompareView.Sentence(read.Rejected[0]).Should().Be("A keyword after a password could not be read: a password with ';' in it must be quoted.");
+        ConnectionCompareView.Sentence(read.Rejected[0]).Should().Be("The keyword after the password could not be read. It is not named, in case it is part of the password; a password with ';' in it must be quoted.");
         Everything(read).Should().NotContain(Sentinel).And.NotContain("abc").And.NotContain("ghi");
     }
 

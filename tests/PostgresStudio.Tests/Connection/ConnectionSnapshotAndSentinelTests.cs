@@ -122,7 +122,7 @@ public sealed class ConnectionSnapshotAndSentinelTests
 
     private static readonly HealthCheckRegistry Registry = new(PostgresStudioDescriptor.Instance);
 
-    internal static string Json(ConnectionPageView? view,ConnectionApplicationsView? applications = null) =>
+    internal static string Json(ConnectionPageView? view, ConnectionApplicationsView? applications = null) =>
         VisitorSnapshotBuilder.Compose(
             new PostgresDatabaseRef("default", "app"),
             new HealthReport { StoreKey = "default", DatabaseId = "app", MeasuredAt = At },

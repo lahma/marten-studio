@@ -82,6 +82,7 @@ internal static class ConnectionComparer
             CurrentReadable = current.Settings.Readable,
             NpgsqlVersion = settings.NpgsqlVersion,
             RemovedSecrets = pasted.RemovedSecrets,
+            RemovedUnquotedSecret = pasted.RemovedUnquotedSecret,
             Rows = rows,
             Cards = [.. after.Cards.Select(card => Cover(card, had))],
             Notes = [.. after.Notes.Where(static x => !x.AllSettingsOnly && x.Kind == ConnectionCardKind.Note).Where(x => !had.Contains(Key(x))).Select(card => Cover(card, had))],

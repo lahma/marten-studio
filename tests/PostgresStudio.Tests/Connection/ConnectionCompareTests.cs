@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using PostgresStudio.Components.Pages.Database;
 using PostgresStudio.Components.Shared;
 using PostgresStudio.Services.Connection;
+using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Tests.Components;
 
 using static PostgresStudio.Tests.Connection.ConnectionTestFacts;
@@ -254,9 +255,40 @@ public sealed class ConnectionCompareTests
         summary.Should().NotContain("differ");
     }
 
+    [Fact]
+    public async Task An_unquoted_removed_password_adds_the_clause_about_quoting_and_a_quoted_one_does_not()
+    {
+        const string clause = "A password with ';' in it must be quoted, or Npgsql reads what follows as settings.";
+
+        await using PostgresStudioComponentContext context = await ContextAsync();
+        IRenderedComponent<ConnectionCompare> page = Open(context);
+
+        await PasteAsync(context, page, "Host=a.example;Password=" + Sentinel);
+        Wait(() => page.Find(".ms-conn-compare-removed").TextContent.Should().Contain("removed before anything was read. " + clause), page);
+
+        await using PostgresStudioComponentContext quoted = await ContextAsync();
+        IRenderedComponent<ConnectionCompare> second = Open(quoted);
+
+        await PasteAsync(quoted, second, "Host=a.example;Password='" + Sentinel + "'");
+        Wait(() => second.Find(".ms-conn-compare-removed").TextContent.Should().Contain("removed before anything was read").And.NotContain("must be quoted"), second);
+    }
+
     // -------------------------------------------------------------------------------------------------
     // Refusals
     // -------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task A_keyword_refused_after_an_unquoted_password_says_the_unnamed_sentence_on_the_page()
+    {
+        await using PostgresStudioComponentContext context = await ContextAsync();
+        IRenderedComponent<ConnectionCompare> page = Open(context);
+
+        await PasteAsync(context, page, "Host=a;Password=abc;def" + Sentinel + "=ghi");
+
+        Wait(() => page.Find(".ms-conn-compare-refusal").TextContent.Should()
+            .Be("The keyword after the password could not be read. It is not named, in case it is part of the password; a password with ';' in it must be quoted."), page);
+        page.Markup.Should().NotContain(Sentinel);
+    }
 
     [Fact]
     public async Task A_keyword_npgsql_rejects_is_refused_by_name_and_the_value_is_never_on_the_page()
@@ -434,6 +466,68 @@ public sealed class ConnectionCompareTests
         }
     }
 
+    // -------------------------------------------------------------------------------------------------
+    // The snapshot cannot reach the comparison: structural, because no state of the comparison exists to put in a file
+    // -------------------------------------------------------------------------------------------------
+
+    private static bool IsPastedType(Type type)
+    {
+        Type element = type.HasElementType ? type.GetElementType()! : type;
+
+        return element == typeof(IConnectionCompareService)
+            || element == typeof(ConnectionCompareService)
+            || element == typeof(ConnectionCompareView)
+            || element == typeof(ConnectionCompareRow)
+            || element == typeof(ConnectionCompareCard)
+            || element == typeof(PastedConnection)
+            || element == typeof(PastedRejection)
+            || element == typeof(PastedStrip)
+            || element.Name.StartsWith("Pasted", StringComparison.Ordinal)
+            || element.Name.StartsWith("ConnectionCompare", StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_visitor_snapshot_builder_takes_nothing_of_the_comparison_in_its_constructor_or_its_fields()
+    {
+        Type builder = typeof(VisitorSnapshotBuilder);
+        BindingFlags all = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        IEnumerable<Type> constructed = builder.GetConstructors(all).SelectMany(static x => x.GetParameters()).Select(static x => x.ParameterType);
+        IEnumerable<Type> held = builder.GetFields(all).Select(static x => x.FieldType);
+        IEnumerable<Type> returned = builder.GetMethods(all).Select(static x => x.ReturnType);
+
+        foreach (Type type in constructed.Concat(held).Concat(returned))
+        {
+            // Nor a generic wrapper of one (Task<ConnectionCompareView>, IReadOnlyList<PastedRejection>).
+            IsPastedType(type).Should().BeFalse(type + " is, or is the comparison's, and a snapshot is built from the visitor's own gated views only");
+            type.GenericTypeArguments.Should().NotContain(static x => IsPastedType(x), type + " wraps the comparison");
+        }
+
+        // The guard is not vacuous: it knows the type the builder does take for the Connection page.
+        constructed.Should().Contain(typeof(IConnectionInsightService));
+    }
+
+    [Fact]
+    public void The_comparison_service_holds_services_only_in_readonly_fields_and_never_the_text_or_the_answer()
+    {
+        FieldInfo[] fields = typeof(ConnectionCompareService).GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        fields.Should().NotBeEmpty("not vacuous");
+
+        foreach (FieldInfo field in fields)
+        {
+            field.IsInitOnly.Should().BeTrue(field.Name + " is mutable, so it could hold the text between calls");
+            (field.FieldType == typeof(string) || field.FieldType == typeof(StringBuilder) || field.FieldType == typeof(ReadOnlyMemory<char>) || field.FieldType.IsArray)
+                .Should().BeFalse(field.Name + " (" + field.FieldType + ") could hold the text");
+            IsPastedType(field.FieldType).Should().BeFalse(field.Name + " holds the comparison's own types");
+            (field.FieldType.IsInterface || field.FieldType == typeof(PostgresStudio.Services.StudioAuthorization) || field.FieldType == typeof(PostgresStudio.Services.Sources.StudioSourceResolver) || field.FieldType == typeof(TimeProvider))
+                .Should().BeTrue(field.Name + " (" + field.FieldType + ") is not a service");
+        }
+
+        typeof(ConnectionCompareService).GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Should().BeEmpty("a property is a field with a name: the service keeps nothing between calls");
+    }
+
     private const string Everything =
         "Host=db.example;Database=app;Username=svc;SSL Mode=Require;Maximum Pool Size=20;Application Name=billing;"
         + "Password=" + Sentinel + "-password;PWD=" + Sentinel + "-PWD;Pwd=" + Sentinel + "-Pwd;PSW=" + Sentinel + "-PSW;SSL Password=" + Sentinel + "-ssl;"
@@ -473,10 +567,6 @@ public sealed class ConnectionCompareTests
         page.Markup.Should().NotContain(Sentinel);
         string.Join('\n', logs.Lines).Should().NotContain(Sentinel);
 
-        // The page's snapshot section, composed after the compare: the comparison is in no part of it.
-        context.Connection.View = View(Facts(InEffect, Observed()), null, GateClosed);
-        string snapshot = ConnectionSnapshotAndSentinelTests.Json(context.Connection.View);
-        snapshot.Should().NotContain(Sentinel).And.Contain("billing", "not vacuous: the connection in effect is in the snapshot");
         context.Services.GetRequiredService<PostgresStudio.Services.StudioActionLogService>().GetLatest().Should().BeEmpty("a comparison is not audited");
 
         // What .NET sent to the browser: element references, a reference to itself and two numbers - and no local storage write.

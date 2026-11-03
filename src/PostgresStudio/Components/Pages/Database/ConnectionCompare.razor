@@ -241,7 +241,7 @@
         @if (view.RemovedSecrets.Count > 0)
         {
             <p class="ms-muted ms-conn-note ms-conn-compare-removed">
-                The text carried @(view.RemovedSecrets.Count == 1 ? "a secret" : "secrets") (@string.Join(", ", view.RemovedSecrets)); it was removed before anything was read.
+                The text carried @(view.RemovedSecrets.Count == 1 ? "a secret" : "secrets") (@string.Join(", ", view.RemovedSecrets)); it was removed before anything was read.@(view.RemovedUnquotedSecret ? " A password with ';' in it must be quoted, or Npgsql reads what follows as settings." : string.Empty)
             </p>
         }
 
