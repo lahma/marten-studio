@@ -47,7 +47,8 @@ namespace PostgresStudio.Services.ConnectionHistory;
 /// </para>
 /// <para>
 /// <b>Leadership is the host's.</b> <see cref="PostgresConnectionHistoryOptions.ShouldSample" /> is asked before every round; while
-/// it answers no, every kept connection is closed.
+/// it answers no, every kept connection is closed and any samples still held (issue #46) are offered to the store, oldest first -
+/// storing one reads nothing from the server, so no second process samples (issue #54).
 /// </para>
 /// </remarks>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA1001:Types that own disposable fields should be disposable", Justification = "The round semaphore is never disposed on purpose (issue #50): its wait handle is never created, so it holds nothing unmanaged, and a Stop or an in-flight round after Dispose must still be able to wait on and release it.")]
@@ -254,8 +255,8 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
     }
 
     /// <summary>
-    /// One round: every server sampled once, unless the host says another process samples. How many samples were stored - the ones
-    /// a store had refused earlier included.
+    /// One round: every server sampled once, unless the host says another process samples - then none is, and only the samples
+    /// still held are offered to the store. How many samples were stored - the ones a store had refused earlier included.
     /// </summary>
     internal async Task<int> SampleOnceAsync(CancellationToken cancellationToken)
     {
@@ -266,7 +267,11 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
             if (options.Value.ShouldSample is { } shouldSample && !await shouldSample(cancellationToken).ConfigureAwait(false))
             {
                 await ReleaseAsync().ConfigureAwait(false);
-                return 0;
+
+                // Issue #54: this process stopped being the sampler, but it may still hold samples from when it was - the moment the
+                // leadership moves is often the moment the store refused them. Writing one reads nothing from the server and needs no
+                // kept connection, so offering them does not make a second process sample; no new sample is taken.
+                return await StoreHeldAsync([], cancellationToken).ConfigureAwait(false);
             }
 
             int stored = 0;
@@ -306,17 +311,7 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
             // A server that left the list - a source stayed unreadable, the host's databases changed, the MaxServers cut moved - still
             // has a backlog, and writing it needs no connection to that server: offered to the store all the same, so it is neither
             // stranded nor claimed as waiting until the process stops.
-            string[] left;
-
-            lock (backlogGate)
-            {
-                left = [.. backlogs.Keys.Where(x => !sampled.Contains(x))];
-            }
-
-            foreach (string server in left)
-            {
-                stored += await StoreAsync(server, null, cancellationToken).ConfigureAwait(false);
-            }
+            stored += await StoreHeldAsync(sampled, cancellationToken).ConfigureAwait(false);
 
             return stored;
         }
@@ -324,6 +319,29 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
         {
             round.Release();
         }
+    }
+
+    /// <summary>
+    /// Offers the backlog of every server not in <paramref name="except" /> to the store, oldest first and stopping at the first
+    /// failure (<see cref="StoreAsync" />), with no sample and no connection. How many were stored.
+    /// </summary>
+    private async Task<int> StoreHeldAsync(HashSet<string> except, CancellationToken cancellationToken)
+    {
+        string[] held;
+
+        lock (backlogGate)
+        {
+            held = [.. backlogs.Keys.Where(x => !except.Contains(x))];
+        }
+
+        int stored = 0;
+
+        foreach (string server in held)
+        {
+            stored += await StoreAsync(server, null, cancellationToken).ConfigureAwait(false);
+        }
+
+        return stored;
     }
 
     /// <summary>

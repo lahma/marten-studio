@@ -27,12 +27,13 @@ public class ConnectionHistoryBacklogTests
 
     private sealed class Rig : IAsyncDisposable
     {
-        private readonly ServiceProvider provider = new ServiceCollection()
-            .AddSingleton<IStudioSourceProvider>(new NoSources())
-            .BuildServiceProvider();
+        private readonly ServiceProvider provider;
 
         public Rig(TimeSpan? interval = null, Func<CancellationToken, ValueTask<bool>>? shouldSample = null)
         {
+            provider = new ServiceCollection()
+                .AddSingleton<IStudioSourceProvider>(Sources)
+                .BuildServiceProvider();
             Clock = new ManualTimeProvider(Start);
             Options = Microsoft.Extensions.Options.Options.Create(new PostgresConnectionHistoryOptions
             {
@@ -51,6 +52,9 @@ public class ConnectionHistoryBacklogTests
         }
 
         public ManualTimeProvider Clock { get; }
+
+        /// <summary>The sources the sampler would read a server through: asked for nothing in a round that does not sample.</summary>
+        public NoSources Sources { get; } = new();
 
         public IOptions<PostgresConnectionHistoryOptions> Options { get; }
 
@@ -156,21 +160,79 @@ public class ConnectionHistoryBacklogTests
     }
 
     [Fact]
-    public async Task While_the_host_says_another_process_samples_the_backlog_is_kept_and_not_flushed()
+    public async Task While_the_host_says_another_process_samples_the_held_samples_are_still_stored_oldest_first_and_nothing_is_read()
     {
         bool sample = true;
         await using Rig rig = new(shouldSample: _ => ValueTask.FromResult(sample));
 
         rig.Store.Refusing = true;
         await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(2), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(3), Token);
         rig.Store.Refusing = false;
         rig.Store.Attempts = 0;
+        rig.Sources.Asked = 0;
+
+        // Issue #54: the process lost the role while holding samples; its next round still offers them.
+        sample = false;
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(3, "the three held samples, and no new one");
+
+        rig.Store.Stored.Select(static x => x.Connections).Should().Equal([1L, 2L, 3L], "oldest first");
+        rig.Store.Attempts.Should().Be(3, "only the held samples were appended: no sample was taken");
+        rig.Sources.Asked.Should().Be(0, "the sources were never asked for a server to read, and none is connected to");
+        rig.Sampler.Pending(Server).Should().Be(0);
+        rig.Logs.Of(9463).Should().ContainSingle("the backlog drained");
+
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0, "nothing is held, nothing is stored, and still nothing is read");
+        rig.Sources.Asked.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_store_that_fails_while_the_process_is_not_the_sampler_stops_at_the_first_failure_and_retries_next_round()
+    {
+        await using Rig rig = new(shouldSample: _ => ValueTask.FromResult(false));
+
+        rig.Store.Refusing = true;
+        await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(2), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(3), Token);
+        rig.Store.Attempts = 0;
+
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0);
+        rig.Store.Attempts.Should().Be(1, "the first held sample was refused and the rest were not tried");
+        rig.Sampler.PendingSamples(Server).Select(static x => x.Connections).Should().Equal([1L, 2L, 3L], "all kept, in order");
+
+        rig.Store.Refusing = false;
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(3, "the next round retries them");
+        rig.Store.Stored.Select(static x => x.Connections).Should().Equal([1L, 2L, 3L]);
+        rig.Sources.Asked.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_store_that_keeps_failing_while_the_process_is_not_the_sampler_holds_no_more_than_the_hour_and_still_drops_once_it_samples_again()
+    {
+        bool sample = true;
+        await using Rig rig = new(interval: TimeSpan.FromMinutes(30), shouldSample: _ => ValueTask.FromResult(sample));
+
+        rig.Store.Refusing = true;
+        await rig.Sampler.StoreAsync(Server, Sample(1), Token);
+        await rig.Sampler.StoreAsync(Server, Sample(2), Token);
 
         sample = false;
-        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0);
 
-        rig.Store.Attempts.Should().Be(0, "the sampler does nothing in such a round");
-        rig.Sampler.Pending(Server).Should().Be(1);
+        for (int i = 0; i < 5; i++)
+        {
+            (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(0);
+        }
+
+        rig.Sampler.PendingSamples(Server).Select(static x => x.Connections).Should().Equal([1L, 2L], "at the bound, and a round that takes no sample adds none");
+        rig.Logs.Of(9464).Should().BeEmpty();
+
+        // The role comes back with the store still refusing: the bound drops the oldest, as it always did.
+        await rig.Sampler.StoreAsync(Server, Sample(3), Token);
+
+        rig.Sampler.PendingSamples(Server).Select(static x => x.Connections).Should().Equal([2L, 3L]);
+        rig.Logs.Of(9464).Should().ContainSingle().Which.Level.Should().Be(LogLevel.Warning);
     }
 
     [Fact]
@@ -186,6 +248,7 @@ public class ConnectionHistoryBacklogTests
         // The round's list is empty: the server is not in it, and the backlog is written all the same.
         (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(2);
 
+        rig.Sources.Asked.Should().BePositive("a sampling round does ask the sources, which is what the not-sampler tests count");
         rig.Store.Stored.Select(static x => x.Connections).Should().Equal([1L, 2L]);
         rig.Sampler.Pending(Server).Should().Be(0);
         rig.Logs.Of(9463).Should().ContainSingle();
@@ -322,9 +385,16 @@ public class ConnectionHistoryBacklogTests
     /// <summary>A source provider that lists no source: every round's list of servers is empty.</summary>
     private sealed class NoSources : IStudioSourceProvider
     {
+        /// <summary>How many times the sampler asked for the list of sources: it does so to find a server to connect to and read.</summary>
+        public int Asked { get; set; }
+
         public long Generation => 0;
 
-        public IReadOnlyList<StudioSourceRegistration> Registrations() => [];
+        public IReadOnlyList<StudioSourceRegistration> Registrations()
+        {
+            Asked++;
+            return [];
+        }
 
         public StudioSourceRegistration? Find(string? key) => null;
 

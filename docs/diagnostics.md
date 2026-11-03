@@ -345,7 +345,7 @@ and kept, named like the studio's own sessions with "history" after the product 
 your `StudioApplicationName` with " (history)" after it) for as long as it is kept, idle between samples too, and given its
 own name back before it is closed. It is **outside `MaxStudioConnections`**: count it in the application's pool size. Its
 time is not the studio's on the Health page's cost line - a session kept for a week is not a week of the studio's work. A
-connection that breaks is opened again at the next round; while `ShouldSample` answers no, every kept connection is closed.
+connection that breaks is opened again at the next round; while `ShouldSample` answers no, every kept connection is closed and any samples still held are offered to the store.
 
 **Reading a history another process fills** (1.0.1, issue #48). A process that must never sample - a web application whose
 studio pool has no connection to spare, while a worker samples on a connection it reserves - registers
@@ -395,7 +395,9 @@ minute); before each new sample the sampler appends what it holds, oldest first,
 store that hangs costs one `QueryTimeout` per server per round. A sample the sampler could not read is lost, but the backlog is
 still offered to the store. Past the hour the oldest is dropped (event 9464, throttled), and when the backlog is written the
 sampler says so (event 9463, Information, once). The backlog lives in the sampling process alone: a process that stops
-loses it. While `ShouldSample` answers no, it is held and not written. Holders, in the process that samples, merges those
+loses it. While `ShouldSample` answers no, no new sample is taken, but the samples still held are offered to the store at every
+round, oldest first and by the same rules (1.1, issue #54), so a peak held through a change of leader is not lost; writing a
+held sample reads nothing from the server. Holders, in the process that samples, merges those
 samples into the history it draws - the store's read failing too leaves it the held ones - and says how many are waiting.
 
 ## Security
