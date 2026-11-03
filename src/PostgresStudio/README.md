@@ -286,9 +286,9 @@ round. A sample the store refuses - a table in the sampled database needs a conn
 at the moment that matters - is not lost: the sampling process holds up to an hour of samples per server, writes them oldest
 first before the next one (and, once it stops being the sampler, at every round, so a change of leader does not lose them),
 drops the oldest past that hour, and loses them only if it stops; make the store's append idempotent (`on conflict
-(server, taken_at) do nothing`), since one that committed and timed out is retried. Holders says how many are waiting. After its first read of a server the studio asks the store only for the samples since its last read, less five minutes,
-with a full read every ten minutes; a store should serve `since` with an index on `(server, taken_at)`, which the example
-table's primary key already gives. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
+(server, taken_at) do nothing`), since one that committed and timed out is retried. Holders says how many are waiting. After its first read of a server the studio asks the store only for the samples
+since its last read, less five minutes, with a full read every ten minutes; a store should serve `since` with an index on
+`(server, taken_at)`, which the example table's primary key already gives. Details in [docs/diagnostics.md](../../docs/diagnostics.md#connection-history).
 
 **Reader only (1.0.1).** A process that must never sample - the web application whose studio pool has no connection to spare -
 reads a history another process fills. The worker samples and appends to a store both processes share; the web application

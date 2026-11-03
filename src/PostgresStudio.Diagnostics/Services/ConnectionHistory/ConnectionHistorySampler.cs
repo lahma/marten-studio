@@ -341,7 +341,11 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
             held = [.. backlogs.Keys.Where(x => !except.Contains(x))];
         }
 
-        DateTimeOffset oldest = time.GetUtcNow() - (PendingBound(options.Value.Interval) * options.Value.Interval);
+        // Half an interval of slack: the sample taken exactly the window ago would otherwise be just past it by the time this runs
+        // (after ShouldSample and the release), and be dropped before it was ever offered - it gets one more offer, as on the
+        // sampler path, and goes the round after.
+        TimeSpan interval = options.Value.Interval;
+        DateTimeOffset oldest = time.GetUtcNow() - (PendingBound(interval) * interval) - (interval / 2);
         int stored = 0;
 
         foreach (string server in held)

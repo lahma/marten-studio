@@ -243,6 +243,24 @@ public class ConnectionHistoryBacklogTests
     }
 
     [Fact]
+    public async Task The_sample_taken_exactly_the_window_ago_still_gets_one_offer_when_the_process_stops_being_the_sampler()
+    {
+        // An hour's interval: the bound is one sample, and the window is one hour.
+        await using Rig rig = new(interval: TimeSpan.FromHours(1), shouldSample: _ => ValueTask.FromResult(false));
+
+        rig.Store.Refusing = true;
+        await rig.Sampler.StoreAsync(Server, Sample(0), Token);
+
+        rig.Clock.Advance(TimeSpan.FromHours(1) + TimeSpan.FromSeconds(3));
+        rig.Store.Refusing = false;
+
+        (await rig.Sampler.SampleOnceAsync(Token)).Should().Be(1, "the round that finds the role gone still offers the one sample it holds");
+        rig.Sampler.Pending(Server).Should().Be(0);
+        rig.Logs.Of(9464).Should().BeEmpty();
+        rig.Store.Stored.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task A_backlog_whose_samples_all_pass_the_window_is_dropped_whole_and_leaves_nothing_held()
     {
         await using Rig rig = new(shouldSample: _ => ValueTask.FromResult(false));
