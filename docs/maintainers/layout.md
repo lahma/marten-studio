@@ -168,6 +168,11 @@ src/MartenStudio/Components/Pages/Configuration/  The configuration dump screen
 tests/MartenStudio.Tests/Schema/          Index advice, the tokenizer, the schema page - no database
 tests/MartenStudio.Tests/Configuration/   The describer and the configuration page - no database
 tests/MartenStudio.Integration.Tests/Schema/  Live Postgres: drift, migration preview, catalog reads
+src/MartenStudio/Services/Connection/     Database > Connection's Marten half (1.1, NP4): the contributor, the command-timeout
+                                         resolution, the data-source origin and the section's rows
+tests/MartenStudio.Tests/Connection/      The Marten connection section, its hint notes, the redaction sentinel and the page - no database
+tests/MartenStudio.Integration.Tests/Connection/  Live Postgres: UseNpgsqlDataSource() versus Connection(string), and the hosted
+                                         daemon's connections
 src/MartenStudio/Components/Pages/Documents/  The documents browser: collections rail, list, detail
 src/MartenStudio/Components/Pages/Query/  The Marten query body: the mode switch and LINQ mode
 src/PostgresStudio/Components/Pages/Query/  The shared query parts: editor, result grid, stats, saved queries,
