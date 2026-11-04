@@ -42,6 +42,8 @@ internal sealed class StudioPage : IAsyncDisposable
     private readonly List<string> pageErrors = [];
     private readonly List<string> failedResponses = [];
     private readonly List<string> webSockets = [];
+    private readonly List<string> failedRequests = [];
+    private readonly List<string> enhancedNavigations = [];
     private readonly Dictionary<string, int> expected = new(StringComparer.Ordinal);
     private readonly Lock gate = new();
 
@@ -56,6 +58,83 @@ internal sealed class StudioPage : IAsyncDisposable
         page.PageError += OnPageError;
         page.Response += OnResponse;
         page.WebSocket += OnWebSocket;
+        page.RequestFailed += OnRequestFailed;
+        page.Request += OnRequest;
+    }
+
+    /// <summary>The environment variable that makes this run's sample hosts start with navigation interception switched off.</summary>
+    /// <remarks>
+    /// <c>SampleHost</c> reads the same name: it starts the sample with a copy of its <c>runtimeconfig.json</c> that sets the
+    /// <c>PostgresStudio.DisableNavigationInterception</c> AppContext switch, which is 1.1's navigation (a fetch of the whole page
+    /// for every move). The suite must still pass in that mode, with <see cref="AssertNoPageFetch" /> relaxed to 1.1's assertion.
+    /// </remarks>
+    internal const string InterceptionOffVariable = "MARTENSTUDIO_TEST_NAV_INTERCEPTION_OFF";
+
+    /// <summary>Whether this run is the one with navigation interception switched off (<see cref="InterceptionOffVariable" />).</summary>
+    internal static bool InterceptionIsOff =>
+        string.Equals(Environment.GetEnvironmentVariable(InterceptionOffVariable), "true", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Every request that was an enhanced navigation - the studio asking the server for a whole page because the visitor moved
+    /// (<c>accept: text/html; blazor-enhanced-nav=on</c>) - as <c>METHOD url</c>. Since 1.2 the studio intercepts its own
+    /// navigation, so a move inside it is rendered by the circuit and this stays empty.
+    /// </summary>
+    public IReadOnlyList<string> EnhancedNavigations
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. enhancedNavigations];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every request the browser itself gave up on (<c>net::ERR_ABORTED</c> and its kin), as <c>METHOD url failure</c>.
+    /// Not part of <see cref="AssertClean" />: a page navigated away from mid-request aborts legitimately, so a scenario
+    /// that is about a request asks for the list itself.
+    /// </summary>
+    public IReadOnlyList<string> FailedRequests
+    {
+        get
+        {
+            lock (gate)
+            {
+                return [.. failedRequests];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fails if a move inside the studio fetched a page or any request failed: no enhanced navigation (a <c>GET</c> of the page
+    /// that asks for <c>blazor-enhanced-nav=on</c>) and no <see cref="FailedRequests">failed request</see> at all, so no
+    /// <c>net::ERR_ABORTED</c> either.
+    /// </summary>
+    /// <param name="because">What the scenario was doing, for the failure message.</param>
+    /// <remarks>
+    /// In the run with interception switched off (<see cref="InterceptionIsOff" />) the studio navigates as 1.1 did: a page fetch
+    /// is expected, and the one tolerated failure is 1.1's - a <c>GET</c> of a page under the mount that the next navigation
+    /// cancelled (<c>net::ERR_ABORTED</c>). Any other failed request still fails there.
+    /// </remarks>
+    public void AssertNoPageFetch(string because)
+    {
+        if (InterceptionIsOff)
+        {
+            string prefix = "GET " + Host.Url(Host.StudioPath.TrimStart('/'));
+            string[] other = [.. FailedRequests.Where(failed => !(failed.StartsWith(prefix, StringComparison.Ordinal) && failed.EndsWith(" net::ERR_ABORTED", StringComparison.Ordinal)))];
+
+            other.Should().BeEmpty("with navigation interception off, only a cancelled GET of a studio page may fail (1.1) (" + because + "): " + string.Join(" | ", other));
+            return;
+        }
+
+        EnhancedNavigations.Should().BeEmpty(
+            "navigation inside the studio is rendered by the circuit and fetches no page, while " + because + "; these were fetched: "
+            + string.Join(" | ", EnhancedNavigations));
+
+        FailedRequests.Should().BeEmpty(
+            "no request may fail while " + because + " (a cancelled page fetch is net::ERR_ABORTED); these did: "
+            + string.Join(" | ", FailedRequests));
     }
 
     /// <summary>The Playwright page.</summary>
@@ -245,7 +324,50 @@ internal sealed class StudioPage : IAsyncDisposable
         await Page.GotoAsync(url, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
         await WaitForCircuitAsync();
         await WaitForScopeInUrlAsync();
+        await WaitForInteractiveAsync();
     }
+
+    /// <summary>
+    /// Waits until the circuit has rendered the shell and the studio has asked for navigation interception: the shell's
+    /// <c>data-ms-interactive</c> marker (1.2).
+    /// </summary>
+    /// <remarks>
+    /// <c>StudioRoutes</c> makes its interop call in its first interactive render, which precedes the shell's render batch that
+    /// carries the marker, so the attribute in the page means a click now is rendered by the circuit. It is the one signal that
+    /// does not depend on whether the address needed a rewrite (<see cref="WaitForScopeInUrlAsync" /> returns at once for an
+    /// address that already carries <c>store=</c>, before the circuit has rendered anything), and it removes the one race left
+    /// in a scenario: a click before interception is on is still an enhanced navigation. With interception switched off the
+    /// marker is still rendered.
+    /// </remarks>
+    public Task WaitForInteractiveAsync() =>
+        Page.WaitForFunctionAsync(
+            "() => document.querySelector('.ms-studio[data-ms-interactive]') !== null",
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+    /// <summary>
+    /// Records every <c>history.pushState</c> and <c>history.replaceState</c> the page makes, from the next document on, so a
+    /// scenario can say how many addresses a gesture wrote. Call it before <see cref="GoAsync" />.
+    /// </summary>
+    public Task RecordHistoryWritesAsync() =>
+        Page.AddInitScriptAsync(
+            "(() => { const writes = window.__msHistoryWrites = []; for (const name of ['pushState', 'replaceState']) { const original = history[name];"
+            + " history[name] = function (state, title, url) { try { writes.push(new URL(url === undefined || url === null ? location.href : url, document.baseURI).href); } catch (e) { } return original.apply(this, arguments); }; } })();");
+
+    /// <summary>The addresses <see cref="RecordHistoryWritesAsync" /> has seen written, in order, in the current document.</summary>
+    public async Task<IReadOnlyList<string>> HistoryWritesAsync() =>
+        await Page.EvaluateAsync<string[]>("() => window.__msHistoryWrites ?? []");
+
+    /// <summary>
+    /// Waits for a condition on <c>window.location</c> (<paramref name="predicate" /> is a JavaScript expression over
+    /// <c>location</c>): the way to wait for an address the circuit wrote, never <c>WaitForURLAsync</c>.
+    /// </summary>
+    /// <param name="predicate">For example <c>location.search.includes('page=2')</c>.</param>
+    public Task WaitForLocationAsync(string predicate) =>
+        Page.WaitForFunctionAsync(
+            "() => " + predicate,
+            null,
+            new PageWaitForFunctionOptions { Timeout = 30_000 });
 
     /// <summary>
     /// Waits until the studio has written its active scope into the query string.
@@ -473,6 +595,8 @@ internal sealed class StudioPage : IAsyncDisposable
         Page.PageError -= OnPageError;
         Page.Response -= OnResponse;
         Page.WebSocket -= OnWebSocket;
+        Page.RequestFailed -= OnRequestFailed;
+        Page.Request -= OnRequest;
 
         await context.CloseAsync();
     }
@@ -524,6 +648,28 @@ internal sealed class StudioPage : IAsyncDisposable
                 "{0} {1}",
                 response.Status,
                 response.Url));
+        }
+    }
+
+    private void OnRequestFailed(object? sender, IRequest request)
+    {
+        lock (gate)
+        {
+            failedRequests.Add(request.Method + " " + request.Url + " " + request.Failure);
+        }
+    }
+
+    private void OnRequest(object? sender, IRequest request)
+    {
+        if (!request.Headers.TryGetValue("accept", out string? accept)
+            || !accept.Contains("blazor-enhanced-nav=on", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            enhancedNavigations.Add(request.Method + " " + request.Url);
         }
     }
 

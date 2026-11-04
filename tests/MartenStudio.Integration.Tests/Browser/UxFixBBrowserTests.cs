@@ -20,24 +20,6 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
         "() => { document.activeElement && document.activeElement.blur(); document.body.setAttribute('tabindex', '-1'); "
         + "document.body.focus(); document.body.removeAttribute('tabindex'); }";
 
-    /// <summary>
-    /// The only request failure these Query tests allow: a <c>GET</c> of the studio's own page, under <c>/marten/query?</c>, that the
-    /// browser cancelled (<c>net::ERR_ABORTED</c>). The studio's router is its own, so every address it writes is an
-    /// enhanced-navigation fetch of the whole page, and on a slow machine one can be cancelled by the next, which shows only in the
-    /// network panel: the page still ends at the right address with the right result, which these tests assert in full. Any other
-    /// failed request - a script, a stylesheet, <c>_blazor</c>, another path, a non-GET, another error - still fails the test.
-    /// Restore the strict "no failed request at all" assertion with the 1.2 navigation work, which removes these page fetches.
-    /// </summary>
-    private static readonly System.Text.RegularExpressions.Regex OwnPageFetch =
-        new(@"^GET https?://[^/\s]+/marten/query\?\S* net::ERR_ABORTED$", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
-
-    private static void AssertOnlyTheOwnPageFetchWasCancelled(StudioPage studio, string because)
-    {
-        string[] other = [.. studio.FailedRequests.Where(static failed => !OwnPageFetch.IsMatch(failed))];
-
-        other.Should().BeEmpty("only a cancelled GET of the studio's own /marten/query page may fail (" + because + "): " + string.Join(" | ", other));
-    }
-
     [BrowserFact]
     public async Task The_skip_link_is_the_first_Tab_stop_shows_on_focus_and_moves_focus_to_the_content_without_navigating()
     {
@@ -88,8 +70,9 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
             await error.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
             (await error.InnerTextAsync()).Should().Contain("Archived selector", "the refusal carries the member's reason");
 
-            // The case that aborted a request: edit the predicate and click Run at once. The box's `change` rewrites the address as
-            // the click lands, and Run used to rewrite it again - a second enhanced navigation that aborted the first.
+            // The case that aborted a request in 1.1: edit the predicate and click Run at once. The box's `change` rewrites the address as
+            // the click lands, and Run used to rewrite it again - a second enhanced navigation that aborted the first. Since 1.2 an address
+            // the page writes is a history update and nothing is fetched, which AssertNoPageFetch proves below.
             await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
             await studio.Page.Locator(".ms-query-run").ClickAsync();
 
@@ -106,21 +89,23 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
                 null,
                 new PageWaitForFunctionOptions { Timeout = 30_000 });
 
-            AssertOnlyTheOwnPageFetchWasCancelled(studio, "refusing an events predicate and running one from the Order-by box");
+            studio.AssertNoPageFetch("refusing an events predicate and running one from the Order-by box");
             studio.AssertClean("refusing an events predicate and running one from the Order-by box");
         });
     }
 
     /// <summary>
     /// 1.1-FINAL-POLISH C1: typing a predicate, moving to the Order-by box and pressing Ctrl+Enter there pushed the address twice -
-    /// once on the predicate's `change` (without the ordering), once for the run - and the first enhanced navigation was aborted.
-    /// The address is now written once per Run.
+    /// once on the predicate's `change` (without the ordering), once for the run. The address is now written once per Run, which
+    /// this proves in the browser: the page's history writes are recorded, exactly one address carries the predicate and it carries
+    /// the ordering too, and (1.2) no page was fetched and no request failed.
     /// </summary>
     [BrowserFact]
     public async Task A_predicate_then_Ctrl_Enter_from_the_Order_by_box_writes_both_into_the_address()
     {
         await BrowserScenario.RunAsync(fixture.Browser, "linq-single-push", fixture.Root, "admin", async studio =>
         {
+            await studio.RecordHistoryWritesAsync();
             await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
@@ -138,74 +123,75 @@ public class UxFixBBrowserTests(BrowserSuiteFixture fixture)
                 new PageWaitForFunctionOptions { Timeout = 30_000 });
             await studio.Page.Locator(".ms-query-linq-events .ms-event-card").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            AssertOnlyTheOwnPageFetchWasCancelled(studio, "editing a predicate and running from the Order-by box");
+            IReadOnlyList<string> writes = [.. (await studio.HistoryWritesAsync()).Where(static x => x.Contains("predicate=", StringComparison.Ordinal))];
+
+            writes.Distinct().Should().ContainSingle("the predicate reached the address in one address, not one before the run and one for it: " + string.Join(" | ", writes));
+            writes[0].Should().Contain("orderby=Sequence", "that one address carries the ordering too");
+
+            if (!StudioPage.InterceptionIsOff)
+            {
+                writes.Should().ContainSingle("the address is written once per Run: " + string.Join(" | ", writes));
+            }
+
+            studio.AssertNoPageFetch("editing a predicate and running from the Order-by box");
             studio.AssertClean("editing a predicate and running from the Order-by box");
         });
     }
 
     /// <summary>
-    /// 1.1-FINAL-POLISH C1, by construction rather than by timing: the first Run's navigation request is held in the browser, the
-    /// second Run (Ctrl+Enter from the Order-by box) is asked for while it is in flight, and only then is the first let through.
-    /// The second Run shows its result, and the address ends carrying the predicate and the ordering. The held request may be
-    /// cancelled by the second navigation (<see cref="OwnPageFetch" />); nothing else may fail.
+    /// 1.1-FINAL-POLISH C1, by construction rather than by timing, and (1.2) as a count: two Runs in a row - the second asked for
+    /// by Ctrl+Enter from the Order-by box without waiting for the first one's address - fetch no page at all. In 1.1 each Run's
+    /// address was a fetch of the whole page, which the next could cancel, so this test held the first request in the browser; the
+    /// studio now renders its own moves in the circuit, and a route on the page's address counts how many times the browser asked
+    /// the server for it. The second Run shows its result and the address ends carrying the predicate and the ordering.
     /// </summary>
     [BrowserFact]
-    public async Task A_second_Run_while_the_first_ones_navigation_is_in_flight_shows_the_second_result()
+    public async Task Two_Runs_in_a_row_fetch_no_page_and_end_on_the_second()
     {
         await BrowserScenario.RunAsync(fixture.Browser, "linq-serialised-push", fixture.Root, "admin", async studio =>
         {
             await studio.GoAsync(fixture.Root.StudioUrl("query?mode=linq&target=events"));
             await studio.Page.Locator("#ms-query-linq-where").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
 
-            TaskCompletionSource<bool> release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            TaskCompletionSource<bool> held = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
+            // Counts every request for the Query page's own address and lets it through: after the load above, any is a page fetch.
+            int pageRequests = 0;
             await studio.Page.RouteAsync(
-                static url => url.Contains("predicate=Version", StringComparison.Ordinal) && !url.Contains("orderby=", StringComparison.Ordinal),
+                static url => url.Contains("/marten/query", StringComparison.Ordinal),
                 async route =>
                 {
-                    held.TrySetResult(true);
-                    await release.Task;
+                    Interlocked.Increment(ref pageRequests);
                     await route.ContinueAsync();
                 });
 
-            try
+            await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
+            await studio.Page.Locator(".ms-query-run").ClickAsync();
+
+            // The second Run is asked for at once, without waiting for the first one's address to be reported back: a run in
+            // progress ignores the chord, so the first Run has finished (its result is on screen and Run is enabled again).
+            await studio.Page.Locator(".ms-query-linq-events .ms-event-card").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
+            await studio.Page.WaitForFunctionAsync(
+                "() => document.querySelector('.ms-query-run') !== null && !document.querySelector('.ms-query-run').disabled",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            await studio.Page.Locator("#ms-query-linq-orderby").FillAsync("Sequence");
+            await studio.Page.Locator("#ms-query-linq-orderby").PressAsync("Control+Enter");
+            await studio.Page.WaitForFunctionAsync(
+                "() => { const s = document.querySelector('.ms-query-linq-events .ms-event-card-seq'); return s !== null && s.textContent.trim() === '#1'; }",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+            await studio.Page.WaitForFunctionAsync(
+                "() => window.location.search.includes('predicate=Version') && window.location.search.includes('orderby=Sequence')",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 30_000 });
+
+            if (!StudioPage.InterceptionIsOff)
             {
-                await studio.Page.Locator("#ms-query-linq-where").FillAsync("Version > 0");
-                await studio.Page.Locator(".ms-query-run").ClickAsync();
-                await held.Task.WaitAsync(TimeSpan.FromSeconds(30));
-
-                // The first navigation is in flight, and the first run has finished (a run in progress ignores the chord).
-                await studio.Page.Locator(".ms-query-linq-events .ms-event-card").First.WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-                await studio.Page.Locator(".ms-query-run").WaitForAsync(new LocatorWaitForOptions { Timeout = 30_000 });
-                await studio.Page.WaitForFunctionAsync(
-                    "() => document.querySelector('.ms-query-run') !== null && !document.querySelector('.ms-query-run').disabled",
-                    null,
-                    new PageWaitForFunctionOptions { Timeout = 30_000 });
-
-                // The second Run is asked for now, while the first one's request is still held.
-                await studio.Page.Locator("#ms-query-linq-orderby").FillAsync("Sequence");
-                await studio.Page.Locator("#ms-query-linq-orderby").PressAsync("Control+Enter");
-                await studio.Page.WaitForFunctionAsync(
-                    "() => { const s = document.querySelector('.ms-query-linq-events .ms-event-card-seq'); return s !== null && s.textContent.trim() === '#1'; }",
-                    null,
-                    new PageWaitForFunctionOptions { Timeout = 30_000 });
-
-                release.TrySetResult(true);
-
-                await studio.Page.WaitForFunctionAsync(
-                    "() => window.location.search.includes('predicate=Version') && window.location.search.includes('orderby=Sequence')",
-                    null,
-                    new PageWaitForFunctionOptions { Timeout = 30_000 });
-
-                AssertOnlyTheOwnPageFetchWasCancelled(studio, "two Runs while the first one's navigation is held");
-                studio.AssertClean("two Runs while the first one's navigation is in flight");
+                Volatile.Read(ref pageRequests).Should().Be(0, "an address the page writes is a history update, not a request for the page");
             }
-            finally
-            {
-                // However the test ends, the held request is let go: a hold nobody releases would hang the page's disposal.
-                release.TrySetResult(true);
-            }
+
+            studio.AssertNoPageFetch("two Runs in a row");
+            studio.AssertClean("two Runs in a row");
         });
     }
 

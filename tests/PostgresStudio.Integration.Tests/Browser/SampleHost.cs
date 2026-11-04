@@ -204,6 +204,43 @@ internal sealed class SampleHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Adds the application to the command line - and, in the run with navigation interception switched off
+    /// (<see cref="StudioPage.InterceptionOffVariable" />), starts it with a copy of its <c>runtimeconfig.json</c> that sets the
+    /// <c>PostgresStudio.DisableNavigationInterception</c> AppContext switch (<c>dotnet exec --runtimeconfig</c>), which is how a host
+    /// reaches the switch without code (<c>docs/stability.md</c>). The sample's own build output is not touched.
+    /// </summary>
+    private static void AddEntryPoint(ProcessStartInfo startInfo, string assembly)
+    {
+        if (!StudioPage.InterceptionIsOff)
+        {
+            startInfo.ArgumentList.Add(assembly);
+            return;
+        }
+
+        string source = Path.ChangeExtension(assembly, ".runtimeconfig.json");
+        System.Text.Json.Nodes.JsonNode root = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(source))
+            ?? throw new InvalidOperationException(source + " is empty.");
+        System.Text.Json.Nodes.JsonObject options = root["runtimeOptions"]?.AsObject()
+            ?? throw new InvalidOperationException(source + " has no runtimeOptions.");
+
+        if (options["configProperties"] is not System.Text.Json.Nodes.JsonObject properties)
+        {
+            properties = [];
+            options["configProperties"] = properties;
+        }
+
+        properties["PostgresStudio.DisableNavigationInterception"] = true;
+
+        string copy = Path.Combine(Directory.CreateTempSubdirectory("ms-nav-off-").FullName, Path.GetFileName(source));
+        File.WriteAllText(copy, root.ToJsonString());
+
+        startInfo.ArgumentList.Add("exec");
+        startInfo.ArgumentList.Add("--runtimeconfig");
+        startInfo.ArgumentList.Add(copy);
+        startInfo.ArgumentList.Add(assembly);
+    }
+
     private static ProcessStartInfo CreateStartInfo(string? connectionString, bool allowDataGeneration)
     {
         string assembly = SampleAssemblyPath();
@@ -217,7 +254,7 @@ internal sealed class SampleHost : IAsyncDisposable
             CreateNoWindow = true,
         };
 
-        startInfo.ArgumentList.Add(assembly);
+        AddEntryPoint(startInfo, assembly);
 
         // Before --urls, bare, on purpose: the sample's own reading is what keeps the switch from swallowing the next token.
         if (allowDataGeneration)
