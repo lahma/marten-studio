@@ -6,6 +6,7 @@ using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
 using MartenStudio.Tests.Conventions;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
@@ -445,10 +446,10 @@ public class QueryPageTests
         page.Find(".ms-query-tab-count").TextContent.Trim().Should().Be("1", "one notice came back");
         page.Find(".ms-query-tab-panel").TextContent.Should().Contain("select 1");
 
-        await page.Find("#ms-query-tab-messages").ClickAsync(new MouseEventArgs());
+        await page.ClickCurrentAsync("#ms-query-tab-messages");
         page.Find(".ms-query-message").TextContent.Should().Contain("something happened");
 
-        await page.Find("#ms-query-tab-plan").ClickAsync(new MouseEventArgs());
+        await page.ClickCurrentAsync("#ms-query-tab-plan");
         page.Find(".ms-query-no-plan").TextContent.Should().Contain("EXPLAIN");
     }
 

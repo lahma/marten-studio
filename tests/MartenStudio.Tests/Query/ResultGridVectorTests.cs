@@ -1,6 +1,7 @@
 using Bunit;
 
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components.Web;
 
@@ -161,7 +162,7 @@ public class ResultGridVectorTests
         page.Find("button.ms-vector-chip").TextContent.Should().Be("vector");
         page.TextOfAll(".ms-query-grid-type").Should().Equal("integer", "vector");
 
-        await page.Find("button.ms-vector-chip").ClickAsync(new MouseEventArgs());
+        await page.ClickCurrentAsync("button.ms-vector-chip");
 
         page.Find(".ms-row-text-panel-body").TextContent.Should().Be(Five);
     }

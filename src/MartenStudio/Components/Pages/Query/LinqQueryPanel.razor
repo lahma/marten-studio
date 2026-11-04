@@ -1010,8 +1010,14 @@
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(200));
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            while (running && await timer.WaitForNextTickAsync(cancellationToken))
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
+                // Re-checked after the wait: a tick that fires as the run ends must not render once more after the run's last render.
+                if (!running)
+                {
+                    break;
+                }
+
                 elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
                 await InvokeAsync(StateHasChanged);
             }

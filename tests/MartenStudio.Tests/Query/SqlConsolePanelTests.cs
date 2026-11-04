@@ -4,6 +4,7 @@ using MartenStudio.Components.Pages;
 using MartenStudio.Services.Query;
 using PostgresStudio.Services.Sources;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -94,10 +95,10 @@ public class SqlConsolePanelTests
         await page.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
         page.WaitForAssertion(() => page.FindAll("table.ms-query-grid").Should().ContainSingle());
 
-        await page.Find("#ms-query-mode-marten").ClickAsync(new MouseEventArgs());
+        await page.ClickCurrentAsync("#ms-query-mode-marten");
         page.WaitForAssertion(() => page.FindAll("table.ms-query-grid").Should().BeEmpty("the where clause tab is on screen"));
 
-        await page.Find("#ms-query-mode-sql").ClickAsync(new MouseEventArgs());
+        await page.ClickCurrentAsync("#ms-query-mode-sql");
 
         page.WaitForAssertion(() => page.FindAll("table.ms-query-grid").Should().ContainSingle("the result survived the tab switch"));
         page.Find("#ms-query-sql").GetAttribute("value").Should().Be("select 1");

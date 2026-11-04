@@ -4,6 +4,7 @@ using MartenStudio.Components.Pages.Query;
 using MartenStudio.Services;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
@@ -324,7 +325,7 @@ public class LinqQueryPanelTests
         await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
 
         linq.Result = linq.Result with { Offset = 1, Plan = null };
-        await panel.FindAll(".ms-query-linq-pager button")[1].ClickAsync(new MouseEventArgs());
+        await RenderRace.ClickCurrentAsync(() => panel.FindAll(".ms-query-linq-pager button")[1]);
 
         linq.Requests.Should().HaveCount(2);
         linq.Requests[1].Offset.Should().Be(1);

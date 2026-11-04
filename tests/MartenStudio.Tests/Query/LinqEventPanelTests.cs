@@ -7,6 +7,7 @@ using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Components;
+using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components.Web;
 
@@ -324,7 +325,7 @@ public class LinqEventPanelTests
         var panel = context.Render<LinqQueryPanel>();
         await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
 
-        await panel.Find("#ms-query-tab-messages").ClickAsync(new MouseEventArgs());
+        await panel.ClickCurrentAsync("#ms-query-tab-messages");
 
         panel.FindAll(".ms-query-message").Select(static x => x.TextContent).Should().Equal(
             "No tenant is selected: Marten read every tenant's events (AnyTenant()).",
@@ -343,7 +344,7 @@ public class LinqEventPanelTests
         var panel = context.Render<LinqQueryPanel>();
         await panel.Find(".ms-query-run").ClickAsync(new MouseEventArgs());
 
-        await panel.Find("#ms-query-tab-messages").ClickAsync(new MouseEventArgs());
+        await panel.ClickCurrentAsync("#ms-query-tab-messages");
 
         panel.Find(".ms-query-messages").TextContent.Should().Contain("not divided by tenant").And.Contain("whole database's event log");
         panel.FindAll(".ms-query-scope-chip").Select(static x => x.TextContent.Trim()).Should().Contain("whole database");
