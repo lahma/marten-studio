@@ -19,6 +19,7 @@ using Microsoft.Extensions.DependencyInjection;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Connection;
+using PostgresStudio.Services.Diagnostics;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Relationships;
@@ -278,6 +279,12 @@ public class CapabilityGatingMatrixTests
         // 1.1-NP3: the compare view parses a pasted connection string and drops it; it writes nothing and is the Connection page's
         // read (the store policy's), so a mutating method added to the service later has to be classified here or fail the matrix.
         [typeof(IConnectionCompareService)] = ["CompareAsync"],
+
+        // 1.2-H-B: Health > Snapshot > "Compare with an earlier snapshot". It builds the visitor's own gated view first (the very view
+        // Download JSON writes, which asks each page's service as the visitor and so audits what those do) and reads the file
+        // after; it writes nothing, logs nothing and audits nothing of its own - the file is the visitor's - so it is a read. A
+        // mutating method added to the service later has to be classified here or fail the matrix.
+        [typeof(ISnapshotCompareService)] = ["CompareAsync"],
     };
 
     /// <summary>

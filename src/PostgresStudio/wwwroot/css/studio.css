@@ -15333,3 +15333,111 @@ a.ms-schema-health-mark:focus-visible {
 .ms-flow-unconsumed {
   margin-top: var(--ms-space-lg);
 }
+
+/* ===== 1.2-H-B Snapshot compare and Markdown ===== */
+
+.ms-snapshot-compare .ms-snapshot-view-header {
+    justify-content: space-between;
+}
+
+.ms-snapshot-compare-pick {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+}
+
+.ms-snapshot-compare-label {
+    font-size: var(--ms-font-size-sm);
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-snapshot-compare-input {
+    max-width: 100%;
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-snapshot-compare-busy,
+.ms-snapshot-compare-note {
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-snapshot-compare-message .ms-alert-content,
+.ms-snapshot-compare-problem .ms-alert-content,
+.ms-snapshot-compare-notice .ms-alert-content {
+    overflow-wrap: anywhere;
+}
+
+.ms-snapshot-compare-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+}
+
+.ms-snapshot-compare-meta {
+    margin: 0;
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+    overflow-wrap: anywhere;
+}
+
+.ms-snapshot-compare-name {
+    margin-right: var(--ms-space-sm);
+}
+
+.ms-snapshot-compare-verdict {
+    margin: 0;
+    font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-snapshot-compare-heading {
+    margin: var(--ms-space-sm) 0 0;
+    font-size: var(--ms-font-size-lg);
+}
+
+.ms-snapshot-compare-table td {
+    vertical-align: top;
+}
+
+.ms-snapshot-compare-table .ms-table-cell-number {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ms-snapshot-compare-statement {
+    max-width: 28ch;
+    overflow-wrap: anywhere;
+}
+
+.ms-snapshot-compare-kind-new,
+.ms-snapshot-compare-kind-worse,
+.ms-snapshot-compare-kind-better,
+.ms-snapshot-compare-kind-gone,
+.ms-snapshot-compare-kind-same {
+    font-weight: var(--ms-font-weight-semibold);
+    white-space: nowrap;
+    border-left: 3px solid var(--ms-color-border);
+}
+
+.ms-snapshot-compare-kind-new,
+.ms-snapshot-compare-kind-worse {
+    border-left-color: var(--ms-color-danger);
+}
+
+.ms-snapshot-compare-kind-better {
+    border-left-color: var(--ms-color-success);
+}
+
+.ms-snapshot-compare-kind-gone {
+    border-left-color: var(--ms-color-warning);
+}
+
+.ms-snapshot-compare-notcompared {
+    margin: 0;
+    padding-left: var(--ms-space-lg);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-sm);
+}

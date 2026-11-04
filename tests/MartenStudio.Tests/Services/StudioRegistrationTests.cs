@@ -236,6 +236,9 @@ public class StudioRegistrationTests
 
         // W5-API: the Health page's Snapshot menu, the circuit's - built from the page services as the visitor.
         (typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.VisitorSnapshotBuilder)),
+
+        // 1.2-H-B: "Compare with an earlier snapshot", the circuit's - the visitor's gated view first, then the file.
+        (typeof(PostgresStudio.Services.Diagnostics.ISnapshotCompareService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Diagnostics.SnapshotCompareService)),
         (typeof(StudioLiveState), ServiceLifetime.Singleton, How.Type, typeof(StudioLiveState)),
         (typeof(StudioOperationTracker), ServiceLifetime.Singleton, How.Type, typeof(StudioOperationTracker)),
         (typeof(DaemonControlState), ServiceLifetime.Singleton, How.Type, typeof(DaemonControlState)),

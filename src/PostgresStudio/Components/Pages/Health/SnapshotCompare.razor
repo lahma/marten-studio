@@ -1,0 +1,319 @@
+@using Microsoft.Extensions.DependencyInjection
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Diagnostics
+@implements IDisposable
+@inject IServiceProvider Services
+@inject StudioState State
+@inject ILogger<SnapshotCompare> Logger
+
+@*
+    The Health page's "Compare with an earlier snapshot" (1.2-H-B, D-HEALTH C): a snapshot file the Snapshot menu saved, read in
+    this circuit through Blazor's InputFile (a stream in chunks, under the circuit's receive limit), compared with the visitor's
+    own gated view, and dropped. It is a file input, not a form (D23 stands), and it is bounded: a file over 4 MB is refused
+    before a byte is read.
+
+    Nothing of the file outlives the compare. The component's fields are the derived comparison, a counter that replaces the
+    input, a busy flag and one sentence: never the stream, the bytes or the snapshot read from them. The service it asks is
+    resolved on use, so a Health page nobody compares on builds none of the six page services it reads. The comparison is
+    drawn from SnapshotComparison alone (DiagnosticsApiIsNotServedTests: a component names no read-model type).
+*@
+
+<section class="ms-snapshot-view ms-snapshot-compare" aria-label="Compare with an earlier snapshot">
+    <header class="ms-snapshot-view-header">
+        <h2 class="ms-snapshot-view-title">Compare with an earlier snapshot</h2>
+        <button type="button" class="ms-btn ms-btn-sm ms-snapshot-view-close ms-snapshot-compare-close" @onclick="CloseAsync">Close</button>
+    </header>
+
+    <p class="ms-snapshot-view-note ms-snapshot-compare-promise">
+        Choose a snapshot file this menu saved. It is read here, compared with what your pages show now, and dropped: it is not
+        stored, logged, audited or sent anywhere. Only what you may see now is compared - an earlier finding, statement or table
+        you are not shown now is counted, never described.
+    </p>
+
+    <div class="ms-snapshot-compare-pick">
+        <label for="ms-snapshot-compare-file" class="ms-snapshot-compare-label">Snapshot file (JSON, at most 4 MB)</label>
+        <InputFile @key="inputGeneration"
+                   OnChange="OnFileChosenAsync"
+                   accept=".json,application/json"
+                   id="ms-snapshot-compare-file"
+                   class="ms-snapshot-compare-input"
+                   disabled="@busy" />
+    </div>
+
+    @if (busy)
+    {
+        <p class="ms-snapshot-compare-busy" role="status">Reading…</p>
+    }
+
+    @if (message is not null)
+    {
+        <div class="ms-alert ms-alert-warning ms-snapshot-compare-message" role="status">
+            <div class="ms-alert-content">@message</div>
+        </div>
+    }
+
+    @if (comparison is { } result)
+    {
+        @Result(result)
+    }
+</section>
+
+@code {
+    private readonly CancellationTokenSource lifetime = new();
+    private SnapshotComparison? comparison;
+    private int inputGeneration;
+    private bool busy;
+    private string? message;
+    private bool disposed;
+
+    /// <summary>Raised when the visitor closes the drawer.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    private async Task CloseAsync()
+    {
+        comparison = null;
+        message = null;
+        inputGeneration++;
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task OnFileChosenAsync(InputFileChangeEventArgs e)
+    {
+        if (busy)
+        {
+            return;
+        }
+
+        comparison = null;
+        message = null;
+
+        if (State.ActiveScope is not { } scope)
+        {
+            message = "Choose a database first.";
+            inputGeneration++;
+            return;
+        }
+
+        IBrowserFile file = e.File;
+
+        // The bound is checked before a byte is read, and OpenReadStream enforces it again.
+        if (file.Size > SnapshotFileReader.MaxBytes)
+        {
+            message = "This file is " + (file.Size / 1024.0 / 1024.0).ToString("N1", System.Globalization.CultureInfo.InvariantCulture)
+                + " MB; a snapshot this studio writes is far smaller, and at most 4 MB is read.";
+            inputGeneration++;
+            return;
+        }
+
+        busy = true;
+        StateHasChanged();
+
+        try
+        {
+            await using Stream stream = file.OpenReadStream(SnapshotFileReader.MaxBytes, lifetime.Token);
+            comparison = await Services.GetRequiredService<ISnapshotCompareService>().CompareAsync(scope, stream, file.Name, lifetime.Token);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            // The services answer a refusal as a value; what escapes is a bug or a browser that stopped sending, and its words are
+            // not the visitor's to read. Nothing of the file is in them: the server log has it once.
+            Logger.LogWarning(exception, "The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} failed", StudioLogValue.Cap(scope.StoreKey), StudioLogValue.Cap(scope.DatabaseId));
+            message = "The file could not be compared; the server log has why.";
+        }
+        finally
+        {
+            busy = false;
+
+            // A new input, so the browser drops its File; nothing else of the file is kept anywhere.
+            inputGeneration++;
+
+            if (!disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private string Time(DateTimeOffset? at) => State.FormatInSelectedTimeZone(at);
+
+    private RenderFragment Result(SnapshotComparison result) => __builder =>
+    {
+        if (result.Outcome != SnapshotCompareOutcome.Compared)
+        {
+            <div class="ms-alert @(result.Outcome == SnapshotCompareOutcome.Refused ? "ms-alert-warning" : "ms-alert-error") ms-snapshot-compare-problem" role="@(result.Outcome == SnapshotCompareOutcome.Refused ? "status" : "alert")">
+                <div class="ms-alert-content">@result.Reason</div>
+            </div>
+            return;
+        }
+
+        <div class="ms-snapshot-compare-result">
+            <p class="ms-snapshot-compare-meta">
+                <code class="ms-snapshot-compare-name">@result.FileName</code>
+                Earlier: @Time(result.EarlierAt). Now: @Time(result.NowAt).
+            </p>
+            <p class="ms-snapshot-compare-verdict">@result.Verdict</p>
+
+            @foreach (string notice in result.Notices)
+            {
+                <div class="ms-alert ms-alert-info ms-snapshot-compare-notice" role="status">
+                    <div class="ms-alert-content">@notice</div>
+                </div>
+            }
+
+            @{
+                SnapshotFindingChange[] changed = [.. result.Findings.Where(static x => x.Kind != SnapshotChangeKind.Unchanged)];
+                int unchanged = result.Findings.Count - changed.Length;
+            }
+
+            @if (changed.Length > 0)
+            {
+                <h3 class="ms-snapshot-compare-heading">Findings</h3>
+                <TableScroll Label="Findings that changed">
+                    <table class="ms-table ms-snapshot-compare-table">
+                        <thead>
+                            <tr><th scope="col">Change</th><th scope="col">Check</th><th scope="col">Finding</th><th scope="col">Severity</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (SnapshotFindingChange change in changed)
+                            {
+                                <tr>
+                                    <td class="@SnapshotCompareText.KindClass(change.Kind)">@SnapshotCompareText.Kind(change.Kind)</td>
+                                    <td class="ms-table-cell-mono">@change.Code</td>
+                                    <td>@change.Title@(change.Subject is null ? null : " (" + change.Subject + ")")</td>
+                                    <td>@SnapshotCompareText.Severity(change)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+
+            @if (unchanged > 0)
+            {
+                <p class="ms-snapshot-compare-note">@unchanged @(unchanged == 1 ? "finding is" : "findings are") unchanged.</p>
+            }
+
+            @ValueTable("Server", "Server changes", result.Server)
+            @ValueTable("Settings", "Setting changes", result.Settings)
+            @ValueTable("Extensions", "Extension changes", result.Extensions)
+            @ValueTable("Storage", "Storage changes", result.Storage)
+
+            @if (result.Tables.Count > 0)
+            {
+                <h3 class="ms-snapshot-compare-heading">Tables</h3>
+                <TableScroll Label="Table size changes">
+                    <table class="ms-table ms-snapshot-compare-table">
+                        <thead>
+                            <tr><th scope="col">Change</th><th scope="col">Table</th><th scope="col">Before</th><th scope="col">Now</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (SnapshotTableChange table in result.Tables)
+                            {
+                                <tr>
+                                    <td class="@SnapshotCompareText.KindClass(table.Kind)">@SnapshotCompareText.Kind(table.Kind)</td>
+                                    <td class="ms-table-cell-mono">@table.Table</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Bytes(table.BytesBefore)</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Bytes(table.BytesNow)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+
+            @if (result.Statements.Count > 0)
+            {
+                <h3 class="ms-snapshot-compare-heading">Statements</h3>
+                <TableScroll Label="Statement changes">
+                    <table class="ms-table ms-snapshot-compare-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Change</th><th scope="col">Query id</th><th scope="col">Mean before</th><th scope="col">Mean now</th>
+                                <th scope="col">Share before</th><th scope="col">Share now</th><th scope="col">Calls before</th><th scope="col">Calls now</th>
+                                <th scope="col">Statement</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (SnapshotStatementChange statement in result.Statements)
+                            {
+                                <tr>
+                                    <td class="@SnapshotCompareText.KindClass(statement.Kind)">@SnapshotCompareText.Kind(statement.Kind)</td>
+                                    <td class="ms-table-cell-mono">@statement.QueryId</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Milliseconds(statement.MeanBefore)</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Milliseconds(statement.MeanNow)</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Share(statement.ShareBefore)</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Share(statement.ShareNow)</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Rate(statement.CallsPerHourBefore)</td>
+                                    <td class="ms-table-cell-number">@SnapshotCompareText.Rate(statement.CallsPerHourNow)</td>
+                                    <td class="ms-snapshot-compare-statement">@(statement.Text ?? (statement.Kind == SnapshotStatementChangeKind.Gone ? "(not shown: it is gone)" : "(text withheld)"))</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            }
+
+            @ValueTable("Write-ahead log", "Write-ahead log between the two", result.Wal)
+            @ValueTable("Connections", "Connection changes", result.Connections)
+            @ValueTable("Connection settings", "Connection setting changes", result.Connection)
+
+            @if (result.NotCompared.Count > 0)
+            {
+                <h3 class="ms-snapshot-compare-heading">Not compared</h3>
+                <ul class="ms-snapshot-compare-notcompared">
+                    @foreach (SnapshotNotCompared item in result.NotCompared)
+                    {
+                        <li>@(item.Count > 0 ? item.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " " : null)@item.What: @item.Why</li>
+                    }
+                </ul>
+            }
+
+            @if (result.SkippedItems > 0)
+            {
+                <p class="ms-snapshot-compare-note">@result.SkippedItems.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) @(result.SkippedItems == 1 ? "item names" : "items name") a value this studio does not know, and @(result.SkippedItems == 1 ? "was" : "were") left out.</p>
+            }
+        </div>
+    };
+
+    private RenderFragment ValueTable(string title, string label, IReadOnlyList<SnapshotValueChange> rows) => __builder =>
+    {
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        <h3 class="ms-snapshot-compare-heading">@title</h3>
+        <TableScroll Label="@label">
+            <table class="ms-table ms-snapshot-compare-table">
+                <thead>
+                    <tr><th scope="col">What</th><th scope="col">Before</th><th scope="col">Now</th><th scope="col">Note</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (SnapshotValueChange row in rows)
+                    {
+                        <tr>
+                            <td class="ms-table-cell-mono">@row.Label</td>
+                            <td class="ms-table-cell-mono">@row.Before</td>
+                            <td class="ms-table-cell-mono">@row.Now</td>
+                            <td>@row.Note</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </TableScroll>
+    };
+
+    public void Dispose()
+    {
+        disposed = true;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

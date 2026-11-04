@@ -239,4 +239,78 @@ public class SnapshotMenuTests
         copy.Arguments[0].Should().BeOfType<string>().Which.Should().Contain("\"schemaVersion\": 1");
         menu.Find(".ms-snapshot-message").TextContent.Should().Be("Copied the snapshot.");
     }
+
+    /// <summary>1.2-H-B: the Markdown report is written from the very view the JSON is, and saved as <c>.md</c>.</summary>
+    [Fact]
+    public async Task Download_Markdown_hands_the_browser_the_report_as_markdown_under_the_json_files_name()
+    {
+        (PostgresStudioComponentContext context, FakeStatements statements) = await ContextAsync();
+        await using PostgresStudioComponentContext owned = context;
+
+        context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(true);
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+        await SelectAsync(menu, "Download Markdown");
+
+        JSRuntimeInvocation download = context.JSInterop.Invocations.Single(static x => x.Identifier == "martenStudio.download.text");
+        string fileName = download.Arguments[0].Should().BeOfType<string>().Subject;
+        string markdown = download.Arguments[2].Should().BeOfType<string>().Subject;
+
+        fileName.Should().MatchRegex(@"^postgres-snapshot-default-default-[0-9]{8}T[0-9]{6}Z\.md$");
+        download.Arguments[1].Should().Be("text/markdown");
+        markdown.Should().StartWith("# Health report: `default` / `default`")
+            .And.Contain("A table is read whole")
+            .And.Contain("- `statements`: Statements need Capabilities\\.ViewDatabaseActivity\\.");
+        statements.Reads.Should().Be(0, "a report never starts a statement sweep the visitor did not start");
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("Saved " + fileName + ".");
+    }
+
+    [Fact]
+    public async Task Copy_Markdown_puts_the_report_on_the_clipboard()
+    {
+        (PostgresStudioComponentContext context, _) = await ContextAsync();
+        await using PostgresStudioComponentContext owned = context;
+
+        context.JSInterop.Setup<bool>("martenStudio.clipboard.copyText", static _ => true).SetResult(true);
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+        await SelectAsync(menu, "Copy Markdown");
+
+        JSRuntimeInvocation copy = context.JSInterop.Invocations.Single(static x => x.Identifier == "martenStudio.clipboard.copyText");
+        copy.Arguments[0].Should().BeOfType<string>().Which.Should().StartWith("# Health report: ");
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("Copied the report.");
+    }
+
+    [Fact]
+    public async Task A_markdown_report_the_browser_did_not_save_is_not_called_saved()
+    {
+        (PostgresStudioComponentContext context, _) = await ContextAsync();
+        await using PostgresStudioComponentContext owned = context;
+
+        context.JSInterop.Setup<bool>("martenStudio.download.text", static _ => true).SetResult(false);
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+        await SelectAsync(menu, "Download Markdown");
+
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("The browser did not save the file.");
+    }
+
+    [Fact]
+    public async Task A_report_that_cannot_be_built_is_logged_and_says_so_without_the_exceptions_words()
+    {
+        CapturingLoggerProvider logs = new();
+        (PostgresStudioComponentContext context, _) = await ContextAsync(services =>
+        {
+            services.AddSingleton<IServerPageService>(new ThrowingServer());
+            services.AddLogging(builder => builder.AddProvider(logs));
+        });
+        await using PostgresStudioComponentContext owned = context;
+
+        IRenderedComponent<SnapshotMenu> menu = context.Render<SnapshotMenu>();
+        await SelectAsync(menu, "Copy Markdown");
+
+        menu.Find(".ms-snapshot-message").TextContent.Should().Be("The snapshot could not be built; the server log has why.")
+            .And.NotContain(ThrowingServer.Words);
+        logs.Entries.Should().ContainSingle(static x => x.Level == LogLevel.Warning && x.Message.Contains("could not be built", StringComparison.Ordinal));
+    }
 }

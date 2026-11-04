@@ -487,16 +487,42 @@ Adding a key keeps the version. Removing or renaming one, changing its type or c
 
 | `schemaVersion` | Written by | What changed |
 |---|---|---|
-| 1 | 0.5.0 | The first version. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. 1.0.1 added `connectionHistory`. 1.1 added `connection`, which only the studio's own Snapshot menu fills (the Connection page's settings, as the visitor's page shows them, passwords never among them; `connection.platform` is the managed platform's name or `null`, `connection.pooler` the poolers detected in front of the server as an array of names or `null`, and `connection.tls` one of `verified`, `encryptedNotVerified`, `encryptedVerificationUnknown`, `encryptedByProxy`, `encryptedGss`, `notEncrypted`, `notEncryptedLocal`, `notVisible` or `notRead`); a snapshot a host asks `IPostgresDiagnostics` for writes `"connection": null`. |
+| 1 | 0.5.0 | The first version. 1.2 fills `statements.windowSeconds` and `statements.statisticsSince` in the studio's own download, as the API always did. 0.9 added keys, and kept the version: `wal`, `settings.dataChecksums`, `settings.checksumFailures`, `settings.lastChecksumFailure` and `storage.largestTables[].allVisibleRatio`. 0.10 added `findings.items[].accepted` and `findings.items[].acceptedReason`. 1.0.1 added `connectionHistory`. 1.1 added `connection`, which only the studio's own Snapshot menu fills (the Connection page's settings, as the visitor's page shows them, passwords never among them; `connection.platform` is the managed platform's name or `null`, `connection.pooler` the poolers detected in front of the server as an array of names or `null`, and `connection.tls` one of `verified`, `encryptedNotVerified`, `encryptedVerificationUnknown`, `encryptedByProxy`, `encryptedGss`, `notEncrypted`, `notEncryptedLocal`, `notVisible` or `notRead`); a snapshot a host asks `IPostgresDiagnostics` for writes `"connection": null`. |
 
 ## The Snapshot menu
 
-The Health page has a **Snapshot** menu - View JSON, Copy JSON, Download JSON - that writes the same shape for the
-visitor who uses it. It is **not** this API: it is built in the visitor's circuit from each page's own service as that
-visitor, so it holds exactly what their screens hold, masked the same way, and a section they may not see is a
-`withheld` entry carrying that page's own sentence. It starts no deeper or statement sweep the visitor did not start, and
-nothing is stored: the JSON is handed to the browser and dropped. The file is named
-`{studio}-snapshot-{source}-{database}-{yyyyMMddTHHmmssZ}.json`.
+The Health page has a **Snapshot** menu - View JSON, Copy JSON, Download JSON, Copy Markdown, Download Markdown and
+Compare with an earlier snapshot - that writes the same shape for the visitor who uses it. It is **not** this API: it is
+built in the visitor's circuit from each page's own service as that visitor, so it holds exactly what their screens hold,
+masked the same way, and a section they may not see is a `withheld` entry carrying that page's own sentence. It starts no
+deeper or statement sweep the visitor did not start, and nothing is stored: the JSON is handed to the browser and dropped.
+The file is named `{studio}-snapshot-{source}-{database}-{yyyyMMddTHHmmssZ}.json`.
+
+**The Markdown report** (1.2) is the same gated view written for a ticket: a summary, the findings by severity with their
+evidence and remedies, the accepted checks, what was checked, storage, the statements with the most time, settings,
+connections, the write-ahead log and the connection settings, and last a list of what was withheld from you. It is written
+from the very snapshot the JSON is, so it holds nothing the JSON does not, and it is named like the JSON with `.md`.
+Every value that came from the database is escaped: names and values are code spans, prose has every punctuation
+character escaped, a statement or a remedy is a fenced block, and the only link is a check's documentation address when it
+is a plain `https` one.
+
+**Compare with an earlier snapshot** (1.2) reads a snapshot file this menu saved - `schemaVersion` 1, at most 4 MB, chosen
+with a file input, never pasted - and compares it with what your pages show now: findings that are new, worse, better,
+accepted or no longer reported; statements and tables that moved; the database's size; the write-ahead log written between
+the two; new checksum failures; settings and extensions; and the Connection page's settings, compared as that page shows
+each (a password or an `Options` value is never shown, only that it changed). Four rules hold it:
+
+- **The file is yours and is kept nowhere.** It is read in your circuit, compared and dropped: not stored, cached, logged,
+  audited or sent anywhere, and no link or address is built from what it holds.
+- **"Now" comes only from your current view.** "No longer reported", "no longer among the top" and "no longer among the
+  largest" are said only where your current view would show the item were it there; otherwise the earlier item is counted,
+  never described.
+- **Earlier values are drawn only beside something your current view also shows.** A section you may not see now is
+  "not compared", with the page's own sentence, and nothing of the file's content for it is drawn.
+- **While the host hides document types** (`IsDocumentTypeVisible`), nothing only the earlier file names is drawn by name.
+
+A file that is not a snapshot, is over the bounds, or was written by a newer studio is refused with a sentence that names
+the key it stopped at and never repeats a word the file holds.
 
 ## Stability
 

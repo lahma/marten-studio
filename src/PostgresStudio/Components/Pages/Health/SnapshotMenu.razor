@@ -19,12 +19,16 @@
 
     The builder is resolved on click rather than injected, so a Health page nobody asks a snapshot of builds none of the six
     page services it reads.
+
+    1.2-H-B: the same view is also written as a Markdown report for a ticket (copied or downloaded), and an earlier snapshot file
+    is compared with it in a drawer of its own (SnapshotCompare). The Markdown is written from the very snapshot the JSON is, so
+    it holds nothing the JSON does not; the compare asks the visitor's gate first and reads the file after.
 *@
 
 <MenuButton Items="items"
             Text="Snapshot"
             Label="Snapshot of this database, as you see it"
-            Title="What your pages show of this database, as one JSON file"
+            Title="What your pages show of this database, as JSON or a Markdown report - or compare an earlier snapshot"
             WrapperClass="ms-menu-button ms-snapshot-menu"
             ButtonClass="ms-button ms-snapshot-menu-button"
             PopoverClass="ms-menu-popover ms-snapshot-menu-popover" />
@@ -32,6 +36,11 @@
 @if (message is not null)
 {
     <span class="ms-snapshot-message" role="status">@message</span>
+}
+
+@if (comparing)
+{
+    <SnapshotCompare OnClose="CloseCompare" />
 }
 
 @if (viewed is { } snapshot)
@@ -54,6 +63,7 @@
     private readonly CancellationTokenSource lifetime = new();
     private IReadOnlyList<(string Label, string? Detail, Func<Task> OnSelect)> items = [];
     private VisitorSnapshot? viewed;
+    private bool comparing;
     private string? message;
 
     protected override void OnInitialized() =>
@@ -62,6 +72,9 @@
             ("View JSON", "Open it here, in the JSON viewer", () => RunAsync(ViewAsync)),
             ("Copy JSON", "Put it on the clipboard", () => RunAsync(CopyAsync)),
             ("Download JSON", "Save it as a file", () => RunAsync(DownloadAsync)),
+            ("Copy Markdown", "A readable report on the clipboard, for a ticket", () => RunAsync(CopyMarkdownAsync)),
+            ("Download Markdown", "A readable report as a .md file", () => RunAsync(DownloadMarkdownAsync)),
+            ("Compare with an earlier snapshot", "Choose a JSON file this menu saved", () => RunAsync(OpenCompareAsync)),
         ];
 
     /// <summary>
@@ -74,7 +87,11 @@
         StateHasChanged();
     }
 
-    private async Task<VisitorSnapshot?> BuildAsync()
+    private Task<VisitorSnapshot?> BuildAsync() =>
+        BuildAsync(static (builder, scope, token) => builder.BuildAsync(scope, token));
+
+    private async Task<T?> BuildAsync<T>(Func<VisitorSnapshotBuilder, StudioScope, CancellationToken, Task<T>> build)
+        where T : class
     {
         if (State.ActiveScope is not { } scope)
         {
@@ -86,7 +103,7 @@
 
         try
         {
-            return await Services.GetRequiredService<VisitorSnapshotBuilder>().BuildAsync(scope, lifetime.Token);
+            return await build(Services.GetRequiredService<VisitorSnapshotBuilder>(), scope, lifetime.Token);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested)
         {
@@ -104,7 +121,53 @@
 
     private async Task ViewAsync()
     {
+        comparing = false;
         viewed = await BuildAsync();
+    }
+
+    private Task OpenCompareAsync()
+    {
+        // One drawer at a time.
+        viewed = null;
+        message = null;
+        comparing = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task CopyMarkdownAsync()
+    {
+        if (await BuildAsync(static (builder, scope, token) => builder.BuildMarkdownAsync(scope, token)) is not { } report)
+        {
+            return;
+        }
+
+        try
+        {
+            bool copied = await JsRuntime.InvokeAsync<bool>("martenStudio.clipboard.copyText", lifetime.Token, report.Markdown);
+            message = copied ? "Copied the report." : "The browser did not allow the copy.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The copy did not reach the browser.";
+        }
+    }
+
+    private async Task DownloadMarkdownAsync()
+    {
+        if (await BuildAsync(static (builder, scope, token) => builder.BuildMarkdownAsync(scope, token)) is not { } report)
+        {
+            return;
+        }
+
+        try
+        {
+            bool saved = await JsRuntime.InvokeAsync<bool>("martenStudio.download.text", lifetime.Token, report.FileName, "text/markdown", report.Markdown);
+            message = saved ? "Saved " + report.FileName + "." : "The browser did not save the file.";
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            message = "The download did not reach the browser.";
+        }
     }
 
     private async Task CopyAsync()
@@ -144,6 +207,8 @@
     }
 
     private void Close() => viewed = null;
+
+    private void CloseCompare() => comparing = false;
 
     public void Dispose()
     {

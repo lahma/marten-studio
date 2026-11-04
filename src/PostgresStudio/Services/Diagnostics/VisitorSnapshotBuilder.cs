@@ -19,6 +19,20 @@ namespace PostgresStudio.Services.Diagnostics;
 /// </param>
 internal sealed record VisitorSnapshot(string Json, string FileName);
 
+/// <summary>What the Snapshot menu's Markdown items hand the browser: the report and the name to save it under (1.2-H-B).</summary>
+/// <param name="Markdown">The report, CommonMark with GitHub-flavoured tables.</param>
+/// <param name="FileName">The JSON's file name with <c>.md</c>.</param>
+internal sealed record VisitorMarkdown(string Markdown, string FileName);
+
+/// <summary>
+/// The visitor's gated view of one database, before it is written as anything (1.2-H-B): the snapshot every output is written
+/// from, the report whose checks encode the gates, and the moment of the build.
+/// </summary>
+/// <param name="Snapshot">The snapshot the pages' views compose.</param>
+/// <param name="Report">The Health report it was composed from: each check's row says what this visitor may be told of it.</param>
+/// <param name="At">When the view was built.</param>
+internal sealed record VisitorView(PostgresDiagnosticsSnapshot Snapshot, HealthReport Report, DateTimeOffset At);
+
 /// <summary>
 /// The studio's snapshot download (API design §2.4 and §4.3): one visitor's view of one database as a
 /// <c>schemaVersion</c> 1 file, built in that visitor's circuit from each section's own page service, as that visitor.
@@ -109,6 +123,32 @@ internal sealed class VisitorSnapshotBuilder
     /// <param name="cancellationToken">Cancels the reads.</param>
     public async Task<VisitorSnapshot> BuildAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
+        VisitorView view = await BuildViewAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        return new VisitorSnapshot(view.Snapshot.ToJson(), FileName(descriptor.Key, scope.StoreKey, scope.DatabaseId, view.At));
+    }
+
+    /// <summary>
+    /// The visitor's Markdown report of <paramref name="scope" /> (1.2-H-B): the same gated view <see cref="BuildAsync" /> writes
+    /// as JSON, written as a readable report. Its only input is that snapshot, so it holds nothing the JSON does not.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="cancellationToken">Cancels the reads.</param>
+    public async Task<VisitorMarkdown> BuildMarkdownAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
+        VisitorView view = await BuildViewAsync(scope, cancellationToken).ConfigureAwait(false);
+
+        return new VisitorMarkdown(SnapshotMarkdown.Write(view.Snapshot), FileName(descriptor.Key, scope.StoreKey, scope.DatabaseId, view.At, "md"));
+    }
+
+    /// <summary>
+    /// The visitor's gated view of <paramref name="scope" />: each page's view, as this visitor, composed into the snapshot. The
+    /// JSON, the Markdown report and the compare are all written from it, so none holds more than a download does.
+    /// </summary>
+    /// <param name="scope">The visitor's scope.</param>
+    /// <param name="cancellationToken">Cancels the reads.</param>
+    public async Task<VisitorView> BuildViewAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    {
         ArgumentNullException.ThrowIfNull(scope);
 
         HealthReport report = await health.GetReportAsync(scope, HealthReportRequest.Regular, cancellationToken).ConfigureAwait(false);
@@ -149,7 +189,7 @@ internal sealed class VisitorSnapshotBuilder
             connectionView,
             applications);
 
-        return new VisitorSnapshot(snapshot.ToJson(), FileName(descriptor.Key, scope.StoreKey, scope.DatabaseId, now));
+        return new VisitorView(snapshot, report, now);
     }
 
     /// <summary>
@@ -171,9 +211,9 @@ internal sealed class VisitorSnapshotBuilder
     /// <c>{studio}-snapshot-{source}-{database}-{yyyyMMdd'T'HHmmss'Z'}.json</c> (API design §4.3): each name kept to
     /// <c>[A-Za-z0-9._-]</c>, the rest replaced with <c>-</c>; an empty database id - a source's only database - is <c>default</c>.
     /// </summary>
-    internal static string FileName(string studio, string source, string database, DateTimeOffset at) =>
+    internal static string FileName(string studio, string source, string database, DateTimeOffset at, string extension = "json") =>
         Slug(studio) + "-snapshot-" + Slug(source) + "-" + Slug(database.Length == 0 ? "default" : database) + "-"
-        + at.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + ".json";
+        + at.UtcDateTime.ToString("yyyyMMdd'T'HHmmss'Z'", CultureInfo.InvariantCulture) + "." + extension;
 
     private static string Slug(string name)
     {
@@ -440,6 +480,7 @@ internal sealed class VisitorSnapshotBuilder
                 Outcome = view.State == StatementsState.Failed ? PostgresReadOutcome.Failed : PostgresReadOutcome.Unavailable,
                 Reason = view.Status,
                 MeasuredAt = view.MeasuredAt ?? default,
+                StatisticsSince = view.StatsReset,
             };
         }
 
@@ -452,6 +493,10 @@ internal sealed class VisitorSnapshotBuilder
             Outcome = PostgresReadOutcome.Read,
             Reason = reasons.Count == 0 ? null : string.Join(" ", reasons),
             MeasuredAt = view.MeasuredAt ?? default,
+
+            // 1.2: as the API's own builder fills them, so a compare of two downloads knows how long each counted.
+            StatisticsSince = view.StatsReset,
+            Window = view.Span,
             TotalMilliseconds = view.TotalExecMs,
             Top =
             [

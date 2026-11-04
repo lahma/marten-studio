@@ -200,6 +200,24 @@ public class VisitorSnapshotBuilderTests
         document.RootElement.GetProperty("withheld").TryGetProperty("statements", out _).Should().BeFalse();
     }
 
+    /// <summary>1.2: the download fills the two keys the diagnostics API always filled, so a compare knows how long each counted.</summary>
+    [Fact]
+    public void The_statements_section_carries_the_window_and_when_the_statistics_began()
+    {
+        StatementsView view = Statements(open: true) with { Span = TimeSpan.FromMinutes(90), StatsReset = At.AddDays(-3) };
+
+        PostgresDiagnosticsSnapshot snapshot = VisitorSnapshotBuilder.Compose(
+            new PostgresDatabaseRef("tenants", "acme"), Report(), Storage(), view, Server(), Summary(), Details(true), Wal(), Registry, "p", At);
+
+        snapshot.Statements!.Window.Should().Be(TimeSpan.FromMinutes(90));
+        snapshot.Statements.StatisticsSince.Should().Be(At.AddDays(-3));
+
+        using JsonDocument document = JsonDocument.Parse(snapshot.ToJson());
+        JsonElement statements = document.RootElement.GetProperty("statements");
+        statements.GetProperty("windowSeconds").GetDouble().Should().Be(5400);
+        statements.GetProperty("statisticsSince").GetString().Should().StartWith("2026-10-30T06:00:01");
+    }
+
     [Fact]
     public void A_visitor_the_store_policy_refuses_gets_the_refusal_and_nothing_about_the_database()
     {

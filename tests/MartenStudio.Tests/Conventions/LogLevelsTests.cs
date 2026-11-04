@@ -325,6 +325,8 @@ public class LogLevelsTests
             "9251 in Postgres Studio's words: a section of a diagnostics snapshot failed, asked as often as the host polls."),
         ["src/PostgresStudio/Components/Pages/Health/SnapshotMenu.razor : The Health page's snapshot of store {StoreKey}, database {DatabaseId} could not be built"] = (Verdict.VisitorAction,
             "The Snapshot menu's builder threw, which the page services never should: one line per click, and the menu says it failed."),
+        ["src/PostgresStudio/Components/Pages/Health/SnapshotCompare.razor : The Health page's snapshot compare for store {StoreKey}, database {DatabaseId} failed"] = (Verdict.VisitorAction,
+            "The compare's service threw, which it never should: one line per chosen file, naming the store and database and none of the file, and the drawer says it failed."),
     };
 
     [Fact]
