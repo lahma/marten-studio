@@ -114,8 +114,12 @@ public sealed class NamedPoolSiblingsTests
         Verdict(ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(1, 100, 1))).Note
             .Should().NotContain("naming no host").And.NotContain("in time");
 
+        // A hostless pool is not a named pool: it is counted and said apart.
         Verdict(ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(1, 100, 3, NoHost: 2))).Note
-            .Should().Contain("Not judged for 3 named pool(s)").And.Contain("a pool name that is a connection string naming no host").And.NotContain("in time");
+            .Should().Contain("Not judged for 1 named pool(s)").And.Contain("and for 2 pool(s) whose name is a connection string naming no host").And.NotContain("in time");
+
+        Verdict(ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(1, 100, 2, NoHost: 2))).Note
+            .Should().StartWith("Not judged for 2 pool(s) whose name is a connection string naming no host").And.NotContain("named pool");
 
         Verdict(ConnectionCheckFacts.Facts("Host=db.example", siblings: new ConnectionPoolSiblings(1, 100, 3, CutOff: 2))).Note
             .Should().Contain("2 of them not judged because the studio could not identify them in time");
@@ -369,8 +373,21 @@ public sealed class NamedPoolSiblingsTests
 
         Read read = await ReadAsync(unnamed, [PoolOf(unnamed), "ghost"], services: s => s.AddScoped<IStudioSourceProvider>(_ => provider));
 
-        provider.Yielded.Should().Be(NamedPoolIdentities.MaxExamined, "the cap counts the sources looked at");
+        provider.Yielded.Should().Be(NamedPoolIdentities.MaxExamined + 1, "the cap is reached when a source beyond it shows up");
         read.Facts.Siblings.Should().Be(new ConnectionPoolSiblings(1, 100, 1, CutOff: 1));
+    }
+
+    [Fact]
+    public async Task A_walk_whose_last_source_is_the_one_at_the_cap_is_not_cut_off()
+    {
+        await using NpgsqlDataSource unnamed = Source(null, Own);
+        await using NpgsqlDataSource other = Source("someone-elses", "Host=127.0.0.1;Port=1;Database=reports;Username=app;Timeout=1");
+        CountingProvider provider = new() { Yields = other, YieldCount = NamedPoolIdentities.MaxExamined };
+
+        Read read = await ReadAsync(unnamed, [PoolOf(unnamed), "ghost"], services: s => s.AddScoped<IStudioSourceProvider>(_ => provider));
+
+        provider.Yielded.Should().Be(NamedPoolIdentities.MaxExamined);
+        read.Facts.Siblings.Should().Be(new ConnectionPoolSiblings(1, 100, 1), "every source was looked at: the ghost is simply not anybody's, and not 'in time'");
     }
 
     [Fact]
@@ -412,11 +429,12 @@ public sealed class NamedPoolSiblingsTests
         // ConnectionFactsSource is a singleton over the root provider, and the source provider is scoped: with ValidateScopes (the
         // Development default) resolving it from the root throws. The walk takes a scope of its own.
         await using NpgsqlDataSource unnamed = Source(null, Own);
+        await using NpgsqlDataSource listed = Source("listed-pool", Own + ";Application Name=listed");
 
         string meterName = "PostgresStudio.Tests.Named." + Guid.NewGuid().ToString("N");
         using Meter meter = new(meterName);
         NpgsqlPoolInstruments names = NpgsqlPoolInstruments.UpToNpgsql9;
-        string[] reported = [PoolOf(unnamed), "ghost"];
+        string[] reported = [PoolOf(unnamed), "listed-pool"];
         meter.CreateObservableUpDownCounter(names.Usage, () => reported.SelectMany(pool => new[]
         {
             new Measurement<int>(0, new KeyValuePair<string, object?>(names.PoolNameTag, pool), new KeyValuePair<string, object?>(names.StateTag, "idle")),
@@ -428,7 +446,7 @@ public sealed class NamedPoolSiblingsTests
         collection.AddLogging();
         collection.AddSingleton(new SessionPoolObserver(meterName));
         collection.AddSingleton(unnamed);
-        collection.AddPostgresStudio();
+        collection.AddPostgresStudio(o => o.AddDataSource("listed", _ => listed));
 
         await using ServiceProvider root = collection.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = false });
 
@@ -441,7 +459,9 @@ public sealed class NamedPoolSiblingsTests
         ConnectionFacts facts = await root.GetRequiredService<PostgresStudio.Services.Connection.IConnectionFactsSource>().GetAsync(resolved, Token);
 
         facts.Settings.Readable.Should().BeTrue();
-        facts.Siblings.Should().Be(new ConnectionPoolSiblings(1, 100, 1), "one pool not judged, and the page's read did not throw");
+        facts.Siblings.Should().Be(
+            new ConnectionPoolSiblings(2, 200, 0),
+            "the named pool is identified through the provider of the walk's own scope: resolved from the root it would throw, be contained, and leave the pool not judged");
     }
 
     [Fact]
@@ -452,7 +472,7 @@ public sealed class NamedPoolSiblingsTests
         Read read = await ReadAsync(unnamed, [PoolOf(unnamed), "Database=orders;Username=app"]);
 
         read.Facts.Siblings.Should().Be(new ConnectionPoolSiblings(1, 100, 1, NoHost: 1));
-        Verdict(read.Facts).Note.Should().Contain("a pool name that is a connection string naming no host");
+        Verdict(read.Facts).Note.Should().StartWith("Not judged for 1 pool(s) whose name is a connection string naming no host").And.NotContain("named pool");
     }
 
     [Fact]

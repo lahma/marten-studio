@@ -745,12 +745,14 @@ the data sources it already resolves - it adds no scan of your container:
 - the data source the sweep is about, and the other sources Postgres Studio lists: the unkeyed `NpgsqlDataSource` it discovers and
   each `AddDataSource(name, ...)` (a keyed registration goes in as `sp => sp.GetRequiredKeyedService<NpgsqlDataSource>(key)`).
   Listing a data source this way **also makes it a source the studio browses and sweeps**, with everything that implies;
-- in Marten Studio, the data source of each database of each Marten store the application registered. Marten Studio has no
+- in Marten Studio, the data source of each database the store's tenancy already holds (its primary pool, not a read pool), for
+  each Marten store the application registered. Marten Studio has no
   `AddDataSource` (and `AddPostgresDiagnostics` is refused beside it), so a named pool that no store uses - the host's own
   `AddNpgsqlDataSource`, Wolverine's standalone persistence - stays not judged for good. Drop its `Name`, or accept C18.
 
 A host's `AddDatabaseSource` is never asked: it is promised to hand over a data source only for a database somebody opens or a
-sweep reaches, so its pools stay not judged too.
+sweep reaches, so its pools stay not judged too - except the host-listed database being swept itself, which is identified through
+the sweep's target.
 
 A named pool whose data source is one of these is compared by that data source's host, port, database and login and counted like
 an unnamed pool, **when exactly one data source reports under the name**. Several under one name - a factory that names every

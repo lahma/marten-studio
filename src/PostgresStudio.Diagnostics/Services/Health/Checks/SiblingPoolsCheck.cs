@@ -128,22 +128,34 @@ internal sealed class SiblingPoolsCheck : HealthCheck<ConnectionFacts>
                 : "Only one Npgsql pool in this process connects to this database as this login.";
         }
 
-        string reasons = "a data source named with NpgsqlDataSourceBuilder.Name that the studio does not resolve, or several data sources "
-            + "that share one name";
+        // A pool whose name is a connection string that names no host is not a named pool: it is counted and said apart.
+        int named = siblings.UnparsedNames - siblings.NoHost;
+        string judged = string.Empty;
+
+        if (named > 0)
+        {
+            string reasons = "a data source named with NpgsqlDataSourceBuilder.Name that the studio does not resolve, or several data sources "
+                + "that share one name";
+
+            if (siblings.CutOff > 0)
+            {
+                reasons += "; " + siblings.CutOff.ToString(CultureInfo.InvariantCulture)
+                    + " of them not judged because the studio could not identify them in time";
+            }
+
+            judged = "Not judged for " + named.ToString(CultureInfo.InvariantCulture)
+                + " named pool(s) of this process that the studio cannot identify (" + reasons + ")";
+        }
 
         if (siblings.NoHost > 0)
         {
-            reasons += ", or a pool name that is a connection string naming no host";
+            string hostless = siblings.NoHost.ToString(CultureInfo.InvariantCulture)
+                + " pool(s) whose name is a connection string naming no host";
+
+            judged = named > 0 ? judged + ", and for " + hostless : "Not judged for " + hostless;
         }
 
-        if (siblings.CutOff > 0)
-        {
-            reasons += "; " + siblings.CutOff.ToString(CultureInfo.InvariantCulture)
-                + " of them not judged because the studio could not identify them in time";
-        }
-
-        return "Not judged for " + siblings.UnparsedNames.ToString(CultureInfo.InvariantCulture)
-            + " named pool(s) of this process that the studio cannot identify (" + reasons + "); "
+        return judged + "; "
             + (siblings.Pools == 0
                 ? "no pool it can identify connects to this database as this login."
                 : "one pool of this process connects to this database as this login.");

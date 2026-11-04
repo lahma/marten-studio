@@ -129,16 +129,17 @@ internal static class NamedPoolIdentities
 
                     await foreach (NpgsqlDataSource dataSource in provider.HeldDataSourcesAsync(budget.Token).WithCancellation(budget.Token).ConfigureAwait(false))
                     {
+                        // Cut off only when a source beyond the cap exists: the cap's last source being the walk's last is no loss.
+                        if (attempts++ >= MaxExamined)
+                        {
+                            cutOff = true;
+                            break;
+                        }
+
                         Take(dataSource);
 
                         if (found.Count >= wanted.Count)
                         {
-                            break;
-                        }
-
-                        if (++attempts >= MaxExamined)
-                        {
-                            cutOff = true;
                             break;
                         }
                     }
