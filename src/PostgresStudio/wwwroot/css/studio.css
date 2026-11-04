@@ -15962,3 +15962,27 @@ a.ms-schema-health-mark:focus-visible {
   color: var(--ms-color-text-secondary);
   background: var(--ms-color-surface-alt);
 }
+
+/* ===== 1.2-FLOW-LINKS Show its flow ===== */
+
+/* The link from a projection's row, an event type's row and the Rebuild dialog to the Event flow: small, under or beside the name it
+   belongs to. The Projections row anchor is scrolled below the sticky header the shell draws. */
+
+.ms-projection-flow-link,
+.ms-event-flow-link,
+.ms-rebuild-flow-link {
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-projection-flow-link,
+.ms-event-flow-link {
+    display: block;
+}
+
+.ms-rebuild-flow-link {
+    margin-left: var(--ms-space-sm);
+}
+
+.ms-projection-row {
+    scroll-margin-top: var(--ms-space-xl);
+}

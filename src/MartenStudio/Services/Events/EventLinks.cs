@@ -48,6 +48,9 @@ internal static class EventLinks
     /// <summary>The event flow screen (1.2): which projections read each event type, and what they write.</summary>
     public const string EventFlowRoute = "events/flow";
 
+    /// <summary>The projections screen, which lists every registration by name.</summary>
+    public const string ProjectionsRoute = "projections";
+
     /// <summary>The dead letters screen.</summary>
     public const string DeadLettersRoute = "events/dead-letters";
 
@@ -144,6 +147,28 @@ internal static class EventLinks
             new("type", eventType),
             new("own", includeOwn ? "1" : null),
         ]);
+
+    /// <summary>
+    /// The anchor of a projection's row on the Projections page (1.2): <c>projection-</c> and the name, with every character an
+    /// element id may not hold made a <c>-</c>. A name is never decoded back from it, so two names that collide only ever share a
+    /// scroll target.
+    /// </summary>
+    public static string ProjectionAnchor(string projectionName)
+    {
+        ArgumentNullException.ThrowIfNull(projectionName);
+
+        var builder = new StringBuilder("projection-", 11 + projectionName.Length);
+        foreach (char c in projectionName)
+        {
+            builder.Append(char.IsAsciiLetterOrDigit(c) || c is '_' or '.' ? c : '-');
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>A link to the Projections page, scrolled to one projection's row (1.2).</summary>
+    public static string ToProjection(MartenStudioOptions options, StudioScope? scope, string projectionName) =>
+        To(options, ProjectionsRoute, scope, []) + "#" + ProjectionAnchor(projectionName);
 
     /// <summary>A link to the feed, filtered to one stream.</summary>
     public static string ToFeedForStream(MartenStudioOptions options, StudioScope? scope, string streamId) =>

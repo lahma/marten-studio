@@ -110,6 +110,11 @@
                                                DotNetTypeName="@type.DotNetTypeName"
                                                IsRegistered="type.IsRegistered"
                                                Href="@FeedHref(type.Name)" />
+                                @if (type.IsRegistered)
+                                {
+                                    @* 1.2: the Event flow, drawn for this event type: which projections read it and what they write. *@
+                                    <a class="ms-event-flow-link" href="@FlowHref(type.Name)" title="Which projections and subscriptions read this event type, and what they write">Show its flow</a>
+                                }
                             </td>
                             @* The readable name in the cell, the assembly-qualified one Marten recorded in
                                the title. A closed generic's real name is 170 characters of nested
@@ -451,6 +456,9 @@
 
     private static string Sequence(long? value) =>
         value is { } sequence ? "#" + sequence.ToString(CultureInfo.InvariantCulture) : "-";
+
+    private string FlowHref(string eventType) =>
+        EventLinks.ToFlow(Options.Value, State.ActiveScope, eventType: eventType);
 
     private string FeedHref(string eventType) =>
         EventLinks.ToFeedForType(Options.Value, State.ActiveScope, eventType);

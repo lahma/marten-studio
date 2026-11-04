@@ -179,7 +179,7 @@
                                 @* A component, so that the key is on the row itself and a reordered list keeps each row's instance. *@
                                 <EventFlowRow @key="@("s:" + source.Name)" CssClass="@("ms-table-row ms-flow-row" + (source.Composite is not null ? " ms-flow-member" : null))" Source="@source.Name">
                                     <td class="ms-table-cell">
-                                        <a class="ms-flow-source-link" href="@ProjectionsHref">@source.Name</a>
+                                        <a class="ms-flow-source-link" href="@ProjectionHref(source.Name)">@source.Name</a>
                                         <a class="ms-flow-show-flow" href="@FlowHref(source.Name, null, false)" title="@("Draw only " + source.Name + " and what it reads and writes")">Show its flow</a>
                                     </td>
                                     <td class="ms-table-cell">@source.Description</td>
@@ -410,7 +410,7 @@
     private EventFlowHrefs Hrefs() => new(
         FeedHref,
         EventLinks.To(Options.Value, EventLinks.FeedRoute, State.ActiveScope, []),
-        _ => ProjectionsHref,
+        ProjectionHref,
         CollectionHref,
         TableHref,
         EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope, []));
@@ -449,8 +449,8 @@
 
     private string FeedHref(string alias) => EventLinks.ToFeedForType(Options.Value, State.ActiveScope, alias);
 
-    /// <summary>The Projections page, which lists every registration by name (an anchor to one row is the Projections page's own business).</summary>
-    private string ProjectionsHref => EventLinks.To(Options.Value, "projections", State.ActiveScope, []);
+    /// <summary>The Projections page, scrolled to one projection's row.</summary>
+    private string ProjectionHref(string name) => EventLinks.ToProjection(Options.Value, State.ActiveScope, name);
 
     private string CollectionHref(string alias) => Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
 

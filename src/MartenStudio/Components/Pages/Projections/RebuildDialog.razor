@@ -31,6 +31,21 @@
             <span class="ms-kv-key">Tables rewritten</span>
             <span class="ms-kv-value ms-mono">@(Tables.Count == 0 ? "could not be determined" : string.Join(", ", Tables))</span>
         </div>
+        @if (EventTypesRead is { Length: > 0 })
+        {
+            @* From the Event flow's model, which is StoreOptions and the projection graph alone: a rebuild replays every event
+               through the shard's filter, so these are the event types it takes in. *@
+            <div class="ms-kv-row ms-rebuild-event-types">
+                <span class="ms-kv-key">Event types read</span>
+                <span class="ms-kv-value">
+                    @EventTypesRead
+                    @if (EventTypesHref is { Length: > 0 })
+                    {
+                        <a class="ms-rebuild-flow-link" href="@EventTypesHref">Show its flow</a>
+                    }
+                </span>
+            </div>
+        }
         <div class="ms-kv-row">
             <span class="ms-kv-key">Events to replay</span>
             <span class="ms-kv-value ms-mono">@EventsToReplay.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)</span>
@@ -145,6 +160,16 @@
     /// <summary>Where the summary says the replay starts - "from the beginning" below Marten 9.52 (<c>RebuildWording</c>).</summary>
     [Parameter]
     public string ReplayPhrase { get; set; } = "from the beginning";
+
+    /// <summary>
+    /// The "Event types read" row (<c>FlowReads.Sentence</c>), or <see langword="null" /> where the Event flow could not say.
+    /// </summary>
+    [Parameter]
+    public string? EventTypesRead { get; set; }
+
+    /// <summary>The link to this projection's Event flow, beside that row.</summary>
+    [Parameter]
+    public string? EventTypesHref { get; set; }
 
     /// <summary>The "Replays from" row, or <see langword="null" /> below Marten 9.52, where there is none.</summary>
     [Parameter]

@@ -304,7 +304,33 @@ internal sealed record FlowWrite(string Source, string OutputKey, string? Subcla
 /// <param name="Input">Whether the projection declares event types.</param>
 /// <param name="Aliases">The user's event types it reads, by alias.</param>
 /// <param name="MartenOwnAliases">Marten's own event types it reads (<c>Archived</c>, <c>Compacted&lt;T&gt;</c>).</param>
-internal sealed record FlowReads(FlowInput Input, IReadOnlyList<string> Aliases, IReadOnlyList<string> MartenOwnAliases);
+internal sealed record FlowReads(FlowInput Input, IReadOnlyList<string> Aliases, IReadOnlyList<string> MartenOwnAliases)
+{
+    /// <summary>
+    /// What the Rebuild dialog's "Event types read" row says: the event types the projection reads, by alias, and Marten's own
+    /// after them - or that it declares none and so reads every event.
+    /// </summary>
+    public string Sentence
+    {
+        get
+        {
+            if (Input == FlowInput.Everything)
+            {
+                return "every event type (it declares none)";
+            }
+
+            string own = MartenOwnAliases.Count == 0 ? string.Empty : "Marten's own " + string.Join(", ", MartenOwnAliases);
+
+            return (Aliases.Count, MartenOwnAliases.Count) switch
+            {
+                (0, 0) => "none listed",
+                (0, _) => own,
+                (_, 0) => string.Join(", ", Aliases),
+                _ => string.Join(", ", Aliases) + " (and " + own + ")",
+            };
+        }
+    }
+}
 
 /// <summary>What the data service answers: the model, or why it could not be built.</summary>
 /// <param name="Model">The model; <see cref="EventFlowModel.None" /> when it failed.</param>

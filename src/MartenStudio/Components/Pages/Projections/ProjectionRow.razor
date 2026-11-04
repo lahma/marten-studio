@@ -1,11 +1,16 @@
+@using MartenStudio.Services.Events
 @* One projection, as the table's group header row: what the host registered, and what can be done to it.
 
    Parameters are primitives and callbacks for the same reason as everywhere else on this screen - a
    public [Parameter] cannot have an internal type, and every DTO here is internal (plan D12). *@
 
-<tr class="ms-table-row ms-projection-row" data-projection="@Name">
+<tr class="ms-table-row ms-projection-row" id="@EventLinks.ProjectionAnchor(Name)" data-projection="@Name">
     <th scope="rowgroup" class="ms-table-cell ms-projection-name">
         <span class="ms-mono">@Name</span>
+        @if (FlowHref is { Length: > 0 })
+        {
+            <a class="ms-projection-flow-link" href="@FlowHref" title="@("Draw only " + Name + " and the event types it reads and what it writes")">Show its flow</a>
+        }
         <span class="ms-badge ms-lifecycle ms-lifecycle-@Lifecycle.ToLowerInvariant()">@Lifecycle</span>
         @if (!IsAsync)
         {
@@ -65,6 +70,10 @@
     /// </summary>
     [Parameter]
     public bool IsRebuilding { get; set; }
+
+    /// <summary>The link to the Event flow drawn for this projection alone (1.2), or <see langword="null" /> for none.</summary>
+    [Parameter]
+    public string? FlowHref { get; set; }
 
     /// <summary>Who is rebuilding it, for the badge's hover text ("by Marten Studio").</summary>
     [Parameter]

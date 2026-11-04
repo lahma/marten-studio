@@ -22,6 +22,7 @@
 @inject IOptions<MartenStudioOptions> Options
 @inject IHealthService Health
 @inject IServiceProvider Services
+@inject MartenStudio.Services.Events.IEventDataService EventData
 
 <PageTitle>Projections</PageTitle>
 
@@ -413,7 +414,8 @@
                                            ImplementationType="@projection.ImplementationTypeName"
                                            ShardCount="projection.ShardNames.Count"
                                            IsRebuilding="IsRebuilding(projection.Name)"
-                                           RebuildingBy="@RebuildingBy(projection.Name)">
+                                           RebuildingBy="@RebuildingBy(projection.Name)"
+                                           FlowHref="@FlowHref(projection.Name)">
                                 <Actions>
                                     @* A subscription registered with Events.Subscribe(...) has no projection to rebuild: the
                                        service refuses one by name, so it is not offered. *@
@@ -799,6 +801,8 @@
                    Tenant="@State.ActiveScope?.TenantId"
                    ShardTimeout="@(rebuild?.ShardTimeout ?? Options.Value.RebuildShardTimeout)"
                    Estimate="@RebuildEstimate"
+                   EventTypesRead="@rebuildEventTypes"
+                   EventTypesHref="@(rebuild is null ? null : FlowHref(rebuild.ProjectionName))"
                    ErrorPolicy="@rebuild?.ErrorPolicy?.Sentence()"
                    ErrorPolicyDifference="@rebuild?.ErrorPolicy?.DifferenceSentence()"
                    DrainNote="@DrainSentence"
@@ -902,6 +906,9 @@
 
     /// <summary>D08's titles for the projection whose rebuild dialog is open; empty when there are none.</summary>
     private IReadOnlyList<string> rebuildWarnings = [];
+
+    /// <summary>What the Rebuild dialog says the projection reads, from the Event flow's model; <see langword="null" /> when it cannot say.</summary>
+    private string? rebuildEventTypes;
 
     /// <summary>What the D01 Explain found, once asked; cleared when the scope changes.</summary>
     private HighWaterExplanation? explanation;
@@ -1567,6 +1574,7 @@
         {
             RebuildScope described = await ProjectionData.DescribeRebuildAsync(scope, projectionName, pageCancellation.Token);
             rebuildWarnings = await RebuildWarningsAsync(scope, described.ProjectionName);
+            rebuildEventTypes = await EventTypesReadAsync(scope, described.ProjectionName);
             rebuild = described;
         }
         catch (OperationCanceledException)
@@ -1579,6 +1587,30 @@
     }
 
     private void CancelRebuild() => rebuild = null;
+
+    /// <summary>The Event flow drawn for one projection (1.2).</summary>
+    private string FlowHref(string projectionName) =>
+        MartenStudio.Services.Events.EventLinks.ToFlow(Options.Value, State.ActiveScope, projectionName);
+
+    /// <summary>
+    /// What the projection reads, from the Event flow's cached model: StoreOptions and the projection graph, no read of the database.
+    /// Absent when the flow could not be built or does not list the projection - the dialog then has no such row.
+    /// </summary>
+    private async Task<string?> EventTypesReadAsync(StudioScope scope, string projectionName)
+    {
+        try
+        {
+            MartenStudio.Services.Events.EventFlowResult flow = await EventData.GetEventFlowAsync(scope, pageCancellation.Token);
+
+            return flow.Error is null && flow.Model.Source(projectionName) is not null
+                ? flow.Model.ReadsOf(projectionName).Sentence
+                : null;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
 
     private async Task ConfirmRebuildAsync()
     {
