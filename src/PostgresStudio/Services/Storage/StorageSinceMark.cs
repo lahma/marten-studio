@@ -10,9 +10,10 @@ namespace PostgresStudio.Services.Storage;
 /// page named to its visitor - numbers only.
 /// </summary>
 /// <param name="At">When the facts were read (the view's <c>MeasuredAt</c>), not when the visitor pressed Mark.</param>
+/// <param name="WindowSince">The statistics window's start then, when it was read: a start that moved means the server's counters began again.</param>
 /// <param name="DatabaseBytes">The database's measured size, when it was measured.</param>
-/// <param name="Tables">The named tables, by <c>schema.name</c>; a table the page withheld is never in it.</param>
-internal sealed record StorageMark(DateTimeOffset At, long? DatabaseBytes, IReadOnlyDictionary<string, StorageMarkRow> Tables);
+/// <param name="Tables">The named tables, by schema and name; a table the page withheld is never in it.</param>
+internal sealed record StorageMark(DateTimeOffset At, DateTimeOffset? WindowSince, long? DatabaseBytes, IReadOnlyDictionary<(string Schema, string Name), StorageMarkRow> Tables);
 
 /// <summary>One table at a mark.</summary>
 /// <param name="TotalBytes">Heap, indexes and TOAST, from <c>relpages</c>.</param>
@@ -27,11 +28,11 @@ internal sealed record StorageMarkRow(long TotalBytes, long? Inserts, long? Upda
 internal sealed record StorageRowSince(string Text, string? Title);
 
 /// <summary>The Storage page counted from a mark: <see cref="Rows" /> parallel the view's tables.</summary>
-/// <param name="Invalid">Why the mark no longer holds, or <see langword="null" /> while it does; then nothing else is set.</param>
+/// <param name="Ended">Why the mark no longer holds, or <see langword="null" /> while it does; then nothing else is set.</param>
 /// <param name="Note">A caveat while it holds, or <see langword="null" />.</param>
 /// <param name="DatabaseChange">The database's size change, signed ("+34 MiB"), or <see langword="null" /> when either size is unknown.</param>
 /// <param name="Rows">One per table of the view, in its order.</param>
-internal sealed record StorageSince(string? Invalid, string? Note, string? DatabaseChange, IReadOnlyList<StorageRowSince> Rows);
+internal sealed record StorageSince(SinceMarkEnd? Ended, string? Note, string? DatabaseChange, IReadOnlyList<StorageRowSince> Rows);
 
 /// <summary>The Storage page counted from a mark. Pure.</summary>
 /// <remarks>
@@ -58,17 +59,17 @@ internal static class StorageSinceMark
             return null;
         }
 
-        Dictionary<string, StorageMarkRow> tables = new(StringComparer.Ordinal);
+        Dictionary<(string Schema, string Name), StorageMarkRow> tables = [];
 
         foreach (StorageTableView table in view.Tables)
         {
             if (table is { Schema: { } schema, Name: { } name })
             {
-                tables[schema + "." + name] = new StorageMarkRow(table.TotalBytes, table.Inserts, table.Updates, table.Deletes);
+                tables[(schema, name)] = new StorageMarkRow(table.TotalBytes, table.Inserts, table.Updates, table.Deletes);
             }
         }
 
-        return new StorageMark(at, view.DatabaseBytes, tables);
+        return new StorageMark(at, view.Window?.Since, view.DatabaseBytes, tables);
     }
 
     /// <summary><paramref name="view" /> counted from <paramref name="mark" />.</summary>
@@ -79,9 +80,9 @@ internal static class StorageSinceMark
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(mark);
 
-        if (!SinceMarks.Holds(mark.At, view.Window, out string? text))
+        if (SinceMarks.Ended(mark.At, mark.WindowSince, view.Window) is { } ended)
         {
-            return new StorageSince(text, null, null, []);
+            return new StorageSince(ended, null, null, []);
         }
 
         List<StorageRowSince> rows = new(view.Tables.Count);
@@ -93,7 +94,7 @@ internal static class StorageSinceMark
 
         return new StorageSince(
             null,
-            text,
+            SinceMarks.Caveat(view.Window),
             view.DatabaseBytes is { } now && mark.DatabaseBytes is { } then ? (now == then ? "no change" : Signed(now - then)) : null,
             rows);
     }
@@ -105,7 +106,7 @@ internal static class StorageSinceMark
             return new StorageRowSince("–", null);
         }
 
-        if (!mark.Tables.TryGetValue(schema + "." + name, out StorageMarkRow? held))
+        if (!mark.Tables.TryGetValue((schema, name), out StorageMarkRow? held))
         {
             return new StorageRowSince("not listed at your mark", null);
         }

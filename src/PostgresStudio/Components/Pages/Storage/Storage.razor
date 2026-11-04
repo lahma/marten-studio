@@ -40,7 +40,7 @@
         <h1 class="ms-page-title">Storage</h1>
         <div class="ms-storage-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
-            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@since?.Invalid" Disabled="@(!interactive || loading || !CanMark)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@(since?.Ended is null ? null : EndedConsequence)" Disabled="@(!interactive || loading || !CanMark)" ClearDisabled="@(!interactive)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
 
@@ -75,13 +75,12 @@
     }
     else
     {
-        @if (since?.Invalid is { Length: > 0 } invalid && mark is { } held)
+        @if (since?.Ended is { } ended && mark is { } held)
         {
             <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
                 <div class="ms-alert-content">
                     <p>
-                        Your mark at @State.FormatInSelectedTimeZone(held.At, "HH:mm") no longer holds: @invalid. The page counts over the
-                        advisor's window again; mark again to count from now.
+                        Your mark at @SinceMarkTime.When(State, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(State, moment)). @EndedConsequence
                     </p>
                 </div>
             </div>
@@ -104,9 +103,9 @@
                     {
                         @("~" + SchemaFormat.Bytes(view.EstimatedDatabaseBytes) + " by the catalog's page counts")
                     }
-                    @if (since is { Invalid: null, DatabaseChange: { } change } && mark is { } markedNow)
+                    @if (since is { Ended: null, DatabaseChange: { } change } && mark is { } markedNow)
                     {
-                        <span class="ms-mark-delta">@(" · " + change + " since " + State.FormatInSelectedTimeZone(markedNow.At, "HH:mm"))</span>
+                        <span class="ms-mark-delta">@(" · " + change + " since " + SinceMarkTime.When(State, markedNow.At))</span>
                     }
                 </dd>
             </div>
@@ -188,7 +187,7 @@
                                 }
                                 @if (Counting is not null)
                                 {
-                                    <th scope="col" class="ms-mark-column" title="The change in each named table's size and its rows written since your mark. A table the page withholds shows a dash.">Since @State.FormatInSelectedTimeZone(mark!.At, "HH:mm")</th>
+                                    <th scope="col" class="ms-mark-column" title="The change in each named table's size and its rows written since your mark. A table the page withholds shows a dash.">Since @SinceMarkTime.When(State, mark!.At)</th>
                                 }
                             </tr>
                         </thead>
@@ -269,6 +268,8 @@
 
     /// <summary><see cref="view" /> counted from <see cref="mark" />, or <see langword="null" /> while there is no mark.</summary>
     private StorageSince? since;
+
+    private const string EndedConsequence = "The Since column is gone; mark again to count from now.";
 
     private string? error;
     private bool loading = true;
@@ -366,7 +367,7 @@
     }
 
     /// <summary>The counted view while a mark holds, or <see langword="null" />.</summary>
-    private StorageSince? Counting => since is { Invalid: null } ? since : null;
+    private StorageSince? Counting => since is { Ended: null } ? since : null;
 
     /// <summary>Whether the page shows a read whose figures a mark can remember.</summary>
     private bool CanMark => view is { Refusal: DatabaseRefusal.None, MeasuredAt: not null };

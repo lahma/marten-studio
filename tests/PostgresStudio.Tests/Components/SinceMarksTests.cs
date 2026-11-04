@@ -81,7 +81,7 @@ public class SinceMarksTests
     }
 
     [Fact]
-    public void A_mark_holds_unless_the_statistics_window_now_begins_after_it()
+    public void A_mark_ends_when_the_statistics_window_now_begins_after_it()
     {
         DateTimeOffset at = new(2026, 10, 26, 9, 0, 0, TimeSpan.Zero);
 
@@ -94,17 +94,41 @@ public class SinceMarksTests
             SharedView = "pg_stat_checkpointer",
         };
 
-        SinceMarks.Holds(at, Window(at.AddDays(-1)), out string? earlier).Should().BeTrue();
-        earlier.Should().BeNull();
+        static string Spelt(SinceMarkEnd? ended) => ended!.Text(static moment => moment.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture));
 
-        SinceMarks.Holds(at, Window(at), out string? same).Should().BeTrue("a window that began at the mark's own moment is the mark's own");
-        same.Should().BeNull();
+        SinceMarks.Ended(at, at.AddDays(-1), Window(at.AddDays(-1))).Should().BeNull();
+        SinceMarks.Ended(at, null, Window(at)).Should().BeNull("a window that began at the mark's own moment is the mark's own");
 
-        SinceMarks.Holds(at, Window(at.AddSeconds(1)), out string? why).Should().BeFalse();
-        why.Should().StartWith("the statistics began again at ").And.Contain("failover");
+        SinceMarkEnd? began = SinceMarks.Ended(at, at.AddDays(-1), Window(at.AddSeconds(1)));
+        Spelt(began).Should().Be("the statistics began again at 2026-10-26 09:00 (" + Window(at).ReasonText + ")");
+        began!.At.Should().Be(at.AddSeconds(1), "the service returns the moment; the page spells it in its visitor's zone");
 
-        SinceMarks.Holds(at, null, out string? unread).Should().BeTrue();
-        unread.Should().Contain("could not be read");
+        SinceMarks.Ended(at, at.AddDays(-1), null).Should().BeNull();
+        SinceMarks.Caveat(null).Should().Contain("could not be read");
+        SinceMarks.Caveat(Window(at)).Should().BeNull();
+    }
+
+    [Fact]
+    public void A_mark_also_ends_when_the_windows_start_moved_by_more_than_the_same_events_slack_in_either_direction()
+    {
+        DateTimeOffset at = new(2026, 10, 26, 9, 0, 0, TimeSpan.Zero);
+        DateTimeOffset since = at.AddDays(-2);
+
+        StatisticsWindow Window(DateTimeOffset start) => new()
+        {
+            MeasuredAt = at.AddHours(1),
+            Since = start,
+            Basis = StatisticsBasis.ServerReset,
+            Reason = StatisticsResetReason.OtherInstance,
+            SharedView = "pg_stat_checkpointer",
+        };
+
+        SinceMarks.Ended(at, since, Window(since.AddDays(-3))).Should().NotBeNull("an earlier start: a failover or an instance switch");
+        SinceMarks.Ended(at, since, Window(since.AddSeconds(-2))).Should().BeNull();
+        SinceMarks.Ended(at, since, Window(since.AddSeconds(2))).Should().BeNull();
+        SinceMarks.Ended(at, since, Window(since.AddSeconds(3))).Should().NotBeNull();
+        SinceMarks.Ended(at, null, Window(since.AddDays(-3))).Should().BeNull("a mark taken with no window read has none to compare");
+        SinceMarks.MovedSince(since, Window(since.AddDays(-3))).Should().BeTrue();
     }
 
     [Fact]

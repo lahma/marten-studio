@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using PostgresStudio.Components.Pages.Maintenance;
 using PostgresStudio.Services.Live;
 
 namespace PostgresStudio.Services.Maintenance;
@@ -9,8 +10,9 @@ namespace PostgresStudio.Services.Maintenance;
 /// and on PostgreSQL 18 how long they took - numbers only.
 /// </summary>
 /// <param name="At">When the sweep read the counters (the view's <c>MeasuredAt</c>), not when the visitor pressed Mark.</param>
+/// <param name="WindowSince">The statistics window's start then, when it was read: a start that moved means the server's counters began again.</param>
 /// <param name="Tables">The tables the page showed, by <see cref="MaintenanceTableView.Key" />; a withheld table is never in it.</param>
-internal sealed record MaintenanceMark(DateTimeOffset At, IReadOnlyDictionary<string, MaintenanceMarkRow> Tables);
+internal sealed record MaintenanceMark(DateTimeOffset At, DateTimeOffset? WindowSince, IReadOnlyDictionary<string, MaintenanceMarkRow> Tables);
 
 /// <summary>One table at a mark.</summary>
 /// <param name="Vacuums"><c>vacuum_count</c> plus <c>autovacuum_count</c>.</param>
@@ -20,10 +22,10 @@ internal sealed record MaintenanceMark(DateTimeOffset At, IReadOnlyDictionary<st
 internal sealed record MaintenanceMarkRow(long? Vacuums, long? Analyzes, double? VacuumMs, double? AnalyzeMs);
 
 /// <summary>The Maintenance page counted from a mark: <see cref="Rows" /> by <see cref="MaintenanceTableView.Key" />.</summary>
-/// <param name="Invalid">Why the mark no longer holds, or <see langword="null" /> while it does; then nothing else is set.</param>
+/// <param name="Ended">Why the mark no longer holds, or <see langword="null" /> while it does; then nothing else is set.</param>
 /// <param name="Note">A caveat while it holds, or <see langword="null" />.</param>
 /// <param name="Rows">What each table has had since, in words.</param>
-internal sealed record MaintenanceSince(string? Invalid, string? Note, IReadOnlyDictionary<string, string> Rows);
+internal sealed record MaintenanceSince(SinceMarkEnd? Ended, string? Note, IReadOnlyDictionary<string, string> Rows);
 
 /// <summary>The Maintenance page counted from a mark. Pure.</summary>
 /// <remarks>
@@ -48,6 +50,7 @@ internal static class MaintenanceSinceMark
 
         return new MaintenanceMark(
             at,
+            view.Statistics?.Since,
             view.Tables.ToDictionary(
                 static x => x.Key,
                 static x => new MaintenanceMarkRow(x.Vacuums, x.Analyzes, x.TotalVacuumMilliseconds, x.TotalAnalyzeMilliseconds),
@@ -63,9 +66,9 @@ internal static class MaintenanceSinceMark
         ArgumentNullException.ThrowIfNull(view);
         ArgumentNullException.ThrowIfNull(mark);
 
-        if (!SinceMarks.Holds(mark.At, view.Statistics, out string? text))
+        if (SinceMarks.Ended(mark.At, mark.WindowSince, view.Statistics) is { } ended)
         {
-            return new MaintenanceSince(text, null, new Dictionary<string, string>());
+            return new MaintenanceSince(ended, null, new Dictionary<string, string>());
         }
 
         Dictionary<string, string> rows = new(StringComparer.Ordinal);
@@ -77,7 +80,7 @@ internal static class MaintenanceSinceMark
                 : "not listed at your mark";
         }
 
-        return new MaintenanceSince(null, text, rows);
+        return new MaintenanceSince(null, SinceMarks.Caveat(view.Statistics), rows);
     }
 
     private static string Counted(MaintenanceTableView table, MaintenanceMarkRow held, bool withTimes)
@@ -101,7 +104,7 @@ internal static class MaintenanceSinceMark
 
         if (withTimes && vacuums is > 0 && table.TotalVacuumMilliseconds is { } vacuumNow && held.VacuumMs is { } vacuumThen && vacuumNow > vacuumThen)
         {
-            text += " · " + Seconds(vacuumNow - vacuumThen) + " vacuuming";
+            text += " · " + MaintenancePresentation.Milliseconds(vacuumNow - vacuumThen) + " vacuuming";
         }
 
         return text;
@@ -111,12 +114,4 @@ internal static class MaintenanceSinceMark
 
     private static string Plural(long count, string noun) =>
         count.ToString("N0", CultureInfo.InvariantCulture) + " " + noun + (count == 1 ? string.Empty : "s");
-
-    /// <summary>"1.2 s", "45 s", "3.5 min".</summary>
-    private static string Seconds(double milliseconds) => milliseconds switch
-    {
-        < 10_000 => (milliseconds / 1000).ToString("0.0", CultureInfo.InvariantCulture) + " s",
-        < 60_000 => (milliseconds / 1000).ToString("0", CultureInfo.InvariantCulture) + " s",
-        _ => (milliseconds / 60_000).ToString("0.0", CultureInfo.InvariantCulture) + " min",
-    };
 }

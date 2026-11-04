@@ -52,7 +52,7 @@ public class MaintenanceSinceMarkTests
 
         MaintenanceSince since = MaintenanceSinceMark.Apply(now, mark, withTimes: true);
 
-        since.Invalid.Should().BeNull();
+        since.Ended.Should().BeNull();
         since.Rows["public.orders"].Should().Be("2 vacuums, 1 analyze · 1.2 s vacuuming");
         since.Rows["public.audit"].Should().Be("none yet");
     }
@@ -84,9 +84,12 @@ public class MaintenanceSinceMarkTests
     {
         MaintenanceMark mark = MaintenanceSinceMark.Take(View(MarkAt, Table("orders", 10, 4, 5_000, 1_000)))!;
 
+        mark.WindowSince.Should().Be(MarkAt.AddDays(-2));
         mark.Tables.Keys.Should().Equal("public.orders");
         mark.Tables["public.orders"].Should().Be(new MaintenanceMarkRow(10, 4, 5_000, 1_000));
-        typeof(MaintenanceMark).GetProperties().Select(static x => x.PropertyType).Should().NotContain(typeof(string));
+        // Keys are the table keys the page showed the visitor; values are numbers.
+        typeof(MaintenanceMark).GetProperty(nameof(MaintenanceMark.Tables))!.PropertyType.Should().Be<IReadOnlyDictionary<string, MaintenanceMarkRow>>();
+        typeof(MaintenanceMarkRow).GetProperties().Select(static x => x.PropertyType).Should().OnlyContain(static x => x == typeof(long?) || x == typeof(double?));
 
         MaintenanceSinceMark.Take(MaintenanceView.Refused(MaintenanceRefusal.StorePolicy, "no")).Should().BeNull();
         MaintenanceSinceMark.Take(new MaintenanceView { MeasuredAt = MarkAt, TablesRead = false }).Should().BeNull("the table read did not finish");
@@ -98,11 +101,11 @@ public class MaintenanceSinceMarkTests
         MaintenanceMark mark = MaintenanceSinceMark.Take(View(MarkAt, Table("orders", 10, 4)))!;
 
         MaintenanceSince ended = MaintenanceSinceMark.Apply(View(Later, Table("orders", 11, 4)) with { Statistics = Window(MarkAt.AddMinutes(1)) }, mark, withTimes: false);
-        ended.Invalid.Should().StartWith("the statistics began again at ");
+        ended.Ended!.Text(static at => at.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)).Should().StartWith("the statistics began again at ");
         ended.Rows.Should().BeEmpty();
 
         MaintenanceSince unread = MaintenanceSinceMark.Apply(View(Later, Table("orders", 11, 4)) with { Statistics = null }, mark, withTimes: false);
-        unread.Invalid.Should().BeNull();
+        unread.Ended.Should().BeNull();
         unread.Note.Should().Contain("could not be read");
         unread.Rows["public.orders"].Should().Be("1 vacuum, 0 analyzes");
     }

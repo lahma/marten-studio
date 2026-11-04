@@ -39,7 +39,7 @@
         <h1 class="ms-page-title">Maintenance</h1>
         <div class="ms-maint-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
-            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@since?.Invalid" Disabled="@(!interactive || loading || !CanMark)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@(since?.Ended is null ? null : EndedConsequence)" Disabled="@(!interactive || loading || !CanMark)" ClearDisabled="@(!interactive)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
 
@@ -75,13 +75,12 @@
     }
     else
     {
-        @if (since?.Invalid is { Length: > 0 } invalid && mark is { } held)
+        @if (since?.Ended is { } ended && mark is { } held)
         {
             <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
                 <div class="ms-alert-content">
                     <p>
-                        Your mark at @State.FormatInSelectedTimeZone(held.At, "HH:mm") no longer holds: @invalid. The page counts over the
-                        advisor's window again; mark again to count from now.
+                        Your mark at @SinceMarkTime.When(State, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(State, moment)). @EndedConsequence
                     </p>
                 </div>
             </div>
@@ -142,7 +141,7 @@
                                 }
                                 @if (Counting is not null)
                                 {
-                                    <th scope="col" class="ms-mark-column" title="The vacuums and analyzes each table has had since your mark (autovacuum's and manual ones together)">Since @State.FormatInSelectedTimeZone(mark!.At, "HH:mm")</th>
+                                    <th scope="col" class="ms-mark-column" title="The vacuums and analyzes each table has had since your mark (autovacuum's and manual ones together)">Since @SinceMarkTime.When(State, mark!.At)</th>
                                 }
                                 <th scope="col">Bloat</th>
                             </tr>
@@ -543,6 +542,8 @@
     /// <summary><see cref="view" /> counted from <see cref="mark" />, or <see langword="null" /> while there is no mark.</summary>
     private MaintenanceSince? since;
 
+    private const string EndedConsequence = "The Since column is gone; mark again to count from now.";
+
     private BloatMeasureResult? bloat;
     private string? error;
     private string? measuring;
@@ -647,7 +648,7 @@
     }
 
     /// <summary>The counted view while a mark holds, or <see langword="null" />.</summary>
-    private MaintenanceSince? Counting => since is { Invalid: null } ? since : null;
+    private MaintenanceSince? Counting => since is { Ended: null } ? since : null;
 
     /// <summary>Whether the page shows tables whose counters a mark can remember.</summary>
     private bool CanMark => view is { Refusal: MaintenanceRefusal.None, TablesRead: true, MeasuredAt: not null };

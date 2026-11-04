@@ -1,7 +1,24 @@
 using PostgresStudio.Services.Health;
-using PostgresStudio.Services.Health.Checks;
 
 namespace PostgresStudio.Services.Live;
+
+/// <summary>
+/// Why a since-mark stopped counting: a sentence with one moment in it, which the page spells in its visitor's time zone -
+/// the service layer returns the moment, never a formatted time (1.2-H-A-FIX).
+/// </summary>
+/// <param name="Before">The words before the moment.</param>
+/// <param name="At">The moment.</param>
+/// <param name="After">The words after it.</param>
+internal sealed record SinceMarkEnd(string Before, DateTimeOffset At, string After = "")
+{
+    /// <summary>The sentence, with the moment spelt by <paramref name="when" />.</summary>
+    /// <param name="when">How the page spells a moment.</param>
+    public string Text(Func<DateTimeOffset, string> when)
+    {
+        ArgumentNullException.ThrowIfNull(when);
+        return Before + when(At) + After;
+    }
+}
 
 /// <summary>
 /// The since-marks of one circuit (1.2-H-A, X6): "count from now" on Statements, Storage and Maintenance - the counters a page
@@ -84,33 +101,46 @@ internal sealed class SinceMarks
     }
 
     /// <summary>
-    /// Whether a mark taken at <paramref name="markAt" /> still counts, by the statistics window now: it does unless the window
-    /// begins after the mark - a <c>pg_stat_reset()</c>, a crash, a restore, a failover or another instance, all of which the
-    /// window folds into its start (health-engine.md, "The statistics window").
+    /// Why a mark taken at <paramref name="markAt" /> no longer counts, by the statistics window now - or <see langword="null" />
+    /// while it does. It does unless the window begins after the mark (a <c>pg_stat_reset()</c>, a crash, a restore, a failover or
+    /// another instance, all of which the window folds into its start; health-engine.md, "The statistics window"), or its start
+    /// has moved since the mark by more than <see cref="StatisticsWindow.SameEvent" /> in either direction - a failover or an
+    /// Aurora instance switch answers with counters that began earlier, which no <c>Since &gt; markAt</c> sees.
     /// </summary>
     /// <param name="markAt">When the counters were read that the mark holds.</param>
+    /// <param name="markWindowSince">The window's start when the mark was taken, or <see langword="null" /> when it was not read.</param>
     /// <param name="now">The statistics window now, or <see langword="null" /> when it could not be read.</param>
-    /// <param name="text">
-    /// When the mark does not hold, why ("the statistics began again at …"). When it holds but <paramref name="now" /> is
-    /// <see langword="null" />, a caveat; otherwise <see langword="null" />.
-    /// </param>
-    public static bool Holds(DateTimeOffset markAt, StatisticsWindow? now, out string? text)
+    public static SinceMarkEnd? Ended(DateTimeOffset markAt, DateTimeOffset? markWindowSince, StatisticsWindow? now)
     {
         if (now is null)
         {
-            text = "Whether the counters were reset since your mark could not be read; a counter that went down is shown as reset.";
-            return true;
+            return null;
         }
 
         if (now.Since > markAt)
         {
-            text = "the statistics began again at " + TableText.When(now.Since) + " (" + now.ReasonText + ")";
-            return false;
+            return new SinceMarkEnd("the statistics began again at ", now.Since, " (" + now.ReasonText + ")");
         }
 
-        text = null;
-        return true;
+        if (MovedSince(markWindowSince, now))
+        {
+            return new SinceMarkEnd("the server's statistics now begin at ", now.Since, " (" + now.ReasonText + ")");
+        }
+
+        return null;
     }
+
+    /// <summary>Whether the window's start now is not the one the mark saw, beyond the same event's slack.</summary>
+    /// <param name="markWindowSince">The window's start when the mark was taken, or <see langword="null" /> when it was not read.</param>
+    /// <param name="now">The statistics window now, or <see langword="null" />.</param>
+    public static bool MovedSince(DateTimeOffset? markWindowSince, StatisticsWindow? now) =>
+        markWindowSince is { } then && now is not null && (now.Since - then).Duration() > StatisticsWindow.SameEvent;
+
+    /// <summary>A caveat while the mark holds but the window could not be read now, or <see langword="null" />.</summary>
+    /// <param name="now">The statistics window now, or <see langword="null" /> when it could not be read.</param>
+    public static string? Caveat(StatisticsWindow? now) => now is null
+        ? "Whether the counters were reset since your mark could not be read; a counter that went down is shown as reset."
+        : null;
 
     private static (string Page, string StoreKey, string DatabaseId) KeyOf(string page, StudioScope scope) =>
         (page, scope.StoreKey, scope.DatabaseId);

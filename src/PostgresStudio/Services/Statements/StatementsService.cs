@@ -183,6 +183,18 @@ internal sealed record StatementsView
     /// <summary>Every statement's execution time since the counters began (1.2-H-A): what a since-mark's total is subtracted from.</summary>
     public double AllExecMsSinceBegan { get; init; }
 
+    /// <summary>Entries the extension evicted over the advisor's window (or since its last reset, before a window), when it says; for the caveat's sentence.</summary>
+    public double? Evicted { get; init; }
+
+    /// <summary>Whether <see cref="Evicted" /> is over a window the statement history watched.</summary>
+    public bool EvictedOverWatchedWindow { get; init; }
+
+    /// <summary>When a since-mark is counting (1.2-H-A), the moment of the read it counts from - the page's window line says so; otherwise <see langword="null" />.</summary>
+    public DateTimeOffset? MarkedAt { get; init; }
+
+    /// <summary>How long ago the mark's read was, as of this read, while a since-mark is counting.</summary>
+    public TimeSpan? MarkSpan { get; init; }
+
     /// <summary><c>pg_stat_statements_info.stats_reset</c> (14+), or <see langword="null" />.</summary>
     public DateTimeOffset? StatsReset { get; init; }
 
@@ -925,6 +937,8 @@ internal sealed class StatementsService : IStatementsService
             Caveat = read.State == StatementsState.Read ? Caveat(read, text) : null,
             TotalExecMs = read.TotalExecMs,
             AllExecMsSinceBegan = read.AllExecMsSinceBegan,
+            Evicted = read.Evicted,
+            EvictedOverWatchedWindow = read.Watched,
             StatsReset = read.StatsReset,
             Statistics = read.Statistics,
             From = read.From,
@@ -988,10 +1002,7 @@ internal sealed class StatementsService : IStatementsService
         ArgumentNullException.ThrowIfNull(read);
         ArgumentNullException.ThrowIfNull(text);
 
-        string evicted = read.Evicted is > 0 and { } count
-            ? " pg_stat_statements evicted " + TableText.Count(count) + " entries " + (read.Watched ? "in the window" : "since its last reset")
-              + " (pg_stat_statements.max), so some statements' counters are younger than that."
-            : string.Empty;
+        string evicted = EvictedSentence(read.Evicted, read.Watched, marked: false);
 
         return "Read from pg_stat_statements as " + text.SourcePossessive + " own Postgres role, which holds that role's statements in "
             + "this database and only the ones that completed: another role's statements are not among them, and another "
@@ -1001,6 +1012,19 @@ internal sealed class StatementsService : IStatementsService
             + (read.StorageReads ? ", the " + TableText.Count(StatementReads.PageTop) + " with the most storage reads" : string.Empty)
             + " and the statement checks' own picks, of the " + TableText.Count(read.AllStatements) + " it holds." + evicted;
     }
+
+    /// <summary>
+    /// The eviction sentence of <see cref="Caveat" />, or an empty string when nothing was evicted. While a since-mark counts
+    /// (<paramref name="marked" />) it says the evictions are over the advisor's window, which is not the mark's.
+    /// </summary>
+    /// <param name="evicted">How many entries the extension evicted over the window (or since its reset, before a window), when it says.</param>
+    /// <param name="watched">Whether the advisor's window was one the statement history watched.</param>
+    /// <param name="marked">Whether a since-mark is counting.</param>
+    internal static string EvictedSentence(double? evicted, bool watched, bool marked) => evicted is > 0 and { } count
+        ? " pg_stat_statements evicted " + TableText.Count(count) + " entries "
+          + (watched ? (marked ? "in the advisor's window (not since your mark)" : "in the window") : "since its last reset")
+          + " (pg_stat_statements.max), so some statements' counters are younger than that."
+        : string.Empty;
 
     /// <summary>What a statement a function runs counts as, for the installed extension's version.</summary>
     private static string Nested(StatementFacts read) => read.FoldsNested

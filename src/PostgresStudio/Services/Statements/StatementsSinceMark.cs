@@ -1,5 +1,4 @@
 using PostgresStudio.Services.Database;
-using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
 
 namespace PostgresStudio.Services.Statements;
@@ -11,11 +10,13 @@ namespace PostgresStudio.Services.Statements;
 /// <param name="At">When the counters were read (the view's <c>MeasuredAt</c>), not when the visitor pressed Mark.</param>
 /// <param name="AllExecMs">Every statement's execution time since the counters began.</param>
 /// <param name="StatsReset"><c>pg_stat_statements_info.stats_reset</c> then, when the extension says.</param>
+/// <param name="WindowSince">The statistics window's start then, when it was read: a start that moves later means the server's counters began again.</param>
 /// <param name="Rows">The kept statements, by <c>queryid</c>.</param>
 internal sealed record StatementsMark(
     DateTimeOffset At,
     double AllExecMs,
     DateTimeOffset? StatsReset,
+    DateTimeOffset? WindowSince,
     IReadOnlyDictionary<long, StatementMarkRow> Rows);
 
 /// <summary>One statement's counters at a mark.</summary>
@@ -64,6 +65,7 @@ internal static class StatementsSinceMark
             at,
             view.AllExecMsSinceBegan,
             view.StatsReset,
+            view.Statistics?.Since,
             view.Rows.ToDictionary(static x => x.QueryId, static x => new StatementMarkRow(x.SinceBegan, x.CountersSince)));
     }
 
@@ -73,18 +75,19 @@ internal static class StatementsSinceMark
     /// </summary>
     /// <param name="now">The statements as the page shows them now, unmarked.</param>
     /// <param name="mark">The mark.</param>
-    public static (StatementsView View, string? Invalid) Apply(StatementsView now, StatementsMark mark)
+    public static (StatementsView View, SinceMarkEnd? Ended) Apply(StatementsView now, StatementsMark mark)
     {
         ArgumentNullException.ThrowIfNull(now);
         ArgumentNullException.ThrowIfNull(mark);
 
-        // Nothing was read to count: the page says why, and the mark waits for a read.
-        if (now.State != StatementsState.Read)
+        // Nothing was read to count - a refusal, or a status in place of the statements: the page says why, and the mark waits
+        // for a read. (A refused view's State is the enum's default, Read, so the refusal has to be asked on its own.)
+        if (now.Refusal != DatabaseRefusal.None || now.State != StatementsState.Read)
         {
             return (now, null);
         }
 
-        if (Invalid(now, mark) is { } why)
+        if (Ended(now, mark) is { } why)
         {
             return (now, why);
         }
@@ -99,34 +102,59 @@ internal static class StatementsSinceMark
 
         TimeSpan span = now.MeasuredAt is { } read && read > mark.At ? read - mark.At : TimeSpan.Zero;
 
+        List<string> basis = [];
+
+        if (now.MeasuredAt == mark.At)
+        {
+            basis.Add("Refresh reads pg_stat_statements again when the last read is more than five minutes old; until then the counters are the mark's own.");
+        }
+
+        // The statistics look reset since the last check: that is about the server, not the window the mark replaced.
+        if (now.Statistics is { LooksReset: true } && now.Basis is { Length: > 0 } looksReset)
+        {
+            basis.Add(looksReset);
+        }
+
         return (
             now with
             {
                 Watched = true,
-                WindowText = "Since your mark at " + TableText.When(mark.At) + " (" + TableText.Span(span)
-                    + "): each statement's change since then, and its share of every statement's.",
-                Basis = now.MeasuredAt == mark.At
-                    ? "Refresh reads pg_stat_statements again when the last read is more than five minutes old; until then the counters are the mark's own."
-                    : null,
+                MarkedAt = mark.At,
+                MarkSpan = span,
+                Basis = basis.Count == 0 ? null : string.Join(" ", basis),
                 TotalExecMs = Math.Max(all, 0),
                 Rows = rows,
+                Caveat = EvictionCaveat(now),
             },
             null);
     }
 
-    /// <summary>Why the mark no longer counts, or <see langword="null" /> while it does.</summary>
-    internal static string? Invalid(StatementsView now, StatementsMark mark)
+    /// <summary>
+    /// The caveat, with its eviction sentence saying the evictions it counts are over the advisor's window - the mark is not that
+    /// window, and the count is not since the mark.
+    /// </summary>
+    private static string? EvictionCaveat(StatementsView now)
     {
-        if (now.StatsReset is { } reset && reset > mark.At)
+        string standard = StatementsService.EvictedSentence(now.Evicted, now.EvictedOverWatchedWindow, marked: false);
+
+        return now.Caveat is null || standard.Length == 0
+            ? now.Caveat
+            : now.Caveat.Replace(standard, StatementsService.EvictedSentence(now.Evicted, now.EvictedOverWatchedWindow, marked: true), StringComparison.Ordinal);
+    }
+
+    /// <summary>Why the mark no longer counts, or <see langword="null" /> while it does.</summary>
+    internal static SinceMarkEnd? Ended(StatementsView now, StatementsMark mark)
+    {
+        // The extension's own reset time moved: pg_stat_statements_reset() ran (14+).
+        if (now.StatsReset is { } reset && reset != mark.StatsReset)
         {
-            return "pg_stat_statements was reset at " + TableText.When(reset);
+            return new SinceMarkEnd("pg_stat_statements was reset at ", reset);
         }
 
-        if (now.Statistics is { } statistics
-            && StatementFacts.RestartsTheCounters(statistics.Reason)
-            && statistics.Since > mark.At)
+        // A manual pg_stat_reset() does not reset pg_stat_statements; a restart, restore, failover or another instance does.
+        if (now.Statistics is { } statistics && StatementFacts.RestartsTheCounters(statistics.Reason))
         {
-            return "the statistics began again at " + TableText.When(statistics.Since) + " (" + statistics.ReasonText + ")";
+            return SinceMarks.Ended(mark.At, mark.WindowSince, statistics);
         }
 
         return null;
@@ -138,16 +166,26 @@ internal static class StatementsSinceMark
         DateTimeOffset? from = null;
         string? note = null;
 
-        if (row.CountersSince is { } began && began >= mark.At)
+        if (mark.Rows.TryGetValue(row.QueryId, out StatementMarkRow? held))
         {
-            // PostgreSQL 17+: the entry began after the mark, so everything it counts is since then.
+            if (row.CountersSince != held.CountersSince)
+            {
+                // The entry was evicted and seen again (PostgreSQL 17+ gives it its own start): a new incarnation, so everything it
+                // counts is since the mark - even when its counters happen to be higher than they were.
+                counts = row.SinceBegan;
+                from = row.CountersSince;
+            }
+            else
+            {
+                counts = Difference(row.SinceBegan, held.SinceBegan);
+                note = counts is null ? "Reset since your mark: its counters are lower than they were, so it was evicted and began again." : null;
+            }
+        }
+        else if (row.CountersSince is { } began && began >= mark.At)
+        {
+            // PostgreSQL 17+: the mark lacked it and its entry began after the mark, so everything it counts is since then.
             counts = row.SinceBegan;
             from = began;
-        }
-        else if (mark.Rows.TryGetValue(row.QueryId, out StatementMarkRow? held))
-        {
-            counts = Difference(row.SinceBegan, held.SinceBegan);
-            note = counts is null ? "Reset since your mark: its counters are lower than they were, so it was evicted and began again." : null;
         }
         else
         {

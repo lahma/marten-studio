@@ -57,9 +57,12 @@ public class StorageSinceMarkTests
 
         mark.At.Should().Be(MarkAt);
         mark.DatabaseBytes.Should().Be(400L << 20);
-        mark.Tables.Keys.Should().Equal("public.orders");
-        mark.Tables["public.orders"].Should().Be(new StorageMarkRow(100L << 20, 10, 20, 30));
-        typeof(StorageMark).GetProperties().Select(static x => x.PropertyType).Should().NotContain(typeof(string));
+        mark.WindowSince.Should().Be(MarkAt.AddDays(-1));
+        mark.Tables.Keys.Should().Equal(("public", "orders"));
+        mark.Tables[("public", "orders")].Should().Be(new StorageMarkRow(100L << 20, 10, 20, 30));
+        // Keys are the names the page showed the visitor, as a schema and a name; values are numbers.
+        typeof(StorageMark).GetProperty(nameof(StorageMark.Tables))!.PropertyType.Should().Be<IReadOnlyDictionary<(string Schema, string Name), StorageMarkRow>>();
+        typeof(StorageMarkRow).GetProperties().Select(static x => x.PropertyType).Should().OnlyContain(static x => x == typeof(long) || x == typeof(long?));
     }
 
     [Fact]
@@ -77,7 +80,7 @@ public class StorageSinceMarkTests
 
         StorageSince since = StorageSinceMark.Apply(now, mark);
 
-        since.Invalid.Should().BeNull();
+        since.Ended.Should().BeNull();
         since.DatabaseChange.Should().Be("+34.0 MiB");
         since.Rows.Should().ContainSingle();
         since.Rows[0].Text.Should().Be("+12.0 MiB · 2,400 rows written");
@@ -130,12 +133,25 @@ public class StorageSinceMarkTests
 
         StorageSince since = StorageSinceMark.Apply(View(Later, 400L << 20, Named("orders", 100L << 20)) with { Window = Window(MarkAt.AddMinutes(5)) }, mark);
 
-        since.Invalid.Should().StartWith("the statistics began again at ");
+        since.Ended!.Text(static at => at.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)).Should().StartWith("the statistics began again at ");
         since.Rows.Should().BeEmpty("nothing is counted from a mark that no longer holds");
         since.DatabaseChange.Should().BeNull();
 
-        StorageSinceMark.Apply(View(Later, 400L << 20, Named("orders", 100L << 20)) with { Window = Window(MarkAt) }, mark).Invalid
-            .Should().BeNull("a window that began at the mark's own moment is the mark's own");
+        StorageSinceMark.Apply(View(Later, 400L << 20, Named("orders", 100L << 20)) with { Window = Window(MarkAt.AddDays(-1)) }, mark).Ended
+            .Should().BeNull("a window that is where the mark saw it is the mark's own");
+    }
+
+    [Fact]
+    public void A_window_that_moved_earlier_ends_the_mark_for_a_failover_but_not_within_the_same_events_slack()
+    {
+        StorageMark mark = StorageSinceMark.Take(View(MarkAt, 400L << 20, Named("orders", 100L << 20)))!;
+        StorageView now = View(Later, 400L << 20, Named("orders", 100L << 20));
+
+        StorageSince moved = StorageSinceMark.Apply(now with { Window = Window(MarkAt.AddDays(-9)) }, mark);
+        moved.Ended!.Text(static at => at.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)).Should().StartWith("the server's statistics now begin at ");
+        moved.Rows.Should().BeEmpty();
+
+        StorageSinceMark.Apply(now with { Window = Window(MarkAt.AddDays(-1).AddSeconds(2)) }, mark).Ended.Should().BeNull();
     }
 
     [Fact]
@@ -145,7 +161,7 @@ public class StorageSinceMarkTests
 
         StorageSince since = StorageSinceMark.Apply(View(Later, 400L << 20, Named("orders", 100L << 20)) with { Window = null }, mark);
 
-        since.Invalid.Should().BeNull();
+        since.Ended.Should().BeNull();
         since.Note.Should().Be("Whether the counters were reset since your mark could not be read; a counter that went down is shown as reset.");
         since.Rows.Should().ContainSingle();
     }
@@ -181,6 +197,6 @@ public class StorageSinceMarkTests
         StorageTableView withheld = view.Tables.Single(static x => x.Withheld);
         (withheld.Inserts, withheld.Updates, withheld.Deletes).Should().Be(((long?)null, (long?)null, (long?)null));
 
-        StorageSinceMark.Take(view)!.Tables.Keys.Should().Equal("public.orders");
+        StorageSinceMark.Take(view)!.Tables.Keys.Should().Equal(("public", "orders"));
     }
 }

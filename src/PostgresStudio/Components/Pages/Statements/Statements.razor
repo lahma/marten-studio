@@ -53,7 +53,7 @@
         <h1 class="ms-page-title">Statements</h1>
         <div class="ms-stmts-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
-            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@markInvalid" Disabled="@(!interactive || loading || !CanMark)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@(markEnded is null ? null : EndedConsequence)" Disabled="@(!interactive || loading || !CanMark)" ClearDisabled="@(!interactive)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
 
@@ -111,19 +111,28 @@
             @Drill(drilled)
         }
 
-        @if (markInvalid is { Length: > 0 } invalid && mark is { } held)
+        @if (markEnded is { } ended && mark is { } held)
         {
             <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
                 <div class="ms-alert-content">
                     <p>
-                        Your mark at @State.FormatInSelectedTimeZone(held.At, "HH:mm") no longer holds: @invalid. The page counts over the
-                        advisor's window again; mark again to count from now.
+                        Your mark at @SinceMarkTime.When(State, held.At) no longer holds: @ended.Text(moment => SinceMarkTime.When(State, moment)). @EndedConsequence
                     </p>
                 </div>
             </div>
         }
 
-        <p class="ms-stmts-window">@view.WindowText</p>
+        @if (view.MarkedAt is { } markedAt)
+        {
+            <p class="ms-stmts-window ms-stmts-window-marked">
+                Since your mark at @SinceMarkTime.When(State, markedAt) (@TableText.Span(view.MarkSpan ?? TimeSpan.Zero)): each statement's change since
+                then, and its share of every statement's.
+            </p>
+        }
+        else
+        {
+            <p class="ms-stmts-window">@view.WindowText</p>
+        }
 
         @if (view.Basis is { Length: > 0 } basis)
         {
@@ -325,7 +334,9 @@
     private StatementsMark? mark;
 
     /// <summary>Why <see cref="mark" /> no longer holds, or <see langword="null" />.</summary>
-    private string? markInvalid;
+    private SinceMarkEnd? markEnded;
+
+    private const string EndedConsequence = "The page counts over the advisor's window again; mark again to count from now.";
 
     private string? error;
     private bool loading = true;
@@ -413,7 +424,7 @@
         view = null;
         raw = null;
         mark = null;
-        markInvalid = null;
+        markEnded = null;
         plan = null;
         plannedFor = null;
         await LoadAsync();
@@ -554,13 +565,23 @@
                         <p class="ms-stmts-note">@note</p>
                     }
 
-                    @if (row.Window is { } counts)
+                    // The plan's own row is the advisor's window; while a mark counts, the counts are the page's, so the drill-in
+                    // says what the window line says.
+                    bool counting = mark is not null && markEnded is null && view?.MarkedAt is not null;
+                    StatementRowView? counted = counting ? view!.Rows.FirstOrDefault(x => x.QueryId == queryId) : null;
+                    StatementCounts? drillCounts = counting ? counted?.Window : row.Window;
+
+                    @if (drillCounts is { } counts)
                     {
                         <p class="ms-plan-drill-counts">
                             @TableText.Count(counts.Calls) calls, @StatementWindows.Milliseconds(counts.ExecMs) of execution
                             @(counts.MeanMs is { } mean ? "(" + StatementWindows.Milliseconds(mean) + " a call)" : string.Empty),
                             @TableText.Count(counts.Rows) rows, over the window above.
                         </p>
+                    }
+                    else if (counting && counted?.MarkNote is { Length: > 0 } markNote)
+                    {
+                        <p class="ms-plan-drill-counts ms-stmts-note">@markNote</p>
                     }
 
                     @if (row.ServerCounters?.Text is { Length: > 0 } serverCounters)
@@ -653,14 +674,14 @@
     {
         StudioScope? scope = State.ActiveScope;
         mark = scope is null ? null : Marks.Get<StatementsMark>(StatementsSinceMark.Page, scope);
-        markInvalid = null;
+        markEnded = null;
         view = raw;
 
         if (raw is not null && mark is not null)
         {
-            (StatementsView counted, string? invalid) = StatementsSinceMark.Apply(raw, mark);
+            (StatementsView counted, SinceMarkEnd? ended) = StatementsSinceMark.Apply(raw, mark);
             view = counted;
-            markInvalid = invalid;
+            markEnded = ended;
         }
     }
 

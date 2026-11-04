@@ -1,3 +1,4 @@
+@using PostgresStudio.Services.Live
 @inject StudioState State
 
 @* The Mark control of Statements, Storage and Maintenance (1.2-H-A, X6): "count from now".
@@ -5,22 +6,25 @@
    Unmarked it is one button. Marked it is a chip - "Counting since 14:02:05" - with Clear; a mark that no longer holds (a
    statistics reset or a restart began the counters again) says so on the chip and offers "Mark again". The page keeps the mark
    (in the circuit, SinceMarks) and does the counting; this draws the control and raises the two events, and makes no interop
-   call of its own. *@
+   call of its own. Mark is inert while the page has nothing to remember; Clear is inert only before the page is interactive,
+   so a mark can always be put down. *@
 
 <div class="ms-mark" role="group" aria-label="Count from now">
     @if (MarkedAt is { } at)
     {
-        <span class="ms-mark-chip @(Invalid is { Length: > 0 } ? "ms-mark-chip-invalid" : null)"
-              title="@(Invalid is { Length: > 0 } ? "This mark no longer holds, so the page counts over the advisor's window again." : "The page shows each counter's change since this moment. Kept in this tab only.")">
-            @(Invalid is { Length: > 0 } ? "Mark no longer holds (" + State.FormatInSelectedTimeZone(at, "HH:mm:ss") + ")" : "Counting since " + State.FormatInSelectedTimeZone(at, "HH:mm:ss"))
+        bool ended = Invalid is { Length: > 0 };
+
+        <span class="ms-mark-chip @(ended ? "ms-mark-chip-invalid" : null)"
+              title="@(ended ? Invalid : "Counted from the read at " + SinceMarkTime.When(State, at, seconds: true) + ": the counters on screen when you pressed Mark.")">
+            @(ended ? "Mark no longer holds (" + SinceMarkTime.When(State, at, seconds: true) + ")" : "Counting since " + SinceMarkTime.When(State, at, seconds: true))
         </span>
 
-        @if (Invalid is { Length: > 0 })
+        @if (ended)
         {
             <button type="button" class="ms-button ms-mark-button ms-mark-again" disabled="@Disabled" @onclick="OnMark">Mark again</button>
         }
 
-        <button type="button" class="ms-button ms-mark-clear" disabled="@Disabled" @onclick="OnClear">Clear</button>
+        <button type="button" class="ms-button ms-mark-clear" disabled="@ClearDisabled" @onclick="OnClear">Clear</button>
     }
     else
     {
@@ -39,11 +43,15 @@
     [Parameter]
     public DateTimeOffset? MarkedAt { get; set; }
 
-    /// <summary>Whether the control is inert: the page is not interactive yet, is loading, or shows no read to mark.</summary>
+    /// <summary>Whether Mark (and Mark again) is inert: the page is not interactive yet, is loading, or shows no read to mark.</summary>
     [Parameter]
     public bool Disabled { get; set; }
 
-    /// <summary>Why the mark no longer holds, or <see langword="null" /> while it does (or there is none).</summary>
+    /// <summary>Whether Clear is inert: only before the page is interactive.</summary>
+    [Parameter]
+    public bool ClearDisabled { get; set; }
+
+    /// <summary>What the chip says when the mark no longer holds, and what the page does instead; <see langword="null" /> while it holds (or there is none).</summary>
     [Parameter]
     public string? Invalid { get; set; }
 
