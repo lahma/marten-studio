@@ -14,6 +14,7 @@
 @inject StudioState State
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
+@inject SinceMarks Marks
 
 @*
     Storage (W5-CAP, issue #8 G3): how big this database is, how fast it grows, and which tables hold the space - read
@@ -26,6 +27,10 @@
 
     Read when the page becomes interactive and every HealthInterval while it stays open (never RefreshInterval: the facts
     are kept that long, single flight, whoever asks), and on Refresh.
+
+    Mark (1.2-H-A, X6): remembers the database's size and, for each table the page names to its visitor, its size and writes -
+    numbers only, in this circuit's memory - and adds one column, "Since HH:MM", with the change since (StorageSinceMark). A reset of
+    the statistics ends it and the page says so.
 *@
 
 <PageTitle>Storage</PageTitle>
@@ -35,6 +40,7 @@
         <h1 class="ms-page-title">Storage</h1>
         <div class="ms-storage-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@since?.Invalid" Disabled="@(!interactive || loading || !CanMark)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
 
@@ -69,6 +75,22 @@
     }
     else
     {
+        @if (since?.Invalid is { Length: > 0 } invalid && mark is { } held)
+        {
+            <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
+                <div class="ms-alert-content">
+                    <p>
+                        Your mark at @State.FormatInSelectedTimeZone(held.At, "HH:mm") no longer holds: @invalid. The page counts over the
+                        advisor's window again; mark again to count from now.
+                    </p>
+                </div>
+            </div>
+        }
+        else if (since?.Note is { Length: > 0 } caveat)
+        {
+            <p class="ms-mark-note ms-muted" role="note">@caveat</p>
+        }
+
         <dl class="ms-storage-tiles">
             <div class="ms-storage-tile">
                 <dt>Database size</dt>
@@ -81,6 +103,10 @@
                     else
                     {
                         @("~" + SchemaFormat.Bytes(view.EstimatedDatabaseBytes) + " by the catalog's page counts")
+                    }
+                    @if (since is { Invalid: null, DatabaseChange: { } change } && mark is { } markedNow)
+                    {
+                        <span class="ms-mark-delta">@(" · " + change + " since " + State.FormatInSelectedTimeZone(markedNow.At, "HH:mm"))</span>
                     }
                 </dd>
             </div>
@@ -160,6 +186,10 @@
                                 {
                                     <th scope="col" class="ms-storage-since" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. Never reset means no reset time is recorded for the table; a dash means its name is withheld, and so is its reset time.">Stats since</th>
                                 }
+                                @if (Counting is not null)
+                                {
+                                    <th scope="col" class="ms-mark-column" title="The change in each named table's size and its rows written since your mark. A table the page withholds shows a dash.">Since @State.FormatInSelectedTimeZone(mark!.At, "HH:mm")</th>
+                                }
                             </tr>
                         </thead>
                         <tbody>
@@ -199,6 +229,11 @@
                                     {
                                         <td class="ms-storage-since" title="@(!row.Withheld && row.CountersReset is null ? "never reset" : null)">@(row.Withheld ? "–" : row.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
                                     }
+                                    @if (Counting is { } counted)
+                                    {
+                                        StorageRowSince changed = counted.Rows[i];
+                                        <td class="ms-mark-column" title="@changed.Title">@changed.Text</td>
+                                    }
                                 </tr>
                             }
                         </tbody>
@@ -228,6 +263,13 @@
     private StudioLiveUpdates? live;
 
     private StorageView? view;
+
+    /// <summary>This database's mark in the circuit's <see cref="SinceMarks" />, or <see langword="null" />.</summary>
+    private StorageMark? mark;
+
+    /// <summary><see cref="view" /> counted from <see cref="mark" />, or <see langword="null" /> while there is no mark.</summary>
+    private StorageSince? since;
+
     private string? error;
     private bool loading = true;
     private bool busy;
@@ -275,6 +317,8 @@
         }
 
         view = null;
+        mark = null;
+        since = null;
         await LoadAsync();
     }
 
@@ -301,6 +345,7 @@
             if (State.ActiveScope == scope)
             {
                 view = read;
+                Rebuild();
                 error = null;
             }
         }
@@ -318,6 +363,60 @@
             loading = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>The counted view while a mark holds, or <see langword="null" />.</summary>
+    private StorageSince? Counting => since is { Invalid: null } ? since : null;
+
+    /// <summary>Whether the page shows a read whose figures a mark can remember.</summary>
+    private bool CanMark => view is { Refusal: DatabaseRefusal.None, MeasuredAt: not null };
+
+    /// <summary>Takes <see cref="since" /> from <see cref="view" /> and this database's mark.</summary>
+    private void Rebuild()
+    {
+        StudioScope? scope = State.ActiveScope;
+        mark = scope is null ? null : Marks.Get<StorageMark>(StorageSinceMark.Page, scope);
+        since = view is not null && mark is not null && view.Refusal == DatabaseRefusal.None
+            ? StorageSinceMark.Apply(view, mark)
+            : null;
+    }
+
+    /// <summary>Remembers the figures on screen. Numbers only, in this circuit's memory; no interop, no storage.</summary>
+    private async Task MarkAsync()
+    {
+        try
+        {
+            if (!disposed && view is not null && State.ActiveScope is { } scope && StorageSinceMark.Take(view) is { } taken)
+            {
+                Marks.Set(StorageSinceMark.Page, scope, taken);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Forgets this database's mark.</summary>
+    private async Task ClearMarkAsync()
+    {
+        try
+        {
+            if (!disposed && State.ActiveScope is { } scope)
+            {
+                Marks.Clear(StorageSinceMark.Page, scope);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private static string Growth(double? bytes) => bytes switch

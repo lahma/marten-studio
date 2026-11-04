@@ -312,7 +312,8 @@ browser's gate admits to that schema (`BrowseDatabase`, the write policy and a `
 else sees its sizes, with `‹withheld›` in place of its name, owner and link. `pg_database_size` needs `CONNECT` on the
 database, or `pg_read_all_stats`, for the role the studio reads as (`SqlConsoleRole` when set). Without it, the page
 says so, names the grant, and shows the catalog's estimate. The sizes come from the catalog's page counts, so the page
-locks nothing it lists.
+locks nothing it lists. A mark (1.2) is held in the circuit, never stored, and covers only the tables the page names to
+you.
 
 ### Measure bloat
 

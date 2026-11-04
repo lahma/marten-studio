@@ -54,6 +54,15 @@ internal sealed record StorageTableView(
 {
     /// <summary>Whether its name is withheld from this visitor.</summary>
     public bool Withheld => Name is null;
+
+    /// <summary><c>n_tup_ins</c> since the counters began (1.2-H-A: what a since-mark subtracts); <see langword="null" /> on a withheld row and where the collector has nothing.</summary>
+    public long? Inserts { get; init; }
+
+    /// <summary><c>n_tup_upd</c> since the counters began, HOT updates included; <see langword="null" /> on a withheld row and where the collector has nothing.</summary>
+    public long? Updates { get; init; }
+
+    /// <summary><c>n_tup_del</c> since the counters began; <see langword="null" /> on a withheld row and where the collector has nothing.</summary>
+    public long? Deletes { get; init; }
 }
 
 /// <summary>What the Storage page draws for one visitor: the database's figures, and the largest tables as the visitor may see them.</summary>
@@ -318,7 +327,13 @@ internal sealed class StorageService : IStorageService
                 table.NewPageShare,
                 window is null ? null : table.GrowthBytesPerDay(window),
                 table.AllVisibleRatio,
-                named ? table.Row.CountersReset : null));
+                named ? table.Row.CountersReset : null)
+            {
+                // Nothing of a withheld table: a counter would still tell its writes.
+                Inserts = named ? table.Row.Inserts : null,
+                Updates = named ? table.Row.Updates : null,
+                Deletes = named ? table.Row.Deletes : null,
+            });
         }
 
         string? withheldReason = withheld == 0 ? null : WithheldReason(withheld, gate is not null);

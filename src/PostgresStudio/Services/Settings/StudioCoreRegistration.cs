@@ -201,6 +201,8 @@ internal static class StudioCoreRegistration
         // plan's own - and the per-visitor service it answers to.
         services.TryAddSingleton<StatementPlanReader>();
         services.TryAddScoped<IStatementsService, StatementsService>();
+        // 1.2-H-A: "Mark" on Statements, Storage and Maintenance. The circuit's, in memory, numbers only - never stored, never shared.
+        services.TryAddScoped<SinceMarks>();
         // X2: the what-if engine - hypopg's availability cached per database, every hypothetical index reset on the connection
         // it was made on - shared by the console, the drill-in and MartenStudio's advisors.
         services.TryAddSingleton<HypotheticalIndexReader>();

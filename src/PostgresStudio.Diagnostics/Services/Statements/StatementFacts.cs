@@ -206,6 +206,12 @@ internal sealed record StatementFacts
     /// <summary>Every statement's execution time over the window, which <see cref="StatementFact.Share" /> divides.</summary>
     public double TotalExecMs { get; init; }
 
+    /// <summary>
+    /// Every statement's execution time since the counters began, as the extension totals it (1.2-H-A): the number a since-mark
+    /// subtracts its own from, whatever window <see cref="TotalExecMs" /> is over.
+    /// </summary>
+    public double AllExecMsSinceBegan { get; init; }
+
     /// <summary>How many statements of the reading role in this database the extension holds.</summary>
     public long AllStatements { get; init; }
 
@@ -335,6 +341,7 @@ internal sealed record StatementFacts
             To = watched ? total!.To : null,
             StatsReset = read.StatsReset,
             TotalExecMs = totalExec,
+            AllExecMsSinceBegan = read.AllExecMs,
             AllStatements = read.AllStatements,
             Evicted = watched ? evicted?.Change : read.Dealloc,
             StorageReads = read.StorageReads,

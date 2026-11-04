@@ -83,6 +83,18 @@ internal sealed record StatementRowView(
     /// <see langword="null" /> where the installed extension is older, and where the statement has nothing to show of them.
     /// </summary>
     public StatementServerCounters? ServerCounters { get; init; }
+
+    /// <summary>
+    /// When this statement's counters began, as the extension knows it (PostgreSQL 17+: its entry's own <c>stats_since</c>; before,
+    /// the extension's <c>stats_reset</c>) - what a since-mark (1.2-H-A) tells an entry started after it from one it saw.
+    /// </summary>
+    public DateTimeOffset? CountersSince { get; init; }
+
+    /// <summary>
+    /// Why a since-mark counts nothing for this statement - it was not among the kept statements at the mark, or its counters
+    /// went down since - or <see langword="null" />. Set only by <see cref="StatementsSinceMark.Apply" />.
+    /// </summary>
+    public string? MarkNote { get; init; }
 }
 
 /// <summary>
@@ -167,6 +179,21 @@ internal sealed record StatementsView
 
     /// <summary>The window's execution time over every statement of the reading role here.</summary>
     public double TotalExecMs { get; init; }
+
+    /// <summary>Every statement's execution time since the counters began (1.2-H-A): what a since-mark's total is subtracted from.</summary>
+    public double AllExecMsSinceBegan { get; init; }
+
+    /// <summary><c>pg_stat_statements_info.stats_reset</c> (14+), or <see langword="null" />.</summary>
+    public DateTimeOffset? StatsReset { get; init; }
+
+    /// <summary>The statistics window the statement history is bounded by, when the sweep read its signals.</summary>
+    public StatisticsWindow? Statistics { get; init; }
+
+    /// <summary>When the window began (or, when it was not watched, when the counters began, if the extension says).</summary>
+    public DateTimeOffset? From { get; init; }
+
+    /// <summary>The span the window covers, when it was watched or its start is known.</summary>
+    public TimeSpan? Span { get; init; }
 
     /// <summary>Every statement the read kept, the most execution time over the window first.</summary>
     public IReadOnlyList<StatementRowView> Rows { get; init; } = [];
@@ -883,6 +910,7 @@ internal sealed class StatementsService : IStatementsService
                     parallelNote is null ? fact.ParallelWorkersToLaunch : null,
                     parallelNote is null ? fact.ParallelWorkersLaunched : null,
                     fact.WalBuffersFull),
+                CountersSince = fact.CountersSince,
             });
         }
 
@@ -896,6 +924,11 @@ internal sealed class StatementsService : IStatementsService
             Basis = BasisText(read),
             Caveat = read.State == StatementsState.Read ? Caveat(read, text) : null,
             TotalExecMs = read.TotalExecMs,
+            AllExecMsSinceBegan = read.AllExecMsSinceBegan,
+            StatsReset = read.StatsReset,
+            Statistics = read.Statistics,
+            From = read.From,
+            Span = read.Span,
             Rows = rows,
             StorageReads = read.StorageReads,
             TextsWithheld = rows.Count > 0 && screen.Withheld is null ? TextsUnchecked : null,

@@ -231,6 +231,9 @@ internal sealed record MaintenanceView
     /// <summary>The server's version, for the version-gated columns (<c>PostgresFeatures</c>).</summary>
     public int ServerVersion { get; init; }
 
+    /// <summary>The statistics window the counters are held to (1.2-H-A), or <see langword="null" /> when the sweep did not read it.</summary>
+    public StatisticsWindow? Statistics { get; init; }
+
     /// <summary>A refused view.</summary>
     public static MaintenanceView Refused(MaintenanceRefusal refusal, string reason) => new() { Refusal = refusal, Reason = reason };
 }

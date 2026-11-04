@@ -15,6 +15,7 @@
 @inject StudioState State
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
+@inject SinceMarks Marks
 
 @*
     Maintenance (W5-V1, issue #8 G2): what autovacuum makes of each table - its three decisions against the table's own
@@ -25,6 +26,10 @@
     nothing the Health page does not: read once interactive, every HealthInterval while it stays open, and on Refresh. The
     gate is the database-wide one; a table outside the source's own schemas is named only past the database browser's gate;
     the horizon holder's names only behind the activity gate, through the Health page's own reads.
+
+    Mark (1.2-H-A, X6): remembers how many vacuums and analyzes each table the page shows has had - numbers only, in this
+    circuit's memory - and adds one column, "Since HH:MM" (MaintenanceSinceMark). A reset of the statistics ends it and the page
+    says so.
 *@
 
 <PageTitle>Maintenance</PageTitle>
@@ -34,6 +39,7 @@
         <h1 class="ms-page-title">Maintenance</h1>
         <div class="ms-maint-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@since?.Invalid" Disabled="@(!interactive || loading || !CanMark)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
 
@@ -69,6 +75,22 @@
     }
     else
     {
+        @if (since?.Invalid is { Length: > 0 } invalid && mark is { } held)
+        {
+            <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
+                <div class="ms-alert-content">
+                    <p>
+                        Your mark at @State.FormatInSelectedTimeZone(held.At, "HH:mm") no longer holds: @invalid. The page counts over the
+                        advisor's window again; mark again to count from now.
+                    </p>
+                </div>
+            </div>
+        }
+        else if (since?.Note is { Length: > 0 } caveat)
+        {
+            <p class="ms-mark-note ms-muted" role="note">@caveat</p>
+        }
+
         @if (view.MeasuredAt is { } measured)
         {
             <p class="ms-maint-measured">
@@ -117,6 +139,10 @@
                                 @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
                                 {
                                     <th scope="col" title="When this table's counters were last reset (PostgreSQL 19). pg_stat_reset() sets it for every table. Never reset means no reset time is recorded for the table.">Stats since</th>
+                                }
+                                @if (Counting is not null)
+                                {
+                                    <th scope="col" class="ms-mark-column" title="The vacuums and analyzes each table has had since your mark (autovacuum's and manual ones together)">Since @State.FormatInSelectedTimeZone(mark!.At, "HH:mm")</th>
                                 }
                                 <th scope="col">Bloat</th>
                             </tr>
@@ -167,6 +193,10 @@
                                     @if (PostgresFeatures.Has(PostgresFeature.StatsResetPerTable, view.ServerVersion))
                                     {
                                         <td class="ms-table-cell ms-maint-since" title="@(table.CountersReset is null ? "never reset" : null)">@(table.CountersReset is { } reset ? State.FormatInSelectedTimeZone(reset, "yyyy-MM-dd HH:mm") : "never reset")</td>
+                                    }
+                                    @if (Counting is { } counted)
+                                    {
+                                        <td class="ms-table-cell ms-mark-column">@(counted.Rows.GetValueOrDefault(table.Key, "–"))</td>
                                     }
                                     <td class="ms-table-cell">
                                         @if (table.Measurable)
@@ -506,6 +536,13 @@
     private StudioLiveUpdates? live;
 
     private MaintenanceView? view;
+
+    /// <summary>This database's mark in the circuit's <see cref="SinceMarks" />, or <see langword="null" />.</summary>
+    private MaintenanceMark? mark;
+
+    /// <summary><see cref="view" /> counted from <see cref="mark" />, or <see langword="null" /> while there is no mark.</summary>
+    private MaintenanceSince? since;
+
     private BloatMeasureResult? bloat;
     private string? error;
     private string? measuring;
@@ -560,6 +597,8 @@
         }
 
         view = null;
+        mark = null;
+        since = null;
         bloat = null;
         await LoadAsync();
     }
@@ -587,6 +626,7 @@
             if (State.ActiveScope == scope)
             {
                 view = read;
+                Rebuild();
                 error = null;
             }
         }
@@ -604,6 +644,60 @@
             loading = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>The counted view while a mark holds, or <see langword="null" />.</summary>
+    private MaintenanceSince? Counting => since is { Invalid: null } ? since : null;
+
+    /// <summary>Whether the page shows tables whose counters a mark can remember.</summary>
+    private bool CanMark => view is { Refusal: MaintenanceRefusal.None, TablesRead: true, MeasuredAt: not null };
+
+    /// <summary>Takes <see cref="since" /> from <see cref="view" /> and this database's mark.</summary>
+    private void Rebuild()
+    {
+        StudioScope? scope = State.ActiveScope;
+        mark = scope is null ? null : Marks.Get<MaintenanceMark>(MaintenanceSinceMark.Page, scope);
+        since = view is not null && mark is not null && view.Refusal == MaintenanceRefusal.None
+            ? MaintenanceSinceMark.Apply(view, mark, PostgresFeatures.Has(PostgresFeature.TotalVacuumTime, view.ServerVersion))
+            : null;
+    }
+
+    /// <summary>Remembers the counters on screen. Numbers only, in this circuit's memory; no interop, no storage.</summary>
+    private async Task MarkAsync()
+    {
+        try
+        {
+            if (!disposed && view is not null && State.ActiveScope is { } scope && MaintenanceSinceMark.Take(view) is { } taken)
+            {
+                Marks.Set(MaintenanceSinceMark.Page, scope, taken);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Forgets this database's mark.</summary>
+    private async Task ClearMarkAsync()
+    {
+        try
+        {
+            if (!disposed && State.ActiveScope is { } scope)
+            {
+                Marks.Clear(MaintenanceSinceMark.Page, scope);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task MeasureAsync(MaintenanceTableView table)

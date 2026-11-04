@@ -76,6 +76,12 @@ internal sealed record MaintenanceFacts
 
     /// <summary>The database's history as the database-wide gate may read it: what progress and the forecast are dated by.</summary>
     public HealthHistoryView History { get; init; } = HealthHistoryView.Empty;
+
+    /// <summary>
+    /// The statistics window the regular sweep computed (1.2-H-A): since when the counters count, which a since-mark is held to.
+    /// <see langword="null" /> when the sweep did not read its signals.
+    /// </summary>
+    public StatisticsWindow? Statistics { get; init; }
 }
 
 /// <summary>The Maintenance page's facts read: one database's <see cref="MaintenanceFacts" />.</summary>
@@ -129,6 +135,7 @@ internal sealed class MaintenanceFactsReader(HealthSweepCache cache, HealthHisto
             Grants = sweep.TryShared<PostgresGrants>(ServerReachQueries.GrantsKey, out var grants) ? grants : null,
             Horizon = sweep.Results.FirstOrDefault(static x => string.Equals(x.Check.Code, "T14", StringComparison.Ordinal)),
             History = history.VisibleAt(HealthGate.Database),
+            Statistics = sweep.Statistics,
         };
     }
 }

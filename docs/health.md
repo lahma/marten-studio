@@ -167,6 +167,16 @@ starts none of its own. Opening the page, pressing Refresh, or running the Healt
 starts a sweep when the last one is more than five minutes old; within five minutes, everybody gets the one
 that ran. The window the page ranks over grows only between such sweeps.
 
+**Mark** (1.2) remembers the counters on screen and shows each statement's change since then ("since 14:02")
+instead of the advisor's window, until you clear it. It is kept in this tab's connection to the server only -
+nothing is stored anywhere - and ends when you reload. A reset of `pg_stat_statements`, or a crash, restore or
+failover that began the server's counters again, ends it and says so, and the page counts over the advisor's
+window again. A statement whose counters went down since the mark (its entry was evicted and began again) shows no
+change; on PostgreSQL 17 and later an entry that began after the mark counts everything since it began, and before
+17 a statement the mark did not hold has no known change and ranks last. The mark holds numbers only - never a
+statement's text. A Refresh within five minutes of the last read shows the same counters, so the change is zero
+until a new read.
+
 On pg_stat_statements 1.8 - no `toplevel` column - a statement's top-level and nested runs are summed into
 one row, so with `pg_stat_statements.track = all` a statement a function runs is counted on its own row as
 well as inside the function's. From 1.9 only top-level runs are read.

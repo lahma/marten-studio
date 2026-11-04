@@ -15019,3 +15019,55 @@ a.ms-schema-health-mark:focus-visible {
     overflow-wrap: anywhere;
     min-width: 0;
 }
+
+/* ===== 1.2-H-A Since-mark counters ===== */
+
+/* Mark on Statements, Storage and Maintenance: a button, or a chip with Clear, beside Refresh in the page's actions. It wraps
+   with them (the header's actions already drop below the title), and the notice about a mark that no longer holds is the
+   page's own alert under the lead, so nothing here is wider than its words. */
+.ms-mark {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs) var(--ms-space-sm);
+    margin-left: var(--ms-space-sm);
+}
+
+.ms-mark-chip {
+    display: inline-block;
+    padding: 2px var(--ms-space-sm);
+    border: 1px solid var(--ms-color-primary);
+    border-radius: var(--ms-radius-full);
+    background: var(--ms-color-primary-light);
+    color: var(--ms-color-text);
+    font-size: var(--ms-font-size-sm);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.ms-mark-chip.ms-mark-chip-invalid {
+    border-color: var(--ms-color-warning);
+    background: var(--ms-color-warning-bg);
+    color: var(--ms-color-text);
+}
+
+.ms-mark-alert {
+    max-width: 90ch;
+    margin: 0 0 var(--ms-space-md);
+}
+
+.ms-mark-note {
+    max-width: 90ch;
+    font-size: var(--ms-font-size-sm);
+}
+
+/* The one column a mark adds to Storage and Maintenance: the words wrap where they do not fit, so the table never grows by more
+   than this column. */
+.ms-mark-column {
+    min-width: 9rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.ms-mark-delta {
+    white-space: nowrap;
+}

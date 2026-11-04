@@ -858,6 +858,14 @@ shown to a visitor the store policy passes for the database as a whole (`TenantI
   `pgstattuple` extension (not trusted: a superuser or the platform's administrator installs it) and `pg_stat_scan_tables` (in `pg_monitor`); without either it says which,
   and who can grant or install it. It is never part of a sweep or a list - it reads the table, under an
   `AccessShareLock` - and every press is audited as "Measure bloat", with the table and nothing else.
+- **Mark** (1.2) - remembers how many vacuums and analyzes each table the page shows has had (autovacuum's and manual
+  ones together) and, on PostgreSQL 18, the time they took, and adds one column, "Since 14:02", with the change since
+  then: "2 vacuums, 1 analyze · 1.2 s vacuuming". It is kept in this tab's connection to the server only - nothing is
+  stored anywhere - and ends when you reload or press Clear. A reset of the statistics, or a crash, restore or failover
+  that began the server's counters again, ends it and says so. A table whose counters went down since the mark shows
+  "reset since your mark", and one the mark did not list "not listed at your mark". The gauges that reset themselves
+  (dead rows, changes since the last analyze, inserts since the last vacuum) are not marked: the bars already show them
+  against their triggers. A table the page does not name to you is never in a mark.
 
 ## T15 Foreign key without a covering index
 

@@ -18,6 +18,7 @@
 @inject StudioLiveUpdatesFactory LiveFactory
 @inject IStudioSettings Settings
 @inject StudioDescriptor Descriptor
+@inject SinceMarks Marks
 
 @*
     Statements (W5-Q1, issue #8 G6 and A5): where this database's time goes, statement by statement - the statements
@@ -38,6 +39,11 @@
     as a tree with the plan insights under it (PlanView). It plans when it opens and on "Plan again", never on the page's poll,
     behind the page's own gate, and the service decides whether a plan may be shown and masks it (IStatementsService.PlanAsync).
     The link is D9's: the queryid and the scope in the query string reopen the same statement.
+
+    Mark (1.2-H-A, X6): remembers the counters on screen - numbers only, in this circuit's memory - and counts each statement's
+    change since then in place of the advisor's window, until it is cleared or a reset of pg_stat_statements, or a restart that
+    began the counters again, ends it (StatementsSinceMark). `raw` is the read as the service gave it; `view` is what the page
+    draws, which is `raw` counted from the mark when there is one that holds.
 *@
 
 <PageTitle>Statements</PageTitle>
@@ -47,6 +53,7 @@
         <h1 class="ms-page-title">Statements</h1>
         <div class="ms-stmts-actions">
             <button type="button" class="ms-button" @onclick="RefreshAsync" disabled="@(!interactive || busy)">Refresh</button>
+            <SinceMarkControl MarkedAt="@mark?.At" Invalid="@markInvalid" Disabled="@(!interactive || loading || !CanMark)" OnMark="MarkAsync" OnClear="ClearMarkAsync" />
         </div>
     </div>
 
@@ -102,6 +109,18 @@
         @if (QueryId is { } drilled)
         {
             @Drill(drilled)
+        }
+
+        @if (markInvalid is { Length: > 0 } invalid && mark is { } held)
+        {
+            <div class="ms-alert ms-alert-warning ms-mark-alert" role="status">
+                <div class="ms-alert-content">
+                    <p>
+                        Your mark at @State.FormatInSelectedTimeZone(held.At, "HH:mm") no longer holds: @invalid. The page counts over the
+                        advisor's window again; mark again to count from now.
+                    </p>
+                </div>
+            </div>
         }
 
         <p class="ms-stmts-window">@view.WindowText</p>
@@ -237,7 +256,7 @@
                                 else
                                 {
                                     <td class="ms-stmts-number ms-muted" colspan="@(view.StorageReads ? 8 : 7)">
-                                        not watched yet: new to the statements kept, watched from the next check
+                                        @(row.MarkNote ?? "not watched yet: new to the statements kept, watched from the next check")
                                     </td>
                                 }
                                 <td class="ms-stmts-statement">
@@ -296,7 +315,18 @@
     /// <summary>The page's own polling loop, at <c>HealthInterval</c>; built rather than injected.</summary>
     private StudioLiveUpdates? live;
 
+    /// <summary>What the page draws: <see cref="raw" /> counted from <see cref="mark" /> while there is one that holds.</summary>
     private StatementsView? view;
+
+    /// <summary>The read as the service gave it, uncounted.</summary>
+    private StatementsView? raw;
+
+    /// <summary>This database's mark in the circuit's <see cref="SinceMarks" />, or <see langword="null" />.</summary>
+    private StatementsMark? mark;
+
+    /// <summary>Why <see cref="mark" /> no longer holds, or <see langword="null" />.</summary>
+    private string? markInvalid;
+
     private string? error;
     private bool loading = true;
     private bool busy;
@@ -381,6 +411,9 @@
         }
 
         view = null;
+        raw = null;
+        mark = null;
+        markInvalid = null;
         plan = null;
         plannedFor = null;
         await LoadAsync();
@@ -586,7 +619,8 @@
             // A scope change while this was reading: the answer is about a database nobody is looking at.
             if (State.ActiveScope == scope)
             {
-                view = read;
+                raw = read;
+                Rebuild();
                 error = null;
 
                 if (view is { StorageReads: false } && (ranking == StatementRanking.StorageReads || sort == StatementSort.StorageReads))
@@ -609,6 +643,63 @@
             loading = false;
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>Whether the page shows a read whose counters a mark can remember.</summary>
+    private bool CanMark => raw is { Refusal: DatabaseRefusal.None, State: StatementsState.Read, MeasuredAt: not null };
+
+    /// <summary>Takes <see cref="view" /> from <see cref="raw" /> and this database's mark: counted from it when it holds.</summary>
+    private void Rebuild()
+    {
+        StudioScope? scope = State.ActiveScope;
+        mark = scope is null ? null : Marks.Get<StatementsMark>(StatementsSinceMark.Page, scope);
+        markInvalid = null;
+        view = raw;
+
+        if (raw is not null && mark is not null)
+        {
+            (StatementsView counted, string? invalid) = StatementsSinceMark.Apply(raw, mark);
+            view = counted;
+            markInvalid = invalid;
+        }
+    }
+
+    /// <summary>Remembers the counters on screen. Numbers only, in this circuit's memory; no interop, no storage.</summary>
+    private async Task MarkAsync()
+    {
+        try
+        {
+            if (!disposed && raw is not null && State.ActiveScope is { } scope && StatementsSinceMark.Take(raw) is { } taken)
+            {
+                Marks.Set(StatementsSinceMark.Page, scope, taken);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Forgets this database's mark: the page counts over the advisor's window again.</summary>
+    private async Task ClearMarkAsync()
+    {
+        try
+        {
+            if (!disposed && State.ActiveScope is { } scope)
+            {
+                Marks.Clear(StatementsSinceMark.Page, scope);
+                Rebuild();
+            }
+        }
+        catch (Exception exception)
+        {
+            error = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>A sortable column's header: a button that sorts the top statements by it, the most first.</summary>

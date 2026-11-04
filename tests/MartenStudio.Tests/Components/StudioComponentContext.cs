@@ -113,6 +113,9 @@ internal class StudioComponentContext : BunitContext
         // Every live page builds its own loop from this, so the circuit's container never tracks one.
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
+        // 1.2-H-A: Mark on Statements, Storage and Maintenance - the circuit's, so the context's one root is the one circuit.
+        Services.AddSingleton<SinceMarks>();
+
         // H1: the Overview's Health region, the Health page and the sidebar's badge all read through this;
         // the mutes and the toast memory are the real ones, because they are per circuit and cheap.
         Health = new MartenStudio.Tests.Health.FakeHealthService();

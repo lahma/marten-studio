@@ -242,6 +242,7 @@ internal sealed class MaintenanceService : IMaintenanceService
             Freeze = await FreezeAsync(read, shown).ConfigureAwait(false),
             Horizon = await HorizonAsync(scope, read, wholeCount, cancellationToken).ConfigureAwait(false),
             ServerVersion = read.Tables is { Count: > 0 } any ? any[0].Row.ServerVersion : read.Wraparound?.Database.ServerVersion ?? 0,
+            Statistics = read.Statistics,
         };
     }
 

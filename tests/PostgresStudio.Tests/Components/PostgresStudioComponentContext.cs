@@ -90,6 +90,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
 
         Services.AddScoped<StudioLiveUpdatesFactory>();
 
+        // 1.2-H-A: Mark on Statements, Storage and Maintenance - the circuit's, so the context's one root is the one circuit.
+        Services.AddSingleton<SinceMarks>();
+
         Services.AddSingleton<IHealthService>(Health);
 
         // 1.1-NP3: Database > Connection, and the Overview's one line about it.
