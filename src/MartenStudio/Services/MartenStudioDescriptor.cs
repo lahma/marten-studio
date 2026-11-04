@@ -72,6 +72,7 @@ internal static class MartenStudioDescriptor
         SourceNoun = "Marten store",
         SourceLabel = "Store",
         ExposedContent = "every document, event stream and schema in this process",
+        ExtraShortcuts = MartenStudioShortcuts.Groups,
         CreateResource = static (scope, capability) => scope.ToResource(capability),
         Surface = "Marten Studio",
         Exposure = "Marten Studio is mapped with no authorization. Its pages can read and edit every document in every Marten "

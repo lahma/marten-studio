@@ -86,6 +86,13 @@ internal sealed class StudioDescriptor : DiagnosticsDescriptor
     public required string Remedies { get; init; }
 
     /// <summary>
+    /// The keyboard shortcuts only this studio's pages answer to (1.2), listed on the shortcut sheet after
+    /// <see cref="StudioShortcuts.Shared" />: MartenStudio's document list and document editor. Empty for a studio with none, so a
+    /// Postgres Studio host is never told about a key that does nothing on its pages.
+    /// </summary>
+    public IReadOnlyList<StudioShortcutGroup> ExtraShortcuts { get; init; } = [];
+
+    /// <summary>
     /// The route table built from <see cref="PageAssemblies" />, once. Building it validates every page: a template
     /// outside its assembly's root, or a relative route two pages claim, throws on first use.
     /// </summary>

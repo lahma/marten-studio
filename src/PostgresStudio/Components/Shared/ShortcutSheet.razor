@@ -1,0 +1,70 @@
+@using PostgresStudio.Services.Settings
+@inject StudioDescriptor Descriptor
+
+@*
+    The keyboard shortcut sheet (1.2-A11Y): every key the studio answers to, opened by `?` and closed by Esc or its Close button.
+
+    It is a <dialog> that is always in the shell and never open when the page is served; studio.js shows it with showModal() on `?`
+    (not while a text field has focus, and not over another dialog), so it needs no circuit round trip and works the moment the page
+    has loaded. It is not a form (D23), and Close is a plain button the script answers to (`data-ms-dialog-close`).
+
+    The list is data, not markup: StudioShortcuts holds the shared groups and the studio's descriptor adds its own (ExtraShortcuts),
+    so a Postgres Studio host never reads a key only a Marten page answers to. There are two global keys, `?` and Esc; the
+    rest work where focus is on the control that handles them, which each group's title says.
+*@
+
+<dialog id="ms-shortcuts"
+        class="ms-modal ms-shortcuts-host"
+        aria-labelledby="ms-shortcuts-title">
+    <div class="ms-confirm-dialog ms-shortcuts">
+        <h3 id="ms-shortcuts-title">Keyboard shortcuts</h3>
+        <p class="ms-shortcuts-note">
+            Press <kbd class="ms-kbd">?</kbd> anywhere except in a text field to open this list. Ctrl means Cmd on a Mac.
+        </p>
+
+        <div class="ms-shortcuts-body" role="region" aria-label="Shortcuts" tabindex="0">
+            @foreach (StudioShortcutGroup group in Groups)
+            {
+                <section class="ms-shortcuts-group" aria-label="@group.Title">
+                    <h4 class="ms-shortcuts-title">@group.Title</h4>
+                    <dl class="ms-shortcuts-list">
+                        @foreach (StudioShortcut shortcut in group.Shortcuts)
+                        {
+                            <div class="ms-shortcuts-row">
+                                <dt class="ms-shortcuts-keys">
+                                    @for (int chord = 0; chord < shortcut.Chords.Count; chord++)
+                                    {
+                                        if (chord > 0)
+                                        {
+                                            <span class="ms-shortcuts-or" aria-hidden="true"> / </span>
+                                        }
+
+                                        string[] keys = shortcut.Chords[chord].Split('+');
+                                        for (int key = 0; key < keys.Length; key++)
+                                        {
+                                            if (key > 0)
+                                            {
+                                                <span class="ms-shortcuts-plus" aria-hidden="true">+</span>
+                                            }
+
+                                            <kbd class="ms-kbd">@keys[key]</kbd>
+                                        }
+                                    }
+                                </dt>
+                                <dd class="ms-shortcuts-does">@shortcut.Does</dd>
+                            </div>
+                        }
+                    </dl>
+                </section>
+            }
+        </div>
+
+        <div class="ms-confirm-actions">
+            <button type="button" class="ms-button" data-ms-dialog-close data-ms-dialog-focus>Close</button>
+        </div>
+    </div>
+</dialog>
+
+@code {
+    private IEnumerable<StudioShortcutGroup> Groups => [.. StudioShortcuts.Shared, .. Descriptor.ExtraShortcuts];
+}

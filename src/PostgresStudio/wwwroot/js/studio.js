@@ -212,29 +212,274 @@
         };
     })();
 
-    // Native <dialog>, driven from C# because showModal() has no HTML attribute equivalent. Both calls
-    // are no-ops when the element is missing or already in the requested state, so a component may call
-    // either one twice without checking.
-    window.martenStudio.dialog = window.martenStudio.dialog || {
-        showModal: function (id) {
-            const dialog = document.getElementById(id);
-            if (!dialog || typeof dialog.showModal !== "function" || dialog.open) {
+    // Native modal dialogs (1.2-A11Y). Every studio dialog is a <dialog class="ms-modal"> that the server renders with the `open`
+    // attribute - which is today's overlay, drawn by the stylesheet - and that this script upgrades to a real modal with showModal():
+    // the browser then makes the rest of the page inert and keeps Tab inside, and the script moves focus to the element marked
+    // `data-ms-dialog-focus` (the primary button when the action is safe, Cancel when it is destructive, the typed-confirmation box
+    // when there is one), turns Esc into the component's own Cancel, and puts focus back on the control that opened the dialog when
+    // the dialog goes. A page where this script (or the browser's showModal) is missing keeps the overlay it always had: the
+    // upgrade is the only thing that is lost, which is why the server never waits for it.
+    //
+    // present(id, ref)   upgrades one server-rendered dialog; `ref` is the component's DotNetObjectReference (Esc calls its
+    //                    OnEscapeAsync), or null for a dialog that is only ever shown and closed here (the shortcut sheet).
+    // release(id)        the component is done with the dialog (closed, or disposed): closes it if it is still in the page and
+    //                    restores focus. Safe to call twice, or for a dialog that was never presented.
+    // openStatic(id)     shows a dialog that is always in the page, for `?`.
+    window.martenStudio.dialog = window.martenStudio.dialog || (function () {
+        const live = new Map();
+        const focusable = "a[href], button:not([disabled]), input:not([disabled]):not([type='hidden']), select:not([disabled]), "
+            + "textarea:not([disabled]), summary, [tabindex]:not([tabindex='-1'])";
+        let lastActivator = null;
+
+        // Safari does not focus a button on click, so the control that opened a dialog is not always document.activeElement.
+        document.addEventListener("click", function (event) {
+            const target = event.target;
+            if (!target || typeof target.closest !== "function") {
+                return;
+            }
+
+            const activator = target.closest("button, a[href], summary, [role='button']");
+            if (activator && !activator.closest("dialog.ms-modal")) {
+                lastActivator = activator;
+            }
+        }, true);
+
+        function invokerNow() {
+            const active = document.activeElement;
+            if (active && active !== document.body && active !== document.documentElement && !active.closest("dialog.ms-modal")) {
+                return active;
+            }
+
+            return lastActivator && lastActivator.isConnected ? lastActivator : null;
+        }
+
+        function nobodyHasFocus() {
+            const active = document.activeElement;
+            return !active || active === document.body || active === document.documentElement;
+        }
+
+        // Only when focus is nowhere: a page that has already moved it on (FocusOnNavigate puts it on the new heading) keeps it.
+        function restore(invoker) {
+            if (invoker && invoker.isConnected && !invoker.disabled && typeof invoker.focus === "function" && nobodyHasFocus()) {
+                try {
+                    invoker.focus({ preventScroll: true });
+                }
+                catch {
+                }
+            }
+        }
+
+        function tabbable(dialog) {
+            return Array.prototype.filter.call(dialog.querySelectorAll(focusable), function (element) {
+                return element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden";
+            });
+        }
+
+        // The browser already keeps Tab out of the inert page; this keeps it from leaving through the browser's own chrome too, so
+        // the dialog is a loop in every browser.
+        function onKeyDown(event) {
+            if (event.key !== "Tab" || event.ctrlKey || event.altKey || event.metaKey) {
+                return;
+            }
+
+            const dialog = event.currentTarget;
+            const items = tabbable(dialog);
+            if (items.length === 0) {
+                event.preventDefault();
+                return;
+            }
+
+            const first = items[0];
+            const last = items[items.length - 1];
+            const active = document.activeElement;
+
+            if (event.shiftKey && (active === first || active === dialog)) {
+                event.preventDefault();
+                last.focus();
+            }
+            else if (!event.shiftKey && active === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+
+        function tell(state) {
+            if (!state || !state.ref || state.released) {
+                return;
+            }
+
+            try {
+                const pending = state.ref.invokeMethodAsync("OnEscapeAsync");
+                if (pending && typeof pending.catch === "function") {
+                    pending.catch(function () { });
+                }
+            }
+            catch {
+                // The circuit has gone; the dialog goes with the page.
+            }
+        }
+
+        function wire(dialog) {
+            if (dialog.dataset.msDialogWired === "true") {
+                return;
+            }
+
+            dialog.dataset.msDialogWired = "true";
+            dialog.addEventListener("keydown", onKeyDown);
+
+            // Esc. A component-driven dialog runs its own Cancel and leaves the closing to the server; a static one closes itself.
+            dialog.addEventListener("cancel", function (event) {
+                const state = live.get(dialog.id);
+                if (state && state.ref) {
+                    event.preventDefault();
+                    tell(state);
+                }
+            });
+
+            // The browser closed the dialog by itself (a second Esc is allowed through whatever cancel did): a component-driven one
+            // is told, so the server's idea of "open" does not outlive the browser's; a static one has only focus to give back.
+            dialog.addEventListener("close", function () {
+                // The event can be delivered late - after the same dialog has been shown again - and then it is about the earlier
+                // closing, which was dealt with when it happened.
+                const state = live.get(dialog.id);
+                if (!state || state.released || dialog.open) {
+                    return;
+                }
+
+                if (state.ref) {
+                    tell(state);
+                }
+                else {
+                    live.delete(dialog.id);
+                    restore(state.invoker);
+                }
+            });
+        }
+
+        function moveFocus(dialog) {
+            const target = dialog.querySelector("[data-ms-dialog-focus]");
+            if (target && !target.disabled && typeof target.focus === "function") {
+                target.focus();
+            }
+        }
+
+        function present(dialog, ref) {
+            if (!dialog || dialog.tagName !== "DIALOG" || typeof dialog.showModal !== "function" || !dialog.id) {
                 return false;
             }
 
-            dialog.showModal();
-            return true;
-        },
-        close: function (id) {
-            const dialog = document.getElementById(id);
-            if (!dialog || typeof dialog.close !== "function" || !dialog.open) {
+            const known = live.get(dialog.id);
+            if (known && known.dialog === dialog && dialog.isConnected && dialog.open) {
+                return true;
+            }
+
+            const invoker = invokerNow();
+
+            try {
+                // showModal() throws on a dialog that is already open, and the server renders it open.
+                if (dialog.hasAttribute("open")) {
+                    dialog.removeAttribute("open");
+                }
+
+                dialog.showModal();
+            }
+            catch {
+                dialog.setAttribute("open", "");
                 return false;
             }
 
-            dialog.close();
+            live.set(dialog.id, { dialog: dialog, invoker: invoker, ref: ref || null, released: false });
+            wire(dialog);
+            moveFocus(dialog);
             return true;
         }
-    };
+
+        return {
+            present: function (id, ref) {
+                return present(typeof id === "string" ? document.getElementById(id) : null, ref);
+            },
+            release: function (id) {
+                const state = live.get(id);
+                if (!state) {
+                    return false;
+                }
+
+                state.released = true;
+                live.delete(id);
+
+                // Disposed with the page still showing the dialog: the page is inert until it is closed, and focus cannot go back to
+                // a control that is inert.
+                const dialog = document.getElementById(id);
+                if (dialog && dialog.tagName === "DIALOG" && dialog.open && typeof dialog.close === "function") {
+                    dialog.close();
+                }
+
+                restore(state.invoker);
+                return true;
+            },
+            openStatic: function (id) {
+                const dialog = typeof id === "string" ? document.getElementById(id) : null;
+                return present(dialog, null);
+            },
+            /* Whether any studio dialog is open as a modal right now - the shortcut sheet does not stack on one. */
+            isOpen: function () {
+                for (const state of live.values()) {
+                    if (state.dialog.isConnected && state.dialog.open) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+        };
+    })();
+
+    // The shortcut sheet's `?`, and the Close button of any dialog that carries one (1.2-A11Y). Both are plain markup hooks: the
+    // sheet is part of the shell, so it works before the circuit connects and after it goes. `?` is ignored where it is a character
+    // being typed - a text field, a textarea, a select, anything contenteditable, an ARIA textbox - and while a dialog is open.
+    (function () {
+        const nonText = ["button", "checkbox", "color", "file", "image", "radio", "range", "reset", "submit"];
+
+        function isTyping(target) {
+            if (!target || target.nodeType !== 1) {
+                return false;
+            }
+
+            if (target.isContentEditable) {
+                return true;
+            }
+
+            const field = target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='textbox'], [role='combobox'], [role='searchbox']");
+            if (!field) {
+                return false;
+            }
+
+            return field.tagName !== "INPUT" || nonText.indexOf((field.getAttribute("type") || "text").toLowerCase()) < 0;
+        }
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key !== "?" || event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented || event.isComposing) {
+                return;
+            }
+
+            if (isTyping(event.target) || window.martenStudio.dialog.isOpen() || document.querySelector("dialog.ms-modal[open]")) {
+                return;
+            }
+
+            if (window.martenStudio.dialog.openStatic("ms-shortcuts")) {
+                event.preventDefault();
+            }
+        });
+
+        document.addEventListener("click", function (event) {
+            const target = event.target;
+            const close = target && typeof target.closest === "function" ? target.closest("[data-ms-dialog-close]") : null;
+            const dialog = close ? close.closest("dialog") : null;
+            if (dialog && typeof dialog.close === "function") {
+                dialog.close();
+            }
+        });
+    })();
 
     // The JSON viewer has one copy menu for every row, so the stylesheet cannot name its anchor the way a
     // MenuButton's own markup does: the anchor is whichever key button asked for the menu last. It is given the

@@ -1,43 +1,47 @@
-@if (IsOpen)
-{
-    <div class="ms-confirm-overlay">
-        <div class="ms-confirm-dialog" role="alertdialog" aria-modal="true" aria-label="@Title">
-            <h3>@Title</h3>
-            <p>@Message</p>
-            @ChildContent
+@* A native modal (1.2-A11Y, ModalDialog): focus goes to the typed-confirmation box when there is one - the phrase is the safeguard,
+   and it is what the visitor does next - and to Cancel when there is not, because every confirm button here is a destructive one
+   (ms-button-danger). Esc is Cancel, Tab stays inside, and focus goes back to the control that opened the dialog. *@
+<ModalDialog IsOpen="IsOpen" Role="alertdialog" Label="@Title" OnCancel="CancelAsync">
+    <div class="ms-confirm-dialog">
+        <h3>@Title</h3>
+        <p>@Message</p>
+        @ChildContent
 
-            @if (RequiresTypedConfirmation)
-            {
-                @* Type-to-confirm. The point is not that it is hard to defeat - it is that the person has
-                   to read what they are about to change and write it out, which is what stops the wrong
-                   row being archived from a list of forty that look alike, and the wrong database having
-                   a migration applied to it. Where a service checks the same string again, this is the
-                   part a person reads, not the part that enforces it. *@
-                <label class="ms-confirm-label" for="ms-confirm-input">
-                    Type <code>@ConfirmationPhrase</code> to confirm.
-                </label>
-                <input id="ms-confirm-input"
-                       class="ms-input ms-input-mono ms-confirm-input"
-                       type="text"
-                       autocomplete="off"
-                       spellcheck="false"
-                       value="@typed"
-                       @oninput="OnTypedAsync" />
-            }
+        @if (RequiresTypedConfirmation)
+        {
+            @* Type-to-confirm. The point is not that it is hard to defeat - it is that the person has
+               to read what they are about to change and write it out, which is what stops the wrong
+               row being archived from a list of forty that look alike, and the wrong database having
+               a migration applied to it. Where a service checks the same string again, this is the
+               part a person reads, not the part that enforces it. *@
+            <label class="ms-confirm-label" for="ms-confirm-input">
+                Type <code>@ConfirmationPhrase</code> to confirm.
+            </label>
+            <input id="ms-confirm-input"
+                   class="ms-input ms-input-mono ms-confirm-input"
+                   type="text"
+                   autocomplete="off"
+                   spellcheck="false"
+                   value="@typed"
+                   data-ms-dialog-focus
+                   @oninput="OnTypedAsync" />
+        }
 
-            <div class="ms-confirm-actions">
-                <button type="button"
-                        class="ms-button ms-button-danger"
-                        disabled="@(!CanConfirm)"
-                        title="@ConfirmBlockedReason"
-                        @onclick="ConfirmAsync">
-                    @ConfirmText
-                </button>
-                <button type="button" class="ms-button" @onclick="CancelAsync">Cancel</button>
-            </div>
+        <div class="ms-confirm-actions">
+            <button type="button"
+                    class="ms-button ms-button-danger"
+                    disabled="@(!CanConfirm)"
+                    title="@ConfirmBlockedReason"
+                    @onclick="ConfirmAsync">
+                @ConfirmText
+            </button>
+            <button type="button"
+                    class="ms-button"
+                    data-ms-dialog-focus="@(RequiresTypedConfirmation ? null : "true")"
+                    @onclick="CancelAsync">Cancel</button>
         </div>
     </div>
-}
+</ModalDialog>
 
 @code {
     private string typed = string.Empty;

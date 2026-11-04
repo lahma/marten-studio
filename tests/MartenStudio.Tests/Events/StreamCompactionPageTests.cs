@@ -149,8 +149,10 @@ public class StreamCompactionPageTests
 
         await page.Find(CompactButton).ClickAsync(new());
 
-        IElement dialog = page.Find(".ms-confirm-dialog");
+        // The accessible name is the native <dialog>'s (1.2-A11Y); the panel inside is only its look.
+        IElement dialog = page.Find("dialog.ms-modal");
         dialog.GetAttribute("aria-label").Should().Be("Compact this stream?");
+        dialog.QuerySelector(".ms-confirm-dialog").Should().NotBeNull();
 
         page.FindAll(".ms-compact-fact").Select(static x => x.TextContent)
             .Should().Equal(StreamCompactionRules.WhatHappens(plan));

@@ -1,0 +1,132 @@
+@using Microsoft.JSInterop
+@using PostgresStudio.Services.Live
+@implements IAsyncDisposable
+@inject IJSRuntime JsRuntime
+
+@*
+    The one native <dialog> every studio dialog stands on (1.2-A11Y): ConfirmDialog, the document write preview.
+
+    The server renders it with the `open` attribute, which is the overlay the studio always had (`.ms-modal` draws it); once the
+    circuit is up, studio.js upgrades it to a real modal with showModal() - the page behind it goes inert, Tab stays inside, focus
+    moves to the element marked `data-ms-dialog-focus`, Esc runs OnCancel, and closing puts focus back on the control that opened
+    it. Nothing here waits for the upgrade or depends on it: a page without the script, a browser without showModal() and a
+    circuit that has gone all keep the overlay (hard rule 15: interop loss is a value, not an error).
+
+    The dialog is an element the server adds and removes, so "closed" is "not rendered" and there is never a closed <dialog> in
+    the page for a test or a screen reader to find.
+*@
+
+@if (IsOpen)
+{
+    <dialog id="@dialogId"
+            class="@HostClass"
+            role="@Role"
+            aria-modal="true"
+            aria-label="@Label"
+            open>
+        @ChildContent
+    </dialog>
+}
+
+@code {
+    private readonly string dialogId = "ms-dialog-" + Guid.NewGuid().ToString("N");
+    private DotNetObjectReference<ModalDialog>? self;
+    private bool presented;
+
+    /// <summary>Whether the dialog is rendered (and, once the browser has the page, shown as a modal).</summary>
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    /// <summary>The dialog's accessible name.</summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary><c>dialog</c>, or <c>alertdialog</c> for a confirmation of something that cannot be taken back.</summary>
+    [Parameter]
+    public string Role { get; set; } = "dialog";
+
+    /// <summary>Classes added to the <c>ms-modal ms-confirm-overlay</c> host, for a dialog that needs its own width or spacing.</summary>
+    [Parameter]
+    public string? CssClass { get; set; }
+
+    /// <summary>
+    /// Raised when the visitor presses Esc. The dialog is not closed here: the owner closes it, exactly as it does for its own
+    /// Cancel button, which is the point - Esc <em>is</em> Cancel.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>
+    /// What the dialog holds. The element to focus first carries <c>data-ms-dialog-focus</c>: the primary button when the action
+    /// is safe, Cancel when it is destructive. With none marked, the browser's own choice (the first focusable element) stands.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private string HostClass => string.IsNullOrWhiteSpace(CssClass)
+        ? "ms-modal ms-confirm-overlay"
+        : "ms-modal ms-confirm-overlay " + CssClass;
+
+    /// <summary>Esc, from the browser (studio.js): runs the owner's Cancel.</summary>
+    [JSInvokable]
+    public async Task OnEscapeAsync()
+    {
+        await InvokeAsync(() => OnCancel.InvokeAsync());
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (IsOpen && !presented)
+        {
+            presented = true;
+            self ??= DotNetObjectReference.Create(this);
+
+            try
+            {
+                await JsRuntime.InvokeAsync<bool>("martenStudio.dialog.present", dialogId, self);
+            }
+            catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+            {
+                // No script, no showModal() or no circuit: the overlay the server rendered is what the visitor has.
+            }
+        }
+        else if (!IsOpen && presented)
+        {
+            presented = false;
+            await ReleaseAsync();
+        }
+    }
+
+    /// <summary>
+    /// Gives the browser's dialog back, and <em>always</em> the <see cref="DotNetObjectReference" />: it is a rooted entry in the
+    /// circuit's interop registry, so it is released in a <c>finally</c> rather than after the <c>catch</c>.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (presented)
+            {
+                presented = false;
+                await ReleaseAsync();
+            }
+        }
+        finally
+        {
+            self?.Dispose();
+            self = null;
+        }
+    }
+
+    private async Task ReleaseAsync()
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.dialog.release", dialogId);
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit is already gone, which is the usual way a page is disposed.
+        }
+    }
+}

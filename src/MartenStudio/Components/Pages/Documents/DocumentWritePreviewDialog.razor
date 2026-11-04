@@ -16,13 +16,15 @@
     offers no preview it is one line saying so. It is advisory: the save is still the studio's.
 *@
 
-@if (IsOpen && Preview is { } preview)
+@* A native modal (1.2-A11Y, ModalDialog). Focus starts on the safe choice: Save when saving drops nothing and Marten's preview does not
+   disagree, and "Back to the editor" when either does (the Save button is then the danger one). Esc is "Back to the editor". *@
+<ModalDialog IsOpen="@(IsOpen && Preview is not null)"
+             Label="What saving this document would do"
+             CssClass="ms-write-preview-overlay"
+             OnCancel="OnCancel">
+@if (Preview is { } preview)
 {
-    <div class="ms-confirm-overlay ms-write-preview-overlay">
-        <div class="ms-confirm-dialog ms-write-preview"
-             role="dialog"
-             aria-modal="true"
-             aria-label="What saving this document would do">
+        <div class="ms-confirm-dialog ms-write-preview">
             <h3>What saving would do</h3>
 
             <section class="ms-write-preview-section ms-write-preview-loss">
@@ -84,12 +86,12 @@
             }
 
             <div class="ms-write-preview-actions">
-                <button type="button" class="ms-button" @onclick="OnCancel">Back to the editor</button>
-                <button type="button" class="@ConfirmClass" @onclick="OnConfirm">@ConfirmLabel</button>
+                <button type="button" class="ms-button" data-ms-dialog-focus="@(Safe ? null : "true")" @onclick="OnCancel">Back to the editor</button>
+                <button type="button" class="@ConfirmClass" data-ms-dialog-focus="@(Safe ? "true" : null)" @onclick="OnConfirm">@ConfirmLabel</button>
             </div>
         </div>
-    </div>
 }
+</ModalDialog>
 
 @code {
     /// <summary>Whether the dialog is open.</summary>
@@ -133,7 +135,8 @@
         }
     }
 
-    private string ConfirmClass => Preview is { HasDrops: true } or { MartenCheck.IsDisagreement: true }
-        ? "ms-button ms-button-danger"
-        : "ms-button ms-button-primary";
+    /// <summary>Whether saving drops nothing and Marten's own preview agrees: the Save button is the primary one, and the one focused first.</summary>
+    private bool Safe => Preview is not { HasDrops: true } and not { MartenCheck.IsDisagreement: true };
+
+    private string ConfirmClass => Safe ? "ms-button ms-button-primary" : "ms-button ms-button-danger";
 }
