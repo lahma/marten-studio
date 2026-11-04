@@ -88,7 +88,7 @@ internal sealed class FakeStudioScopeCatalog : IStudioScopeCatalog
     {
         if (DescribeGate is { } gate)
         {
-            await gate.Task;
+            await gate.Task.Bounded();
         }
 
         return Facts.TryGetValue(storeKey, out StoreScopeFacts? facts) ? facts : StoreScopeFacts.None;

@@ -31,7 +31,7 @@ public class StudioSnapshotCacheTests
             .. Enumerable.Range(0, 8).Select(_ => cache.GetAsync("scope|projections", async _ =>
             {
                 Interlocked.Increment(ref calls);
-                return await gate.Task;
+                return await gate.Task.Bounded();
             }, Token))
         ];
 
@@ -148,7 +148,7 @@ public class StudioSnapshotCacheTests
         Task<int> patient = cache.GetAsync("k", async token =>
         {
             sawCancellation = token.CanBeCanceled;
-            return await gate.Task;
+            return await gate.Task.Bounded();
         }, CancellationToken.None);
 
         Task<int> impatient = cache.GetAsync("k", _ => Task.FromResult(-1), leaving.Token);

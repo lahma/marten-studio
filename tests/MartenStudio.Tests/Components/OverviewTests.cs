@@ -8,6 +8,7 @@ using MartenStudio.Components.Pages;
 using MartenStudio.Services;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Events;
+using MartenStudio.Tests.Support;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Components;
@@ -711,31 +712,47 @@ public class OverviewTests
     {
         using StudioComponentContext context = await TwoStoreContextAsync();
 
+        // No poll tick while the test runs: a tick is a third run, and on a loaded machine the default interval passes before the
+        // test is done (the feed count below is of the two runs the test makes).
+        context.Options.RefreshInterval = TimeSpan.FromMinutes(5);
+
         var page = context.Render<Overview>();
         page.StatCardValue("Streams").Should().Be("~1,200");
 
-        // The next counts read is held open. The run it belongs to is the one for the other store.
-        TaskCompletionSource held = new();
-        context.EventData.CountsGates.Enqueue(held);
+        // The other store's counts read is held open, and the test waits until that read has been asked. Which of two overlapping
+        // runs reaches the service first is the scheduler's, and a gate that "the next read" takes could be taken by the run for
+        // the scope the visitor comes back to - which this test then waited on for ever (1.2-HANG).
+        TaskCompletionSource held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        context.EventData.CountsGates["other"] = held;
 
-        Task movedAway = context.State.SetScopeAsync("other", null, null, Xunit.TestContext.Current.CancellationToken);
-        movedAway.IsCompleted.Should().BeFalse("the other store's counts read is being held open");
+        try
+        {
+            Task movedAway = context.State.SetScopeAsync("other", null, null, Xunit.TestContext.Current.CancellationToken);
 
-        // What the store the visitor came back to reports, which is a different number.
-        context.EventData.Counts = new EventStoreCounts(
-            EventStoreCount.Estimate(77), EventStoreCount.Estimate(88), TablesExist: true, Error: null);
+            await context.EventData.CountsReadStarted("other").Bounded();
+            movedAway.IsCompleted.Should().BeFalse("the other store's counts read is being held open");
 
-        await context.State.SetScopeAsync("default", null, null, Xunit.TestContext.Current.CancellationToken);
+            // What the store the visitor came back to reports, which is a different number.
+            context.EventData.Counts = new EventStoreCounts(
+                EventStoreCount.Estimate(77), EventStoreCount.Estimate(88), TablesExist: true, Error: null);
 
-        page.StatCardValue("Streams").Should().Be("~77", "the run for the scope the selector is on landed");
+            await context.State.SetScopeAsync("default", null, null, Xunit.TestContext.Current.CancellationToken).Bounded();
 
-        // Now the abandoned run finishes, holding the first store's numbers.
-        held.SetResult();
-        await movedAway;
+            page.StatCardValue("Streams").Should().Be("~77", "the run for the scope the selector is on landed");
 
-        page.StatCardValue("Streams").Should().Be("~77", "the abandoned run must not put the old scope's numbers back");
-        context.EventData.FeedRequests.Should().HaveCount(2,
-            "the abandoned run stopped where it noticed rather than reading five more regions");
+            // Now the abandoned run finishes, holding the first store's numbers.
+            held.SetResult();
+            await movedAway.Bounded();
+
+            page.StatCardValue("Streams").Should().Be("~77", "the abandoned run must not put the old scope's numbers back");
+            context.EventData.FeedRequests.Should().HaveCount(2,
+                "the abandoned run stopped where it noticed rather than reading five more regions");
+        }
+        finally
+        {
+            // A failed assertion above must not leave the held read waiting.
+            held.TrySetResult();
+        }
     }
 
     /// <summary>A context with a settled scope and a store for the sections below the tiles.</summary>

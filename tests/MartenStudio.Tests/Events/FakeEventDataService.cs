@@ -86,22 +86,40 @@ internal sealed partial class FakeEventDataService : IEventDataService
         EventStoreCount.Estimate(1_200), EventStoreCount.Estimate(9_400), TablesExist: true, Error: null);
 
     /// <summary>
-    /// Gates, one per counts read: a call takes the next one off the queue and waits on it before it
-    /// answers. A call made when the queue is empty answers immediately.
+    /// Gates, one per store key: the first counts read for that store takes its gate and waits on it
+    /// before it answers. A read for a store with no gate answers immediately.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// What this is for is the Overview's scope race. Two runs of <c>LoadScopeRegionsAsync</c> overlap
     /// whenever the selector moves while a read is in flight, and the only way to test <em>which</em> one
     /// lands is to decide the order they finish in. <see cref="Counts" /> is captured when the call is
     /// made rather than when it returns, so a test can change the answer while a call is held and the
     /// held call still returns what the scope it was asked for would have reported.
+    /// </para>
     /// <para>
-    /// Concurrent, because the thing it models is two overlapping reads: the held call and the one that
-    /// overtakes it run on different threads, and a <c>Queue&lt;T&gt;</c> being read by both is a fake
-    /// whose own data structure is the race the test is trying to arrange.
+    /// Keyed by the store, not a queue of "the next read": which of two overlapping runs reaches the fake
+    /// first is the scheduler's to decide, and on a loaded machine the run for the scope the visitor just
+    /// came back to could take the gate meant for the one it outran - and the test then waited on a gate
+    /// only its own later line released, for ever (1.2-HANG). Concurrent, because the held call and the
+    /// one that overtakes it run on different threads. A test waits for the held read to be asked
+    /// (<see cref="CountsReadStarted" />) before it moves the scope on, and releases its gate in a
+    /// <c>finally</c>.
     /// </para>
     /// </remarks>
-    public ConcurrentQueue<TaskCompletionSource> CountsGates { get; } = new();
+    public ConcurrentDictionary<string, TaskCompletionSource> CountsGates { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> countsReadsStarted = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Completes when a counts read for <paramref name="storeKey" /> has been asked - and, if a gate is set for it, is about to wait
+    /// on it - so a test waits on the read it holds rather than on a poll of the page.
+    /// </summary>
+    /// <param name="storeKey">The store whose read to wait for.</param>
+    public Task CountsReadStarted(string storeKey) => CountsReadSignal(storeKey).Task;
+
+    private TaskCompletionSource CountsReadSignal(string storeKey) =>
+        countsReadsStarted.GetOrAdd(storeKey, static _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
     /// <summary>What the Overview's streams panel is given.</summary>
     public RecentStreams Recent { get; set; } = RecentStreams.Empty;
@@ -227,7 +245,11 @@ internal sealed partial class FakeEventDataService : IEventDataService
     {
         EventStoreCounts answer = Counts;
 
-        if (CountsGates.TryDequeue(out TaskCompletionSource? gate))
+        // The gate is taken before the signal, so a test that sees the signal knows its gate is the one the read waits on.
+        CountsGates.TryRemove(scope.StoreKey, out TaskCompletionSource? gate);
+        CountsReadSignal(scope.StoreKey).TrySetResult();
+
+        if (gate is not null)
         {
             // With the token: a held gate that nobody completes must end when the caller's region is
             // cancelled, the way a real read does, rather than hanging the test host until it is killed.

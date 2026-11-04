@@ -1,3 +1,5 @@
+using MartenStudio.Tests.Support;
+
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using PostgresStudio.Services;
@@ -145,7 +147,7 @@ public class HealthSweepCacheTests
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         harness.Script.Gather["K90"] = async (_, _) =>
         {
-            await release.Task;
+            await release.Task.Bounded();
             return new ScriptedFacts("K90", [], null);
         };
 
@@ -173,7 +175,7 @@ public class HealthSweepCacheTests
         TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         harness.Script.Gather["K90"] = async (_, _) =>
         {
-            await release.Task;
+            await release.Task.Bounded();
             return new ScriptedFacts("K90", [], null);
         };
 

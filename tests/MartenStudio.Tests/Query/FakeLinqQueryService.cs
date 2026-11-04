@@ -1,4 +1,5 @@
 using MartenStudio.Services.Query;
+using MartenStudio.Tests.Support;
 using PostgresStudio.Services;
 
 namespace MartenStudio.Tests.Query;
@@ -46,7 +47,7 @@ internal sealed class FakeLinqQueryService : ILinqQueryService
 
         if (Hold is { } hold)
         {
-            await hold.Task;
+            await hold.Task.Bounded();
         }
 
         if (Failure is { } failure)

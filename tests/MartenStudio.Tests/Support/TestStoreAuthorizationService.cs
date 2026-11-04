@@ -43,7 +43,7 @@ public sealed class TestStoreAuthorizationService : IAuthorizationService
     {
         if (Gate is not null)
         {
-            await Gate.Task;
+            await Gate.Task.Bounded();
         }
 
         return resource is MartenStoreResource store && rule(store)
@@ -60,7 +60,7 @@ public sealed class TestStoreAuthorizationService : IAuthorizationService
 
         if (Gate is not null)
         {
-            await Gate.Task;
+            await Gate.Task.Bounded();
         }
 
         return resource is MartenStoreResource allowed && rule(allowed)

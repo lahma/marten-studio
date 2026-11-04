@@ -40,7 +40,7 @@ public class ShapeCheckCacheTests : IDisposable
 
         if (gate is not null)
         {
-            await gate;
+            await gate.Bounded();
         }
 
         return ShapeCheckResult.NotChecked("order", "run " + counter.Value, clock.GetUtcNow());
@@ -166,7 +166,7 @@ public class ShapeCheckCacheTests : IDisposable
         Func<CancellationToken, Task<ShapeCheckResult>> failing = async _ =>
         {
             Interlocked.Increment(ref reads);
-            await gate.Task;
+            await gate.Task.Bounded();
             return ShapeCheckResult.Failed("order", "busy", clock.GetUtcNow(), TimeSpan.Zero, []);
         };
 

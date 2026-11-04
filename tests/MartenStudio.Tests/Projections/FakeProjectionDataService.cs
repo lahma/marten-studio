@@ -1,6 +1,7 @@
 using JasperFx.Events.Projections;
 
 using MartenStudio.Services.Projections;
+using MartenStudio.Tests.Support;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 
@@ -438,7 +439,7 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
 
         if (SubscribeGate is { } gate)
         {
-            await gate.Task;
+            await gate.Task.Bounded();
         }
 
         return new Lease(this);

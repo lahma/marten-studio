@@ -34,7 +34,7 @@ public class StudioOperationTrackerTests
             async _ =>
             {
                 started.TrySetResult();
-                await gate.Task;
+                await gate.Task.Bounded();
             });
 
         handle.Started.Should().BeTrue();
@@ -161,13 +161,13 @@ public class StudioOperationTrackerTests
         OperationStart first = Start(tracker, "DailySales", async _ =>
         {
             Interlocked.Increment(ref runs);
-            await gate.Task;
+            await gate.Task.Bounded();
         });
 
         OperationStart second = Start(tracker, "DailySales", async _ =>
         {
             Interlocked.Increment(ref runs);
-            await gate.Task;
+            await gate.Task.Bounded();
         });
 
         first.Started.Should().BeTrue();

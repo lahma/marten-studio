@@ -4,6 +4,7 @@ using MartenStudio.Services.Health.Checks;
 using PostgresStudio.Services.Health.Export;
 using MartenStudio.Services.Projections;
 using MartenStudio.Tests.Projections;
+using MartenStudio.Tests.Support;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -790,7 +791,7 @@ public class HealthExportTests
         harness.Script.Gather["K90"] = async (_, _) =>
         {
             entered.TrySetResult();
-            await release.Task;
+            await release.Task.Bounded();
             return new ScriptedFacts("K90", [], null);
         };
 
