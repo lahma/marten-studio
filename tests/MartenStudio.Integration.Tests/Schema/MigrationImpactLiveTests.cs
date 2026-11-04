@@ -139,6 +139,103 @@ public class MigrationImpactLiveTests(PostgresFixture postgres)
     }
 
     /// <summary>
+    /// The sessions read counts this database only: a session in another database that holds a lock on a table of the same
+    /// schema and name is not counted. (The read filters <c>pg_locks.database</c>; a join on names alone would count it.)
+    /// </summary>
+    [PostgresFact]
+    public async Task A_session_in_another_database_holding_a_lock_on_a_same_named_table_is_not_counted()
+    {
+        await using SchemaFixture schema = await StartPopulatedAsync("apply_impact_otherdb");
+        SchemaFixture.StudioHost drifted = schema.Drifted(static options => options.Capabilities.ViewDatabaseActivity = true);
+        string other = "apply_impact_other_" + Guid.NewGuid().ToString("N")[..8];
+
+        await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
+        {
+            await ExecuteAsync(admin, $"create database {other}");
+        }
+
+        try
+        {
+            var builder = new NpgsqlConnectionStringBuilder(postgres.ConnectionString) { Database = other, Pooling = false };
+            await using var holder = new NpgsqlConnection(builder.ConnectionString);
+            await holder.OpenAsync(Token);
+            await ExecuteAsync(holder, $"create schema {schema.Schema}");
+            await ExecuteAsync(holder, $"create table {schema.Schema}.{Customers} (id int)");
+
+            await using NpgsqlTransaction holding = await holder.BeginTransactionAsync(Token);
+            await ExecuteAsync(holder, $"lock table {schema.Schema}.{Customers} in access share mode");
+
+            // Anti-vacuity: the other database really holds that lock, on the table of that name.
+            await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
+            {
+                await using var held = new NpgsqlCommand(
+                    """
+                    select count(*) from pg_locks l join pg_database d on d.oid = l.database
+                    where d.datname = @other and l.locktype = 'relation' and l.mode = 'AccessShareLock' and l.granted
+                      and l.pid <> pg_backend_pid()
+                    """,
+                    admin);
+                held.Parameters.AddWithValue("other", other);
+                ((long) (await held.ExecuteScalarAsync(Token))!).Should().BePositive("the other database's session holds a lock");
+            }
+
+            MigrationPreview preview = await drifted.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+
+            preview.Impact.Tables.Should().ContainSingle().Which.Sessions!.Holding.Should().Be(0, "that session is in another database");
+
+            await holding.RollbackAsync(Token);
+        }
+        finally
+        {
+            await using NpgsqlConnection admin = await postgres.OpenAsync(Token);
+            await ExecuteAsync(admin, $"drop database if exists {other} with (force)");
+        }
+    }
+
+    /// <summary>
+    /// Under a narrowed <c>SqlConsoleRole</c> the read cannot see another role's session state, and says so: the count is still right
+    /// and the state is "state not visible".
+    /// </summary>
+    [PostgresFact]
+    public async Task A_narrowed_console_role_counts_the_session_and_says_its_state_is_not_visible()
+    {
+        await using SchemaFixture schema = await StartPopulatedAsync("apply_impact_role");
+        string role = "ms_apply_role_" + Guid.NewGuid().ToString("N")[..8];
+
+        await using (NpgsqlConnection admin = await postgres.OpenAsync(Token))
+        {
+            await ExecuteAsync(admin, $"create role {role} nologin");
+        }
+
+        try
+        {
+            SchemaFixture.StudioHost drifted = schema.Drifted(options =>
+            {
+                options.Capabilities.ViewDatabaseActivity = true;
+                options.SqlConsoleRole = role;
+            });
+
+            await using NpgsqlConnection holder = await postgres.OpenAsync(Token);
+            await using NpgsqlTransaction holding = await holder.BeginTransactionAsync(Token);
+            await ExecuteAsync(holder, $"lock table {schema.Schema}.{Customers} in access share mode");
+
+            MigrationPreview preview = await drifted.SchemaAsync(x => x.PreviewAsync(SchemaFixture.Scope));
+
+            preview.Impact.SessionsNotice.Should().BeNull();
+            TableSessions sessions = preview.Impact.Tables.Should().ContainSingle().Subject.Sessions!;
+            sessions.Holding.Should().Be(1, "pg_locks is readable by every role");
+            sessions.Summary.Should().Be("1 session holds a lock (1 state not visible)");
+
+            await holding.RollbackAsync(Token);
+        }
+        finally
+        {
+            await using NpgsqlConnection admin = await postgres.OpenAsync(Token);
+            await ExecuteAsync(admin, $"drop role if exists {role}");
+        }
+    }
+
+    /// <summary>
     /// D27, measured: the two reads open no table. They finish while another session holds the table in <c>ACCESS EXCLUSIVE</c> mode,
     /// with a short <c>lock_timeout</c>, and this backend holds no lock on any relation of the schema afterwards. The held lock is also
     /// what the sessions read finds.

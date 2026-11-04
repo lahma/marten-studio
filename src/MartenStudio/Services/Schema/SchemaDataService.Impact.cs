@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using Marten.Storage;
+
 using MartenStudio.Internal.Sql;
 
 using Microsoft.Extensions.Logging;
@@ -66,7 +68,8 @@ internal sealed partial class SchemaDataService
                         resolved,
                         (connection, transaction, timeout, token) =>
                             MigrationImpactQueries.ReadFootprintsAsync(connection, transaction, relations, timeout, token),
-                        cancellationToken)
+                        cancellationToken,
+                        ConnectionUsage.ReadWrite)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -93,7 +96,8 @@ internal sealed partial class SchemaDataService
                         resolved,
                         (connection, transaction, timeout, token) =>
                             MigrationImpactQueries.ReadSessionsAsync(connection, transaction, tables, timeout, token),
-                        cancellationToken)
+                        cancellationToken,
+                        ConnectionUsage.ReadWrite)
                     .ConfigureAwait(false);
 
                 int counted = sessions.Sum(static x => x.Sessions);

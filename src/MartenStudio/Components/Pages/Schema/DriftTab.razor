@@ -270,6 +270,8 @@ else
                     <strong>What applying this will lock and rewrite.</strong> The statements below run against tables that already
                     exist. Rows and sizes are estimates from the catalog's statistics (<code>pg_class</code>), as of the last
                     <code>VACUUM</code> or <code>ANALYZE</code> or index build - nothing was counted or locked to read them.
+                    Every <code>ALTER TABLE</code> and partition create on an existing table is listed; other statements
+                    (functions, sequences, new tables and their indexes) lock nothing that already holds data.
                 </p>
                 @if (impact.Notice is { Length: > 0 } impactNotice)
                 {

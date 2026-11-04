@@ -163,6 +163,29 @@ public class ActivityViewsOffThePollPathTests
     /// the Activity gate - the capability, then the write policy with the capability named - before it opens a connection for it.
     /// The Preview button is the only thing that reaches it.
     /// </summary>
+    /// <summary>
+    /// 1.2-APPLY-FIX: both of the migration notes' reads - the table statistics and the sessions - open the primary
+    /// (<c>ConnectionUsage.ReadWrite</c>, inside the read-only transaction), because the apply runs there and a standby's locks and
+    /// sessions are another server's. <c>InSessionAsync</c> defaults to <c>Read</c> for the Schema tabs, so each call here names it.
+    /// </summary>
+    [Fact]
+    public void The_migration_notes_reads_open_the_primary_and_not_a_standby()
+    {
+        string impact = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "Services", "Schema", "SchemaDataService.Impact.cs")));
+        string service = SourceScanner.StripCommentsAndStrings(
+            File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "Services", "Schema", "SchemaDataService.cs")));
+
+        int sessionCalls = System.Text.RegularExpressions.Regex.Count(impact, @"InSessionAsync\s*\(", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(5));
+        int primaryCalls = System.Text.RegularExpressions.Regex.Count(impact, @"ConnectionUsage\.ReadWrite", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(5));
+
+        sessionCalls.Should().Be(2, "the footprint read and the sessions read");
+        primaryCalls.Should().Be(sessionCalls, "every one of the impact reads names the primary");
+        impact.Should().NotContain("ConnectionUsage.Read)", "a Read usage would be a standby when the host opts in");
+
+        service.Should().Contain("MartenStudioDatabase.CreateConnection(resolved.Database, usage)", "InSessionAsync opens the usage it is given");
+    }
+
     [Fact]
     public void The_migration_notes_sessions_read_is_called_only_behind_the_activity_gate()
     {

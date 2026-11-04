@@ -184,6 +184,174 @@ public class MigrationImpactTests
     }
 
     // ------------------------------------------------------------------------------------------------
+    // 1.2-APPLY-FIX: several statements on one line, and the shapes beyond the destructive ones
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Marten V9.57.0's <c>DuplicatedFieldColumn.AddColumnSql</c>: Weasel's <c>alter table … add column …;</c> with the backfilling
+    /// <c>update</c> appended on the same line, which Weasel sends as one command.
+    /// </summary>
+    private const string AddedDuplicatedField =
+        "alter table studio.mt_doc_customer add column email varchar NULL;update studio.mt_doc_customer set \"email\" = CAST(d.data ->> 'Email' as varchar);";
+
+    /// <summary>Marten V9.57.0's <c>DuplicatedFieldColumn.AlterColumnTypeSql</c>: drop, add, fill, on one line.</summary>
+    private const string ChangedDuplicatedField =
+        "alter table studio.mt_doc_customer drop column email;alter table studio.mt_doc_customer add column email varchar NULL;update studio.mt_doc_customer set \"email\" = CAST(d.data ->> 'Email' as varchar);";
+
+    [Fact]
+    public void An_added_duplicated_field_is_listed_and_holds_the_lock_through_the_backfill()
+    {
+        TableLockStatement statement = MigrationRisk.LockStatements(AddedDuplicatedField).Should().ContainSingle().Subject;
+
+        statement.Kind.Should().Be(MigrationRisk.AddsDuplicatedColumnKind);
+        statement.Lock.Should().Be(TableLockMode.AccessExclusive);
+        statement.Rewrite.Should().Be(TableRewrite.Yes);
+        statement.Effect.Should().Be("updates every row to fill the duplicated column while it holds the lock");
+        (statement.Schema, statement.Name).Should().Be(("studio", "mt_doc_customer"));
+    }
+
+    [Fact]
+    public void A_changed_duplicated_field_is_a_type_change_that_rewrites_every_row_and_is_one_statement()
+    {
+        TableLockStatement statement = MigrationRisk.LockStatements(ChangedDuplicatedField).Should().ContainSingle().Subject;
+
+        statement.Kind.Should().Be(MigrationRisk.ChangesColumnTypeKind);
+        statement.Lock.Should().Be(TableLockMode.AccessExclusive);
+        statement.Rewrite.Should().Be(TableRewrite.Yes, "the same command updates every row while it holds the lock");
+        statement.Statement.Should().Contain("update studio.mt_doc_customer");
+        MigrationRisk.Find(ChangedDuplicatedField).Should().ContainSingle("Find still reports the drop on this line");
+    }
+
+    [Fact]
+    public void A_standalone_update_is_never_a_lock_statement_and_a_dropped_column_is_not_a_changed_one()
+    {
+        MigrationRisk.LockStatements("update studio.mt_doc_customer set \"email\" = CAST(d.data ->> 'Email' as varchar);").Should().BeEmpty();
+        MigrationRisk.LockStatements("    UPDATE studio.mt_doc_customer SET x = 1;").Should().BeEmpty();
+
+        MigrationRisk.LockStatements("alter table studio.mt_doc_customer drop column email;").Should().ContainSingle()
+            .Which.Kind.Should().Be(MigrationRisk.DropsColumnKind);
+
+        // An update of another table does not backfill this one.
+        MigrationRisk.LockStatements("alter table studio.a add column c int NULL;update studio.b set c = 1;").Should().ContainSingle()
+            .Which.Kind.Should().Be(MigrationRisk.AltersTableKind);
+    }
+
+    [Fact]
+    public void Semicolons_inside_quotes_and_dollar_quotes_do_not_split_a_line()
+    {
+        MigrationRisk.SplitStatements("a;b;;  c ;").Should().Equal("a", "b", "c");
+        MigrationRisk.SplitStatements("update t set x = 'a;b';select \"c;d\";select $$e;f$$;select $tag$g;h$tag$")
+            .Should().Equal("update t set x = 'a;b'", "select \"c;d\"", "select $$e;f$$", "select $tag$g;h$tag$");
+        MigrationRisk.SplitStatements("select $1;select 'it''s;ok'").Should().Equal("select $1", "select 'it''s;ok'");
+    }
+
+    [Fact]
+    public void A_column_added_with_a_volatile_default_rewrites_the_table_and_a_plain_add_is_the_catch_all()
+    {
+        // Marten's VersionColumn: DefaultExpression = "(md5(random()::text || clock_timestamp()::text)::uuid)".
+        TableLockStatement version = MigrationRisk.LockStatements(
+                "alter table studio.mt_doc_customer add column mt_version uuid NOT NULL default (md5(random()::text || clock_timestamp()::text)::uuid);")
+            .Should().ContainSingle().Subject;
+
+        version.Kind.Should().Be(MigrationRisk.AddsVolatileColumnKind);
+        version.Lock.Should().Be(TableLockMode.AccessExclusive);
+        version.Rewrite.Should().Be(TableRewrite.Yes);
+
+        TableLockStatement plain = MigrationRisk.LockStatements("alter table studio.mt_doc_customer add column note text NULL;")
+            .Should().ContainSingle().Subject;
+
+        plain.Kind.Should().Be(MigrationRisk.AltersTableKind);
+        plain.Rewrite.Should().Be(TableRewrite.Unknown);
+        plain.Lock.Should().Be(TableLockMode.AccessExclusive);
+        plain.RewriteText.Should().Contain("does not judge");
+    }
+
+    [Fact]
+    public void Set_not_null_is_a_full_scan_under_access_exclusive_and_set_default_is_the_catch_all()
+    {
+        // Weasel's TableColumn.WriteDriftCorrections.
+        TableLockStatement notNull = MigrationRisk.LockStatements("alter table studio.mt_doc_customer alter column email set not null;")
+            .Should().ContainSingle().Subject;
+
+        notNull.Kind.Should().Be(MigrationRisk.SetsNotNullKind);
+        notNull.Lock.Should().Be(TableLockMode.AccessExclusive);
+        notNull.Effect.Should().Contain("scans the whole table");
+
+        MigrationRisk.LockStatements("alter table studio.mt_doc_customer alter column email set default 'x';").Should().ContainSingle()
+            .Which.Kind.Should().Be(MigrationRisk.AltersTableKind);
+        MigrationRisk.LockStatements("alter table studio.mt_doc_customer alter column email drop not null;").Should().ContainSingle()
+            .Which.Kind.Should().Be(MigrationRisk.AltersTableKind);
+    }
+
+    [Fact]
+    public void An_added_foreign_key_over_three_lines_takes_share_row_exclusive_on_both_tables()
+    {
+        // Weasel 9.48.0 ForeignKey.WriteAddStatement: three WriteLine/Write calls, then ";" and a newline.
+        const string sql =
+            """
+            ALTER TABLE studio.mt_event_tag_account
+            ADD CONSTRAINT fk_tag_stream FOREIGN KEY(stream_id)
+            REFERENCES studio.mt_streams(id) ON DELETE CASCADE;
+            """;
+
+        IReadOnlyList<TableLockStatement> found = MigrationRisk.LockStatements(sql);
+
+        found.Select(static x => x.Kind).Should().Equal(MigrationRisk.AddsForeignKeyKind, MigrationRisk.ReferencedByForeignKeyKind);
+        found.Should().OnlyContain(static x => x.Lock == TableLockMode.ShareRowExclusive && x.Rewrite == TableRewrite.No);
+        found.Select(static x => x.Name).Should().Equal("mt_event_tag_account", "mt_streams");
+        found[0].LockName.Should().Be("SHARE ROW EXCLUSIVE");
+        MigrationRisk.Advice(found).Should().BeEmpty("a SHARE ROW EXCLUSIVE lock lets reads go on");
+    }
+
+    [Fact]
+    public void A_partition_created_on_an_existing_parent_takes_access_exclusive_on_the_parent_and_on_a_new_one_nothing()
+    {
+        // Weasel 9.48.0 ListPartition, RangePartition and HashPartition .WriteCreateStatement.
+        const string sql =
+            """
+            CREATE TABLE IF NOT EXISTS studio.mt_doc_invoice_acme partition of studio.mt_doc_invoice for values in ('acme');
+            CREATE TABLE IF NOT EXISTS studio.mt_events_2026 PARTITION OF studio.mt_events FOR VALUES FROM ('2026-01-01') TO ('2027-01-01');
+            create table if not exists studio.mt_streams_0 partition of studio.mt_streams for values with (modulus 3, remainder 0);
+            CREATE TABLE studio.mt_new (id uuid not null) partition by list (tenant_id);
+            create table if not exists studio.mt_new_a partition of studio.mt_new for values in ('a');
+            """;
+
+        IReadOnlyList<TableLockStatement> found = MigrationRisk.LockStatements(sql);
+
+        found.Select(static x => x.Name).Should().Equal("mt_doc_invoice", "mt_events", "mt_streams");
+        found.Should().OnlyContain(static x => x.Kind == MigrationRisk.AddsPartitionKind && x.Lock == TableLockMode.AccessExclusive);
+    }
+
+    [Fact]
+    public void A_renamed_primary_key_constraint_is_access_exclusive_without_a_rewrite()
+    {
+        TableLockStatement statement = MigrationRisk.LockStatements(
+                "alter table studio.mt_doc_customer rename constraint pk_old to pkey_mt_doc_customer_id;")
+            .Should().ContainSingle().Subject;
+
+        statement.Kind.Should().Be(MigrationRisk.RenamesConstraintKind);
+        statement.Lock.Should().Be(TableLockMode.AccessExclusive);
+        statement.Rewrite.Should().Be(TableRewrite.No);
+    }
+
+    [Fact]
+    public void Other_statements_that_lock_nothing_holding_data_are_not_listed()
+    {
+        const string sql =
+            """
+            CREATE OR REPLACE FUNCTION studio.mt_upsert_customer(doc jsonb) RETURNS void AS $function$
+            BEGIN
+              update studio.mt_doc_customer set data = doc;
+            END;
+            $function$ LANGUAGE plpgsql;
+            CREATE SEQUENCE studio.mt_hilo_seq;
+            CREATE TABLE studio.mt_doc_new (id uuid not null);
+            """;
+
+        MigrationRisk.LockStatements(sql).Should().BeEmpty();
+    }
+
+    // ------------------------------------------------------------------------------------------------
     // Advice
     // ------------------------------------------------------------------------------------------------
 

@@ -1414,7 +1414,8 @@ internal sealed partial class SchemaDataService : ISchemaDataService
     private async Task<T> InSessionAsync<T>(
         ResolvedScope resolved,
         Func<NpgsqlConnection, NpgsqlTransaction, int, CancellationToken, Task<T>> read,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ConnectionUsage usage = ConnectionUsage.Read)
     {
         MartenStudioOptions value = options.Value;
 
@@ -1428,7 +1429,7 @@ internal sealed partial class SchemaDataService : ISchemaDataService
         // message, where a client-side timeout only breaks the connection.
         int commandTimeout = CommandTimeoutSeconds + 5;
 
-        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, usage);
         await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         return await session
