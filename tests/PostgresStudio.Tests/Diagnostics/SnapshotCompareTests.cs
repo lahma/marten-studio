@@ -39,6 +39,12 @@ internal static class SnapshotCompareFixtures
         public Task<PostgresStudio.Services.Query.WhatIfResult> WhatIfAsync(
             StudioScope scope, long queryId, PostgresStudio.Services.Query.HypotheticalIndex index, CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException("The compare never imagines an index.");
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The compare never asks the index advisor.");
+
+        public Task<IndexAdviceView> AdviseIndexesAsync(StudioScope scope, IndexAdviceRequest request, bool recordAudit, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("The compare never asks the index advisor.");
     }
 
     internal sealed class OneServer : IServerPageService
