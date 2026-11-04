@@ -533,7 +533,14 @@ refused, naming both, and the dialog also shows what Marten's own preview of the
 (`PreviewDocumentJsonAsync`) would keep, and holds a save Marten keeps differently or refuses. An **Order** control
 lists a collection newest first by last modified, created or revision, where its table has the column. With
 `DeleteDocuments` you get delete (soft where
-the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection.
+the mapping says soft, hard otherwise), undelete, and a bulk delete over the selection. **Check shapes** (1.2) asks
+whether what is stored still fits the type this build has. It reads a sample of the collection in scope (all of it up
+to 200 documents), loads each document as Marten would, writes it back in memory, and lists what does not fit:
+documents that cannot be loaded, members the type no longer declares and the next save would drop, values that change
+or come back empty, and members the stored documents never had. Each line has a count and a link to an example.
+Nothing is written, and the result shows member names and counts, never values. On a conjoined-tenanted collection
+with no tenant selected, only the lowest and highest keys are read, in the primary key's own order; choose a tenant
+for a spread sample.
 
 **Database** — everything else in the store's Postgres database, for a host that keeps a Quartz.NET job
 store, a legacy schema or another library's tables beside Marten. A schema rail, and kind tabs for
