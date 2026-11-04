@@ -24,6 +24,9 @@ using System.Security.Cryptography;
 
 using PostgresStudio.Services.Settings;
 
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Endpoints;
@@ -194,9 +197,15 @@ internal static class StudioEndpointMapper
         [
             MapStudioStaticAssets(builder, pathPrefix: string.Empty),
             MapStudioStaticAssets(builder, pathPrefix: studioPath),
-            MapStudioFrameworkScript(builder, studioPath),
-            MapStudioFrameworkFiles(builder, studioPath)
+            MapStudioFrameworkScript(builder, studioPath)
         ];
+
+        // Not an asset endpoint, and deliberately not in the list above. The asset endpoints serve this package's own
+        // content (and the framework script, which is public by nature), so they may opt out of authorization. This one
+        // forwards to files the HOST owns, and the host may have put them behind its own policy or a fail-closed
+        // FallbackPolicy: it is governed exactly as the page that imports them is - by the studio's policy when there is
+        // one, else by whatever the caller said about the mapping (StudioConventionBuilder) and the host's FallbackPolicy.
+        RouteHandlerBuilder frameworkFiles = MapStudioFrameworkFiles(builder, studioPath);
 
         if (!string.IsNullOrWhiteSpace(settings.AuthorizationPolicy))
         {
@@ -214,6 +223,7 @@ internal static class StudioEndpointMapper
             // the policy covers them all, which is also what keeps /_blazor reachable under a fail-closed
             // FallbackPolicy.
             components.RequireAuthorization(policyName);
+            frameworkFiles.RequireAuthorization(policyName);
         }
         else
         {
@@ -244,7 +254,7 @@ internal static class StudioEndpointMapper
         components.Add(endpointBuilder =>
             endpointBuilder.Metadata.Add(IsStudioPage(endpointBuilder, descriptor.PageAssemblies) ? pageMarker : circuitMarker));
 
-        return new StudioConventionBuilder(components, hub: null);
+        return new StudioConventionBuilder(components, hub: null, frameworkFiles);
     }
 
     /// <summary>
@@ -416,6 +426,20 @@ internal static class StudioEndpointMapper
     /// route is exactly <c>/_framework/{file}</c>, or a file in the web root under <c>_framework</c>. A path that could climb
     /// out of that folder is a 404, and so is a file the host does not have.
     /// </para>
+    /// <para>
+    /// <b>These are the host's files, so the studio never serves a visitor what the host itself would refuse.</b> The
+    /// endpoint is not one of the anonymous asset endpoints: it carries the studio's policy when one is configured, and
+    /// otherwise it belongs to the builder <c>Map*Studio()</c> returns, so the caller's <c>RequireAuthorization()</c> or
+    /// <c>AllowAnonymous()</c> and the host's <c>FallbackPolicy</c> govern it as they govern the page that imports the
+    /// files. On top of that, as defence in depth, the forward asks for no more than the root would give: it skips a root
+    /// endpoint that does not answer the request's method (a host's <c>MapPost("/_framework/x")</c> is never run by a GET),
+    /// and evaluates the root endpoint's own authorization (its <see cref="IAuthorizeData" />, or the
+    /// <c>FallbackPolicy</c> when it states nothing and does not allow anonymous) for this request, answering 404 on a
+    /// refusal. A file served from the web root is held to the <c>FallbackPolicy</c> the same way: a host whose
+    /// <c>UseStaticFiles</c> runs before <c>UseAuthorization</c> serves those files publicly at its own root, but the studio
+    /// cannot know the pipeline's order, so it takes the stricter answer. A visitor the studio admitted normally passes
+    /// the fallback too, so the cost is a 404 only where the host's policies disagree with each other.
+    /// </para>
     /// </remarks>
     private static RouteHandlerBuilder MapStudioFrameworkFiles(IEndpointRouteBuilder builder, string studioPath)
     {
@@ -431,16 +455,18 @@ internal static class StudioEndpointMapper
                 return;
             }
 
-            if (await TryForwardToRootEndpointAsync(context, "/_framework/" + file).ConfigureAwait(false))
+            if (await TryForwardToRootEndpointAsync(context, "/_framework/" + file, enforceRootAuthorization: true).ConfigureAwait(false))
             {
                 return;
             }
 
             // A host that serves static web assets with UseStaticFiles rather than MapStaticAssets has no endpoint for
-            // them, and its web root has the file.
+            // them, and its web root has the file - for a visitor the FallbackPolicy admits.
             IWebHostEnvironment env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
             IFileInfo fileInfo = env.WebRootFileProvider.GetFileInfo("_framework/" + file);
-            if (!fileInfo.Exists || fileInfo.IsDirectory)
+            if (!fileInfo.Exists
+                || fileInfo.IsDirectory
+                || !await IsAdmittedAsync(context, rootEndpoint: null).ConfigureAwait(false))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
                 return;
@@ -463,7 +489,18 @@ internal static class StudioEndpointMapper
         return WriteFileAsync(context, fileInfo, "text/javascript", etagCacheKey: fileInfo.PhysicalPath ?? logicalPath);
     }
 
-    private static async Task<bool> TryForwardToRootEndpointAsync(HttpContext context, string rootPath)
+    /// <summary>
+    /// Runs the host's own root endpoint for <paramref name="rootPath" /> in place of the mirrored request, and says whether
+    /// the request was answered (served, or refused with a 404).
+    /// </summary>
+    /// <param name="context">The mirrored request.</param>
+    /// <param name="rootPath">The absolute path the host serves the file at.</param>
+    /// <param name="enforceRootAuthorization">
+    /// Whether to evaluate the root endpoint's own authorization first and answer 404 on a refusal. The framework script
+    /// does not ask for it: it is public content the studio has always mirrored for any visitor, and the host's copy of it
+    /// is the one thing the D22 order prefers. Every other framework file is the host's own and does.
+    /// </param>
+    private static async Task<bool> TryForwardToRootEndpointAsync(HttpContext context, string rootPath, bool enforceRootAuthorization = false)
     {
         EndpointDataSource dataSource = context.RequestServices.GetRequiredService<EndpointDataSource>();
         RouteEndpoint? rootEndpoint = null;
@@ -474,7 +511,8 @@ internal static class StudioEndpointMapper
                 string? rawText = routeEndpoint.RoutePattern.RawText;
                 if (rawText is not null
                     && (rootPath.Equals(rawText, StringComparison.OrdinalIgnoreCase)
-                        || (rawText.Length == rootPath.Length - 1 && rootPath.EndsWith(rawText, StringComparison.OrdinalIgnoreCase))))
+                        || (rawText.Length == rootPath.Length - 1 && rootPath.EndsWith(rawText, StringComparison.OrdinalIgnoreCase)))
+                    && AnswersMethod(routeEndpoint, context.Request.Method))
                 {
                     rootEndpoint = routeEndpoint;
                     break;
@@ -485,6 +523,12 @@ internal static class StudioEndpointMapper
         if (rootEndpoint is null)
         {
             return false;
+        }
+
+        if (enforceRootAuthorization && !await IsAdmittedAsync(context, rootEndpoint).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return true;
         }
 
         // Handlers resolve content from the request path and the endpoint metadata, so both must describe
@@ -504,6 +548,51 @@ internal static class StudioEndpointMapper
         }
 
         return true;
+    }
+
+    /// <summary>Whether <paramref name="endpoint" /> would be matched for <paramref name="method" />: no method metadata means any.</summary>
+    private static bool AnswersMethod(Endpoint endpoint, string method) =>
+        endpoint.Metadata.GetMetadata<IHttpMethodMetadata>() is not { } methods
+        || methods.HttpMethods.Contains(method, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the host's authorization would admit this request to <paramref name="rootEndpoint" />, as
+    /// <c>UseAuthorization</c> decides it: the endpoint's <see cref="IAuthorizeData" /> and policies combined, else the
+    /// <c>FallbackPolicy</c> when the endpoint states nothing and does not allow anonymous. With no endpoint
+    /// (<see langword="null" />, a file of the web root) it is the <c>FallbackPolicy</c> alone. Evaluated here, never
+    /// challenged: a refusal is the caller's 404.
+    /// </summary>
+    private static async Task<bool> IsAdmittedAsync(HttpContext context, Endpoint? rootEndpoint)
+    {
+        if (rootEndpoint?.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+        {
+            return true;
+        }
+
+        IReadOnlyList<IAuthorizeData> authorizeData = rootEndpoint?.Metadata.GetOrderedMetadata<IAuthorizeData>() ?? [];
+        IReadOnlyList<AuthorizationPolicy> policies = rootEndpoint?.Metadata.GetOrderedMetadata<AuthorizationPolicy>() ?? [];
+        bool statesSomething = authorizeData.Count > 0 || policies.Count > 0;
+
+        IAuthorizationPolicyProvider? provider = context.RequestServices.GetService<IAuthorizationPolicyProvider>();
+        IPolicyEvaluator? evaluator = context.RequestServices.GetService<IPolicyEvaluator>();
+        if (provider is null || evaluator is null)
+        {
+            // No authorization services, so nothing could have enforced a fallback; an endpoint that asks for authorization
+            // cannot be judged here and is not served.
+            return !statesSomething;
+        }
+
+        AuthorizationPolicy? policy = statesSomething
+            ? await AuthorizationPolicy.CombineAsync(provider, authorizeData, policies).ConfigureAwait(false)
+            : await provider.GetFallbackPolicyAsync().ConfigureAwait(false);
+        if (policy is null)
+        {
+            return true;
+        }
+
+        AuthenticateResult authentication = await evaluator.AuthenticateAsync(policy, context).ConfigureAwait(false);
+        PolicyAuthorizationResult authorization = await evaluator.AuthorizeAsync(policy, authentication, context, rootEndpoint).ConfigureAwait(false);
+        return authorization.Succeeded;
     }
 
     private static async Task WriteFileAsync(HttpContext context, IFileInfo fileInfo, string contentType, string? etagCacheKey)

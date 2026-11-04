@@ -219,8 +219,8 @@ There are three layers, and two process-wide switches on top of them. All five a
 the studio authenticates nobody.
 
 1. **`AuthorizationPolicy`** — *who gets in*. Applied to every studio endpoint: the pages, the Blazor
-   circuit and the static assets. `RequireAuthorization()` on the builder returned by
-   `MapMartenStudio()` does the same job, and covers the pages and the circuit.
+   circuit, the static assets and the forward of your own `_framework` files. `RequireAuthorization()` on the builder
+   returned by `MapMartenStudio()` does the same job, and covers the pages, the circuit and that forward.
 2. **`StoreAuthorizationPolicy`** — *which store, database and tenant*. Resource-based, evaluated
    against a `MartenStoreResource`, and asked on **every** data call rather than only at the scope
    selector. Listings are filtered rather than annotated: a tenant you may not see is one you never
@@ -262,6 +262,13 @@ The static assets under `_content/PostgresStudio/` (both studios' shell is Postg
 — CSS and a little JS. With a
 studio policy configured they carry it too; without one they opt out explicitly, so an application with
 a fail-closed `FallbackPolicy` can still load the stylesheet.
+
+The `{Path}/_framework/{**file}` forward is **not** among them: it serves files that are *yours* (the host's
+`_framework` tree, for example the .NET 11 SDK's hot-reload initializer), so it can never opt out. With an
+`AuthorizationPolicy` it carries the policy; without one it is part of what `MapMartenStudio()` returns, so your
+`RequireAuthorization()` or `AllowAnonymous()` on the mapping and your `FallbackPolicy` govern it exactly as they govern
+the page that imports those files. It also never serves more than your own root would: a root endpoint that refuses the
+visitor, or does not answer GET, is a 404 under the mount.
 
 ### Resource-based authorization
 
@@ -792,12 +799,11 @@ tenant, because there is nothing to filter on and hiding it would hide something
   script among the page's Blazor initializers. From 1.2.0 the studio serves the host's whole `_framework` tree under
   its path, so that script loads and the page starts; on 1.1.x, build the host with
   `-p:EnableHotReloadInRuntimeConfigDevFile=false`.
-- **.NET 11 and a fail-closed `FallbackPolicy`.** A mapping that says `AllowAnonymous()` (for example in Development
-  only) in an application whose `FallbackPolicy` requires an authenticated user does not start its circuit for an
-  unauthenticated visitor on .NET 11: ASP.NET Core 11 holds the async hub methods Blazor's circuit uses to the
-  `FallbackPolicy` whatever the endpoint allows ([dotnet/aspnetcore#69624](https://github.com/dotnet/aspnetcore/issues/69624),
-  open). The studio does not work around it; until it is fixed, an anonymous mapping on .NET 11 needs an application
-  without a fail-closed `FallbackPolicy`.
+- **.NET 11 and a fail-closed `FallbackPolicy`.** ASP.NET Core 11 holds the async hub methods Blazor's circuit uses to the
+  `FallbackPolicy` whatever the endpoint allows, so the circuit starts only for a visitor the `FallbackPolicy` admits; an
+  `AllowAnonymous()` mapping under a fail-closed policy is the usual case
+  ([dotnet/aspnetcore#69624](https://github.com/dotnet/aspnetcore/issues/69624), open). The studio does not work around
+  it; until it is fixed, an anonymous mapping on .NET 11 needs an application without a fail-closed `FallbackPolicy`.
 - **Behind a reverse proxy**, forward the studio prefix and it works: the studio's plumbing is all under
   its own path. If the proxy strips a prefix, give the application the same prefix with
   `app.UsePathBase("/…")` so that the routes and the `<base href>` agree; mounting at

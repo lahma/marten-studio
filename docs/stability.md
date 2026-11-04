@@ -49,7 +49,7 @@ What a minor or patch release will not break:
 
 | | Supported | Tested |
 |---|---|---|
-| .NET | `net10.0` | .NET 10; on .NET 11 (release candidate 3) both studios run in a Release build of the host and, from 1.2.0, in a Debug build with the 11 SDK (1.1.x does not start the studio's page there: build the host with `-p:EnableHotReloadInRuntimeConfigDevFile=false` until you are on 1.2.0). On .NET 11 an `AllowAnonymous()` mapping under a fail-closed `FallbackPolicy` does not start its circuit for an unauthenticated visitor: see [Hosting notes](../README.md#hosting-notes) |
+| .NET | `net10.0` | .NET 10; on .NET 11 (release candidate 3) both studios run in a Release build of the host and, from 1.2.0, in a Debug build with the 11 SDK (1.1.x does not start the studio's page there: build the host with `-p:EnableHotReloadInRuntimeConfigDevFile=false` until you are on 1.2.0). On .NET 11 the circuit starts only for a visitor the `FallbackPolicy` admits; an `AllowAnonymous()` mapping under a fail-closed policy is the usual case (dotnet/aspnetcore#69624, open): see [Hosting notes](../README.md#hosting-notes) |
 | Marten (Marten Studio) | 9.x from 9.57.0 | 9.57.0 on every build |
 | Npgsql (Postgres Studio, Diagnostics) | from 9.0.4 | 9.0.4 and 10.0.3 |
 | PostgreSQL | 15 to 19; 14 works, untested | every major from 15 to 19, 19 on its release candidate until its general availability |

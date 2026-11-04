@@ -251,8 +251,10 @@ public class StudioEndpointsTest
         // FallbackPolicy, because a studio without its stylesheet is not a security win.
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/blazor.web.js")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
+        // The host's own files are not package content: the studio does not opt this forward out, so the caller's statement
+        // about the mapping and the host's FallbackPolicy govern it as they govern the page that imports them.
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/{**file}")
-            .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
+            .Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/PostgresStudio/{**path}")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
 
@@ -819,6 +821,22 @@ public class StudioEndpointsTest
         {
             await app.StopAsync(Token);
         }
+    }
+
+    /// <summary>
+    /// The forward of the host's own <c>_framework</c> files is part of what the builder governs: the caller's
+    /// <c>RequireAuthorization()</c> reaches it as it reaches the pages and the circuit (1.2-NET11-FIX).
+    /// </summary>
+    [Fact]
+    public async Task The_builders_authorization_reaches_the_framework_file_forward()
+    {
+        await using var app = CreateApp();
+        app.MapMartenStudio().RequireAuthorization("x");
+
+        var forward = GetRouteEndpoints(app).Single(x => x.RoutePattern.RawText == "/marten/_framework/{**file}");
+
+        forward.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().Contain(x => x.Policy == "x");
+        forward.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
     }
 
     /// <summary>

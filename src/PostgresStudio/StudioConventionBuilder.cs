@@ -44,6 +44,13 @@ namespace PostgresStudio;
 /// that a fail-closed <c>FallbackPolicy</c> cannot leave the studio without its stylesheet.
 /// </para>
 /// <para>
+/// The <c>{Path}/_framework/{**file}</c> forward <em>is</em> here, in a slot of its own. It serves the
+/// <em>host's</em> files, not the package's, so it cannot opt out of anything: with an
+/// <c>AuthorizationPolicy</c> it carries the policy, and without one it takes whatever the caller says
+/// about the studio (<c>RequireAuthorization()</c>, <c>AllowAnonymous()</c>) and, silent, the host's
+/// <c>FallbackPolicy</c> — exactly what governs the page that imports those files.
+/// </para>
+/// <para>
 /// The hub slot is empty in v1 and is kept for a reason: pages poll through a snapshot cache instead
 /// (D10), and if a hub is ever added it must arrive without changing what this method returns, so that
 /// the one statement a caller made about the studio keeps covering all of it.
@@ -53,6 +60,7 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
 {
     private readonly IEndpointConventionBuilder components;
     private readonly IEndpointConventionBuilder? hub;
+    private readonly IEndpointConventionBuilder frameworkFiles;
 
     /// <param name="components">
     /// The Razor components builder the studio's pages and its Blazor circuit live in.
@@ -62,23 +70,31 @@ internal sealed class StudioConventionBuilder : IEndpointConventionBuilder
     /// pages poll through a snapshot cache rather than opening a second host-visible endpoint (D10), and
     /// the slot is kept because adding the hub later must not change what <c>MapMartenStudio</c> returns.
     /// </param>
+    /// <param name="frameworkFiles">
+    /// The forward of the host's own <c>_framework</c> files under the mount path: host-owned content, so it is governed
+    /// by what the caller says about the studio and not left to opt out like the package's static assets.
+    /// </param>
     public StudioConventionBuilder(
         IEndpointConventionBuilder components,
-        IEndpointConventionBuilder? hub)
+        IEndpointConventionBuilder? hub,
+        IEndpointConventionBuilder frameworkFiles)
     {
         this.components = components;
         this.hub = hub;
+        this.frameworkFiles = frameworkFiles;
     }
 
     public void Add(Action<EndpointBuilder> convention)
     {
         components.Add(convention);
         hub?.Add(convention);
+        frameworkFiles.Add(convention);
     }
 
     public void Finally(Action<EndpointBuilder> finallyConvention)
     {
         components.Finally(finallyConvention);
         hub?.Finally(finallyConvention);
+        frameworkFiles.Finally(finallyConvention);
     }
 }

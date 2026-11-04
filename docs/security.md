@@ -37,7 +37,10 @@ the studio's pages **and** its Blazor circuit, which is the half that matters mo
 401 while `POST /_blazor/negotiate` answers 200 is a studio anyone can drive. The studio therefore stamps
 no `AllowAnonymous` of its own on the circuit; only the static assets under `_content/PostgresStudio/` (both
 studios' shell) opt out, and only when no studio policy is configured, so that an application with a fail-closed
-`FallbackPolicy` can still load a stylesheet.
+`FallbackPolicy` can still load a stylesheet. The `{Path}/_framework/{**file}` forward of the host's own `_framework`
+files is *not* package content and never opts out: it carries the studio policy, or else it is governed by what the caller
+said about the mapping and by the `FallbackPolicy`, and it additionally answers 404 where the host's own root endpoint (or,
+for a file of the web root, the `FallbackPolicy`) would refuse the visitor, or where the root endpoint does not answer GET.
 
 Layer 2 filters listings rather than annotating them. A tenant you may not see is one you never learn
 exists — the *count* of tenants in a process is itself something a tenant should not learn. In Postgres Studio layer 2

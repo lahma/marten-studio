@@ -2,13 +2,16 @@ using System.Net;
 
 using MartenStudio.Tests.Support;
 
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 
 using Npgsql;
 
@@ -117,8 +120,8 @@ public class PostgresStudioEndpointsTests
     {
         await using WebApplication app = CreateApp();
 
-        // As MapStaticAssets registers them: a literal route per file, with or without the leading slash.
-        app.MapGet("/_framework/" + Initializer, static () => Results.Text("export function beforeWebStart() { }", "text/javascript")).AllowAnonymous();
+        // As MapStaticAssets registers them: a literal route per file, with or without the leading slash, for GET and HEAD.
+        app.MapMethods("/_framework/" + Initializer, ["GET", "HEAD"], static () => Results.Text("export function beforeWebStart() { }", "text/javascript")).AllowAnonymous();
         app.MapGet("_framework/dotnet-browser-tools/BrowserTools.js", static () => Results.Text("// tools", "text/javascript")).AllowAnonymous();
         app.MapPostgresStudio().AllowAnonymous();
         await app.StartAsync(Token);
@@ -174,31 +177,79 @@ public class PostgresStudioEndpointsTests
         }
     }
 
+    /// <summary>
+    /// A path that could climb out of <c>_framework</c> is a 404 that never reaches the web root's file provider, and so is
+    /// a file the host does not have. The rows are the request paths as the server sees them <em>after</em> decoding
+    /// (<c>%2e%2e/</c> is <c>../</c>, <c>%5C</c> a backslash, <c>%00</c> a NUL), and they are sent through the test server
+    /// directly: an ordinary client <see cref="Uri" /> would fold <c>../</c> away before it was sent and never reach the
+    /// guard. The recording provider proves the guard, not the router, refused them.
+    /// </summary>
     [Theory]
     [InlineData("/postgres/_framework/nothing-serves-this.js")]
-    [InlineData("/postgres/_framework/..%2F..%2Fappsettings.json")]
-    [InlineData("/postgres/_framework/%2e%2e/appsettings.json")]
-    [InlineData("/postgres/_framework/..%5C..%5Cappsettings.json")]
+    [InlineData("/postgres/_framework/../../appsettings.json")]
     [InlineData("/postgres/_framework/nested/../../appsettings.json")]
+    [InlineData("/postgres/_framework/..\\..\\appsettings.json")]
+    [InlineData("/postgres/_framework/nested/..\\..\\appsettings.json")]
+    [InlineData("/postgres/_framework/a\0b.js")]
+    [InlineData("/postgres/_framework/a\\b.js")]
+    [InlineData("/postgres/_framework//appsettings.json")]
+    [InlineData("/postgres/_framework/%2e%2e/appsettings.json")]
     [InlineData("/postgres/_framework/nested")]
     public async Task A_framework_file_the_host_does_not_serve_and_any_path_that_climbs_is_404_never_500(string path)
     {
-        await using WebApplication app = CreateApp(configureBuilder: static builder =>
-            builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
-            {
-                ["_framework/nested/other.js"] = "// other"u8.ToArray(),
-                ["appsettings.json"] = "{ \"secret\": true }"u8.ToArray(),
-            }));
+        RecordingFileProvider webRoot = new(new TestFileProvider(new Dictionary<string, byte[]>
+        {
+            ["_framework/nested/other.js"] = "// other"u8.ToArray(),
+            ["appsettings.json"] = "{ \"secret\": true }"u8.ToArray(),
+        }));
+        await using WebApplication app = CreateApp(configureBuilder: builder => builder.Environment.WebRootFileProvider = webRoot);
+        app.MapPostgresStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            HttpContext response = await app.GetTestServer().SendAsync(
+                context =>
+                {
+                    context.Request.Method = HttpMethods.Get;
+                    context.Request.Path = new PathString(path);
+                },
+                Token);
+
+            response.Response.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+            using StreamReader reader = new(response.Response.Body);
+            (await reader.ReadToEndAsync(Token)).Should().NotContain("secret");
+            webRoot.Asked.Should().NotContain(static x => x.Contains("..", StringComparison.Ordinal)
+                    || x.Contains('\\', StringComparison.Ordinal)
+                    || x.Contains('\0', StringComparison.Ordinal)
+                    || x.Contains("//", StringComparison.Ordinal)
+                    || x == "appsettings.json" || x == "_framework/appsettings.json",
+                "the guard refuses these before the provider is asked");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>The control for the theory above: a legitimate nested file does reach the provider, so the recorder sees real asks.</summary>
+    [Fact]
+    public async Task The_recording_provider_sees_the_legitimate_nested_ask()
+    {
+        RecordingFileProvider webRoot = new(new TestFileProvider(new Dictionary<string, byte[]>
+        {
+            ["_framework/nested/other.js"] = "// other"u8.ToArray(),
+        }));
+        await using WebApplication app = CreateApp(configureBuilder: builder => builder.Environment.WebRootFileProvider = webRoot);
         app.MapPostgresStudio().AllowAnonymous();
         await app.StartAsync(Token);
         try
         {
             using HttpClient client = app.GetTestClient();
 
-            using HttpResponseMessage response = await client.GetAsync(new Uri(path, UriKind.Relative), Token);
+            using HttpResponseMessage response = await client.GetAsync(new Uri("/postgres/_framework/nested/other.js", UriKind.Relative), Token);
 
-            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-            (await response.Content.ReadAsStringAsync(Token)).Should().NotContain("secret");
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            webRoot.Asked.Should().Contain("_framework/nested/other.js");
         }
         finally
         {
@@ -209,13 +260,19 @@ public class PostgresStudioEndpointsTests
     /// <summary>
     /// The literal endpoints keep their own handlers by route precedence: <c>blazor.web.js</c> is still served by the
     /// studio's three-tier handler (the web root's copy wins over what a root endpoint serves), and the enhanced-navigation
-    /// <c>opaque-redirect</c> is still the framework's own endpoint, not a file lookup.
+    /// <c>opaque-redirect</c> request is still matched to the framework's own endpoint, not to the file forward.
     /// </summary>
     [Fact]
     public async Task The_literal_framework_endpoints_keep_their_own_handlers_beside_the_file_forward()
     {
         await using WebApplication app = CreateApp(configureBuilder: WithWebRoot);
         app.MapGet("/_framework/blazor.web.js", static () => Results.Text("// the root endpoint's", "text/javascript")).AllowAnonymous();
+        string? matched = null;
+        app.Use(async (context, next) =>
+        {
+            matched = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText;
+            await next(context);
+        });
         app.MapPostgresStudio().AllowAnonymous();
 
         List<RouteEndpoint> framework = [.. RouteEndpoints(app).Where(static x => x.RoutePattern.RawText!.StartsWith("/postgres/_framework/", StringComparison.Ordinal))];
@@ -230,9 +287,12 @@ public class PostgresStudioEndpointsTests
             using HttpResponseMessage script = await client.GetAsync(new Uri("/postgres/_framework/blazor.web.js", UriKind.Relative), Token);
             script.StatusCode.Should().Be(HttpStatusCode.OK);
             (await script.Content.ReadAsStringAsync(Token)).Should().Be("// blazor.web.js", "the host's web root wins (D22)");
+            matched.Should().Be("/postgres/_framework/blazor.web.js");
 
             using HttpResponseMessage redirect = await client.GetAsync(new Uri("/postgres/_framework/opaque-redirect?url=x", UriKind.Relative), Token);
-            redirect.StatusCode.Should().NotBe(HttpStatusCode.NotFound, "the framework's own endpoint answers, not the file forward");
+            matched.Should().Be("/postgres/_framework/opaque-redirect", "the framework's own endpoint is matched, not the file forward");
+            redirect.StatusCode.Should().NotBe(HttpStatusCode.InternalServerError);
+            redirect.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
         }
         finally
         {
@@ -240,9 +300,33 @@ public class PostgresStudioEndpointsTests
         }
     }
 
-    /// <summary>The forward is behind the studio's authorization, like the other mirrored endpoints.</summary>
+    // -------------------------------------------------------------------------------------------
+    // The forward serves the host's files: it is governed as the page that imports them is (1.2-NET11-FIX)
+    // -------------------------------------------------------------------------------------------
+
+    /// <summary>Without the option the forward is no anonymous asset endpoint: it says nothing, so the caller and the FallbackPolicy decide.</summary>
     [Fact]
-    public async Task The_framework_file_forward_carries_the_studios_policy_or_stays_anonymous_like_the_other_assets()
+    public async Task Without_a_policy_the_framework_file_forward_says_nothing_and_the_builder_governs_it()
+    {
+        await using WebApplication silent = CreateApp();
+        silent.MapPostgresStudio();
+        RouteEndpoint untouched = RouteEndpoints(silent).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        untouched.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull("the host's files may not be opted out by the studio");
+        untouched.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().BeEmpty();
+
+        await using WebApplication required = CreateApp();
+        required.MapPostgresStudio().RequireAuthorization("x");
+        RouteEndpoint governed = RouteEndpoints(required).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        governed.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().Contain(static x => x.Policy == "x");
+
+        await using WebApplication anonymous = CreateApp();
+        anonymous.MapPostgresStudio().AllowAnonymous();
+        RouteEndpoint open = RouteEndpoints(anonymous).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+        open.Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull("the caller said so about the mapping");
+    }
+
+    [Fact]
+    public async Task With_the_option_set_the_framework_file_forward_carries_the_studios_policy()
     {
         await using WebApplication governed = CreateApp(
             static options => options.AuthorizationPolicy = "ops",
@@ -250,13 +334,173 @@ public class PostgresStudioEndpointsTests
         governed.MapPostgresStudio();
 
         RouteEndpoint withPolicy = RouteEndpoints(governed).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
+
         withPolicy.Metadata.GetOrderedMetadata<IAuthorizeData>().Should().Contain(static x => x.Policy == "ops");
+        withPolicy.Metadata.GetMetadata<IAllowAnonymous>().Should().BeNull();
+    }
 
-        await using WebApplication open = CreateApp();
-        open.MapPostgresStudio();
+    private static WebApplication CreateFailClosedApp(Action<WebApplicationBuilder>? configureBuilder = null) =>
+        CreateApp(configureBuilder: builder =>
+        {
+            builder.Services
+                .AddAuthentication(TestAuthenticationHandler.SchemeName)
+                .AddScheme<AuthenticationSchemeOptions, TestAuthenticationHandler>(TestAuthenticationHandler.SchemeName, null);
+            builder.Services.AddAuthorization(static options =>
+            {
+                options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+                options.AddPolicy("nobody", static policy => policy.RequireAssertion(static _ => false));
+            });
+            configureBuilder?.Invoke(builder);
+        });
 
-        RouteEndpoint anonymous = RouteEndpoints(open).Single(static x => x.RoutePattern.RawText == "/postgres/_framework/{**file}");
-        anonymous.Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull("package-adjacent plumbing, like the stylesheet, so a fail-closed FallbackPolicy host still loads it");
+    private static HttpRequestMessage AsOperator(string path, HttpMethod? method = null)
+    {
+        HttpRequestMessage request = new(method ?? HttpMethod.Get, new Uri(path, UriKind.Relative));
+        request.Headers.Add(TestAuthenticationHandler.UserHeader, "operator");
+        return request;
+    }
+
+    /// <summary>
+    /// The review's finding, as a host is built: a fail-closed <c>FallbackPolicy</c> and the studio mapped with
+    /// <c>RequireAuthorization()</c> on the builder. The host's own file is 401 at the root and was 200 to anyone under the
+    /// mount; an anonymous visitor now gets neither the file nor a 200, and a visitor the studio admits gets exactly what
+    /// the host would give them: a file with no metadata of its own (the initializer), and a 404 for one whose own policy
+    /// refuses them.
+    /// </summary>
+    [Fact]
+    public async Task A_fail_closed_host_serves_its_framework_files_under_the_mount_only_to_who_the_host_would_serve()
+    {
+        await using WebApplication app = CreateFailClosedApp();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapGet("_framework/App.Client.wasm", static () => Results.Text("host-owned wasm", "application/wasm"));
+        app.MapGet("/_framework/" + Initializer, static () => Results.Text("export function beforeWebStart() { }", "text/javascript"));
+        app.MapGet("/_framework/admin-only.js", static () => Results.Text("host-owned admin", "text/javascript")).RequireAuthorization("nobody");
+        app.MapPostgresStudio().RequireAuthorization();
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+
+            using HttpResponseMessage root = await client.GetAsync(new Uri("/_framework/App.Client.wasm", UriKind.Relative), Token);
+            root.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/postgres/_framework/App.Client.wasm", UriKind.Relative), Token);
+            anonymous.StatusCode.Should().NotBe(HttpStatusCode.OK);
+            (await anonymous.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
+
+            using HttpRequestMessage initializerRequest = AsOperator("/postgres/_framework/" + Initializer);
+            using HttpResponseMessage initializer = await client.SendAsync(initializerRequest, Token);
+            initializer.StatusCode.Should().Be(HttpStatusCode.OK, "a visitor the studio admits gets the file a file with no metadata gives them");
+            (await initializer.Content.ReadAsStringAsync(Token)).Should().Contain("beforeWebStart");
+
+            using HttpRequestMessage wasmRequest = AsOperator("/postgres/_framework/App.Client.wasm");
+            using HttpResponseMessage wasm = await client.SendAsync(wasmRequest, Token);
+            wasm.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using HttpRequestMessage atRoot = AsOperator("/_framework/admin-only.js");
+            using HttpResponseMessage adminAtRoot = await client.SendAsync(atRoot, Token);
+            adminAtRoot.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the host itself refuses this visitor");
+
+            using HttpRequestMessage underMount = AsOperator("/postgres/_framework/admin-only.js");
+            using HttpResponseMessage adminUnderMount = await client.SendAsync(underMount, Token);
+            adminUnderMount.StatusCode.Should().Be(HttpStatusCode.NotFound, "the studio never serves what the host would refuse");
+            (await adminUnderMount.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>The web-root branch is held to the <c>FallbackPolicy</c> too, even under an <c>AllowAnonymous()</c> mapping.</summary>
+    [Fact]
+    public async Task A_web_root_framework_file_is_held_to_the_fallback_policy_under_an_anonymous_mapping()
+    {
+        await using WebApplication app = CreateFailClosedApp(static builder =>
+            builder.Environment.WebRootFileProvider = new TestFileProvider(new Dictionary<string, byte[]>
+            {
+                ["_framework/host-owned.js"] = "// host-owned"u8.ToArray(),
+            }));
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapPostgresStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+
+            using HttpResponseMessage anonymous = await client.GetAsync(new Uri("/postgres/_framework/host-owned.js", UriKind.Relative), Token);
+            anonymous.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            (await anonymous.Content.ReadAsStringAsync(Token)).Should().NotContain("host-owned");
+
+            using HttpRequestMessage request = AsOperator("/postgres/_framework/host-owned.js");
+            using HttpResponseMessage authenticated = await client.SendAsync(request, Token);
+            authenticated.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>A GET to the mirror never runs a handler the host mapped for another method at the same path.</summary>
+    [Fact]
+    public async Task A_get_to_the_mirror_does_not_run_a_root_endpoint_for_another_method()
+    {
+        int ran = 0;
+        await using WebApplication app = CreateApp();
+        app.MapPost("/_framework/x.js", () =>
+        {
+            ran++;
+            return Results.Text("posted", "text/javascript");
+        }).AllowAnonymous();
+        app.MapPostgresStudio().AllowAnonymous();
+        await app.StartAsync(Token);
+        try
+        {
+            using HttpClient client = app.GetTestClient();
+
+            using HttpResponseMessage response = await client.GetAsync(new Uri("/postgres/_framework/x.js", UriKind.Relative), Token);
+
+            response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            ran.Should().Be(0);
+        }
+        finally
+        {
+            await app.StopAsync(Token);
+        }
+    }
+
+    /// <summary>Records every path the web root is asked for, so a test can prove what the guard kept from the provider.</summary>
+    private sealed class RecordingFileProvider(IFileProvider inner) : IFileProvider
+    {
+        private readonly List<string> asked = [];
+
+        public IReadOnlyList<string> Asked
+        {
+            get
+            {
+                lock (asked)
+                {
+                    return [.. asked];
+                }
+            }
+        }
+
+        public IDirectoryContents GetDirectoryContents(string subpath) => inner.GetDirectoryContents(subpath);
+
+        public IFileInfo GetFileInfo(string subpath)
+        {
+            lock (asked)
+            {
+                asked.Add(subpath);
+            }
+
+            return inner.GetFileInfo(subpath);
+        }
+
+        public IChangeToken Watch(string filter) => inner.Watch(filter);
     }
 
     [Fact]

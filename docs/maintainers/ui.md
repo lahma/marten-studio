@@ -16,8 +16,13 @@ web root, then the host endpoint, then a normally absent packaged copy
 (`_content/PostgresStudio/_framework/blazor.web.js`), as the host's copy must always win. Since 1.2 the same
 studio-rooted `<base href>` is answered for the rest of the `_framework` tree by `MapStudioFrameworkFiles`
 (`{Path}/_framework/{**file}`): it forwards to whatever the host serves at `/_framework/{file}` (the exact-route endpoint
-`MapStaticAssets` registers per file), else to the web root's `_framework/`, behind the studio's own authorization like
-the other mirrored endpoints, and answers 404 for a missing file or a path containing `..`. A Debug build with the .NET 11
+`MapStaticAssets` registers per file), else to the web root's `_framework/`, and answers 404 for a missing file or a path
+containing `..`. Unlike the other mirrored endpoints, which serve package content and may be anonymous, these are the
+**host's** files, so the forward never opts out and never serves a visitor what the host itself would refuse: it carries
+the studio's `AuthorizationPolicy`, else it belongs to the builder `Map*Studio()` returns (the caller's
+`RequireAuthorization()` / `AllowAnonymous()` and the host's `FallbackPolicy` govern it as they govern the page that imports
+the files), skips a root endpoint that does not answer the request's method, and answers 404 where the root endpoint's own
+authorization (or, for a web-root file, the `FallbackPolicy`) refuses the visitor (`IPolicyEvaluator`). A Debug build with the .NET 11
 SDK lists a hot-reload JS initializer (`Microsoft.NET.Sdk.BlazorWeb.DotNetWatch.<hash>.lib.module.js`) among the page's
 Blazor initializers, and a 404 on it stops `Blazor.start`. D24 holds: the packages ship no initializer, this serves only
 the host's own files. Measurements, and the
