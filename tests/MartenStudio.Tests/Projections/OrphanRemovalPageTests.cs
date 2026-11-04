@@ -202,7 +202,7 @@ public class OrphanRemovalPageTests
         page.Find(Remove).Click();
 
         string text = page.WaitForElement(ConfirmDialog).TextContent;
-        text.Should().Contain("The row was last written 1970-01-01").And.Contain("(database server time)");
+        text.Should().Contain("The row was last written 1970-01-01").And.Contain("(by the database server's clock)");
         text.Should().Contain("Remove it once the rename or removal has shipped");
     }
 

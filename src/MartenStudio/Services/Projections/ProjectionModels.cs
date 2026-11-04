@@ -898,7 +898,7 @@ internal static class OrphanWording
         + "the projection wrote stay. Marten's call first ensures the event store's storage under the store's AutoCreate"
         + (databaseAutoCreate is { Length: > 0 } auto ? " (" + auto + " for this database)" : string.Empty)
         + ", as every write to it does. "
-        + (lastWritten is { Length: > 0 } written ? "The row was last written " + written + " (database server time). " : string.Empty)
+        + (lastWritten is { Length: > 0 } written ? "The row was last written " + written + " (by the database server's clock). " : string.Empty)
         + "Remove it once the rename or removal has shipped: an instance still running the old deployment may write it again. "
         + "A projection registered again under this name and version would resume from its position rather than replay from "
         + "the first event.";

@@ -19,6 +19,7 @@ using Npgsql;
 
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services;
+using PostgresStudio.Services.Live;
 
 namespace MartenStudio.Integration.Tests.Projections;
 
@@ -144,6 +145,38 @@ public class OrphanedProgressionRemovalLiveTests(PostgresFixture postgres) : IAs
         (await PositionAsync(OrphanRow)).Should().BePositive("the side-effect gate reads that row each time version 2 starts");
     }
 
+    /// <summary>
+    /// Marten's call can return and leave the row (here a trigger cancels the delete): that is a failure, audited, and - because
+    /// Marten has ensured storage and run - the cached view is cleared as a success clears it, so the page does not redraw rows it
+    /// cached before. The cache is made long enough that only the clear can explain the second view.
+    /// </summary>
+    [PostgresFact]
+    public async Task A_call_that_leaves_the_row_fails_audited_and_clears_the_cached_view()
+    {
+        await using Studio studio = Build("DailySales", longCache: true);
+
+        (await studio.ViewAsync()).Orphans.Rows.Should().ContainSingle().Which.Name.Should().Be(OrphanRow);
+
+        string table = SqlIdentifier.Qualify(EventSchema, "mt_event_progression");
+        string function = SqlIdentifier.Qualify(EventSchema, "ms_keep_progression_row");
+        await ExecuteAsync(
+            $"create function {function}() returns trigger language plpgsql as $$ begin return null; end $$;"
+            + $" create trigger ms_keep_progression_row before delete on {table} for each row execute function {function}();");
+
+        Func<Task> removing = () => studio.RemoveAsync(OrphanRow);
+
+        await removing.Should().ThrowAsync<InvalidOperationException>().WithMessage("*is still in mt_event_progression*");
+        (await PositionAsync(OrphanRow)).Should().BePositive("the trigger kept it");
+
+        studio.ActionLog.GetLatest().Should().ContainSingle(x =>
+            x.Action == ProjectionDataService.RemoveOrphanAction && !x.Succeeded && x.Target == OrphanRow);
+
+        // Behind the cache: the row goes some other way. Only a cleared cache lets the next view see it.
+        await ExecuteAsync($"drop trigger ms_keep_progression_row on {table}; delete from {table} where name = '{OrphanRow}';");
+
+        (await studio.ViewAsync()).Orphans.Rows.Should().BeEmpty("the failed removal cleared the cache");
+    }
+
     [PostgresFact]
     public async Task A_tenants_row_is_removed_alone_and_the_store_global_row_stays()
     {
@@ -173,9 +206,16 @@ public class OrphanedProgressionRemovalLiveTests(PostgresFixture postgres) : IAs
         options.Projections.Add(projection, ProjectionLifecycle.Async);
     }
 
-    private Studio Build(string projectionName, uint version = 1, bool gate = false)
+    private Studio Build(string projectionName, uint version = 1, bool gate = false, bool longCache = false)
     {
         var services = new ServiceCollection();
+
+        if (longCache)
+        {
+            // Registered first, so it wins over the default's one second: a view cached before a failed removal stays cached for
+            // the length of the test unless the removal clears it.
+            services.AddSingleton(new StudioSnapshotCache(TimeProvider.System, TimeSpan.FromMinutes(10)));
+        }
 
         services.AddLogging(static builder => builder.SetMinimumLevel(LogLevel.Warning));
         services.AddAuthorization();
@@ -188,6 +228,13 @@ public class OrphanedProgressionRemovalLiveTests(PostgresFixture postgres) : IAs
         });
 
         return new Studio(services.BuildServiceProvider());
+    }
+
+    private async Task ExecuteAsync(string sql)
+    {
+        await using NpgsqlConnection connection = await postgres.OpenAsync(Token);
+        await using NpgsqlCommand command = new(sql, connection);
+        await command.ExecuteNonQueryAsync(Token);
     }
 
     private async Task<long?> PositionAsync(string name)

@@ -267,6 +267,18 @@ public class ProjectionProgressQueriesTests
         command.CommandText.Should().Contain("from \"Odd Schema\".\"mt_event_progression\"");
     }
 
+    /// <summary>1.2-PROJ: the two reads around the orphan removal's call are of one name, as a value - not of the table.</summary>
+    [Fact]
+    public void The_existence_read_is_one_name_as_a_parameter_in_a_quoted_schema()
+    {
+        using NpgsqlCommand command = ProjectionProgressQueries.BuildProgressionRowExists("Odd Schema", "Retired:All'; drop table x; --", TimeSpan.FromSeconds(5));
+
+        command.CommandText.Should().Be("select exists (select 1 from \"Odd Schema\".\"mt_event_progression\" where \"name\" = @name)");
+        command.CommandText.Should().NotContain("drop table");
+        command.Parameters.Should().ContainSingle().Which.Value.Should().Be("Retired:All'; drop table x; --");
+        command.CommandTimeout.Should().Be(5);
+    }
+
     /// <summary>The names the studio reads are Marten's, spelled once.</summary>
     [Fact]
     public void The_object_names_are_Martens_own()

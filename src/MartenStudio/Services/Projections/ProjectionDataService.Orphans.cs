@@ -128,6 +128,9 @@ internal sealed partial class ProjectionDataService
             // And what the call did, read back: a row still there after a call that did not throw is not "removed".
             if (await RowExistsAsync(resolved, name, cancellationToken).ConfigureAwait(false))
             {
+                // Marten has run, and ensured storage, whatever came of the row: the page must not redraw rows it cached before.
+                cache.InvalidatePrefix(CachePrefix(resolved));
+
                 throw new InvalidOperationException("Marten's removal returned, and the progression row is still in mt_event_progression.");
             }
 
@@ -185,12 +188,14 @@ internal sealed partial class ProjectionDataService
         return OrphanRowsOf(merged).FirstOrDefault(x => string.Equals(x.ShardName, rowName, StringComparison.Ordinal));
     }
 
-    /// <summary>Whether a row called <paramref name="name" /> is in the progression table now, whoever owns it.</summary>
+    /// <summary>Whether a row called exactly <paramref name="name" /> is in the progression table now: a read of that one name.</summary>
     private async Task<bool> RowExistsAsync(ResolvedScope resolved, string name, CancellationToken cancellationToken)
     {
-        ProgressionRows rows = await ReadWholeTableAsync(resolved, cancellationToken).ConfigureAwait(false);
+        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-        return rows.Rows.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal));
+        return await ProjectionProgressQueries
+            .ProgressionRowExistsAsync(connection, catalog, EventSchemaOf(resolved), name, CommandTimeout, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>The progression table of the scope's database, every tenant's rows, read with the studio's own SQL.</summary>

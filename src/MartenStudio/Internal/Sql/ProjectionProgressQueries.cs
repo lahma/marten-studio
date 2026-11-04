@@ -245,6 +245,74 @@ internal static class ProjectionProgressQueries
     }
 
     /// <summary>
+    /// Whether <c>mt_event_progression</c> holds a row called exactly <paramref name="name" /> - one row, by its name, as a value.
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="name">The row's name, as the table holds it.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    public static NpgsqlCommand BuildProgressionRowExists(string schema, string name, TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            command.CommandText =
+                "select exists (select 1 from " + SqlIdentifier.Qualify(schema, ProgressionTable)
+                + " where " + SqlIdentifier.Quote(NameColumn) + " = @name)";
+
+            command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Varchar) { Value = name });
+
+            ApplyTimeout(command, commandTimeout);
+
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Whether the progression table holds a row called exactly <paramref name="name" />; <see langword="false" /> when the table
+    /// does not exist. A read of that one name - not of the table.
+    /// </summary>
+    /// <param name="connection">An open read connection to the database in scope.</param>
+    /// <param name="catalog">The shared, expiring catalog.</param>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="name">The row's name.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    public static async Task<bool> ProgressionRowExistsAsync(
+        NpgsqlConnection connection,
+        ColumnCatalog catalog,
+        string schema,
+        string name,
+        TimeSpan? commandTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(catalog);
+
+        TableColumns table = await catalog
+            .GetAsync(connection, schema, ProgressionTable, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!table.Exists)
+        {
+            return false;
+        }
+
+        await using NpgsqlCommand command = BuildProgressionRowExists(schema, name, commandTimeout);
+        command.Connection = connection;
+
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is true;
+    }
+
+    /// <summary>
     /// The highest assigned event sequence number, which every projection lag is measured against.
     /// </summary>
     /// <param name="schema">The event store's schema.</param>

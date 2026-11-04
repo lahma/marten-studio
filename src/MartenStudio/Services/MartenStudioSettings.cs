@@ -35,7 +35,7 @@ internal sealed class MartenStudioSettings : IStudioSettings
 
     private MartenStudioOptions Value => options.Value;
 
-    /// <summary><see cref="MartenStudioOptions.ProjectionThresholds" />, live, for the daemon checks (D03, D04).</summary>
+    /// <summary><see cref="MartenStudioOptions.ProjectionThresholds" />, as frozen at startup, for the daemon checks (D03, D04).</summary>
     internal IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionThresholds => Value.ProjectionLagThresholdsByName;
 
     /// <inheritdoc />
