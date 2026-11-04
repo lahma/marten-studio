@@ -299,7 +299,8 @@ internal static class DiagnosticsSnapshotBuilder
     }
 
     /// <summary>What the section says while the window holds no sample.</summary>
-    internal const string NoSamplesYet = "The connection history holds no sample of this server yet: the first is taken a moment after the application starts.";
+    internal const string NoSamplesYet =
+        "The connection history holds no sample of this server yet: the first is taken a moment after the application starts. " + ConnectionHistorySamplingText.DynamicDatabases;
 
     /// <summary>What the section says while the window holds no sample and the host's <c>ShouldSample</c> has chosen this process to sample (issue #57).</summary>
     internal const string NoSamplesYetChosen = ConnectionHistorySamplingText.Chosen;
@@ -317,6 +318,7 @@ internal static class DiagnosticsSnapshotBuilder
             {
                 ConnectionHistorySampling.Chosen => NoSamplesYetChosen,
                 ConnectionHistorySampling.NotChosen => NoSamplesYetNotChosen,
+                ConnectionHistorySampling.NotChosenInMemory => ConnectionHistorySamplingText.NotChosenInMemory,
                 _ => NoSamplesYet,
             };
 

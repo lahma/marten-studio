@@ -627,6 +627,27 @@ public class ConnectionHistoryBacklogTests
         plain.Sampler.Sampling.Should().Be(ConnectionHistorySampling.Always, "no ShouldSample: this process always samples");
     }
 
+    [Fact]
+    public async Task A_process_not_chosen_that_keeps_the_default_in_memory_history_says_so_and_a_shared_store_is_not_chosen_only()
+    {
+        await using Rig rig = new(shouldSample: _ => ValueTask.FromResult(false));
+        using ServiceProvider provider = new ServiceCollection().AddSingleton<IStudioSourceProvider>(rig.Sources).BuildServiceProvider();
+        using ConnectionHistorySampler inMemory = new(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            rig.Options,
+            new InMemoryConnectionHistoryStore(rig.Options, rig.Clock),
+            PostgresStudioSettings.Of(new PostgresStudioOptions()),
+            rig.Logs,
+            new StudioLogThrottle(rig.Clock),
+            rig.Clock);
+
+        await inMemory.SampleOnceAsync(Token);
+        await rig.Sampler.SampleOnceAsync(Token);
+
+        inMemory.Sampling.Should().Be(ConnectionHistorySampling.NotChosenInMemory, "another process samples, into a store this process never reads");
+        rig.Sampler.Sampling.Should().Be(ConnectionHistorySampling.NotChosen, "a shared store: the samples do appear here");
+    }
+
     /// <summary>A logger that keeps what it was asked to write.</summary>
     private sealed class RecordingLogger<T> : ILogger<T>
     {

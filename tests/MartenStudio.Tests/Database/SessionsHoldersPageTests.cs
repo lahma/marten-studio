@@ -301,7 +301,7 @@ public class SessionsHoldersPageTests
         await HistoryAsync(Open, kept: true, null, null, static page =>
         {
             string said = Regex.Replace(page.Find(".ms-holders-history-none").TextContent, @"\s+", " ").Trim();
-            said.Should().Be("The connection history holds no sample of this server yet: the first is taken at the next interval, now that ShouldSample has chosen this process to sample.");
+            said.Should().Be("The connection history holds no sample of this server yet: the first is taken at the next interval, now that ShouldSample has chosen this process to sample. A server only a source of dynamic databases names is not sampled.");
             said.Should().NotContain("samples each server once an interval");
             return Task.CompletedTask;
         }, sampling: ConnectionHistorySampling.Chosen);
@@ -311,9 +311,18 @@ public class SessionsHoldersPageTests
         await HistoryAsync(Open, kept: true, null, null, static page =>
         {
             string said = Regex.Replace(page.Find(".ms-holders-history-none").TextContent, @"\s+", " ").Trim();
-            said.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), and its samples appear here once stored.");
+            said.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), and its samples appear here once stored. A server only a source of dynamic databases names is not sampled.");
             return Task.CompletedTask;
         }, sampling: ConnectionHistorySampling.NotChosen);
+
+    [Fact]
+    public async Task Under_ShouldSample_a_process_not_chosen_that_keeps_the_in_memory_history_says_the_other_processs_samples_never_appear() =>
+        await HistoryAsync(Open, kept: true, null, null, static page =>
+        {
+            string said = Regex.Replace(page.Find(".ms-holders-history-none").TextContent, @"\s+", " ").Trim();
+            said.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), but this process keeps the history in its own memory, so that process's samples never appear here. Register a shared IPostgresConnectionHistoryStore to see them.");
+            return Task.CompletedTask;
+        }, sampling: ConnectionHistorySampling.NotChosenInMemory);
 
     [Fact]
     public async Task A_reader_only_registration_keeps_its_own_sentence_whatever_ShouldSample_says() =>

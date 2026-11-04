@@ -191,15 +191,19 @@ public class ConnectionHistorySectionTests
 
         PostgresConnectionHistorySection chosen = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.Chosen);
         PostgresConnectionHistorySection notChosen = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.NotChosen);
+        PostgresConnectionHistorySection inMemory = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.NotChosenInMemory);
         PostgresConnectionHistorySection always = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.Always);
         PostgresConnectionHistorySection readerOnly = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, readerOnly: true, sampling: ConnectionHistorySampling.NotChosen);
 
-        chosen.Reason.Should().Be("The connection history holds no sample of this server yet: the first is taken at the next interval, now that ShouldSample has chosen this process to sample.");
-        notChosen.Reason.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), and its samples appear here once stored.");
-        always.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYet, "without ShouldSample the sentence is unchanged");
+        chosen.Reason.Should().Be("The connection history holds no sample of this server yet: the first is taken at the next interval, now that ShouldSample has chosen this process to sample. A server only a source of dynamic databases names is not sampled.");
+        notChosen.Reason.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), and its samples appear here once stored. A server only a source of dynamic databases names is not sampled.");
+        inMemory.Reason.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), but this process keeps the history in its own memory, so that process's samples never appear here. Register a shared IPostgresConnectionHistoryStore to see them.");
+        always.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYet);
+        always.Reason.Should().StartWith("The connection history holds no sample of this server yet: the first is taken a moment after the application starts.")
+            .And.EndWith("A server only a source of dynamic databases names is not sampled.");
         readerOnly.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYetReaderOnly, "the reader-only registration keeps its own sentence (#48)");
 
-        foreach (PostgresConnectionHistorySection section in new[] { chosen, notChosen })
+        foreach (PostgresConnectionHistorySection section in new[] { chosen, notChosen, inMemory })
         {
             section.Outcome.Should().Be(PostgresReadOutcome.Unavailable);
             section.Reason.Should().NotContain("moment after the application starts");

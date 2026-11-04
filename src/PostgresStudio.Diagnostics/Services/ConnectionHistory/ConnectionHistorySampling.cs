@@ -14,4 +14,10 @@ internal enum ConnectionHistorySampling
 
     /// <summary><c>ShouldSample</c> is set and its last answer was no, or it has not answered yet: another process samples, if any does.</summary>
     NotChosen = 2,
+
+    /// <summary>
+    /// <c>ShouldSample</c> is set, this process is not chosen, and its store is the default in-memory one: the process that samples
+    /// writes somewhere this process never reads.
+    /// </summary>
+    NotChosenInMemory = 3,
 }

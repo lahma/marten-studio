@@ -90,7 +90,9 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
     internal ConnectionHistorySampling Sampling =>
         options.Value.ShouldSample is null
             ? ConnectionHistorySampling.Always
-            : Volatile.Read(ref shouldSampleAnswer) == 1 ? ConnectionHistorySampling.Chosen : ConnectionHistorySampling.NotChosen;
+            : Volatile.Read(ref shouldSampleAnswer) == 1
+                ? ConnectionHistorySampling.Chosen
+                : store is InMemoryConnectionHistoryStore ? ConnectionHistorySampling.NotChosenInMemory : ConnectionHistorySampling.NotChosen;
 
     /// <summary>
     /// Issue #46: the samples whose append failed, per server, oldest first. Mutated only inside <see cref="round" />, and each

@@ -376,7 +376,10 @@ Holders' applications do. Without the registration, Holders says how to turn it 
 Before the first sample of a server is stored, Holders and the `ConnectionHistory` section say who takes it. With no
 `ShouldSample` it is this process, a moment after the application starts. With one (1.2, issue #57) the sentence follows its last
 answer: yes, and the first is taken at the next interval; no, or none yet, and another process samples and its samples
-appear once stored. A reader-only registration says another process fills the history.
+appear once stored - unless this process keeps the default in-memory history, which that process's samples never reach, and
+the sentence then says to register a shared `IPostgresConnectionHistoryStore`. A reader-only registration says another process
+fills the history. A server only a source of dynamic databases names is never sampled, and the sentences that promise a
+sample say so.
 
 **In the snapshot** (1.0.1, issue #47). `PostgresDiagnosticsRequest.ConnectionHistory` (in `AllSections`, not in `FindingsOnly`)
 adds a `ConnectionHistory` section, for a worker or a support page that has no Holders to open:
