@@ -43,8 +43,9 @@ public sealed class MartenStudioOptions
     /// <summary>
     /// Where the header's "Back to application" link goes, or <see langword="null" /> (the default) for no link. Either a
     /// host-relative path that starts with a single <c>/</c> (<c>/</c>, <c>/app</c>) or an absolute <c>http</c> or
-    /// <c>https</c> URL. It is used exactly as written and is never re-rooted under the studio's mount path, so
-    /// <c>/</c> is the host's own front page, not the studio's. Validated at startup.
+    /// <c>https</c> URL without user information. It is used exactly as written and is never re-rooted under the studio's mount
+    /// path, so <c>/</c> is the host's own front page, not the studio's. A host that runs behind <c>UsePathBase</c> includes its
+    /// base (<c>/myapp/</c>): the option is not rewritten for it. Validated at startup.
     /// </summary>
     public string? ApplicationPath { get; set; }
 

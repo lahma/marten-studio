@@ -302,7 +302,7 @@ statement. Grant `RunSql` to people you would give `psql` to, and set `SqlConsol
 |---|---|---|
 | `Path` | `/postgres` | A plain rooted path; `MapPostgresStudio(pattern)` overrides it |
 | `Title` | `Postgres Studio` | |
-| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; none when `null`. A path that starts with a single `/` or an absolute `http(s)` URL, used as written and never re-rooted under the mount |
+| `ApplicationPath` | `null` | Where the header's "Back to application" link goes; none when `null`. A path that starts with a single `/` or an absolute `http(s)` URL without user information, used as written and never re-rooted under the mount; a host behind `UsePathBase` includes its base (`/myapp/`) |
 | `AuthorizationPolicy` | `null` | Every studio endpoint: pages, circuit, static assets, the forward of the host's `_framework` files |
 | `SourceAuthorizationPolicy` | `null` | Against `PostgresStudioResource`, capability `null` |
 | `WriteAuthorizationPolicy` | `null` | Against `PostgresStudioResource`, capability named; falls back to the source policy |

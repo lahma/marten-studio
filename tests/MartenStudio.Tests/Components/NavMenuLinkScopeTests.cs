@@ -182,6 +182,10 @@ public class NavMenuLinkScopeTests
         string stores = routes.FindAll(".ms-sidebar a.ms-nav-link").First(static x => (x.GetAttribute("href") ?? string.Empty).StartsWith("stores", StringComparison.Ordinal)).GetAttribute("href")!;
         navigation.Click(stores);
 
+        // The click inside the window already carries the address's scope: this is what the fix is (the old rail's link had no scope at all
+        // here, and the shell followed it back to the first store).
+        context.CurrentUri.Should().Contain("store=other").And.Contain("db=db-x", "the clicked address names the scope being applied");
+
         context.Catalog.DescribeGate.SetResult();
 
         routes.WaitForAssertion(() => context.State.ActiveScope.Should().Be(new StudioScope("other", "db-x", null)));
@@ -190,6 +194,62 @@ public class NavMenuLinkScopeTests
         // And once settled the rail is the active scope's, with nothing left over from the window.
         routes.WaitForAssertion(() => routes.FindAll(".ms-sidebar a.ms-nav-link").Select(static x => x.GetAttribute("href") ?? string.Empty)
             .Should().OnlyContain(static x => x.Contains("store=other") && x.Contains("db=db-x")));
+    }
+
+    /// <summary>
+    /// A subscriber that throws is contained: the scope still moves, the next subscriber is still told, and <c>ScopeChanged</c> is still raised -
+    /// the scope never moves without it, and the pending scope never stands for good.
+    /// </summary>
+    [Fact]
+    public async Task A_link_scope_handler_that_throws_neither_stops_the_scope_change_nor_the_next_handler()
+    {
+        await using StudioComponentContext context = new();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "db-a")
+            .WithStore("other", "Other", databaseIdentities: "db-x");
+        await context.State.EnsureInitializedAsync(Token);
+
+        int told = 0;
+        int scopeChanged = 0;
+        context.State.LinkScopeChanged += static () => throw new InvalidOperationException("a page's handler failed");
+        context.State.LinkScopeChanged += () => told++;
+        context.State.ScopeChanged += () =>
+        {
+            scopeChanged++;
+            return Task.CompletedTask;
+        };
+
+        await context.State.SetScopeAsync("other", null, null, Token);
+
+        context.State.ActiveScope.Should().Be(new StudioScope("other", "db-x", null));
+        context.State.LinkScope.Should().Be(context.State.ActiveScope, "no pending scope is left standing");
+        told.Should().BeGreaterThan(0, "the handler after the one that threw was still told");
+        scopeChanged.Should().Be(1, "the awaited notification was still raised");
+    }
+
+    /// <summary>Each call ends only its own pending scope: an earlier call finishing must not clear the one a later call is still applying.</summary>
+    [Fact]
+    public async Task A_call_that_finishes_does_not_clear_the_pending_scope_of_a_later_one()
+    {
+        await using StudioComponentContext context = new();
+        context.Catalog
+            .WithStore("default", "Default", databaseIdentities: "db-a")
+            .WithStore("other", "Other", databaseIdentities: "db-x");
+        await context.State.EnsureInitializedAsync(Token);
+
+        long first = context.State.BeginApplying("other", "db-x", null);
+        context.State.LinkScope.Should().Be(new StudioScope("other", "db-x", null));
+
+        context.Catalog.DescribeGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task later = context.State.SetScopeAsync("other", "db-x", null, Token);
+        context.State.LinkScope.Should().Be(new StudioScope("other", "db-x", null));
+
+        context.State.EndApplying(first);
+        context.State.LinkScope.Should().Be(new StudioScope("other", "db-x", null), "the first caller's end is a no-op while the later call's pending scope stands");
+
+        context.Catalog.DescribeGate.SetResult();
+        await later;
+        context.State.LinkScope.Should().Be(context.State.ActiveScope);
     }
 
     /// <summary>An address that names no scope puts nothing in the window: the links are the active scope's, as ever.</summary>

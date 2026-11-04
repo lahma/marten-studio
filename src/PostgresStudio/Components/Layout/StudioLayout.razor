@@ -153,7 +153,7 @@
 
         // The rail is drawn while the listings load and the scope is applied below, and a link a visitor clicks in that time must
         // carry the scope the address names, not the one the studio is still on (1.2). Ended whatever happens next.
-        State.BeginApplying(storeKey, databaseId, tenantId);
+        long applying = State.BeginApplying(storeKey, databaseId, tenantId);
         try
         {
             await State.EnsureInitializedAsync();
@@ -165,7 +165,7 @@
         }
         finally
         {
-            State.EndApplying();
+            State.EndApplying(applying);
         }
 
         // From here on the address's own scope has been read, so the shell may write its scope into it (1.2, N5a). A no-op until the

@@ -44,6 +44,7 @@ internal sealed class StudioState
     private long preferenceVersion;
     private bool initialized;
     private StudioScope? applyingScope;
+    private long applyingGeneration;
 
     /// <param name="catalog">The sources, databases and tenants this visitor may see.</param>
     /// <param name="logger">Where a page's failed scope-change handler goes.</param>
@@ -287,16 +288,15 @@ internal sealed class StudioState
         StoreListing? store = FindStore(storeKey ?? previous?.StoreKey);
         if (store is null)
         {
-            // Nothing is applied. The first load names the address's scope before the listings exist (BeginApplying), so a pending
-            // one is dropped here rather than left standing.
-            EndApplying();
+            // Nothing is applied, and nothing is ended here: a pending scope that is standing belongs to whoever began it (the first
+            // load, which ends its own in a finally), not to a call that applied nothing.
             return;
         }
 
         bool storeChanged = !string.Equals(store.Key, previous?.StoreKey, StringComparison.OrdinalIgnoreCase);
 
         // Before the first await: from here until the scope is the active one, a link is drawn from the scope being applied.
-        SetApplying(PendingScopeFor(store.Key, databaseId, tenantId, previous, storeChanged));
+        long generation = SetApplying(PendingScopeFor(store.Key, databaseId, tenantId, previous, storeChanged));
 
         try
         {
@@ -319,13 +319,14 @@ internal sealed class StudioState
                 ? NullIfBlank(tenantId)
                 : TenantList.IsAcceptable(AvailableTenants, previous?.TenantId) ? NullIfBlank(previous?.TenantId) : null;
 
-            await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous, endsApplying: true).ConfigureAwait(false);
+            await SetActiveScopeAsync(new StudioScope(store.Key, resolvedDatabaseId, resolvedTenantId), previous, generation).ConfigureAwait(false);
         }
         finally
         {
             // A read that threw or was cancelled applied nothing: the links go back to the scope that is still the active one.
-            // (A no-op after the scope was applied: SetActiveScopeAsync ended it before it notified anyone.)
-            EndApplying();
+            // (A no-op after the scope was applied: SetActiveScopeAsync ended it before it notified anyone.) Only this call's own: a
+            // later call that began applying another scope meanwhile keeps its own pending scope.
+            EndApplying(generation);
         }
     }
 
@@ -338,18 +339,33 @@ internal sealed class StudioState
     /// <param name="storeKey">The address's source key, or <see langword="null" />.</param>
     /// <param name="databaseId">The address's database, or <see langword="null" />.</param>
     /// <param name="tenantId">The address's tenant, or <see langword="null" />.</param>
-    public void BeginApplying(string? storeKey, string? databaseId, string? tenantId)
+    /// <returns>The generation to hand <see cref="EndApplying" />, or 0 when the address names nothing and nothing was begun.</returns>
+    public long BeginApplying(string? storeKey, string? databaseId, string? tenantId)
     {
         if (storeKey is null && databaseId is null && tenantId is null)
+        {
+            return 0;
+        }
+
+        return SetApplying(new StudioScope(storeKey ?? ActiveScope?.StoreKey ?? string.Empty, databaseId ?? string.Empty, NullIfBlank(tenantId)));
+    }
+
+    /// <summary>
+    /// Ends the pending scope <paramref name="generation" /> began: links are drawn from <see cref="ActiveScope" /> again. A no-op when a
+    /// later call has begun another pending scope since (or this one has already ended), so one call's exit never clears another's.
+    /// </summary>
+    /// <param name="generation">What <see cref="BeginApplying" /> or the call applying a scope was given; 0 ends nothing.</param>
+    public void EndApplying(long generation)
+    {
+        if (generation == 0 || generation != Volatile.Read(ref applyingGeneration) || applyingScope is null)
         {
             return;
         }
 
-        SetApplying(new StudioScope(storeKey ?? ActiveScope?.StoreKey ?? string.Empty, databaseId ?? string.Empty, NullIfBlank(tenantId)));
+        StudioScope? before = LinkScope;
+        applyingScope = null;
+        RaiseLinkScopeChanged(before);
     }
-
-    /// <summary>Ends <see cref="BeginApplying" />: links are drawn from <see cref="ActiveScope" /> again.</summary>
-    public void EndApplying() => SetApplying(null);
 
     /// <summary>
     /// The scope a link should carry while <see cref="SetScopeAsync" /> is still reading, built without an await from the request
@@ -376,18 +392,46 @@ internal sealed class StudioState
         return new StudioScope(storeKey, pendingDatabase, pendingTenant);
     }
 
-    private void SetApplying(StudioScope? scope)
+    private long SetApplying(StudioScope scope)
     {
         StudioScope? before = LinkScope;
+        long generation = Interlocked.Increment(ref applyingGeneration);
         applyingScope = scope;
         RaiseLinkScopeChanged(before);
+        return generation;
     }
 
+    /// <summary>
+    /// Raises <see cref="LinkScopeChanged" /> when the links' scope moved, containing a handler that throws: the invocation list is
+    /// walked by hand, as <see cref="NotifyAsync" /> walks its own, so one subscriber's failure neither stops the next nor unwinds
+    /// into the scope change it was told about (which would leave the scope moved without <see cref="ScopeChanged" /> raised, or a
+    /// pending scope standing for good).
+    /// </summary>
     private void RaiseLinkScopeChanged(StudioScope? before)
     {
-        if (LinkScope != before)
+        if (LinkScope == before)
         {
-            LinkScopeChanged?.Invoke();
+            return;
+        }
+
+        Delegate[] handlers = LinkScopeChanged?.GetInvocationList() ?? [];
+        foreach (Delegate handler in handlers)
+        {
+            try
+            {
+                ((Action) handler)();
+            }
+            catch (Exception exception)
+            {
+                if (product == StudioProduct.PostgresStudio)
+                {
+                    logger.LogError(exception, "A Postgres Studio page failed to handle a change of the scope its links carry");
+                }
+                else
+                {
+                    logger.LogError(exception, "A Marten Studio page failed to handle a change of the scope its links carry");
+                }
+            }
         }
     }
 
@@ -489,14 +533,14 @@ internal sealed class StudioState
         ActiveStoreUnavailableMessage = facts.UnavailableMessage;
     }
 
-    private async Task SetActiveScopeAsync(StudioScope? scope, StudioScope? previous, bool endsApplying = false)
+    private async Task SetActiveScopeAsync(StudioScope? scope, StudioScope? previous, long endsGeneration = 0)
     {
         // The links move first and synchronously (LinkScopeChanged); only then does the awaited ScopeChanged walk its handlers. The
         // scope being applied ends here when it is the one that has just become active, and stands when a refresh of the listings
         // sets the opening scope while a pasted address's own is still to be applied.
         StudioScope? linkBefore = LinkScope;
         ActiveScope = scope;
-        if (endsApplying)
+        if (endsGeneration != 0 && endsGeneration == Volatile.Read(ref applyingGeneration))
         {
             applyingScope = null;
         }

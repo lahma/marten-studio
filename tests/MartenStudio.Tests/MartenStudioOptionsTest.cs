@@ -126,6 +126,13 @@ public class MartenStudioOptionsTest
     [InlineData("javascript:alert(1)")]
     [InlineData("https://")]
     [InlineData("mailto:ops@example.com")]
+    [InlineData("https://user:pass@evil.com/")]
+    [InlineData("https://app.example.com@evil.com/")]
+    [InlineData("JAVASCRIPT:alert(1)")]
+    [InlineData("data:text/html,x")]
+    [InlineData(" javascript:x")]
+    [InlineData("\\\\evil.com\\x")]
+    [InlineData("/app")]
     public void An_application_path_that_is_neither_is_refused_at_startup(string path)
     {
         ResolveAction(options => options.ApplicationPath = path).Should().Throw<OptionsValidationException>()

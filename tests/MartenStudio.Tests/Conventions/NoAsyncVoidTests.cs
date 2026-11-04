@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 
 namespace MartenStudio.Tests.Conventions;
@@ -43,6 +45,90 @@ public class NoAsyncVoidTests
         offenders.Should().BeEmpty(
             "hard rule 6: an async void handler's exception kills the Blazor circuit silently. Offenders: " +
             string.Join(", ", offenders));
+    }
+
+    private const BindingFlags AllDeclared =
+        BindingFlags.DeclaredOnly | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+    /// <summary>
+    /// Hard rule 6's other half (1.2-HEADER-FU): the text scan above cannot see an <c>async</c> lambda converted to an <c>Action</c>, an
+    /// <c>async</c> local function that returns <c>void</c> or one added to an <c>EventHandler</c> - each is an <c>async void</c>
+    /// with different spelling. The compiler turns every one of them into a method that returns <c>void</c> and carries
+    /// <c>[AsyncStateMachine]</c> (closure classes and local functions included), so the compiled assemblies are scanned for exactly that.
+    /// <c>StudioState.LinkScopeChanged</c> is an <c>Action</c> event, which is only safe while this stays green.
+    /// </summary>
+    [Fact]
+    public void No_compiled_method_in_a_shipped_assembly_is_an_async_void()
+    {
+        Assembly[] assemblies =
+        [
+            typeof(MartenStudioOptions).Assembly,
+            typeof(PostgresStudio.PostgresStudioOptions).Assembly,
+            typeof(PostgresStudio.PostgresDiagnosticsOptions).Assembly,
+        ];
+
+        assemblies.Select(static x => x.GetName().Name).Should().OnlyHaveUniqueItems("three different assemblies are scanned");
+
+        Type[] types = [.. assemblies.SelectMany(static x => x.GetTypes())];
+        types.Should().HaveCountGreaterThan(100, "scanning nothing would pass for the wrong reason");
+
+        string[] offenders = [.. VoidAsyncMethods(types)];
+
+        offenders.Should().BeEmpty(
+            "hard rule 6: a void-returning async method (an async lambda converted to an Action or an event handler, or an async void local "
+            + "function) is an async void with different spelling, and its exception kills the circuit. Offenders: " + string.Join(", ", offenders));
+    }
+
+    /// <summary>The anti-vacuity check for the compiled scan: the two async void shapes are found, a <c>Func&lt;Task&gt;</c> lambda and an async <c>Task</c> method are not.</summary>
+    [Fact]
+    public void The_compiled_scan_finds_an_async_lambda_on_an_Action_and_an_async_void_local_function_and_ignores_a_Func_of_Task()
+    {
+        Type[] fixture = [.. typeof(AsyncVoidFixture).Assembly.GetTypes()
+            .Where(static x => x == typeof(AsyncVoidFixture) || x.DeclaringType == typeof(AsyncVoidFixture))];
+
+        string[] flagged = [.. VoidAsyncMethods(fixture)];
+
+        flagged.Should().HaveCount(2, "exactly the async lambda on an Action and the async void local function: " + string.Join(", ", flagged));
+        flagged.Should().Contain(static x => x.Contains("AsyncVoidFixture", StringComparison.Ordinal));
+        flagged.Should().NotContain(static x => x.Contains("Fine", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> VoidAsyncMethods(IEnumerable<Type> types)
+    {
+        foreach (Type type in types)
+        {
+            foreach (MethodInfo method in type.GetMethods(AllDeclared))
+            {
+                if (method.ReturnType == typeof(void) && method.GetCustomAttribute<AsyncStateMachineAttribute>() is not null)
+                {
+                    yield return type.FullName + "::" + method.Name;
+                }
+            }
+        }
+    }
+
+    /// <summary>What the compiled scan has to find (and not find). Never called.</summary>
+    internal static class AsyncVoidFixture
+    {
+        public static Action Lambda()
+        {
+            Action action = async () => await Task.Yield();
+            return action;
+        }
+
+        public static void LocalFunction()
+        {
+            async void Run() => await Task.Yield();
+            Run();
+        }
+
+        public static Func<Task> Fine()
+        {
+            Func<Task> func = async () => await Task.Yield();
+            return func;
+        }
+
+        public static async Task FineToo() => await Task.Yield();
     }
 
     /// <summary>The anti-vacuity check: the scanner has to be able to fail.</summary>

@@ -117,7 +117,9 @@ internal static class StudioOptionsValidation
     /// <c>//host</c> and <c>/\host</c> are refused: they start with <c>/</c> but a browser reads them as a network-path reference
     /// to another host, which is neither of the two shapes the option names. A value with whitespace or a control character in it
     /// is refused whole, so a stray space in a configuration file is a startup error rather than a link that does not work.
-    /// An empty string is refused as well: the option's "no link" is <see langword="null" />.
+    /// An empty string is refused as well: the option's "no link" is <see langword="null" />. An absolute URL with user information
+    /// (<c>https://app.example.com@evil.com/</c>, <c>https://user:pass@host/</c>) is refused: the part before the <c>@</c> reads as the
+    /// destination to a person looking at the link, and the browser goes to what follows it.
     /// </remarks>
     internal static bool IsApplicationPath(string? value)
     {
@@ -138,7 +140,8 @@ internal static class StudioOptionsValidation
 
         return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri)
             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
-            && !string.IsNullOrEmpty(uri.Host);
+            && !string.IsNullOrEmpty(uri.Host)
+            && uri.UserInfo.Length == 0;
     }
 
     /// <summary>The capabilities object, which a host may set to <see langword="null" /> by mistake.</summary>
