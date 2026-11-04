@@ -51,16 +51,18 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    (LINQ mode's `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also
    holds every `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
    statement, which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
-6. **No `async void`.** Component events are `Func<Task>`, handlers are `private async Task` with a
-   `try`/`catch` that puts the failure on screen. An `async void` handler's exception escapes the
-   synchronization context unobserved and kills the circuit: the page silently stops responding and the
-   server log gets an unhandled exception with no component in the stack. `NoAsyncVoidTests` scans `src/`
-   and fails on any occurrence. **The lambda form is equally forbidden and the scanner cannot see it:**
-   `handler += async (s, e) => …` against an `EventHandler`, or any `async` lambda converted to an
-   `Action`, is an `async void` with different spelling and fails in exactly the same way. That is why
-   every event this codebase raises is declared `event Func<Task>?` rather than `EventHandler` — an
-   `EventHandler` is what *forces* the mistake, so the type is the enforcement and the scanner is only
-   the backstop.
+6. **No `async void`.** Component events are `Func<Task>`, handlers are `private async Task` with a `try`/`catch` that
+   puts the failure on screen. An `async void` handler's exception escapes the synchronization context unobserved and
+   kills the circuit: the page silently stops responding and the server log gets an unhandled exception with no
+   component in the stack. `NoAsyncVoidTests` scans `src/` and fails on any occurrence. **The lambda form is equally
+   forbidden and the source scanner cannot see it:** `handler += async (s, e) => …` against an `EventHandler`, or any
+   `async` lambda converted to an `Action`, is an `async void` with different spelling and fails in exactly the same
+   way. That is why every event this codebase raises is declared `event Func<Task>?` rather than `EventHandler` — an
+   `EventHandler` is what *forces* the mistake, so the type is the enforcement and the scanner is only the backstop. The
+   one exception is `StudioState.LinkScopeChanged`, an `event Action?` because its handlers must run before anything is
+   awaited: they are synchronous methods that only ask for a render, and `NoAsyncVoidTests` also scans the compiled
+   assemblies for a void-returning `[AsyncStateMachine]` method, so an `async` lambda attached to it, or to any
+   `Action`, fails the suite.
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** MartenStudio's surface is
    three static classes, two classes and two records, in
    `tests/MartenStudio.Tests/Verify/PublicApiTest_MartenStudio.verified.txt`, and it must not move because of

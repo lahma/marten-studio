@@ -98,9 +98,11 @@ Each rule's full text, with its lists of events, tests and history, is in
    and tail beyond it. Full text, with the events this holds in: hard rule 5.
 
 6. **No `async void`.** Component events are `Func<Task>`, handlers are `private async Task` with a `try`/`catch` that
-   puts the failure on screen. **The lambda form is equally forbidden and the scanner cannot see it:** an `async` lambda
-   converted to an `Action`, or added to an `EventHandler`, is an `async void` with different spelling; every event this
-   codebase raises is declared `event Func<Task>?`. `NoAsyncVoidTests` scans `src/`. Full text: hard rule 6.
+   puts the failure on screen. **The lambda form is equally forbidden and the source scanner cannot see it:** an `async`
+   lambda converted to an `Action`, or added to an `EventHandler`, is an `async void` with different spelling; every
+   event this codebase raises is declared `event Func<Task>?`, except `StudioState.LinkScopeChanged` (`Action`,
+   synchronous by contract, 1.2), which the compiled-assembly scan guards. `NoAsyncVoidTests` scans `src/` and, since
+   1.2, the compiled assemblies for a void-returning `[AsyncStateMachine]` method. Full text: hard rule 6.
 
 7. **A public API change needs a reviewed Verify baseline and a CHANGELOG entry.** MartenStudio's surface is three
    static classes, two classes and two records, and it must not move because of PostgresStudio; PostgresStudio's is its
