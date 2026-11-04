@@ -432,11 +432,20 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         ContinuousSkips: new SkippedErrors(true, true, true));
 
     /// <inheritdoc />
-    public Task<IDisposable> SubscribeToLiveStateAsync(StudioScope scope, CancellationToken cancellationToken = default)
+    public async Task<IDisposable> SubscribeToLiveStateAsync(StudioScope scope, CancellationToken cancellationToken = default)
     {
         Subscriptions++;
-        return Task.FromResult<IDisposable>(new Lease(this));
+
+        if (SubscribeGate is { } gate)
+        {
+            await gate.Task;
+        }
+
+        return new Lease(this);
     }
+
+    /// <summary>When set, <see cref="SubscribeToLiveStateAsync" /> waits for it: a test that leaves the page during the subscription.</summary>
+    public TaskCompletionSource? SubscribeGate { get; set; }
 
     /// <inheritdoc />
     public async Task<DaemonControlResult> StartAgentAsync(StudioScope scope, string shardName, CancellationToken cancellationToken = default)

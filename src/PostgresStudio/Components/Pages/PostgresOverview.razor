@@ -439,6 +439,13 @@
             await LoadEverythingAsync();
             await InvokeAsync(StateHasChanged);
 
+            // Leaving the page during the first loads disposes it under the awaits: the page's token source is gone (reading its
+            // token throws ObjectDisposedException, which ends the circuit), and a loop started now would be one nothing disposes.
+            if (disposed)
+            {
+                return;
+            }
+
             live = LiveFactory.Create();
             await live.StartAsync(Settings.RefreshInterval, TickAsync, pageCancellation.Token);
         }

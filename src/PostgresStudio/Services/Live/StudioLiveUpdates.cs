@@ -120,13 +120,17 @@ internal sealed class StudioLiveUpdates : IAsyncDisposable
     /// <param name="cancellationToken">Cancels the start itself, not the loop.</param>
     /// <remarks>
     /// <para>
+    /// <b>Two halves, and neither may be dropped (1.2-LIVE-FIX).</b> What fixes the order of events across the watch call is the
+    /// last paragraph below: the source and its token are taken before the await and <c>disposed</c> is checked after it. The
+    /// <see cref="NullReferenceException" /> that used to end the circuit came from that order (a page left during the await had
+    /// nulled the source the start then read) and would happen on a single-threaded context too.
+    /// </para>
+    /// <para>
     /// <b>Never <c>ConfigureAwait(false)</c> on this method's own awaits.</b> A component calls it from <c>OnAfterRenderAsync</c>,
-    /// on the renderer's dispatcher, and <see cref="DisposeAsync" /> is called from the same dispatcher: keeping the context means
-    /// the two run one at a time, so a dispose that arrives while the watch call is in flight is seen by the continuation below
-    /// without a data race, and every interop call (watch, unwatch) is issued from the renderer, in order. Resuming on the thread
-    /// pool is what let a dispose null the source under the start (a <see cref="NullReferenceException" /> that ended the circuit) and
-    /// two instances' interop calls reach a JS runtime from two threads at once (1.2-LIVE-FIX). The loop itself, <c>RunAsync</c>, does
-    /// run on the pool.
+    /// on the renderer's dispatcher, and <see cref="DisposeAsync" /> is called from the same dispatcher. Keeping the context is what
+    /// lets the <c>disposed</c> check run without racing the dispose (the two run one at a time), and it keeps every interop call
+    /// (watch, unwatch) on the renderer, in order - resuming on the thread pool also let two instances' calls reach a JS runtime from
+    /// two threads at once. The loop itself, <c>RunAsync</c>, does run on the pool.
     /// </para>
     /// <para>
     /// The source and its token are taken before the await, and <c>disposed</c> is checked after it: a page left during the watch

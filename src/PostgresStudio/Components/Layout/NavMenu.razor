@@ -159,6 +159,13 @@
         // are on screen already, and a toast saying they just appeared would be false.
         await HealthAlerts.ObserveAsync(State.ActiveScope, indicators.Health);
 
+        // Leaving (the circuit ending) during the reads above disposes the menu under the awaits: its token source is gone (reading
+        // its token throws ObjectDisposedException), and a loop started now would be one nothing disposes.
+        if (disposed)
+        {
+            return;
+        }
+
         live = LiveFactory.Create();
 
         // No Failed handler: a badge that could not be read is a badge that is not drawn, and the

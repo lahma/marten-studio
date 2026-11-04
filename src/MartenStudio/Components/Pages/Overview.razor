@@ -751,6 +751,13 @@
         await HealthMutes.LoadAsync(JsRuntime, pageCancellation.Token);
         await RefreshHealthAsync();
 
+        // Leaving the page during the first loads disposes it under the awaits: the page's token source is gone (reading its token
+        // throws ObjectDisposedException, which ends the circuit), and a loop started now would be one nothing disposes.
+        if (disposed)
+        {
+            return;
+        }
+
         live = LiveFactory.Create();
 
         // No Failed handler: every region already keeps its own failure as a value and renders it, so a

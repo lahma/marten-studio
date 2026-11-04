@@ -849,6 +849,9 @@
     private IDisposable? liveLease;
     private bool loading = true;
     private bool started;
+
+    /// <summary>Whether the page has been disposed: a lease taken after that is released at once, nothing else would release it.</summary>
+    private bool disposed;
     private string? loadError;
 
     /// <summary>
@@ -971,7 +974,7 @@
         // to exist for the page to draw, and neither may delay it.
         await SubscribeToLiveStateAsync();
 
-        if (live is not null)
+        if (live is not null && !disposed)
         {
             await live.StartAsync(Options.Value.RefreshInterval, TickAsync, pageCancellation.Token);
         }
@@ -1064,7 +1067,16 @@
 
         try
         {
-            liveLease = await ProjectionData.SubscribeToLiveStateAsync(scope, pageCancellation.Token);
+            IDisposable? lease = await ProjectionData.SubscribeToLiveStateAsync(scope, pageCancellation.Token);
+
+            if (disposed)
+            {
+                // Left during the subscription: the disposal has already released what it knew of, so this one is released here.
+                lease?.Dispose();
+                return;
+            }
+
+            liveLease = lease;
         }
         catch (OperationCanceledException)
         {
@@ -1970,6 +1982,13 @@
 
     public async ValueTask DisposeAsync()
     {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+
         State.ScopeChanged -= OnScopeChangedAsync;
 
         if (live is not null)
