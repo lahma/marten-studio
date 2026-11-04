@@ -34,6 +34,12 @@ internal sealed record EventFlowModel(
     IReadOnlyList<EventTagTypeModel> TagTypes,
     string? SubscriptionsUnavailable)
 {
+    /// <summary>
+    /// <see langword="null" />, or why no source lists what it writes: Marten would not give the store's document types, so nothing
+    /// can be told from a hidden type and the model lists no output rather than guess.
+    /// </summary>
+    public string? DocumentTypesUnavailable { get; init; }
+
     /// <summary>A store with nothing to draw.</summary>
     public static EventFlowModel None { get; } = new([], [], [], [], [], [], null);
 
@@ -218,6 +224,12 @@ internal sealed record FlowSource(
 {
     /// <summary>"global: one aggregate across tenants", or <see langword="null" />.</summary>
     public string? GlobalNote { get; init; }
+
+    /// <summary>
+    /// Why what it writes could not be listed ("could not describe what it writes: ..."), or <see langword="null" />. Apart from
+    /// <see cref="Note" />, which is about what it reads, so neither overwrites the other.
+    /// </summary>
+    public string? WritesNote { get; init; }
 
     /// <summary>Whether this is a composite: a group of members, and not a box of the picture.</summary>
     public bool IsComposite => Kind == FlowSourceKind.Composite;

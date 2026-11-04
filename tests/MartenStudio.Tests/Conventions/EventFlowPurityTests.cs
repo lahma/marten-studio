@@ -82,6 +82,20 @@ public class EventFlowPurityTests
     }
 
     [Fact]
+    public void The_type_fence_finds_a_real_use_and_ignores_one_in_a_comment()
+    {
+        const string Source = """
+            // IEventStore is never used here.
+            NpgsqlConnection connection = null;
+            IMartenDatabase database = null;
+            """;
+
+        string code = SourceScanner.StripCommentsAndStrings(Source);
+
+        ForbiddenTypes.Matches(code).Select(static x => x.Value).Should().Equal("NpgsqlConnection", "IMartenDatabase");
+    }
+
+    [Fact]
     public void The_scanner_finds_a_real_call_and_ignores_one_in_a_comment_or_a_string()
     {
         const string Source = """

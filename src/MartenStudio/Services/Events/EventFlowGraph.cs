@@ -52,6 +52,9 @@ internal static class EventFlowGraph
     /// <summary>Why the daemon's shard list could not be read.</summary>
     internal const string SubscriptionsUnavailableText = "Subscriptions could not be read from this store's options.";
 
+    /// <summary>Why no source lists what it writes: Marten would not give the store's document types.</summary>
+    internal const string DocumentTypesUnavailableText = "This store's document types could not be read, so what each projection writes is not listed.";
+
     /// <summary>Builds the model for a store.</summary>
     /// <param name="store">The store; only its options are read.</param>
     /// <param name="isVisible"><c>MartenStudioOptions.IsDocumentTypeVisible</c>, or <see langword="null" /> to hide nothing.</param>
@@ -143,10 +146,20 @@ internal static class EventFlowGraph
         private readonly Dictionary<string, Type> clrByKey = new(StringComparer.Ordinal);
         private Dictionary<Type, (IDocumentType Root, bool IsSubclass)> documents = [];
 
+        // Hidden is a property of the document type's whole hierarchy: a hidden root hides every subclass it has, as the rest of the
+        // studio treats them (LinqQueryService.HiddenDocumentTypes), and a visible root's subclass the delegate hides is hidden too.
+        // Filled by ReadDocumentTypes, so it comes first; with the registry unreadable it is empty and the document types are
+        // unavailable, so no output is listed at all.
+        private readonly HashSet<Type> hidden = [];
+        private bool documentsReadable = true;
+
+        /// <summary>The one visibility question the builder asks: the delegate's answer, and the hierarchy's.</summary>
+        private bool IsHidden(Type type) => !visible(type) || hidden.Contains(type);
+
         public EventFlowModel Build()
         {
-            ReadEventTypes();
             ReadDocumentTypes();
+            ReadEventTypes();
 
             HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
 
@@ -165,8 +178,11 @@ internal static class EventFlowGraph
                 [.. reads.Distinct().OrderBy(static x => x.EventAlias, StringComparer.Ordinal).ThenBy(static x => x.Source, StringComparer.Ordinal)],
                 [.. writes.Distinct().OrderBy(static x => x.Source, StringComparer.Ordinal).ThenBy(static x => x.OutputKey, StringComparer.Ordinal)],
                 [.. outputs.Values.OrderBy(static x => x.Title, StringComparer.OrdinalIgnoreCase).ThenBy(static x => x.Key, StringComparer.Ordinal)],
-                EventTagModel.From(options, visible).Types,
-                unavailable);
+                EventTagModel.From(options, type => !IsHidden(type)).Types,
+                unavailable)
+            {
+                DocumentTypesUnavailable = documentsReadable ? null : DocumentTypesUnavailableText,
+            };
         }
 
         // ------------------------------------------------------------------------------------------
@@ -318,8 +334,10 @@ internal static class EventFlowGraph
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                // Marten asks every projection for PublishedTypes() to build its mappings, so one that throws fails this too. Every
-                // output is then a type that is "not a document type of this store", and the throwing source carries its own note.
+                // Marten asks every projection for PublishedTypes() to build its mappings, so one that throws fails this too. Fail
+                // closed: without the registry no published type can be told from a hidden one's, so no source lists what it writes,
+                // and the model says so once.
+                documentsReadable = false;
                 return;
             }
 
@@ -327,6 +345,13 @@ internal static class EventFlowGraph
             {
                 if (CollectionAliases.IsMartenInfrastructure(root.DocumentType) || !visible(root.DocumentType))
                 {
+                    hidden.Add(root.DocumentType);
+
+                    foreach (SubClassMapping subclass in root.SubClasses)
+                    {
+                        hidden.Add(subclass.DocumentType);
+                    }
+
                     continue;
                 }
 
@@ -335,7 +360,14 @@ internal static class EventFlowGraph
                 // A subclass has no table of its own: the root is what it resolves to (MartenRelationshipGraph.DeclaredKeys).
                 foreach (SubClassMapping subclass in root.SubClasses)
                 {
-                    documents.TryAdd(subclass.DocumentType, (root, true));
+                    if (visible(subclass.DocumentType))
+                    {
+                        documents.TryAdd(subclass.DocumentType, (root, true));
+                    }
+                    else
+                    {
+                        hidden.Add(subclass.DocumentType);
+                    }
                 }
             }
         }
@@ -350,7 +382,7 @@ internal static class EventFlowGraph
 
             foreach (Type argument in type.GetGenericArguments())
             {
-                if (!visible(argument) || MentionsHidden(argument))
+                if (IsHidden(argument) || MentionsHidden(argument))
                 {
                     return true;
                 }
@@ -393,11 +425,16 @@ internal static class EventFlowGraph
                 List<string> undrawn = [];
 
                 string? note = readable || isComposite ? null : UnreadableInputNote;
+                string? writesNote = null;
 
-                MapOutputs(source, name, kind, undrawn, ref note);
+                // A composite's PublishedTypes() is its members' own: it lists only what it adds, in AddMembers.
+                if (!isComposite)
+                {
+                    MapOutputs(source, name, undrawn, ref writesNote);
+                }
 
                 EventFilterable? filter = source as EventFilterable;
-                string? streamType = filter?.StreamType is { } stream && !visible(stream) ? null : filter?.StreamType is { } shown ? ClrName(shown) : null;
+                string? streamType = filter?.StreamType is { } stream && !IsHidden(stream) ? ClrName(stream) : null;
 
                 string? tagType = null;
                 string? global = null;
@@ -408,7 +445,7 @@ internal static class EventFlowGraph
                     {
                         tagType = graph.TagTypes.FirstOrDefault(x => x.TagType == aggregate.IdentityType)?.TagType.Name;
 
-                        if (graph.GlobalAggregates.Contains(aggregate.AggregateType) && visible(aggregate.AggregateType))
+                        if (graph.GlobalAggregates.Contains(aggregate.AggregateType) && !IsHidden(aggregate.AggregateType))
                         {
                             global = "global: one aggregate across tenants";
                         }
@@ -417,7 +454,7 @@ internal static class EventFlowGraph
 
                 if (isComposite && depth < MaxCompositeDepth)
                 {
-                    note = AddMembers(source, name, depth, listed, undrawn) ?? note;
+                    AddMembers(source, name, depth, listed, undrawn, ref note, ref writesNote);
                 }
 
                 sources.Add(new FlowSource(
@@ -427,6 +464,7 @@ internal static class EventFlowGraph
                     streamType, filter?.IncludeArchivedEvents ?? false, tagType, note)
                 {
                     GlobalNote = global,
+                    WritesNote = writesNote,
                 });
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -438,12 +476,12 @@ internal static class EventFlowGraph
             }
         }
 
-        /// <summary>A composite's members become sources of their own. Returns a note when the composite will not list them.</summary>
-        private string? AddMembers(ISubscriptionSource source, string name, int depth, HashSet<string> listed, List<string> undrawn)
+        /// <summary>A composite's members become sources of their own; a note says when it will not list them or what it publishes.</summary>
+        private void AddMembers(ISubscriptionSource source, string name, int depth, HashSet<string> listed, List<string> undrawn, ref string? note, ref string? writesNote)
         {
             if (source is not CompositeProjection<IDocumentOperations, IQuerySession> composite)
             {
-                return null;
+                return;
             }
 
             IReadOnlyList<IProjectionSource<IDocumentOperations, IQuerySession>> all;
@@ -453,7 +491,8 @@ internal static class EventFlowGraph
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                return "could not list its members: " + exception.GetType().Name;
+                note = "could not list its members: " + exception.GetType().Name;
+                return;
             }
 
             HashSet<Type> memberTypes = [];
@@ -475,24 +514,16 @@ internal static class EventFlowGraph
                 }
             }
 
-            // What the composite itself publishes beyond its members' is listed on its row and not drawn: rare, and a box
-            // between the events and the members would break the columns.
+            // What the composite itself publishes beyond its members' is listed on its row, mapped as any source's output is, and
+            // never drawn: a box between the events and the members would break the columns.
             try
             {
-                foreach (Type published in composite.PublishedTypes())
-                {
-                    if (!memberTypes.Contains(published) && visible(published) && !MentionsHidden(published))
-                    {
-                        undrawn.Add(ClrName(published));
-                    }
-                }
+                MapPublished(name, [.. composite.PublishedTypes().Where(x => !memberTypes.Contains(x))], null, undrawn);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                return "could not list what it publishes: " + exception.GetType().Name;
+                writesNote = "could not describe what it writes: " + exception.GetType().Name;
             }
-
-            return null;
         }
 
         private static FlowSourceKind KindOf(ISubscriptionSource source)
@@ -573,11 +604,11 @@ internal static class EventFlowGraph
         // Outputs
         // ------------------------------------------------------------------------------------------
 
-        private void MapOutputs(ISubscriptionSource source, string name, FlowSourceKind kind, List<string> undrawn, ref string? note)
+        private void MapOutputs(ISubscriptionSource source, string name, List<string> undrawn, ref string? writesNote)
         {
             Type? live = source is IAggregateProjection { Lifecycle: ProjectionLifecycle.Live } aggregation ? aggregation.AggregateType : null;
 
-            if (live is not null && visible(live) && !CollectionAliases.IsMartenInfrastructure(live))
+            if (live is not null && !IsHidden(live) && !CollectionAliases.IsMartenInfrastructure(live))
             {
                 // Folded on read and never written by this projection, though the type usually is a document type with no table.
                 FlowOutput output = new("a:" + (live.FullName ?? live.Name), FlowOutputKind.LiveAggregate, ClrName(live), "folded live, not stored", CollectionColorizer.HueFor(ClrName(live)));
@@ -590,14 +621,28 @@ internal static class EventFlowGraph
                 AddTable(name, flat);
             }
 
-            IEnumerable<Type> published;
+            Type[] published;
             try
             {
                 published = source is IPublishesTypes publishes ? [.. publishes.PublishedTypes()] : [];
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                note = "could not describe what it writes: " + exception.GetType().Name;
+                writesNote = "could not describe what it writes: " + exception.GetType().Name;
+                return;
+            }
+
+            MapPublished(name, published, live, undrawn);
+        }
+
+        /// <summary>
+        /// Maps published types to the document types they are (a subclass to its root), and lists the rest by name - unless the
+        /// store's document types could not be read, when nothing can be told from a hidden type and nothing is listed.
+        /// </summary>
+        private void MapPublished(string name, IEnumerable<Type> published, Type? live, List<string> undrawn)
+        {
+            if (!documentsReadable)
+            {
                 return;
             }
 
@@ -608,8 +653,8 @@ internal static class EventFlowGraph
                     continue;
                 }
 
-                // Hidden is absent: no edge, no node, no count and no text - nor for a subclass whose root is hidden.
-                if (!visible(type) || MentionsHidden(type))
+                // Hidden is absent: no edge, no node, no count and no text - and a subclass of a hidden root is hidden with it.
+                if (IsHidden(type) || MentionsHidden(type))
                 {
                     continue;
                 }
@@ -680,7 +725,7 @@ internal static class EventFlowGraph
                     FlowInput input = declared.Count == 0 ? FlowInput.Everything : FlowInput.Declared;
                     List<string> also = MatchReads(group.Key, declared, input);
 
-                    string? stream = filters.StreamType is { } type && visible(type) ? ClrName(type) : null;
+                    string? stream = filters.StreamType is { } type && !IsHidden(type) ? ClrName(type) : null;
 
                     sources.Add(new FlowSource(
                         group.Key, FlowSourceKind.Subscription, ProjectionLifecycle.Async, first.Name.Version,

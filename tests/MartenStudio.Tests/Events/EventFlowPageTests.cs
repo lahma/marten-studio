@@ -2,9 +2,9 @@ using AngleSharp.Dom;
 
 using Bunit;
 
+using MartenStudio.Components.Pages.Events;
 using MartenStudio.Services.Events;
 using MartenStudio.Tests.Components;
-using MartenStudio.Tests.Conventions;
 using MartenStudio.Tests.Support;
 
 using Microsoft.AspNetCore.Components;
@@ -325,21 +325,82 @@ public class EventFlowPageTests
     }
 
     /// <summary>
-    /// bUnit parses the markup afresh on every render, so an element's identity cannot be compared across one; the guarantee
-    /// is that every row of every list is keyed on its stable key, which the page's source states.
+    /// bUnit patches its DOM from the new markup, so an element's identity says nothing about Blazor's keys; a keyed row is a
+    /// component, and a component instance that survives a reorder is the proof that it was matched by its key and not by position.
     /// </summary>
     [Fact]
-    public void Every_row_of_every_list_is_keyed_on_its_stable_key()
+    public async Task Rows_keep_their_instances_when_the_model_is_reordered()
     {
-        string razor = File.ReadAllText(RepositoryRoot.Combine("src", StudioProjects.Marten, "Components", "Pages", "Events", "EventFlow.razor"));
+        using StudioComponentContext context = NewContext();
+        IRenderedComponent<FlowPage> page = Render(context);
 
-        string[] rows = [.. System.Text.RegularExpressions.Regex.Matches(razor, @"<tr\b[^>]*>", System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromSeconds(5))
-            .Select(static x => x.Value)
-            .Where(static x => x.Contains("class=", StringComparison.Ordinal))];
+        Dictionary<string, EventFlowRow> before = Rows(page);
+        before.Keys.Should().Contain(["s:Orders", "s:Daily", "e:shipped", "e:archived"]);
 
-        rows.Should().HaveCountGreaterThanOrEqualTo(4, "the by-projection, by-event-type, group and tag rows");
-        rows.Should().OnlyContain(static x => x.Contains("@key", StringComparison.Ordinal), "a row without a key is re-created when the list is reordered");
-        razor.Should().Contain("\"s:\" + source.Name").And.Contain("\"e:\" + type.Key");
+        EventFlowModel sample = EventFlowFixtures.Sample();
+        context.EventData.EventFlow = new EventFlowResult(
+            sample with { Sources = [.. sample.Sources.Reverse()], EventTypes = [.. sample.EventTypes.Reverse()] },
+            null);
+
+        await page.Find(".ms-graph-actions button").ClickAsync(new());
+
+        Dictionary<string, EventFlowRow> after = Rows(page);
+        after.Keys.Should().BeEquivalentTo(before.Keys);
+
+        foreach ((string key, EventFlowRow row) in before)
+        {
+            after[key].Should().BeSameAs(row, key + " is matched by its key, not by its place in the list");
+        }
+    }
+
+    private static Dictionary<string, EventFlowRow> Rows(IRenderedComponent<FlowPage> page) =>
+        page.FindComponents<EventFlowRow>().Select(static x => x.Instance).ToDictionary(
+            static x => x.Source is { Length: > 0 } source ? "s:" + source : "e:" + x.Event,
+            static x => x,
+            StringComparer.Ordinal);
+
+    [Fact]
+    public void A_type_the_registry_has_not_met_is_marked_with_why()
+    {
+        EventFlowModel sample = EventFlowFixtures.Sample();
+        using StudioComponentContext context = NewContext(sample with
+        {
+            EventTypes = [.. sample.EventTypes, EventFlowFixtures.Event("fresh") with { NotRegistered = true }],
+        });
+
+        IRenderedComponent<FlowPage> page = Render(context);
+
+        IElement mark = page.Find("tr[data-event='fresh'] .ms-flow-unregistered");
+        mark.TextContent.Should().Be("(not registered yet)");
+        mark.GetAttribute("title").Should().Contain("registry grows as events are appended or read");
+        page.FindAll("tr[data-event='shipped'] .ms-flow-unregistered").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void What_a_source_reads_and_what_it_writes_keep_their_notes_apart()
+    {
+        EventFlowModel sample = EventFlowFixtures.Sample();
+        FlowSource broken = EventFlowFixtures.Source("Broken", FlowSourceKind.Custom, input: FlowInput.Everything) with
+        {
+            Note = "The studio cannot read which event types this declares.",
+            WritesNote = "could not describe what it writes: InvalidOperationException",
+        };
+        using StudioComponentContext context = NewContext(sample with { Sources = [.. sample.Sources, broken] });
+
+        IRenderedComponent<FlowPage> page = Render(context);
+
+        IElement row = page.Find("tr[data-source='Broken']");
+        row.QuerySelector(".ms-flow-reads")!.TextContent.Should().Contain("cannot read which event types").And.NotContain("could not describe what it writes");
+        row.QuerySelector(".ms-flow-writes")!.TextContent.Should().Contain("could not describe what it writes: InvalidOperationException")
+            .And.NotContain("none listed");
+    }
+
+    [Fact]
+    public void A_store_whose_document_types_cannot_be_read_says_so_once()
+    {
+        using StudioComponentContext context = NewContext(EventFlowFixtures.Sample() with { DocumentTypesUnavailable = EventFlowGraph.DocumentTypesUnavailableText });
+
+        Render(context).FindAll(".ms-graph-withheld").Select(static x => x.TextContent).Should().Equal(EventFlowGraph.DocumentTypesUnavailableText);
     }
 
     [Fact]

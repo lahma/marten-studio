@@ -239,3 +239,40 @@ public sealed partial class FlowSecretLiveProjection : SingleStreamProjection<Fl
     /// <summary>Starts one.</summary>
     public static FlowSecretLive Create(FlowPlaced placed) => new() { Id = placed.OrderId };
 }
+
+/// <summary>The root of a hierarchy the host hides.</summary>
+public class FlowSecretVault
+{
+    /// <summary>The id.</summary>
+    public Guid Id { get; set; }
+}
+
+/// <summary>A subclass of the hidden root: visible on its own, hidden with its hierarchy.</summary>
+public sealed class FlowSecretCell : FlowSecretVault;
+
+/// <summary>An event projection that declares it writes the hidden hierarchy's subclass.</summary>
+internal sealed partial class FlowStrongboxProjection : EventProjection
+{
+    /// <summary>Named.</summary>
+    public FlowStrongboxProjection()
+    {
+        Name = "Strongbox";
+        Options.DeleteViewTypeOnTeardown<FlowSecretCell>();
+        FilterIncomingEventsOnStreamType(typeof(FlowSecretCell));
+    }
+
+    /// <summary>Reads an event type.</summary>
+    public static void Project(IEvent<FlowPlaced> placed, IDocumentOperations operations)
+    {
+    }
+}
+
+/// <summary>A single-stream projection of the hidden hierarchy's subclass: its <c>Compacted&lt;T&gt;</c> names the subclass.</summary>
+public sealed partial class FlowCellarProjection : SingleStreamProjection<FlowSecretCell, Guid>
+{
+    /// <summary>Named.</summary>
+    public FlowCellarProjection() => Name = "Cellar";
+
+    /// <summary>Starts one.</summary>
+    public static FlowSecretCell Create(FlowPlaced placed) => new() { Id = placed.OrderId };
+}

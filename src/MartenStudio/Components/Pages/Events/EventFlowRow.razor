@@ -1,0 +1,24 @@
+@*
+    One row of an event flow table. A component rather than a bare <tr> so that the page can put @key on the row itself: a key on
+    markup emitted by a RenderFragment is a key inside a region, which Blazor does not use to match siblings, so a reordered
+    list would reuse rows by position. The row's identity is the data attribute its test finds it by.
+*@
+<tr class="@CssClass" data-source="@Source" data-event="@Event">@ChildContent</tr>
+
+@code {
+    /// <summary>The row's classes.</summary>
+    [Parameter]
+    public string? CssClass { get; set; }
+
+    /// <summary>A projection's name, on a row of the by-projection table.</summary>
+    [Parameter]
+    public string? Source { get; set; }
+
+    /// <summary>An event type's alias, on a row of the by-event-type table.</summary>
+    [Parameter]
+    public string? Event { get; set; }
+
+    /// <summary>The row's cells.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

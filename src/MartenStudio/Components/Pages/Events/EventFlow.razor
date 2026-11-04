@@ -176,7 +176,8 @@
                         <tbody>
                             @foreach (FlowSource source in OrderedSources)
                             {
-                                <tr class="@("ms-table-row ms-flow-row" + (source.Composite is not null ? " ms-flow-member" : null))" data-source="@source.Name" @key="@("s:" + source.Name)">
+                                @* A component, so that the key is on the row itself and a reordered list keeps each row's instance. *@
+                                <EventFlowRow @key="@("s:" + source.Name)" CssClass="@("ms-table-row ms-flow-row" + (source.Composite is not null ? " ms-flow-member" : null))" Source="@source.Name">
                                     <td class="ms-table-cell">
                                         <a class="ms-flow-source-link" href="@ProjectionsHref">@source.Name</a>
                                         <a class="ms-flow-show-flow" href="@FlowHref(source.Name, null, false)" title="@("Draw only " + source.Name + " and what it reads and writes")">Show its flow</a>
@@ -186,7 +187,7 @@
                                     <td class="ms-table-cell ms-flow-writes">@WritesCell(source)</td>
                                     <td class="ms-table-cell ms-table-cell-mono" title="@string.Join(", ", source.Shards)">@source.Shards.Count.ToString(CultureInfo.InvariantCulture)</td>
                                     <td class="ms-table-cell ms-flow-notes">@NotesCell(source)</td>
-                                </tr>
+                                </EventFlowRow>
                             }
                         </tbody>
                     </table>
@@ -211,7 +212,7 @@
                         <tbody>
                             @foreach (FlowEventType type in model.EventTypes.Where(static x => !x.IsMartenOwn))
                             {
-                                @EventTypeRow(type)
+                                <EventFlowRow @key="@("e:" + type.Key)" CssClass="@("ms-table-row ms-flow-row")" Event="@type.Alias">@EventTypeCells(type)</EventFlowRow>
                             }
                             @if (model.EventTypes.Any(static x => x.IsMartenOwn))
                             {
@@ -220,7 +221,7 @@
                                 </tr>
                                 @foreach (FlowEventType type in model.EventTypes.Where(static x => x.IsMartenOwn))
                                 {
-                                    @EventTypeRow(type)
+                                    <EventFlowRow @key="@("e:" + type.Key)" CssClass="@("ms-table-row ms-flow-row ms-flow-row-own")" Event="@type.Alias">@EventTypeCells(type)</EventFlowRow>
                                 }
                             }
                         </tbody>
@@ -583,7 +584,11 @@
             <span class="ms-muted ms-flow-undrawn" @key="@("u:" + undrawn)">declares @undrawn, not a document type of this store</span>
         }
 
-        if (!any)
+        if (source.WritesNote is { Length: > 0 } writesNote)
+        {
+            <span class="ms-flow-note ms-flow-note-warning">@writesNote</span>
+        }
+        else if (!any)
         {
             // The same words for a source that declares nothing and for one whose every output is hidden.
             <span class="ms-muted">none listed</span>
@@ -630,7 +635,8 @@
         }
     };
 
-    private RenderFragment EventTypeRow(FlowEventType type) => __builder =>
+    /// <summary>The cells of one event type's row; the row itself is an <c>EventFlowRow</c>, keyed by its type.</summary>
+    private RenderFragment EventTypeCells(FlowEventType type) => __builder =>
     {
         List<FlowRead> readers = [.. model.Reads.Where(x => string.Equals(x.EventAlias, type.Key, StringComparison.Ordinal))
             .OrderBy(static x => x.Source, StringComparer.OrdinalIgnoreCase)];
@@ -651,12 +657,16 @@
             }
         }
 
-        <tr class="@("ms-table-row ms-flow-row" + (type.IsMartenOwn ? " ms-flow-row-own" : null))" data-event="@type.Alias" @key="@("e:" + type.Key)">
-            <td class="ms-table-cell">
+        <td class="ms-table-cell">
                 <EventTypeChip Name="@type.Alias" DotNetTypeName="@type.DotNetTypeName" Href="@FeedHref(type.Alias)" />
                 @if (type.SharesAliasWith is { Length: > 0 } other)
                 {
                     <span class="ms-muted ms-flow-via">alias shared with @other</span>
+                }
+                @if (type.NotRegistered)
+                {
+                    <span class="ms-muted ms-flow-via ms-flow-unregistered"
+                          title="The store's event registry grows as events are appended or read, so a type a projection declares can be unknown to it for now. Its alias here is the one the registry will use.">(not registered yet)</span>
                 }
             </td>
             <td class="ms-table-cell ms-table-cell-mono ms-type-name" title="@type.DotNetTypeName">
@@ -714,7 +724,6 @@
                     <span class="ms-muted">-</span>
                 }
             </td>
-        </tr>
     };
 
     /// <summary>What the picture leaves out, said once below it.</summary>
@@ -723,6 +732,11 @@
         if (model.SubscriptionsUnavailable is { Length: > 0 } unavailable)
         {
             <p class="ms-graph-withheld" role="note">@unavailable</p>
+        }
+
+        if (model.DocumentTypesUnavailable is { Length: > 0 } documents)
+        {
+            <p class="ms-graph-withheld" role="note">@documents</p>
         }
     };
 

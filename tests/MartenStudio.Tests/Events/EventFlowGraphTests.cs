@@ -418,9 +418,77 @@ public class EventFlowGraphTests
         EventFlowModel model = EventFlowGraph.Build(store, null);
 
         FlowSource described = model.Sources.Single(static x => x.Name == "Throwing");
-        described.Note.Should().Contain(nameof(InvalidOperationException));
-        described.Note.Should().NotContain("no types for you", "an exception type, never what it said");
+        described.WritesNote.Should().Contain(nameof(InvalidOperationException));
+        described.WritesNote.Should().NotContain("no types for you", "an exception type, never what it said");
+        described.Note.Should().BeNull("what it writes is a note of its own and never overwrites what it reads");
         model.Sources.Should().Contain(static x => x.Name == "Orders");
+    }
+
+    /// <summary>
+    /// Marten builds the store's document mappings from every projection's <c>PublishedTypes()</c>, so one that throws empties
+    /// <c>AllKnownDocumentTypes()</c> too. No published type can then be told from a hidden one, so nothing is listed.
+    /// </summary>
+    [Fact]
+    public void When_the_document_types_cannot_be_read_no_source_lists_what_it_writes_and_the_model_says_so_once()
+    {
+        var throwing = new FlowThrowingProjection();
+
+        using DocumentStore store = Store(o =>
+        {
+            o.Projections.Add(throwing, ProjectionLifecycle.Async);
+            o.Projections.Add(new FlowOrderProjection(), ProjectionLifecycle.Inline);
+            o.Projections.Add(new FlowTrackerProjection(), ProjectionLifecycle.Async);
+        });
+
+        throwing.Armed = true;
+
+        EventFlowModel model = EventFlowGraph.Build(store, null);
+
+        model.DocumentTypesUnavailable.Should().Be(EventFlowGraph.DocumentTypesUnavailableText);
+        model.Sources.Single(static x => x.Name == "Orders").UndrawnOutputs.Should().BeEmpty("it would otherwise read 'not a document type of this store'");
+        model.Sources.Should().OnlyContain(static x => x.UndrawnOutputs.Count == 0);
+        model.Writes.Should().BeEmpty();
+        model.Outputs.Should().BeEmpty();
+        model.Sources.Single(static x => x.Name == "Orders").Input.Should().Be(FlowInput.Declared, "what it reads is unaffected");
+    }
+
+    [Fact]
+    public void When_the_document_types_can_be_read_the_model_does_not_say_otherwise()
+    {
+        using DocumentStore store = Store(o => SampleShaped(o));
+
+        EventFlowGraph.Build(store, null).DocumentTypesUnavailable.Should().BeNull();
+    }
+
+    /// <summary>
+    /// A composite's <c>PublishedTypes()</c> is its members' own, so mapping it as a source's output would repeat every member's
+    /// documents on the composite's row: the row lists only what the composite itself adds, mapped like any output.
+    /// </summary>
+    [Fact]
+    public void A_composites_row_lists_only_what_it_adds_and_maps_an_added_document_type_to_its_root()
+    {
+        using DocumentStore store = Store(o =>
+        {
+            o.Schema.For<FlowVehicle>().AddSubClass<FlowCar>();
+            o.Projections.CompositeProjectionFor("Bundle", composite =>
+            {
+                composite.Add(new FlowOrderProjection());
+                composite.Options.DeleteViewTypeOnTeardown<FlowCar>();
+                composite.Options.DeleteViewTypeOnTeardown<FlowShipment>();
+            });
+        });
+
+        EventFlowModel model = EventFlowGraph.Build(store, null);
+
+        FlowSource bundle = model.Sources.Single(static x => x.Name == "Bundle");
+        FlowWrite[] own = [.. model.Writes.Where(static x => x.Source == "Bundle")];
+
+        own.Should().HaveCount(2, "the two types it adds; its members' documents are the members' rows, not the composite's");
+        own.Single(static x => x.Subclass == nameof(FlowCar)).OutputKey.Should().Be(
+            model.Outputs.Single(static x => x.Subtitle == nameof(FlowVehicle)).Key, "an added subclass is mapped to its root");
+        own.Single(static x => x.Subclass is null).OutputKey.Should().Be(model.Outputs.Single(static x => x.Subtitle == nameof(FlowShipment)).Key);
+        bundle.UndrawnOutputs.Should().BeEmpty("an added type that is a document type is mapped, not listed as 'not a document type'");
+        model.Writes.Should().Contain(static x => x.Source == "Orders", "the member keeps its own output");
     }
 
     [Fact]
@@ -498,9 +566,16 @@ public class EventFlowGraphTests
             o.Projections.Add(new FlowSecretProjection(), ProjectionLifecycle.Inline);
             o.Projections.Add(new FlowSecretLiveProjection(), ProjectionLifecycle.Live);
             o.Events.RegisterTagType<FlowTagId>("flowtag").ForAggregate<FlowSecretTagged>();
+
+            // A hidden root with a subclass the delegate does not hide: the subclass lives in the hidden collection, so it is hidden
+            // with it - as a published type, as a Compacted<T> event type, and as a stream type.
+            o.Schema.For<FlowSecretVault>().AddSubClass<FlowSecretCell>();
+            o.Projections.Add(new FlowStrongboxProjection(), ProjectionLifecycle.Async);
+            o.Projections.Add(new FlowCellarProjection(), ProjectionLifecycle.Inline);
         });
 
-        bool Visible(Type type) => type != typeof(FlowSecret) && type != typeof(FlowSecretLive) && type != typeof(FlowSecretTagged);
+        bool Visible(Type type) =>
+            type != typeof(FlowSecret) && type != typeof(FlowSecretLive) && type != typeof(FlowSecretTagged) && type != typeof(FlowSecretVault);
 
         EventFlowModel model = EventFlowGraph.Build(store, Visible);
 
@@ -510,6 +585,11 @@ public class EventFlowGraphTests
             "a hidden type is absent: no output, no count, no note, and no event type that names it");
         model.TagTypes.Single().AggregateName.Should().BeNull("the tag type keeps its table; the aggregate it names is hidden");
         model.Sources.Should().Contain(static x => x.Name == "Orders", "visible projections are untouched");
+        model.Sources.Should().Contain(static x => x.Name == "Strongbox", "the projection itself is named as the Projections page names it (OPEN-1)");
+        model.Sources.Single(static x => x.Name == "Strongbox").UndrawnOutputs.Should().BeEmpty(
+            "a subclass of a hidden root is not 'a document type this store does not have': that sentence names it and is false");
+        model.Writes.Should().NotContain(static x => x.Source == "Strongbox" || x.Source == "Cellar");
+        model.EventTypes.Should().NotContain(static x => x.ClrName.Contains("FlowSecretCell", StringComparison.Ordinal), "Compacted<subclass> names it");
     }
 
     [Fact]
