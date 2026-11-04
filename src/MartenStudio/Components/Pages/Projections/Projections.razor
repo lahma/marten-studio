@@ -475,8 +475,8 @@
                                                            Stalled="figure.Stalled"
                                                            Warning="figure.Warning"
                                                            Critical="figure.Critical"
-                                                           WarningTitle="@ThresholdTitle("Warning", history.EffectiveWarning, history.WarningThreshold is not null)"
-                                                           CriticalTitle="@ThresholdTitle("Critical", history.EffectiveCritical, history.CriticalThreshold is not null)"
+                                                           WarningTitle="@ThresholdTitle("Warning", history.EffectiveWarning, history.WarningThreshold is not null, history.ThresholdsFromOption)"
+                                                           CriticalTitle="@ThresholdTitle("Critical", history.EffectiveCritical, history.CriticalThreshold is not null, history.ThresholdsFromOption)"
                                                            Arrow="@history.Arrow"
                                                            Direction="@history.DirectionClass"
                                                            Summary="@history.Summary()"
@@ -581,8 +581,9 @@
             <p class="ms-muted ms-projections-footnote">
                 Lag is the high water mark minus the shard's own sequence. Amber above
                 @ProjectionLagThresholds.Amber.ToString("N0", CultureInfo.InvariantCulture) events, red above
-                @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture) - unless the shard's
-                progression row carries thresholds of its own, which Marten creates and does not write. The chart, the
+                @ProjectionLagThresholds.Red.ToString("N0", CultureInfo.InvariantCulture) - unless
+                <code>MartenStudioOptions.ProjectionThresholds</code> names the shard's projection, or its progression
+                row carries thresholds of its own, which Marten creates and does not write. The chart, the
                 arrow and the time to catch up come from this page's own samples, kept each time this page or the
                 Overview reads the database; until there are enough of them, the arrow is the health advisor's, from
                 the samples it takes while the Health page or the Overview is open.
@@ -596,10 +597,38 @@
                         <li>
                             <strong>Lag colours and chart lines:</strong> amber above
                             @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Amber) events behind, red above
-                            @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Red) - the studio's own - unless a
-                            shard's progression row carries <code>warning_behind_threshold</code> or
-                            <code>critical_behind_threshold</code>, which then win. Marten creates those two columns and
-                            writes neither. A line is drawn on a chart once the lag comes within half of it.
+                            @DaemonCheckConfiguration.Number(ProjectionLagThresholds.Red) - the studio's own - unless
+                            <code>MartenStudioOptions.ProjectionThresholds</code> names a shard's projection, which then
+                            wins for every store of this application, or its progression row carries
+                            <code>warning_behind_threshold</code> or <code>critical_behind_threshold</code>, which win
+                            over the studio's. Marten creates those two columns and writes neither. A line is drawn on a
+                            chart once the lag comes within half of it.
+                            @if (ThresholdSources is { IsEmpty: false } sources)
+                            {
+                                <ul class="ms-projection-threshold-sources">
+                                    @foreach (ProjectionThresholdSource source in sources.Projections)
+                                    {
+                                        <li data-threshold-projection="@source.Projection" data-threshold-source="@source.Source.ToString().ToLowerInvariant()">
+                                            <strong>@source.Projection</strong>: amber above
+                                            @DaemonCheckConfiguration.Number(source.Warning), red above
+                                            @DaemonCheckConfiguration.Number(source.Critical)
+                                            (@(source.Source == LagThresholdSource.Option
+                                                ? "MartenStudioOptions.ProjectionThresholds"
+                                                : "its progression row's columns")).
+                                        </li>
+                                    }
+                                    @foreach (string unmatched in sources.UnmatchedOptions)
+                                    {
+                                        <li class="ms-muted" data-threshold-unmatched="@unmatched">
+                                            Configured for <strong>@unmatched</strong>, which this store has no projection named.
+                                        </li>
+                                    }
+                                </ul>
+                                @if (sources.Projections.Count > 0)
+                                {
+                                    <span class="ms-muted">Every other projection runs on the studio's defaults.</span>
+                                }
+                            }
                         </li>
                         <li>
                             <strong>D04, falling behind:</strong> past the warning threshold, and the lag grew at each of
@@ -647,8 +676,9 @@
             @* M4: progression rows nothing this store registers advances - 0.5's "Unregistered shards", less the rows that
                were never orphans (a subscription's, and each tenant's row of a registered shard), which are drawn under
                their projection above. Counted for everyone the scope admits, named only for a visitor the store policy
-               allows for the whole database. Read-only: Marten has no call that removes one, and the studio writes no DML
-               (D6) - the statements are text for the host's own migrations. *@
+               allows for the whole database. 1.2-PROJ: a row the daemon may not read can be removed with Marten's own
+               DeleteProjectionProgressByShardNameAsync under CorrectProgression - the studio writes no DML of its own (D6) -
+               and the statements stay as text for the host's own migrations. *@
             <section class="ms-orphaned-progression" aria-labelledby="ms-orphaned-progression-title">
                 <h2 class="ms-section-title" id="ms-orphaned-progression-title">@OrphanWording.Heading</h2>
                 <p class="ms-orphaned-progression-count"><strong>@OrphanWording.Count(view.Orphans.Count)</strong></p>
@@ -668,6 +698,7 @@
                                     <th scope="col">Position</th>
                                     <th scope="col" title="mt_event_progression.last_updated, in the database server's time">Last written</th>
                                     <th scope="col">Why nothing advances it</th>
+                                    <th scope="col">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -694,11 +725,37 @@
                                             @(orphan.LastUpdated is { } updated ? State.FormatInSelectedTimeZone(updated) : "not recorded")
                                         </td>
                                         <td class="ms-table-cell ms-orphaned-progression-reason">@orphan.Explanation</td>
+                                        <td class="ms-table-cell ms-table-cell-actions">
+                                            @* Beside Marten's call, and only where that call is shown: a row the daemon may still read, or
+                                               whose name cannot be shown as what it is, is not offered. The service checks all of it again. *@
+                                            @if (orphan.RemovalCall is not null)
+                                            {
+                                                <button type="button"
+                                                        class="ms-btn ms-btn-sm ms-orphan-remove"
+                                                        disabled="@(!CorrectEnabled)"
+                                                        title="@CorrectTitle"
+                                                        @onclick="() => AskRemoveOrphanAsync(orphan.Name)">
+                                                    Remove
+                                                </button>
+                                            }
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
                         </table>
                     </TableScroll>
+
+                    @if (view.Orphans.RemovalCalls.Count > 0)
+                    {
+                        @if (!Capabilities.IsEnabled(StudioCapability.CorrectProgression))
+                        {
+                            <CapabilityDisabled Capability="@nameof(StudioCapability.CorrectProgression)"
+                                                Action="Removing an orphaned progression row" />
+                        }
+
+                        <WriteRefusal Refused="RefusedByPolicy(StudioCapability.CorrectProgression)"
+                                      Capability="@nameof(StudioCapability.CorrectProgression)" />
+                    }
 
                     @if (view.Orphans.RemovalStatements.Count > 0 || view.Orphans.RemovalCalls.Count > 0)
                     {
@@ -735,6 +792,8 @@
                    Tenant="@State.ActiveScope?.TenantId"
                    ShardTimeout="@(rebuild?.ShardTimeout ?? Options.Value.RebuildShardTimeout)"
                    Estimate="@RebuildEstimate"
+                   ErrorPolicy="@rebuild?.ErrorPolicy?.Sentence()"
+                   ErrorPolicyDifference="@rebuild?.ErrorPolicy?.DifferenceSentence()"
                    DrainNote="@DrainSentence"
                    Warnings="rebuildWarnings"
                    OnConfirm="ConfirmRebuildAsync"
@@ -756,7 +815,8 @@
         CorrectProgression,
         CancelOperation,
         PauseDaemon,
-        ResumeDaemon
+        ResumeDaemon,
+        RemoveOrphan
     }
 
     private readonly CancellationTokenSource pageCancellation = new();
@@ -776,6 +836,9 @@
     private RebuildScope? rebuild;
     private PendingAction pending = PendingAction.None;
     private string? pendingOperationId;
+
+    /// <summary>The orphaned progression row the Remove dialog is about, by the name the page drew.</summary>
+    private string? pendingOrphan;
     private IDisposable? liveLease;
     private bool loading = true;
     private bool started;
@@ -1227,18 +1290,27 @@
     private ShardLagHistory? HistoryOf(ShardProgress shard) => view?.LagHistories.GetValueOrDefault(shard.ShardName);
 
     /// <summary>A threshold line's title: its number, and whose it is.</summary>
-    private static string ThresholdTitle(string which, long threshold, bool fromRow) =>
+    private static string ThresholdTitle(string which, long threshold, bool fromRow, bool fromOption = false) =>
         which + " threshold: " + DaemonCheckConfiguration.Number(threshold) + " behind ("
-        + (fromRow ? "from its progression row" : "the studio's") + ")";
+        + (fromOption ? "from MartenStudioOptions.ProjectionThresholds" : fromRow ? "from its progression row" : "the studio's") + ")";
+
+    /// <summary>
+    /// Where per-projection thresholds come from, projection by projection, for the "Thresholds that apply" disclosure -
+    /// <see langword="null" /> until the view is read.
+    /// </summary>
+    private ThresholdDisclosure? ThresholdSources =>
+        view is null ? null : LagThresholdResolver.Describe(view.Projections, view.Progress, Options.Value.ProjectionLagThresholdsByName);
 
     /// <summary>The lag cell's hover text: which thresholds colour it, and the trend.</summary>
     private string LagTitle(ShardProgress shard)
     {
         string thresholds = "Amber above " + shard.EffectiveWarningThreshold.ToString("N0", CultureInfo.InvariantCulture)
             + ", red above " + shard.EffectiveCriticalThreshold.ToString("N0", CultureInfo.InvariantCulture)
-            + (shard.WarningThreshold is not null || shard.CriticalThreshold is not null
-                ? " (this shard's own thresholds, from its progression row)."
-                : " (the studio's defaults).");
+            + (shard.ThresholdsFromOption
+                ? " (MartenStudioOptions.ProjectionThresholds for " + shard.ProjectionName + ")."
+                : shard.WarningThreshold is not null || shard.CriticalThreshold is not null
+                    ? " (this shard's own thresholds, from its progression row)."
+                    : " (the studio's defaults).");
 
         string? trend = HistoryOf(shard) is { HasTrend: true } own ? own.Describe()
             : TrendOf(shard)?.Describe();
@@ -1528,22 +1600,38 @@
         return Task.CompletedTask;
     }
 
+    /// <summary>Asks before removing an orphaned progression row: the dialog names it and what Marten's call does.</summary>
+    private Task AskRemoveOrphanAsync(string rowName)
+    {
+        pending = PendingAction.RemoveOrphan;
+        pendingOperationId = null;
+        pendingOrphan = rowName;
+        return Task.CompletedTask;
+    }
+
     private void CancelPending()
     {
         pending = PendingAction.None;
         pendingOperationId = null;
+        pendingOrphan = null;
     }
 
     private async Task ConfirmPendingAsync()
     {
         PendingAction action = pending;
         string? operationId = pendingOperationId;
+        string? orphan = pendingOrphan;
 
         pending = PendingAction.None;
         pendingOperationId = null;
+        pendingOrphan = null;
 
         switch (action)
         {
+            case PendingAction.RemoveOrphan when orphan is { Length: > 0 }:
+                await RemoveOrphanAsync(orphan);
+                break;
+
             case PendingAction.AdvanceHighWaterMark:
                 await RunAsync(
                     "High water mark advanced to the latest event",
@@ -1587,6 +1675,7 @@
         PendingAction.CancelOperation => "Stop this operation?",
         PendingAction.PauseDaemon => "Pause the projection daemon?",
         PendingAction.ResumeDaemon => "Resume the projection daemon?",
+        PendingAction.RemoveOrphan => OrphanWording.RemoveTitle,
         _ => string.Empty
     };
 
@@ -1667,6 +1756,10 @@
 
     private string PendingMessage => pending switch
     {
+        PendingAction.RemoveOrphan =>
+            OrphanWording.RemoveMessage(pendingOrphan ?? string.Empty, view?.DatabaseAutoCreate)
+            + " It is the database's bookkeeping, not one tenant's, so it is refused unless you may change this database as a "
+            + "whole, whatever tenant is selected.",
         PendingAction.PauseDaemon =>
             DaemonControlMessages.PauseIsProcessWide
             + $" That is every database this store has here: {AffectedDatabases}. Nothing projects "
@@ -1692,6 +1785,43 @@
             + "finish it - the projection stays half built until it is rebuilt again.",
         _ => string.Empty
     };
+
+    /// <summary>
+    /// Removes one orphaned progression row. The service reads the table again at the click, so "no longer an orphan" comes
+    /// back as a value - an info toast, not a red one: nothing failed, and nothing was removed.
+    /// </summary>
+    private async Task RemoveOrphanAsync(string rowName)
+    {
+        StudioScope? scope = State.ActiveScope;
+        if (scope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            OrphanRemoval removal = await ProjectionData.RemoveOrphanedProgressionAsync(scope, rowName, pageCancellation.Token);
+
+            if (removal.Removed)
+            {
+                await Toasts.Success(removal.Message);
+            }
+            else
+            {
+                await Toasts.Info(removal.Message);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            await Toasts.Error(exception.Message);
+        }
+
+        await LoadAsync(pageCancellation.Token);
+        await InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>
     /// Runs one action: report it, refresh, and put any refusal on the screen rather than in the log.

@@ -48,6 +48,22 @@
             <span class="ms-kv-key">Time allowed per shard</span>
             <span class="ms-kv-value ms-mono">@TimeoutText</span>
         </div>
+        @if (ErrorPolicy is { Length: > 0 })
+        {
+            @* The store's Projections.RebuildErrors, which is not the policy the live agents run under (Projections.Errors): a
+               host that set SkipApplyErrors for the continuous agents only sees a rebuild fail where the live agent skipped.
+               Read off StoreOptions; no database read. *@
+            <div class="ms-kv-row ms-rebuild-error-policy">
+                <span class="ms-kv-key">Error policy</span>
+                <span class="ms-kv-value">
+                    @ErrorPolicy
+                    @if (ErrorPolicyDifference is { Length: > 0 })
+                    {
+                        <span class="ms-rebuild-error-policy-difference"> @ErrorPolicyDifference</span>
+                    }
+                </span>
+            </div>
+        }
         @if (Estimate is { Length: > 0 })
         {
             <div class="ms-kv-row ms-rebuild-estimate">
@@ -177,6 +193,20 @@
     /// </summary>
     [Parameter]
     public string? Estimate { get; set; }
+
+    /// <summary>
+    /// The policy a rebuild runs under, from the store's <c>Projections.RebuildErrors</c>
+    /// (<c>RebuildErrorPolicy.Sentence</c>), or <see langword="null" /> where it was not read.
+    /// </summary>
+    [Parameter]
+    public string? ErrorPolicy { get; set; }
+
+    /// <summary>
+    /// A second clause when that differs from the continuous agents' <c>Projections.Errors</c>
+    /// (<c>RebuildErrorPolicy.DifferenceSentence</c>), or <see langword="null" /> when they agree.
+    /// </summary>
+    [Parameter]
+    public string? ErrorPolicyDifference { get; set; }
 
     /// <summary>What stopping the projection's shards does, in the store's own <c>StopAndDrainTimeout</c>.</summary>
     [Parameter]

@@ -55,6 +55,7 @@ namespace MartenStudio
         public int MaxSqlConsoleRows { get; set; }
         public int MaxStudioConnections { get; set; }
         public string Path { get; set; }
+        public System.Collections.Generic.IDictionary<string, MartenStudio.ProjectionLagThreshold> ProjectionThresholds { get; }
         public System.TimeSpan QueryTimeout { get; set; }
         public bool ReadOnly { get; set; }
         public System.TimeSpan RebuildShardTimeout { get; set; }
@@ -68,5 +69,11 @@ namespace MartenStudio
     public static class MartenStudioServiceCollectionExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddMartenStudio(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<MartenStudio.MartenStudioOptions>? configure = null) { }
+    }
+    public sealed record ProjectionLagThreshold : System.IEquatable<MartenStudio.ProjectionLagThreshold>
+    {
+        public ProjectionLagThreshold(long WarningBehind, long CriticalBehind) { }
+        public long CriticalBehind { get; init; }
+        public long WarningBehind { get; init; }
     }
 }

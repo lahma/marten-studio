@@ -333,4 +333,39 @@ public class ShardStalledCheckTests
             new HealthSamplePart(DaemonSeries.ShardPosition("ShipmentTracker:All"), 0),
         });
     }
+
+    /// <summary>
+    /// 1.2-PROJ: the series D04 and the screen's arrows read are the thresholds that apply - the host's
+    /// <c>ProjectionThresholds</c> for the shard's projection first, then the row's columns, else none recorded.
+    /// </summary>
+    [Fact]
+    public void It_samples_the_hosts_thresholds_for_a_projection_over_its_rows_and_the_rows_otherwise()
+    {
+        DaemonCheckConfiguration configuration = DaemonConfiguration(shards: ["DailySales:All", "ShipmentTracker:All", "Orders:All"]) with
+        {
+            ProjectionThresholds = new Dictionary<string, ProjectionLagThreshold>(StringComparer.Ordinal)
+            {
+                ["DailySales"] = new(WarningBehind: 5_000, CriticalBehind: 50_000),
+            },
+        };
+
+        ShardStalledFacts facts = new(
+            configuration,
+            Reading(TimeSpan.Zero),
+            [
+                new DaemonShardRow("DailySales:All", 42, Now, WarningThreshold: 10, CriticalThreshold: 20),
+                new DaemonShardRow("ShipmentTracker:All", 7, Now, WarningThreshold: 11),
+            ],
+            HealthyHere);
+
+        new ShardStalledCheck().Sample(facts).Should().BeEquivalentTo(new[]
+        {
+            new HealthSamplePart(DaemonSeries.ShardPosition("DailySales:All"), 42),
+            new HealthSamplePart(DaemonSeries.ShardWarningThreshold("DailySales:All"), 5_000),
+            new HealthSamplePart(DaemonSeries.ShardCriticalThreshold("DailySales:All"), 50_000),
+            new HealthSamplePart(DaemonSeries.ShardPosition("ShipmentTracker:All"), 7),
+            new HealthSamplePart(DaemonSeries.ShardWarningThreshold("ShipmentTracker:All"), 11),
+            new HealthSamplePart(DaemonSeries.ShardPosition("Orders:All"), 0),
+        });
+    }
 }

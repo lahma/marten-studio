@@ -38,6 +38,32 @@ internal static partial class MartenLog
     [LoggerMessage(EventId = 9209, Level = LogLevel.Information, Message = "Marten Studio user {User} requested daemon control {Operation} on {Target} in store {StoreKey}, database {DatabaseId}")]
     public static partial void DaemonControlRequestedRaw(this ILogger logger, string user, string operation, string target, string storeKey, string databaseId);
 
+    [LoggerMessage(EventId = 9225, Level = LogLevel.Information, Message = "Marten Studio user {User} is removing the orphaned progression row {Row} from store {StoreKey}, database {DatabaseId}")]
+    public static partial void OrphanedProgressionRemovalRequestedRaw(this ILogger logger, string user, string row, string storeKey, string databaseId);
+
+    [LoggerMessage(EventId = 9226, Level = LogLevel.Information, Message = "Marten Studio refused user {User}'s removal of the progression row {Row} from store {StoreKey}, database {DatabaseId}: {Reason}")]
+    public static partial void OrphanedProgressionRemovalRefusedRaw(this ILogger logger, string user, string row, string storeKey, string databaseId, string reason);
+
+    /// <summary>9225, with the user's name, the row's name and the scope escaped and bounded.</summary>
+    /// <remarks>
+    /// The row is what the circuit named - the page sends the name of the row it drew, and the service checks it against the
+    /// table before it deletes anything, but this line is written first - so it is the visitor's text and is capped (H1).
+    /// </remarks>
+    public static void OrphanedProgressionRemovalRequested(this ILogger logger, string user, string row, string storeKey, string databaseId)
+    {
+        (user, row, storeKey, databaseId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(row), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.OrphanedProgressionRemovalRequestedRaw(user, row, storeKey, databaseId);
+    }
+
+    /// <summary>9226, with the user's name, the row's name and the scope escaped and bounded.</summary>
+    public static void OrphanedProgressionRemovalRefused(this ILogger logger, string user, string row, string storeKey, string databaseId, string reason)
+    {
+        (user, row, storeKey, databaseId) =
+            (StudioLogValue.Cap(user), StudioLogValue.Cap(row), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.OrphanedProgressionRemovalRefusedRaw(user, row, storeKey, databaseId, reason);
+    }
+
     /// <summary>9206, with the user's name and the scope escaped and bounded.</summary>
     public static void SchemaChangeApplied(this ILogger logger, string user, string storeKey, string databaseId, string summary)
     {

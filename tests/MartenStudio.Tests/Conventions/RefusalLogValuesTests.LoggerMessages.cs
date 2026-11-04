@@ -123,7 +123,11 @@ public partial class RefusalLogValuesTests
         logger.DaemonControlRequested("ops", "StopAgent", HostileStatement, "default", "db");
         logger.ProjectionRebuildStarted("ops", HostileStatement, "default", "db");
 
-        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9209, 9207);
+        // 1.2-PROJ: the row a circuit names reaches 9225 before the service has looked it up in the table, and 9226 on the way out.
+        logger.OrphanedProgressionRemovalRequested("ops", HostileStatement, "default", "db");
+        logger.OrphanedProgressionRemovalRefused("ops", HostileStatement, "default", "db", "refused");
+
+        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9209, 9207, 9225, 9226);
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {

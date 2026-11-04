@@ -380,6 +380,10 @@ internal sealed record ProjectionThresholds(TimeSpan SlowPollingTime, TimeSpan H
 /// <param name="AgentStatusHere">The status of the shard's agent in the daemon hosted here, when one runs it.</param>
 /// <param name="WarningThreshold">The row's own <c>warning_behind_threshold</c>, when the host wrote one.</param>
 /// <param name="CriticalThreshold">The row's own <c>critical_behind_threshold</c>, likewise.</param>
+/// <param name="ThresholdsFromOption">
+/// Whether the two thresholds are the host's <c>MartenStudioOptions.ProjectionThresholds</c> for the shard's projection
+/// (<see cref="LagThresholdResolver" />) rather than the row's.
+/// </param>
 internal sealed record ShardLagContext(
     TimeSpan Spacing,
     bool Rebuilding = false,
@@ -387,7 +391,8 @@ internal sealed record ShardLagContext(
     bool PausedByStudio = false,
     string? AgentStatusHere = null,
     long? WarningThreshold = null,
-    long? CriticalThreshold = null)
+    long? CriticalThreshold = null,
+    bool ThresholdsFromOption = false)
 {
     /// <summary>
     /// The longest step between two samples that is still one run: four of the spacing, and at least half a minute - a poll
@@ -421,11 +426,16 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
     /// </summary>
     public string? WithheldBecause { get; init; }
 
-    /// <summary>The row's own warning threshold, when the host wrote one.</summary>
+    /// <summary>The shard's own warning threshold, when the host set one: in <c>ProjectionThresholds</c>, or in the row.</summary>
     public long? WarningThreshold { get; init; }
 
-    /// <summary>The row's own critical threshold, when the host wrote one.</summary>
+    /// <summary>The shard's own critical threshold, when the host set one.</summary>
     public long? CriticalThreshold { get; init; }
+
+    /// <summary>
+    /// Whether the two thresholds are the host's <c>MartenStudioOptions.ProjectionThresholds</c> rather than the row's.
+    /// </summary>
+    public bool ThresholdsFromOption { get; init; }
 
     /// <summary>The longest step between two samples of one run.</summary>
     public TimeSpan MaxStep { get; init; } = TimeSpan.FromSeconds(30);
@@ -483,6 +493,7 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
             WithheldBecause = withheld,
             WarningThreshold = context.WarningThreshold,
             CriticalThreshold = context.CriticalThreshold,
+            ThresholdsFromOption = context.ThresholdsFromOption,
             MaxStep = maxStep,
         };
     }
@@ -553,6 +564,12 @@ internal sealed record ShardLagHistory(string ShardName, IReadOnlyList<LagPoint>
         if (WarningThreshold is null && CriticalThreshold is null)
         {
             return null;
+        }
+
+        if (ThresholdsFromOption)
+        {
+            return "Thresholds: warning above " + Number(EffectiveWarning) + ", critical above " + Number(EffectiveCritical)
+                + " (MartenStudioOptions.ProjectionThresholds).";
         }
 
         return "Thresholds: warning above " + Number(EffectiveWarning) + (WarningThreshold is null ? " (the studio's)" : " (its progression row's)")

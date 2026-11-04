@@ -110,6 +110,17 @@ internal interface IProjectionDataService
     Task CorrectProgressionAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Removes one orphaned row of <c>mt_event_progression</c> by its exact name. Requires <c>CorrectProgression</c>, and the
+    /// store and write policies' yes for the database as a whole (<c>TenantId = null</c>), whatever tenant is selected.
+    /// </summary>
+    /// <remarks>
+    /// The name is checked against the table again at the call - still an orphan, not one the daemon may read - and a row that
+    /// is not is a refusal in the returned value, audited, with nothing removed. Marten's call first ensures the event store's
+    /// storage under the database's <c>AutoCreate</c>, as every write to it does.
+    /// </remarks>
+    Task<OrphanRemoval> RemoveOrphanedProgressionAsync(StudioScope scope, string rowName, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// D01's Explain: who could be holding the high-water mark behind its gap - Marten's own gap-liveness questions plus
     /// <c>pg_prepared_xacts</c>, asked once, now.
     /// </summary>

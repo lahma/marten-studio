@@ -51,11 +51,17 @@ internal sealed record ShardTrend(
     long? WarningThreshold,
     long? CriticalThreshold)
 {
-    /// <summary>The warning threshold that applies: the row's own, or the studio's 1,000.</summary>
+    /// <summary>The warning threshold that applies: the host's option, the row's own, or the studio's 1,000.</summary>
     public long EffectiveWarning => WarningThreshold ?? ProjectionLagThresholds.Amber;
 
-    /// <summary>The critical threshold that applies: the row's own, or the studio's 100,000.</summary>
+    /// <summary>The critical threshold that applies: the host's option, the row's own, or the studio's 100,000.</summary>
     public long EffectiveCritical => CriticalThreshold ?? ProjectionLagThresholds.Red;
+
+    /// <summary>
+    /// Whether <see cref="WarningThreshold" /> and <see cref="CriticalThreshold" /> are the host's
+    /// <c>MartenStudioOptions.ProjectionThresholds</c> (<see cref="LagThresholdResolver" />) rather than the samples' row values.
+    /// </summary>
+    public bool ThresholdsFromOption { get; init; }
 
     /// <summary>Whether the high-water mark moved over the window: whether anything new reached the shards at all.</summary>
     public bool MarkMoved { get; init; }

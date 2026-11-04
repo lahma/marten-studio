@@ -163,7 +163,10 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
 
         DaemonStatus daemon = await DescribeDaemonAsync(resolved, cancellationToken).ConfigureAwait(false);
 
-        List<ShardProgress> merged = MergeProgress(resolved, stored);
+        // The host's per-projection thresholds (MartenStudioOptions.ProjectionThresholds) win over the row's columns, which win
+        // over the studio's defaults; from here every colour, chart line and summary reads the shard's own numbers.
+        List<ShardProgress> merged = LagThresholdResolver.Apply(
+            MergeProgress(resolved, stored), options.Value.ProjectionLagThresholdsByName);
 
         // The orphans are not shards: their lag only grows, so they are carried apart and never sort to the top (M4).
         IReadOnlyList<ShardProgress> progress = [.. merged.Where(static x => x.IsRegistered)];
@@ -200,12 +203,13 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
     /// Under <c>UseTenantPartitionedEvents</c> a tenant-scoped read sees only that tenant's rows, as every row here.
     /// </para>
     /// <para>
-    /// <b>Read-only, in 0.6.</b> Removing a row is the host's decision, and the studio writes no DML of its own (D6). Marten
-    /// removes one by its exact name - registered or not - with <c>IEventDatabase.DeleteProjectionProgressByShardNameAsync</c>
-    /// (marten#4785, public at <c>V9.39.0</c> and <c>v9.54.2</c>), while <c>IEventStore.DeleteProjectionProgressAsync</c>
-    /// looks the name up among the registered projections and throws <see cref="ArgumentOutOfRangeException" /> for any
-    /// other. Each row it may name carries that call, for the host's own code, and the statement, for its migrations, built
-    /// in <c>MigrationSqlText</c> - except a row the daemon may still read.
+    /// <b>Listing is a read; removing is <see cref="RemoveOrphanedProgressionAsync" />'s.</b> The studio writes no DML of its own
+    /// (D6): Marten removes one row by its exact name - registered or not - with
+    /// <c>IEventDatabase.DeleteProjectionProgressByShardNameAsync</c> (marten#4785, public at <c>V9.39.0</c> and
+    /// <c>v9.54.2</c>), while <c>IEventStore.DeleteProjectionProgressAsync</c> looks the name up among the registered
+    /// projections and throws <see cref="ArgumentOutOfRangeException" /> for any other. Each row it may name carries that call,
+    /// for the host's own code, and the statement, for its migrations, built in <c>MigrationSqlText</c> - except a row the daemon
+    /// may still read, which is also the row the studio will not remove.
     /// </para>
     /// </remarks>
     private async Task<OrphanedProgression> OrphansAsync(
@@ -213,7 +217,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
         IReadOnlyList<ShardProgress> merged,
         CancellationToken cancellationToken)
     {
-        List<ShardProgress> orphans = [.. merged.Where(static x => !x.IsRegistered && x.Classification is null or { Kind: ProgressionRowKind.Orphan })];
+        List<ShardProgress> orphans = [.. OrphanRowsOf(merged)];
 
         if (orphans.Count == 0)
         {
@@ -383,6 +387,7 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
             options.Value.RebuildShardTimeout)
         {
             Floor = floor,
+            ErrorPolicy = Read<RebuildErrorPolicy?>(() => RebuildErrorPolicy.Read(resolved.Store), null),
         };
     }
 
@@ -837,7 +842,8 @@ internal sealed partial class ProjectionDataService : IProjectionDataService
                     ? daemon.Agents.FirstOrDefault(x => string.Equals(x.ShardName, shard.ShardName, StringComparison.OrdinalIgnoreCase))?.Status
                     : null,
                 WarningThreshold: shard.WarningThreshold,
-                CriticalThreshold: shard.CriticalThreshold);
+                CriticalThreshold: shard.CriticalThreshold,
+                ThresholdsFromOption: shard.ThresholdsFromOption);
 
             histories[shard.ShardName] = ShardLagHistory.Build(shard.ShardName, points, context);
         }

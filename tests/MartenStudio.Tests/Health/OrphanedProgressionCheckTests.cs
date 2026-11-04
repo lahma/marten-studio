@@ -58,7 +58,8 @@ public class OrphanedProgressionCheckTests
         finding.Title.Should().NotContain("acme");
         finding.Link!.Route.Should().Be("projections");
         finding.Link.Label.Should().Be("Open the projections screen");
-        finding.Caveat.Should().StartWith("Marten Studio never removes one: whether to is the host's decision.");
+        finding.Caveat.Should().StartWith("Whether to remove one is the host's decision, and this check removes nothing.")
+            .And.Contain("Capabilities.CorrectProgression");
         finding.DocumentTypes.Should().BeEmpty("a projection no longer registered has no published types to read");
 
         // The remedy is Marten's own removal by name, for the host's code: the store-global row by name, the tenants' in words.

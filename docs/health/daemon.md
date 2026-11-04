@@ -181,10 +181,14 @@ or not run, D02), or when the high-water mark has not moved (held behind a gap, 
 projections screen's own arrow is withheld for the pause and the agent alone: a stall is coloured and said on its
 chart, and a rebuild's catching up is what its estimate is for.
 
-Thresholds: the projections screen's - 1,000 events behind for the warning, 100,000 for critical - unless a
-progression row's own `warning_behind_threshold` or `critical_behind_threshold` is set. A threshold a host writes
-itself is honoured; Marten writes none (#5173, at `V9.39.0` and `V9.50.2`: it creates the two columns and leaves them
-empty) and the studio offers no way to set one. The finding's evidence says which threshold it used.
+Thresholds, in this order: the host's `MartenStudioOptions.ProjectionThresholds` for the shard's projection (1.2: `o.ProjectionThresholds["Trips"] =
+new(WarningBehind: 5_000, CriticalBehind: 50_000)`, applied to every store by projection name); then a progression
+row's own `warning_behind_threshold` or `critical_behind_threshold`, if one is set; then the projections screen's
+defaults - 1,000 events behind for the warning, 100,000 for critical. A threshold a host writes into a row is honoured;
+Marten writes none (#5173, at `V9.39.0` and `V9.50.2`: it creates the two columns and leaves them empty) and the studio
+writes none either - the option is the way to set one. The finding's evidence says which threshold it used, and where it
+came from. D03 records the thresholds that apply (the option, else the row's) in the series D04 and the screen's arrows
+read, so a projection told 5,000 behind is normal is not reported as falling behind at 3,800.
 
 **The projections screen's own lag history** (0.6). Each shard row has a small chart of its position against the high
 water, drawn from samples the screen keeps itself: one each time the projections screen or the Overview reads the

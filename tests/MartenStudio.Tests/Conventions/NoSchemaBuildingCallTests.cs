@@ -92,6 +92,10 @@ public class NoSchemaBuildingCallTests
     private static readonly (string File, string Member)[] AllowedCalls =
     [
         ("src/MartenStudio/Services/Events/EventDataService.cs", "MarkEventsAsSkipped"),
+
+        // 1.2-PROJ: the Remove button on an orphaned progression row - a CorrectProgression write the visitor confirmed, whose
+        // row the service re-read and found removable, audited as 9225 / the audit log. Marten's call ensures storage first.
+        ("src/MartenStudio/Services/Projections/ProjectionDataService.Orphans.cs", "DeleteProjectionProgressByShardNameAsync"),
     ];
 
     [Fact]

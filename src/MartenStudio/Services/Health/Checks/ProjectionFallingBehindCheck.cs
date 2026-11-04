@@ -38,9 +38,10 @@ internal sealed record ProjectionFallingBehindFacts(DaemonCheckConfiguration Con
 /// moved too.
 /// </para>
 /// <para>
-/// <b>Thresholds.</b> A progression row's <c>warning_behind_threshold</c> and <c>critical_behind_threshold</c> win when
-/// set. Marten creates those columns and writes nothing to them (#5173, at V9.39.0 and V9.50.2), so in practice it is
-/// the projections screen's 1,000 and 100,000; a host that writes its own is honoured.
+/// <b>Thresholds.</b> The host's <c>MartenStudioOptions.ProjectionThresholds</c> for the shard's projection win; then a
+/// progression row's <c>warning_behind_threshold</c> and <c>critical_behind_threshold</c> when set. Marten creates those
+/// columns and writes nothing to them (#5173, at V9.39.0 and V9.50.2), so without an option it is in practice the
+/// projections screen's 1,000 and 100,000; a host that writes its own is honoured.
 /// </para>
 /// </remarks>
 [HealthCheck("D04", HealthArea.Daemon, HealthCostTier.InProcess, "Falling behind, with an ETA")]
@@ -79,7 +80,7 @@ internal sealed class ProjectionFallingBehindCheck : HealthCheck<ProjectionFalli
         foreach (string shard in facts.AsyncShards)
         {
             ShardTrend trend = ProjectionTrend.Judged(
-                ProjectionTrend.For(evaluation.History, shard),
+                LagThresholdResolver.Apply(ProjectionTrend.For(evaluation.History, shard), facts.Configuration.ThresholdOptionFor(shard)),
                 pausedByStudio: inProcess.PausedByStudio is not null,
                 rebuilding: inProcess.IsKnownRebuilding(shard),
                 agentStatusHere: inProcess.Agent(shard)?.Status);
@@ -147,10 +148,12 @@ internal sealed class ProjectionFallingBehindCheck : HealthCheck<ProjectionFalli
                 new HealthEvidence("Measured over", DaemonCheckConfiguration.Format(trend.Watched) + ", "
                     + trend.Samples.ToString(System.Globalization.CultureInfo.InvariantCulture) + " samples"),
                 new HealthEvidence("Warning threshold", DaemonCheckConfiguration.Number(trend.EffectiveWarning)
-                    + (trend.WarningThreshold is null ? " (the studio's default; Marten writes no per-shard threshold)" : " (warning_behind_threshold)")),
+                    + (trend.ThresholdsFromOption ? " (MartenStudioOptions.ProjectionThresholds)"
+                        : trend.WarningThreshold is null ? " (the studio's default; Marten writes no per-shard threshold)" : " (warning_behind_threshold)")),
                 new HealthEvidence("Critical threshold", DaemonCheckConfiguration.Number(trend.EffectiveCritical)
                     + (pastCritical ? ", passed" : string.Empty)
-                    + (trend.CriticalThreshold is null ? " (the studio's default)" : " (critical_behind_threshold)")),
+                    + (trend.ThresholdsFromOption ? " (MartenStudioOptions.ProjectionThresholds)"
+                        : trend.CriticalThreshold is null ? " (the studio's default)" : " (critical_behind_threshold)")),
             ],
             Caveat =
                 "Rates are measured between the advisor's own samples, which exist only while the Health page or the Overview is "

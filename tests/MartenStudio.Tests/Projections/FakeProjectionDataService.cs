@@ -91,6 +91,17 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
         return this;
     }
 
+    /// <summary>
+    /// Says the shard's thresholds are the host's <c>ProjectionThresholds</c> for its projection, as the real service marks them
+    /// (<see cref="LagThresholdResolver" />) - set the numbers with <see cref="WithThresholds" />.
+    /// </summary>
+    public FakeProjectionDataService WithThresholdsFromOption(string shardName)
+    {
+        int index = progress.FindIndex(x => x.ShardName == shardName);
+        progress[index] = progress[index] with { ThresholdsFromOption = true };
+        return this;
+    }
+
     /// <summary>Says the daemon here is rebuilding these projections (JasperFx 2.86+), not Marten Studio.</summary>
     public FakeProjectionDataService WithRebuildingHere(params string[] projectionNames)
     {
@@ -411,8 +422,14 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
             ShardTimeout)
         {
             Floor = RebuildFloor,
+            ErrorPolicy = RebuildErrors,
         });
     }
+
+    /// <summary>The error policy <see cref="DescribeRebuildAsync" /> reports: JasperFx's defaults unless a test sets another.</summary>
+    public RebuildErrorPolicy RebuildErrors { get; set; } = new(
+        RebuildSkips: new SkippedErrors(false, false, false),
+        ContinuousSkips: new SkippedErrors(true, true, true));
 
     /// <inheritdoc />
     public Task<IDisposable> SubscribeToLiveStateAsync(StudioScope scope, CancellationToken cancellationToken = default)
@@ -462,6 +479,19 @@ internal sealed class FakeProjectionDataService : IProjectionDataService
     /// <inheritdoc />
     public Task CorrectProgressionAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Record("CorrectProgression");
+
+    /// <summary>What <see cref="RemoveOrphanedProgressionAsync" /> answers: a removal unless set to a refusal.</summary>
+    public string? OrphanRemovalRefusal { get; set; }
+
+    /// <inheritdoc />
+    public async Task<OrphanRemoval> RemoveOrphanedProgressionAsync(StudioScope scope, string rowName, CancellationToken cancellationToken = default)
+    {
+        await Record("RemoveOrphan:" + rowName);
+
+        return OrphanRemovalRefusal is { } refusal
+            ? new OrphanRemoval(rowName, false, refusal)
+            : new OrphanRemoval(rowName, true, "Removed the progression row " + rowName + ".");
+    }
 
     /// <inheritdoc />
     public StudioOperation? FindOperation(string? operationId) =>

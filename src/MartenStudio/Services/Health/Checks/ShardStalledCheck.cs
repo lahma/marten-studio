@@ -93,12 +93,19 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
             // A registered shard with no row has processed nothing: position 0, as the projections screen draws it.
             yield return new HealthSamplePart(DaemonSeries.ShardPosition(shard), row?.Sequence ?? 0);
 
-            if (row?.WarningThreshold is { } warning)
+            // The host's thresholds for the projection (MartenStudioOptions.ProjectionThresholds) win over the row's columns, so the
+            // series every trend and D04 read are the thresholds that apply.
+            ProjectionLagThreshold? option = facts.Configuration.ThresholdOptionFor(shard);
+
+            long? warningBehind = option is null ? row?.WarningThreshold : option.WarningBehind;
+            long? criticalBehind = option is null ? row?.CriticalThreshold : option.CriticalBehind;
+
+            if (warningBehind is { } warning)
             {
                 yield return new HealthSamplePart(DaemonSeries.ShardWarningThreshold(shard), warning);
             }
 
-            if (row?.CriticalThreshold is { } critical)
+            if (criticalBehind is { } critical)
             {
                 yield return new HealthSamplePart(DaemonSeries.ShardCriticalThreshold(shard), critical);
             }

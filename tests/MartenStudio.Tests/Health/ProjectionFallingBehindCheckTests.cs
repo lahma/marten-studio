@@ -99,6 +99,47 @@ public class ProjectionFallingBehindCheckTests
         finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "50 (warning_behind_threshold)");
     }
 
+    private static DaemonCheckConfiguration WithOption(long warning, long critical) => DaemonConfiguration(shards: [Shard]) with
+    {
+        ProjectionThresholds = new Dictionary<string, ProjectionLagThreshold>(StringComparer.Ordinal)
+        {
+            ["DailySales"] = new(warning, critical),
+        },
+    };
+
+    /// <summary>1.2-PROJ: the host's thresholds for the projection win over the studio's, and the evidence says whose they are.</summary>
+    [Fact]
+    public void The_hosts_threshold_for_the_projection_wins_over_the_default_and_is_named()
+    {
+        HealthFinding finding = EvaluateWith(DaemonInProcess.NotHosted, WithOption(500, 3_000), Growing).Findings.Should().ContainSingle().Subject;
+
+        finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "500 (MartenStudioOptions.ProjectionThresholds)");
+        finding.Evidence.Should().Contain(x => x.Label == "Critical threshold" && x.Value == "3,000, passed (MartenStudioOptions.ProjectionThresholds)");
+    }
+
+    /// <summary>A projection that has been told 5,000 behind is normal is not falling behind at 3,800 - where the default 1,000 says it is.</summary>
+    [Fact]
+    public void A_higher_hosts_threshold_quietens_a_lag_the_default_would_report()
+    {
+        EvaluateWith(DaemonInProcess.NotHosted, WithOption(5_000, 50_000), Growing).Findings.Should().BeEmpty();
+        Evaluate(Growing).Findings.Should().ContainSingle("without the option the studio's own 1,000 applies");
+    }
+
+    /// <summary>The option wins over a threshold a host wrote into the row, whichever the sample carried.</summary>
+    [Fact]
+    public void The_option_wins_over_the_rows_threshold()
+    {
+        HealthFinding finding = EvaluateWith(
+                DaemonInProcess.NotHosted,
+                WithOption(500, 3_000),
+                At(TimeSpan.FromMinutes(4), 1_000, 3_000, warning: 100),
+                At(TimeSpan.FromMinutes(2), 1_100, 4_000, warning: 100),
+                At(TimeSpan.Zero, 1_200, 5_000, warning: 100))
+            .Findings.Single();
+
+        finding.Evidence.Should().Contain(x => x.Label == "Warning threshold" && x.Value == "500 (MartenStudioOptions.ProjectionThresholds)");
+    }
+
     /// <summary>
     /// The H2 re-review: a burst of appends lands in one step, however large. Growth needs two steps in a row, so a
     /// single burst - between two samples, or after a quiet one - is never "falling behind".

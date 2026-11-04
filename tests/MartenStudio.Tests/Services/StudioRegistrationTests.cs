@@ -141,6 +141,8 @@ public class StudioRegistrationTests
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Instance, typeof(ValidateOptions<MartenStudioOptions>)),
         (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Factory, typeof(IValidateOptions<MartenStudioOptions>)),
+        // 1.2-PROJ: ProjectionThresholds' validator, a type of its own because its message names the projection.
+        (typeof(IValidateOptions<MartenStudioOptions>), ServiceLifetime.Singleton, How.Type, typeof(ProjectionThresholdsValidator)),
         (typeof(MartenStoreRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenStoreRegistry)),
         (typeof(IStudioSourceProvider), ServiceLifetime.Scoped, How.Type, typeof(MartenStudioSourceProvider)),
         (typeof(IStudioLinks), ServiceLifetime.Singleton, How.Type, typeof(MartenStudioLinks)),

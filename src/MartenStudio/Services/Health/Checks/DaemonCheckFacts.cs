@@ -231,6 +231,19 @@ internal sealed record DaemonCheckConfiguration(
     /// </summary>
     public TimeSpan HealthInterval { get; init; } = TimeSpan.FromMinutes(1);
 
+    private static readonly IReadOnlyDictionary<string, ProjectionLagThreshold> NoThresholds =
+        new Dictionary<string, ProjectionLagThreshold>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// <c>MartenStudioOptions.ProjectionThresholds</c> as read at gather time: the host's lag thresholds by projection name,
+    /// which win over a progression row's columns for D03's recorded series and D04's judgement (<see cref="LagThresholdResolver" />).
+    /// </summary>
+    public IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionThresholds { get; init; } = NoThresholds;
+
+    /// <summary>The host's thresholds for the projection behind <paramref name="shard" />, or <see langword="null" /> when it set none.</summary>
+    public ProjectionLagThreshold? ThresholdOptionFor(string shard) =>
+        LagThresholdResolver.OptionFor(ProjectionThresholds, ProjectionOf(shard));
+
     /// <summary>The document types the projection behind <paramref name="shard" /> writes.</summary>
     public IReadOnlyList<Type> PublishedTypesOf(string shard) =>
         PublishedTypes.GetValueOrDefault(ProjectionOf(shard)) ?? [];
@@ -276,6 +289,7 @@ internal sealed record DaemonCheckConfiguration(
             LockKeysFor(schema, shards, lockId))
         {
             HealthInterval = context.StudioOptions.EffectiveHealthInterval,
+            ProjectionThresholds = LagThresholdResolver.From(context.Settings),
             PublishedTypes = published,
             HiddenProjections = new HashSet<string>(
                 published.Where(x => x.Value.Any(type => !context.IsDocumentTypeVisible(type))).Select(static x => x.Key),

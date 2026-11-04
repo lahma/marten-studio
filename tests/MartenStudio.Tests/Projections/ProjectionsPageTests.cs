@@ -541,14 +541,16 @@ public class ProjectionsPageTests
         row.QuerySelector(".ms-orphaned-progression-reason")!.TextContent
             .Should().Be("No projection or subscription named RetiredProjection is registered: it was renamed or removed.");
 
-        // Marten's own removal by name and the equivalent statement are text for the host, under the advisor's own heading -
-        // never a button.
+        // Marten's own removal by name and the equivalent statement are text for the host, under the advisor's own heading;
+        // 1.2-PROJ adds the studio's own Remove beside them, which is the only button here and is off without CorrectProgression.
         page.Find(".ms-orphaned-progression-sql summary").TextContent.Should().Be("For your own migrations - the studio never runs this");
         page.Find(".ms-orphaned-progression-calls").TextContent
             .Should().Be("""await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("RetiredProjection:All");""");
         page.Find(".ms-orphaned-progression-sql-statements").TextContent
             .Should().Be("""DELETE FROM "events"."mt_event_progression" WHERE "name" = 'RetiredProjection:All';""");
-        section.QuerySelectorAll("button").Should().BeEmpty("M4 is read-only: nothing on this section writes");
+        section.QuerySelectorAll("button").Should().ContainSingle().Which.ClassList.Should().Contain("ms-orphan-remove");
+        page.Find(".ms-orphan-remove").HasAttribute("disabled").Should().BeTrue("CorrectProgression is off");
+        page.Find(".ms-orphan-remove").GetAttribute("title").Should().Contain("Capabilities.CorrectProgression");
 
         // And it is not smuggled into the projections table as a shard of something that is registered.
         page.FindAll("[data-shard='RetiredProjection:All']").Should().BeEmpty();

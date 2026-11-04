@@ -116,12 +116,18 @@ internal static class MartenNavBadges
 
         List<string> reasons = [];
 
-        if (summary.MaxLag > ProjectionLagThresholds.Amber)
+        if (summary.IsBehind)
         {
+            // The shard past its own threshold that is furthest behind - which, with a threshold per projection, need not
+            // be the shard furthest behind of all.
+            ShardProgress? behind = summary.WorstOverThreshold;
+            string? worst = behind?.ShardName ?? summary.WorstShardName;
+            long lag = behind?.Lag ?? summary.MaxLag;
+
             reasons.Add(
-                summary.WorstShardName is { Length: > 0 } worst
-                    ? $"{worst} is {summary.MaxLag:N0} events behind"
-                    : $"a shard is {summary.MaxLag:N0} events behind");
+                worst is { Length: > 0 }
+                    ? $"{worst} is {lag:N0} events behind"
+                    : $"a shard is {lag:N0} events behind");
         }
 
         if (summary.PausedCount > 0)

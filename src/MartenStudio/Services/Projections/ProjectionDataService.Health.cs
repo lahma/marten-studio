@@ -197,7 +197,10 @@ internal sealed partial class ProjectionDataService
 
         foreach (ShardProgress shard in progress)
         {
-            ShardTrend trend = ProjectionTrend.For(history, shard.ShardName);
+            // The host's thresholds for this projection win over what the samples carried from the row (LagThresholdResolver).
+            ShardTrend trend = LagThresholdResolver.Apply(
+                ProjectionTrend.For(history, shard.ShardName),
+                LagThresholdResolver.OptionFor(options.Value.ProjectionLagThresholdsByName, shard.ProjectionName));
 
             if (trend.MeasuredAt is not { } at || now - at > freshness)
             {

@@ -79,8 +79,10 @@ public partial class RefusalLogValuesTests
         logger.SchemaChangeApplied(HostileStoreKey, HostileStoreKey, HostileDatabaseId, "applied");
         logger.ProjectionRebuildStarted(HostileStoreKey, "DailySales", HostileStoreKey, HostileDatabaseId);
         logger.DaemonControlRequested(HostileStoreKey, "Rewind", "DailySales", HostileStoreKey, HostileDatabaseId);
+        logger.OrphanedProgressionRemovalRequested(HostileStoreKey, "Retired:All", HostileStoreKey, HostileDatabaseId);
+        logger.OrphanedProgressionRemovalRefused(HostileStoreKey, "Retired:All", HostileStoreKey, HostileDatabaseId, "refused");
 
-        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9206, 9207, 9209);
+        captured.Entries.Select(static x => x.EventId.Id).Should().Equal(9206, 9207, 9209, 9225, 9226);
 
         foreach (CapturedLogEntry entry in captured.Entries)
         {
@@ -102,12 +104,16 @@ public partial class RefusalLogValuesTests
             raw.AddRange(RawTemplateCall().Matches(code).Select(x => SourceScanner.Relative(file) + ": " + x.Value));
         }
 
-        raw.Should().BeEmpty("9206, 9207 and 9209 go through MartenLog's wrappers, which cap the user and the scope");
+        raw.Should().BeEmpty("9206, 9207, 9209, 9225 and 9226 go through MartenLog's wrappers, which cap the user and the scope");
 
         string martenLog = SourceScanner.StripCommentsAndStrings(File.ReadAllText(RepositoryRoot.Combine("src", "MartenStudio", "Services", "MartenLog.cs")));
-        RawTemplateCall().Matches(martenLog).Should().HaveCount(3, "each wrapper calls its template once");
+        RawTemplateCall().Matches(martenLog).Should().HaveCount(5, "each wrapper calls its template once");
 
-        foreach (string wrapper in new[] { "SchemaChangeApplied", "ProjectionRebuildStarted", "DaemonControlRequested" })
+        foreach (string wrapper in new[]
+        {
+            "SchemaChangeApplied", "ProjectionRebuildStarted", "DaemonControlRequested",
+            "OrphanedProgressionRemovalRequested", "OrphanedProgressionRemovalRefused",
+        })
         {
             Regex.IsMatch(martenLog, @"public static void " + wrapper + @"\(this ILogger logger, string user[^{]*\{\s*\([^;]*StudioLogValue\.Cap\(user\)")
                 .Should().BeTrue("the {0} wrapper caps the user before it writes", wrapper);
@@ -118,7 +124,7 @@ public partial class RefusalLogValuesTests
             "9211, a Warning, writes the user capped; its type and id already go through WriteAuditText.Sanitize");
     }
 
-    [GeneratedRegex(@"\.\s*(?:SchemaChangeApplied|ProjectionRebuildStarted|DaemonControlRequested)Raw\s*\(", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\.\s*(?:SchemaChangeApplied|ProjectionRebuildStarted|DaemonControlRequested|OrphanedProgressionRemovalRequested|OrphanedProgressionRemovalRefused)Raw\s*\(", RegexOptions.CultureInvariant)]
     private static partial Regex RawTemplateCall();
 
     // ---------------------------------------------------------------------------------------------------------------

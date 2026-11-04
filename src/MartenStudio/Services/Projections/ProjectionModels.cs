@@ -2,6 +2,8 @@ using System.Globalization;
 
 using JasperFx.Events.Projections;
 
+using Marten;
+
 using PostgresStudio.Services;
 using PostgresStudio.Services.Health;
 
@@ -168,10 +170,10 @@ internal enum LagSeverity
 /// Where the two lag colours change.
 /// </summary>
 /// <remarks>
-/// Constants for now, deliberately. A real threshold depends on how fast the store is written to, and a
-/// host-configurable one would need a unit ("events" or "seconds behind") that the studio cannot compute
-/// honestly yet. These two numbers are the ones an operator recognises: a thousand events behind is worth
-/// looking at, a hundred thousand is worth acting on.
+/// The studio's defaults, which a shard's own thresholds replace: a host's <c>MartenStudioOptions.ProjectionThresholds</c> for
+/// the shard's projection name first, then numbers it wrote into the progression row (<see cref="LagThresholdResolver" />). A
+/// threshold is in events - the one unit the studio can compute honestly, not seconds behind. These two numbers are the ones an
+/// operator recognises: a thousand events behind is worth looking at, a hundred thousand is worth acting on.
 /// </remarks>
 internal static class ProjectionLagThresholds
 {
@@ -249,6 +251,13 @@ internal sealed record ShardProgress(
 
     /// <summary>The colour this row wears: against the row's own thresholds when it carries them, the studio's otherwise.</summary>
     public LagSeverity Severity => ProjectionLagThresholds.Severity(Lag, WarningThreshold, CriticalThreshold);
+
+    /// <summary>
+    /// Whether <see cref="WarningThreshold" /> and <see cref="CriticalThreshold" /> are the host's
+    /// <c>MartenStudioOptions.ProjectionThresholds</c> for this shard's projection rather than the progression row's
+    /// (<see cref="LagThresholdResolver" />).
+    /// </summary>
+    public bool ThresholdsFromOption { get; init; }
 
     /// <summary>The amber threshold that applies to this row.</summary>
     public long EffectiveWarningThreshold => WarningThreshold ?? ProjectionLagThresholds.Amber;
@@ -791,6 +800,12 @@ internal sealed record OrphanedProgressionRow(
     string? RemovalSql,
     string? RemovalCall = null);
 
+/// <summary>What <c>RemoveOrphanedProgressionAsync</c> did: the row was removed, or the studio declined at the click and says why.</summary>
+/// <param name="Name">The row's name, as the table holds it.</param>
+/// <param name="Removed">Whether Marten was asked to remove it and did.</param>
+/// <param name="Message">The sentence the page shows - the refusal, or what was removed.</param>
+internal sealed record OrphanRemoval(string Name, bool Removed, string Message);
+
 /// <summary>
 /// What the projections screen and D10 say about orphaned progression rows - pure text, so each sentence is a unit test.
 /// </summary>
@@ -810,7 +825,9 @@ internal static class OrphanWording
     public const string HandOver =
         "These rows are in mt_event_progression, and nothing this store registers advances them: each was written by a "
         + "projection that has since been renamed, removed or given a new version, or by a subscription that was removed. "
-        + "Whether to remove one is the host's decision, and Marten Studio never does. Marten's own "
+        + "Whether to remove one is the host's decision: Marten Studio removes one only where the host enabled "
+        + "Capabilities.CorrectProgression and the write policy allows this visitor to change this database as a whole, after a "
+        + "confirmation. Marten's own "
         + "IEventDatabase.DeleteProjectionProgressByShardNameAsync removes a row by its exact name, registered or not - "
         + "DeleteProjectionProgressAsync, which looks a projection's name up among the registered ones, refuses one that is "
         + "not. A projection registered again under the same name and version resumes from its row's position rather than "
@@ -848,6 +865,30 @@ internal static class OrphanWording
               + name.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal)
               + "\");"
             : null;
+
+    /// <summary>The Remove dialog's title.</summary>
+    public const string RemoveTitle = "Remove this progression row?";
+
+    /// <summary>The refusal at the click for a name that is no row of the table any more, or no longer an orphan.</summary>
+    public const string RemovalNoLongerOrphan =
+        "That row is no longer an orphaned progression row (it was removed, or a registered projection claims it now), so nothing was removed.";
+
+    /// <summary>The refusal at the click for a row the daemon may still read, or a name that cannot be shown as what it is.</summary>
+    public const string RemovalNotOffered =
+        "That row is not offered for removal: the daemon may still read it, or its name cannot be shown as what it is. Nothing was removed.";
+
+    /// <summary>
+    /// What the Remove dialog says, in the words of <see cref="SqlNote" />: Marten's call first ensures the event store's storage
+    /// under the store's <c>AutoCreate</c>, removes this one row, and leaves what the projection wrote.
+    /// </summary>
+    /// <param name="name">The row's name.</param>
+    /// <param name="databaseAutoCreate">The database's <c>AutoCreate</c>, when it was read.</param>
+    public static string RemoveMessage(string name, string? databaseAutoCreate) =>
+        "This removes the row " + name + " from mt_event_progression in this database, and nothing else: the documents and tables "
+        + "the projection wrote stay. Marten's call first ensures the event store's storage under the store's AutoCreate"
+        + (databaseAutoCreate is { Length: > 0 } auto ? " (" + auto + " for this database)" : string.Empty)
+        + ", as every write to it does. A projection registered again under this name and version would resume from its "
+        + "position rather than replay from the first event.";
 
     /// <summary>"1 row" or "3 rows".</summary>
     public static string Count(int count) =>
@@ -930,8 +971,26 @@ internal sealed record ProjectionSummary(
     long HighWaterMark = 0,
     IReadOnlyList<ShardProgress>? Shards = null)
 {
-    /// <summary>The colour the Overview tile wears.</summary>
-    public LagSeverity Severity => ProjectionLagThresholds.Severity(MaxLag);
+    /// <summary>
+    /// The colour the Overview tile wears: the worst of the shards' own colours, which are judged against the thresholds that
+    /// apply to each (<c>MartenStudioOptions.ProjectionThresholds</c>, a row's columns, the studio's defaults) - or, where no
+    /// shard list was read, the worst lag against the studio's defaults.
+    /// </summary>
+    public LagSeverity Severity => Shards is { Count: > 0 } shards
+        ? shards.Max(static x => x.Severity)
+        : ProjectionLagThresholds.Severity(MaxLag);
+
+    /// <summary>
+    /// The shard furthest behind that is past its own warning threshold, or <see langword="null" /> when none is (or no shard
+    /// list was read).
+    /// </summary>
+    public ShardProgress? WorstOverThreshold => Shards?.FirstOrDefault(static x => x.Severity != LagSeverity.Ok);
+
+    /// <summary>
+    /// Whether a shard is behind by more than its threshold: against each shard's own thresholds where the list was read,
+    /// the studio's default for the worst lag where it was not.
+    /// </summary>
+    public bool IsBehind => Shards is { Count: > 0 } ? WorstOverThreshold is not null : MaxLag > ProjectionLagThresholds.Amber;
 
     /// <summary>The shards, worst lag first, or an empty list when nothing could be read.</summary>
     public IReadOnlyList<ShardProgress> Progress => Shards ?? [];
@@ -944,7 +1003,7 @@ internal sealed record ProjectionSummary(
     /// must not decorate it as a fault.
     /// </remarks>
     public bool NeedsAttention =>
-        MaxLag > ProjectionLagThresholds.Amber || PausedCount > 0 || FailedCount > 0;
+        IsBehind || PausedCount > 0 || FailedCount > 0;
 }
 
 /// <summary>
@@ -977,6 +1036,142 @@ internal sealed record RebuildScope(
     /// a dialog not yet loaded.
     /// </summary>
     public RebuildFloor? Floor { get; init; }
+
+    /// <summary>
+    /// The error policy the rebuild runs under, from the store's <c>Projections.RebuildErrors</c>: <see langword="null" /> only
+    /// for a dialog not yet loaded.
+    /// </summary>
+    public RebuildErrorPolicy? ErrorPolicy { get; init; }
+}
+
+/// <summary>
+/// What a rebuild does with an event that fails, from the store's <c>Projections.RebuildErrors</c> - and what the continuous
+/// agents do, from <c>Projections.Errors</c>, because the two differ by default and a host that set only the second sees a
+/// rebuild stop where the live agent did not.
+/// </summary>
+/// <remarks>
+/// JasperFx's <c>ProjectionGraph.Errors</c> skips apply errors, unknown events and serialization errors by default (the live
+/// daemon survives a poison pill by dead-lettering it), and <c>RebuildErrors</c> skips none ("the defaults are to not skip any
+/// errors"). Memory only: both are read off <c>StoreOptions</c>, never the database.
+/// </remarks>
+/// <param name="RebuildSkips">What a rebuild skips: <c>RebuildErrors</c>.</param>
+/// <param name="ContinuousSkips">What a continuous agent skips: <c>Errors</c>.</param>
+internal sealed record RebuildErrorPolicy(SkippedErrors RebuildSkips, SkippedErrors ContinuousSkips)
+{
+    /// <summary>
+    /// Reads both policies off the store's options - <c>Events.Daemon</c> is the store's <c>ProjectionOptions</c>, as the daemon
+    /// checks read it - or <see langword="null" /> where it is not one, which the dialog draws as no line.
+    /// </summary>
+    /// <param name="store">The store.</param>
+    public static RebuildErrorPolicy? Read(IDocumentStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        if (store.Options.Events.Daemon is not Marten.Events.Projections.ProjectionOptions projections)
+        {
+            return null;
+        }
+
+        JasperFx.Events.Daemon.ErrorHandlingOptions rebuild = projections.RebuildErrors;
+        JasperFx.Events.Daemon.ErrorHandlingOptions continuous = projections.Errors;
+
+        return new RebuildErrorPolicy(
+            new SkippedErrors(rebuild.SkipApplyErrors, rebuild.SkipUnknownEvents, rebuild.SkipSerializationErrors),
+            new SkippedErrors(continuous.SkipApplyErrors, continuous.SkipUnknownEvents, continuous.SkipSerializationErrors));
+    }
+
+    /// <summary>"Runs under RebuildErrors: apply errors stop the rebuild; unknown events are skipped."</summary>
+    public string Sentence()
+    {
+        List<string> stopping = [];
+        List<string> skipped = [];
+
+        foreach ((string what, bool skips) in RebuildSkips.Kinds)
+        {
+            (skips ? skipped : stopping).Add(what);
+        }
+
+        List<string> clauses = [];
+
+        if (stopping.Count > 0)
+        {
+            clauses.Add(Join(stopping) + " stop the rebuild");
+        }
+
+        if (skipped.Count > 0)
+        {
+            clauses.Add(Join(skipped) + " are skipped");
+        }
+
+        return "Runs under RebuildErrors: " + string.Join("; ", clauses) + ".";
+    }
+
+    /// <summary>
+    /// The second clause when the rebuild's policy differs from the continuous agents' (<c>Projections.Errors</c>), or
+    /// <see langword="null" /> when they agree.
+    /// </summary>
+    public string? DifferenceSentence()
+    {
+        List<string> liveSkipsRebuildStops = [];
+        List<string> liveStopsRebuildSkips = [];
+
+        foreach (((string what, bool rebuild), (_, bool continuous)) in RebuildSkips.Kinds.Zip(ContinuousSkips.Kinds))
+        {
+            if (continuous && !rebuild)
+            {
+                liveSkipsRebuildStops.Add(what);
+            }
+            else if (!continuous && rebuild)
+            {
+                liveStopsRebuildSkips.Add(what);
+            }
+        }
+
+        List<string> clauses = [];
+
+        if (liveSkipsRebuildStops.Count > 0)
+        {
+            clauses.Add("the continuous agents skip " + Join(liveSkipsRebuildStops) + ", where this rebuild stops on them");
+        }
+
+        if (liveStopsRebuildSkips.Count > 0)
+        {
+            clauses.Add("the continuous agents stop on " + Join(liveStopsRebuildSkips) + ", where this rebuild skips them");
+        }
+
+        if (clauses.Count == 0)
+        {
+            return null;
+        }
+
+        return "Differs from Projections.Errors: " + string.Join("; ", clauses) + "."
+            + (liveSkipsRebuildStops.Count > 0 ? " A rebuild can therefore fail on an event the live agent got past." : string.Empty);
+    }
+
+    private static string Join(List<string> items) => items.Count switch
+    {
+        1 => items[0],
+        2 => items[0] + " and " + items[1],
+        _ => string.Join(", ", items[..^1]) + " and " + items[^1],
+    };
+}
+
+/// <summary>Which kinds of failing event an <c>ErrorHandlingOptions</c> skips rather than stopping on.</summary>
+/// <param name="ApplyErrors"><c>SkipApplyErrors</c>: an exception from the projection's own code.</param>
+/// <param name="UnknownEvents"><c>SkipUnknownEvents</c>: an event type the store has no mapping for.</param>
+/// <param name="SerializationErrors"><c>SkipSerializationErrors</c>: an event that will not deserialize.</param>
+internal readonly record struct SkippedErrors(bool ApplyErrors, bool UnknownEvents, bool SerializationErrors)
+{
+    /// <summary>Each kind, in the order the dialog names them, with whether it is skipped.</summary>
+    public IEnumerable<(string What, bool Skips)> Kinds
+    {
+        get
+        {
+            yield return ("apply errors", ApplyErrors);
+            yield return ("unknown events", UnknownEvents);
+            yield return ("serialization errors", SerializationErrors);
+        }
+    }
 }
 
 /// <summary>

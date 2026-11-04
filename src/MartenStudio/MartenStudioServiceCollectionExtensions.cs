@@ -106,6 +106,9 @@ public static partial class MartenStudioServiceCollectionExtensions
             .ValidateSharedSchemas(nameof(MartenStudioOptions), Shape)
             .ValidateSharedAcceptedChecks(nameof(MartenStudioOptions), MartenStudioDescriptor.Instance, static options => options.AcceptedCheckReasons);
 
+        // 1.2-PROJ: the per-projection lag thresholds (a type of its own: a failure names the projection).
+        services.AddSingleton<IValidateOptions<MartenStudioOptions>, ProjectionThresholdsValidator>();
+
         if (configure is not null)
         {
             optionsBuilder.Configure(configure);

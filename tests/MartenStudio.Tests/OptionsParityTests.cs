@@ -38,6 +38,9 @@ public class OptionsParityTests
         nameof(MartenStudioOptions.IncludeAncillaryStores),
         nameof(MartenStudioOptions.IsDocumentTypeVisible),
         nameof(MartenStudioOptions.KnownTenantIds),
+
+        // 1.2-PROJ: projection lag thresholds by projection name - a projection is a Marten idea.
+        nameof(MartenStudioOptions.ProjectionThresholds),
         nameof(MartenStudioOptions.RebuildShardTimeout),
     ];
 

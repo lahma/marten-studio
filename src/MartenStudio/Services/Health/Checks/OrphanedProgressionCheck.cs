@@ -194,8 +194,9 @@ internal sealed class OrphanedProgressionCheck : HealthCheck<OrphanedProgression
                       + "raise side effects again for events the prior version already handled."
                     : string.Empty),
             Evidence = evidence,
-            Caveat = "Marten Studio never removes one: whether to is the host's decision. The projections screen lists the rows, "
-                + "each with Marten's call and the statement that removes it."
+            Caveat = "Whether to remove one is the host's decision, and this check removes nothing. The projections screen lists the rows, "
+                + "each with Marten's call and the statement that removes it, and removes one for a visitor whose host enabled "
+                + "Capabilities.CorrectProgression and whose write policy allows it."
                 + (facts.Truncated
                     ? " The read stopped at " + DaemonCheckConfiguration.Number(HealthDaemonQueries.MaxShardRows) + " rows, so there may be more."
                     : string.Empty),

@@ -109,6 +109,7 @@ public class CapabilityGatingMatrixTests
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.CancelOperationAsync), StudioCapability.RebuildProjections),
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.AdvanceHighWaterMarkAsync), StudioCapability.CorrectProgression),
         new(typeof(IProjectionDataService), nameof(IProjectionDataService.CorrectProgressionAsync), StudioCapability.CorrectProgression),
+        new(typeof(IProjectionDataService), nameof(IProjectionDataService.RemoveOrphanedProgressionAsync), StudioCapability.CorrectProgression),
 
         new(typeof(ISchemaDataService), nameof(ISchemaDataService.ApplyAsync), StudioCapability.ApplySchemaChanges),
 

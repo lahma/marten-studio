@@ -197,6 +197,11 @@ public class StorageEnsuringCallTests
             ["AdvanceHighWaterMarkAsync", "AdvanceHighWaterMarkAsync"],
             "AdvanceHighWaterMarkAsync (CorrectProgression), through AdvancedAsync's capability check, reach authorization and "
             + "audit: from Marten 9.52 the advance ensures the event store's storage first, which the dialog and the button say"),
+        new("src/MartenStudio/Services/Projections/ProjectionDataService.Orphans.cs", "DeleteProjectionProgressByShardNameAsync",
+            ["RemoveOrphanedProgressionAsync"],
+            "1.2-PROJ: RemoveOrphanedProgressionAsync (CorrectProgression), audited, after the store policy and the write policy "
+            + "answered for (store, database, null) and the row was re-read and found to be a removable orphan: Marten's call first "
+            + "ensures the event store's storage under the database's AutoCreate, removes the one row and leaves what the projection wrote"),
         new("src/MartenStudio/Services/Query/LinqQueryComposer.cs", "Query",
             ["ComposeCore"],
             "F7: the LINQ source the visitor's predicate is composed onto - built by MartenLinqCommand without "

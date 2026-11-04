@@ -215,6 +215,33 @@ public sealed class MartenStudioOptions
     /// <summary><see cref="AcceptedChecks"/> as the studio reads it.</summary>
     internal IReadOnlyDictionary<string, string> AcceptedCheckReasons => acceptedChecks;
 
+    private readonly Dictionary<string, ProjectionLagThreshold> projectionThresholds = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// How far behind the high-water mark a projection may fall before the studio colours it amber and red, by projection
+    /// name: <c>o.ProjectionThresholds["Trips"] = new(WarningBehind: 5_000, CriticalBehind: 50_000);</c>. Never
+    /// <see langword="null" />, empty by default.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The thresholds colour the lag on the Projections page and the Overview, draw the lines on a shard's chart, and are what
+    /// the falling-behind finding (D04) judges a lag against. Precedence, for every one of them: the entry here for the shard's
+    /// projection name, then thresholds a host wrote itself into a progression row's <c>warning_behind_threshold</c> and
+    /// <c>critical_behind_threshold</c> (Marten creates those columns and writes neither), then the studio's own 1,000 and
+    /// 100,000. The Projections page's <em>Thresholds that apply</em> disclosure says which one applies to each projection.
+    /// </para>
+    /// <para>
+    /// The dictionary applies to <b>every store</b> of the application, by projection name alone; a name that no projection of
+    /// a store has is not an error (projections are often registered per environment), the disclosure just says so. Keys are
+    /// compared exactly, case included. Validation at startup refuses an entry whose numbers are not greater than zero or
+    /// whose critical threshold is below its warning threshold, naming the projection.
+    /// </para>
+    /// </remarks>
+    public IDictionary<string, ProjectionLagThreshold> ProjectionThresholds => projectionThresholds;
+
+    /// <summary><see cref="ProjectionThresholds"/> as the studio reads it.</summary>
+    internal IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionLagThresholdsByName => projectionThresholds;
+
     /// <summary>
     /// The per-shard replay timeout handed to Marten's rebuild. At least one minute.
     /// </summary>
