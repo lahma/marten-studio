@@ -45,8 +45,16 @@ on 14 to 18: `pg_get_indexdef` in any form, `pg_get_expr` with a relation (a def
 `pg_get_partkeydef`. Lists read partition bounds with `pg_get_expr(relpartbound, 0)`, which opens nothing
 (`LintMatrixLiveTests`); T20 parses that text in C# (`PartitionBoundText`), in ISO `DateStyle`, which the health
 runner pins beside `search_path` (`HealthSessionQueries`). A list that must deparse takes the sweep's one `pg_locks`
-read (D29) and leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a by-oid detail read may wait for its
-one relation, under `lock_timeout`.
+read (D29) and leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a detail read for one object (by oid,
+or by name inside the store's schemas, as Schema › Indexes' "Show definition") may wait for its one relation, under
+`lock_timeout`. Schema › Indexes (1.2) holds to it: `SchemaStatsQueries.IndexStatsSql` reads each key column's name from
+`pg_index.indkey` joined to `pg_attribute` (an expression key, `indkey = 0`, reads "(expression)"), the access method,
+`indisvalid`, the INCLUDE count (`indnatts - indnkeyatts`) and predicate presence (`indpred is not null`, a null test,
+never a deparse), and no definition. One index's statement is `ISchemaDataService.IndexDefinitionAsync`
+(`IndexDefinitionSql`), found by schema, table and name inside the store's schemas (no oid from the caller), shown to the
+visitors and for the indexes the list shows (the same `TableIsShown`), masked through the browser's gate, and may wait for
+that one table under `lock_timeout` (`SchemaIndexDefinition.Busy`). `SchemaAlignmentLiveTests` holds a table and a
+partition in ACCESS EXCLUSIVE and proves the list finishes.
 Another store's key, alias and name in the "could not be built" notice show only to a visitor its store policy passes,
 its Marten-managed rows need its store and write policies, and other stores' databases are enumerated only when a store
 policy (or, while `BrowseDatabase` is on, a write policy) will be asked, never for a `DynamicMultiple` store. No rows

@@ -714,8 +714,10 @@ the studio, which the daemon says it is running.
 **Schema** — five tabs: *Drift* (what Marten would change), *Tables*, *Indexes*, *Functions* and *DDL*.
 *Tables* shows each table's TOAST size, dead and HOT percentages, last autovacuum and storage parameters
 (with drift against the configuration), and names each pgvector column with its
-dimensions; *Indexes* marks invalid, redundant and unused indexes from the health advisor's last check and
-says what an HNSW or IVFFlat index's operator class and parameters mean. Nothing here executes DDL on a
+dimensions; *Indexes* lists each index's keys, size and use from the catalogs alone - it locks nothing it lists, so it
+answers while a migration holds a table - marks invalid, redundant and unused indexes from the health advisor's last
+check, says what an HNSW or IVFFlat index's operator class and parameters mean, and reads an index's full statement when
+you open "Show definition" on its row. Nothing here executes DDL on a
 read path: schema names, declared indexes, managed tables and installed functions come from `StoreOptions`
 and Marten's own feature schemas, and `Check`, `Preview` and `DDL` sit behind buttons that say on the
 button what they may create. What those three show spans the whole database — every tenant's partition by
