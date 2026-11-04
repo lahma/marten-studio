@@ -49,6 +49,9 @@ internal sealed class ForeignKeyWhatIfAction(HypotheticalIndexReader hypothetica
         "Not offered on a partitioned table or a partition: an index there is declared on the partitioned table, and whether hypopg's "
         + "hypothetical index on one serves a partition's scan has not been measured.";
 
+    /// <summary>What a lookup whose plan reads a table other than the key's - through a row-level security policy - is told.</summary>
+    internal const string OtherTableRefusal = "Not shown: the lookup's plan reads another table, through a row-level security policy.";
+
     /// <summary>What a key the studio cannot find again is told.</summary>
     internal const string NotFound = "The studio could not find this foreign key again; run the checks again.";
 
@@ -174,7 +177,17 @@ internal sealed class ForeignKeyWhatIfAction(HypotheticalIndexReader hypothetica
                 return HealthActionResult.Refused(result.Reason ?? "Not compared.", now) with { AuditMessage = result.Outcome() };
             }
 
-            return Present(context, result, lookup, availability.Schema, now);
+            // Under row-level security the lookup's plan gains the policy's own subquery, which may read a table in a schema this visitor's
+            // browser gate withholds: nothing of such a plan is drawn.
+            if (ReadsAnotherTable(result.Before, key) || ReadsAnotherTable(result.After, key))
+            {
+                return HealthActionResult.Refused(OtherTableRefusal, now) with
+                {
+                    AuditMessage = "Planned, and not shown: the lookup's plan reads another table.",
+                };
+            }
+
+            return Present(context, result, key, lookup, availability.Schema, now);
         }
         catch (Exception exception) when (PostgresFailure.IsConnectionFailure(exception))
         {
@@ -209,6 +222,7 @@ internal sealed class ForeignKeyWhatIfAction(HypotheticalIndexReader hypothetica
     private static HealthActionResult Present(
         HealthActionContext context,
         WhatIfResult result,
+        ForeignKeyLookupKey key,
         string lookup,
         string? hypopgSchema,
         DateTimeOffset now)
@@ -247,7 +261,7 @@ internal sealed class ForeignKeyWhatIfAction(HypotheticalIndexReader hypothetica
                 + "its key - the finding counts the deletes.",
             TableLabel = "The foreign key's lookup, planned now and with the index",
             Columns = ["Plan", "Top scan", "Estimated rows", "Estimated cost"],
-            Rows = [Row("Now", result.Before!), Row("With the index", result.After!)],
+            Rows = [Row("Now", result.Before!, key), Row("With the index", result.After!, key)],
             Notes = notes,
             Remedies = context.Finding.Finding.Remedy is { } remedy ? [remedy] : [],
             Statements = statements,
@@ -255,9 +269,17 @@ internal sealed class ForeignKeyWhatIfAction(HypotheticalIndexReader hypothetica
         };
     }
 
-    private static HealthActionRow Row(string label, QueryPlan plan)
+    /// <summary>Whether <paramref name="plan" /> reads any relation other than the key's own table.</summary>
+    private static bool ReadsAnotherTable(QueryPlan? plan, ForeignKeyLookupKey key) =>
+        plan is not null && plan.Nodes.Any(x => x.RelationName is not null && !IsKeysTable(x, key));
+
+    private static bool IsKeysTable(PlanNode node, ForeignKeyLookupKey key) =>
+        string.Equals(node.Schema, key.Schema, StringComparison.Ordinal) && string.Equals(node.RelationName, key.Table, StringComparison.Ordinal);
+
+    private static HealthActionRow Row(string label, QueryPlan plan, ForeignKeyLookupKey key)
     {
-        PlanNode? scan = plan.Nodes.FirstOrDefault(static x => x.RelationName is not null);
+        // Only the key's own table is named: the scan, and the index a bitmap scan names on a node of its own under it.
+        PlanNode? scan = plan.Nodes.FirstOrDefault(x => IsKeysTable(x, key));
         string scanned = scan?.Description ?? plan.Root.Description;
 
         // A bitmap scan names its index on a node of its own, under the heap scan: say which index served it.

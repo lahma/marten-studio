@@ -133,6 +133,36 @@ public class IndexWhatIfActionLiveTests(HypopgServer server) : IClassFixture<Hyp
     }
 
     [PostgresFact]
+    public async Task Under_row_level_security_a_plan_that_reads_another_table_draws_nothing_and_names_neither_table()
+    {
+        (string database, string app) = await SeedAsync("idx_b_t15_rls");
+        await StatementsLive.ExecuteAsync(
+            app,
+            "create schema hidden_rls; create table hidden_rls.allowed (order_id int primary key); insert into hidden_rls.allowed select g from pg_catalog.generate_series(1, 5000) g; "
+            + "analyze hidden_rls.allowed; "
+            + "alter table public.order_lines enable row level security; "
+            + "create policy by_allowed on public.order_lines for select to console_role using (order_id in (select order_id from hidden_rls.allowed))");
+        await server.ExecuteAsync(
+            "grant select on public.order_lines to console_role; grant usage on schema hidden_rls to console_role; grant select on hidden_rls.allowed to console_role",
+            database,
+            Token);
+        AdvisorRecorder recorder = new();
+        await using StudioHost host = Host(database, recorder, static o => o.SqlConsoleRole = "console_role", role: "console_login");
+        await using StudioCircuit circuit = host.Circuit();
+
+        HealthActionResult result = await PressAsync(circuit, "T15", "public.order_lines.order_lines_order_id_fkey", ForeignKeyWhatIfAction.ActionId);
+
+        result.Outcome.Should().Be(HealthActionOutcome.Refused, result.Summary);
+        result.Reason.Should().Be(ForeignKeyWhatIfAction.OtherTableRefusal).And.NotContain("hidden_rls").And.NotContain("allowed");
+        result.Rows.Should().BeEmpty("nothing of a plan that reads another table is drawn");
+        result.Summary.Should().BeNull();
+        recorder.Cleanups.Should().Equal(HypotheticalIndexCleanup.Reset);
+
+        StudioActionLogEntry entry = host.Ring.GetLatest().Should().ContainSingle(static x => x.Action == "What-if foreign key lookup").Subject;
+        entry.Message.Should().NotContain("hidden_rls").And.NotContain("allowed");
+    }
+
+    [PostgresFact]
     public async Task A_key_that_is_partly_covered_is_compared_on_all_of_its_columns()
     {
         (string database, string app) = await SeedAsync("idx_b_t15_partly");

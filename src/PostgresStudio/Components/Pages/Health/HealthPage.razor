@@ -537,6 +537,14 @@
         }
     }
 
+    /// <summary>
+    /// Whether an offer is drawn for this visitor (1.2-INDEX-B-FU): not one whose gate is <see cref="HealthGate.Activity" /> where the
+    /// report already says they do not pass it (<c>StatementChecksAllowed</c> is that very question, asked while the report was built) - a
+    /// press would be refused and audited. No new question is asked here; the service asks every gate again on every press.
+    /// </summary>
+    private bool OfferedToThisVisitor(HealthActionOffer offer) =>
+        offer.Gate != HealthGate.Activity || report is not { StatementChecksExist: true, StatementChecksAllowed: false };
+
     private bool IsRunning(HealthReportFinding finding, HealthActionOffer offer) =>
         runningAction is { } running && string.Equals(running.MuteKey, finding.MuteKey, StringComparison.Ordinal)
             && string.Equals(running.ActionId, offer.Id, StringComparison.Ordinal);
@@ -841,7 +849,7 @@
 
             @* 1.2-H-C: what this finding offers to read beyond its sweep, on demand and for this visitor alone. Nothing runs on
                render: the button is the only way in, and the service asks the gates again on every press. *@
-            @foreach (HealthActionOffer offer in Actions.OffersFor(finding))
+            @foreach (HealthActionOffer offer in Actions.OffersFor(finding).Where(OfferedToThisVisitor))
             {
                 <div class="ms-health-action" @key="@(finding.MuteKey + "|" + offer.Id)">
                     <div class="ms-health-action-bar">

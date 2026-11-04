@@ -125,7 +125,7 @@ internal sealed class HealthActionService : IHealthActionService
             return [];
         }
 
-        return [.. actions.Where(x => x.AppliesTo(finding.Finding)).Select(static x => new HealthActionOffer(x.Id, x.Label, x.Description))];
+        return [.. actions.Where(x => x.AppliesTo(finding.Finding)).Select(static x => new HealthActionOffer(x.Id, x.Label, x.Description) { Gate = x.Gate })];
     }
 
     /// <inheritdoc />

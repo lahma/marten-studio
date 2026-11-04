@@ -4,6 +4,8 @@ using MartenStudio.Tests.Sql;
 
 using PostgresStudio.Services.Query;
 
+using Weasel.Postgresql.Tables;
+
 namespace MartenStudio.Tests.Query;
 
 /// <summary>
@@ -82,16 +84,44 @@ public class MartenIndexCandidateContributorTests
     }
 
     [Fact]
-    public void A_partial_declared_index_is_not_the_index_a_line_would_declare()
+    public void A_partial_declared_index_is_not_the_index_a_line_would_declare_and_the_line_names_its_own_index()
     {
         IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email, configure: static i => i.Predicate = "email is not null"));
 
-        tables[0].Indexes.Should().ContainSingle(static x => x.Predicate != null);
+        tables[0].Indexes.Should().ContainSingle(static x => x.Predicate != null && x.Name == "mt_doc_sqltestcustomer_idx_email");
 
         HypotheticalIndex index = Offer(Scan("(d.email = $1)"), tables).Should().ContainSingle().Subject;
 
-        index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().Index(x => x.Email);", "a partial index does not serve every lookup of the column");
-        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_email ON studio_sql.mt_doc_sqltestcustomer USING btree ((email));");
+        index.Line.Should().Be(
+            "options.Schema.For<SqlTestCustomer>().Index(x => x.Email, i => i.Name = \"mt_doc_sqltestcustomer_idx_email_full\");",
+            "a partial index does not serve every lookup of the column, and a line of the derived name would collide with the declared one");
+        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_email_full ON studio_sql.mt_doc_sqltestcustomer USING btree ((email));");
+        index.Note.Should().Contain("The store declares a partial index named mt_doc_sqltestcustomer_idx_email on this column; a full b-tree needs a name of its own.");
+    }
+
+    [Fact]
+    public void A_hash_declared_index_is_not_a_full_b_tree_either_and_the_line_names_its_own_index()
+    {
+        IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email, configure: static i => i.Method = IndexMethod.hash));
+
+        tables[0].Indexes.Should().ContainSingle(static x => !x.IsBtree && x.Name == "mt_doc_sqltestcustomer_idx_email");
+
+        HypotheticalIndex index = Offer(Scan("(d.email = $1)"), tables).Should().ContainSingle().Subject;
+
+        index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().Index(x => x.Email, i => i.Name = \"mt_doc_sqltestcustomer_idx_email_full\");");
+        index.Definition.Should().Contain("mt_doc_sqltestcustomer_idx_email_full").And.Contain("USING btree");
+        index.Note.Should().Contain("non-b-tree index named mt_doc_sqltestcustomer_idx_email");
+    }
+
+    [Fact]
+    public void A_partial_index_on_the_last_modified_column_gets_a_named_IndexLastModified()
+    {
+        IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().IndexLastModified(static i => i.Predicate = "mt_last_modified is not null"));
+
+        HypotheticalIndex index = Offer(Scan("(d.mt_last_modified > $1)"), tables).Should().ContainSingle().Subject;
+
+        index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().IndexLastModified(i => i.Name = \"mt_doc_sqltestcustomer_idx_mt_last_modified_full\");");
+        index.Definition.Should().Contain("mt_doc_sqltestcustomer_idx_mt_last_modified_full");
     }
 
     [Fact]

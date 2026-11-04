@@ -40,6 +40,10 @@ public sealed class IndexWhatIfActionTests : IAsyncDisposable
         service.OffersFor(Finding("T01", "public.orders")).Should().ContainSingle().Which.Id.Should().Be(SequentialScanWhatIfAction.ActionId);
         service.OffersFor(Finding("T15", "public.orders.fk")).Should().ContainSingle().Which.Id.Should().Be(ForeignKeyWhatIfAction.ActionId);
         service.OffersFor(Finding("T02", null)).Should().BeEmpty();
+
+        // The page leaves an Activity offer out where its report says the visitor does not pass that gate.
+        service.OffersFor(Finding("T01", "public.orders")).Single().Gate.Should().Be(HealthGate.Activity);
+        service.OffersFor(Finding("T15", "public.orders.fk")).Single().Gate.Should().Be(HealthGate.Database);
     }
 
     [Fact]

@@ -190,4 +190,11 @@ internal sealed record HealthActionCell(string Text)
 /// <param name="Id">The action's id.</param>
 /// <param name="Label">The button.</param>
 /// <param name="Description">What it reads and costs.</param>
-internal sealed record HealthActionOffer(string Id, string Label, string Description);
+internal sealed record HealthActionOffer(string Id, string Label, string Description)
+{
+    /// <summary>
+    /// The least gate a press runs under (<see cref="IHealthFindingAction.Gate" />): what lets the page leave out an offer whose
+    /// gate its own report already says the visitor does not pass. The runner asks it again on every press all the same.
+    /// </summary>
+    public HealthGate Gate { get; init; }
+}

@@ -108,6 +108,36 @@ public class HealthPageActionTests
     }
 
     [Fact]
+    public async Task An_offer_whose_gate_is_Activity_is_left_out_where_the_report_says_the_visitor_does_not_pass_it()
+    {
+        await using StudioComponentContext context = await ReadyAsync();
+        context.HealthActions.Offer = context.HealthActions.Offer with { Gate = HealthGate.Activity };
+        context.Health.Report = context.Health.Report with { StatementChecksExist = true, StatementChecksAllowed = false };
+        int questions = context.HealthActions.OfferQuestions;
+
+        IRenderedComponent<HealthPage> page = Render(context);
+
+        page.FindAll("#finding-e06 .ms-health-action").Should().BeEmpty("a press would be refused and audited anyway");
+        context.HealthActions.Runs.Should().BeEmpty();
+        context.HealthActions.OfferQuestions.Should().BeGreaterThan(questions, "the offer was asked for; the report's own answer left it out");
+    }
+
+    [Fact]
+    public async Task An_Activity_offer_is_drawn_where_the_report_says_the_visitor_passes_it_and_a_Database_offer_is_drawn_either_way()
+    {
+        await using StudioComponentContext context = await ReadyAsync();
+        context.HealthActions.Offer = context.HealthActions.Offer with { Gate = HealthGate.Activity };
+        context.Health.Report = context.Health.Report with { StatementChecksExist = true, StatementChecksAllowed = true };
+
+        Render(context).FindAll("#finding-e06 .ms-health-action-run").Should().ContainSingle();
+
+        context.HealthActions.Offer = context.HealthActions.Offer with { Gate = HealthGate.Database };
+        context.Health.Report = context.Health.Report with { StatementChecksExist = true, StatementChecksAllowed = false };
+
+        Render(context).FindAll("#finding-e06 .ms-health-action-run").Should().ContainSingle("a Database offer asks nothing the report knows to be refused");
+    }
+
+    [Fact]
     public async Task A_muted_finding_offers_it_too()
     {
         await using StudioComponentContext context = await ReadyAsync();

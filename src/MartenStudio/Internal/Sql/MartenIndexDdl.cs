@@ -61,7 +61,8 @@ internal static class MartenIndexDdl
     /// </summary>
     /// <param name="mapping">The document type, as <c>IDocumentType</c> - a <see cref="DocumentMapping" /> on every Marten 9.</param>
     /// <param name="members">The member path, outermost first.</param>
-    public static string? Computed(IDocumentType mapping, IReadOnlyList<MemberInfo> members)
+    /// <param name="name">An explicit index name (<c>Index(x =&gt; x.Member, i =&gt; i.Name = …)</c>), or <see langword="null" /> for Marten's own.</param>
+    public static string? Computed(IDocumentType mapping, IReadOnlyList<MemberInfo> members, string? name = null)
     {
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentNullException.ThrowIfNull(members);
@@ -73,7 +74,14 @@ internal static class MartenIndexDdl
 
         try
         {
-            return new ComputedIndex(document, [.. members]).ToDDL(new Table(document.TableName));
+            ComputedIndex index = new(document, [.. members]);
+
+            if (name is not null)
+            {
+                index.Name = name;
+            }
+
+            return index.ToDDL(new Table(document.TableName));
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or NotSupportedException or KeyNotFoundException)
         {
@@ -90,14 +98,25 @@ internal static class MartenIndexDdl
     /// <param name="mapping">The document type.</param>
     /// <param name="column">The metadata column.</param>
     /// <param name="predicate">Its partial-index predicate, as Marten sets it, or <see langword="null" />.</param>
-    public static string? OnColumn(IDocumentType mapping, string column, string? predicate = null)
+    /// <param name="name">An explicit index name, or <see langword="null" /> for Marten's own.</param>
+    public static string? OnColumn(IDocumentType mapping, string column, string? predicate = null, string? name = null)
     {
         ArgumentNullException.ThrowIfNull(mapping);
         ArgumentException.ThrowIfNullOrWhiteSpace(column);
 
-        return mapping is DocumentMapping document
-            ? new DocumentIndex(document, column) { Predicate = predicate }.ToDDL(new Table(document.TableName))
-            : null;
+        if (mapping is not DocumentMapping document)
+        {
+            return null;
+        }
+
+        DocumentIndex index = new(document, column) { Predicate = predicate };
+
+        if (name is not null)
+        {
+            index.Name = name;
+        }
+
+        return index.ToDDL(new Table(document.TableName));
     }
 
     /// <summary>

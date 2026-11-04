@@ -144,14 +144,25 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
         if (MartenDuplicatedFields.Physical(mapping).FirstOrDefault(x => string.Equals(x.ColumnName, column, StringComparison.Ordinal)) is { Members.Length: > 0 } duplicated
             && MartenIndexDdl.Computed(mapping, duplicated.Members) is { } computed)
         {
-            string line = Line(table, "Index(x => x." + string.Join('.', duplicated.Members.Select(static x => x.Name)) + ")");
-            return Make(table, column, computed, line);
+            string member = string.Join('.', duplicated.Members.Select(static x => x.Name));
+
+            return Make(
+                table,
+                column,
+                computed,
+                Line(table, "Index(x => x." + member + ")"),
+                name => (MartenIndexDdl.Computed(mapping, duplicated.Members, name), Line(table, "Index(x => x." + member + ", i => i.Name = \"" + name + "\")")));
         }
 
         if (string.Equals(table.Info.MetadataColumnName(DocumentMetadataColumn.LastModified), column, StringComparison.Ordinal)
             && MartenIndexDdl.OnColumn(mapping, column) is { } onColumn)
         {
-            return Make(table, column, onColumn, Line(table, "IndexLastModified()"));
+            return Make(
+                table,
+                column,
+                onColumn,
+                Line(table, "IndexLastModified()"),
+                name => (MartenIndexDdl.OnColumn(mapping, column, name: name), Line(table, "IndexLastModified(i => i.Name = \"" + name + "\")")));
         }
 
         return null;
@@ -165,19 +176,47 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
     /// (<see cref="MartenIndexDdl.AlreadyDeclaredNote" />), and what is imagined is the declared index's own DDL, so the what-if tests
     /// what an apply would create.
     /// </summary>
-    private static HypotheticalIndex Make(MartenPlanTable table, string column, string definition, string line)
+    private static HypotheticalIndex Make(
+        MartenPlanTable table,
+        string column,
+        string definition,
+        string line,
+        Func<string, (string? Definition, string Line)> named)
     {
         HypotheticalIndex index = MartenIndexDdl.Index("advisor:" + table.Schema + "." + table.Table + ":" + line, definition, line, table.Info, duplicate: false);
 
-        return DeclaredOn(table, column) is { } declared
-            ? index with
+        if (DeclaredOn(table, column) is { } declared)
+        {
+            return index with
             {
                 Definition = declared.Definition,
                 Line = null,
                 Caption = "The index " + declared.Name + ", which the store already declares",
                 Note = MartenIndexDdl.AlreadyDeclaredNote,
+            };
+        }
+
+        // An index of the line's own derived name that is not the plain full b-tree (partial, hash, another method) would collide with the
+        // line: the apply would find the name taken. The line then names its index explicitly, and the what-if imagines that one.
+        if (DeclaredName(definition) is { } derived
+            && table.Indexes.FirstOrDefault(x => string.Equals(x.Name, derived, StringComparison.Ordinal)) is { } taken)
+        {
+            string name = derived + "_full";
+            (string? namedDefinition, string namedLine) = named(name);
+
+            if (namedDefinition is not null)
+            {
+                string kind = !string.IsNullOrWhiteSpace(taken.Predicate) ? "partial" : !taken.IsBtree ? "non-b-tree" : "differently shaped";
+
+                return MartenIndexDdl.Index("advisor:" + table.Schema + "." + table.Table + ":" + namedLine, namedDefinition, namedLine, table.Info, duplicate: false) with
+                {
+                    Note = "The store declares a " + kind + " index named " + derived + " on this column; a full b-tree needs a name of its own. "
+                        + MartenIndexDdl.DeclareNote,
+                };
             }
-            : index;
+        }
+
+        return index;
     }
 
     /// <summary>
@@ -188,6 +227,20 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
         table.Indexes.FirstOrDefault(x => x.IsBtree && string.IsNullOrWhiteSpace(x.Predicate) && x.Columns.Count == 1
             && string.Equals(Bare(x.Columns[0]), column, StringComparison.OrdinalIgnoreCase)
             && x.Definition.StartsWith("CREATE ", StringComparison.Ordinal));
+
+    /// <summary>The name in Marten's <c>CREATE INDEX name ON …</c>, or <see langword="null" />.</summary>
+    private static string? DeclaredName(string definition)
+    {
+        const string Prefix = "CREATE INDEX ";
+        const string UniquePrefix = "CREATE UNIQUE INDEX ";
+
+        string rest = definition.StartsWith(Prefix, StringComparison.Ordinal) ? definition[Prefix.Length..]
+            : definition.StartsWith(UniquePrefix, StringComparison.Ordinal) ? definition[UniquePrefix.Length..]
+            : string.Empty;
+
+        int end = rest.IndexOf(' ', StringComparison.Ordinal);
+        return end > 0 ? rest[..end] : null;
+    }
 
     /// <summary>A column as an index holds it: without the parentheses and quotes an expression index and a quoted name add.</summary>
     private static string Bare(string column) => column.Trim().Trim('(', ')').Trim().Trim('"').Trim();
