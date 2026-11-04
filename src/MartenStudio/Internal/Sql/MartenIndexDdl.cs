@@ -49,6 +49,13 @@ internal static class MartenIndexDdl
         + "does not declare.";
 
     /// <summary>
+    /// 1.2-INDEX-A: what the index advisor says where the store already declares the index it would have recommended a line for - a
+    /// <c>Duplicate()</c> always declares its own - so the line is no remedy.
+    /// </summary>
+    internal const string AlreadyDeclaredNote =
+        "The store already declares this index; it is missing from the database. Applying the schema creates it (Schema › Apply).";
+
+    /// <summary>
     /// The computed index Marten creates for <c>Index(x =&gt; x.Member)</c> over <paramref name="members" />, as Marten writes it -
     /// or <see langword="null" /> when the mapping is not one Marten builds that index for, or Marten cannot.
     /// </summary>

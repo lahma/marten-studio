@@ -125,6 +125,64 @@ public class IndexAdvisorTests
         Select("public.nowhere", Nothing, Statement(1, "select * from public.orders")).Kept.Should().BeEmpty();
     }
 
+    private static readonly StudioTable Salaries = new("hr", "salaries", StudioTableKind.Relational, StudioTableOwnership.Other) { GatedSchemas = ["hr"] };
+
+    [Fact]
+    public void A_guessed_table_in_a_schema_the_visitor_may_not_see_answers_as_a_table_nobody_uses()
+    {
+        HashSet<string> withheld = ["hr"];
+        (StatementFact, StatementRowView)[] statements =
+        [
+            Statement(1, "select * from hr.salaries where who = $1", tables: [Salaries]),
+            Statement(2, "select * from hr.salaries where who = $1 for update", tables: [Salaries], shown: false),
+            Statement(3, "insert into salaries values ($1)", tables: [Salaries]),
+            Statement(4, "vacuum salaries", tables: [Salaries]),
+            Statement(5, "select * from public.orders", tables: [Orders]),
+        ];
+
+        WorkloadStatements guessed = Select(Salaries.Key, withheld, statements);
+        WorkloadStatements nowhere = Select("hr.nowhere", withheld, statements);
+
+        guessed.Kept.Should().BeEmpty();
+        guessed.Skipped.Should().BeEmpty("nothing about a statement that names a table the visitor may not see is counted");
+        guessed.Kept.Should().Equal(nowhere.Kept);
+        guessed.Skipped.Should().Equal(nowhere.Skipped);
+
+        // Asking about every table still counts what the visitor may see counted, as it always did.
+        Select(null, withheld, statements).Skipped.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public void A_guessed_table_whose_gate_could_not_be_read_answers_the_same_way()
+    {
+        (StatementFact, StatementRowView)[] statements = [Statement(1, "insert into salaries values ($1)", tables: [Salaries])];
+
+        Select(Salaries.Key, null, statements).Skipped.Should().BeEmpty();
+        Select("hr.nowhere", null, statements).Skipped.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_statement_with_no_window_is_ranked_by_its_own_counters_not_last()
+    {
+        StatementFact fresh = new()
+        {
+            QueryId = 1,
+            Text = "select * from public.orders where a = $1",
+            TextRead = true,
+            SinceBegan = Counts(10, 900),
+            Window = null,
+            Tables = [Orders],
+        };
+        (StatementFact other, StatementRowView otherRow) = Statement(2, "select * from public.orders where b = $1", execMs: 100);
+        StatementRowView freshRow = new(1, fresh.Text, null, "g", "g", null, fresh.SinceBegan, null, null, null);
+
+        WorkloadStatements selection = IndexAdvisor.Select([other, fresh], new Dictionary<long, StatementRowView> { [1] = freshRow, [2] = otherRow }, Nothing, null, watched: true);
+
+        selection.Kept.Select(static x => x.QueryId).Should().Equal(1L, 2L);
+        selection.Ranking.Should().Be(IndexAdvisor.RankedByWindow);
+        Select(null, Nothing, Statement(1, "select * from public.orders")).Ranking.Should().Be(IndexAdvisor.RankedSinceBegan);
+    }
+
     // ---- Which indexes ----------------------------------------------------------------------------------------------------
 
     private static HypotheticalIndex Index(string table, params string[] columns) =>

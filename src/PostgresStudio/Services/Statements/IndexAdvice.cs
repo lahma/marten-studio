@@ -125,6 +125,9 @@ internal sealed record IndexAdviceView
     /// <summary>Which bound stopped the run, in words, or <see langword="null" />.</summary>
     public string? Stopped { get; init; }
 
+    /// <summary>What ranked the statements: the window the statement checks watched, or the counters since they began.</summary>
+    public string? Ranking { get; init; }
+
     /// <summary>When the run finished.</summary>
     public DateTimeOffset? RanAt { get; init; }
 

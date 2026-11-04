@@ -133,7 +133,7 @@ public class IndexAdvisorMartenLiveTests(MartenAdvisorServer server) : IClassFix
     private static readonly StudioScope Scope = new(MartenStoreRegistry.DefaultStoreKey, string.Empty, null);
 
     [PostgresFact]
-    public async Task A_duplicated_field_that_lost_its_index_is_recommended_as_its_StoreOptions_line_not_as_SQL()
+    public async Task A_duplicated_fields_lost_index_is_recommended_as_the_schema_apply_the_store_already_declares_not_as_SQL()
     {
         server.SkipIfUnavailable();
 
@@ -187,10 +187,9 @@ public class IndexAdvisorMartenLiveTests(MartenAdvisorServer server) : IClassFix
         view.Unavailable.Should().BeNull();
         IndexAdviceItem item = view.Recommended.Should().ContainSingle().Subject;
         item.Index.Origin.Should().Be(PostgresStudio.Services.Query.HypotheticalIndexOrigin.Marten);
-        item.Remedy.Should().Be("options.Schema.For<WhatIfPaint>().Index(x => x.Color);", "the line that declares the index, never SQL for an mt_doc_ table");
-        item.Remedy.Should().NotContain("CREATE INDEX");
         item.Statements.Should().Contain(static x => x.Used && x.After < x.Before);
-        item.RemedyNote.Should().Contain("Declare it in StoreOptions");
+        item.Remedy.Should().BeNull("the store already declares the index: no line is the remedy, and never SQL for an mt_doc_ table");
+        item.RemedyNote.Should().Be(MartenStudio.Internal.Sql.MartenIndexDdl.AlreadyDeclaredNote);
 
         provider.GetRequiredService<StudioActionLogService>().GetLatest()
             .Should().ContainSingle(static x => x.Action == StatementsService.IndexAdviceAction && x.Succeeded);

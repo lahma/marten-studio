@@ -224,6 +224,10 @@
                 {
                     <text> Planned @shown.StatementsTried of @shown.StatementsSelected statements@(shown.CandidatesTried > 0 || shown.CandidatesFound > 0 ? "; tried " + shown.CandidatesTried + " of " + shown.CandidatesFound + " indexes" : string.Empty).</text>
                 }
+                @if (shown.Ranking is { Length: > 0 } ranking)
+                {
+                    <text> @ranking</text>
+                }
             </p>
         }
 
@@ -290,7 +294,7 @@
                                     @foreach (IndexAdviceStatement statement in item.Statements)
                                     {
                                         <tr @key="statement.QueryId">
-                                            <td><a class="ms-plan-open" href="@StatementLinks.ToStatement(Settings, Descriptor, State.ActiveScope, statement.QueryId)">queryid @statement.QueryId.ToString(CultureInfo.InvariantCulture)</a></td>
+                                            <td><a class="ms-plan-open" href="@StatementLink(statement.QueryId)">queryid @statement.QueryId.ToString(CultureInfo.InvariantCulture)</a></td>
                                             <td class="ms-advisor-number">@TableTextCount(statement.Calls)</td>
                                             <td class="ms-advisor-number">@Cost(statement.Before)</td>
                                             <td class="ms-advisor-number">@(statement.After is { } after ? Cost(after) : "–")</td>
@@ -369,6 +373,14 @@
             <SqlDisclosure Sql="@statement.Sql" ParameterNames="statement.ParameterNames" Reads="@statement.Label" />
         }
     };
+
+    /// <summary>
+    /// The drill-in's link for a statement, carrying <c>advise=</c> as well (D9): Back from the drill-in returns to this panel, which is
+    /// keyed on the parameter and the scope and so keeps its result.
+    /// </summary>
+    private string StatementLink(long queryId) =>
+        StatementLinks.ToStatement(Settings, Descriptor, State.ActiveScope, queryId)
+        + "&" + IndexAdvisor.AdviseParameter + "=" + Uri.EscapeDataString(Table ?? IndexAdvisor.AdviseAll);
 
     private static string TableTextCount(double value) => value.ToString("N0", CultureInfo.InvariantCulture);
 

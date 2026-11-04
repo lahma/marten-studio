@@ -163,17 +163,7 @@ internal static class MartenJsonMembers
     /// <param name="root">The document type.</param>
     /// <param name="jsonPath">The keys, outermost first.</param>
     /// <param name="naming">The serializer's naming policy, or <see langword="null" /> to write a member's own name.</param>
-    public static string? Resolve(Type root, IReadOnlyList<string> jsonPath, JsonNamingPolicy? naming) =>
-        ResolveMembers(root, jsonPath, naming) is { } members ? string.Join('.', members.Select(static x => x.Name)) : null;
-
-    /// <summary>
-    /// 1.2-INDEX-A: the members (outermost first) <paramref name="jsonPath" /> names on <paramref name="root" />, or <see langword="null" />
-    /// - the walk <see cref="Resolve" /> makes, as <see cref="MemberInfo" />s, for Marten's own index constructor.
-    /// </summary>
-    /// <param name="root">The document type.</param>
-    /// <param name="jsonPath">The keys, outermost first.</param>
-    /// <param name="naming">The serializer's naming policy, or <see langword="null" /> to write a member's own name.</param>
-    public static IReadOnlyList<MemberInfo>? ResolveMembers(Type root, IReadOnlyList<string> jsonPath, JsonNamingPolicy? naming)
+    public static string? Resolve(Type root, IReadOnlyList<string> jsonPath, JsonNamingPolicy? naming)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentNullException.ThrowIfNull(jsonPath);
@@ -184,7 +174,7 @@ internal static class MartenJsonMembers
         }
 
         Type current = root;
-        List<MemberInfo> members = [];
+        List<string> members = [];
 
         foreach (string key in jsonPath)
         {
@@ -196,13 +186,13 @@ internal static class MartenJsonMembers
                 return null;
             }
 
-            List<(MemberInfo Member, Type Type)> matches = [];
+            List<(string Name, Type Type)> matches = [];
 
             foreach (MemberInfo member in Members(current))
             {
                 if (JsonNameOf(member, naming) is { } written && string.Equals(written, key, StringComparison.Ordinal))
                 {
-                    matches.Add((member, member is PropertyInfo property ? property.PropertyType : ((FieldInfo) member).FieldType));
+                    matches.Add((member.Name, member is PropertyInfo property ? property.PropertyType : ((FieldInfo) member).FieldType));
                 }
             }
 
@@ -211,11 +201,11 @@ internal static class MartenJsonMembers
                 return null;
             }
 
-            members.Add(matches[0].Member);
+            members.Add(matches[0].Name);
             current = matches[0].Type;
         }
 
-        return members;
+        return string.Join('.', members);
     }
 
     private static Type Unwrap(Type type) => Nullable.GetUnderlyingType(type) ?? type;

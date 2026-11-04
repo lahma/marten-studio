@@ -41,8 +41,9 @@ internal sealed record SelectedStatement(long QueryId, string Text, bool Truncat
 
 /// <summary>Which statements the advisor plans, and how many it passed over on the way, counted by reason.</summary>
 /// <param name="Kept">At most <see cref="IndexAdvisor.MaxStatements" />, the most execution time first.</param>
+/// <param name="Ranking">What ordered them: the window the statement checks watched, or the counters since they began.</param>
 /// <param name="Skipped">The statements passed over, each reason counted ("4 writes").</param>
-internal sealed record WorkloadStatements(IReadOnlyList<SelectedStatement> Kept, IReadOnlyList<string> Skipped);
+internal sealed record WorkloadStatements(IReadOnlyList<SelectedStatement> Kept, string Ranking, IReadOnlyList<string> Skipped);
 
 /// <summary>A statement the advisor planned and may compare: its plan now, parsed, for reading candidates.</summary>
 /// <param name="QueryId">Its <c>queryid</c>.</param>
@@ -169,12 +170,17 @@ internal static class IndexAdvisor
     /// <param name="facts">The statement sweep's statements: nothing in them is yet shown to anybody.</param>
     /// <param name="rows">The same statements as this visitor may see them (<c>StatementsService.Show</c>), by <c>queryid</c>.</param>
     /// <param name="withheld">The schemas the visitor may not see, or <see langword="null" /> when their gate could not be read.</param>
-    /// <param name="table">A <see cref="StudioTable.Key" />: only statements naming it count, and the others are not even passed over.</param>
+    /// <param name="table">
+    /// A <see cref="StudioTable.Key" />: only statements naming it count, and the others are not even passed over. A statement that
+    /// names it and is not shown to the visitor, or whose table is in a schema they may not see, is passed over uncounted too.
+    /// </param>
+    /// <param name="watched">Whether the statement checks watched a window the counters are the change over (<see cref="StatementFacts.Watched" />).</param>
     public static WorkloadStatements Select(
         IReadOnlyList<StatementFact> facts,
         IReadOnlyDictionary<long, StatementRowView> rows,
         IReadOnlySet<string>? withheld,
-        string? table)
+        string? table,
+        bool watched = false)
     {
         ArgumentNullException.ThrowIfNull(facts);
         ArgumentNullException.ThrowIfNull(rows);
@@ -182,8 +188,10 @@ internal static class IndexAdvisor
         List<SelectedStatement> kept = [];
         int writes = 0, utility = 0, locking = 0, shape = 0, cut = 0, notShown = 0, untied = 0, uncalled = 0;
 
+        // The page's own order, with one difference: a statement the statement checks did not watch over the window (new to the kept
+        // statements) is ranked by its own counters since they began, not last. The panel says which basis ranked them.
         IEnumerable<StatementFact> ordered = facts
-            .OrderByDescending(x => rows.TryGetValue(x.QueryId, out StatementRowView? row) ? row.Window?.ExecMs ?? double.MinValue : double.MinValue)
+            .OrderByDescending(x => rows.TryGetValue(x.QueryId, out StatementRowView? ranked) ? ranked.Window?.ExecMs ?? ranked.SinceBegan.ExecMs : double.MinValue)
             .ThenBy(static x => x.QueryId);
 
         foreach (StatementFact fact in ordered)
@@ -193,15 +201,31 @@ internal static class IndexAdvisor
                 break;
             }
 
-            if (table is not null && !fact.Tables.Any(x => string.Equals(x.Key, table, StringComparison.Ordinal)))
+            StudioTable? named = table is null ? null : fact.Tables.FirstOrDefault(x => string.Equals(x.Key, table, StringComparison.Ordinal));
+
+            if (table is not null && named is null)
             {
                 continue;
             }
 
+            // A request that names a table must not confirm one the visitor may not see: a statement that names it but is not shown
+            // to them (its text is withheld, or names a schema they may not see), or whose table is in such a schema, is passed over
+            // uncounted, so a guessed name answers as a name nobody uses does. With every table, nothing is hidden by this.
+            bool quiet = table is not null && (withheld is null || named!.GatedSchemas.Any(withheld.Contains));
+
             if (!rows.TryGetValue(fact.QueryId, out StatementRowView? row) || fact.Text is not { } text || row.Text is null || withheld is null
                 || StatementsService.TextNamesWithheld(text, withheld) is not null)
             {
-                notShown++;
+                if (table is null)
+                {
+                    notShown++;
+                }
+
+                continue;
+            }
+
+            if (quiet)
+            {
                 continue;
             }
 
@@ -250,6 +274,7 @@ internal static class IndexAdvisor
 
         return new WorkloadStatements(
             kept,
+            watched ? RankedByWindow : RankedSinceBegan,
             Counted(
                 (writes, "write", "writes"),
                 (utility, "utility statement", "utility statements"),
@@ -260,6 +285,12 @@ internal static class IndexAdvisor
                 (untied, "statement the checks could not tie to a table", "statements the checks could not tie to a table"),
                 (uncalled, "statement not called in the window", "statements not called in the window")));
     }
+
+    /// <summary>What ranked the statements when a window was watched.</summary>
+    public const string RankedByWindow = "Ranked by execution time since the statement checks' window began.";
+
+    /// <summary>What ranked the statements when none was watched over a window.</summary>
+    public const string RankedSinceBegan = "Ranked by execution time since the statistics began.";
 
     private static bool IsWrite(string text)
     {
@@ -655,6 +686,7 @@ internal static class IndexAdvisor
 
         if (index.Origin == HypotheticalIndexOrigin.Marten)
         {
+            // The line to declare - or none, when the store already declares the index: its note then says the schema apply creates it.
             return (index.Line, index.Note);
         }
 

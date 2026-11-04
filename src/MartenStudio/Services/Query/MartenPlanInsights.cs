@@ -300,7 +300,7 @@ internal static partial class MartenPlanInsights
     /// <summary>One JSON use of a filter that no declared index serves, and the member it maps to.</summary>
     internal sealed record Unserved(JsonUse Use, string? Member);
 
-    internal static List<Unserved> Unserve(MartenPlanTable table, IReadOnlyList<JsonUse> uses)
+    private static List<Unserved> Unserve(MartenPlanTable table, IReadOnlyList<JsonUse> uses)
     {
         List<Unserved> unserved = [];
         HashSet<string> seen = new(StringComparer.Ordinal);

@@ -149,6 +149,18 @@ public class IndexAdviceServiceTests
     }
 
     [Fact]
+    public async Task A_run_that_selected_no_statement_is_audited_as_the_top_statements_never_the_top_zero()
+    {
+        await using PostgresStudioComponentContext context = new();
+        context.WithAllCapabilities();
+        await context.ReadyAsync();
+
+        await Service(context, Some()).AdviseIndexesAsync(Scope, new IndexAdviceRequest(), TestContext.Current.CancellationToken);
+
+        Entries(context).Should().ContainSingle().Which.Target.Should().Be("the top statements");
+    }
+
+    [Fact]
     public async Task A_caller_that_records_the_press_itself_leaves_the_advisor_without_an_entry()
     {
         await using PostgresStudioComponentContext context = new();

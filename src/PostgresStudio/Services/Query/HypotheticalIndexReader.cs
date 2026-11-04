@@ -495,6 +495,7 @@ internal sealed class HypotheticalIndexReader
                 catch (PostgresException exception) when (exception.SqlState == PostgresErrorCodes.DuplicatePreparedStatement && attempt == 0)
                 {
                     // The name was on that session - left by a plan that could not take it back. The finally below takes it back; once more.
+                    sqlState = exception.SqlState;
                     retry = true;
                 }
                 finally
@@ -519,7 +520,9 @@ internal sealed class HypotheticalIndexReader
                     }
                 }
 
-                if (retry)
+                // Once more only on a session the cleanup left clean and open: after a reset that failed (the session ended, or the
+                // connection broke) there is no connection to try on, and the trial is returned with its SQLSTATE for the run to stop.
+                if (retry && cleanup is HypotheticalIndexCleanup.ResetAfterFailure or HypotheticalIndexCleanup.NothingMade)
                 {
                     continue;
                 }

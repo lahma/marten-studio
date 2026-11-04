@@ -226,6 +226,53 @@ public class HypotheticalWorkloadLiveTests(HypopgServer server) : IClassFixture<
     }
 
     [PostgresFact]
+    public async Task A_name_left_on_the_session_is_not_retried_when_the_cleanup_had_to_end_the_session()
+    {
+        string database = await SeedAsync("adv_engine_42p05");
+        AdvisorRecorder recorder = new();
+        await using StudioHost host = Host(database, recorder, consoleRole: "console_role", role: "console_login");
+        await using StudioCircuit circuit = host.Circuit();
+        HypotheticalIndexReader reader = host.Services.GetRequiredService<HypotheticalIndexReader>();
+        int prepared = 0;
+
+        // Trial one fails in its plan (42501) with nothing to take the prepared name back; trial two meets that name (42P05) after its
+        // reset was made to fail, so its cleanup ends the session: the retry must not go on to a connection that is gone.
+        HypotheticalWorkloadPlanner planner = new(
+            PrepareAsync: (_, _, _) =>
+            {
+                if (Interlocked.Increment(ref prepared) == 2)
+                {
+                    reader.ResetSqlOverride = "select public.hypopg_reset_that_is_not_there()";
+                }
+
+                return Task.CompletedTask;
+            },
+            PlanAsync: async (i, connection, transaction, token) =>
+            {
+                (string? json, _) = await StatementPlanQueries.ReadPlanAsync(
+                    connection,
+                    transaction,
+                    StatementPlanQueries.GenericPlan(i == 0 ? "select * from public.secret" : "select * from public.t where b = 5", false)!,
+                    ExplainStatements.MaxPlanCharacters,
+                    35,
+                    token);
+                return json;
+            });
+
+        HypotheticalWorkloadRead read = await reader.ReadTrialsAsync(
+            await DatabaseAsync(circuit),
+            [new HypotheticalIndexTrial(Index("b"), [0]), new HypotheticalIndexTrial(Index("a"), [1]), new HypotheticalIndexTrial(Index("c"), [1])],
+            planner,
+            DateTimeOffset.MaxValue,
+            TimeProvider.System,
+            Token);
+
+        read.Trials.Select(static x => x.SqlState).Should().Equal("42501", "42P05");
+        read.Stopped.Should().Be(HypotheticalWorkloadStop.SessionEnded);
+        recorder.Cleanups.Should().Equal(HypotheticalIndexCleanup.ResetAfterFailure, HypotheticalIndexCleanup.SessionEnded);
+    }
+
+    [PostgresFact]
     public async Task The_callers_cancellation_in_the_middle_of_a_trial_resets_hypopg_before_it_throws()
     {
         string database = await SeedAsync("adv_engine_cancel");
@@ -463,6 +510,21 @@ public class IndexAdvisorLiveTests(HypopgServer server) : IClassFixture<HypopgSe
             Words(view).Should().NotContain(static x => x.Contains("salaries", StringComparison.OrdinalIgnoreCase) || x.Contains("hr.", StringComparison.Ordinal));
             view.Skipped.Should().Contain(static x => x.Contains("not shown to you", StringComparison.Ordinal));
             view.Recommended.Should().ContainSingle().Which.TableKey.Should().Be("public.orders");
+
+            // A guessed name must not confirm the table: asking about hr.salaries answers exactly as asking about a table that is not there.
+            IndexAdviceView guessed = await circuit.Get<IStatementsService>().AdviseIndexesAsync(Scope, new IndexAdviceRequest { Table = "hr.salaries" }, Token);
+            IndexAdviceView nowhere = await circuit.Get<IStatementsService>().AdviseIndexesAsync(Scope, new IndexAdviceRequest { Table = "hr.nowhere" }, Token);
+
+            guessed.Reason.Should().Be(nowhere.Reason).And.Be(IndexAdvisor.NoStatementNamesTable);
+            guessed.Skipped.Should().Equal(nowhere.Skipped);
+            guessed.AuditOutcome.Should().Be(nowhere.AuditOutcome);
+            guessed.StatementsSelected.Should().Be(nowhere.StatementsSelected);
+            guessed.Recommended.Should().BeEmpty();
+            nowhere.Recommended.Should().BeEmpty();
+
+            IReadOnlyList<StudioActionLogEntry> entries = [.. withheld.Ring.GetLatest().Where(static x => x.Action == StatementsService.IndexAdviceAction && x.Target.StartsWith("statements on ", StringComparison.Ordinal))];
+            entries.Should().HaveCount(2);
+            entries.Select(static x => (x.Succeeded, x.Message)).Distinct().Should().ContainSingle("the two entries differ only in the name typed");
         }
 
         AdvisorRecorder admittedRecorder = new();

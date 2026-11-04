@@ -14,8 +14,9 @@ namespace MartenStudio.Services.Query;
 /// <summary>
 /// 1.2-INDEX-A: MartenStudio's <see cref="IIndexCandidateContributor" /> - the Statements page's index advisor, in Marten's terms. On
 /// a Marten document table an index read off a plan is replaced by the index Marten would create for a <c>StoreOptions</c> line
-/// (and carries that line as its remedy), or dropped; and the JSON members a document table's plan filters on that no declared
-/// index serves are added (P26's, without its threshold - the advisor's evaluation is the threshold).
+/// (and carries that line as its remedy), or dropped. It adds nothing of its own: a recorded statement names no JSON member
+/// (<c>pg_stat_statements</c> replaces every constant, the key included, with <c>$n</c>), so P26's member-by-member advice cannot be
+/// made from one.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,9 +34,8 @@ namespace MartenStudio.Services.Query;
 /// Marten's is dropped and the rest are returned - MartenStudio never offers an unlined index on a Marten table.
 /// </para>
 /// <para>
-/// <b>No GIN.</b> A containment or key-existence test yields no candidate: hypopg imagines btree, BRIN, hash and bloom indexes, not
-/// GIN (<see cref="MartenIndexDdl" />). <c>Duplicate(...)</c> adds a column, which hypopg cannot imagine either, so its index is the
-/// computed one <c>Index(...)</c> on the same member would create (<see cref="MartenIndexDdl.DuplicateNote" />).
+/// <b>A line the configuration already declares is no remedy.</b> A <c>Duplicate()</c> always declares the index on its column, so
+/// when that index is missing from the database the candidate carries no line and the note says applying the schema creates it.
 /// </para>
 /// </remarks>
 internal sealed class MartenIndexCandidateContributor : IIndexCandidateContributor
@@ -78,17 +78,16 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
             tables = null;
         }
 
-        return Offer(plan, fromPlan, tables);
+        return Offer(fromPlan, tables);
     }
 
     /// <summary>
-    /// What the studio offers for <paramref name="plan" /> given the tables the store declares (<see langword="null" /> when they could
+    /// What the studio offers for the plan given the tables the store declares (<see langword="null" /> when they could
     /// not be learned: every candidate on a table named like Marten's is then dropped). Pure: reads no database.
     /// </summary>
-    /// <param name="plan">The plan.</param>
     /// <param name="fromPlan">The indexes the plan suggests, or the previous contributor's.</param>
     /// <param name="tables">The store's visible document tables, or <see langword="null" />.</param>
-    internal static List<HypotheticalIndex> Offer(QueryPlan plan, IReadOnlyList<HypotheticalIndex> fromPlan, IReadOnlyList<MartenPlanTable>? tables)
+    internal static List<HypotheticalIndex> Offer(IReadOnlyList<HypotheticalIndex> fromPlan, IReadOnlyList<MartenPlanTable>? tables)
     {
         if (tables is null)
         {
@@ -114,11 +113,6 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
             }
 
             // Anything else on a Marten table is dropped: no line declares it, and one made by hand is dropped by the next apply.
-        }
-
-        foreach (HypotheticalIndex added in Added(plan, tables))
-        {
-            Add(added);
         }
 
         return offered;
@@ -151,60 +145,46 @@ internal sealed class MartenIndexCandidateContributor : IIndexCandidateContribut
             && MartenIndexDdl.Computed(mapping, duplicated.Members) is { } computed)
         {
             string line = Line(table, "Index(x => x." + string.Join('.', duplicated.Members.Select(static x => x.Name)) + ")");
-            return Make(table, computed, line, duplicate: false);
+            return Make(table, computed, line);
         }
 
         if (string.Equals(table.Info.MetadataColumnName(DocumentMetadataColumn.LastModified), column, StringComparison.Ordinal)
             && MartenIndexDdl.OnColumn(mapping, column) is { } onColumn)
         {
-            return Make(table, onColumn, Line(table, "IndexLastModified()"), duplicate: false);
+            return Make(table, onColumn, Line(table, "IndexLastModified()"));
         }
 
         return null;
     }
 
     /// <summary>
-    /// P26's indexes: for each scan with a filter of a visible document table, the JSON members no declared index serves that resolve
-    /// to exactly one member of the document type. A comparison is offered as the <c>Duplicate</c> line it would be declared with
-    /// (imagined as the computed index, <see cref="MartenIndexDdl.DuplicateNote" />), any other test as an <c>Index</c> line. Never a
-    /// containment or key-existence test: GIN is not an index hypopg imagines.
+    /// The index for <paramref name="line" /> - unless the store's configuration <em>already declares</em> an index of that name (a
+    /// <c>Duplicate()</c> or <c>[DuplicateField]</c> always declares its own, and <c>IndexLastModified()</c> may be declared): then
+    /// the line is no remedy, because it is already written. The index is missing from the database, and applying the schema creates
+    /// it - so the candidate has <b>no line</b> and says so (<see cref="MartenIndexDdl.AlreadyDeclaredNote" />).
     /// </summary>
-    private static List<HypotheticalIndex> Added(QueryPlan plan, IReadOnlyList<MartenPlanTable> tables)
+    private static HypotheticalIndex Make(MartenPlanTable table, string definition, string line)
     {
-        List<HypotheticalIndex> found = [];
+        HypotheticalIndex index = MartenIndexDdl.Index("advisor:" + table.Schema + "." + table.Table + ":" + line, definition, line, table.Info, duplicate: false);
 
-        foreach (PlanNode node in plan.Nodes)
-        {
-            if (found.Count >= HypotheticalIndexCandidates.MaxCandidates
-                || node.NodeType is not ("Seq Scan" or "Index Scan" or "Index Only Scan" or "Bitmap Heap Scan")
-                || node.Filter is not { Length: > 0 } filter
-                || MartenPlanInsights.TableOf(node, null, tables) is not { Mapping: not null } table)
-            {
-                continue;
-            }
-
-            foreach (MartenPlanInsights.Unserved unserved in MartenPlanInsights.Unserve(table, JsonUses.Read(filter)))
-            {
-                if (found.Count >= HypotheticalIndexCandidates.MaxCandidates || unserved.Use.Kind != JsonUseKind.Member
-                    || MartenJsonMembers.ResolveMembers(table.DocumentType, unserved.Use.Path, table.Naming) is not { Count: > 0 } members
-                    || MartenIndexDdl.Computed(table.Mapping!, members) is not { } definition)
-                {
-                    continue;
-                }
-
-                bool comparison = unserved.Use.Operator == JsonOperator.Comparison;
-                string member = string.Join('.', members.Select(static x => x.Name));
-                string line = Line(table, (comparison ? "Duplicate" : "Index") + "(x => x." + member + ")");
-
-                found.Add(Make(table, definition, line, comparison));
-            }
-        }
-
-        return found;
+        return DeclaredName(definition) is { } name && table.Indexes.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal))
+            ? index with { Line = null, Caption = "The index " + name + ", which the store already declares", Note = MartenIndexDdl.AlreadyDeclaredNote }
+            : index;
     }
 
-    private static HypotheticalIndex Make(MartenPlanTable table, string definition, string line, bool duplicate) =>
-        MartenIndexDdl.Index("advisor:" + table.Schema + "." + table.Table + ":" + line, definition, line, table.Info, duplicate);
+    /// <summary>The name in Marten's <c>CREATE INDEX name ON …</c>, or <see langword="null" />.</summary>
+    private static string? DeclaredName(string definition)
+    {
+        const string Prefix = "CREATE INDEX ";
+        const string UniquePrefix = "CREATE UNIQUE INDEX ";
+
+        string rest = definition.StartsWith(Prefix, StringComparison.Ordinal) ? definition[Prefix.Length..]
+            : definition.StartsWith(UniquePrefix, StringComparison.Ordinal) ? definition[UniquePrefix.Length..]
+            : string.Empty;
+
+        int end = rest.IndexOf(' ', StringComparison.Ordinal);
+        return end > 0 ? rest[..end] : null;
+    }
 
     private static string Line(MartenPlanTable table, string call) => "options.Schema.For<" + table.TypeName + ">()." + call + ";";
 }

@@ -455,6 +455,7 @@ public class StatementsPageTests
         Skipped = ["2 writes"],
         NotTried = ["An index on public.big (a): a partition."],
         ComparedColumns = ["customer_id", "total"],
+        Ranking = IndexAdvisor.RankedByWindow,
     };
 
     [Fact]
@@ -512,9 +513,10 @@ public class StatementsPageTests
         page.Find(".ms-advisor-remedy").TextContent.Should().Contain("Run it yourself, outside the studio");
         page.FindAll(".ms-advisor-card [role=region]").Should().ContainSingle();
         page.FindAll(".ms-advisor-statements tbody tr").Should().HaveCount(2);
-        page.FindAll(".ms-advisor-statements a").Select(static x => x.GetAttribute("href")).Should().OnlyContain(static x => x!.Contains("queryid=", StringComparison.Ordinal));
+        page.FindAll(".ms-advisor-statements a").Select(static x => x.GetAttribute("href")).Should().OnlyContain(static x => x!.Contains("queryid=", StringComparison.Ordinal) && x.Contains("advise=all", StringComparison.Ordinal),
+                "Back from the drill-in returns to the panel");
         page.Find(".ms-advisor-skipped").TextContent.Should().Contain("2 writes");
-        page.Find(".ms-advisor-ran").TextContent.Should().Contain("in 4.2 s");
+        page.Find(".ms-advisor-ran").TextContent.Should().Contain("in 4.2 s").And.Contain("since the statement checks' window began");
         page.FindAll(".ms-advisor-picker").Should().BeEmpty("the picker is only for a run that names a table");
     }
 

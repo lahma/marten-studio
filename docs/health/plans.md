@@ -690,10 +690,13 @@ that help are recommended, the most saved first. A longer index that extends a s
 folded into it ("also tried (a, b), no better"). Both thresholds are judgements to revisit, not measurements.
 
 **What to do about it.** On a table Marten owns a document table's index is the `StoreOptions` line that declares it - an
-`Index(x => x.Member)` on a duplicated field, `IndexLastModified()`, or the `Duplicate(x => x.Member)` a JSON comparison
-needs (imagined as the computed index on the same member, which says so) - and an index Marten's next apply would drop is never
-offered as SQL. On any other table it is `CREATE INDEX CONCURRENTLY`, which you run yourself, outside the studio. Nothing offers
-to run it. A containment or key-existence test yields no index: hypopg does not imagine GIN.
+`Index(x => x.Member)` on a duplicated field, or `IndexLastModified()` - and an index Marten's next apply would drop is never
+offered as SQL. Where the store already declares the index (a `Duplicate()` always does) and the database has lost it, there is
+no line to write: the studio says so, and that applying the schema (Schema › Apply) creates it. A JSON member is not offered
+at all: `pg_stat_statements` replaces every constant in a statement, the key included, with a placeholder (Marten writes
+`data ->> $2 = $1`), so a recorded statement never names the member; a plan you run yourself, in Query, still gets P26's advice.
+On any other table the remedy is `CREATE INDEX CONCURRENTLY`, which you run yourself, outside the studio. Nothing offers to run
+it.
 
 **Bounds.** 20 statements, 12 indexes (and your own, besides), 150 plans under imagined indexes, 60 seconds - checked between
 plans and between indexes - one run per tab and one per database in the process (a second is refused, never joined). A run a

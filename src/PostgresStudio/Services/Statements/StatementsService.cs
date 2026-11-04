@@ -969,7 +969,7 @@ internal sealed class StatementsService : IStatementsService
 
         string target = request.Table is { } table
             ? "statements on " + StudioLogValue.Cap(table)
-            : "the top " + selected.ToString(CultureInfo.InvariantCulture) + " statements";
+            : selected > 0 ? "the top " + selected.ToString(CultureInfo.InvariantCulture) + " statements" : "the top statements";
 
         audit.Record(IndexAdviceAction, target, succeeded, outcome, StudioCapability.ViewDatabaseActivity, whole);
     }
@@ -1028,7 +1028,7 @@ internal sealed class StatementsService : IStatementsService
         }
 
         // 6. Selection.
-        WorkloadStatements selection = IndexAdvisor.Select(read.Statements, rows, screen.Withheld, request.Table);
+        WorkloadStatements selection = IndexAdvisor.Select(read.Statements, rows, screen.Withheld, request.Table, read.Watched);
         run.Selected = selection.Kept.Count;
 
         if (selection.Kept.Count == 0 || screen.Withheld is not { } withheld)
@@ -1141,6 +1141,7 @@ internal sealed class StatementsService : IStatementsService
             StatementsTried = admitted.Count,
             Workload = admitted.Sum(static x => x.Calls * x.Before),
             Stopped = view.Stopped ?? stopped,
+            Ranking = selection.Ranking,
             ComparedColumns = table is null ? [] : IndexAdvisor.ComparedColumns(admitted.Select(static x => x.Plan), table.Schema, table.Table),
             Statements = Shown(planStatements, usable.Schema, view.Statements),
         };
@@ -1462,12 +1463,28 @@ internal sealed class StatementsService : IStatementsService
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// A drill-in statement as the advisor's "Show SQL" prints it. The drill-in's batch stands in for the recorded text with "shown masked
+    /// above"; the advisor shows no text above, so the stand-in says it is each statement's, and not shown.
+    /// </summary>
+    private static HealthStatement ForAdvisor(HealthStatement statement)
+    {
+        int start = statement.Sql.IndexOf(StatementPlanQueries.StatementShown, StringComparison.Ordinal);
+        int end = start < 0 ? -1 : statement.Sql.IndexOf('>', start);
+
+        string sql = end < 0
+            ? statement.Sql
+            : statement.Sql[..start] + "<the text pg_stat_statements recorded for each statement; the advisor does not show it>" + statement.Sql[(end + 1)..];
+
+        return statement with { Sql = sql, Label = statement.Label ?? "each statement's plan, as the drill-in plans it" };
+    }
+
     /// <summary>"Show SQL": the drill-in's statements, the relation read and hypopg's two calls - shapes, never a text or a value.</summary>
     private static List<HealthStatement> Shown(IReadOnlyList<HealthStatement> plan, string? hypopgSchema, IReadOnlyList<HealthStatement> more)
     {
         List<HealthStatement> shown =
         [
-            .. plan.Select(static x => x with { Label = x.Label ?? "a statement's plan" }),
+            .. plan.Select(static x => ForAdvisor(x)),
             new(IndexAdvisorQueries.RelationsSql, [IndexAdvisorQueries.SchemasParameter, IndexAdvisorQueries.TablesParameter]) { Label = "the tables the candidates are on" },
         ];
 

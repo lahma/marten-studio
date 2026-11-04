@@ -1,3 +1,4 @@
+using MartenStudio.Internal.Sql;
 using MartenStudio.Services.Query;
 using MartenStudio.Tests.Sql;
 
@@ -7,9 +8,10 @@ namespace MartenStudio.Tests.Query;
 
 /// <summary>
 /// 1.2-INDEX-A: MartenStudio's half of the index advisor, with no database and no store connection. On a Marten document table an
-/// index read off a plan becomes the index Marten would create for a <c>StoreOptions</c> line, carrying that line, or is dropped;
-/// P26's JSON members are added; a hidden type's table yields nothing and is never named; and when the store cannot be learned every
-/// candidate on a Marten-named table is dropped.
+/// index read off a plan becomes the index Marten would create for a <c>StoreOptions</c> line, carrying that line, or - where the
+/// store already declares it - the same index with no line and a note; any other is dropped; a hidden type's table yields nothing and
+/// is never named; and when the store cannot be learned every candidate on a Marten-named table is dropped. A JSON member is never
+/// offered: a recorded statement names none.
 /// </summary>
 public class MartenIndexCandidateContributorTests
 {
@@ -24,14 +26,26 @@ public class MartenIndexCandidateContributorTests
         [MartenPlanTable.From(SqlTestStore.DocumentType<SqlTestCustomer>(configure), null)];
 
     private static List<HypotheticalIndex> Offer(QueryPlan plan, IReadOnlyList<MartenPlanTable>? tables) =>
-        MartenIndexCandidateContributor.Offer(plan, WorkloadIndexCandidates.FromPlan(plan), tables);
+        MartenIndexCandidateContributor.Offer(WorkloadIndexCandidates.FromPlan(plan), tables);
 
     [Fact]
-    public void A_duplicated_fields_column_becomes_the_Index_line_with_Martens_own_DDL()
+    public void A_duplicated_fields_column_the_store_does_not_declare_an_index_on_becomes_the_Index_line_with_Martens_own_DDL()
     {
-        QueryPlan plan = Scan("(d.email = $1)");
+        // A mapping read straight from StoreOptions: the duplicated field Marten always indexes, with its index taken out of the
+        // declared set, is what a database that lost it looks like to the advisor.
+        MartenPlanTable declared = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email))[0];
+        MartenPlanTable withoutIt = new()
+        {
+            Schema = declared.Schema,
+            Table = declared.Table,
+            TypeName = declared.TypeName,
+            DocumentType = declared.DocumentType,
+            Info = declared.Info,
+            Mapping = declared.Mapping,
+            Indexes = [.. declared.Indexes.Where(static x => !x.Name.EndsWith("_idx_email", StringComparison.Ordinal))],
+        };
 
-        HypotheticalIndex index = Offer(plan, Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email))).Should().ContainSingle().Subject;
+        HypotheticalIndex index = Offer(Scan("(d.email = $1)"), [withoutIt]).Should().ContainSingle().Subject;
 
         index.Origin.Should().Be(HypotheticalIndexOrigin.Marten);
         index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().Index(x => x.Email);");
@@ -40,12 +54,33 @@ public class MartenIndexCandidateContributorTests
     }
 
     [Fact]
-    public void The_last_modified_column_becomes_IndexLastModified()
+    public void A_duplicated_field_the_store_already_declares_an_index_on_has_no_line_and_says_applying_the_schema_creates_it()
     {
-        HypotheticalIndex index = Offer(Scan("(d.mt_last_modified > $1)"), Tables()).Should().ContainSingle().Subject;
+        IReadOnlyList<MartenPlanTable> tables = Tables(static o => o.Schema.For<SqlTestCustomer>().Duplicate(x => x.Email));
 
-        index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().IndexLastModified();");
-        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_mt_last_modified ON studio_sql.mt_doc_sqltestcustomer USING btree (mt_last_modified);");
+        tables[0].Indexes.Should().Contain(static x => x.Name == "mt_doc_sqltestcustomer_idx_email", "a Duplicate() always declares its own index");
+
+        HypotheticalIndex index = Offer(Scan("(d.email = $1)"), tables).Should().ContainSingle().Subject;
+
+        index.Origin.Should().Be(HypotheticalIndexOrigin.Marten);
+        index.Line.Should().BeNull("the line is already written in the configuration");
+        index.Note.Should().Be(MartenIndexDdl.AlreadyDeclaredNote);
+        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_email ON studio_sql.mt_doc_sqltestcustomer USING btree ((email));");
+        index.Caption.Should().Contain("already declares");
+    }
+
+    [Fact]
+    public void The_last_modified_column_becomes_IndexLastModified_where_the_store_does_not_declare_it_and_has_no_line_where_it_does()
+    {
+        HypotheticalIndex undeclared = Offer(Scan("(d.mt_last_modified > $1)"), Tables()).Should().ContainSingle().Subject;
+
+        undeclared.Line.Should().Be("options.Schema.For<SqlTestCustomer>().IndexLastModified();");
+        undeclared.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_mt_last_modified ON studio_sql.mt_doc_sqltestcustomer USING btree (mt_last_modified);");
+
+        HypotheticalIndex declared = Offer(Scan("(d.mt_last_modified > $1)"), Tables(static o => o.Schema.For<SqlTestCustomer>().IndexLastModified())).Should().ContainSingle().Subject;
+
+        declared.Line.Should().BeNull();
+        declared.Note.Should().Be(MartenIndexDdl.AlreadyDeclaredNote);
     }
 
     [Fact]
@@ -58,24 +93,10 @@ public class MartenIndexCandidateContributorTests
     }
 
     [Fact]
-    public void A_json_comparison_is_offered_as_the_Duplicate_line_imagined_as_the_computed_index()
+    public void A_json_member_yields_nothing_because_a_recorded_statement_names_none_and_hypopg_imagines_no_GIN()
     {
-        HypotheticalIndex index = Offer(Scan("((d.data ->> 'Name'::text) = $1)"), Tables()).Should().ContainSingle().Subject;
-
-        index.Line.Should().Be("options.Schema.For<SqlTestCustomer>().Duplicate(x => x.Name);");
-        index.Definition.Should().Be("CREATE INDEX mt_doc_sqltestcustomer_idx_name ON studio_sql.mt_doc_sqltestcustomer USING btree ((data ->> 'Name'));");
-        index.Note.Should().Contain(MartenStudio.Internal.Sql.MartenIndexDdl.DuplicateNote);
-    }
-
-    [Fact]
-    public void A_json_member_a_declared_index_serves_yields_nothing()
-    {
-        Offer(Scan("((d.data ->> 'Name'::text) = $1)"), Tables(static o => o.Schema.For<SqlTestCustomer>().Index(x => x.Name))).Should().BeEmpty();
-    }
-
-    [Fact]
-    public void Containment_and_key_existence_yield_nothing_because_hypopg_imagines_no_GIN()
-    {
+        Offer(Scan("((d.data ->> $2) = $1)"), Tables()).Should().BeEmpty();
+        Offer(Scan("((d.data ->> 'Name'::text) = $1)"), Tables()).Should().BeEmpty("the advisor adds nothing of its own");
         Offer(Scan("(d.data @> $1)"), Tables()).Should().BeEmpty();
         Offer(Scan("(d.data ? 'Name'::text)"), Tables()).Should().BeEmpty();
     }
@@ -85,9 +106,6 @@ public class MartenIndexCandidateContributorTests
     {
         IReadOnlyList<MartenPlanTable> none = [];
 
-        List<HypotheticalIndex> offered = Offer(Scan("((d.data ->> 'Name'::text) = $1)"), none);
-
-        offered.Should().BeEmpty();
         Offer(Scan("(d.email = $1)"), none).Should().BeEmpty("a hidden type has no table here: its candidates are dropped");
     }
 
@@ -124,7 +142,7 @@ public class MartenIndexCandidateContributorTests
         int declared = tables[0].Mapping!.Indexes.Count;
 
         Offer(Scan("(d.email = $1)"), tables);
-        Offer(Scan("((d.data ->> 'Name'::text) = $1)"), tables);
+        Offer(Scan("(d.mt_last_modified > $1)"), tables);
 
         tables[0].Mapping!.Indexes.Should().HaveCount(declared);
     }
