@@ -47,7 +47,9 @@ does, so layer 1 is asked when a studio page is loaded and whenever the circuit 
 layers 2 and 3 are asked on every data call and every mutation, as before. A sign-in that expires, or a sign-out in another tab,
 therefore ends a studio session at its next page load or reconnect rather than at its next click. An application that needs it
 to end sooner revalidates the circuit's authentication state (`RevalidatingServerAuthenticationStateProvider`): the studio reads
-the visitor from `AuthenticationStateProvider` on every call, so a visitor the provider has dropped is refused by the next one.
+the visitor from `AuthenticationStateProvider` on every call, so a visitor the provider has dropped is refused by the next one,
+provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in Postgres Studio) is a policy that refuses that visitor; a
+studio authorized by `AuthorizationPolicy` alone asks no policy per call.
 
 Layer 2 filters listings rather than annotating them. A tenant you may not see is one you never learn
 exists — the *count* of tenants in a process is itself something a tenant should not learn. In Postgres Studio layer 2
