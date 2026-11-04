@@ -51,7 +51,7 @@
     <!-- 1.0: package validation compares each shipped package with the last release on nuget.org (EnablePackageValidation is
          on in each shipped project). Move it to the version just released, in the release's own pull request
          (build-and-release.md, Release engineering). -->
-    <PackageValidationBaselineVersion>1.0.1</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.1.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
 </Project>

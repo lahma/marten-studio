@@ -214,7 +214,7 @@ public class HealthMutesTests
         HealthMuteKeys theirs = new(new EphemeralDataProtectionProvider());
 
         string written = await MutedAsync(ours, Key);
-        string ourHash = JsonDocument.Parse(written).RootElement.GetProperty("muted")[0].GetString()!;
+        string ourHash = JsonElement.Parse(written).GetProperty("muted")[0].GetString()!;
 
         (HealthMutes elsewhere, BunitContext browser) = await ReadBackAsync(theirs, written);
         using (browser)

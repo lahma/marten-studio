@@ -792,7 +792,7 @@ public class PlanPageTests
         download[0].Should().Be("plan.speedscope.json");
         download[1].Should().Be("application/json");
 
-        JsonElement file = JsonDocument.Parse((string) download[2]!).RootElement;
+        JsonElement file = JsonElement.Parse((string) download[2]!);
         file.GetProperty("$schema").GetString().Should().Be("https://www.speedscope.app/file-format-schema.json");
         file.GetProperty("name").GetString().Should().Be("select o.id", "the statement's first line");
         file.GetProperty("exporter").GetString().Should().StartWith("Postgres Studio ");
@@ -813,7 +813,7 @@ public class PlanPageTests
         page.Find(".ms-plan-download-speedscope").Click();
         page.WaitForAssertion(() => context.JSInterop.Invocations["martenStudio.download.text"].Should().ContainSingle(), Wait);
 
-        JsonElement file = JsonDocument.Parse((string) context.JSInterop.Invocations["martenStudio.download.text"].Single().Arguments[2]!).RootElement;
+        JsonElement file = JsonElement.Parse((string) context.JSInterop.Invocations["martenStudio.download.text"].Single().Arguments[2]!);
         file.GetProperty("name").GetString().Should().Be("Pasted plan");
     }
 

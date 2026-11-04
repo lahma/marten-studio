@@ -56,7 +56,7 @@ internal static class SampleDatabaseCheck
 
         if (dropped.NeedsReseed)
         {
-            await output.WriteLineAsync(ReseededLine(dropped));
+            await output.WriteLineAsync(ReseededLine(dropped).AsMemory(), cancellationToken);
         }
 
         return null;

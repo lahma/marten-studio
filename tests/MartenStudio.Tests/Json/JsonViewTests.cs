@@ -442,7 +442,7 @@ public class JsonViewTests
 
         var copied = context.JSInterop.Invocations["martenStudio.clipboard.copyText"].Single().Arguments[0] as string;
         copied.Should().NotBeNull();
-        JsonDocument.Parse(copied!).RootElement.GetProperty("city").GetString().Should().Be("Helsinki");
+        JsonElement.Parse(copied!).GetProperty("city").GetString().Should().Be("Helsinki");
     }
 
     [Fact]

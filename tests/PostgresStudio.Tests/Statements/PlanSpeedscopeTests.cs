@@ -19,7 +19,7 @@ public class PlanSpeedscopeTests
             ? QueryPlanReader.Read(plan).Plan!
             : PlanFixtures.Plan(plan);
 
-        return JsonDocument.Parse(PlanSpeedscope.Build(read, name, Exporter)).RootElement;
+        return JsonElement.Parse(PlanSpeedscope.Build(read, name, Exporter));
     }
 
     private static JsonElement Profile(JsonElement file, string name) =>
