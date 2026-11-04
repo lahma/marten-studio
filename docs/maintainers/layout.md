@@ -134,6 +134,8 @@ src/MartenStudio/Services/Documents/      Document read and write services and t
                                          Marten's edit preview (M5)
 tests/MartenStudio.Tests/Documents/       Document service unit tests - no database
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
+src/MartenStudio/Services/Tenants/        The Tenants overview's service (TenantOverviewService), its models and TenantBoundText:
+                                         read-only, statistics only, activity-gated
 src/MartenStudio/Services/Shapes/         The shape check's core (1.2-SHAPE): sampler limits and cache, the round-trip classifier, the
                                          failure describer, the aggregator and the sentences; the documents' check service
 src/MartenStudio/Components/Shapes/       The shape check's panels and the findings table

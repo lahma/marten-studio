@@ -47,10 +47,10 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    `WriteAuthorizationPolicy`) → the operation → `audit.Record`, written on failure as well as on success.
    A value a visitor could shape reaches the log only through `StudioLogValue`: escaped, a backslash doubled, a name
    bounded at 256 characters and other text at 4,000. That holds in these events: 9200–9205, 9223, 9224, 9235, 9236,
-   9245 and 9452 (the per-product dispatchers); 9206, 9207, 9209, 9225 and 9226 (MartenLog's wrappers); 9260–9263 (LINQ
-   mode's `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also holds
-   every `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed statement,
-   which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
+   9245 and 9452 (the per-product dispatchers); 9206, 9207, 9209, 9225, 9226 and 9265 (MartenLog's wrappers); 9260–9263
+   (LINQ mode's `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also
+   holds every `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
+   statement, which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
 6. **No `async void`.** Component events are `Func<Task>`, handlers are `private async Task` with a
    `try`/`catch` that puts the failure on screen. An `async void` handler's exception escapes the
    synchronization context unobserved and kills the circuit: the page silently stops responding and the

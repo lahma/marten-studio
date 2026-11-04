@@ -442,7 +442,13 @@ look", links to Database › Connection.
 builds and why not, its tenancy in words, its document types and event store, whether this process hosts its daemon, and
 each database with a health chip from the last sweep. The page never starts a sweep by being opened; Check runs the one
 a database's Overview would. A link to another store, database or tenant that you click moves the studio to it; Back and
-Forward do not.
+Forward do not (the address is rewritten back to the scope on screen).
+
+**Tenants** (`/marten/tenants`, 1.2, shown for a store with conjoined data) — the tenants you may address, 25 a page:
+where each lives (its own database, its own partition, or shared tables), estimated documents, events and streams from
+the catalog's statistics (never a `count(*)`), its last event where an index finds it, and its projection progress where
+Marten keeps progress per tenant. Estimates and last events compare tenants, so they need `ViewDatabaseActivity`, as
+T18 does.
 
 **Health** — the health advisor, at `/marten/health` (the long form is
 [`docs/health.md`](docs/health.md), and every code, its variants and what its subject names are in
@@ -806,7 +812,8 @@ resolves that scope and re-asks `StoreAuthorizationPolicy` about it.
   tenants is worse than no picker. The selector says which tier answered. A tenant-partitioned database lists
   only tenants registered in `mt_tenant_partitions`: a tenant whose rows are only in a conjoined document type
   that opts out of partitioning (`[DoNotPartition]` / `DisablePartitioningIfAny`) is not listed, and a link
-  naming it is refused until the tenant is registered.
+  naming it is refused until the tenant is registered. Tenants shows the same tenants the selector offers, placed in
+  their databases, with statistics only.
 
 Conjoined tenancy is per document type, so a store whose documents are tenanted while its event store is
 not is the normal case and is handled: a single-tenanted collection is not filtered by the scope's

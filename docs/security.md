@@ -868,6 +868,7 @@ a statement out of the record.
 | 9209 | `DaemonControlRequested` — the operation and its target | Information |
 | 9225 | `OrphanedProgressionRemovalRequested` — the row being removed, its store and database | Information |
 | 9226 | `OrphanedProgressionRemovalRefused` — the re-check declined the row, and why | Information |
+| 9265 | `TenantVolumesRead` — Tenants' first read in a circuit of a database's per-tenant estimates and last events: how many tenants | Information |
 | 9210 | `StoreUnavailable` — a registered store that would not build, and why | Warning |
 | 9211 | `DocumentWriteRoundTripDropped` — a save whose round trip dropped properties, counted and named | Warning |
 | 9235 | `TableRowsRead` — the first read of a relation's rows per signature: the relation, the filter as typed and the sort | Information |
@@ -884,8 +885,11 @@ in a circuit - "Read replication names", "Read Aurora session waits", the Health
 activity gate - and every "Measure bloat", every press of a finding's action on the Health page ("Find the longest streams"),
 every Statements drill-in plan ("Plan database statement") and every What
 if? ("RunSql what-if", "ExplainQuery what-if", "LinqWhatIf", "DocumentsWhatIf" and "What-if database statement"). LINQ
-mode over events records "LinqEventQuery" (a run, success and failure) and "LinqEventExplain" (a refused plan). A
-diagnostics API call is not audited (event 9250, at Debug, codes and counts only).
+mode over events records "LinqEventQuery" (a run, success and failure) and "LinqEventExplain" (a refused plan). "Read
+tenant volumes" (`ViewDatabaseActivity`, 9265) is Tenants' first read in a circuit, per store and database, of the row
+estimates and newest events that compare tenants; Tenants shows tenant ids at the picker's gate and its estimates and
+last events at the activity gate, and reads nothing for a visitor below it. A diagnostics API call is not audited
+(event 9250, at Debug, codes and counts only).
 
 ## Reporting a vulnerability
 

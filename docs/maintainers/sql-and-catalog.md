@@ -42,7 +42,8 @@ one at a time, behind `has_sequence_privilege`, which on 18 keeps the `RowExclus
 deparse function that opens what it describes, as its `AccessShareLock` queues behind a migration's `ACCESS EXCLUSIVE`
 on 14 to 18: `pg_get_indexdef` in any form, `pg_get_expr` with a relation (a default's `adbin`, a partition's
 `relpartbound`: `pg_get_expr(relpartbound, <relid>)`), `pg_get_viewdef`, a table CHECK's `pg_get_constraintdef`,
-`pg_get_partkeydef`. Lists read partition bounds with `pg_get_expr(relpartbound, 0)`, which opens nothing
+`pg_get_partkeydef`. Lists read partition bounds with `pg_get_expr(relpartbound, 0)` (Tenants' per-tenant estimates
+match bounds against values the studio builds and return no partition's name, `ColumnValueRowsQueries`), which opens nothing
 (`LintMatrixLiveTests`); T20 parses that text in C# (`PartitionBoundText`), in ISO `DateStyle`, which the health
 runner pins beside `search_path` (`HealthSessionQueries`). A list that must deparse takes the sweep's one `pg_locks`
 read (D29) and leaves a locked table's text out (`HealthTableQueries.IndexesSql`); a detail read for one object (by oid,
