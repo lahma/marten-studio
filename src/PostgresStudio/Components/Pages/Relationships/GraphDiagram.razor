@@ -82,7 +82,7 @@
                     <rect class="ms-graph-node-box"
                           x="@Number(box.X)" y="@Number(box.Y)"
                           width="@Number(box.Width)" height="@Number(box.Height)"
-                          rx="@Radius(node)" ry="@Radius(node)" />
+                          rx="@Radius(node, box)" ry="@Radius(node, box)" />
                     @if (node.Shape == GraphNodeShape.Square)
                     {
                         <rect class="ms-graph-node-dot"
@@ -175,12 +175,33 @@
             ? node
             : new GraphDiagramNode(key, key, null, null, 210, GraphNodeShape.Rounded, "#", key);
 
-    private static string NodeClass(GraphDiagramNode node) =>
-        (node.Shape == GraphNodeShape.Square ? "ms-graph-node-table" : string.Empty) +
-        (node.Emphasis ? " ms-graph-node-emphasis" : string.Empty);
+    private static string NodeClass(GraphDiagramNode node)
+    {
+        string classes =
+            (node.Shape switch
+            {
+                GraphNodeShape.Square => "ms-graph-node-table",
+                GraphNodeShape.Pill => "ms-graph-node-pill",
+                _ => string.Empty,
+            }) +
+            (node.Emphasis ? " ms-graph-node-emphasis" : string.Empty);
 
-    /// <summary>Square corners for a table, the rounded ones a document type has always had.</summary>
-    private static string Radius(GraphDiagramNode node) => node.Shape == GraphNodeShape.Square ? "0" : "8";
+        // A node that asks for nothing extra gets exactly the string it always had.
+        return node.CssClass is { Length: > 0 } extra
+            ? classes + (classes.Length > 0 ? " " : string.Empty) + extra
+            : classes;
+    }
+
+    /// <summary>
+    /// Square corners for a table, ends as round as the box is high for a pill, and the rounded ones a document type has
+    /// always had.
+    /// </summary>
+    private static string Radius(GraphDiagramNode node, GraphNodeBox box) => node.Shape switch
+    {
+        GraphNodeShape.Square => "0",
+        GraphNodeShape.Pill => Number(box.Height / 2),
+        _ => "8",
+    };
 
     private static string Number(double value) =>
         value.ToString(System.Globalization.CultureInfo.InvariantCulture);

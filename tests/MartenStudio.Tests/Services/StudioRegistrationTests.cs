@@ -185,6 +185,9 @@ public class StudioRegistrationTests
 
         // M3: the grouped dead-letter view's read, shared across circuits for one refresh interval - added in 0.6.
         (typeof(DeadLetterGroupCache), ServiceLifetime.Singleton, How.Type, typeof(DeadLetterGroupCache)),
+
+        // 1.2 (M6): the event flow's model, one per store, rebuilt only when the configuration moved.
+        (typeof(EventFlowCache), ServiceLifetime.Singleton, How.Type, typeof(EventFlowCache)),
         (typeof(ISchemaDataService), ServiceLifetime.Scoped, How.Type, typeof(SchemaDataService)),
         (typeof(IConfigurationService), ServiceLifetime.Scoped, How.Type, typeof(ConfigurationService)),
         (typeof(IQueryService), ServiceLifetime.Scoped, How.Type, typeof(QueryService)),

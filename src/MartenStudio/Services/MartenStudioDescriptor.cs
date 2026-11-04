@@ -112,6 +112,7 @@ internal static class MartenStudioDescriptor
             new("Streams", "events/streams", "stream"),
             new("Feed", "events/feed", "feed"),
             new("Event types", "events/types", "tag"),
+            new("Event flow", "events/flow", "flow", Title: "Which projections read each event type, and what they write"),
 
             // Absent while the host hides DeadLetterEvent (DeadLetterVisibility, failing closed): a hidden document type
             // is absent (D27), as the Overview's tile is, and the page it would link to says why if reached by address.

@@ -103,6 +103,7 @@ internal sealed partial class EventDataService : IEventDataService
     private readonly ILogger<EventDataService> logger;
     private readonly DatabaseReachAuthorization reach;
     private readonly DeadLetterGroupCache groups;
+    private readonly EventFlowCache flows;
 
     public EventDataService(
         StudioScopeResolver resolver,
@@ -115,7 +116,8 @@ internal sealed partial class EventDataService : IEventDataService
         IOptions<MartenStudioOptions> options,
         StudioLogThrottle throttle,
         ILogger<EventDataService> logger,
-        DeadLetterGroupCache groups)
+        DeadLetterGroupCache groups,
+        EventFlowCache flows)
     {
         this.resolver = resolver;
         this.capabilities = capabilities;
@@ -128,6 +130,7 @@ internal sealed partial class EventDataService : IEventDataService
         this.throttle = throttle;
         this.logger = logger;
         this.groups = groups;
+        this.flows = flows;
         reach = new DatabaseReachAuthorization(authorization, logger);
     }
 

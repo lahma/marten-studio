@@ -168,6 +168,9 @@ public static partial class MartenStudioServiceCollectionExtensions
 
         // M3: the grouped dead-letter view's read, one per database and tenant per refresh interval across circuits.
         services.TryAddSingleton<DeadLetterGroupCache>();
+
+        // 1.2: the event flow's model, one per store, rebuilt only when the configuration moved.
+        services.TryAddSingleton<EventFlowCache>();
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();

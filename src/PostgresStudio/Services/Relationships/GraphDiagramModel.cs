@@ -8,6 +8,9 @@ internal enum GraphNodeShape
 
     /// <summary>Square corners: a table the studio does not map as a document type.</summary>
     Square,
+
+    /// <summary>Fully rounded ends, the radius half the box's height: a label rather than an object (1.2: an event type).</summary>
+    Pill,
 }
 
 /// <summary>One box of a <see cref="GraphDiagramModel" />.</summary>
@@ -22,6 +25,11 @@ internal enum GraphNodeShape
 /// <param name="Href">Where the node links to - already carrying the scope.</param>
 /// <param name="Tooltip">The whole name and anything else the box cut off.</param>
 /// <param name="Emphasis">Whether this is the node the diagram is about - the neighbourhood graph's centre.</param>
+/// <param name="CssClass">
+/// Extra classes for the box, appended after the shape's and the emphasis's, or <see langword="null" /> for none: a
+/// picture that wants a node styled its own way says so here (1.2: the event flow). Relationships and the neighbourhood
+/// graph pass none, so their markup is what it always was.
+/// </param>
 internal sealed record GraphDiagramNode(
     string Key,
     string Title,
@@ -31,7 +39,8 @@ internal sealed record GraphDiagramNode(
     GraphNodeShape Shape,
     string Href,
     string Tooltip,
-    bool Emphasis = false);
+    bool Emphasis = false,
+    string? CssClass = null);
 
 /// <summary>One arrow of a <see cref="GraphDiagramModel" />, from the node that points to the one pointed at.</summary>
 /// <param name="From">The pointing node's key.</param>

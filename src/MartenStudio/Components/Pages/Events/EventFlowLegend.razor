@@ -1,0 +1,38 @@
+@*
+    What the line styles on the event flow picture mean - only the ones it actually draws, in a fixed order. The swatches use the
+    same CSS classes the diagram's edges do, so a legend can never drift from the picture it explains (RelationshipLegend's rule).
+*@
+
+@if (Styles.Count > 0)
+{
+<ul class="ms-graph-legend ms-flow-legend">
+    @foreach (string style in Styles)
+    {
+        <li class="ms-graph-legend-item" @key="style">
+            <svg class="ms-graph-legend-swatch" viewBox="0 0 40 10" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+                <g class="ms-graph-edge ms-flow-edge-@style">
+                    <path class="ms-graph-edge-line" d="M 2 5 L 30 5" />
+                    <path class="ms-graph-edge-arrow" d="M 38 5 L 29 9 L 29 1 Z" />
+                </g>
+            </svg>
+            <span>@Describe(style)</span>
+        </li>
+    }
+</ul>
+}
+
+@code {
+    /// <summary>The styles to explain, by name - <c>reads</c>, <c>via</c>, <c>every</c>, <c>writes</c>, <c>folds</c> - in legend order.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Styles { get; set; } = [];
+
+    private static RenderFragment Describe(string style) => style switch
+    {
+        "reads" => @<text>Reads the event type it declares.</text>,
+        "via" => @<text>Reads it through a base type or interface it declares.</text>,
+        "every" => @<text>Declares no event types, so the daemon feeds it every event.</text>,
+        "writes" => @<text>Writes the document type or flat table it declares.</text>,
+        "folds" => @<text>Folds the aggregate live from a stream's events; nothing is stored.</text>,
+        _ => @<text>@style</text>,
+    };
+}

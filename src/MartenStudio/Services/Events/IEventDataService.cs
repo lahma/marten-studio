@@ -98,6 +98,18 @@ internal interface IEventDataService
         bool withCounts,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Which projections and subscriptions read each event type of the scope's store, and what each writes (1.2, M6).
+    /// </summary>
+    /// <remarks>
+    /// From <c>StoreOptions</c> and the projection graph alone: no connection is opened, nothing is audited, and the model is
+    /// cached per store (<see cref="EventFlowCache" />). The scope is resolved first, so the store policy applies; the cached
+    /// model is the same for every visitor, with every hidden document type already absent from it.
+    /// </remarks>
+    /// <param name="scope">The store, database and tenant.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<EventFlowResult> GetEventFlowAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
     /// <summary>The aggregate types this store's streams can be replayed into.</summary>
     Task<IReadOnlyList<AggregateTypeCandidate>> ListAggregateCandidatesAsync(
         StudioScope scope,

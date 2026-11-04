@@ -87,6 +87,14 @@ public class ReadPathNoDdlLiveTests(PostgresFixture fixture)
         bool exists = await host.DocumentsAsync(x => x.StreamExistsAsync(Scope, Guid.NewGuid().ToString(), Token));
         DeadLetterGroupList groups = await host.EventsAsync(x => x.ListDeadLetterGroupsAsync(Scope, Token));
 
+        // 1.2 (M6): Event flow reads StoreOptions and the projection graph alone, so it too creates nothing.
+        EventFlowResult flow = await host.EventsAsync(x => x.GetEventFlowAsync(Scope, Token));
+
+        flow.Error.Should().BeNull();
+        flow.Model.Sources.Should().BeEmpty("the store registers no projection");
+        flow.Model.Unconsumed.Select(static x => x.ClrName).Should().Contain([nameof(LedgerOpened), nameof(LedgerCredited)],
+            "registered with AddEventType<T>() and read by nothing");
+
         page.Should().BeSameAs(DeadLetterPage.Empty, "no table is an empty list, not a failure");
         groups.Error.Should().BeNull("M3: no table is no groups, not a failure");
         groups.Groups.Should().BeEmpty();

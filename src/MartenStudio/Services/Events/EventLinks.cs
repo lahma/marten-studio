@@ -45,6 +45,9 @@ internal static class EventLinks
     /// <summary>The event types screen.</summary>
     public const string EventTypesRoute = "events/types";
 
+    /// <summary>The event flow screen (1.2): which projections read each event type, and what they write.</summary>
+    public const string EventFlowRoute = "events/flow";
+
     /// <summary>The dead letters screen.</summary>
     public const string DeadLettersRoute = "events/dead-letters";
 
@@ -129,6 +132,18 @@ internal static class EventLinks
     /// <summary>A link to the dead letters that name one event.</summary>
     public static string ToDeadLettersForEvent(MartenStudioOptions options, StudioScope? scope, long sequence) =>
         To(options, DeadLettersRoute, scope, [new("seq", Number(sequence))]);
+
+    /// <summary>
+    /// A link to the event flow (1.2), optionally filtered to one projection and/or one event type, and optionally drawing
+    /// Marten's own events too. A blank value is left out, so a link carries only what is set.
+    /// </summary>
+    public static string ToFlow(MartenStudioOptions options, StudioScope? scope, string? projection = null, string? eventType = null, bool includeOwn = false) =>
+        To(options, EventFlowRoute, scope,
+        [
+            new("projection", projection),
+            new("type", eventType),
+            new("own", includeOwn ? "1" : null),
+        ]);
 
     /// <summary>A link to the feed, filtered to one stream.</summary>
     public static string ToFeedForStream(MartenStudioOptions options, StudioScope? scope, string streamId) =>

@@ -371,6 +371,7 @@ public class StudioLayoutTests
                 "Streams",
                 "Feed",
                 "Event types",
+                "Event flow",
                 "Dead letters",
                 "Health",
                 "Statements",
@@ -409,6 +410,7 @@ public class StudioLayoutTests
             "events/streams",
             "events/feed",
             "events/types",
+            "events/flow",
             "events/dead-letters",
             "health",
             "statements",
@@ -445,6 +447,7 @@ public class StudioLayoutTests
             "events/streams",
             "events/feed",
             "events/types",
+            "events/flow",
             "events/dead-letters",
             "health",
             "statements",
@@ -633,7 +636,7 @@ public class StudioLayoutTests
         var layout = RenderLayout(context);
 
         layout.FindAll(".ms-nav-badge").Should().BeEmpty();
-        layout.FindAll("a.ms-nav-link").Should().HaveCount(21, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included, Plan (0.9; every visitor's since 1.0), and Connection (1.1)");
+        layout.FindAll("a.ms-nav-link").Should().HaveCount(22, "every entry, Health (0.4), Statements, Maintenance, Storage, Replication and Server (0.5) included, Plan (0.9; every visitor's since 1.0), Connection (1.1) and Event flow (1.2)");
         layout.Markup.Should().Contain(BodyMarker);
     }
 

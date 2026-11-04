@@ -219,6 +219,10 @@ public class CapabilityGatingMatrixTests
             "GetStreamAsync", "GetStreamEventsAsync", "ListAggregateCandidatesAsync", "ListDeadLettersAsync",
             "ListEventTypesAsync", "ListStreamsAsync", "ListTagTypesAsync",
 
+            // 1.2 (M6): Event flow reads StoreOptions and the projection graph and opens no connection, as the Event types page
+            // without counts does; the scope resolution in front of its cache is the store policy.
+            "GetEventFlowAsync",
+
             // M1: the stepper is time travel one event at a time, and gated as time travel is - the store policy for the
             // scope, no capability. It runs the projection's own code exactly as AggregateAtVersionAsync does.
             "FindNextChangeAsync", "StepAsync",

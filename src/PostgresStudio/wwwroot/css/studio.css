@@ -15163,3 +15163,173 @@ a.ms-schema-health-mark:focus-visible {
 .ms-health-action-remedy {
     min-width: 0;
 }
+
+/* ===== 1.2-FLOW event flow ===== */
+
+/* Events › Event flow (M6). The picture is the Relationships diagram (GraphDiagram) with a node shape and node/edge classes of its
+   own; everything below is spelled in the existing tokens, and a later rule of an earlier selector wins on purpose (D26). The pill's
+   ends are drawn by the box's own rx (half its height); this only has to keep the stroke consistent with the other shapes. */
+
+.ms-graph-node-pill .ms-graph-node-box {
+  stroke: hsl(var(--ms-collection-hue, 210) 30% 55%);
+}
+
+.ms-flow-node-source .ms-graph-node-box {
+  stroke: var(--ms-color-primary);
+  stroke-width: 1.75;
+}
+
+.ms-flow-node-live .ms-graph-node-box {
+  /* Folded on read and never stored: a dashed outline, as a thing that is not there until it is asked for. */
+  stroke-dasharray: 6 4;
+}
+
+.ms-flow-node-every .ms-graph-node-box {
+  stroke: var(--ms-color-text-muted);
+  stroke-dasharray: 2 4;
+  stroke-linecap: round;
+}
+
+.ms-flow-node-own .ms-graph-node-box {
+  /* Marten's own events (Archived, Compacted<T>): present, but quieter than the application's. */
+  stroke: var(--ms-color-text-muted);
+}
+
+.ms-flow-node-own .ms-graph-node-alias {
+  fill: var(--ms-color-text-secondary);
+}
+
+.ms-flow-edge-reads .ms-graph-edge-line {
+  stroke: var(--ms-color-border-strong);
+}
+
+.ms-flow-edge-reads .ms-graph-edge-arrow {
+  fill: var(--ms-color-border-strong);
+}
+
+.ms-flow-edge-via .ms-graph-edge-line {
+  /* Through a base type or interface the projection declares: dashed, in the informational colour. */
+  stroke: var(--ms-color-info);
+  stroke-dasharray: 7 5;
+}
+
+.ms-flow-edge-via .ms-graph-edge-arrow {
+  fill: var(--ms-color-info);
+}
+
+.ms-flow-edge-every .ms-graph-edge-line {
+  stroke: var(--ms-color-text-muted);
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+
+.ms-flow-edge-every .ms-graph-edge-arrow {
+  fill: var(--ms-color-text-muted);
+}
+
+.ms-flow-edge-writes .ms-graph-edge-line {
+  stroke: var(--ms-color-primary);
+}
+
+.ms-flow-edge-writes .ms-graph-edge-arrow {
+  fill: var(--ms-color-primary);
+}
+
+.ms-flow-edge-folds .ms-graph-edge-line {
+  stroke: var(--ms-color-primary);
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+
+.ms-flow-edge-folds .ms-graph-edge-arrow {
+  fill: var(--ms-color-primary);
+}
+
+/* --- The filter bar --- */
+
+.ms-flow-filters {
+  align-items: flex-end;
+}
+
+.ms-flow-own-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ms-space-xs);
+  padding-bottom: 2px;
+  color: var(--ms-color-text-secondary);
+  font-size: var(--ms-font-size-sm);
+  cursor: pointer;
+}
+
+/* --- The tables --- */
+
+.ms-flow-table-panel {
+  margin-top: var(--ms-space-lg);
+}
+
+.ms-flow-reads,
+.ms-flow-writes,
+.ms-flow-notes {
+  min-width: 12rem;
+}
+
+.ms-flow-chip,
+.ms-flow-write,
+.ms-flow-reader {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ms-space-xs);
+  margin: 0 var(--ms-space-sm) var(--ms-space-xs) 0;
+}
+
+.ms-flow-chip-own {
+  opacity: 0.75;
+}
+
+.ms-flow-via,
+.ms-flow-also,
+.ms-flow-undrawn {
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-flow-also,
+.ms-flow-undrawn {
+  display: block;
+}
+
+.ms-flow-note {
+  display: block;
+  color: var(--ms-color-text-secondary);
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-flow-note-warning {
+  /* Not the warning hue: it is below 4.5:1 as text on white. Weight says "read this" instead. */
+  color: var(--ms-color-text);
+  font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-flow-show-flow {
+  display: block;
+  font-size: var(--ms-font-size-xs);
+}
+
+.ms-flow-member > .ms-table-cell:first-child {
+  padding-left: var(--ms-space-xl);
+}
+
+.ms-flow-group-row > th {
+  padding: var(--ms-space-sm) var(--ms-space-md);
+  color: var(--ms-color-text-secondary);
+  font-size: var(--ms-font-size-xs);
+  font-weight: var(--ms-font-weight-semibold);
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--ms-color-surface-hover);
+}
+
+.ms-flow-unconsumed {
+  margin-top: var(--ms-space-lg);
+}

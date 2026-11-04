@@ -1,0 +1,785 @@
+@page "/marten/events/flow"
+@using System.Globalization
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Events
+@using PostgresStudio.Components.Pages.Relationships
+@using PostgresStudio.Services.Database
+@using PostgresStudio.Services.Settings
+@implements IDisposable
+@inject IEventDataService Events
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+@inject IStudioSettings Settings
+@inject IStudioLinks Links
+@inject StudioDescriptor Descriptor
+@inject NavigationManager Navigation
+
+@*
+    Events › Event flow (1.2, M6): which projections and subscriptions read each event type of this store, and what each one
+    writes.
+
+    From StoreOptions and the projection graph alone. Nothing here opens a connection, writes an audit entry or polls: a store's
+    projections change when somebody deploys, not second by second, so a Refresh button is the honest affordance. The model is
+    a cached read (EventFlowCache) and every view of it - the picture, the three tables, the filters - is a pure function of it,
+    so the picture and the tables cannot tell two different stories.
+
+    The filters live in the URL (D9): ?projection=, ?type= and ?own=1, so a pasted link reopens the same picture. A change
+    navigates, exactly as Relationships' view switch does. The diagram is PostgresStudio's neutral GraphDiagram; the tables are
+    its accessible form, and the only form below 900 px.
+*@
+
+<PageTitle>Event flow</PageTitle>
+
+<div class="ms-page ms-flow-page">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Event flow</h1>
+    </div>
+
+    <p class="ms-schema-note">
+        Which projections and subscriptions read each event type of this store, and what each one writes - from
+        <code>StoreOptions</code> alone; nothing on this screen reads the database. A projection reads the event types it
+        declares, and one that declares none is fed every event. It writes what it declares
+        (<code>PublishedTypes()</code>), less any type <code>@Settings.OptionName("IsDocumentTypeVisible")</code> hides. An
+        event projection that stores documents from a <code>Project</code> method without declaring them lists none
+        (<code>Options.DeleteViewTypeOnTeardown&lt;T&gt;()</code> declares one). An aggregate folded live with no registered
+        projection is not drawn.
+    </p>
+
+    @if (actionFailure is { Length: > 0 } failure)
+    {
+        <ErrorAlert Message="@failure" />
+    }
+
+    @if (Drawing)
+    {
+        <div class="ms-graph-toolbar ms-flow-filters">
+            <div class="ms-header-control">
+                <label class="ms-header-control-label" for="ms-flow-projection">Projection</label>
+                <select id="ms-flow-projection" class="ms-select" value="@(projection ?? string.Empty)" @onchange="OnProjectionChangedAsync">
+                    <option value="">All</option>
+                    @foreach (string name in ProjectionNames)
+                    {
+                        <option value="@name" selected="@string.Equals(name, projection, StringComparison.OrdinalIgnoreCase)" @key="name">@name</option>
+                    }
+                </select>
+            </div>
+            <div class="ms-header-control">
+                <label class="ms-header-control-label" for="ms-flow-type">Event type</label>
+                <select id="ms-flow-type" class="ms-select" value="@(eventType ?? string.Empty)" @onchange="OnTypeChangedAsync">
+                    <option value="">All</option>
+                    @foreach (string alias in EventAliases)
+                    {
+                        <option value="@alias" selected="@string.Equals(alias, eventType, StringComparison.OrdinalIgnoreCase)" @key="alias">@alias</option>
+                    }
+                </select>
+            </div>
+            <label class="ms-flow-own-toggle" title="Archived and Compacted&lt;T&gt;: every single-stream projection reads them, so they are off the picture until asked for">
+                <input type="checkbox" checked="@includeOwn" @onchange="OnOwnChangedAsync" />
+                <span>Marten's own events</span>
+            </label>
+        </div>
+    }
+
+    <div class="ms-graph-bar">
+        @if (Drawing)
+        {
+            <EventFlowLegend Styles="@drawing.Styles" />
+        }
+        <div class="ms-graph-actions">
+            <button type="button" class="ms-button" @onclick="LoadAsync" disabled="@(loading || refreshing)">Refresh</button>
+        </div>
+    </div>
+
+    @if (loading)
+    {
+        <LoadingSpinner />
+    }
+    else if (error is { Length: > 0 } message)
+    {
+        <ErrorAlert Message="@message" OnRetry="LoadAsync" />
+    }
+    else if (State.ActiveScope is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No @Descriptor.SourceNoun to show</p>
+            <p class="ms-empty-description">
+                This application registered no @Descriptor.SourceNoun that you are authorized to see.
+            </p>
+        </div>
+    }
+    else if (model.EventTypes.Count == 0 && model.Sources.Count == 0)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">This store has no event types or projections</p>
+            <p class="ms-empty-description">
+                Event types are registered with <code>opts.Events.AddEventType&lt;T&gt;()</code> or by appending them; a projection
+                or subscription with <code>opts.Projections.Add(...)</code> or <code>opts.Events.Subscribe(...)</code>.
+            </p>
+        </div>
+
+        @Notes()
+    }
+    else
+    {
+        @if (model.Sources.Count == 0)
+        {
+            <p class="ms-schema-note" role="status">No projection or subscription is registered.</p>
+        }
+
+        @if (drawing.UnknownFilter)
+        {
+            <div class="ms-empty" role="status">
+                <p class="ms-empty-title">No projection or event type of that name in this store</p>
+                <p class="ms-empty-description">
+                    <a href="@FlowHref(null, null, false)">Show the whole flow</a>
+                </p>
+            </div>
+        }
+        else if (drawing.OverCap)
+        {
+            <div class="ms-graph-toomany" role="status">
+                <p class="ms-graph-toomany-title">@drawing.DrawnNodes boxes are too many to draw - pick a projection or an event type.</p>
+                <p class="ms-graph-toomany-description">
+                    Every projection, subscription and event type of this store is still in the tables below.
+                </p>
+            </div>
+        }
+        else if (drawing.Drawn.Nodes.Count > 0)
+        {
+            <GraphDiagram Model="@drawing.Drawn" RegionLabel="Event flow diagram" />
+        }
+        else if (model.Sources.Count > 0)
+        {
+            <p class="ms-schema-note" role="status">Nothing is drawn for this selection; the tables below list everything.</p>
+        }
+
+        @Notes()
+
+        @UnconsumedList()
+
+        @if (model.Sources.Count > 0)
+        {
+            <section class="ms-section ms-flow-table-panel">
+                <h2 class="ms-section-title">Projections and subscriptions</h2>
+                <TableScroll Label="Projections and subscriptions table">
+                    <table class="ms-table ms-flow-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Name</th>
+                                <th scope="col">Kind · lifecycle</th>
+                                <th scope="col">Reads</th>
+                                <th scope="col">Writes</th>
+                                <th scope="col">Shards</th>
+                                <th scope="col">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (FlowSource source in OrderedSources)
+                            {
+                                <tr class="@("ms-table-row ms-flow-row" + (source.Composite is not null ? " ms-flow-member" : null))" data-source="@source.Name" @key="@("s:" + source.Name)">
+                                    <td class="ms-table-cell">
+                                        <a class="ms-flow-source-link" href="@ProjectionsHref">@source.Name</a>
+                                        <a class="ms-flow-show-flow" href="@FlowHref(source.Name, null, false)" title="@("Draw only " + source.Name + " and what it reads and writes")">Show its flow</a>
+                                    </td>
+                                    <td class="ms-table-cell">@source.Description</td>
+                                    <td class="ms-table-cell ms-flow-reads">@ReadsCell(source)</td>
+                                    <td class="ms-table-cell ms-flow-writes">@WritesCell(source)</td>
+                                    <td class="ms-table-cell ms-table-cell-mono" title="@string.Join(", ", source.Shards)">@source.Shards.Count.ToString(CultureInfo.InvariantCulture)</td>
+                                    <td class="ms-table-cell ms-flow-notes">@NotesCell(source)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            </section>
+        }
+
+        @if (model.EventTypes.Count > 0)
+        {
+            <section class="ms-section ms-flow-table-panel">
+                <h2 class="ms-section-title">Event types</h2>
+                <TableScroll Label="Event types table">
+                    <table class="ms-table ms-flow-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Event type</th>
+                                <th scope="col">CLR type</th>
+                                <th scope="col">Read by</th>
+                                <th scope="col">Feeds</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (FlowEventType type in model.EventTypes.Where(static x => !x.IsMartenOwn))
+                            {
+                                @EventTypeRow(type)
+                            }
+                            @if (model.EventTypes.Any(static x => x.IsMartenOwn))
+                            {
+                                <tr class="ms-flow-group-row" @key="@("g:own")">
+                                    <th scope="rowgroup" colspan="4">Marten's own events</th>
+                                </tr>
+                                @foreach (FlowEventType type in model.EventTypes.Where(static x => x.IsMartenOwn))
+                                {
+                                    @EventTypeRow(type)
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            </section>
+        }
+
+        @if (model.TagTypes.Count > 0)
+        {
+            <section class="ms-section ms-flow-table-panel">
+                <h2 class="ms-section-title">Tag types</h2>
+                <p class="ms-schema-note">
+                    A DCB tag is attached to each event when it is appended, so the configuration cannot say which event types carry one.
+                </p>
+                <TableScroll Label="Tag types table">
+                    <table class="ms-table ms-flow-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Tag type</th>
+                                <th scope="col">Table</th>
+                                <th scope="col">Aggregate</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (EventTagTypeModel tag in model.TagTypes)
+                            {
+                                <tr class="ms-table-row" @key="@("tag:" + tag.Name)">
+                                    <td class="ms-table-cell">@tag.Name</td>
+                                    <td class="ms-table-cell ms-table-cell-mono">@tag.Table</td>
+                                    <td class="ms-table-cell">@(tag.AggregateName ?? "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </TableScroll>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>How many unread event types are listed before "and N more".</summary>
+    private const int UnconsumedLimit = 200;
+
+    private readonly CancellationTokenSource lifetime = new();
+
+    private EventFlowModel model = EventFlowModel.None;
+    private EventFlowDrawing drawing = EventFlowDrawing.Empty;
+    private IReadOnlyList<FlowSource> orderedSources = [];
+    private string? error;
+    private string? actionFailure;
+    private bool loading = true;
+    private bool refreshing;
+    private bool loaded;
+
+    private string? projection;
+    private string? eventType;
+    private bool includeOwn;
+    private string? seenProjection;
+    private string? seenType;
+    private string? seenOwn;
+    private bool seenParameters;
+
+    /// <summary>The projection, subscription or composite the picture is narrowed to, as the URL carries it.</summary>
+    [SupplyParameterFromQuery(Name = "projection")]
+    public string? ProjectionToken { get; set; }
+
+    /// <summary>The event type, by alias, the picture is narrowed to, as the URL carries it.</summary>
+    [SupplyParameterFromQuery(Name = "type")]
+    public string? TypeToken { get; set; }
+
+    /// <summary>Whether Marten's own event types are drawn too: <c>1</c>.</summary>
+    [SupplyParameterFromQuery(Name = "own")]
+    public string? OwnToken { get; set; }
+
+    /// <summary>Whether the controls, legend and tables are on screen.</summary>
+    private bool Drawing =>
+        !loading && error is not { Length: > 0 } && State.ActiveScope is not null && (model.EventTypes.Count > 0 || model.Sources.Count > 0);
+
+    private IEnumerable<string> ProjectionNames =>
+        model.Sources.Select(static x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static x => x, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> EventAliases =>
+        model.EventTypes.OrderBy(static x => x.IsMartenOwn).ThenBy(static x => x.Alias, StringComparer.OrdinalIgnoreCase)
+            .Select(static x => x.Alias).Distinct(StringComparer.Ordinal);
+
+    private IReadOnlyList<FlowSource> OrderedSources => orderedSources;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+
+        // Idempotent, and normally already done by StudioLayout; called so the page also works when it is the only thing rendered.
+        await State.EnsureInitializedAsync();
+        await LoadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // The URL is the authority whenever it changes - a pasted link, the back button - and only then: a change of a select
+        // sets the state first and the navigation it makes then agrees with it.
+        if (!seenParameters || !string.Equals(ProjectionToken, seenProjection, StringComparison.Ordinal))
+        {
+            projection = Blank(ProjectionToken);
+            seenProjection = ProjectionToken;
+        }
+
+        if (!seenParameters || !string.Equals(TypeToken, seenType, StringComparison.Ordinal))
+        {
+            eventType = Blank(TypeToken);
+            seenType = TypeToken;
+        }
+
+        if (!seenParameters || !string.Equals(OwnToken, seenOwn, StringComparison.Ordinal))
+        {
+            includeOwn = string.Equals(OwnToken?.Trim(), "1", StringComparison.Ordinal);
+            seenOwn = OwnToken;
+        }
+
+        seenParameters = true;
+        Recompute();
+    }
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task LoadAsync()
+    {
+        // The first read shows the spinner; a Refresh keeps what is on screen until the answer replaces it, so a row that is still
+        // there is the same element before and after (each is keyed), and the picture does not flash.
+        if (loaded)
+        {
+            refreshing = true;
+        }
+        else
+        {
+            loading = true;
+        }
+
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+
+            if (scope is null)
+            {
+                model = EventFlowModel.None;
+                error = null;
+            }
+            else
+            {
+                EventFlowResult result = await Events.GetEventFlowAsync(scope, lifetime.Token);
+                model = result.Model;
+                error = result.Error;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            // The service answers with a value rather than throwing, so reaching here means something outside it did. On the
+            // page either way: a failure the visitor cannot see is a page that silently shows nothing.
+            model = EventFlowModel.None;
+            error = exception.Message;
+        }
+        finally
+        {
+            Recompute();
+            loading = false;
+            refreshing = false;
+            loaded = true;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void Recompute()
+    {
+        drawing = EventFlowDiagram.Project(model, new EventFlowFilter(projection, eventType, includeOwn), Hrefs());
+        orderedSources = Order(model);
+    }
+
+    private EventFlowHrefs Hrefs() => new(
+        FeedHref,
+        EventLinks.To(Options.Value, EventLinks.FeedRoute, State.ActiveScope, []),
+        _ => ProjectionsHref,
+        CollectionHref,
+        TableHref,
+        EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope, []));
+
+    private async Task OnProjectionChangedAsync(ChangeEventArgs args) => await ChangeFilterAsync(Blank(args.Value?.ToString()), eventType, includeOwn);
+
+    private async Task OnTypeChangedAsync(ChangeEventArgs args) => await ChangeFilterAsync(projection, Blank(args.Value?.ToString()), includeOwn);
+
+    private async Task OnOwnChangedAsync(ChangeEventArgs args) => await ChangeFilterAsync(projection, eventType, args.Value is true);
+
+    private async Task ChangeFilterAsync(string? nextProjection, string? nextType, bool nextOwn)
+    {
+        try
+        {
+            actionFailure = null;
+            projection = nextProjection;
+            eventType = nextType;
+            includeOwn = nextOwn;
+            Recompute();
+            Navigation.NavigateTo(FlowHref(projection, eventType, includeOwn));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            actionFailure = exception.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Links: built through the studio's own builders, scope and all (D9).
+    // ---------------------------------------------------------------------------------------------
+
+    private string FlowHref(string? flowProjection, string? flowType, bool own) =>
+        EventLinks.ToFlow(Options.Value, State.ActiveScope, flowProjection, flowType, own);
+
+    private string FeedHref(string alias) => EventLinks.ToFeedForType(Options.Value, State.ActiveScope, alias);
+
+    /// <summary>The Projections page, which lists every registration by name (an anchor to one row is the Projections page's own business).</summary>
+    private string ProjectionsHref => EventLinks.To(Options.Value, "projections", State.ActiveScope, []);
+
+    private string CollectionHref(string alias) => Links.ToCollection(State.ActiveScope, alias) ?? string.Empty;
+
+    private string TableHref(string schema, string name) => DatabaseLinks.ToObject(Settings, Descriptor, State.ActiveScope, schema, name);
+
+    private string StreamsHref => EventLinks.To(Options.Value, EventLinks.StreamsRoute, State.ActiveScope, []);
+
+    /// <summary>The by-projection table's order: each top-level source, then - indented - the members of a composite.</summary>
+    private static IReadOnlyList<FlowSource> Order(EventFlowModel flow)
+    {
+        List<FlowSource> rows = [];
+        HashSet<string> emitted = new(StringComparer.OrdinalIgnoreCase);
+
+        void Add(FlowSource source)
+        {
+            if (!emitted.Add(source.Name))
+            {
+                return;
+            }
+
+            rows.Add(source);
+
+            if (!source.IsComposite)
+            {
+                return;
+            }
+
+            foreach (FlowSource member in flow.Sources.Where(x => x.Composite is not null && string.Equals(x.Composite, source.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                Add(member);
+            }
+        }
+
+        foreach (FlowSource source in flow.Sources.Where(static x => x.Composite is null))
+        {
+            Add(source);
+        }
+
+        // A member whose composite is somehow not a source of the model is still a row.
+        foreach (FlowSource source in flow.Sources)
+        {
+            Add(source);
+        }
+
+        return rows;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Cells
+    // ---------------------------------------------------------------------------------------------
+
+    private RenderFragment ReadsCell(FlowSource source) => __builder =>
+    {
+        if (source.IsComposite)
+        {
+            <span class="ms-muted">through its members (below)</span>
+        }
+        else if (source.Input == FlowInput.Everything)
+        {
+            <span class="ms-flow-every" data-edge="@EventFlowDiagram.EveryEdgeId(source.Name)">every event type</span>
+            if (source.Note is { Length: > 0 } unreadable && source.Kind != FlowSourceKind.Subscription)
+            {
+                <span class="ms-muted"> (@unreadable)</span>
+            }
+        }
+        else
+        {
+            Dictionary<string, FlowEventType> byKey = model.EventTypes.ToDictionary(static x => x.Key, StringComparer.Ordinal);
+
+            foreach (FlowRead read in model.Reads.Where(x => string.Equals(x.Source, source.Name, StringComparison.OrdinalIgnoreCase)
+                                                             && byKey.ContainsKey(x.EventAlias))
+                         .OrderBy(x => byKey[x.EventAlias].IsMartenOwn)
+                         .ThenBy(x => byKey[x.EventAlias].Alias, StringComparer.Ordinal))
+            {
+                FlowEventType type = byKey[read.EventAlias];
+
+                <span class="@("ms-flow-chip" + (type.IsMartenOwn ? " ms-flow-chip-own" : null))" data-edge="@EventFlowDiagram.ReadEdgeId(type.Key, source.Name)" @key="@("r:" + type.Key)">
+                    <EventTypeChip Name="@type.Alias" DotNetTypeName="@type.DotNetTypeName" Href="@FeedHref(type.Alias)" />
+                    @if (read.Via is { Length: > 0 } via)
+                    {
+                        <span class="ms-muted ms-flow-via">(as @via)</span>
+                    }
+                </span>
+            }
+        }
+
+        if (source.AlsoDeclares.Count > 0)
+        {
+            <span class="ms-muted ms-flow-also">also declares @string.Join(", ", source.AlsoDeclares)</span>
+        }
+    };
+
+    private RenderFragment WritesCell(FlowSource source) => __builder =>
+    {
+        Dictionary<string, FlowOutput> byKey = model.Outputs.ToDictionary(static x => x.Key, StringComparer.Ordinal);
+        bool any = false;
+
+        foreach (IGrouping<string, FlowWrite> group in model.Writes.Where(x => string.Equals(x.Source, source.Name, StringComparison.OrdinalIgnoreCase)
+                                                                                && byKey.ContainsKey(x.OutputKey))
+                     .GroupBy(static x => x.OutputKey, StringComparer.Ordinal))
+        {
+            FlowOutput output = byKey[group.Key];
+            string[] subclasses = [.. group.Select(static x => x.Subclass).OfType<string>().Order(StringComparer.Ordinal)];
+            any = true;
+
+            <span class="ms-flow-write" data-edge="@EventFlowDiagram.WriteEdgeId(source.Name, output.Key)" @key="@("w:" + output.Key)">
+                @switch (output.Kind)
+                {
+                    case FlowOutputKind.Table:
+                        <a class="ms-flow-output-link" href="@TableHref(output.Schema ?? string.Empty, output.Table ?? output.Title)" title="@($"{output.Schema}.{output.Table} - a flat table")">@output.Title</a>
+                        <span class="ms-muted">(table)</span>
+                        break;
+                    case FlowOutputKind.LiveAggregate:
+                        <a class="ms-flow-output-link" href="@StreamsHref" title="Fold a stream of it from its detail page">@output.Title</a>
+                        <span class="ms-muted">(folded live)</span>
+                        break;
+                    default:
+                        <a class="ms-flow-output-link" href="@CollectionHref(output.Alias ?? output.Title)">@output.Title</a>
+                        break;
+                }
+                @if (subclasses.Length > 0)
+                {
+                    <span class="ms-muted ms-flow-via">(as @string.Join(", ", subclasses))</span>
+                }
+            </span>
+        }
+
+        foreach (string undrawn in source.UndrawnOutputs)
+        {
+            any = true;
+            <span class="ms-muted ms-flow-undrawn" @key="@("u:" + undrawn)">declares @undrawn, not a document type of this store</span>
+        }
+
+        if (!any)
+        {
+            // The same words for a source that declares nothing and for one whose every output is hidden.
+            <span class="ms-muted">none listed</span>
+        }
+    };
+
+    private RenderFragment NotesCell(FlowSource source) => __builder =>
+    {
+        if (source.StreamType is { Length: > 0 } stream)
+        {
+            <span class="ms-flow-note">only streams of @stream</span>
+        }
+
+        if (source.IncludesArchived)
+        {
+            <span class="ms-flow-note">reads archived events too</span>
+        }
+
+        if (source.TagType is { Length: > 0 } tag)
+        {
+            EventTagTypeModel? tagType = model.TagTypes.FirstOrDefault(x => string.Equals(x.Name, tag, StringComparison.Ordinal));
+
+            <span class="ms-flow-note">keyed by tag @tag@(tagType is null ? null : ", " + tagType.Table)</span>
+        }
+
+        if (source.GlobalNote is { Length: > 0 } global)
+        {
+            <span class="ms-flow-note">@global</span>
+        }
+
+        if (source.Composite is { Length: > 0 } composite)
+        {
+            <span class="ms-flow-note">member of @composite</span>
+        }
+
+        if (source.IsComposite)
+        {
+            <span class="ms-flow-note">its members are listed below it</span>
+        }
+
+        if (source.Note is { Length: > 0 } note && (source.Kind == FlowSourceKind.Subscription || source.Input != FlowInput.Everything || source.IsComposite))
+        {
+            <span class="ms-flow-note ms-flow-note-warning">@note</span>
+        }
+    };
+
+    private RenderFragment EventTypeRow(FlowEventType type) => __builder =>
+    {
+        List<FlowRead> readers = [.. model.Reads.Where(x => string.Equals(x.EventAlias, type.Key, StringComparison.Ordinal))
+            .OrderBy(static x => x.Source, StringComparer.OrdinalIgnoreCase)];
+        HashSet<string> readerNames = new(readers.Select(static x => x.Source), StringComparer.OrdinalIgnoreCase);
+
+        Dictionary<string, FlowOutput> outputsByKey = model.Outputs.ToDictionary(static x => x.Key, StringComparer.Ordinal);
+        bool everyone = model.HasEverythingSource;
+        HashSet<string> feeds = new(StringComparer.Ordinal);
+
+        foreach (FlowWrite write in model.Writes)
+        {
+            bool reads = readerNames.Contains(write.Source)
+                         || (everyone && model.Sources.Any(x => x.Input == FlowInput.Everything && string.Equals(x.Name, write.Source, StringComparison.OrdinalIgnoreCase)));
+
+            if (reads)
+            {
+                feeds.Add(write.OutputKey);
+            }
+        }
+
+        <tr class="@("ms-table-row ms-flow-row" + (type.IsMartenOwn ? " ms-flow-row-own" : null))" data-event="@type.Alias" @key="@("e:" + type.Key)">
+            <td class="ms-table-cell">
+                <EventTypeChip Name="@type.Alias" DotNetTypeName="@type.DotNetTypeName" Href="@FeedHref(type.Alias)" />
+                @if (type.SharesAliasWith is { Length: > 0 } other)
+                {
+                    <span class="ms-muted ms-flow-via">alias shared with @other</span>
+                }
+            </td>
+            <td class="ms-table-cell ms-table-cell-mono ms-type-name" title="@type.DotNetTypeName">
+                @type.ClrName
+                @if (type.IsBaseType)
+                {
+                    <span class="ms-muted"> (base type)</span>
+                }
+            </td>
+            <td class="ms-table-cell">
+                @foreach (FlowRead read in readers)
+                {
+                    <span class="ms-flow-reader" @key="@("rd:" + read.Source)">
+                        <a href="@FlowHref(read.Source, null, false)" title="@("Draw only " + read.Source)">@read.Source</a>
+                        @if (read.Via is { Length: > 0 } via)
+                        {
+                            <span class="ms-muted ms-flow-via">(as @via)</span>
+                        }
+                    </span>
+                }
+                @if (everyone)
+                {
+                    <span class="ms-muted">@(readers.Count > 0 ? "and every source that declares none" : "every source that declares none")</span>
+                }
+                else if (readers.Count == 0 && !type.IsMartenOwn)
+                {
+                    <span class="ms-muted ms-flow-unread">nothing reads it</span>
+                }
+            </td>
+            <td class="ms-table-cell">
+                @foreach (string key in feeds.OrderBy(x => outputsByKey.TryGetValue(x, out FlowOutput? o) ? o.Title : x, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!outputsByKey.TryGetValue(key, out FlowOutput? output))
+                    {
+                        continue;
+                    }
+
+                    <span class="ms-flow-write" @key="@("f:" + key)">
+                        @switch (output.Kind)
+                        {
+                            case FlowOutputKind.Table:
+                                <a class="ms-flow-output-link" href="@TableHref(output.Schema ?? string.Empty, output.Table ?? output.Title)">@output.Title</a>
+                                break;
+                            case FlowOutputKind.LiveAggregate:
+                                <a class="ms-flow-output-link" href="@StreamsHref" title="Fold a stream of it from its detail page">@output.Title</a>
+                                break;
+                            default:
+                                <a class="ms-flow-output-link" href="@CollectionHref(output.Alias ?? output.Title)">@output.Title</a>
+                                break;
+                        }
+                    </span>
+                }
+                @if (feeds.Count == 0)
+                {
+                    <span class="ms-muted">-</span>
+                }
+            </td>
+        </tr>
+    };
+
+    /// <summary>What the picture leaves out, said once below it.</summary>
+    private RenderFragment Notes() => __builder =>
+    {
+        if (model.SubscriptionsUnavailable is { Length: > 0 } unavailable)
+        {
+            <p class="ms-graph-withheld" role="note">@unavailable</p>
+        }
+    };
+
+    /// <summary>
+    /// The event types nothing reads, as chips right under the picture: drawn, they were a column of unconnected boxes. When some
+    /// source reads everything the list is one honest sentence instead - an empty list would not be.
+    /// </summary>
+    private RenderFragment UnconsumedList() => __builder =>
+    {
+        if (model.EventTypes.Count == 0)
+        {
+            return;
+        }
+
+        if (model.HasEverythingSource)
+        {
+            string names = string.Join(", ", model.Sources.Where(static x => x.Input == FlowInput.Everything).Select(static x => x.Name));
+
+            <div class="ms-graph-isolated ms-flow-unconsumed">
+                <h2 class="ms-section-title">Event types nothing reads</h2>
+                <p class="ms-schema-note">@names @(names.Contains(',') ? "declare" : "declares") no event types, so the daemon feeds @(names.Contains(',') ? "them" : "it") every event, and no event type goes unread.</p>
+            </div>
+            return;
+        }
+
+        IReadOnlyList<FlowEventType> unread = model.Unconsumed;
+
+        <div class="ms-graph-isolated ms-flow-unconsumed">
+            <h2 class="ms-section-title">Event types nothing reads</h2>
+            @if (unread.Count == 0)
+            {
+                <p class="ms-schema-note">Every event type of this store is read by at least one projection or subscription.</p>
+            }
+            else
+            {
+                <ul class="ms-graph-isolated-list" aria-label="Event types nothing reads">
+                    @foreach (FlowEventType type in unread.Take(UnconsumedLimit))
+                    {
+                        <li @key="@("x:" + type.Key)">
+                            <EventTypeChip Name="@type.Alias" DotNetTypeName="@type.DotNetTypeName" Href="@FeedHref(type.Alias)" />
+                        </li>
+                    }
+                </ul>
+                @if (unread.Count > UnconsumedLimit)
+                {
+                    <p class="ms-schema-note">And @(unread.Count - UnconsumedLimit) more - pick an event type to see it.</p>
+                }
+            }
+        </div>
+    };
+
+    private async Task OnScopeChangedAsync() => await LoadAsync();
+
+    public void Dispose()
+    {
+        State.ScopeChanged -= OnScopeChangedAsync;
+        lifetime.Cancel();
+        lifetime.Dispose();
+    }
+}

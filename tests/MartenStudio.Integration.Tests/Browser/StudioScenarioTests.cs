@@ -35,6 +35,11 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
     /// <summary>A seeded customer's e-mail, which exactly one document carries.</summary>
     private const string KnownCustomerEmail = "customer07@example.com";
 
+    /// <summary>The demo store's three projections, by name.</summary>
+    private static readonly string[] SampleProjections = ["OrderSummary", "DailySales", "ShipmentTracker"];
+
+    private static readonly Regex ProjectionInUrl = new("projection=ShipmentTracker", RegexOptions.None, TimeSpan.FromSeconds(5));
+
     private static readonly Regex Digits = new(@"\d", RegexOptions.None, TimeSpan.FromSeconds(5));
 
     // ------------------------------------------------------------------------------------------------
@@ -356,6 +361,64 @@ public class StudioScenarioTests(BrowserSuiteFixture fixture)
             await AssertTheTableListsTheDiagramAsync(edges, rows, "the Tables view");
 
             studio.AssertClean("reading the relationships screen in two views");
+        });
+    }
+
+    // ------------------------------------------------------------------------------------------------
+    // 7. The event flow (1.2, M6)
+    // ------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Events › Event flow draws which projections read which event types from the configuration alone, and the by-projection table
+    /// beside the picture carries every arrow it draws; choosing a projection in the select narrows the picture to it and puts the
+    /// choice in the URL.
+    /// </summary>
+    [BrowserFact]
+    public async Task The_event_flow_diagram_and_its_table_tell_the_same_story()
+    {
+        await RunAsync("event-flow", fixture.Root, "admin", async studio =>
+        {
+            await studio.GoAsync(fixture.Root.StudioUrl("events/flow"));
+
+            await studio.Page.Locator("svg.ms-graph-svg").WaitForAsync();
+
+            // The sample registers three projections of three shapes, and each has a row.
+            foreach (string name in SampleProjections)
+            {
+                (await studio.Page.Locator($"tr[data-source='{name}']").CountAsync()).Should().Be(1, name + " is a row of the by-projection table");
+            }
+
+            string tracker = await studio.Page.Locator("tr[data-source='ShipmentTracker'] .ms-flow-reads").InnerTextAsync();
+            tracker.Should().Contain("order_shipped", "an event projection reads the event types of its Project methods' IEvent<T> parameters");
+
+            string daily = await studio.Page.Locator("tr[data-source='DailySales'] .ms-flow-reads").InnerTextAsync();
+            daily.Should().Contain("order_placed");
+
+            // Every drawn arrow is on a row of the table.
+            List<string> listed = [];
+            foreach (ILocator row in await studio.Page.Locator("table.ms-flow-table [data-edge]").AllAsync())
+            {
+                listed.Add(await row.GetAttributeAsync("data-edge") ?? string.Empty);
+            }
+
+            ILocator edges = studio.Page.Locator("svg.ms-graph-svg .ms-graph-edge");
+            (await edges.CountAsync()).Should().BeGreaterThan(0, "the sample's projections read event types");
+
+            foreach (ILocator edge in await edges.AllAsync())
+            {
+                string id = await edge.GetAttributeAsync("data-edge") ?? string.Empty;
+                id.Should().NotBeEmpty();
+                listed.Should().Contain(id, "the table is the accessible form of the picture");
+            }
+
+            // Choosing a projection narrows the picture to it, and the choice is in the URL.
+            await studio.Page.Locator("#ms-flow-projection").SelectOptionAsync("ShipmentTracker");
+
+            // A polling assertion, not WaitForURL: the circuit's navigation is a pushState that may land before the wait begins.
+            await Assertions.Expect(studio.Page).ToHaveURLAsync(ProjectionInUrl);
+            await Assertions.Expect(studio.Page.Locator("svg.ms-graph-svg .ms-flow-node-source")).ToHaveCountAsync(1);
+
+            studio.AssertClean("reading the event flow and filtering it");
         });
     }
 
