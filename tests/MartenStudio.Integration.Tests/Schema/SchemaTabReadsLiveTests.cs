@@ -83,8 +83,12 @@ public class SchemaTabReadsLiveTests(SchemaTabReadsLiveTests.Fixture fixture) : 
         indexes.Reason.Should().BeNull();
         functions.Reason.Should().BeNull();
 
-        indexes.Indexes.Single(static x => x.Name == "hr_refs_norm").Definition
-            .Should().Contain("(" + Mask + ".norm(id))", "the expression calls a function in the withheld schema");
+        IndexInfo expression = indexes.Indexes.Single(static x => x.Name == "hr_refs_norm");
+        expression.Summary.Should().Be("btree ((expression))", "the list prints no statement (D27), so it can name no schema");
+
+        // The statement is read on request, masked through the same gate: the expression calls a function in the withheld schema.
+        SchemaIndexDefinition statement = await SchemaAsync(host, x => x.IndexDefinitionAsync(BrowserHost.Scope, expression.Schema, expression.Table, expression.Name, Token));
+        statement.Sql.Should().Contain("(" + Mask + ".norm(id))").And.NotContain(fixture.HrSchema);
 
         FunctionInfo grade = functions.Functions.Single(static x => x.Name == "zz_grade_of");
         grade.IdentityArguments.Should().Be("g " + Mask + ".grade");
@@ -237,11 +241,13 @@ public class SchemaTabReadsLiveTests(SchemaTabReadsLiveTests.Fixture fixture) : 
     }
 
     /// <summary>
-    /// An uncommitted <c>DROP INDEX</c> is the way to hold an <c>ACCESS EXCLUSIVE</c> lock on an index: a
-    /// <c>LOCK TABLE</c> takes its table's, never its indexes'.
+    /// 1.2-LOCKS (D27): like the Tables read before it, the index list prints no definition and so waits for nothing - it answers at
+    /// once while a migration holds a listed index, the locked one included. An uncommitted <c>DROP INDEX</c> is the way to hold an
+    /// <c>ACCESS EXCLUSIVE</c> lock on an index: a <c>LOCK TABLE</c> takes its table's, never its indexes'. The one statement that
+    /// does deparse gives up after the three-second lock timeout and says it was busy.
     /// </summary>
     [PostgresFact]
-    public async Task The_indexes_read_gives_up_on_a_locked_index_after_three_seconds_and_says_it_was_busy()
+    public async Task The_index_list_answers_while_a_migration_holds_an_index_and_only_its_statement_says_it_was_busy()
     {
         await using BrowserHost host = fixture.Host(static options => options.QueryTimeout = TimeSpan.FromSeconds(60));
 
@@ -253,8 +259,18 @@ public class SchemaTabReadsLiveTests(SchemaTabReadsLiveTests.Fixture fixture) : 
         SchemaIndexes indexes = await SchemaAsync(host, x => x.IndexesAsync(BrowserHost.Scope, Token));
         watch.Stop();
 
-        indexes.Busy.Should().BeTrue();
-        indexes.Reason.Should().Contain("An index in this store's schemas is locked right now");
+        indexes.Busy.Should().BeFalse(indexes.Reason, "the list locks nothing it lists, so another session's lock does not stop it");
+        indexes.Indexes.Should().Contain(static x => x.Name == "hr_refs_norm");
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3), "it never waits for the lock");
+
+        IndexInfo locked = indexes.Indexes.Single(static x => x.Name == "hr_refs_norm");
+
+        watch.Restart();
+        SchemaIndexDefinition statement = await SchemaAsync(host, x => x.IndexDefinitionAsync(BrowserHost.Scope, locked.Schema, locked.Table, locked.Name, Token));
+        watch.Stop();
+
+        statement.Busy.Should().BeTrue(statement.Reason);
+        statement.Reason.Should().Contain("The table this index is on is locked right now");
         watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(20));
 
         await holding.RollbackAsync(Token);

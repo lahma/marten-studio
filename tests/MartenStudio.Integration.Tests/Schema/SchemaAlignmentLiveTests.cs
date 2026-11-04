@@ -150,9 +150,10 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
     /// <c>lock_timeout</c>. They must finish, and <c>pg_locks</c> must show this backend holding no lock on
     /// any partition afterwards. Since 1.0 (D27) the Tables read takes no lock on the listed tables either - their
     /// sizes are page counts - so it finishes while a migration holds a listed table in <c>ACCESS EXCLUSIVE</c>
-    /// mode. The Indexes read still prints each index's definition with <c>pg_get_indexdef</c>, which takes the
-    /// table's lock for the moment it runs (measured on 17): it gives up at the <c>lock_timeout</c> while the
-    /// migration holds the table, which the service says as "locked by a migration", and holds nothing afterwards.
+    /// mode. Since 1.2 the Indexes read does too: it prints no definition (<c>pg_get_indexdef</c> takes the table's lock
+    /// for the moment it runs - measured on 17 - and used to give up at the <c>lock_timeout</c> while a migration held
+    /// the table), so it finishes through the same locks and holds no lock on any relation of the schema afterwards.
+    /// The one-index definition read still deparses, still waits, and still gives up at the <c>lock_timeout</c>.
     /// </summary>
     [PostgresFact]
     public async Task The_tables_read_takes_no_lock_on_any_table_it_lists_and_neither_read_holds_one()
@@ -180,8 +181,20 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
                 (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
                     "since 1.0 no size function opens a listed table: the sizes are the catalog's page counts");
 
-                Func<Task> indexes = () => SchemaStatsQueries.ReadIndexesAsync(reader, reading, schemas, 30, Token);
-                (await indexes.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("55P03",
+                // 1.2 (D27): the index list prints no definition, so it answers through the same locks at once...
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                IReadOnlyList<IndexStatsRow> whileHeld = await SchemaStatsQueries.ReadIndexesAsync(reader, reading, schemas, 30, Token);
+                clock.Stop();
+
+                clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1), "it never waited for the lock_timeout");
+                whileHeld.Should().Contain(x => x.Table == Partitioned);
+                (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
+                    "the list opens no relation it lists: its keys are pg_attribute names and its flags are index columns");
+
+                // ...and the one statement that does deparse still waits for the table, and gives up at the lock_timeout.
+                Func<Task> definition = () => SchemaStatsQueries.ReadIndexDefinitionAsync(
+                    reader, reading, schemas, host.Schema, Partitioned, Partitioned + "_v", 30, Token);
+                (await definition.Should().ThrowAsync<PostgresException>()).Which.SqlState.Should().Be("55P03",
                     "pg_get_indexdef waits for the table a migration holds, and gives up at the lock_timeout");
 
                 await reading.RollbackAsync(Token);
@@ -196,14 +209,96 @@ public class SchemaAlignmentLiveTests(PostgresFixture fixture)
         read.Should().NotContain(x => x.Table.StartsWith(Partitioned + "_", StringComparison.Ordinal),
             "an index on a partition is named after the partition");
         read.Should().Contain(x => x.Table == Partitioned, "the partitioned parent's own indexes are listed");
-        read.Should().OnlyContain(static x => x.Bytes >= 0 && x.Definition.StartsWith("CREATE", StringComparison.Ordinal));
+        read.Should().OnlyContain(static x => x.Bytes >= 0 && x.KeyColumns.Count > 0);
 
         (await PartitionLocksAsync(reader, host.Schema)).Should().BeEmpty(
             "the reads walk pg_inherits and catalog columns and never open a partition");
         (await SchemaLocksAsync(reader, host.Schema)).Should().BeEmpty(
-            "pg_get_indexdef takes the table's lock for the moment it runs and keeps none");
+            "since 1.2 the index list calls no deparse function, so it opens - and locks - no relation of the schema at all");
 
         await again.RollbackAsync(Token);
+    }
+
+    /// <summary>
+    /// 1.2-LOCKS (D27), through the service: while a migration holds a listed table in <c>ACCESS EXCLUSIVE</c> mode the
+    /// Indexes list answers at once - not after the session's three-second <c>lock_timeout</c>, not "locked by a migration" -
+    /// with every index, the table's own included, and an expression key reads "(expression)". Only the statement of an index
+    /// on that table waits for it, says why, and reads once the lock is gone.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_indexes_list_answers_through_a_migrations_lock_and_only_the_one_statement_waits_for_it()
+    {
+        await using Host host = await StartAsync("db7_idxlock");
+
+        await using NpgsqlConnection migration = await fixture.OpenAsync(Token);
+        await using NpgsqlTransaction holding = await migration.BeginTransactionAsync(Token);
+        await ExecuteAsync(migration, $"lock table {host.Schema}.ext_things in access exclusive mode");
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        SchemaIndexes indexes = await host.SchemaAsync(x => x.IndexesAsync(Scope));
+        clock.Stop();
+
+        indexes.Reason.Should().BeNull(indexes.Reason);
+        indexes.Busy.Should().BeFalse("the list reads nothing the lock holds");
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2), "the list does not queue behind the migration's lock");
+
+        IndexInfo declared = indexes.Indexes.Single(x => x.Name == ExtendedIndex);
+        declared.Summary.Should().Be("btree (name)");
+
+        IndexInfo handMade = indexes.Indexes.Single(x => x.Name == HandMadeOnExtended);
+        handMade.Summary.Should().Be("btree ((expression))", "lower(name) is an expression key; the statement is read on request");
+        indexes.Indexes.Should().OnlyContain(static x => !x.Summary.Contains("CREATE", StringComparison.OrdinalIgnoreCase));
+
+        clock.Restart();
+        SchemaIndexDefinition busy = await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, "ext_things", HandMadeOnExtended));
+        clock.Stop();
+
+        busy.Busy.Should().BeTrue(busy.Reason);
+        busy.Sql.Should().BeNull();
+        busy.Reason.Should().Be(SchemaDataService.DefinitionLockedSentence);
+        clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15), "the three-second lock_timeout ends the wait, not QueryTimeout");
+
+        // An index on a table the migration does not hold is read at once, through the same lock.
+        SchemaIndexDefinition other = await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, Partitioned, Partitioned + "_v"));
+        other.Sql.Should().StartWith("CREATE INDEX " + Partitioned + "_v ON ").And.Contain("USING btree (v)");
+
+        await holding.RollbackAsync(Token);
+
+        SchemaIndexDefinition read = await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, "ext_things", HandMadeOnExtended));
+
+        read.Busy.Should().BeFalse(read.Reason);
+        read.Sql.Should().Contain(HandMadeOnExtended).And.Contain("lower(").And.NotContain(host.Schema + "_events");
+    }
+
+    /// <summary>
+    /// The statement read shows exactly the indexes the list shows: a hidden document type's index, a partition's, a schema the
+    /// store does not own and an index that is not there are all the same sentence - and a table named wrongly finds nothing.
+    /// </summary>
+    [PostgresFact]
+    public async Task The_definition_read_is_found_by_name_inside_the_stores_schemas_and_shows_only_what_the_list_shows()
+    {
+        await using Host host = await StartAsync("db7_idxdef");
+
+        SchemaIndexes indexes = await host.SchemaAsync(x => x.IndexesAsync(Scope));
+        IndexInfo listed = indexes.Indexes.Single(x => x.Name == ExtendedIndex);
+
+        SchemaIndexDefinition shown = await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, listed.Schema, listed.Table, listed.Name));
+        shown.Reason.Should().BeNull();
+        shown.Sql.Should().Contain(ExtendedIndex).And.Contain("USING btree (name)");
+
+        string hidden = await host.IndexNamesAsync("mt_doc_alignsecret") is { Count: > 0 } names ? names[0] : throw new InvalidOperationException("no index on the hidden type's table");
+        SchemaIndexDefinition[] refused =
+        [
+            await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, "mt_doc_alignsecret", hidden)),
+            await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, Partitioned + "_" + Tenants[0], Partitioned + "_" + Tenants[0] + "_pkey")),
+            await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, "pg_catalog", "pg_class", "pg_class_oid_index")),
+            await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, "ext_things", "no_such_index")),
+            await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, host.Schema, "mt_doc_aligncustomer", ExtendedIndex)),
+            await host.SchemaAsync(x => x.IndexDefinitionAsync(Scope, string.Empty, string.Empty, string.Empty)),
+        ];
+
+        refused.Should().OnlyContain(static x => x.Sql == null && !x.Busy && x.Reason != null && x.Reason.StartsWith("No index ", StringComparison.Ordinal),
+            "a hidden type, a partition, a foreign schema, a missing index and a wrong table are the same sentence");
     }
 
     /// <summary>

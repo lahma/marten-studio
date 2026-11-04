@@ -107,17 +107,24 @@ public class PgVectorLiveTests(PgVectorServerFixture server) : IClassFixture<PgV
         ivfflat.AccessMethod.Should().Be("ivfflat");
         Parameters(ivfflat).Should().Equal(("lists", "2", false));
         ivfflat.Columns.Single().OperatorClass.Should().Be("vector_l2_ops");
-        byName["embeddings_ivfflat"].Definition.Should().NotContain("vector_l2_ops",
-            "Postgres prints no operator class that is the default for its type - which is why the studio reads pg_opclass");
+        (await scope.ServiceProvider.GetRequiredService<ISchemaDataService>()
+                .IndexDefinitionAsync(Scope, DocumentSchema, Table, "embeddings_ivfflat", Token))
+            .Sql.Should().NotContain("vector_l2_ops",
+                "Postgres prints no operator class that is the default for its type - which is why the studio reads pg_opclass");
+        byName["embeddings_ivfflat"].Summary.Should().Be("ivfflat (embedding)", "the list's keys are pg_attribute names, never a deparse");
 
         PgVectorIndex ivfflatDefault = byName["embeddings_ivfflat_default"].Vector!;
         ivfflatDefault.Columns.Single().Distance.Should().Be(new PgVectorDistance("negative inner product", "<#>"));
         Parameters(ivfflatDefault).Should().Equal(("lists", "100", true));
 
         PgVectorIndex expression = byName["embeddings_expression"].Vector!;
-        expression.Columns.Single().Definition.Should().Be("(embedding::text::public.vector(3))",
-            "Marten.PgVector's shape: an HNSW index over a cast, printed with its schema while the search path is pinned");
+        expression.Columns.Single().Definition.Should().Be(IndexStatsRow.ExpressionKey,
+            "Marten.PgVector's shape is an HNSW index over a cast; the list reads no deparse (D27), so the key is named as an expression");
         expression.Columns.Single().OperatorClass.Should().Be("vector_l1_ops");
+
+        (await scope.ServiceProvider.GetRequiredService<ISchemaDataService>()
+                .IndexDefinitionAsync(Scope, DocumentSchema, Table, "embeddings_expression", Token))
+            .Sql.Should().Contain("::public.vector(3)", "the statement, on request, is printed with its schema while the search path is pinned");
     }
 
     [PostgresFact]
@@ -176,21 +183,27 @@ public class PgVectorLiveTests(PgVectorServerFixture server) : IClassFixture<PgV
 
         indexes.Reason.Should().BeNull();
         IndexInfo schemaExpression = indexes.Indexes.Single(static x => x.Name == "embeddings_expression");
-        schemaExpression.Definition.Should().NotContain("public.").And.Contain(WithheldNames.Token + ".vector_l1_ops");
-        schemaExpression.Vector!.Columns.Single().Definition.Should().Be("(embedding::text::" + WithheldNames.Token + ".vector(3))");
+        schemaExpression.Summary.Should().NotContain("public.");
+        schemaExpression.Vector!.Columns.Single().Definition.Should().Be(IndexStatsRow.ExpressionKey);
         schemaExpression.Vector.Columns.Single().OperatorClass.Should().Be("vector_l1_ops",
             "an operator class is shown by its bare name, which names no schema");
+
+        // The statement, on request, is masked through the same gate as the definition beside it in the browser.
+        SchemaIndexDefinition statement = await scope.ServiceProvider.GetRequiredService<ISchemaDataService>()
+            .IndexDefinitionAsync(Scope, schemaExpression.Schema, schemaExpression.Table, schemaExpression.Name, Token);
+        statement.Sql.Should().NotContain("public.").And.Contain(WithheldNames.Token + ".vector_l1_ops");
     }
 
     /// <summary>
-    /// The index reads' <c>pg_get_indexdef</c> briefly locks the indexed table (<c>AccessShareLock</c>, through
-    /// <c>deparse_context_for</c>), so while somebody holds it in <c>ACCESS EXCLUSIVE</c> mode - a migration - those reads
-    /// queue, and the read-only session's three-second <c>lock_timeout</c> ends the wait: Schema › Indexes says it is
-    /// busy, and the browser's object detail fails with the reason, as every browser read does behind a held lock. The
-    /// vector-column read, which touches nothing but the catalogs, answers through the lock.
+    /// <c>pg_get_indexdef</c> briefly locks the indexed table (<c>AccessShareLock</c>, through <c>deparse_context_for</c>),
+    /// so while somebody holds it in <c>ACCESS EXCLUSIVE</c> mode - a migration - a read that calls it queues, and the
+    /// read-only session's three-second <c>lock_timeout</c> ends the wait. Since 1.2 (D27) Schema › Indexes' list calls
+    /// it nowhere and answers through the lock; the one statement it reads on request says it is busy, and the browser's
+    /// object detail, which deparses every index by design, fails with the reason, as every browser read does behind a
+    /// held lock. The vector-column read, which touches nothing but the catalogs, answers through the lock.
     /// </summary>
     [PostgresFact]
-    public async Task Behind_an_access_exclusive_lock_the_index_reads_give_up_at_the_lock_timeout_and_the_column_read_answers()
+    public async Task Behind_an_access_exclusive_lock_the_list_answers_and_the_deparsing_reads_give_up_at_the_lock_timeout()
     {
         SkipIfUnavailable();
 
@@ -211,8 +224,18 @@ public class PgVectorLiveTests(PgVectorServerFixture server) : IClassFixture<PgV
             SchemaIndexes indexes = await scope.ServiceProvider.GetRequiredService<ISchemaDataService>().IndexesAsync(Scope, Token);
             clock.Stop();
 
-            indexes.Busy.Should().BeTrue(indexes.Reason);
-            indexes.Reason.Should().Contain("locked right now");
+            indexes.Busy.Should().BeFalse(indexes.Reason);
+            indexes.Reason.Should().BeNull();
+            indexes.Indexes.Where(static x => x.Table == Table).Select(static x => x.Name).Should().Contain("embeddings_hnsw");
+            clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2), "the list opens no table: it never waits for the lock_timeout");
+
+            clock.Restart();
+            SchemaIndexDefinition statement = await scope.ServiceProvider.GetRequiredService<ISchemaDataService>()
+                .IndexDefinitionAsync(Scope, DocumentSchema, Table, "embeddings_hnsw", Token);
+            clock.Stop();
+
+            statement.Busy.Should().BeTrue(statement.Reason);
+            statement.Reason.Should().Contain("locked right now");
             clock.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15), "the three-second lock_timeout ends the wait, not QueryTimeout");
 
             clock.Restart();

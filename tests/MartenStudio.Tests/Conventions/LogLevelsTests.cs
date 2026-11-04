@@ -233,6 +233,8 @@ public class LogLevelsTests
             "The schema screen's tables tab failed to load."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not read index statistics for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The schema screen's indexes tab failed to load."),
+        ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not read an index definition for database {DatabaseId}"] = (Verdict.VisitorAction,
+            "A person opened an index's definition on the schema screen's indexes tab and it failed to load."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not read functions for database {DatabaseId}"] = (Verdict.VisitorAction,
             "The schema screen's functions tab failed to load."),
         ["src/MartenStudio/Services/Schema/SchemaDataService.cs : Marten Studio could not produce a database script for database {DatabaseId}"] = (Verdict.VisitorAction,

@@ -15852,3 +15852,19 @@ a.ms-schema-health-mark:focus-visible {
 .ms-stores-strip-all {
   margin-left: auto;
 }
+
+/* ===== 1.2-LOCKS Schema > Indexes: keys in the list, the statement on request ===== */
+
+.ms-index-statement {
+    margin-top: var(--ms-space-xs);
+}
+
+.ms-index-statement-summary {
+    cursor: pointer;
+    font-size: var(--ms-font-size-xs);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-index-statement-summary:hover {
+    color: var(--ms-color-text);
+}

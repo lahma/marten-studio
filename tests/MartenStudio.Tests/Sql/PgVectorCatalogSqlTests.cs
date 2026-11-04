@@ -9,8 +9,9 @@ namespace MartenStudio.Tests.Sql;
 /// PGV, read off the statements: pgvector columns and indexes are known from <c>pg_catalog</c> alone - the
 /// extension that owns a type or an access method, a type modifier, <c>pg_opclass</c> and <c>reloptions</c> - with
 /// no value read, and the schema filter every catalog read carries. The new vector-column read calls no function that
-/// locks; the index reads' <c>pg_get_indexdef</c> briefly locks the indexed table, as it always did, and
-/// <c>PgVectorLiveTests</c> measures what that costs behind an <c>ACCESS EXCLUSIVE</c> lock.
+/// locks; the browser's index read keeps its <c>pg_get_indexdef</c>, which briefly locks the indexed table, and
+/// <c>PgVectorLiveTests</c> measures what that costs behind an <c>ACCESS EXCLUSIVE</c> lock. Since 1.2 the Schema
+/// list has none (D27) and reads a vector index's key columns from <c>pg_attribute</c>.
 /// </summary>
 public partial class PgVectorCatalogSqlTests
 {
@@ -18,6 +19,7 @@ public partial class PgVectorCatalogSqlTests
     {
         { nameof(SchemaStatsQueries.VectorColumnsSql), SchemaStatsQueries.VectorColumnsSql },
         { nameof(SchemaStatsQueries.IndexStatsSql), SchemaStatsQueries.IndexStatsSql },
+        { nameof(SchemaStatsQueries.IndexDefinitionSql), SchemaStatsQueries.IndexDefinitionSql },
         { "DatabaseCatalogQueries." + nameof(DatabaseCatalogQueries.ColumnsSql), DatabaseCatalogQueries.ColumnsSql },
         { "DatabaseCatalogQueries." + nameof(DatabaseCatalogQueries.IndexesSql), DatabaseCatalogQueries.IndexesSql },
     };
@@ -92,9 +94,12 @@ public partial class PgVectorCatalogSqlTests
             sql.Should().Contain("oc.opcname::text");
             sql.Should().MatchRegex(@"case when [a-z]+\.amname in \('hnsw', 'ivfflat'\) then [a-z]+\.reloptions end",
                 "an index's reloptions are read for pgvector's two access methods only");
-            sql.Should().MatchRegex(@"pg_get_indexdef\([a-z.]+, k, true\)");
             sql.Should().MatchRegex(@"u\.ord <= [a-z]\.indnkeyatts", "an INCLUDE column has no operator class to show");
         }
+
+        // The browser deparses each key column; the Schema list does not (1.2-LOCKS, D27): its keys are pg_attribute names.
+        DatabaseCatalogQueries.IndexesSql.Should().MatchRegex(@"pg_get_indexdef\([a-z.]+, k, true\)");
+        SchemaStatsQueries.IndexStatsSql.Should().NotContain("pg_get_indexdef");
     }
 
     [GeneratedRegex(@"\b(?:from|join)\s+([^\s]+)", RegexOptions.IgnoreCase)]

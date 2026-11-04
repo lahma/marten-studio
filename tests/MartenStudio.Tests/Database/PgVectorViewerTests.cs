@@ -383,7 +383,7 @@ public class PgVectorViewerTests
 
         fake.Indexes = new SchemaIndexes(
             [
-                new IndexInfo("studio", "embeddings", "embeddings_hnsw", "CREATE INDEX embeddings_hnsw ON studio.embeddings USING hnsw (embedding public.vector_cosine_ops) WITH (m='16', ef_construction='64')",
+                new IndexInfo("studio", "embeddings", "embeddings_hnsw", "hnsw (embedding)",
                     8192, 0, 0, false, false, false, null, null, OnMartenTable: false)
                 {
                     AccessMethod = "hnsw",

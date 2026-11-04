@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Npgsql;
 
 using NpgsqlTypes;
@@ -76,23 +78,28 @@ internal sealed record TableStatsRow(
 /// <param name="Schema">The schema the index lives in.</param>
 /// <param name="Table">The table it is on.</param>
 /// <param name="Name">The index name.</param>
-/// <param name="Definition">The <c>create index</c> statement Postgres reports for it.</param>
 /// <param name="Bytes">The index's pages (<c>relpages</c>) times the block size - an estimate, as of its last build, <c>VACUUM</c> or <c>ANALYZE</c>.</param>
 /// <param name="Scans"><c>idx_scan</c>, or <see langword="null" /> when the collector has nothing.</param>
 /// <param name="TuplesRead"><c>idx_tup_read</c>, or <see langword="null" />.</param>
 /// <param name="IsPrimaryKey">Whether the index backs the table's primary key.</param>
 /// <param name="IsUnique">Whether the index is unique.</param>
+/// <remarks>
+/// Carries no definition: the statement is deparsed for one index at a time, on request
+/// (<see cref="SchemaStatsQueries.IndexDefinitionSql" />), because deparsing opens the indexed table (D27).
+/// </remarks>
 internal sealed record IndexStatsRow(
     string Schema,
     string Table,
     string Name,
-    string Definition,
     long Bytes,
     long? Scans,
     long? TuplesRead,
     bool IsPrimaryKey,
     bool IsUnique)
 {
+    /// <summary>What a key column that is an expression is shown as.</summary>
+    internal const string ExpressionKey = "(expression)";
+
     /// <summary><c>pg_am.amname</c>: <c>btree</c>, <c>gin</c>, <c>hnsw</c>, <c>ivfflat</c>...</summary>
     public string AccessMethod { get; init; } = "btree";
 
@@ -102,11 +109,64 @@ internal sealed record IndexStatsRow(
     /// <summary>For an <c>hnsw</c> or <c>ivfflat</c> index, each key column's operator class.</summary>
     public IReadOnlyList<string?>? OperatorClasses { get; init; }
 
-    /// <summary>For the same, each key column as <c>pg_get_indexdef(oid, k, true)</c> prints it.</summary>
-    public IReadOnlyList<string?>? KeyDefinitions { get; init; }
+    /// <summary>
+    /// Each key column's name from <c>pg_attribute</c>, or <see langword="null" /> for an expression key
+    /// (<c>pg_index.indkey = 0</c>). An <c>INCLUDE</c> column is not a key and is only counted
+    /// (<see cref="IncludedColumns" />).
+    /// </summary>
+    public IReadOnlyList<string?> KeyColumns { get; init; } = [];
 
-    /// <summary>For the same, the index's <c>reloptions</c>.</summary>
+    /// <summary>For an <c>hnsw</c> or <c>ivfflat</c> index, the index's <c>reloptions</c>.</summary>
     public IReadOnlyList<string>? Options { get; init; }
+
+    /// <summary>Whether Postgres considers the index valid (<c>indisvalid</c>); a failed <c>CREATE INDEX CONCURRENTLY</c> leaves one that is not.</summary>
+    public bool IsValid { get; init; } = true;
+
+    /// <summary>How many <c>INCLUDE</c> columns the index carries (<c>indnatts - indnkeyatts</c>).</summary>
+    public int IncludedColumns { get; init; }
+
+    /// <summary>Whether the index is partial - has a <c>WHERE</c> predicate (<c>indpred is not null</c>); the predicate itself is not read.</summary>
+    public bool IsPartial { get; init; }
+
+    /// <summary>The key columns as the catalogs name them, an expression key shown as <see cref="ExpressionKey" />.</summary>
+    public IReadOnlyList<string> KeyColumnNames => [.. KeyColumns.Select(static x => x ?? ExpressionKey)];
+
+    /// <summary>The one-line summary the Indexes tab shows in place of the statement: <c>btree (data, (expression)), 1 included column, partial</c>.</summary>
+    public string Summary => IndexSummary.Describe(AccessMethod, KeyColumnNames, IncludedColumns, IsPartial, IsValid);
+}
+
+/// <summary>Builds the one-line summary of an index from what the catalogs hold as columns - never from a deparse.</summary>
+internal static class IndexSummary
+{
+    /// <summary>The summary: access method, key columns, then whatever else is true of the index.</summary>
+    /// <param name="accessMethod"><c>pg_am.amname</c>.</param>
+    /// <param name="keyColumns">The key columns' names, an expression shown as "(expression)".</param>
+    /// <param name="includedColumns">The number of <c>INCLUDE</c> columns.</param>
+    /// <param name="isPartial">Whether it has a predicate.</param>
+    /// <param name="isValid">Whether Postgres considers it valid.</param>
+    public static string Describe(string accessMethod, IReadOnlyList<string> keyColumns, int includedColumns, bool isPartial, bool isValid)
+    {
+        ArgumentNullException.ThrowIfNull(keyColumns);
+
+        List<string> parts = [accessMethod + " (" + string.Join(", ", keyColumns) + ")"];
+
+        if (includedColumns > 0)
+        {
+            parts.Add(includedColumns == 1 ? "1 included column" : includedColumns.ToString(CultureInfo.InvariantCulture) + " included columns");
+        }
+
+        if (isPartial)
+        {
+            parts.Add("partial");
+        }
+
+        if (!isValid)
+        {
+            parts.Add("invalid");
+        }
+
+        return string.Join(", ", parts);
+    }
 }
 
 /// <summary>One pgvector column of a table in one of the store's schemas.</summary>
@@ -203,10 +263,12 @@ internal static class SchemaStatsQueries
     /// refresh, and the tab says so. <c>SchemaAlignmentLiveTests</c> measures it: a read over a parent whose
     /// partition another session holds in <c>ACCESS EXCLUSIVE</c> mode finishes, and holds no partition lock
     /// afterwards - and, since 1.0, that a read while a listed table is held that way finishes too, and holds no
-    /// lock on any relation of the schema. <see cref="IndexStatsSql" /> still prints each definition with
-    /// <c>pg_get_indexdef</c>, which takes the table's lock for the moment it runs (measured on 17) and keeps none:
-    /// that read gives up at the session's <c>lock_timeout</c> while a migration holds the table, and the service
-    /// says so.
+    /// lock on any relation of the schema. Since 1.2 <see cref="IndexStatsSql" /> holds to the same rule: it prints no
+    /// definition (<c>pg_get_indexdef</c> opens the indexed table with <c>AccessShareLock</c> for the moment it runs, and
+    /// queued behind a migration's lock until the session's <c>lock_timeout</c> - measured on 17), so the index list
+    /// finishes while a migration holds a listed table and holds no lock on any relation of the schema afterwards.
+    /// The statement of one index is read when a person asks for it (<see cref="IndexDefinitionSql" />), which may lock
+    /// that one table briefly and gives up at the <c>lock_timeout</c>, as the database browser's index read does by design.
     /// </para>
     /// <para>
     /// A partitioned parent has no storage of its own (<c>relpages</c> 0), so adding the partitions in
@@ -337,8 +399,8 @@ internal static class SchemaStatsQueries
         """;
 
     /// <summary>
-    /// Every index in the store's schemas, with its definition, its size and its recorded use - never an
-    /// index on a partition, whose figures are added into its partitioned parent index's.
+    /// Every index in the store's schemas, with its keys, its size and its recorded use - never an index on a
+    /// partition, whose figures are added into its partitioned parent index's - and never a definition.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -349,6 +411,17 @@ internal static class SchemaStatsQueries
     /// pages and scan counters instead, walked through <c>pg_inherits</c> like the tables - lock-free, for
     /// the reasons <see cref="TableStatsSql" /> gives.
     /// </para>
+    /// <para>
+    /// <b>No deparse function (1.2, D27).</b> <c>pg_get_indexdef</c> - the statement, or one key column - deparses
+    /// through <c>set_relation_column_names</c>, which opens the <em>indexed table</em> with <c>AccessShareLock</c> for
+    /// the moment it runs, so a list that printed it queued behind a migration's <c>ACCESS EXCLUSIVE</c> lock and gave up
+    /// at the session's three-second <c>lock_timeout</c> (<c>SchemaAlignmentLiveTests</c> measured it, on 17). The list
+    /// reads what the catalogs hold as columns instead: each key column's name from <c>pg_index.indkey</c> joined to
+    /// <c>pg_attribute</c> (an expression key, <c>indkey = 0</c>, comes back <c>NULL</c> and is shown as
+    /// "(expression)"), the number of <c>INCLUDE</c> columns (<c>indnatts - indnkeyatts</c>), whether it is partial
+    /// (<c>indpred is not null</c>, a null test on the stored node tree that never deparses it) and whether it is
+    /// valid. The statement itself is <see cref="IndexDefinitionSql" />, read for one index when a person asks.
+    /// </para>
     /// </remarks>
     internal const string IndexStatsSql =
         """
@@ -358,9 +431,14 @@ internal static class SchemaStatsQueries
                    t.relname as table_name,
                    c.relname as index_name,
                    c.relkind,
+                   i.indrelid,
+                   i.indkey,
                    i.indisprimary,
                    i.indisunique,
+                   i.indisvalid,
                    i.indnkeyatts,
+                   i.indnatts,
+                   i.indpred is not null as is_partial,
                    i.indclass,
                    c.reloptions,
                    c.relpages::bigint as pages,
@@ -397,7 +475,6 @@ internal static class SchemaStatsQueries
         select l.nspname::text,
                l.table_name::text,
                l.index_name::text,
-               pg_catalog.pg_get_indexdef(l.oid),
                (l.pages + coalesce(r.pages, 0)) * pg_catalog.current_setting('block_size')::bigint,
                case when l.relkind = 'I' then r.scans::bigint else s.idx_scan end,
                case when l.relkind = 'I' then r.tuples::bigint else s.idx_tup_read end,
@@ -419,15 +496,43 @@ internal static class SchemaStatsQueries
                       join pg_catalog.pg_opclass oc on oc.oid = u.opclass
                       where u.ord <= l.indnkeyatts)
                end,
-               case when l.amname in ('hnsw', 'ivfflat') then
-                   (select pg_catalog.array_agg(pg_catalog.pg_get_indexdef(l.oid, k, true) order by k)
-                      from pg_catalog.generate_series(1, l.indnkeyatts::int) as k)
-               end,
-               case when l.amname in ('hnsw', 'ivfflat') then l.reloptions end
+               (select pg_catalog.array_agg(a.attname::text order by k.ord)
+                  from pg_catalog.unnest(l.indkey::pg_catalog.int2[]) with ordinality as k(attnum, ord)
+                  left join pg_catalog.pg_attribute a on a.attrelid = l.indrelid and a.attnum = k.attnum and k.attnum > 0
+                  where k.ord <= l.indnkeyatts),
+               case when l.amname in ('hnsw', 'ivfflat') then l.reloptions end,
+               l.indisvalid,
+               (l.indnatts - l.indnkeyatts)::int,
+               l.is_partial
         from listed l
         left join rolled r on r.root = l.oid
         left join pg_catalog.pg_stat_user_indexes s on s.indexrelid = l.oid
         order by l.nspname, l.table_name, l.index_name
+        """;
+
+    /// <summary>
+    /// The statement Postgres reconstructs for one index in the store's schemas, found by its schema, table and name.
+    /// </summary>
+    /// <remarks>
+    /// The one place the Schema screen deparses an index, and only for the index a person asked for:
+    /// <c>pg_get_indexdef</c> opens the indexed table with <c>AccessShareLock</c> for the moment it runs, so it queues
+    /// behind a migration's <c>ACCESS EXCLUSIVE</c> lock and gives up at the session's <c>lock_timeout</c> - the same
+    /// trade the database browser's <c>DatabaseCatalogQueries.IndexesSql</c> makes by design. The oid is resolved here,
+    /// from the names and inside the store's schemas, never taken from the caller, and a partition's index is not found,
+    /// as in <see cref="IndexStatsSql" />. Parameters: <c>@schemas</c>, <c>@schema</c>, <c>@table</c>, <c>@name</c>.
+    /// </remarks>
+    internal const string IndexDefinitionSql =
+        """
+        select pg_catalog.pg_get_indexdef(c.oid)
+        from pg_catalog.pg_index i
+        join pg_catalog.pg_class c on c.oid = i.indexrelid
+        join pg_catalog.pg_class t on t.oid = i.indrelid
+        join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = any(@schemas)
+          and n.nspname = @schema
+          and t.relname = @table
+          and c.relname = @name
+          and not t.relispartition
         """;
 
     /// <summary>
@@ -555,7 +660,7 @@ internal static class SchemaStatsQueries
 
     /// <summary>Every statement this class runs, for the tests that hold them to their rules.</summary>
     internal static IReadOnlyList<string> AllStatements { get; } =
-        [TableStatsSql, IndexStatsSql, FunctionsSql, FunctionBodiesSql, DatabaseSizeSql, VectorColumnsSql];
+        [TableStatsSql, IndexStatsSql, IndexDefinitionSql, FunctionsSql, FunctionBodiesSql, DatabaseSizeSql, VectorColumnsSql];
 
     /// <summary>Reads table sizes and activity for the store's schemas.</summary>
     /// <param name="connection">An open connection to the database in scope.</param>
@@ -627,22 +732,55 @@ internal static class SchemaStatsQueries
                 reader.GetString(0),
                 reader.GetString(1),
                 reader.GetString(2),
-                reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                reader.GetInt64(4),
+                reader.GetInt64(3),
+                NullableInt64(reader, 4),
                 NullableInt64(reader, 5),
-                NullableInt64(reader, 6),
-                reader.GetBoolean(7),
-                reader.GetBoolean(8))
+                reader.GetBoolean(6),
+                reader.GetBoolean(7))
             {
-                AccessMethod = reader.IsDBNull(9) ? string.Empty : reader.GetString(9),
-                AccessMethodIsPgVector = !reader.IsDBNull(10) && reader.GetBoolean(10),
-                OperatorClasses = reader.IsDBNull(11) ? null : reader.GetFieldValue<string?[]>(11),
-                KeyDefinitions = reader.IsDBNull(12) ? null : reader.GetFieldValue<string?[]>(12),
-                Options = reader.IsDBNull(13) ? null : reader.GetFieldValue<string[]>(13),
+                AccessMethod = reader.IsDBNull(8) ? string.Empty : reader.GetString(8),
+                AccessMethodIsPgVector = !reader.IsDBNull(9) && reader.GetBoolean(9),
+                OperatorClasses = reader.IsDBNull(10) ? null : reader.GetFieldValue<string?[]>(10),
+                KeyColumns = reader.IsDBNull(11) ? [] : reader.GetFieldValue<string?[]>(11),
+                Options = reader.IsDBNull(12) ? null : reader.GetFieldValue<string[]>(12),
+                IsValid = reader.IsDBNull(13) || reader.GetBoolean(13),
+                IncludedColumns = reader.IsDBNull(14) ? 0 : reader.GetInt32(14),
+                IsPartial = !reader.IsDBNull(15) && reader.GetBoolean(15),
             });
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Reads the statement Postgres reconstructs for one index (<see cref="IndexDefinitionSql" />) - which opens the
+    /// indexed table briefly, so it gives up at the session's <c>lock_timeout</c> while a migration holds the table.
+    /// </summary>
+    /// <param name="connection">An open connection to the database in scope.</param>
+    /// <param name="transaction">The read-only transaction to run in, or <see langword="null" /> for none.</param>
+    /// <param name="schemas">The schemas the store owns; the index must be in one of them.</param>
+    /// <param name="schema">The index's schema.</param>
+    /// <param name="table">The table it is on.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout, from <c>MartenStudioOptions.QueryTimeout</c>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The statement, or <see langword="null" /> when no such index is in those schemas.</returns>
+    public static async Task<string?> ReadIndexDefinitionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        IReadOnlyList<string> schemas,
+        string schema,
+        string table,
+        string name,
+        int commandTimeoutSeconds,
+        CancellationToken cancellationToken = default)
+    {
+        await using NpgsqlCommand command = CreateCommand(connection, transaction, IndexDefinitionSql, schemas, commandTimeoutSeconds);
+        command.Parameters.Add(new NpgsqlParameter("schema", NpgsqlDbType.Text) { Value = schema });
+        command.Parameters.Add(new NpgsqlParameter("table", NpgsqlDbType.Text) { Value = table });
+        command.Parameters.Add(new NpgsqlParameter("name", NpgsqlDbType.Text) { Value = name });
+
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) as string;
     }
 
     /// <summary>Reads every pgvector column of every table in the store's schemas (<see cref="VectorColumnsSql" />).</summary>

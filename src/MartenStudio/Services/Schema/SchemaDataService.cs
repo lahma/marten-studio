@@ -518,9 +518,14 @@ internal sealed class SchemaDataService : ISchemaDataService
     /// <para>
     /// A hidden document type's indexes are left out with its table, by the browser's classification over
     /// every registered store; a store that cannot be read withholds the indexes of every table it could own
-    /// (<see cref="SchemaClassification" />). Every definition is read with the <c>search_path</c> pinned to
-    /// <c>pg_catalog</c> and masked through the browser's gate, so an expression index that calls a function
-    /// in a withheld schema names <c>‹withheld›</c>, as the browser's object detail does.
+    /// (<see cref="SchemaClassification" />).
+    /// </para>
+    /// <para>
+    /// <b>The list locks nothing it lists (1.2, D27).</b> It reads each index's key columns, access method, included
+    /// columns, predicate presence and validity from the catalogs' columns and calls no deparse function, because
+    /// <c>pg_get_indexdef</c> opens the indexed table and so queued behind a migration's lock until the session's
+    /// <c>lock_timeout</c>. The statement of one index is <see cref="IndexDefinitionAsync" />. An expression key reads
+    /// "(expression)". Nothing here names a schema, so there is nothing to mask.
     /// </para>
     /// </remarks>
     public async Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default)
@@ -550,9 +555,6 @@ internal sealed class SchemaDataService : ISchemaDataService
             SchemaDeclarations declarations = own.Declarations;
             string[] schemas = [.. declarations.Schemas];
 
-            IReadOnlySet<string> withheldSchemas = await WithheldSchemasAsync(scope, resolved, classification.Value, schemas, cancellationToken)
-                .ConfigureAwait(false);
-
             ManagedTableSet managed = ManagedTables(declarations);
 
             IReadOnlyList<IndexStatsRow> actual = await InSessionAsync(
@@ -569,33 +571,10 @@ internal sealed class SchemaDataService : ISchemaDataService
 
             foreach (IndexStatsRow row in actual)
             {
-                string table = SchemaKey.For(row.Schema, row.Table);
-
-                if (excluded.Contains(table) || withheldTables.Contains(table))
+                if (TableIsShown(classification.Value, row.Schema, row.Table, excluded, withheldTables))
                 {
-                    continue;
+                    shown.Add(row);
                 }
-
-                if (classification.Value.IsDegraded)
-                {
-                    if (classifier.ClassifyRelation(row.Schema, row.Table) is not { } ownership)
-                    {
-                        excluded.Add(table);
-                        continue;
-                    }
-
-                    if (classification.Value.WithholdsRelation(row.Table, ownership))
-                    {
-                        withheldTables.Add(table);
-                        continue;
-                    }
-                }
-
-                shown.Add(row with
-                {
-                    Definition = WithheldNames.Redact(row.Definition, withheldSchemas) ?? string.Empty,
-                    KeyDefinitions = row.KeyDefinitions?.Select(definition => WithheldNames.Redact(definition, withheldSchemas)).ToList(),
-                });
             }
 
             excluded.UnionWith(withheldTables);
@@ -628,6 +607,155 @@ internal sealed class SchemaDataService : ISchemaDataService
         {
             logger.LogWarning(exception, "Marten Studio could not read index statistics for database {DatabaseId}", resolved.Database.Id.Identity);
             return SchemaIndexes.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Whether the visitor is shown the indexes of a table: it is neither a hidden document type's, nor - while the
+    /// classification is degraded - one the classification cannot place or withholds. Shared by the list and the
+    /// by-name definition read, so the second can never show what the first leaves out.
+    /// </summary>
+    /// <param name="classification">The store classification.</param>
+    /// <param name="schema">The table's schema.</param>
+    /// <param name="table">The table.</param>
+    /// <param name="excluded">The hidden tables, which this adds a table the degraded classification cannot place to.</param>
+    /// <param name="withheldTables">The tables a degraded classification withholds, which this adds to.</param>
+    private static bool TableIsShown(
+        SchemaClassification classification,
+        string schema,
+        string table,
+        HashSet<string> excluded,
+        HashSet<string> withheldTables)
+    {
+        string key = SchemaKey.For(schema, table);
+
+        if (excluded.Contains(key) || withheldTables.Contains(key))
+        {
+            return false;
+        }
+
+        if (!classification.IsDegraded)
+        {
+            return true;
+        }
+
+        if (classification.Classifier.ClassifyRelation(schema, table) is not { } ownership)
+        {
+            excluded.Add(key);
+            return false;
+        }
+
+        if (classification.WithholdsRelation(table, ownership))
+        {
+            withheldTables.Add(key);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>What the definition read says when it gave up behind the indexed table's lock.</summary>
+    internal const string DefinitionLockedSentence =
+        "The table this index is on is locked right now - somebody is changing it: a migration, or Marten adding a " +
+        "tenant's partition - and the read gave up after three seconds rather than queue behind the lock and hold up " +
+        "everything queued after it. Postgres opens the table while it prints an index's statement. Try again in a moment.";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <b>The same visitors, the same indexes, the same masking as the list - and one table's lock.</b> The store
+    /// policy is asked by the same <c>resolver.ResolveAsync</c>; the table must be one <see cref="TableIsShown" />
+    /// lets the list show, and the answer for anything else (a hidden type, a schema the store does not own, an index
+    /// that is gone) is the one sentence of <see cref="SchemaIndexDefinition.NotFound" />. The index is found by its
+    /// names inside the store's schemas (<see cref="SchemaStatsQueries.IndexDefinitionSql" />), so a caller cannot
+    /// name an oid. The statement is read with the <c>search_path</c> pinned to <c>pg_catalog</c> and masked through the
+    /// browser's gate, so an expression index that calls a function in a withheld schema names <c>‹withheld›</c>, as
+    /// the browser's object detail does.
+    /// </para>
+    /// <para>
+    /// It deparses, so it opens the indexed table with <c>AccessShareLock</c> for the moment it runs and gives up at the
+    /// session's <c>lock_timeout</c> behind a migration's <c>ACCESS EXCLUSIVE</c> lock: that is the price of one
+    /// statement, paid only when a person asks for it, and the list never pays it. Reading the statement is a
+    /// structure read like the list, ungated by a capability, and is not audited, as the list is not.
+    /// </para>
+    /// </remarks>
+    public async Task<SchemaIndexDefinition> IndexDefinitionAsync(
+        StudioScope scope,
+        string schema,
+        string table,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        schema ??= string.Empty;
+        table ??= string.Empty;
+        name ??= string.Empty;
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            SchemaDeclarationRead own = SchemaDeclarationReader.ReadForClassification(
+                resolved.Store.Options,
+                options.Value.IsDocumentTypeVisible);
+
+            if (!own.Succeeded)
+            {
+                return SchemaIndexDefinition.Unavailable(own.Failure ?? "The store's configuration could not be read.");
+            }
+
+            ClassificationRead classification = await ClassifyAsync(resolved, cancellationToken).ConfigureAwait(false);
+            if (!classification.Succeeded)
+            {
+                return SchemaIndexDefinition.Unavailable(classification.Failure);
+            }
+
+            string[] schemas = [.. own.Declarations.Schemas];
+
+            if (schema.Length == 0 || table.Length == 0 || name.Length == 0
+                || !schemas.Contains(schema, StringComparer.Ordinal)
+                || !TableIsShown(
+                    classification.Value,
+                    schema,
+                    table,
+                    new HashSet<string>(classification.Value.Classifier.HiddenTables, StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+            {
+                return SchemaIndexDefinition.NotFound(schema, name);
+            }
+
+            IReadOnlySet<string> withheldSchemas = await WithheldSchemasAsync(scope, resolved, classification.Value, schemas, cancellationToken)
+                .ConfigureAwait(false);
+
+            string? statement = await InSessionAsync(
+                    resolved,
+                    (connection, transaction, timeout, token) =>
+                        SchemaStatsQueries.ReadIndexDefinitionAsync(connection, transaction, schemas, schema, table, name, timeout, token),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            return statement is null
+                ? SchemaIndexDefinition.NotFound(schema, name)
+                : SchemaIndexDefinition.Read(WithheldNames.Redact(statement, withheldSchemas) ?? string.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (PostgresException exception) when (exception.SqlState == LockNotAvailable)
+        {
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(exception, "Marten Studio's index definition read for database {DatabaseId} gave up on a lock", resolved.Database.Id.Identity);
+            }
+
+            return SchemaIndexDefinition.Locked(DefinitionLockedSentence);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Marten Studio could not read an index definition for database {DatabaseId}", resolved.Database.Id.Identity);
+            return SchemaIndexDefinition.Unavailable(await MaskAsync(scope, resolved, exception.Message, cancellationToken).ConfigureAwait(false) ?? exception.Message);
         }
     }
 

@@ -300,7 +300,7 @@ public class SchemaPageTests
         schema.Indexes = new SchemaIndexes(
             [
                 new IndexInfo("studio", "mt_doc_customer", "mt_doc_customer_idx_name",
-                    "CREATE INDEX ...", 8192, 0, 0, false, false, true, "customer", IndexAdvice.NeverUsedSuggestion),
+                    "btree (name)", 8192, 0, 0, false, false, true, "customer", IndexAdvice.NeverUsedSuggestion),
             ],
             [],
             [new UnindexedCollection("note", "Note", "studio", "mt_doc_note",
@@ -313,6 +313,46 @@ public class SchemaPageTests
         page.TextOfAll(".ms-index-flag-warn").Should().Contain("never used");
         page.Markup.Should().Contain("pg_stat_reset()");
         page.Markup.Should().Contain("opts.Schema.For&lt;Note&gt;().Index(x =&gt; x.Text);");
+    }
+
+    /// <summary>
+    /// 1.2-LOCKS (D27): the list shows an index's keys and no statement, and reads the statement of one index only when its
+    /// row's disclosure is opened - and says why when that read gave up on a migration's lock.
+    /// </summary>
+    [Fact]
+    public async Task The_Indexes_tab_shows_keys_and_reads_one_statement_when_its_disclosure_is_opened()
+    {
+        using var context = NewContext(out FakeSchemaDataService schema);
+        schema.Indexes = new SchemaIndexes(
+            [
+                new IndexInfo("studio", "mt_doc_customer", "mt_doc_customer_idx_name", "btree (data, (expression)), partial",
+                    8192, 3, 3, false, false, true, "customer", null),
+                new IndexInfo("studio", "mt_doc_customer", "mt_doc_customer_idx_email", "btree (email)",
+                    8192, 3, 3, false, false, true, "customer", null),
+            ],
+            [],
+            [],
+            null);
+        schema.IndexDefinitions["mt_doc_customer_idx_name"] = SchemaIndexDefinition.Read(
+            "CREATE INDEX mt_doc_customer_idx_name ON studio.mt_doc_customer USING btree (data, ((data ->> 'Name'::text))) WHERE (data IS NOT NULL)");
+        schema.IndexDefinitions["mt_doc_customer_idx_email"] = SchemaIndexDefinition.Locked(SchemaDataService.DefinitionLockedSentence);
+
+        context.Navigate("/marten/schema?tab=indexes");
+        var page = context.Render<SchemaPage>();
+
+        page.Markup.Should().Contain("btree (data, (expression)), partial");
+        page.Markup.Should().NotContain("CREATE INDEX", "the list carries no statement");
+        schema.IndexDefinitionRequests.Should().BeEmpty("a statement is read when its row is opened, not on arrival");
+
+        await page.FindAll("details.ms-index-statement")[0].TriggerEventAsync("ontoggle", EventArgs.Empty);
+
+        schema.IndexDefinitionRequests.Should().Equal("mt_doc_customer_idx_name");
+        page.Markup.Should().Contain("CREATE").And.Contain("USING").And.Contain("WHERE");
+
+        await page.FindAll("details.ms-index-statement")[1].TriggerEventAsync("ontoggle", EventArgs.Empty);
+
+        schema.IndexDefinitionRequests.Should().Equal("mt_doc_customer_idx_name", "mt_doc_customer_idx_email");
+        page.Markup.Should().Contain("is locked right now");
     }
 
     [Fact]
@@ -483,7 +523,7 @@ public class SchemaPageTests
         schema.Indexes = new SchemaIndexes(
             [
                 new IndexInfo("studio", "mt_doc_customer", "hand_rolled_idx",
-                    "CREATE INDEX ...", 8192, 400, 900, false, false, false, "customer",
+                    "btree (legacy_code)", 8192, 400, 900, false, false, false, "customer",
                     IndexAdvice.UndeclaredSuggestion),
             ],
             [],
@@ -560,7 +600,7 @@ public class SchemaPageTests
         schema.Indexes = new SchemaIndexes(
             [
                 new IndexInfo("studio", "mt_doc_customer", "mt_doc_customer_idx_name",
-                    "CREATE INDEX ...", 8192, 12, 40, false, false, true, "customer", null),
+                    "btree (name)", 8192, 12, 40, false, false, true, "customer", null),
             ],
             [new MissingIndex("studio", "mt_doc_note", "mt_doc_note_idx_text", "CREATE INDEX ...", "note")],
             [],

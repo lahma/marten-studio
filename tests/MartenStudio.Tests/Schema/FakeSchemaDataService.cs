@@ -94,6 +94,24 @@ internal sealed class FakeSchemaDataService : ISchemaDataService
     public Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(Indexes);
 
+    /// <summary>What <see cref="IndexDefinitionAsync" /> answers, by index name; an index not named is not found.</summary>
+    public Dictionary<string, SchemaIndexDefinition> IndexDefinitions { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>The index names <see cref="IndexDefinitionAsync" /> was asked for, in order.</summary>
+    public List<string> IndexDefinitionRequests { get; } = [];
+
+    public Task<SchemaIndexDefinition> IndexDefinitionAsync(
+        StudioScope scope,
+        string schema,
+        string table,
+        string name,
+        CancellationToken cancellationToken = default)
+    {
+        IndexDefinitionRequests.Add(name);
+
+        return Task.FromResult(IndexDefinitions.TryGetValue(name, out SchemaIndexDefinition? found) ? found : SchemaIndexDefinition.NotFound(schema, name));
+    }
+
     public Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default) =>
         Task.FromResult(Functions);
 

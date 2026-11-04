@@ -86,6 +86,40 @@ public partial class HealthTableQueriesTests
         WritesOrHides().IsMatch("select * from pg_catalog.pg_class").Should().BeTrue();
     }
 
+    /// <summary>Every <c>pg_get_*def</c> deparse function, each of which opens the relation it is handed.</summary>
+    [GeneratedRegex(
+        @"\bpg_get_(indexdef|constraintdef|viewdef|functiondef|triggerdef|ruledef|statisticsobjdef|expr|partkeydef|partition_constraintdef)\s*\(",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DeparseFunction();
+
+    /// <summary>
+    /// 1.2-LOCKS (D27): the Schema screen's index list deparses nothing - <c>pg_get_indexdef</c> opens the indexed table with
+    /// <c>AccessShareLock</c>, so a list that printed it queued behind a migration's lock - and the one statement that does is
+    /// the by-name definition read, which resolves the oid itself inside the store's schemas.
+    /// </summary>
+    [Fact]
+    public void The_index_list_deparses_nothing_and_only_the_by_name_definition_read_does()
+    {
+        DeparseFunction().IsMatch(SchemaStatsQueries.IndexStatsSql).Should().BeFalse("D27: the list reads columns, never a deparse");
+        DeparseFunction().IsMatch(SchemaStatsQueries.TableStatsSql).Should().BeFalse();
+
+        SchemaStatsQueries.IndexStatsSql.Should().Contain("pg_catalog.pg_attribute", "key columns are pg_attribute names");
+        SchemaStatsQueries.IndexStatsSql.Should().Contain("i.indpred is not null", "predicate presence is a null test, not a deparse");
+
+        string definition = SchemaStatsQueries.IndexDefinitionSql;
+        DeparseFunction().Matches(definition).Should().ContainSingle().Which.Groups[1].Value.Should().Be("indexdef");
+        definition.Should().Contain("pg_catalog.pg_get_indexdef(c.oid)");
+        definition.Should().MatchRegex(@"nspname\s*=\s*any\(@schemas\)", "the index must be in the store's schemas");
+        definition.Should().Contain("not t.relispartition", "an index on a partition is named after its tenant");
+        definition.Should().Contain("c.relname = @name").And.Contain("t.relname = @table").And.Contain("n.nspname = @schema",
+            "found by names; no oid comes from the caller");
+        SchemaStatsQueries.AllStatements.Should().Contain(definition);
+
+        // The anti-vacuity half: the scan sees the call it is for.
+        DeparseFunction().IsMatch("select pg_catalog.pg_get_indexdef(l.oid) from listed l").Should().BeTrue();
+        DeparseFunction().IsMatch("select pg_catalog.pg_get_indexdef(l.oid, k, true)").Should().BeTrue();
+    }
+
     [Fact]
     public void The_tables_and_their_schemas_travel_as_two_text_arrays_and_no_name_is_in_the_text()
     {

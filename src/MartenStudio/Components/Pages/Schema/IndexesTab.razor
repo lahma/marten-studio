@@ -43,9 +43,15 @@
     links to its finding on the Health page.
 
     A pgvector HNSW or IVFFlat index - Marten.PgVector's VectorIndex<T>() makes one, over an expression on the
-    document table - says under its definition what pg_get_indexdef only implies: each column's operator class and
+    document table - says under its keys what the statement only implies: each column's operator class and
     the distance it serves, and m, ef_construction or lists from reloptions, with pgvector's default where the index
     sets none (VectorIndexSummary).
+
+    The list locks nothing it lists (1.2, D27): it shows each index's keys from the catalogs' columns (an expression
+    key reads "(expression)") and prints no statement, because Postgres opens the indexed table while it prints one and
+    the list used to queue behind a migration's lock. "Show definition" reads the statement of that one index when a
+    person opens it (ISchemaDataService.IndexDefinitionAsync), which may wait for that one table and says so when a
+    migration holds it.
 *@
 
 @if (!loading && indexes.ClassificationNotice is { Length: > 0 } notice)
@@ -192,7 +198,7 @@ else
                         <th class="ms-num">Size</th>
                         <th class="ms-num">Scans</th>
                         <th class="ms-num">Tuples read</th>
-                        <th>Definition</th>
+                        <th>Keys</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -242,7 +248,7 @@ else
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.Scans)</td>
                             <td class="ms-table-cell ms-num">@SchemaFormat.Count(index.TuplesRead)</td>
                             <td class="ms-table-cell">
-                                <div class="ms-index-definition">@index.Definition</div>
+                                <div class="ms-index-definition">@index.Summary</div>
                                 @if (index.Vector is { } vector)
                                 {
                                     <VectorIndexSummary Model="vector" />
@@ -251,6 +257,24 @@ else
                                 {
                                     <p class="ms-suggestion">@suggestion</p>
                                 }
+                                <details class="ms-index-statement" @key="DefinitionKey(index)" @ontoggle="() => OnToggledAsync(index)">
+                                    <summary class="ms-index-statement-summary">Show definition</summary>
+                                    @if (statements.TryGetValue(DefinitionKey(index), out IndexStatement? statement))
+                                    {
+                                        @if (statement.Loading)
+                                        {
+                                            <LoadingSpinner />
+                                        }
+                                        else if (statement.Error is { Length: > 0 } error)
+                                        {
+                                            <ErrorAlert Message="@error" OnRetry="() => LoadStatementAsync(index)" />
+                                        }
+                                        else if (statement.Sql is { } sql)
+                                        {
+                                            <SqlText Sql="@sql" Label="@(index.Name + " definition")" Wrap="true" ShowLineNumbers="false" />
+                                        }
+                                    }
+                                </details>
                             </td>
                         </tr>
                     }
@@ -353,6 +377,67 @@ else
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
+    /// <summary>The statements read so far, by <see cref="DefinitionKey" />: read once, kept while the list is the one on screen.</summary>
+    private readonly Dictionary<string, IndexStatement> statements = new(StringComparer.Ordinal);
+
+    private static string DefinitionKey(IndexInfo index) => SchemaKey.For(index.Schema, index.Table, index.Name);
+
+    /// <summary>
+    /// Reads an index's statement the first time its row is opened.
+    /// </summary>
+    /// <remarks>
+    /// <c>toggle</c> fires on opening and on closing alike and carries nothing to tell them apart, so this does not try
+    /// to: a row's first toggle is always its opening, and every later one finds the statement already read (or being
+    /// read) and does nothing. A read that failed is retried by its own Retry button, not by closing and opening.
+    /// </remarks>
+    private Task OnToggledAsync(IndexInfo index) =>
+        statements.ContainsKey(DefinitionKey(index)) ? Task.CompletedTask : LoadStatementAsync(index);
+
+    private async Task LoadStatementAsync(IndexInfo index)
+    {
+        string key = DefinitionKey(index);
+        statements[key] = IndexStatement.Reading;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            StudioScope? scope = State.ActiveScope;
+            if (scope is null)
+            {
+                statements.Remove(key);
+                return;
+            }
+
+            SchemaIndexDefinition definition = await SchemaData.IndexDefinitionAsync(scope, index.Schema, index.Table, index.Name, lifetime.Token);
+
+            statements[key] = definition.Sql is { } sql
+                ? IndexStatement.Read(sql)
+                : IndexStatement.Failed(definition.Reason ?? "The definition could not be read.");
+        }
+        catch (OperationCanceledException)
+        {
+            statements.Remove(key);
+        }
+        catch (Exception exception)
+        {
+            statements[key] = IndexStatement.Failed(exception.Message);
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>One statement: being read, read, or not readable.</summary>
+    private sealed record IndexStatement(bool Loading, string? Sql, string? Error)
+    {
+        public static IndexStatement Reading { get; } = new(true, null, null);
+
+        public static IndexStatement Read(string sql) => new(false, sql, null);
+
+        public static IndexStatement Failed(string error) => new(false, null, error);
+    }
+
     private async Task LoadAsync()
     {
         loading = true;
@@ -361,6 +446,7 @@ else
         try
         {
             StudioScope? scope = State.ActiveScope;
+            statements.Clear();
             indexes = scope is null
                 ? SchemaIndexes.Empty
                 : await SchemaData.IndexesAsync(scope, lifetime.Token);

@@ -246,7 +246,9 @@ public class CapabilityGatingMatrixTests
         ],
         [typeof(ISchemaDataService)] =
         [
-            "CheckAsync", "DatabaseIdentityAsync", "DdlAsync", "FunctionsAsync", "IndexesAsync",
+            // 1.2-LOCKS: IndexDefinitionAsync is the Indexes list's statement for one index, shown to the visitors and for the
+            // indexes the list shows, at the list's own gate (store policy, classification) - a structure read, not gated by a capability.
+            "CheckAsync", "DatabaseIdentityAsync", "DdlAsync", "FunctionsAsync", "IndexDefinitionAsync", "IndexesAsync",
             "PreviewAsync", "TablesAsync",
         ],
         [typeof(IQueryService)] = ["BuildExamplesAsync", "ListDocumentTypesAsync", "RunMartenQueryAsync", "WhatIfAsync"],

@@ -101,8 +101,36 @@ internal interface ISchemaDataService
     /// </summary>
     Task<SchemaTables> TablesAsync(StudioScope scope, CancellationToken cancellationToken = default);
 
-    /// <summary>Every index that exists, every index that is declared, and what to do about the difference.</summary>
+    /// <summary>
+    /// Every index that exists, every index that is declared, and what to do about the difference - from the
+    /// catalogs' columns alone, so it locks nothing it lists (D27) and carries no index's statement
+    /// (<see cref="IndexDefinitionAsync" />).
+    /// </summary>
     Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The statement Postgres reconstructs for one index <see cref="IndexesAsync" /> lists, read when a person asks for
+    /// it. Postgres opens the indexed table for the moment it deparses, so this read - unlike the list - may queue
+    /// behind a migration's lock on that one table and gives up at the session's <c>lock_timeout</c>
+    /// (<see cref="SchemaIndexDefinition.Busy" />).
+    /// </summary>
+    /// <param name="scope">The store and database to read.</param>
+    /// <param name="schema">The index's schema.</param>
+    /// <param name="table">The table it is on.</param>
+    /// <param name="name">The index name.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <remarks>
+    /// Shown to exactly the visitors, and for exactly the indexes, the list shows (same store policy, same
+    /// classification: a hidden document type's table, or one a degraded classification withholds, is "not there"),
+    /// with every schema the visitor is not shown masked as in the list. The index is found by its names inside the
+    /// store's own schemas; no oid travels in from the caller.
+    /// </remarks>
+    Task<SchemaIndexDefinition> IndexDefinitionAsync(
+        StudioScope scope,
+        string schema,
+        string table,
+        string name,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The functions, procedures, aggregates and window functions in the store's schemas, with whether this

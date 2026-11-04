@@ -361,6 +361,49 @@ public class IndexAdviceTests
             .Should().Be("opts.Schema.For<List<Int32>>().Index(x => x.Count);");
     }
 
+    /// <summary>
+    /// 1.2-LOCKS (D27): the list's one-line summary is made of the catalogs' columns - an expression key is "(expression)", an
+    /// <c>INCLUDE</c> column is counted, a predicate is only noted, a failed build is called invalid - and a pgvector index's key
+    /// column is what the summary says, not a deparse.
+    /// </summary>
+    [Theory]
+    [InlineData("btree", new[] { "id" }, 0, false, true, "btree (id)")]
+    [InlineData("btree", new[] { "data", "(expression)" }, 0, false, true, "btree (data, (expression))")]
+    [InlineData("btree", new[] { "tenant_id", "id" }, 1, true, true, "btree (tenant_id, id), 1 included column, partial")]
+    [InlineData("gin", new[] { "(expression)" }, 3, false, false, "gin ((expression)), 3 included columns, invalid")]
+    public void The_summary_is_made_of_the_catalog_columns(string method, string[] keys, int included, bool partial, bool valid, string expected)
+    {
+        IndexSummary.Describe(method, keys, included, partial, valid).Should().Be(expected);
+    }
+
+    [Fact]
+    public void A_row_carries_a_summary_and_no_statement_and_a_vector_indexs_expression_key_is_named_as_one()
+    {
+        IndexStatsRow expression = new(Schema, "embeddings", "embeddings_expression", 8192, 1, 1, false, false)
+        {
+            AccessMethod = "hnsw",
+            AccessMethodIsPgVector = true,
+            KeyColumns = [null],
+            OperatorClasses = ["vector_l1_ops"],
+        };
+        IndexStatsRow plain = new(Schema, "embeddings", "embeddings_hnsw", 8192, 1, 1, false, false)
+        {
+            AccessMethod = "hnsw",
+            AccessMethodIsPgVector = true,
+            KeyColumns = ["embedding"],
+            OperatorClasses = ["vector_cosine_ops"],
+            IncludedColumns = 0,
+        };
+
+        SchemaIndexes result = IndexAdvice.Join([expression, plain], [], []);
+
+        result.Indexes.Single(static x => x.Name == "embeddings_expression").Summary.Should().Be("hnsw ((expression))");
+        result.Indexes.Single(static x => x.Name == "embeddings_expression").Vector!.Columns.Single().Definition
+            .Should().Be(IndexStatsRow.ExpressionKey);
+        result.Indexes.Single(static x => x.Name == "embeddings_hnsw").Summary.Should().Be("hnsw (embedding)");
+        result.Indexes.Single(static x => x.Name == "embeddings_hnsw").Vector!.Columns.Single().Definition.Should().Be("embedding");
+    }
+
     /// <summary>A nested type, so the C#-friendly name has something to qualify.</summary>
     public sealed class Nested
     {
@@ -374,7 +417,7 @@ public class IndexAdviceTests
         long? scans = 5,
         bool primaryKey = false,
         bool unique = false) =>
-        new(Schema, table, name, $"CREATE INDEX {name} ON {Schema}.{table} USING btree (x)", 8192, scans, scans, primaryKey, unique);
+        new(Schema, table, name, 8192, scans, scans, primaryKey, unique) { KeyColumns = ["x"] };
 
     private static DeclaredIndex Declared(string alias, string table, string name, string definition = "CREATE INDEX ...") =>
         new(alias, alias, Schema, table, name, definition);

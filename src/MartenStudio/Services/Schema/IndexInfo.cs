@@ -4,7 +4,12 @@ namespace MartenStudio.Services.Schema;
 /// <param name="Schema">The schema it lives in.</param>
 /// <param name="Table">The table it is on.</param>
 /// <param name="Name">The index name.</param>
-/// <param name="Definition">The <c>create index</c> statement Postgres reconstructs for it.</param>
+/// <param name="Summary">
+/// One line from the catalog's columns - access method, key columns ("(expression)" for an expression key), included
+/// columns, partial, invalid. Not the <c>create index</c> statement: deparsing it opens the indexed table, so the list
+/// never does (D27) and the statement is read for one index on request
+/// (<see cref="ISchemaDataService.IndexDefinitionAsync" />).
+/// </param>
 /// <param name="Bytes">How much disk it takes.</param>
 /// <param name="Scans"><c>idx_scan</c>, or <see langword="null" /> when the collector has nothing to say.</param>
 /// <param name="TuplesRead"><c>idx_tup_read</c>, or <see langword="null" />.</param>
@@ -34,7 +39,7 @@ internal sealed record IndexInfo(
     string Schema,
     string Table,
     string Name,
-    string Definition,
+    string Summary,
     long Bytes,
     long? Scans,
     long? TuplesRead,
@@ -176,4 +181,31 @@ internal sealed record SchemaIndexes(
             return count;
         }
     }
+}
+
+/// <summary>
+/// One index's statement, read on request (<see cref="ISchemaDataService.IndexDefinitionAsync" />) - or why it was not.
+/// </summary>
+/// <param name="Sql">The statement Postgres reconstructs for it, with every schema this visitor is not shown masked, or <see langword="null" />.</param>
+/// <param name="Reason">Why there is no statement, or <see langword="null" /> when there is one.</param>
+internal sealed record SchemaIndexDefinition(string? Sql, string? Reason)
+{
+    /// <summary>Whether the read gave up on a lock rather than failing or finding nothing. <see cref="Reason" /> says so.</summary>
+    public bool Busy { get; init; }
+
+    /// <summary>The statement was read.</summary>
+    public static SchemaIndexDefinition Read(string sql) => new(sql, null);
+
+    /// <summary>
+    /// The index is not one this visitor is shown: not there, in a schema the store does not own, on a hidden document
+    /// type's table, or on a table the classification withholds. One sentence for all of them, so the answer is no oracle.
+    /// </summary>
+    public static SchemaIndexDefinition NotFound(string schema, string name) =>
+        new(null, "No index " + schema + "." + name + " is shown here - it may have been dropped since the list was read.");
+
+    /// <summary>The read failed, and this is why.</summary>
+    public static SchemaIndexDefinition Unavailable(string reason) => new(null, reason);
+
+    /// <summary>The indexed table is locked, and the read gave up rather than queue behind the lock (<c>55P03</c>).</summary>
+    public static SchemaIndexDefinition Locked(string reason) => new(null, reason) { Busy = true };
 }

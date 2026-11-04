@@ -236,7 +236,7 @@ internal static class IndexAdvice
                 row.Schema,
                 row.Table,
                 row.Name,
-                row.Definition,
+                row.Summary,
                 row.Bytes,
                 row.Scans,
                 row.TuplesRead,
@@ -250,7 +250,7 @@ internal static class IndexAdvice
             {
                 AccessMethod = row.AccessMethod,
                 Vector = PostgresStudio.Services.Database.PgVector.Index(
-                    row.AccessMethodIsPgVector, row.AccessMethod, row.KeyDefinitions, row.OperatorClasses, row.Options),
+                    row.AccessMethodIsPgVector, row.AccessMethod, row.KeyColumnNames, row.OperatorClasses, row.Options),
             });
         }
 
