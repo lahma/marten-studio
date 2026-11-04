@@ -259,6 +259,10 @@ public class CapabilityGatingMatrixTests
         // finding and per piece of evidence, and refuses nothing - the read that refuses on it is the sessions one.
         [typeof(IHealthService)] = ["CachedFindingsAsync", "GetReportAsync", "GlanceAsync"],
 
+        // 1.2-H-C: a finding's on-demand action. A read at the finding's own gate (re-asked on every press, in the service), audited
+        // on every press. No 1.2 action declares a capability; one that does moves RunAsync to GatedReads, with the three refusals.
+        [typeof(IHealthActionService)] = ["OffersFor", "RunAsync"],
+
         // H3: the summary is the store policy's for the database as a whole; the details are a gated read.
         [typeof(ISessionActivityService)] = ["GetDetailsAsync", "GetSummaryAsync"],
 

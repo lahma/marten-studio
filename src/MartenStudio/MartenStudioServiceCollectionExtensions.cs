@@ -7,6 +7,7 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Connection;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
 using MartenStudio.Services.Projections;
@@ -138,6 +139,10 @@ public static partial class MartenStudioServiceCollectionExtensions
 
         // 1.0-P3C: Marten Studio's plan insights (P26 to P28), judged against the document tables the store in scope declares.
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IPlanInsightContributor, MartenPlanInsightContributor>());
+
+        // 1.2-H-C: E06's on-demand action, "Find the 20 longest streams". The runner and its flights are PostgresStudio's
+        // (StudioCoreRegistration); a finding offers an action only if one is registered here.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHealthFindingAction, LongestStreamsAction>());
 
         // 1.1-NP4: "How Marten uses this connection" on Database > Connection. The data-source registry captures this collection and
         // scans it lazily, like the store registry: AddMartenStudio() is routinely called before AddNpgsqlDataSource().

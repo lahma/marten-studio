@@ -94,6 +94,7 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<SinceMarks>();
 
         Services.AddSingleton<IHealthService>(Health);
+        Services.AddSingleton<IHealthActionService>(new NoHealthActionService());
 
         // 1.1-NP3: Database > Connection, and the Overview's one line about it.
         Connection = new FakeConnectionInsightService();

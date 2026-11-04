@@ -148,6 +148,12 @@ internal static class StudioCoreRegistration
         services.TryAddScoped<HealthAlerts>();
         services.TryAddScoped<IHealthService, HealthService>();
 
+        // 1.2-H-C: a finding's on-demand actions. The seam's runner is the circuit's (one press at a time in a tab); one run of an
+        // action per database at once is the process's. With no IHealthFindingAction registered - Postgres Studio registers none -
+        // a finding offers nothing and the page draws as it always has.
+        services.TryAddSingleton<HealthActionFlights>();
+        services.TryAddScoped<IHealthActionService, HealthActionService>();
+
         // W5-V1: the Maintenance page. Its facts are the engine's (the regular sweep's own reads); the one bloat measure per
         // database at once is the process's, and what a visitor is shown of them is the circuit's.
         services.TryAddSingleton<BloatMeasureFlights>();

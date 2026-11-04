@@ -70,6 +70,31 @@ internal sealed record EventFeedQuery
 /// <param name="Id">The last row's id, as text.</param>
 internal sealed record StreamKeysetCursor(DateTimeOffset Timestamp, string Id);
 
+/// <summary>What the Health page's "20 longest streams" action asks for (1.2, E06).</summary>
+internal sealed record LongestStreamsQuery
+{
+    /// <summary>The most streams the statement returns.</summary>
+    public const int MaxTake = 20;
+
+    /// <summary>
+    /// Only this tenant's streams - a predicate when set and <c>mt_streams</c> has <c>tenant_id</c>, which narrows a conjoined
+    /// store's read to the tenant's partition (<c>UseTenantPartitionedEvents</c>) as the streams list does.
+    /// </summary>
+    public string? TenantId { get; init; }
+
+    /// <summary>Whether to select <c>tenant_id</c>: a conjoined store read with no tenant selected, whose rows name theirs.</summary>
+    public bool IncludeTenant { get; init; }
+
+    /// <summary>
+    /// The lower-case aliases of the aggregate types the studio may show; a stream whose type is none of them is left out, and
+    /// one with no type is kept. <see langword="null" /> when nothing is hidden: no type filter.
+    /// </summary>
+    public IReadOnlyCollection<string>? ShownTypes { get; init; }
+
+    /// <summary>How many streams, clamped to 1 and <see cref="MaxTake" />.</summary>
+    public int Take { get; init; } = MaxTake;
+}
+
 /// <summary>What the streams list is asking for.</summary>
 internal sealed record StreamListQuery
 {
@@ -364,6 +389,93 @@ internal static class EventQueryBuilder
             {
                 sql.Append(" offset ").Append(parameters.Add(NpgsqlDbType.Integer, query.Offset, "offset"));
             }
+
+            command.CommandText = sql.ToString();
+            return command;
+        }
+        catch
+        {
+            command.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The streams with the most events, longest first - the Health page's E06 action (1.2).
+    /// </summary>
+    /// <param name="table">The discovered event tables.</param>
+    /// <param name="query">What to read.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>It reads <c>mt_streams</c> and never <c>mt_events</c>.</b> Marten 9.57 declares no index on <c>version</c> (the key is
+    /// <c>(tenant_id,) id</c>), so this is a sequential scan of one row per live stream feeding a top-20 heap sort: bounded in
+    /// memory, linear in the number of streams, with the caller's <c>statement_timeout</c> as the bound. <c>is_archived = false</c>
+    /// prunes the archived partition under <c>UseArchivedStreamPartitioning</c>, and a tenant predicate prunes to its
+    /// partition under <c>UseTenantPartitionedEvents</c>.
+    /// </para>
+    /// <para>
+    /// The id is selected as text, so one reader serves a <c>uuid</c> and a <c>varchar</c> identity. Every optional column is
+    /// emitted only when the table has it, never <c>select *</c>, and every function is <c>pg_catalog</c>-qualified.
+    /// </para>
+    /// </remarks>
+    public static NpgsqlCommand BuildLongestStreams(EventTableInfo table, LongestStreamsQuery query)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (!table.HasStreamColumn("id") || !table.HasStreamColumn("version"))
+        {
+            throw new ArgumentException("mt_streams has no id or version column, so there is no length to order streams by.", nameof(table));
+        }
+
+        var command = new NpgsqlCommand();
+
+        try
+        {
+            var parameters = new ParameterBuilder(command);
+            var sql = new StringBuilder();
+            var hasType = table.HasStreamColumn("type");
+
+            sql.Append("select ").Append(Column(StreamAlias, "id")).Append("::text as ").Append(SqlIdentifier.Quote("id"));
+            sql.Append(",\n       ").Append(hasType ? Column(StreamAlias, "type") : "null::text as " + SqlIdentifier.Quote("type"));
+            sql.Append(",\n       ").Append(Column(StreamAlias, "version"));
+
+            if (query.IncludeTenant && table.HasStreamColumn("tenant_id"))
+            {
+                sql.Append(",\n       ").Append(Column(StreamAlias, "tenant_id"));
+            }
+
+            if (table.HasStreamColumn("created"))
+            {
+                sql.Append(",\n       ").Append(Column(StreamAlias, "created"));
+            }
+
+            sql.Append('\n');
+            sql.Append("from ").Append(table.QualifiedStreams).Append(AsStreamAlias).Append('\n');
+            sql.Append("where true\n");
+
+            if (table.HasStreamColumn("is_archived"))
+            {
+                sql.Append("  and ").Append(Column(StreamAlias, "is_archived")).Append(" = false\n");
+            }
+
+            if (query.TenantId is { } tenant && table.HasStreamColumn("tenant_id"))
+            {
+                sql.Append("  and ").Append(Column(StreamAlias, "tenant_id")).Append(" = ")
+                    .Append(parameters.Add(NpgsqlDbType.Varchar, tenant, "tenant")).Append('\n');
+            }
+
+            if (query.ShownTypes is { } shown && hasType)
+            {
+                sql.Append("  and (").Append(Column(StreamAlias, "type")).Append(" is null or pg_catalog.lower(")
+                    .Append(Column(StreamAlias, "type")).Append(") = any(")
+                    .Append(parameters.Add(NpgsqlDbType.Array | NpgsqlDbType.Text, shown.ToArray(), "shown")).Append("))\n");
+            }
+
+            sql.Append("order by ").Append(Column(StreamAlias, "version")).Append(" desc nulls last, ")
+                .Append(Column(StreamAlias, "id")).Append('\n');
+            sql.Append("limit ").Append(parameters.Add(
+                NpgsqlDbType.Integer, Math.Clamp(query.Take, 1, LongestStreamsQuery.MaxTake), "limit"));
 
             command.CommandText = sql.ToString();
             return command;

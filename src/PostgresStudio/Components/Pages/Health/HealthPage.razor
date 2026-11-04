@@ -6,6 +6,7 @@
 @using PostgresStudio.Services
 @implements IAsyncDisposable
 @inject IHealthService HealthData
+@inject IHealthActionService Actions
 @inject HealthMutes Mutes
 @inject HealthAlerts Alerts
 @inject StudioState State
@@ -305,6 +306,15 @@
     /// <summary>The code of the finding the address named when the host accepted its check (issue #35): no card to reveal.</summary>
     private string? linkedFindingAccepted;
 
+    /// <summary>
+    /// What the actions pressed on this page returned, by finding (its mute key) and action: in this component and nowhere else,
+    /// so a result is one visitor's, goes with the page and is never cached, shared or sent.
+    /// </summary>
+    private readonly Dictionary<(string MuteKey, string ActionId), HealthActionResult> actionResults = [];
+
+    /// <summary>The finding and action whose press is running now; one at a time, as the service allows.</summary>
+    private (string MuteKey, string ActionId)? runningAction;
+
     private List<HealthReportFinding> VisibleFindings =>
         report is null ? [] : [.. report.Findings.Where(x => x.Counts(Mutes.IsMuted))];
 
@@ -474,6 +484,10 @@
         }
 
         report = null;
+
+        // A result is about the database it was read in: another scope shows none of it.
+        actionResults.Clear();
+
         await LoadAsync(HealthReportRequest.Regular);
     }
 
@@ -504,6 +518,7 @@
             {
                 report = read;
                 error = null;
+                PruneActionResults();
             }
         }
         catch (OperationCanceledException)
@@ -521,6 +536,208 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private bool IsRunning(HealthReportFinding finding, HealthActionOffer offer) =>
+        runningAction is { } running && string.Equals(running.MuteKey, finding.MuteKey, StringComparison.Ordinal)
+            && string.Equals(running.ActionId, offer.Id, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Presses a finding's action: one at a time in this tab, the service asking every gate again. The result is kept only if the
+    /// scope it was read for is still the page's. A failure the service did not turn into a value is put on the card, not lost.
+    /// </summary>
+    private async Task RunActionAsync(HealthReportFinding finding, HealthActionOffer offer)
+    {
+        if (disposed || runningAction is not null || State.ActiveScope is not { } scope)
+        {
+            return;
+        }
+
+        (string MuteKey, string ActionId) key = (finding.MuteKey, offer.Id);
+        CancellationToken token = lifetime.Token;
+
+        actionResults.Remove(key);
+        runningAction = key;
+        await InvokeAsync(StateHasChanged);
+
+        HealthActionResult? result = null;
+
+        try
+        {
+            result = await Actions.RunAsync(scope, finding, offer.Id, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // The page was left, or the circuit closed: nothing to show.
+        }
+        catch (Exception exception)
+        {
+            result = HealthActionResult.Failed("The action could not be run (" + exception.GetType().Name + ").", DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            runningAction = null;
+        }
+
+        if (!disposed)
+        {
+            if (result is not null && State.ActiveScope == scope)
+            {
+                actionResults[key] = result;
+            }
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void CloseAction(HealthReportFinding finding, HealthActionOffer offer) =>
+        actionResults.Remove((finding.MuteKey, offer.Id));
+
+    /// <summary>Drops the results of findings the latest report no longer shows; the others stay across a poll.</summary>
+    private void PruneActionResults()
+    {
+        if (actionResults.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<string> shown = report is { Refusal: HealthRefusal.None } current
+            ? [.. current.Findings.Select(static x => x.MuteKey)]
+            : [];
+
+        foreach ((string MuteKey, string ActionId) key in actionResults.Keys.Where(x => !shown.Contains(x.MuteKey)).ToList())
+        {
+            actionResults.Remove(key);
+        }
+    }
+
+    private static string CellClass(HealthActionCell cell) =>
+        "ms-table-cell" + (cell.Mono ? " ms-table-cell-mono" : string.Empty) + (cell.Number ? " ms-table-cell-number" : string.Empty);
+
+    /// <summary>
+    /// What a press returned: when it was read and how long it took, then a refusal, a failure with "Run again", or the summary, the
+    /// table, the notes, the remedies and "Show SQL". A render fragment for the same reason <see cref="FindingCard" /> is: its model
+    /// is internal.
+    /// </summary>
+    private RenderFragment ActionResult(HealthReportFinding finding, HealthActionOffer offer, HealthActionResult result) => __builder =>
+    {
+        <div class="@("ms-health-action-result ms-health-action-outcome-" + result.Outcome.ToString().ToLowerInvariant())"
+             role="group"
+             aria-label="@(offer.Label + ": result")">
+            <div class="ms-health-action-result-header">
+                <span class="ms-health-action-read">
+                    Read @State.FormatInSelectedTimeZone(result.RanAt)@(result.Took is { } took ? " in " + took.TotalMilliseconds.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " ms" : string.Empty)
+                </span>
+                <button type="button" class="ms-button ms-btn-sm ms-health-action-close" @onclick="() => CloseAction(finding, offer)">Close</button>
+            </div>
+
+            @if (result.Outcome == HealthActionOutcome.Refused)
+            {
+                <div class="ms-alert ms-alert-warning ms-health-action-refused" role="status">
+                    <div class="ms-alert-content">
+                        <p>@result.Reason</p>
+                    </div>
+                </div>
+            }
+            else if (result.Outcome != HealthActionOutcome.Done)
+            {
+                <div class="ms-alert ms-alert-error ms-health-action-problem" role="alert">
+                    <div class="ms-alert-content">
+                        <p>@result.Reason</p>
+                        <button type="button"
+                                class="ms-button ms-btn-sm ms-health-action-again"
+                                disabled="@(!interactive || runningAction is not null)"
+                                @onclick="() => RunActionAsync(finding, offer)">Run again</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <p class="ms-health-action-summary">@result.Summary</p>
+
+                @if (result.Rows.Count > 0)
+                {
+                    <TableScroll Label="@(result.TableLabel ?? offer.Label)">
+                        <table class="ms-table ms-health-action-table">
+                            <thead>
+                                <tr>
+                                    @foreach (string column in result.Columns)
+                                    {
+                                        <th>@column</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @for (int r = 0; r < result.Rows.Count; r++)
+                                {
+                                    HealthActionRow row = result.Rows[r];
+
+                                    <tr class="ms-table-row" @key="r">
+                                        @for (int c = 0; c < row.Cells.Count; c++)
+                                        {
+                                            HealthActionCell cell = row.Cells[c];
+                                            string heading = c < result.Columns.Count ? result.Columns[c] : "value";
+
+                                            <td class="@CellClass(cell)">
+                                                @if (cell.Time is { } time)
+                                                {
+                                                    @State.FormatInSelectedTimeZone(time)
+                                                }
+                                                else if (cell.Link is { } cellLink)
+                                                {
+                                                    <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, cellLink.Route, State.ActiveScope, cellLink.Query)">@cell.Text</a>
+                                                }
+                                                else
+                                                {
+                                                    @cell.Text
+                                                }
+                                                @if (cell.Copy)
+                                                {
+                                                    <CopyButton Value="@cell.Text" Label="@("Copy " + heading.ToLowerInvariant())" />
+                                                }
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </TableScroll>
+                }
+
+                @if (result.Notes.Count > 0)
+                {
+                    <ul class="ms-health-action-notes">
+                        @foreach (string note in result.Notes)
+                        {
+                            <li>@note</li>
+                        }
+                    </ul>
+                }
+
+                @foreach (HealthRemedy remedy in result.Remedies)
+                {
+                    <div class="ms-health-remedy ms-health-action-remedy">
+                        <div class="ms-health-remedy-header">
+                            <span class="ms-health-remedy-title">@remedy.Heading</span>
+                            <CopyButton Value="@remedy.Code" Label="@("Copy the remedy the " + finding.Code + " action found")" />
+                        </div>
+                        <pre class="ms-code ms-health-remedy-code"><code>@remedy.Code</code></pre>
+                        @if (remedy.Explanation is { Length: > 0 } explanation)
+                        {
+                            <p class="ms-health-remedy-explanation">@explanation</p>
+                        }
+                    </div>
+                }
+
+                @for (int s = 0; s < result.Statements.Count; s++)
+                {
+                    HealthStatement statement = result.Statements[s];
+                    <SqlDisclosure Sql="@statement.Sql"
+                                   ParameterNames="statement.ParameterNames"
+                                   Reads="@StatementLabel(statement, s, result.Statements.Count)" />
+                }
+            }
+        </div>
+    };
 
     private async Task ToggleMuteAsync(HealthReportFinding finding)
     {
@@ -620,6 +837,28 @@
                 <p class="ms-health-link">
                     <a href="@HealthLinks.To(Settings, Descriptor.SourceQueryParameter, link.Route, State.ActiveScope, link.Query)">@link.Label</a>
                 </p>
+            }
+
+            @* 1.2-H-C: what this finding offers to read beyond its sweep, on demand and for this visitor alone. Nothing runs on
+               render: the button is the only way in, and the service asks the gates again on every press. *@
+            @foreach (HealthActionOffer offer in Actions.OffersFor(finding))
+            {
+                <div class="ms-health-action" @key="@(finding.MuteKey + "|" + offer.Id)">
+                    <div class="ms-health-action-bar">
+                        <button type="button"
+                                class="ms-button ms-btn-sm ms-health-action-run"
+                                disabled="@(!interactive || runningAction is not null)"
+                                aria-busy="@(IsRunning(finding, offer) ? "true" : "false")"
+                                @onclick="() => RunActionAsync(finding, offer)">
+                            @(IsRunning(finding, offer) ? "Reading…" : offer.Label)
+                        </button>
+                    </div>
+                    <p class="ms-health-action-note">@offer.Description</p>
+                    @if (actionResults.TryGetValue((finding.MuteKey, offer.Id), out HealthActionResult? result))
+                    {
+                        @ActionResult(finding, offer, result)
+                    }
+                </div>
             }
 
             @* 1.0-HARD: a finding with several statements says which each is - by what it reads, or by its place - never two

@@ -22,7 +22,8 @@ namespace PostgresStudio.Services;
 /// version, tenant discovery and policy, live-update and health-check anomalies), 9230 (the database browser's
 /// configuration notice), 9235-9237 (row reads), 9245-9246 (Sessions), 9250-9251 (the diagnostics API: one call, at
 /// Debug, and a snapshot section it could not read; 9252-9254 are held for it), 9270 (the health export), 9280-9281
-/// (the statement checks) and 9290 (platform detection). Outside this class: 9300-9301 are Postgres Studio's own
+/// (the statement checks) and 9290 (platform detection), and, since 1.2, 9223-9224 (a finding's on-demand action on the
+/// Health page: failed at Warning, one line per press, and refused at Debug; <c>StudioLog.HealthActions.cs</c>). Outside this class: 9300-9301 are Postgres Studio's own
 /// (<c>PostgresLog</c>: an unkeyed data source not listed, and database names a host source listed that were left out),
 /// and 9320-9329 MartenStudio's (<c>MartenLog.Deps.cs</c>: 9320, a subscription rewind Marten refused).
 /// </para>

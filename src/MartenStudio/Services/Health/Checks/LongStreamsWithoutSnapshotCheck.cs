@@ -39,7 +39,8 @@ internal sealed record LongStreamsFacts(IReadOnlyList<LiveAggregate> LiveOnly, i
 /// (<c>ProjectionOptions.AllAggregateTypes()</c>); the stream lengths from <c>pg_stats.histogram_bounds</c> of
 /// <c>mt_streams.version</c>, shared with E05 and E07. The statistics describe every stream together and cannot say
 /// which aggregate a long stream belongs to, so the finding is an Info and says so. The 20 longest streams are a
-/// scan of <c>mt_streams</c>, which this check never runs.
+/// scan of <c>mt_streams</c>, which this check never runs; the finding's on-demand action does
+/// (<see cref="MartenStudio.Services.Health.LongestStreamsAction" />), for the visitor who presses it.
 /// </para>
 /// </remarks>
 [HealthCheck("E06", HealthArea.Events, HealthCostTier.Catalog, "Long streams without a snapshot")]
@@ -47,6 +48,17 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
 {
     /// <summary>A stream with more events than this is long for a live aggregation.</summary>
     internal const long LongStream = 1_000;
+
+    /// <summary>What the snapshot line changes and costs - E06's remedy, and the one its on-demand action offers per aggregate.</summary>
+    internal const string SnapshotRemedyExplanation =
+        "Adds the aggregate's document table and keeps it in the appending transaction; on an existing store, rebuild the "
+        + "snapshot projection once to fill it. SnapshotLifecycle.Async keeps it off the append path instead, at the cost "
+        + "of a fetch that may lag.";
+
+    /// <summary>The <c>StoreOptions</c> line that snapshots an aggregate inline.</summary>
+    /// <param name="aggregate">The aggregate's name in code.</param>
+    internal static string SnapshotRemedyLine(string aggregate) =>
+        "opts.Projections.Snapshot<" + aggregate + ">(SnapshotLifecycle.Inline);";
 
     /// <inheritdoc />
     public override async Task<LongStreamsFacts> GatherAsync(HealthCheckContext context, CancellationToken cancellationToken)
@@ -151,11 +163,7 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
             Caveat = EventHealth.StatisticsCaveat(facts.Streams)
                 + " The statistics describe every stream together and cannot say which aggregate a long stream belongs to - it may "
                 + "be one that is already snapshotted. Aggregates this process has never fetched live are not known to it.",
-            Remedy = new HealthRemedy(
-                "opts.Projections.Snapshot<" + first.Name + ">(SnapshotLifecycle.Inline);",
-                "Adds the aggregate's document table and keeps it in the appending transaction; on an existing store, rebuild the "
-                + "snapshot projection once to fill it. SnapshotLifecycle.Async keeps it off the append path instead, at the cost "
-                + "of a fetch that may lag."),
+            Remedy = new HealthRemedy(SnapshotRemedyLine(first.Name), SnapshotRemedyExplanation),
             Link = new HealthLink("Open Streams", EventLinks.StreamsRoute),
         });
     }
@@ -165,7 +173,7 @@ internal sealed class LongStreamsWithoutSnapshotCheck : HealthCheck<LongStreamsF
     /// projections, live sources and what this process has aggregated live - whose every aggregate registration is
     /// <c>Live</c>.
     /// </summary>
-    private static IEnumerable<(Type Type, bool Registered)> LiveOnly(StoreOptions options)
+    internal static IEnumerable<(Type Type, bool Registered)> LiveOnly(StoreOptions options)
     {
         List<IAggregateProjection> projections = [.. options.Projections.All.OfType<IAggregateProjection>()];
 

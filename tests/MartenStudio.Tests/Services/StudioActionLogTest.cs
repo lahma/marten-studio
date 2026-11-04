@@ -242,13 +242,15 @@ public class StudioActionLogTest
         // failure, and its first read in a circuit, the audit line.
         // 9250 and 9251 are W5-API's (9250-9254): one call of the diagnostics API, at Debug, and a section of a snapshot that
         // could not be read, throttled.
+        // 9223 and 9224 are 1.2-H-C's: a finding's on-demand action the visitor pressed that failed (Warning, one line per press),
+        // and one refused for an expected reason (Debug).
         // 9460-9462 are 1.0-C43's (9460-9469), the opt-in connection history's sampler: a round that failed and a server that
         // could not be sampled, both throttled, and a source it could not list, at Debug. 9463 and 9464 are #46's: a backlog of samples the
         // store refused, written (Information, once per drain) or outgrown (throttled). 9490 is 1.1's: an AcceptedChecks entry for a
         // retired check, accepted and ignored, once per code at Information.
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
-            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237, 9245, 9246,
+            9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9223, 9224, 9230, 9235, 9236, 9237, 9245, 9246,
             9250, 9251, 9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421, 9430, 9431, 9440,
             9450, 9451, 9452, 9460, 9461, 9462, 9463, 9464, 9490, 9500, 9501);
     }
@@ -271,7 +273,7 @@ public class StudioActionLogTest
         ];
 
         Ids(typeof(StudioLog)).Should().Equal(
-            9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9230, 9235, 9236, 9237,
+            9200, 9201, 9202, 9203, 9204, 9205, 9210, 9213, 9214, 9219, 9220, 9221, 9222, 9223, 9224, 9230, 9235, 9236, 9237,
             9245, 9246, 9250, 9251, 9270, 9280, 9281, 9290, 9410, 9420, 9421, 9430, 9431, 9440, 9450, 9451, 9452, 9460, 9461, 9462, 9463, 9464,
             9490, 9500, 9501);
 

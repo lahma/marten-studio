@@ -258,6 +258,12 @@ public class LogLevelsTests
         ["src/MartenStudio/Services/Documents/DocumentDataService.Detail.cs : Marten Studio could not probe the collections for id '{Id}'"] = (Verdict.VisitorAction,
             "The find-by-id probe the visitor ran failed; per-collection probe failures inside it are Debug."),
 
+        // ---- 1.2-H-C ----------------------------------------------------------------------------------
+        ["src/PostgresStudio.Diagnostics/Services/StudioLog.HealthActions.cs : 9223 HealthActionFailed"] = (Verdict.VisitorAction,
+            "A finding's action the visitor pressed failed after its gates passed; one line per press, never polled, and the card shows it."),
+        ["src/PostgresStudio.Diagnostics/Services/PostgresStudioLog.HealthActions.cs : 9223 PostgresStudioHealthActionFailed"] = (Verdict.VisitorAction,
+            "9223 in Postgres Studio's words: a finding's action the visitor pressed failed after its gates passed; one line per press."),
+
         // ---- W5-V1 ------------------------------------------------------------------------------------
         ["src/PostgresStudio.Diagnostics/Services/StudioLog.Maintenance.cs : 9420 BloatMeasureFailed"] = (Verdict.VisitorAction,
             "A bloat measure the visitor pressed failed after its gates and preconditions passed; one line per press, never polled, and the page shows it."),

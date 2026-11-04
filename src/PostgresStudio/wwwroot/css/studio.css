@@ -15071,3 +15071,95 @@ a.ms-schema-health-mark:focus-visible {
 .ms-mark-delta {
     white-space: nowrap;
 }
+
+/* ===== 1.2-H-C Health finding actions ===== */
+
+/* --------------------------------------------------------------------------
+   A finding card's on-demand action: a button, a sentence saying what pressing it reads and costs, and - once pressed - the
+   result drawn under it until Close, a scope change or the finding going away. Appended in D26 order; only `ms-health-action*`
+   selectors are new, so nothing earlier is re-declared. The table sits in a labelled scroll region (D25, `TableScroll`).
+   -------------------------------------------------------------------------- */
+
+.ms-health-action {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    padding-top: var(--ms-space-xs);
+    border-top: 1px dashed var(--ms-color-border);
+}
+
+.ms-health-action-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-health-action-note,
+.ms-health-action-summary,
+.ms-health-action-notes {
+    margin: 0;
+    max-width: 80ch;
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-action-summary {
+    color: var(--ms-color-text);
+}
+
+.ms-health-action-result {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-sm);
+    min-width: 0;
+    padding: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-md);
+    background: var(--ms-color-surface-alt);
+}
+
+.ms-health-action-result-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--ms-space-sm);
+}
+
+.ms-health-action-read {
+    font-size: var(--ms-font-size-sm);
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-health-action-result .ms-alert {
+    margin: 0;
+}
+
+.ms-health-action-problem .ms-alert-content {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-sm);
+}
+
+.ms-health-action-problem p {
+    margin: 0;
+}
+
+.ms-health-action-table .ms-table-cell-number {
+    text-align: right;
+}
+
+.ms-health-action-table td {
+    white-space: nowrap;
+}
+
+.ms-health-action-notes {
+    padding-left: var(--ms-space-lg);
+}
+
+.ms-health-action-remedy {
+    min-width: 0;
+}

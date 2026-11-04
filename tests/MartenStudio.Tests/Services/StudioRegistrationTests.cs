@@ -109,6 +109,10 @@ public class StudioRegistrationTests
         (typeof(HealthMutes), ServiceLifetime.Scoped, How.Type, typeof(HealthMutes)),
         (typeof(HealthAlerts), ServiceLifetime.Scoped, How.Type, typeof(HealthAlerts)),
         (typeof(IHealthService), ServiceLifetime.Scoped, How.Type, typeof(HealthService)),
+
+        // 1.2-H-C: a finding's on-demand actions - the runner is the circuit's, one run of an action per database is the process's.
+        (typeof(HealthActionFlights), ServiceLifetime.Singleton, How.Type, typeof(HealthActionFlights)),
+        (typeof(IHealthActionService), ServiceLifetime.Scoped, How.Type, typeof(HealthActionService)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.MaintenanceFactsReader)),
         (typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceNameGate), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Maintenance.DatabaseAccessNameGate)),
@@ -160,6 +164,9 @@ public class StudioRegistrationTests
 
         // 1.0-P3C: Marten Studio's plan insights P26 to P28, the one registration the packet adds.
         (typeof(IPlanInsightContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenPlanInsightContributor)),
+
+        // 1.2-H-C: E06's on-demand action, the one finding action 1.2 registers.
+        (typeof(IHealthFindingAction), ServiceLifetime.Singleton, How.Type, typeof(MartenStudio.Services.Health.LongestStreamsAction)),
 
         // 1.1-NP4: "How Marten uses this connection" - the data-source registry, the deeper checks' average sizes and the contributor.
         (typeof(MartenDataSourceRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenDataSourceRegistry)),

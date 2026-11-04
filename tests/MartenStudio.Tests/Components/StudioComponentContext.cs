@@ -120,6 +120,8 @@ internal class StudioComponentContext : BunitContext
         // the mutes and the toast memory are the real ones, because they are per circuit and cheap.
         Health = new MartenStudio.Tests.Health.FakeHealthService();
         Services.AddSingleton<PostgresStudio.Services.Health.IHealthService>(Health);
+        HealthActions = new MartenStudio.Tests.Health.FakeHealthActionService();
+        Services.AddSingleton<PostgresStudio.Services.Health.IHealthActionService>(HealthActions);
         Services.AddSingleton<PostgresStudio.Services.Health.HealthMutes>();
         Services.AddSingleton<PostgresStudio.Services.Health.HealthAlerts>();
 
@@ -190,6 +192,9 @@ internal class StudioComponentContext : BunitContext
 
     /// <summary>What the Health page, the Overview's Health region and the badge are told (H1).</summary>
     public MartenStudio.Tests.Health.FakeHealthService Health { get; }
+
+    /// <summary>What the Health page's finding cards are offered and given when an action is pressed (1.2-H-C).</summary>
+    public MartenStudio.Tests.Health.FakeHealthActionService HealthActions { get; }
 
     /// <summary>What Database › Connection and the Overview's connection line are told (NP3).</summary>
     public FakeConnectionInsightService Connection { get; }
