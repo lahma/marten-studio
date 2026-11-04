@@ -93,7 +93,10 @@ no specificity, so any rule that names a link wins over it. Earlier releases' se
 0.10.0 appended `0.10-Q35` (accepted checks) `0.10-A` (the plan facts panel, tested in `PlanFactsStylesheetTests`) and `0.10-B` (Compare and the settings what-if,
 tested in `PlanCompareStylesheetTests`) and `UI-0.10` (the sweep's wrap for a node's values, tested in
 `PlanUiSweepStylesheetTests`), in that order.
-1.0.0 appended `1.0-UIFIX` (menus and the rail's credit), described next.
+1.0.0 appended `1.0-UIFIX` (menus and the rail's credit), described next. 1.2.0 appended `1.2-H-A`, `1.2-H-C`, `1.2-FLOW`,
+`1.2-H-B`, `1.2-SHAPE` (SHAPE-B's event rules at its end), `1.2-INDEX`, `1.2-STORES`, `1.2-LOCKS`, `1.2-TENANTS`,
+`1.2-FLOW-LINKS`, `1.2-A11Y`, `1.2-POLISH`, `1.2-HEADER` and `1.2-FIND`, in that order; `1.2-FIND` re-declares
+`1.2-HEADER`'s phone gaps on purpose (the Find box needs them).
 
 ## Menus and the rail (1.0-UIFIX)
 

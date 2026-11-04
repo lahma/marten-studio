@@ -62,7 +62,8 @@ tested against it, and a minor release may stop supporting it outright. PostgreS
 candidate, and the matrix moves to its general-availability image in a later patch.
 
 `PostgresStudio.DisableNavigationInterception` (AppContext switch, 1.2): `true` makes both studios navigate as 1.1 did, with an
-enhanced-navigation fetch per page. Temporary; to be removed in 1.3.
+enhanced-navigation fetch per page. Temporary; to be removed in 1.3. With the switch on, a link the visitor clicks that
+names another store, database or tenant still moves the studio to it (enhanced navigation reports a click as intercepted).
 
 [docs/postgres-versions.md](postgres-versions.md) says what each version adds.
 

@@ -62,7 +62,11 @@ graph:
    `HealthCodesTests` (hard rule 7's codes table); `NpgsqlVersionTests` and `PostgresStudioSolutionFilterTests`
    (*Build*); and `ReleasePushOrderTests` (*Release engineering*). `ReadmeSnippetTests` holds both READMEs to their
    samples: `README.md` to `samples/MartenStudio.Sample/Program.cs` and `src/PostgresStudio/README.md` to
-   `samples/PostgresStudio.Sample/Program.cs`.
+   `samples/PostgresStudio.Sample/Program.cs`. `NoUnboundedGateAwaitTests` holds every awaited gate to a bound. A
+   singleton cache never resolves a scoped, authorization-bearing service: it is handed the scope the caller resolved
+   under its own visitor (`DeadLetterGroupCache`, `EventTypeListingCache`), because the rigs share one
+   `AuthenticationStateProvider` across DI scopes and so cannot catch a fresh scope with no user; a regression test of
+   such a cache registers the real scoped `ServerAuthenticationStateProvider`.
 6. **Marten API surface** (`tests/MartenStudio.Tests/Marten/MartenApiSurfaceTest.cs`) — the contract with
    Marten 9.35, pinned two ways at once. A `CompileOnlyAsync` method that is never executed puts every
    member the design depends on into real C#, so the *compiler* checks signatures, generic constraints and

@@ -926,6 +926,8 @@ changing the access path being compared. The gate is the finding's own, `Databas
 cost and row count and the child table's own index names, which the finding and Storage show already - and it declares no
 capability. It is planned, never run; one audit entry; and not offered on a partitioned table or a partition (hypopg's
 support for those is unmeasured), nor when hypopg is absent or the role may not use it, where the answer is the sentence.
+When either plan reads a table other than the key's own (a row-level-security policy's subquery), nothing is drawn: "Not
+shown: the lookup's plan reads another table, through a row-level security policy."
 
 ## T17 Orphaned document tables
 
