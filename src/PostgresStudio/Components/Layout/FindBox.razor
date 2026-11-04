@@ -1,0 +1,351 @@
+@using Microsoft.Extensions.Logging
+@using PostgresStudio.Services
+@using PostgresStudio.Services.Find
+@using PostgresStudio.Services.Live
+@implements IAsyncDisposable
+@inject FindService Finder
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IJSRuntime JsRuntime
+@inject ILogger<FindBox> Logger
+
+@* Find by id (1.2): one box in the header for a document id, a stream id, a natural key, #sequence, a table or view name or a statement's
+   queryid. It runs on Enter and never while typing (twenty-five primary-key probes per keystroke would be the denial of service D8
+   warns about); every probe is the read the page its hit opens makes, under that page's gates (FindService).
+
+   Wide screens draw the box in the header. Below 1024 px the header shows a magnifier and the box is a native popover on the
+   PreferencesMenu pattern: the same markup either way, and the stylesheet decides which. There is no <form> (D23), so Enter is handled in
+   script (studio.js, martenStudio.find) and reaches this component through [JSInvokable] FindAsync with the field's live text, and the
+   field is never bound, so a render never touches what the visitor typed.
+
+   A hit is a link. A link the visitor clicks is followed by the shell, which moves the scope when the link names another store,
+   database or tenant; this box never calls SetScopeAsync, and it navigates by itself only when the one hit is in the scope already on
+   screen. *@
+
+@if (Finder.IsAvailable && State.ActiveScope is not null)
+{
+    <div class="ms-header-find" role="search">
+        <button type="button"
+                class="ms-button ms-btn-icon ms-find-toggle"
+                popovertarget="ms-find-popover"
+                aria-label="Find by id"
+                title="Find by id (/)">
+            <svg class="ms-find-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="7.5" cy="7.5" r="4.75" />
+                <path d="m11 11 4.5 4.5" />
+            </svg>
+        </button>
+
+        <div id="ms-find-popover" popover="auto" class="ms-popover ms-find-popover">
+            <div class="ms-find">
+                <input @ref="input"
+                       id="ms-find-input"
+                       type="search"
+                       class="ms-input ms-find-input"
+                       placeholder="Find by id (/)"
+                       aria-label="Find by id"
+                       aria-describedby="ms-find-hint"
+                       autocomplete="off"
+                       spellcheck="false"
+                       enterkeyhint="search" />
+                <span id="ms-find-hint" class="ms-sr-only">A document or stream id, a natural key, #sequence, a table name or a queryid</span>
+
+                @* Always in the DOM and changing its text, which is what makes a polite live region announce. *@
+                <div class="ms-find-status" role="status" aria-live="polite">@StatusText</div>
+
+                @if (busy)
+                {
+                    <p class="ms-find-busy">Searching@(searchingIn is null ? string.Empty : " " + searchingIn)…</p>
+                }
+                else if (error is not null)
+                {
+                    <p class="ms-find-note ms-find-error">@error</p>
+                }
+                else if (result is not null)
+                {
+                    <div class="ms-find-panel" data-ms-find-panel>
+                        @if (result.Refusal is not null)
+                        {
+                            <p class="ms-find-note">@result.Refusal</p>
+                        }
+                        else if (result.Found)
+                        {
+                            @foreach (IGrouping<string, FindHit> group in result.Hits.GroupBy(static x => x.Kind))
+                            {
+                                <div class="ms-find-group" @key="group.Key">
+                                    <p class="ms-find-group-title">@group.Key</p>
+                                    <ul class="ms-find-hits">
+                                        @foreach (FindHit hit in group)
+                                        {
+                                            <li @key="hit.Key">
+                                                <a class="ms-find-hit" href="@hit.Url">
+                                                    <span class="ms-find-hit-title">@hit.Title</span>
+                                                    @if (hit.TenantChip is not null)
+                                                    {
+                                                        <span class="ms-chip ms-find-chip">@hit.TenantChip</span>
+                                                    }
+                                                    @if (hit.Mark is not null)
+                                                    {
+                                                        <span class="ms-chip ms-chip-warning ms-find-chip">@hit.Mark</span>
+                                                    }
+                                                    @if (hit.Detail is not null)
+                                                    {
+                                                        <span class="ms-find-hit-detail">@hit.Detail</span>
+                                                    }
+                                                </a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            @if (result.HitsOmitted > 0)
+                            {
+                                <p class="ms-find-note">and @result.HitsOmitted more not shown. Narrow the value to see them.</p>
+                            }
+                        }
+                        else
+                        {
+                            <p class="ms-find-note">Nothing in @Where(result.Scope) matched "@result.Value".</p>
+                        }
+
+                        @if (result.Refusal is null)
+                        {
+                            @if (result.Searched.Count > 0)
+                            {
+                                <p class="ms-find-note">Searched: @string.Join(", ", result.Searched).</p>
+                            }
+                            @foreach (string note in result.Notes)
+                            {
+                                <p class="ms-find-note">@note</p>
+                            }
+                            @if (!result.Found && OtherStores.Count > 0)
+                            {
+                                <div class="ms-find-other" role="group" aria-label="Search in another store">
+                                    <span class="ms-find-other-label">Search in</span>
+                                    @foreach (StoreListing store in OtherStores)
+                                    {
+                                        <button type="button" class="ms-button ms-find-other-store" @key="store.Key" @onclick="() => SearchInAsync(store)">@store.DisplayName</button>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>The most other stores the panel offers.</summary>
+    private const int MaxOtherStores = 8;
+
+    private ElementReference input;
+    private DotNetObjectReference<FindBox>? reference;
+    private FindResult? result;
+    private string? error;
+    private string? searchingIn;
+    private string lastValue = string.Empty;
+    private bool busy;
+    private bool enhanced;
+    private bool disposed;
+    private bool subscribed;
+
+    private string StatusText
+    {
+        get
+        {
+            if (busy || error is not null || result is null)
+            {
+                return string.Empty;
+            }
+
+            if (result.Refusal is not null)
+            {
+                return result.Refusal;
+            }
+
+            return result.Found ? (result.Hits.Count == 1 ? "1 result" : $"{result.Hits.Count} results") : "Nothing found";
+        }
+    }
+
+    /// <summary>The other stores the visitor may select, at most eight, shown when nothing was found where they looked.</summary>
+    private IReadOnlyList<StoreListing> OtherStores =>
+        result is null
+            ? []
+            : [.. State.AvailableStores
+                .Where(x => x.Availability.IsAvailable && !string.Equals(x.Key, result.Scope.StoreKey, StringComparison.OrdinalIgnoreCase))
+                .Take(MaxOtherStores)];
+
+    protected override void OnInitialized()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+        subscribed = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Never in prerender (there is no circuit, so no interop) and not before the field exists: the box is drawn only once a scope is.
+        if (enhanced || disposed || !Finder.IsAvailable || State.ActiveScope is null)
+        {
+            return;
+        }
+
+        try
+        {
+            reference ??= DotNetObjectReference.Create(this);
+            enhanced = await JsRuntime.InvokeAsync<bool>("martenStudio.find.enhance", new object?[] { input, reference });
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            // The circuit went away, or there is none yet. The box is on the page; Enter simply does nothing until the script is there.
+        }
+    }
+
+    /// <summary>Enter in the box, with the field's live text. Called by script.</summary>
+    /// <param name="value">What the visitor typed.</param>
+    [JSInvokable]
+    public Task FindAsync(string value) => RunAsync(State.ActiveScope, value, null);
+
+    /// <summary>Escape in the box or on a result: the panel goes, the text and the focus stay. Called by script.</summary>
+    [JSInvokable]
+    public async Task CloseAsync()
+    {
+        Finder.Cancel();
+        result = null;
+        error = null;
+        busy = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task SearchInAsync(StoreListing store)
+    {
+        // The store's first database, which the resolver matches for an empty id; no tenant.
+        return RunAsync(new StudioScope(store.Key, string.Empty, null), lastValue, store.DisplayName);
+    }
+
+    private async Task RunAsync(StudioScope? scope, string value, string? where)
+    {
+        if (scope is null || disposed)
+        {
+            return;
+        }
+
+        lastValue = value ?? string.Empty;
+        busy = true;
+        error = null;
+        result = null;
+        searchingIn = where;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            FindResult found = await Finder.FindAsync(scope, lastValue);
+            if (disposed)
+            {
+                return;
+            }
+
+            result = found;
+            busy = false;
+
+            // The one hit, in the scope already on screen: open it. In any other scope it is a link the visitor clicks, because the shell
+            // follows a clicked link's scope and never a pushed one's.
+            if (found.Hits.Count == 1 && SameScope(found.Hits[0].Scope, State.ActiveScope))
+            {
+                Navigation.NavigateTo(found.Hits[0].Url);
+                await DismissAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A newer Find, or the box going away, owns the panel now.
+            return;
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            return;
+        }
+        catch (Exception e)
+        {
+            Logger.LogDebug(e, "Find could not search for '{Value}'", StudioLogValue.Cap(lastValue));
+            busy = false;
+            error = "Find could not complete. Try again.";
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DismissAsync()
+    {
+        try
+        {
+            await JsRuntime.InvokeVoidAsync("martenStudio.find.dismiss");
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+        }
+    }
+
+    private async Task OnScopeChangedAsync()
+    {
+        // What was found was found in another scope.
+        Finder.Cancel();
+        result = null;
+        error = null;
+        busy = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static bool SameScope(StudioScope hit, StudioScope? active) =>
+        active is not null
+        && string.Equals(hit.StoreKey, active.StoreKey, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(hit.DatabaseId, active.DatabaseId, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(hit.TenantId, active.TenantId, StringComparison.Ordinal);
+
+    private string Where(StudioScope scope)
+    {
+        StoreListing? store = State.AvailableStores.FirstOrDefault(x => string.Equals(x.Key, scope.StoreKey, StringComparison.OrdinalIgnoreCase));
+        string name = store?.DisplayName ?? scope.StoreKey;
+
+        if (State.ActiveScope is { } active && string.Equals(active.StoreKey, scope.StoreKey, StringComparison.OrdinalIgnoreCase))
+        {
+            DatabaseListing? database = State.AvailableDatabases.FirstOrDefault(x => string.Equals(x.Identity, scope.DatabaseId, StringComparison.OrdinalIgnoreCase));
+            if (database is not null)
+            {
+                name += " › " + database.Name;
+            }
+
+            name += scope.TenantId is { Length: > 0 } tenant ? $" (tenant {tenant})" : " (all tenants)";
+        }
+
+        return name;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+
+        if (subscribed)
+        {
+            State.ScopeChanged -= OnScopeChangedAsync;
+        }
+
+        Finder.Cancel();
+
+        if (enhanced)
+        {
+            try
+            {
+                await JsRuntime.InvokeVoidAsync("martenStudio.find.release", new object?[] { input });
+            }
+            catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+            {
+                // The circuit is gone; so is the field.
+            }
+        }
+
+        reference?.Dispose();
+        reference = null;
+    }
+}

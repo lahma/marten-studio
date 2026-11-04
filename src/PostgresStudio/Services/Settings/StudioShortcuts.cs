@@ -37,13 +37,14 @@ internal static class StudioShortcuts
 {
     /// <summary>The group of keys that work wherever focus is.</summary>
     /// <remarks>
-    /// The shell-wide find (<c>/</c>) and the command search (<c>Ctrl+K</c>) that the scope packet adds are appended to this group
-    /// by that packet, with their handler; they are not listed before they exist.
+    /// Find by id (<c>/</c> and <c>Ctrl+K</c>, 1.2-SCOPE-3) is a document-level handler in studio.js, like <c>?</c>: it is ignored
+    /// while typing in a field and while a dialog is open. A JSON viewer row that has focus answers <c>/</c> itself.
     /// </remarks>
     public static StudioShortcutGroup Anywhere { get; } = new(
         "Anywhere",
         [
             new StudioShortcut("?", "Show this list (not while typing in a field)"),
+            new StudioShortcut(["/", "Ctrl+K"], "Find by id: go to the header's box (Cmd+K on a Mac; not while typing in a field)"),
             new StudioShortcut("Esc", "Close this list, or cancel the open dialog"),
         ]);
 

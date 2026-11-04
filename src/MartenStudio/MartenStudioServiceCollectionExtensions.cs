@@ -7,6 +7,7 @@ using MartenStudio.Services.Configuration;
 using MartenStudio.Services.Connection;
 using MartenStudio.Services.Documents;
 using MartenStudio.Services.Events;
+using MartenStudio.Services.Find;
 using MartenStudio.Services.Health;
 using MartenStudio.Services.Health.Checks;
 using MartenStudio.Services.Live;
@@ -15,6 +16,7 @@ using MartenStudio.Services.Query;
 using MartenStudio.Services.Schema;
 using MartenStudio.Services.Shapes;
 using PostgresStudio.Services.Connection;
+using PostgresStudio.Services.Find;
 using PostgresStudio.Services.Query;
 using PostgresStudio.Services.Settings;
 using PostgresStudio.Services.Sources;
@@ -151,6 +153,14 @@ public static partial class MartenStudioServiceCollectionExtensions
         // 1.2-H-C: E06's on-demand action, "Find the 20 longest streams". The runner and its flights are PostgresStudio's
         // (StudioCoreRegistration); a finding offers an action only if one is registered here.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHealthFindingAction, LongestStreamsAction>());
+
+        // 1.2-SCOPE-3: Find by id, in Marten's terms. Each kind asks the data service of the page its hit opens (documents, streams and
+        // natural keys, event sequences), so every probe runs under that page's gates; the scoped helper reads the event store's shape
+        // once per Find and asks the store policy about the tenants a hit names.
+        services.TryAddScoped<IFindEventScopes, FindEventScopes>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, DocumentFindContributor>());
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, StreamFindContributor>());
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, EventSequenceFindContributor>());
 
         // 1.1-NP4: "How Marten uses this connection" on Database > Connection. The data-source registry captures this collection and
         // scans it lazily, like the store registry: AddMartenStudio() is routinely called before AddNpgsqlDataSource().

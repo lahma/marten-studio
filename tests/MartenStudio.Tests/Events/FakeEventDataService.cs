@@ -36,6 +36,12 @@ internal sealed partial class FakeEventDataService : IEventDataService
     /// <summary>What the streams list answers.</summary>
     public StreamPage Streams { get; set; } = StreamPage.Empty;
 
+    /// <summary>What a streams list asked for one stream id answers, whatever the id, when set: the rows of every tenant that holds it.</summary>
+    public IReadOnlyList<StreamRow>? StreamsForId { get; set; }
+
+    /// <summary>The scope of every streams list, newest last.</summary>
+    public List<StudioScope> StreamRequestScopes { get; } = [];
+
     /// <summary>What the stream header answers, by stream id.</summary>
     public Dictionary<string, StreamState> StreamStates { get; } = new(StringComparer.Ordinal);
 
@@ -169,6 +175,13 @@ internal sealed partial class FakeEventDataService : IEventDataService
         CancellationToken cancellationToken = default)
     {
         StreamRequests.Add(request);
+        StreamRequestScopes.Add(scope);
+
+        if (request.StreamId is { Length: > 0 } && StreamsForId is not null)
+        {
+            // Find by id (1.2): the same id can be a stream in more than one tenant.
+            return Task.FromResult(new StreamPage(StreamsForId, null, false));
+        }
 
         if (request.StreamId is { Length: > 0 } id)
         {

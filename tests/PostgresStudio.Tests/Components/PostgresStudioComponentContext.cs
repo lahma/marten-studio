@@ -109,6 +109,9 @@ internal sealed class PostgresStudioComponentContext : BunitContext
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
 
+        // 1.2-SCOPE-3: the header's Find box. No contributor is registered, so the box is not drawn; a test that wants it adds its own.
+        Services.AddSingleton<PostgresStudio.Services.Find.FindService>();
+
         Services.AddSingleton(static provider =>
         {
             StudioState state = ActivatorUtilities.CreateInstance<StudioState>(provider);

@@ -457,6 +457,9 @@
             return field.tagName !== "INPUT" || nonText.indexOf((field.getAttribute("type") || "text").toLowerCase()) < 0;
         }
 
+        // Shared with Find's `/` and Ctrl+K (below): the same question, so the two never disagree about where a key is a character.
+        window.martenStudio.isTypingTarget = isTyping;
+
         document.addEventListener("keydown", function (event) {
             if (event.key !== "?" || event.ctrlKey || event.altKey || event.metaKey || event.defaultPrevented || event.isComposing) {
                 return;
@@ -481,6 +484,225 @@
         });
 
         return {};
+    })();
+
+    // Find by id (1.2). `/` and Ctrl+K (Cmd+K) focus the header's box, opening it first when it is the narrow screens' popover; Enter in
+    // the box, Escape, and the arrow keys through the results are answered here too, so typing costs no round trip and a key is never
+    // routed through the circuit. One document-level listener, registered once at load: it needs no .NET. Like `?` it is ignored where
+    // the key is a character being typed (a text field, a textarea, a select, anything contenteditable, an ARIA textbox, the JSON
+    // editor) and while a dialog is open.
+    window.martenStudio.find = window.martenStudio.find || (function () {
+        const hitSelector = ".ms-find-panel a.ms-find-hit";
+
+        function input() {
+            return document.getElementById("ms-find-input");
+        }
+
+        function popover() {
+            return document.getElementById("ms-find-popover");
+        }
+
+        function isShown(element) {
+            return !!element && element.getClientRects().length > 0;
+        }
+
+        function popoverIsOpen(element) {
+            try {
+                return !!element && element.matches(":popover-open");
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function call(ref, method, argument) {
+            try {
+                const pending = argument === undefined ? ref.invokeMethodAsync(method) : ref.invokeMethodAsync(method, argument);
+                if (pending && typeof pending.catch === "function") {
+                    pending.catch(function () { });
+                }
+            } catch (e) {
+                // The circuit is gone; there is nothing to tell.
+            }
+        }
+
+        function focusBox() {
+            const field = input();
+            if (!field) {
+                return false;
+            }
+
+            const pop = popover();
+            if (pop && !isShown(field) && typeof pop.showPopover === "function" && !popoverIsOpen(pop)) {
+                try {
+                    pop.showPopover();
+                } catch (e) {
+                    // A browser without popovers has no collapsed box either.
+                }
+            }
+
+            if (!isShown(field)) {
+                return false;
+            }
+
+            field.focus();
+            try {
+                field.select();
+            } catch (e) {
+                // A field that cannot select is still focused.
+            }
+
+            return true;
+        }
+
+        function hits() {
+            return Array.prototype.slice.call(document.querySelectorAll(hitSelector));
+        }
+
+        function panelOpen() {
+            return !!document.querySelector("[data-ms-find-panel], .ms-find-busy, .ms-find-error");
+        }
+
+        document.addEventListener("keydown", function (event) {
+            if (event.defaultPrevented || event.isComposing || event.altKey) {
+                return;
+            }
+
+            const slash = event.key === "/" && !event.ctrlKey && !event.metaKey;
+            const chord = (event.key === "k" || event.key === "K") && (event.ctrlKey || event.metaKey) && !event.shiftKey;
+            if (!slash && !chord) {
+                return;
+            }
+
+            if (window.martenStudio.isTypingTarget(event.target) || document.querySelector("dialog[open]")) {
+                return;
+            }
+
+            // In the JSON viewer a row that has focus answers `/` itself (to its search box); Ctrl+K still reaches Find from there.
+            if (slash && event.target && typeof event.target.closest === "function" && event.target.closest("[role='tree']")) {
+                return;
+            }
+
+            if (focusBox()) {
+                event.preventDefault();
+            }
+        });
+
+        // Arrow keys through the results; Escape on a result puts the focus back in the box and closes the panel.
+        document.addEventListener("keydown", function (event) {
+            const target = event.target;
+            const link = target && typeof target.closest === "function" ? target.closest(hitSelector) : null;
+            if (!link || event.isComposing || event.ctrlKey || event.metaKey || event.altKey) {
+                return;
+            }
+
+            const all = hits();
+            const at = all.indexOf(link);
+            const field = input();
+
+            if (event.key === "ArrowDown") {
+                event.preventDefault();
+                if (at >= 0 && at < all.length - 1) {
+                    all[at + 1].focus();
+                }
+            } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                if (at > 0) {
+                    all[at - 1].focus();
+                } else if (field) {
+                    field.focus();
+                }
+            } else if (event.key === "Escape" && field) {
+                event.preventDefault();
+                field.focus();
+                if (field.msFindRef) {
+                    call(field.msFindRef, "CloseAsync");
+                }
+            }
+        });
+
+        // Following a result inside the narrow screens' popover closes it; the click itself is left alone for the router.
+        document.addEventListener("click", function (event) {
+            const target = event.target;
+            if (target && typeof target.closest === "function" && target.closest(hitSelector)) {
+                const pop = popover();
+                if (popoverIsOpen(pop) && typeof pop.hidePopover === "function") {
+                    try {
+                        pop.hidePopover();
+                    } catch (e) {
+                        // Already closed.
+                    }
+                }
+            }
+        });
+
+        return {
+            /*
+             * Enter in the box sends its live text to the component's [JSInvokable] FindAsync; Escape, while a panel is showing,
+             * closes it with CloseAsync and keeps the text and the focus (a second Escape is the browser's own: it closes the
+             * popover); ArrowDown moves to the first result. Idempotent per element, like enhanceRunField.
+             */
+            enhance: function (field, dotNetRef) {
+                if (!field || !dotNetRef) {
+                    return false;
+                }
+
+                field.msFindRef = dotNetRef;
+                if (field.msFindHandlers) {
+                    return true;
+                }
+
+                const onKeyDown = function (event) {
+                    if (event.isComposing) {
+                        return;
+                    }
+
+                    if (event.key === "Enter") {
+                        event.preventDefault();
+                        call(field.msFindRef, "FindAsync", field.value);
+                    } else if (event.key === "Escape" && panelOpen()) {
+                        event.preventDefault();
+                        call(field.msFindRef, "CloseAsync");
+                    } else if (event.key === "ArrowDown") {
+                        const first = hits()[0];
+                        if (first) {
+                            event.preventDefault();
+                            first.focus();
+                        }
+                    }
+                };
+
+                field.addEventListener("keydown", onKeyDown);
+                field.msFindHandlers = { keydown: onKeyDown };
+                return true;
+            },
+
+            release: function (field) {
+                if (!field || !field.msFindHandlers) {
+                    return false;
+                }
+
+                field.removeEventListener("keydown", field.msFindHandlers.keydown);
+                delete field.msFindHandlers;
+                delete field.msFindRef;
+                return true;
+            },
+
+            /* Closes the narrow screens' popover after the box opened a result by itself. */
+            dismiss: function () {
+                const pop = popover();
+                if (popoverIsOpen(pop) && typeof pop.hidePopover === "function") {
+                    try {
+                        pop.hidePopover();
+                    } catch (e) {
+                        // Already closed.
+                    }
+                }
+
+                return true;
+            },
+
+            focus: focusBox
+        };
     })();
 
     // The JSON viewer has one copy menu for every row, so the stylesheet cannot name its anchor the way a

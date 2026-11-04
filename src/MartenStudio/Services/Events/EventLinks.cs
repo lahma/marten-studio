@@ -102,6 +102,17 @@ internal static class EventLinks
         To(options, StreamDetailRoute, scope, [new("id", streamId)]);
 
     /// <summary>
+    /// A link to one stream's detail page at one of its events (1.2, Find by id): <c>events/streams/s?id=&amp;v=</c>, which the page
+    /// selects and scrolls to. The version is the event's own within the stream.
+    /// </summary>
+    /// <param name="options">The studio's options.</param>
+    /// <param name="scope">The scope to carry.</param>
+    /// <param name="streamId">The stream.</param>
+    /// <param name="version">The event's version in the stream.</param>
+    public static string ToStreamAt(MartenStudioOptions options, StudioScope? scope, string streamId, long version) =>
+        To(options, StreamDetailRoute, scope, [new("id", streamId), new("v", Number(version))]);
+
+    /// <summary>
     /// A link to the stepper: the stream, the aggregate type, the step and the watched path all in the query string, so a
     /// pasted link reopens the same step (D9).
     /// </summary>

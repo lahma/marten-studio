@@ -134,6 +134,9 @@ internal class StudioComponentContext : BunitContext
         Services.AddSingleton<AuthenticationStateProvider>(AuthenticationState);
         Services.AddSingleton<StudioAuthorization>();
 
+        // 1.2-SCOPE-3: the header's Find box. No contributor is registered, so the box is not drawn; a test that wants it adds its own.
+        Services.AddSingleton<PostgresStudio.Services.Find.FindService>();
+
         // The time zone is pinned here rather than by resolving the state in this constructor: bUnit
         // seals its service provider the moment anything is resolved from it, and a derived context - one
         // per area, each with its own fake data service - has to be able to add services after this

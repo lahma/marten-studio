@@ -1,6 +1,7 @@
 using PostgresStudio.Internal;
 using PostgresStudio.Internal.Sql;
 using PostgresStudio.Services.Database;
+using PostgresStudio.Services.Find;
 using PostgresStudio.Services.Health;
 using PostgresStudio.Services.Health.Checks;
 using PostgresStudio.Services.Live;
@@ -225,5 +226,12 @@ internal static class StudioCoreRegistration
 
         // 1.2-H-B: "Compare with an earlier snapshot". The visitor's gate first, then the file; no logger, no audit, no cache.
         services.TryAddScoped<Diagnostics.ISnapshotCompareService, Diagnostics.SnapshotCompareService>();
+
+        // 1.2-SCOPE-3: Find by id, the header's box. The service is the circuit's (one Find at a time, a newer one cancelling the one
+        // in flight); each kind is a contributor that asks the service of the page its hit opens, under that page's gates. These two
+        // are PostgresStudio's own; a studio adds its kinds beside them with TryAddEnumerable, and a studio with none draws no box.
+        services.TryAddScoped<FindService>();
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, RelationFindContributor>());
+        services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, StatementFindContributor>());
     }
 }

@@ -115,6 +115,11 @@ public class StudioRegistrationTests
         (typeof(IHealthActionService), ServiceLifetime.Scoped, How.Type, typeof(HealthActionService)),
         (typeof(IHealthFindingAction), ServiceLifetime.Scoped, How.Type, typeof(ForeignKeyWhatIfAction)),
         (typeof(IHealthFindingAction), ServiceLifetime.Scoped, How.Type, typeof(SequentialScanWhatIfAction)),
+
+        // 1.2-SCOPE-3: Find by id - the circuit's service and Postgres Studio's own two kinds.
+        (typeof(PostgresStudio.Services.Find.FindService), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Find.FindService)),
+        (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Find.RelationFindContributor)),
+        (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Find.StatementFindContributor)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceFacts), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.MaintenanceFactsReader)),
         (typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights), ServiceLifetime.Singleton, How.Type, typeof(PostgresStudio.Services.Maintenance.BloatMeasureFlights)),
         (typeof(PostgresStudio.Services.Maintenance.IMaintenanceNameGate), ServiceLifetime.Scoped, How.Type, typeof(PostgresStudio.Services.Maintenance.DatabaseAccessNameGate)),
@@ -176,6 +181,12 @@ public class StudioRegistrationTests
 
         // 1.2-H-C: E06's on-demand action, the one finding action 1.2 registers.
         (typeof(IHealthFindingAction), ServiceLifetime.Singleton, How.Type, typeof(MartenStudio.Services.Health.LongestStreamsAction)),
+
+        // 1.2-SCOPE-3: Find by id, in Marten's terms - three kinds and the helper they share.
+        (typeof(MartenStudio.Services.Find.IFindEventScopes), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.FindEventScopes)),
+        (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.DocumentFindContributor)),
+        (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.StreamFindContributor)),
+        (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.EventSequenceFindContributor)),
 
         // 1.1-NP4: "How Marten uses this connection" - the data-source registry, the deeper checks' average sizes and the contributor.
         (typeof(MartenDataSourceRegistry), ServiceLifetime.Singleton, How.Instance, typeof(MartenDataSourceRegistry)),

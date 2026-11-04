@@ -136,6 +136,9 @@ tests/MartenStudio.Tests/Documents/       Document service unit tests - no datab
 tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document write path end to end
 src/MartenStudio/Services/Tenants/        The Tenants overview's service (TenantOverviewService), its models and TenantBoundText:
                                          read-only, statistics only, activity-gated
+src/MartenStudio/Services/Find/           Find by id's Marten kinds (1.2-SCOPE-3): the document, stream and natural-key, and event-sequence
+                                         contributors, each asking the data service of the page its hit opens, and the helper that reads
+                                         the event store's shape once per Find
 src/MartenStudio/Services/Shapes/         The shape check's core (1.2-SHAPE): sampler limits and cache, the round-trip classifier, the
                                          failure describer, the aggregator and the sentences; the documents' check service
 src/MartenStudio/Components/Shapes/       The shape check's panels and the findings table
@@ -293,6 +296,9 @@ tests/PostgresStudio.Integration.Tests/Aurora/  Live on VERS's Aurora shim: the 
                                          failover, the not-applicable checks, C03's remedy and the spoof-proof markers
 src/PostgresStudio.Diagnostics/Services/Statements/  The Statements page's facts (the statement sweep's own read and history), the plain classifier,
                                          the page's route and the words for pg_stat_statements' state (W5-Q1)
+src/PostgresStudio/Services/Find/         Find by id (1.2-SCOPE-3): the typed value's parser (FindQuery), the seam (IFindContributor), the
+                                         circuit's service (FindService: one Find at a time, a 10 s budget) and Postgres Studio's own
+                                         kinds, tables and views and statement queryids
 src/PostgresStudio/Services/Statements/   The Statements page's per-visitor view behind the activity gate, and the drill-in's planner
 src/PostgresStudio/Components/Pages/Statements/  Operations › Statements: the top statements by total time, and by group,
                                          and one statement's drill-in

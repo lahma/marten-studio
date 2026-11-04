@@ -16361,3 +16361,226 @@ dialog.ms-modal::backdrop {
         border-width: 0;
     }
 }
+
+/* ===== 1.2-FIND find by id ===== */
+
+/* The header's Find box (SCOPE-3). One markup at every width: from 1024 px the box sits in the header between the scope and the actions;
+   below it the header shows a magnifier and the box is the native popover it names, on the preferences gear's pattern. A popover is
+   `display: none` until it opens, and an author rule beats that, which is how the same element is a header field on a laptop and a
+   popover on a phone. A later rule of an earlier selector wins on purpose (D26). */
+.ms-header-find {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 26rem;
+    margin-inline: var(--ms-space-md);
+}
+
+.ms-find-toggle {
+    display: none;
+    flex-shrink: 0;
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-find-toggle:hover {
+    color: var(--ms-color-text);
+}
+
+.ms-find-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.ms-find {
+    position: relative;
+    width: 100%;
+}
+
+.ms-find-input {
+    width: 100%;
+}
+
+/* The live region is for the screen reader: the panel says the same in words. */
+.ms-find-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+.ms-find-panel,
+.ms-find-busy,
+.ms-find-error {
+    margin: var(--ms-space-xs) 0 0;
+    padding: var(--ms-space-sm);
+    border: 1px solid var(--ms-color-border);
+    border-radius: var(--ms-radius-lg);
+    background: var(--ms-color-surface);
+    color: var(--ms-color-text);
+    box-shadow: var(--ms-shadow-lg);
+    font-size: var(--ms-font-size-sm);
+}
+
+.ms-find-panel {
+    max-height: min(28rem, 70vh);
+    overflow: auto;
+}
+
+.ms-find-busy {
+    color: var(--ms-color-text-secondary);
+}
+
+.ms-find-note {
+    margin: 0 0 var(--ms-space-xs);
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+.ms-find-error {
+    color: var(--ms-color-danger);
+}
+
+.ms-find-group + .ms-find-group {
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-find-group-title {
+    margin: 0 0 2px;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    font-weight: var(--ms-font-weight-semibold);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ms-find-hits {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.ms-find-hit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px var(--ms-space-sm);
+    padding: var(--ms-space-xs) var(--ms-space-sm);
+    border-radius: var(--ms-radius-md);
+    color: var(--ms-color-text);
+    text-decoration: none;
+}
+
+.ms-find-hit:hover,
+.ms-find-hit:focus-visible {
+    background: var(--ms-color-surface-hover);
+}
+
+.ms-find-hit-title {
+    font-family: var(--ms-font-mono);
+    overflow-wrap: anywhere;
+}
+
+.ms-find-chip {
+    flex-shrink: 0;
+}
+
+.ms-find-hit-detail {
+    flex: 1 0 100%;
+    color: var(--ms-color-text-muted);
+    font-size: var(--ms-font-size-xs);
+    overflow-wrap: anywhere;
+}
+
+.ms-find-other {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--ms-space-xs);
+    margin-top: var(--ms-space-sm);
+}
+
+.ms-find-other-label {
+    color: var(--ms-color-text-secondary);
+    font-size: var(--ms-font-size-xs);
+}
+
+@media (min-width: 1024px) {
+    .ms-popover.ms-find-popover,
+    .ms-popover.ms-find-popover:popover-open {
+        display: block;
+        position: static;
+        inset: auto;
+        width: 100%;
+        max-width: none;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        overflow: visible;
+        border: 0;
+        background: transparent;
+        box-shadow: none;
+    }
+
+    .ms-find-panel,
+    .ms-find-busy,
+    .ms-find-error {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 30;
+    }
+}
+
+@media (max-width: 1023.98px) {
+    .ms-header-find {
+        flex: 0 0 auto;
+        margin-inline: 0;
+    }
+
+    .ms-find-toggle {
+        display: inline-flex;
+    }
+
+    .ms-popover.ms-find-popover:popover-open {
+        position: fixed;
+        inset: var(--ms-space-sm) var(--ms-space-md) auto var(--ms-space-md);
+        position-anchor: auto;
+        width: min(34rem, calc(100vw - 2 * var(--ms-space-md)));
+        max-width: none;
+        max-height: calc(100vh - 2 * var(--ms-space-md));
+        margin: 0 auto;
+        overflow: auto;
+    }
+
+    .ms-find-panel,
+    .ms-find-busy,
+    .ms-find-error {
+        position: static;
+        box-shadow: none;
+    }
+}
+
+/* On a phone the header is two rows (HEADER): the magnifier joins the second, beside the environment and the actions. With the rail
+   taking 72 px of a 390 px screen, the badge, the magnifier and the four actions need their gaps at the small step to fit one row. */
+@media (max-width: 720px) {
+    .ms-header {
+        column-gap: var(--ms-space-xs);
+        padding-inline: var(--ms-space-sm);
+    }
+
+    .ms-header .ms-header-find {
+        order: 2;
+    }
+
+    .ms-header .ms-header-right {
+        gap: var(--ms-space-xs);
+    }
+}

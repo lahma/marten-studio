@@ -321,6 +321,147 @@ internal sealed partial class DocumentDataService
         return probes;
     }
 
+    /// <summary>How many tenants one find hit names before it says how many more there are.</summary>
+    internal const int MaxFindTenantsShown = 5;
+
+    /// <inheritdoc />
+    public async Task<DocumentFindResult> FindByIdAsync(StudioScope scope, string value, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(value);
+
+        ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
+
+        // The scope as the resolver matched it - the registered key and the database's own identity - which is what a policy is
+        // asked about a tenant and what a link carries, however the visitor spelled either.
+        StudioScope concrete = new(resolved.Registration.Key, resolved.Database.Id.Identity, resolved.TenantId);
+
+        List<DocumentFindHit> hits = [];
+        int visible = 0;
+        int partitionedSkipped = 0;
+        int probed = 0;
+        bool limited = false;
+
+        await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(resolved.Database, ConnectionUsage.Read);
+        await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
+
+        foreach (IDocumentType documentType in VisibleDocumentTypes(resolved.Store))
+        {
+            visible++;
+
+            // Nothing partitioned by tenant is probed while no tenant is selected: one probe would plan, and lock, every tenant's
+            // partition and its index - thousands of locks in the shared table on a store with thousands of tenants (D27).
+            if (resolved.TenantId is null && StoreTenancy.IsTenantPartitioned(documentType))
+            {
+                partitionedSkipped++;
+                continue;
+            }
+
+            if (probed >= MaxIdProbes)
+            {
+                limited = true;
+                continue;
+            }
+
+            DocumentTableInfo table = DocumentTableInfo.FromDocumentType(documentType)
+                .WithPhysicalColumns(await columnCatalog
+                    .GetAsync(connection, documentType.TableName.Schema, documentType.TableName.Name, cancellationToken)
+                    .ConfigureAwait(false));
+
+            if (!DocumentQueryBuilder.TryBuildFind(table, value, resolved.TenantId, CommandTimeoutSeconds, out NpgsqlCommand? command, out DocumentFindShape shape))
+            {
+                continue;
+            }
+
+            probed++;
+
+            List<DocumentFindRow> rows = [];
+
+            try
+            {
+                await using (command)
+                {
+                    command.Connection = connection;
+
+                    await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+                    while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        int at = 1;
+                        string? tenant = shape.Tenant ? reader.GetString(at++) : null;
+                        string? discriminator = null;
+                        if (shape.Type)
+                        {
+                            discriminator = reader.IsDBNull(at) ? null : reader.GetString(at);
+                            at++;
+                        }
+
+                        bool deleted = shape.Deleted && !reader.IsDBNull(at) && reader.GetBoolean(at);
+
+                        rows.Add(new DocumentFindRow(tenant, SubclassName(documentType, discriminator), deleted));
+                    }
+                }
+            }
+            catch (PostgresException exception)
+            {
+                if (logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(exception, "Marten Studio could not probe '{Alias}' for an id", table.Alias);
+                }
+
+                continue;
+            }
+
+            if (rows.Count == 0)
+            {
+                continue;
+            }
+
+            bool maybeMore = rows.Count >= DocumentQueryBuilder.FindLimit;
+
+            // Every tenant a hit names is one the store policy admits for this database; a refused one is dropped and never counted.
+            // With no store policy nothing is asked (StudioAuthorization.FilterAsync).
+            List<DocumentFindRow> admitted = shape.Tenant
+                ? await authorization
+                    .FilterAsync(rows, x => concrete with { TenantId = x.TenantId }, take: null, cancellationToken)
+                    .ConfigureAwait(false)
+                : rows;
+
+            if (admitted.Count == 0)
+            {
+                continue;
+            }
+
+            hits.Add(new DocumentFindHit(
+                table.Alias,
+                CollectionColorizer.HueFor(table.Alias),
+                value,
+                [.. admitted.Take(MaxFindTenantsShown)],
+                Math.Max(admitted.Count - MaxFindTenantsShown, 0),
+                maybeMore));
+        }
+
+        return new DocumentFindResult(hits, visible, partitionedSkipped, limited, concrete);
+    }
+
+    /// <summary>The name of the subclass a row is, or <see langword="null" /> for the collection's own type or an alias nothing claims.</summary>
+    private static string? SubclassName(IDocumentType documentType, string? discriminator)
+    {
+        if (string.IsNullOrWhiteSpace(discriminator) || string.Equals(discriminator, documentType.Alias, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        try
+        {
+            Type type = documentType.TypeFor(discriminator);
+            return type == documentType.DocumentType ? null : type.Name;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Whether one id is in one collection, in the cheapest read Postgres will accept.</summary>
     /// <remarks>
     /// <c>select 1 … limit 1</c> rather than a one-row list: the list's select list carries

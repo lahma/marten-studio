@@ -133,6 +133,17 @@ internal interface IDocumentDataService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Find by id (1.2): which visible collections hold <paramref name="value" />, on one connection, with the tenants (that the store
+    /// policy admits), the subclass and the soft-delete flag of each row. The probe is <c>ProbeIdAsync</c>'s loop - the same visibility
+    /// gate, the same 25-collection bound - plus a tenant-partitioned collection is not probed while no tenant is selected. The scope is
+    /// resolved first, so a refused scope throws as every read of this service does; nothing is audited, because the detail read is not.
+    /// </summary>
+    /// <param name="scope">The store, database and (optionally) tenant.</param>
+    /// <param name="value">What was typed.</param>
+    /// <param name="cancellationToken">Cancels the probes.</param>
+    Task<DocumentFindResult> FindByIdAsync(StudioScope scope, string value, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The <c>_recent</c> pseudo-collection: the most recently modified documents of any type, with the
     /// reason there are no rows when there are none.
     /// </summary>

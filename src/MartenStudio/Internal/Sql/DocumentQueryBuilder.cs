@@ -84,6 +84,12 @@ internal enum DocumentRowLock
     ForUpdate,
 }
 
+/// <summary>Which optional columns a find probe's rows carry after the constant (<see cref="DocumentQueryBuilder.TryBuildFind" />).</summary>
+/// <param name="Tenant">The conjoined collection's <c>tenant_id</c>.</param>
+/// <param name="Type"><c>mt_doc_type</c>, the subclass discriminator.</param>
+/// <param name="Deleted"><c>mt_deleted</c>.</param>
+internal readonly record struct DocumentFindShape(bool Tenant, bool Type, bool Deleted);
+
 /// <summary>
 /// Builds the two document reads: the list and the single document. Every identifier is quoted, every
 /// value is a parameter, and every sort key and column comes from the allow-list that
@@ -520,6 +526,91 @@ internal static class DocumentQueryBuilder
             AppendTenantFilter(sql, table, tenantId, builder);
 
             sql.Append("limit 1");
+
+            built.CommandText = sql.ToString();
+            command = built;
+            return true;
+        }
+        catch
+        {
+            built.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>The most rows one find probe reads: a hit names at most five tenants, and one more shows there are others.</summary>
+    public const int FindLimit = 21;
+
+    /// <summary>
+    /// The find probe (1.2): which rows of a collection have this id, with the tenant, the subclass discriminator and the soft-delete
+    /// flag of each - <c>select 1[, tenant_id][, mt_doc_type][, mt_deleted] from &lt;table&gt; where id = @id [and tenant_id = @tenant]
+    /// limit 21</c>. Each optional column is selected only when the physical table has it (hard rule 10); the tenant predicate is
+    /// <see cref="TryBuildExists" />'s own; the id is a parameter.
+    /// </summary>
+    /// <param name="table">The collection to probe.</param>
+    /// <param name="rawId">The id as typed.</param>
+    /// <param name="tenantId">The tenant in scope, when the collection is conjoined.</param>
+    /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
+    /// <param name="command">The probe, when the id parsed against this collection's id column.</param>
+    /// <param name="shape">Which of the optional columns follow the constant in each row, in that order.</param>
+    public static bool TryBuildFind(
+        DocumentTableInfo table,
+        string rawId,
+        string? tenantId,
+        int commandTimeoutSeconds,
+        [NotNullWhen(true)] out NpgsqlCommand? command,
+        out DocumentFindShape shape)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+
+        var parsed = ParseId(table.IdColumnType, rawId);
+        shape = default;
+
+        if (!parsed.Success)
+        {
+            command = null;
+            return false;
+        }
+
+        string? tenantColumn = table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined
+            ? table.MetadataColumnName(DocumentMetadataColumn.TenantId)
+            : null;
+        string? typeColumn = table.MetadataColumnName(DocumentMetadataColumn.DocumentType);
+        string? deletedColumn = table.MetadataColumnName(DocumentMetadataColumn.IsSoftDeleted);
+
+        shape = new DocumentFindShape(tenantColumn is not null, typeColumn is not null, deletedColumn is not null);
+
+        var built = NewCommand(commandTimeoutSeconds);
+
+        try
+        {
+            var builder = new ParameterBuilder(built);
+            var sql = new StringBuilder("select 1");
+
+            if (tenantColumn is not null)
+            {
+                sql.Append(", ").Append(Column(tenantColumn));
+            }
+
+            if (typeColumn is not null)
+            {
+                sql.Append(", ").Append(Column(typeColumn));
+            }
+
+            if (deletedColumn is not null)
+            {
+                sql.Append(", ").Append(Column(deletedColumn));
+            }
+
+            sql.Append('\n');
+            sql.Append("from ").Append(table.QualifiedName).Append(AsAlias).Append('\n');
+            sql.Append("where ").Append(IdRef).Append(" = ")
+                .Append(builder.Add(DocumentIdColumnTypes.DbType(table.IdColumnType), parsed.Value!, "id"))
+                .Append('\n');
+
+            AppendTenantFilter(sql, table, tenantId, builder);
+
+            sql.Append("limit ").Append(FindLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
             built.CommandText = sql.ToString();
             command = built;

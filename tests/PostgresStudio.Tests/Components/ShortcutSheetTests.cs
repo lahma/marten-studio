@@ -69,7 +69,7 @@ public class ShortcutSheetTests
     }
 
     [Fact]
-    public void The_two_global_keys_come_first_and_every_other_key_names_where_it_works()
+    public void The_global_keys_come_first_and_every_other_key_names_where_it_works()
     {
         IRenderedComponent<ShortcutSheet> sheet = Render(PostgresStudioDescriptor.Instance);
 
@@ -85,6 +85,7 @@ public class ShortcutSheetTests
 
         Does(sheet, "Anywhere").Should().Equal(
             "Show this list (not while typing in a field)",
+            "Find by id: go to the header's box (Cmd+K on a Mac; not while typing in a field)",
             "Close this list, or cancel the open dialog");
     }
 

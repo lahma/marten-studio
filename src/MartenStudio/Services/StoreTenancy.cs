@@ -150,6 +150,17 @@ internal sealed record StoreTenancy(StoreTenancyKind Kind, string Words)
         return (count, partitioned);
     }
 
+    /// <summary>Whether <paramref name="documentType" /> is a conjoined collection partitioned on <c>tenant_id</c> (Marten-managed or declared).</summary>
+    /// <param name="documentType">The collection.</param>
+    internal static bool IsTenantPartitioned(IDocumentType documentType)
+    {
+        ArgumentNullException.ThrowIfNull(documentType);
+
+        return documentType.TenancyStyle == TenancyStyle.Conjoined
+            && documentType is DocumentMapping { Partitioning.Columns: { } columns }
+            && columns.Contains(TenantIdColumn, StringComparer.OrdinalIgnoreCase);
+    }
+
     private static StoreTenancy Custom(ITenancy? tenancy)
     {
         string typeName = tenancy?.GetType().Name ?? "unknown";

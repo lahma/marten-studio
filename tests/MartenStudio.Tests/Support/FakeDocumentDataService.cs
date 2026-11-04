@@ -125,6 +125,21 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
         string id,
         CancellationToken cancellationToken = default) => Task.FromResult(Probes);
 
+    /// <summary>What a find over the collections answers (1.2, Find by id).</summary>
+    public DocumentFindResult FindResult { get; set; } = DocumentFindResult.Empty;
+
+    /// <summary>Every value a find was asked for, with the scope it was asked in.</summary>
+    public List<(StudioScope Scope, string Value)> Finds { get; } = [];
+
+    public Task<DocumentFindResult> FindByIdAsync(
+        StudioScope scope,
+        string value,
+        CancellationToken cancellationToken = default)
+    {
+        Finds.Add((scope, value));
+        return Task.FromResult(FindResult);
+    }
+
     public Task<RecentDocuments> ListRecentAsync(
         StudioScope scope,
         int limit,

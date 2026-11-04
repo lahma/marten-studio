@@ -209,6 +209,9 @@ public class CapabilityGatingMatrixTests
         [
             "CountExactAsync", "GetCollectionsAsync", "GetDocumentAsync", "GetRelatedAsync",
             "ListAsync", "ListRecentAsync", "ProbeIdAsync", "StreamExistsAsync",
+            // 1.2-SCOPE-3: Find by id, an ungated read like ProbeIdAsync - the scope's store policy through the resolver, then each
+            // tenant a hit names asked of that policy; it audits nothing, because the detail read it stands in for does not.
+            "FindByIdAsync",
             // X2: a gated read (GatedReads), behind the Query page's advisor's plan gate.
             "WhatIfAsync",
         ],
