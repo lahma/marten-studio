@@ -119,6 +119,9 @@ public class DriftTabImpactTests
 
         public Task<SchemaIndexes> IndexesAsync(StudioScope scope, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
+        public Task<SchemaIndexDefinition> IndexDefinitionAsync(StudioScope scope, string schema, string table, string name, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<SchemaFunctions> FunctionsAsync(StudioScope scope, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
         public Task<DdlScript> DdlAsync(StudioScope scope, CancellationToken cancellationToken = default) => throw new NotSupportedException();
