@@ -148,13 +148,30 @@ internal static class EventFlowGraph
 
         // Hidden is a property of the document type's whole hierarchy: a hidden root hides every subclass it has, as the rest of the
         // studio treats them (LinqQueryService.HiddenDocumentTypes), and a visible root's subclass the delegate hides is hidden too.
-        // Filled by ReadDocumentTypes, so it comes first; with the registry unreadable it is empty and the document types are
-        // unavailable, so no output is listed at all.
+        // Filled by ReadDocumentTypes, so it comes first. With the registry unreadable the hierarchy is unknown, so it fails closed:
+        // every document type counts as hidden. Generic event types over a type, stream types, the global note, live outputs and tag
+        // aggregate names then drop out; non-generic event types the registry knows, and every source's reads of them, stay.
         private readonly HashSet<Type> hidden = [];
         private bool documentsReadable = true;
 
-        /// <summary>The one visibility question the builder asks: the delegate's answer, and the hierarchy's.</summary>
-        private bool IsHidden(Type type) => !visible(type) || hidden.Contains(type);
+        // The event types the registry knows, before any type a projection declares is added to them.
+        private HashSet<Type> registeredClr = [];
+
+        /// <summary>
+        /// The question asked of a document type - a stream type, a live or tag aggregate, a type argument: the delegate's answer,
+        /// the hierarchy's, and yes for everything when the registry could not be read.
+        /// </summary>
+        private bool IsHidden(Type type) => !documentsReadable || IsHiddenByHost(type);
+
+        /// <summary>What the host and the hierarchy hide, without the fail-closed answer: what can still be asked of an event type.</summary>
+        private bool IsHiddenByHost(Type type) => !visible(type) || hidden.Contains(type);
+
+        /// <summary>
+        /// Whether an event type, or a declared input, is left out: it is a hidden type itself or over one, or - with the registry
+        /// unreadable - it is not one the registry knows, because nothing declared-but-unregistered can then be told from a document type.
+        /// </summary>
+        private bool LeaveOut(Type type) =>
+            IsHiddenByHost(type) || MentionsHidden(type) || (!documentsReadable && !registeredClr.Contains(type));
 
         public EventFlowModel Build()
         {
@@ -191,7 +208,8 @@ internal static class EventFlowGraph
 
         private void ReadEventTypes()
         {
-            List<IEventType> known = [.. options.Events.AllKnownEventTypes().Where(x => !MentionsHidden(x.EventType))];
+            List<IEventType> known = [.. options.Events.AllKnownEventTypes().Where(x => !IsHiddenByHost(x.EventType) && !MentionsHidden(x.EventType))];
+            registeredClr = [.. known.Select(static x => x.EventType)];
 
             Dictionary<string, List<IEventType>> byAlias = new(StringComparer.Ordinal);
             foreach (IEventType type in known)
@@ -239,7 +257,7 @@ internal static class EventFlowGraph
 
             foreach (Type declared in DeclaredByAnySource())
             {
-                if (registered.Contains(declared) || MentionsHidden(declared))
+                if (registered.Contains(declared) || LeaveOut(declared))
                 {
                     continue;
                 }
@@ -558,7 +576,7 @@ internal static class EventFlowGraph
                 _ => null,
             };
 
-            return types is null ? ([], false) : ([.. types.Where(x => !MentionsHidden(x)).Distinct()], true);
+            return types is null ? ([], false) : ([.. types.Where(x => !LeaveOut(x)).Distinct()], true);
         }
 
         /// <summary>
@@ -720,7 +738,7 @@ internal static class EventFlowGraph
                 {
                     AsyncShard<IDocumentOperations, IQuerySession> first = group.First();
                     EventFilterable filters = first.Filters;
-                    List<Type> declared = [.. filters.IncludedEventTypes.Where(x => !MentionsHidden(x)).Distinct()];
+                    List<Type> declared = [.. filters.IncludedEventTypes.Where(x => !LeaveOut(x)).Distinct()];
 
                     FlowInput input = declared.Count == 0 ? FlowInput.Everything : FlowInput.Declared;
                     List<string> also = MatchReads(group.Key, declared, input);

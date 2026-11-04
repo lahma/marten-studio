@@ -36,7 +36,9 @@ internal sealed record EventFlowModel(
 {
     /// <summary>
     /// <see langword="null" />, or why no source lists what it writes: Marten would not give the store's document types, so nothing
-    /// can be told from a hidden type and the model lists no output rather than guess.
+    /// can be told from a hidden type and the model fails closed. Every document type then counts as hidden: no output is listed,
+    /// and generic event types over a type, stream types, the global note, live outputs and tag aggregate names drop out. The event
+    /// types the registry knows, and every source's reads of them, stay.
     /// </summary>
     public string? DocumentTypesUnavailable { get; init; }
 

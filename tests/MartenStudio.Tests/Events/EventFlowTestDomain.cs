@@ -259,6 +259,9 @@ internal sealed partial class FlowStrongboxProjection : EventProjection
         Name = "Strongbox";
         Options.DeleteViewTypeOnTeardown<FlowSecretCell>();
         FilterIncomingEventsOnStreamType(typeof(FlowSecretCell));
+
+        // A declared input that is itself a hidden document type, and not an event type any registry has met.
+        IncludeType<FlowSecretCell>();
     }
 
     /// <summary>Reads an event type.</summary>
@@ -275,4 +278,24 @@ public sealed partial class FlowCellarProjection : SingleStreamProjection<FlowSe
 
     /// <summary>Starts one.</summary>
     public static FlowSecretCell Create(FlowPlaced placed) => new() { Id = placed.OrderId };
+}
+
+/// <summary>A second subclass of the hidden root, folded live.</summary>
+public sealed class FlowSecretLiveCell : FlowSecretVault;
+
+/// <summary>A third subclass of the hidden root, the aggregate of a tag type.</summary>
+public sealed class FlowSecretTagCell : FlowSecretVault;
+
+/// <summary>A tag type whose aggregate is a hidden hierarchy's subclass.</summary>
+/// <param name="Value">The value.</param>
+public readonly record struct FlowCellTagId(Guid Value);
+
+/// <summary>A live projection of a hidden hierarchy's subclass.</summary>
+public sealed partial class FlowSecretLiveCellProjection : SingleStreamProjection<FlowSecretLiveCell, Guid>
+{
+    /// <summary>Named.</summary>
+    public FlowSecretLiveCellProjection() => Name = "CellLive";
+
+    /// <summary>Starts one.</summary>
+    public static FlowSecretLiveCell Create(FlowPlaced placed) => new() { Id = placed.OrderId };
 }

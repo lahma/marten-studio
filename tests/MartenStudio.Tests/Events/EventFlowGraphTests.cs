@@ -557,6 +557,59 @@ public class EventFlowGraphTests
         }
     }
 
+    /// <summary>
+    /// A hidden root with subclasses the delegate does not hide: a subclass lives in the hidden collection, so it is hidden with it -
+    /// as a published type, a <c>Compacted&lt;T&gt;</c> event type, a stream type, a live aggregate, a tag aggregate and a declared
+    /// input.
+    /// </summary>
+    private static void HiddenHierarchy(StoreOptions o)
+    {
+        o.Schema.For<FlowSecretVault>().AddSubClass<FlowSecretCell>().AddSubClass<FlowSecretLiveCell>().AddSubClass<FlowSecretTagCell>();
+        o.Projections.Add(new FlowStrongboxProjection(), ProjectionLifecycle.Async);
+        o.Projections.Add(new FlowCellarProjection(), ProjectionLifecycle.Inline);
+        o.Projections.Add(new FlowSecretLiveCellProjection(), ProjectionLifecycle.Live);
+        o.Events.RegisterTagType<FlowCellTagId>("celltag").ForAggregate<FlowSecretTagCell>();
+    }
+
+    private static bool VisibleButTheSecretRoot(Type type) =>
+        type != typeof(FlowSecret) && type != typeof(FlowSecretLive) && type != typeof(FlowSecretTagged) && type != typeof(FlowSecretVault);
+
+    /// <summary>
+    /// The registry unreadable: the hierarchy is unknown, so every document type counts as hidden. Nothing that names the hidden
+    /// hierarchy survives, while the event types the registry knows and every source's reads of them stay.
+    /// </summary>
+    [Fact]
+    public void With_the_document_types_unreadable_the_hidden_hierarchy_is_still_absent_from_every_string_of_the_model()
+    {
+        var throwing = new FlowThrowingProjection();
+
+        using DocumentStore store = Store(o =>
+        {
+            SampleShaped(o);
+            HiddenHierarchy(o);
+            o.Projections.Add(throwing, ProjectionLifecycle.Async);
+            o.Events.AddEventType<FlowPlaced>();
+        });
+
+        throwing.Armed = true;
+
+        EventFlowModel model = EventFlowGraph.Build(store, VisibleButTheSecretRoot);
+
+        model.DocumentTypesUnavailable.Should().NotBeNull("the premise: the registry could not be read");
+        string[] strings = [.. StringsOf(model)];
+        strings.Should().NotBeEmpty();
+        strings.Should().NotContain(static x => x.Replace("_", string.Empty, StringComparison.Ordinal).Contains("FlowSecret", StringComparison.OrdinalIgnoreCase),
+            "fail closed: with no hierarchy to consult, a subclass of a hidden root is told from a visible type by nothing else");
+        model.TagTypes.Should().OnlyContain(static x => x.AggregateName == null);
+        model.Outputs.Should().BeEmpty();
+        model.Sources.Select(static x => x.Name).Should().Contain(["Orders", "Daily", "Tracker", "Strongbox", "Cellar", "CellLive"]);
+        model.Sources.Should().OnlyContain(static x => x.UndrawnOutputs.Count == 0 && x.StreamType == null);
+        model.EventTypes.Should().Contain(static x => x.ClrName == nameof(FlowPlaced));
+        ReadBy(model, "Orders").Should().Contain(AliasOf<FlowPlaced>(model), "what a source reads of an event type the registry knows stays");
+        model.EventTypes.Should().NotContain(static x => x.NotRegistered,
+            "nothing declared-but-unregistered can be told from a document type, so none is named");
+    }
+
     [Fact]
     public void A_hidden_document_type_is_absent_from_every_string_of_the_model()
     {
@@ -567,23 +620,18 @@ public class EventFlowGraphTests
             o.Projections.Add(new FlowSecretLiveProjection(), ProjectionLifecycle.Live);
             o.Events.RegisterTagType<FlowTagId>("flowtag").ForAggregate<FlowSecretTagged>();
 
-            // A hidden root with a subclass the delegate does not hide: the subclass lives in the hidden collection, so it is hidden
-            // with it - as a published type, as a Compacted<T> event type, and as a stream type.
-            o.Schema.For<FlowSecretVault>().AddSubClass<FlowSecretCell>();
-            o.Projections.Add(new FlowStrongboxProjection(), ProjectionLifecycle.Async);
-            o.Projections.Add(new FlowCellarProjection(), ProjectionLifecycle.Inline);
+            HiddenHierarchy(o);
         });
 
-        bool Visible(Type type) =>
-            type != typeof(FlowSecret) && type != typeof(FlowSecretLive) && type != typeof(FlowSecretTagged) && type != typeof(FlowSecretVault);
-
-        EventFlowModel model = EventFlowGraph.Build(store, Visible);
+        EventFlowModel model = EventFlowGraph.Build(store, VisibleButTheSecretRoot);
 
         string[] strings = [.. StringsOf(model)];
         strings.Should().NotBeEmpty();
         strings.Should().NotContain(static x => x.Replace("_", string.Empty, StringComparison.Ordinal).Contains("FlowSecret", StringComparison.OrdinalIgnoreCase),
             "a hidden type is absent: no output, no count, no note, and no event type that names it");
-        model.TagTypes.Single().AggregateName.Should().BeNull("the tag type keeps its table; the aggregate it names is hidden");
+        model.TagTypes.Should().HaveCount(2).And.OnlyContain(static x => x.AggregateName == null, "a tag type keeps its table; the aggregate it names is hidden");
+        model.Outputs.Should().NotContain(static x => x.Kind == FlowOutputKind.LiveAggregate, "the live aggregates are a hidden hierarchy's");
+        model.DocumentTypesUnavailable.Should().BeNull();
         model.Sources.Should().Contain(static x => x.Name == "Orders", "visible projections are untouched");
         model.Sources.Should().Contain(static x => x.Name == "Strongbox", "the projection itself is named as the Projections page names it (OPEN-1)");
         model.Sources.Single(static x => x.Name == "Strongbox").UndrawnOutputs.Should().BeEmpty(
