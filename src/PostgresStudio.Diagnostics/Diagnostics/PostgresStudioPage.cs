@@ -37,4 +37,7 @@ public enum PostgresStudioPage
 
     /// <summary>The Overview, the studio's landing page.</summary>
     Overview = 10,
+
+    /// <summary>Database › Connection: how this application connects (1.1).</summary>
+    Connection = 11,
 }

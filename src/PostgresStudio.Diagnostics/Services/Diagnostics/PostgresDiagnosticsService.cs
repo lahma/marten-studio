@@ -126,6 +126,7 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             PostgresStudioPage.Plan => StudioPageRoutes.Plan,
             PostgresStudioPage.Replication => ReplicationLinks.Route,
             PostgresStudioPage.Overview => OverviewLinks.Route,
+            PostgresStudioPage.Connection => StudioPageRoutes.Connection,
             _ => throw new ArgumentOutOfRangeException(nameof(page)),
         };
 
@@ -613,14 +614,15 @@ internal sealed class PostgresDiagnosticsService : IPostgresDiagnostics
             };
         }
 
-        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, services.GetService<ConnectionHistorySampler>(), server, includeActivity, null, cancellationToken).ConfigureAwait(false);
+        ConnectionHistorySampler? sampler = services.GetService<ConnectionHistorySampler>();
+        ConnectionHistoryRead read = await ConnectionHistoryLookup.ReadAsync(reader, sampler, server, includeActivity, null, cancellationToken).ConfigureAwait(false);
 
         if (read.Failure is { } failure)
         {
             LogHistoryFailure(failure, resolved);
         }
 
-        return DiagnosticsSnapshotBuilder.ConnectionHistory(read, includeActivity, reader.ReaderOnly);
+        return DiagnosticsSnapshotBuilder.ConnectionHistory(read, includeActivity, reader.ReaderOnly, sampler?.Sampling ?? ConnectionHistorySampling.Always);
     }
 
     private void LogHistoryFailure(Exception exception, ResolvedSource resolved)

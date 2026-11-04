@@ -31,6 +31,19 @@ public class DiagnosticsServiceTests
     private static PostgresDiagnosticsRequest Including(bool activity) => PostgresDiagnosticsRequest.FindingsOnly with { IncludeActivity = activity };
 
     [Fact]
+    public async Task The_connection_page_has_a_path_under_Marten_Studio_too_and_it_is_the_route_its_navigation_names()
+    {
+        await using HealthHarness harness = HealthHarness.Create();
+
+        string path = Diagnostics(harness).GetStudioPath(Database(harness), PostgresStudioPage.Connection);
+
+        // Issue #55: the same page, the same route and the store's scope, in both studios; Marten Studio re-roots it under /marten.
+        path.Should().StartWith("database/connection?store=default&db=");
+        MartenStudio.Services.MartenStudioDescriptor.Instance.Navigation.SelectMany(static x => x.Items)
+            .Should().Contain(x => x.Route == "database/connection");
+    }
+
+    [Fact]
     public async Task An_unknown_source_or_database_is_NotFound_and_never_throws()
     {
         await using HealthHarness harness = HealthHarness.Create();

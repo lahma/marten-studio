@@ -219,8 +219,22 @@ statement texts in an e-mail.
 ## Linking to the studio
 
 Each finding carries `StudioPath`, its card on the Health page, and `StudioLinks`, the screens that help with it;
-`GetStudioPath(database, page)` gives Health, Sessions, its blocking view, Statements, Maintenance, Storage or Server for
-a database. Each is relative to where you mapped the studio, with the database's scope in its query, so
+`GetStudioPath(database, page)` gives the path of one page for a database:
+
+| `PostgresStudioPage` | The page |
+|---|---|
+| `Health` | Health |
+| `Sessions`, `Blocking`, `Holders` | Database › Sessions, its blocking view, and its holders view |
+| `Statements` | Statements |
+| `Maintenance` | Maintenance |
+| `Storage` | Storage |
+| `Server` | Server |
+| `Plan` | Query › Plan |
+| `Replication` | Replication |
+| `Overview` | the Overview, the studio's landing page |
+| `Connection` | Database › Connection: how this application connects (1.2, issue #55) |
+
+Each path is relative to where you mapped the studio, with the database's scope in its query, so
 `$"{options.Path}/{finding.StudioPath}"` opens it. Take them from here rather than building routes: the studio's routes
 and query parameters are its own and may change between releases. A link opens the page for whoever follows it, under
 that visitor's own gates; it carries nothing the page would not show them. A finding's `StudioPath` ends in its card's
@@ -358,6 +372,11 @@ exclusive with `AddPostgresConnectionHistory()` in one container. See [Postgres 
 **What a visitor sees.** On Holders, anybody the source policy passes sees the counts: the window, the peak against the client
 limit and when, how many samples, and how many instance changes. The applications' own peaks need `ViewDatabaseActivity`, as
 Holders' applications do. Without the registration, Holders says how to turn it on.
+
+Before the first sample of a server is stored, Holders and the `ConnectionHistory` section say who takes it. With no
+`ShouldSample` it is this process, a moment after the application starts. With one (1.2, issue #57) the sentence follows its last
+answer: yes, and the first is taken at the next interval; no, or none yet, and another process samples and its samples
+appear once stored. A reader-only registration says another process fills the history.
 
 **In the snapshot** (1.0.1, issue #47). `PostgresDiagnosticsRequest.ConnectionHistory` (in `AllSections`, not in `FindingsOnly`)
 adds a `ConnectionHistory` section, for a worker or a support page that has no Holders to open:

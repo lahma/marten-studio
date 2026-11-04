@@ -185,6 +185,28 @@ public class ConnectionHistorySectionTests
     }
 
     [Fact]
+    public void Under_ShouldSample_an_empty_window_says_whether_this_process_was_chosen_and_never_that_the_first_is_taken_a_moment_after_start()
+    {
+        ConnectionHistoryRead none = new(PostgresReadOutcome.Unavailable, "db:5432", TimeSpan.FromDays(7), null, 0, null);
+
+        PostgresConnectionHistorySection chosen = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.Chosen);
+        PostgresConnectionHistorySection notChosen = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.NotChosen);
+        PostgresConnectionHistorySection always = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, sampling: ConnectionHistorySampling.Always);
+        PostgresConnectionHistorySection readerOnly = DiagnosticsSnapshotBuilder.ConnectionHistory(none, false, readerOnly: true, sampling: ConnectionHistorySampling.NotChosen);
+
+        chosen.Reason.Should().Be("The connection history holds no sample of this server yet: the first is taken at the next interval, now that ShouldSample has chosen this process to sample.");
+        notChosen.Reason.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), and its samples appear here once stored.");
+        always.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYet, "without ShouldSample the sentence is unchanged");
+        readerOnly.Reason.Should().Be(DiagnosticsSnapshotBuilder.NoSamplesYetReaderOnly, "the reader-only registration keeps its own sentence (#48)");
+
+        foreach (PostgresConnectionHistorySection section in new[] { chosen, notChosen })
+        {
+            section.Outcome.Should().Be(PostgresReadOutcome.Unavailable);
+            section.Reason.Should().NotContain("moment after the application starts");
+        }
+    }
+
+    [Fact]
     public async Task Holders_and_the_API_read_one_sample_set_through_one_cache_and_cannot_disagree_on_a_peak()
     {
         CountingStore store = new(Day());

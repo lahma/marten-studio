@@ -7,7 +7,7 @@ namespace PostgresStudio.Services.Connection;
 internal static class ConnectionLinks
 {
     /// <summary>The page's route under the studio's path.</summary>
-    public const string Route = "database/connection";
+    public const string Route = StudioPageRoutes.Connection;
 
     /// <summary>
     /// The page, with the scope carried (D9) under the studio's own source parameter, and optionally a fragment: a link to a row

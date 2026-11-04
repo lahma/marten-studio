@@ -601,6 +601,32 @@ public class ConnectionHistoryBacklogTests
         await finished.Should().NotThrowAsync("the round's release of its semaphore does not meet a disposed one (issue #50)");
     }
 
+    [Fact]
+    public async Task Sampling_says_whether_ShouldSample_chose_this_process_at_its_last_round_and_not_chosen_until_it_has_answered()
+    {
+        bool answer = true;
+        bool fail = false;
+        await using Rig rig = new(shouldSample: _ => fail ? throw new InvalidOperationException("the election is down") : ValueTask.FromResult(answer));
+
+        rig.Sampler.Sampling.Should().Be(ConnectionHistorySampling.NotChosen, "ShouldSample has not answered yet");
+
+        await rig.Sampler.SampleOnceAsync(Token);
+        rig.Sampler.Sampling.Should().Be(ConnectionHistorySampling.Chosen);
+
+        fail = true;
+        (await FluentActions.Awaiting(() => rig.Sampler.SampleOnceAsync(Token)).Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("election");
+        rig.Sampler.Sampling.Should().Be(ConnectionHistorySampling.Chosen, "a ShouldSample that threw did not answer: the last answer stands");
+
+        fail = false;
+        answer = false;
+        await rig.Sampler.SampleOnceAsync(Token);
+        rig.Sampler.Sampling.Should().Be(ConnectionHistorySampling.NotChosen);
+
+        await using Rig plain = new();
+        await plain.Sampler.SampleOnceAsync(Token);
+        plain.Sampler.Sampling.Should().Be(ConnectionHistorySampling.Always, "no ShouldSample: this process always samples");
+    }
+
     /// <summary>A logger that keeps what it was asked to write.</summary>
     private sealed class RecordingLogger<T> : ILogger<T>
     {

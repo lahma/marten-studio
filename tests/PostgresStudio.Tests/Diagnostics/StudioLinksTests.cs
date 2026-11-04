@@ -68,6 +68,7 @@ public class StudioLinksTests
     [InlineData("Holders", "database/sessions?view=holders&store=main&db=db1")]
     [InlineData("Replication", "replication?store=main&db=db1")]
     [InlineData("Overview", "?store=main&db=db1")]
+    [InlineData("Connection", "database/connection?store=main&db=db1")]
     public void Every_page_has_its_exact_path_and_the_table_names_every_member(string page, string path)
     {
         Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), Enum.Parse<PostgresStudioPage>(page)).Should().Be(path);
@@ -78,7 +79,7 @@ public class StudioLinksTests
     {
         Enum.GetValues<PostgresStudioPage>().Select(static x => ((int) x, x.ToString())).Should().Equal(
             (0, "Health"), (1, "Sessions"), (2, "Blocking"), (3, "Statements"), (4, "Maintenance"), (5, "Storage"), (6, "Server"),
-            (7, "Plan"), (8, "Holders"), (9, "Replication"), (10, "Overview"));
+            (7, "Plan"), (8, "Holders"), (9, "Replication"), (10, "Overview"), (11, "Connection"));
     }
 
     [Fact]
@@ -87,6 +88,17 @@ public class StudioLinksTests
         string path = Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresStudioPage.Overview);
 
         path.Should().StartWith("?").And.Contain("store=main").And.Contain("db=db1");
+    }
+
+    [Fact]
+    public void The_connection_pages_path_is_the_route_both_studios_mount_and_carries_the_scope()
+    {
+        string path = Service().GetStudioPath(new PostgresDatabaseRef("main", "db1"), PostgresStudioPage.Connection);
+
+        // Issue #55: the one spelling the page's own link (ConnectionLinks) and the diagnostics API share, so a host's link and a
+        // visitor's cannot drift; both studios mount it (Marten Studio's navigation names the same route).
+        path.Should().StartWith(PostgresStudio.Services.Connection.ConnectionLinks.Route + "?").And.Contain("store=main").And.Contain("db=db1");
+        PostgresStudioDescriptor.Instance.Navigation.SelectMany(static x => x.Items).Should().Contain(x => x.Route == "database/connection");
     }
 
     [Fact]

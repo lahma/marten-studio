@@ -370,6 +370,7 @@ namespace PostgresStudio
         Holders = 8,
         Replication = 9,
         Overview = 10,
+        Connection = 11,
     }
     public enum PostgresTableOwnership
     {

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 using AngleSharp.Dom;
 
 using Bunit;
@@ -244,10 +246,10 @@ public class SessionsHoldersPageTests
         },
     ];
 
-    private static async Task HistoryAsync(SessionDetailsAccess access, bool kept, ConnectionHistoryView? counts, ConnectionHistoryView? named, Func<Bunit.IRenderedComponent<Sessions>, Task> check, bool readOnly = false)
+    private static async Task HistoryAsync(SessionDetailsAccess access, bool kept, ConnectionHistoryView? counts, ConnectionHistoryView? named, Func<Bunit.IRenderedComponent<Sessions>, Task> check, bool readOnly = false, ConnectionHistorySampling sampling = ConnectionHistorySampling.Always)
     {
         (StudioComponentContext context, SessionPoolObserver pools) = await ReadyAsync(
-            Summary(access) with { ConnectionHistoryKept = kept, ConnectionHistoryReadOnly = readOnly, ConnectionHistory = counts },
+            Summary(access) with { ConnectionHistoryKept = kept, ConnectionHistoryReadOnly = readOnly, ConnectionHistorySampling = sampling, ConnectionHistory = counts },
             Details() with { ConnectionHistory = named });
 
         try
@@ -293,6 +295,33 @@ public class SessionsHoldersPageTests
             page.FindAll(".ms-holders-history-off").Should().BeEmpty();
             return Task.CompletedTask;
         }, readOnly: true);
+
+    [Fact]
+    public async Task Under_ShouldSample_an_empty_history_says_this_process_was_chosen_and_the_first_sample_comes_at_the_next_interval() =>
+        await HistoryAsync(Open, kept: true, null, null, static page =>
+        {
+            string said = Regex.Replace(page.Find(".ms-holders-history-none").TextContent, @"\s+", " ").Trim();
+            said.Should().Be("The connection history holds no sample of this server yet: the first is taken at the next interval, now that ShouldSample has chosen this process to sample.");
+            said.Should().NotContain("samples each server once an interval");
+            return Task.CompletedTask;
+        }, sampling: ConnectionHistorySampling.Chosen);
+
+    [Fact]
+    public async Task Under_ShouldSample_an_empty_history_in_a_process_not_chosen_says_another_process_samples() =>
+        await HistoryAsync(Open, kept: true, null, null, static page =>
+        {
+            string said = Regex.Replace(page.Find(".ms-holders-history-none").TextContent, @"\s+", " ").Trim();
+            said.Should().Be("The connection history holds no sample of this server yet: another process samples (ShouldSample chooses it), and its samples appear here once stored.");
+            return Task.CompletedTask;
+        }, sampling: ConnectionHistorySampling.NotChosen);
+
+    [Fact]
+    public async Task A_reader_only_registration_keeps_its_own_sentence_whatever_ShouldSample_says() =>
+        await HistoryAsync(Open, kept: true, null, null, static page =>
+        {
+            page.Find(".ms-holders-history-none").TextContent.Should().Contain("another process fills it").And.NotContain("ShouldSample");
+            return Task.CompletedTask;
+        }, readOnly: true, sampling: ConnectionHistorySampling.NotChosen);
 
     [Fact]
     public async Task Without_the_gate_the_history_is_counts_and_names_no_application() =>

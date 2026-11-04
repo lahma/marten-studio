@@ -18,6 +18,9 @@ internal static class StudioPageRoutes
     /// <summary>The Plan page's route under the studio's path.</summary>
     public const string Plan = "plan";
 
+    /// <summary>Database › Connection's route under the studio's path (1.1).</summary>
+    public const string Connection = "database/connection";
+
     /// <summary>The database browser: the schemas, the kind tabs and the grids.</summary>
     public const string DatabaseBrowser = "database";
 

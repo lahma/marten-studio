@@ -85,6 +85,14 @@
                         has sampled nothing of this server within the window.
                     </text>
                 }
+                else if (Summary.ConnectionHistorySampling == ConnectionHistorySampling.Chosen)
+                {
+                    @ConnectionHistorySamplingText.Chosen
+                }
+                else if (Summary.ConnectionHistorySampling == ConnectionHistorySampling.NotChosen)
+                {
+                    @ConnectionHistorySamplingText.NotChosen
+                }
                 else
                 {
                     <text>

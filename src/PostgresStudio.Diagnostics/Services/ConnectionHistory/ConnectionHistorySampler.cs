@@ -79,6 +79,19 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
 
     private int disposed;
 
+    /// <summary>Issue #57: <see cref="PostgresConnectionHistoryOptions.ShouldSample" />'s answer at the last round: 0 not asked yet, 1 yes, 2 no.</summary>
+    private int shouldSampleAnswer;
+
+    /// <summary>
+    /// Issue #57: whether this process samples now - <see cref="ConnectionHistorySampling.Always" /> without a
+    /// <see cref="PostgresConnectionHistoryOptions.ShouldSample" />, else what it answered at the last round, and "not chosen" until
+    /// it has answered once. Read from a page's thread; the answer is one int, written once a round.
+    /// </summary>
+    internal ConnectionHistorySampling Sampling =>
+        options.Value.ShouldSample is null
+            ? ConnectionHistorySampling.Always
+            : Volatile.Read(ref shouldSampleAnswer) == 1 ? ConnectionHistorySampling.Chosen : ConnectionHistorySampling.NotChosen;
+
     /// <summary>
     /// Issue #46: the samples whose append failed, per server, oldest first. Mutated only inside <see cref="round" />, and each
     /// mutation - an enqueue, a dequeue, a clear - is made under <see cref="backlogGate" />, which a page's read of
@@ -265,7 +278,15 @@ internal sealed class ConnectionHistorySampler : BackgroundService, IAsyncDispos
 
         try
         {
-            if (options.Value.ShouldSample is { } shouldSample && !await shouldSample(cancellationToken).ConfigureAwait(false))
+            bool? chosen = options.Value.ShouldSample is { } shouldSample ? await shouldSample(cancellationToken).ConfigureAwait(false) : null;
+
+            if (chosen is { } answer)
+            {
+                // Issue #57: what the pages say while the history holds no sample of a server.
+                Volatile.Write(ref shouldSampleAnswer, answer ? 1 : 2);
+            }
+
+            if (chosen == false)
             {
                 await ReleaseAsync().ConfigureAwait(false);
 

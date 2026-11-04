@@ -301,6 +301,25 @@ internal static class DiagnosticsSnapshotBuilder
     /// <summary>What the section says while the window holds no sample.</summary>
     internal const string NoSamplesYet = "The connection history holds no sample of this server yet: the first is taken a moment after the application starts.";
 
+    /// <summary>What the section says while the window holds no sample and the host's <c>ShouldSample</c> has chosen this process to sample (issue #57).</summary>
+    internal const string NoSamplesYetChosen = ConnectionHistorySamplingText.Chosen;
+
+    /// <summary>What the section says while the window holds no sample and <c>ShouldSample</c> has not chosen this process (issue #57).</summary>
+    internal const string NoSamplesYetNotChosen = ConnectionHistorySamplingText.NotChosen;
+
+    /// <summary>The sentence for an empty window, by whether the host's <c>ShouldSample</c> decides who samples (issue #57).</summary>
+    /// <param name="readerOnly">Whether this process only reads the history.</param>
+    /// <param name="sampling">This process's sampling state.</param>
+    internal static string NoSamples(bool readerOnly, ConnectionHistorySampling sampling) =>
+        readerOnly
+            ? NoSamplesYetReaderOnly
+            : sampling switch
+            {
+                ConnectionHistorySampling.Chosen => NoSamplesYetChosen,
+                ConnectionHistorySampling.NotChosen => NoSamplesYetNotChosen,
+                _ => NoSamplesYet,
+            };
+
     /// <summary>What the section says while the window holds no sample and this process only reads the history (<c>AddPostgresConnectionHistoryReader()</c>).</summary>
     internal const string NoSamplesYetReaderOnly =
         "The connection history has no sample of this server yet. This process only reads it: another process fills it, and has sampled nothing of this server within the window.";
@@ -312,7 +331,12 @@ internal static class DiagnosticsSnapshotBuilder
     /// <param name="read">The lookup's answer.</param>
     /// <param name="includeActivity">The request's switch.</param>
     /// <param name="readerOnly">Whether this process only reads the history, so that it never samples and the reason for an empty window says so.</param>
-    public static PostgresConnectionHistorySection ConnectionHistory(ConnectionHistoryRead read, bool includeActivity, bool readerOnly = false)
+    /// <param name="sampling">Whether the host's <c>ShouldSample</c> chose this process to sample (issue #57); the reason for an empty window follows it.</param>
+    public static PostgresConnectionHistorySection ConnectionHistory(
+        ConnectionHistoryRead read,
+        bool includeActivity,
+        bool readerOnly = false,
+        ConnectionHistorySampling sampling = ConnectionHistorySampling.Always)
     {
         ArgumentNullException.ThrowIfNull(read);
 
@@ -342,7 +366,7 @@ internal static class DiagnosticsSnapshotBuilder
                 return new PostgresConnectionHistorySection
                 {
                     Outcome = PostgresReadOutcome.Unavailable,
-                    Reason = readerOnly ? NoSamplesYetReaderOnly : NoSamplesYet,
+                    Reason = NoSamples(readerOnly, sampling),
                     Server = read.Server,
                     Window = read.Window,
                     PendingSamples = read.PendingSamples,
