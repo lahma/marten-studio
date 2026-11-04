@@ -774,7 +774,11 @@ should not have been typed is on the record either way.
   the event store's own feature schema, and touch no connection. `Check`, `Preview` and `DDL` are behind
   buttons that say on the button what they may create. An apply is gated on `ApplySchemaChanges`, runs
   under `AutoCreate.CreateOrUpdate` and never `AutoCreate.All`, lists its destructive statements, and
-  requires a typed confirmation that travels to the service rather than being re-supplied by the page.
+  requires a typed confirmation that travels to the service rather than being re-supplied by the page. The preview's
+  apply section also reads, on the same button, each table the script locks: its estimated rows and size from `pg_class`
+  statistics (no size function, nothing that locks) and, only for a visitor through the `ViewDatabaseActivity` gate, how
+  many sessions in this database hold or wait for a lock on it, as counts by state and never a statement, as one audited
+  read. Both reads run on the host the apply runs on (the primary, inside a read-only transaction), never a standby.
   The one exception is Marten's, not the studio's: enumerating a master-table, sharded or single-server
   tenancy's databases builds them, and the first time a store instance does so it applies the tenancy's
   lookup table or creates a configured database that does not exist yet - and the studio's first

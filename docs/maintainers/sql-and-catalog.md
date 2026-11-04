@@ -10,6 +10,22 @@ an optional `SET LOCAL ROLE`, not the statement parser — the parser exists to 
 message, and treating it as the security boundary is how these features get CVEs. `README.md` says it
 plainly: grant it to people you would give `psql` to.
 
+**The describe (1.2).** `ReadOnlySqlSession.ReadAsync` first runs the statement with `CommandBehavior.SchemaOnly` (Npgsql
+sends Parse, Describe(statement) and Sync, never Bind or Execute; read at v9.0.4 and v10.0.3), inside the console's
+transaction and under its timeouts. A column is read as text (`NpgsqlCommand.UnknownResultTypeList`) when Npgsql cannot
+read it as a value (`GetFieldType` throws `InvalidCastException` or `NotSupportedException`) or when the `vector`
+extension owns its type (`pg_depend` `deptype 'e'`, asked only when such a column or a column named `vector`, `halfvec` or
+`sparsevec` exists). A parse error raised by the describe is the statement's own error and is answered by the same
+handlers; the notices it raised are dropped just before the statement runs (a describe that fails keeps them). The
+reported duration excludes the describe. A pgvector cell is kept to `SqlValueFormatterOptions.MaxVectorLength` (64 Ki
+characters), a result to `MaxVectorResultLength` (8 Mi), past which a cell falls back to the kilobyte and is marked cut;
+it is Text kind, and the grid knows it is a vector from `SqlResultColumn.Vector`. **Not on a connection that
+auto-prepares:** Npgsql keys an auto-prepared statement by its SQL text alone (`PreparedStatementManager`) and fixes the
+result formats into its row description, so with `Max Auto Prepare` above zero in the connection string (set in code or
+in the string; the data source's string carries it) the describe and the list are skipped and the statement runs exactly
+as before 1.2; a column Npgsql cannot read says to cast it to `::text`, and `ReadCell` catches `ArgumentException` (the
+decoder's fallback exception) so nothing escapes unaudited.
+
 ## D27
 
 **D27 — The database browser: one capability, one schema filter, and Marten's tables are never read raw.**
@@ -55,7 +71,12 @@ never a deparse), and no definition. One index's statement is `ISchemaDataServic
 (`IndexDefinitionSql`), found by schema, table and name inside the store's schemas (no oid from the caller), shown to the
 visitors and for the indexes the list shows (the same `TableIsShown`), masked through the browser's gate, and may wait for
 that one table under `lock_timeout` (`SchemaIndexDefinition.Busy`). `SchemaAlignmentLiveTests` holds a table and a
-partition in ACCESS EXCLUSIVE and proves the list finishes.
+partition in ACCESS EXCLUSIVE and proves the list finishes. The Schema screen's migration notes (1.2) read `pg_class`
+statistics of exactly the tables the previewed script names, with no size function and no lock, and count the sessions
+locking them (`pg_locks` joined to `pg_stat_activity`, this database only, counts and states only) behind the
+`Activity` gate; both reads open the primary (`ConnectionUsage.ReadWrite`, in the read-only transaction), as the health
+sweep's activity reads do. `MigrationImpactQueries` is the one builder allowed to read those views for it, called only
+from `SchemaDataService.Impact.cs` (`ActivityViewsOffThePollPathTests`).
 Another store's key, alias and name in the "could not be built" notice show only to a visitor its store policy passes,
 its Marten-managed rows need its store and write policies, and other stores' databases are enumerated only when a store
 policy (or, while `BrowseDatabase` is on, a write policy) will be asked, never for a `DynamicMultiple` store. No rows

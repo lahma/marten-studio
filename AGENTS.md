@@ -257,8 +257,11 @@ the connection history's four types (1.0). Full text: [architecture.md](docs/mai
 
 **D13 — The SQL console is off by default, and its real guard is the transaction.** `RunSql` is a capability like any
 other. What makes it safe is `SET TRANSACTION READ ONLY` plus `statement_timeout` and an optional `SET LOCAL ROLE`, not
-the statement parser. Grant it to people you would give `psql` to. Full text:
-[sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d13).
+the statement parser. Grant it to people you would give `psql` to. Since 1.2 the console describes a statement (Parse and
+Describe, never Bind or Execute) inside the same read-only transaction before running it, so that columns Npgsql has no
+handler for - pgvector's three types among them - are requested as text; this changes neither the guard nor the audit,
+and it does not happen on a connection that auto-prepares (`Max Auto Prepare`), where the console runs as before. Full
+text: [sql-and-catalog.md](docs/maintainers/sql-and-catalog.md#d13).
 
 **D14 — No live SQL tail in v1.** It would require replacing the host's `StoreOptions.Logger`, which is exactly the
 "registration changes host behaviour" failure this project refuses, and Marten 9 defaults `DisableNpgsqlLogging=true`
