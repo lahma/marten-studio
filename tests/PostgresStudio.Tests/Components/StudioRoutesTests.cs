@@ -144,7 +144,27 @@ public sealed class StudioRoutesTests
             routes.WaitForAssertion(() => rig.Interception.Calls.Should().Be(1));
             await SettleAsync(routes);
             routes.Find("h1").TextContent.Should().Be("Connection", failure.GetType().Name + ": the page renders");
+            await AssertEnhancedNavigationBehaviourAsync(rig, routes);
         }
+    }
+
+    /// <summary>
+    /// With interception off - the host's switch, or an ask that failed - 1.1's enhanced navigation is in charge: it reports a link
+    /// click as intercepted and scrolls to a fragment itself, so the studio's force-load (which would abort its fetch) and its
+    /// own fragment scroll (the page would scroll twice) must not run.
+    /// </summary>
+    private static async Task AssertEnhancedNavigationBehaviourAsync(Rig rig, IRenderedComponent<StudioRoutes> routes)
+    {
+        rig.Navigation.Simulate("postgres/no-such-page", intercepted: true);
+        await SettleAsync(routes);
+
+        routes.WaitForAssertion(() => routes.Find("h1").TextContent.Should().Be("Not found"));
+        rig.Navigation.ForceLoads.Should().BeEmpty("enhanced navigation reports a click as intercepted, and a force-load would abort its fetch");
+
+        rig.Navigation.Simulate("postgres/database/connection#conn-marten", intercepted: true);
+        await SettleAsync(routes);
+
+        rig.Scroll.Refreshed.Should().BeEmpty("enhanced navigation scrolls to the fragment itself");
     }
 
     [Fact]
@@ -207,6 +227,7 @@ public sealed class StudioRoutesTests
             await SettleAsync(routes);
 
             rig.Interception.Calls.Should().Be(0, "the host turned the 1.1 behaviour back on");
+            await AssertEnhancedNavigationBehaviourAsync(rig, routes);
         }
         finally
         {

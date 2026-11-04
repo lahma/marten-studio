@@ -35,6 +35,13 @@ else
     /// <summary>Whether interception has been asked for: once per component, before the await, as the built-in Router does.</summary>
     private bool interceptionRequested;
 
+    /// <summary>
+    /// Whether interception is on in this document: set when it was asked for, cleared if the ask failed. With it off (the host's
+    /// switch, or another renderer holding it) the enhanced navigation of 1.1 handles links, which reports a click as intercepted
+    /// and scrolls to fragments itself, so neither the force-load nor the fragment scroll below may run.
+    /// </summary>
+    private bool interceptionOn;
+
     /// <summary>The last location's path and fragment, to tell a move that deserves a scroll to a fragment from one that does not.</summary>
     private string? lastPath;
     private string? lastFragment;
@@ -53,7 +60,7 @@ else
     {
         RouteData? next = Match(e.Location);
 
-        if (next is null && e.IsNavigationIntercepted)
+        if (next is null && e.IsNavigationIntercepted && interceptionOn)
         {
             // A link, Back or Forward to an address under the mount that is not a studio page - a file, an endpoint, an address that
             // does not exist: the browser loads it, the built-in Router's rule. The page on screen stays until then. A document load
@@ -110,6 +117,7 @@ else
         if (firstRender && !interceptionRequested && StudioNavigationSwitch.InterceptionEnabled)
         {
             interceptionRequested = true;
+            interceptionOn = true;
 
             try
             {
@@ -118,11 +126,12 @@ else
             catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
             {
                 // A circuit that closed, or another renderer already holding interception in this document (a JSException): the
-                // enhanced navigation of 1.1 stays, and works.
+                // enhanced navigation of 1.1 stays, and works, and nothing of the interception's own (force-load, fragment scroll) runs.
+                interceptionOn = false;
             }
         }
 
-        if (!scrollToFragment)
+        if (!scrollToFragment || !interceptionOn)
         {
             return;
         }
