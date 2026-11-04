@@ -41,18 +41,24 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
         create index events_account_idx on public.events (account);
         analyze public.events;
 
-        -- Never vacuumed, and told never to be: the visibility map stays empty, so an index-only scan visits the table for every row.
+        -- Never vacuumed, and told never to be: the visibility map stays empty, so an index-only scan visits the table for every row -
+        -- provided nothing else sets a bit, which on 19 a read can (on-access pruning); the P09 test holds a snapshot from before this runs.
         create table public.unvacuumed (id int primary key, v int not null) with (autovacuum_enabled = false);
         insert into public.unvacuumed select g, g from pg_catalog.generate_series(1, 100000) g;
         analyze public.unvacuumed;
         """;
 
-    private sealed record Harness(StudioHost Host, NpgsqlDataSource Source, string Connection) : IAsyncDisposable
+    private sealed record Harness(StudioHost Host, NpgsqlDataSource Source, string Connection, NpgsqlConnection? Horizon = null) : IAsyncDisposable
     {
         public async ValueTask DisposeAsync()
         {
             await Host.DisposeAsync();
             await Source.DisposeAsync();
+
+            if (Horizon is not null)
+            {
+                await Horizon.DisposeAsync();
+            }
         }
     }
 
@@ -60,13 +66,32 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
     /// A host over one data source of one connection that is never reset on close: a prepared statement a run left behind would
     /// still be on the session the next caller gets, and <see cref="PreparedAsync" /> reads exactly that session.
     /// </summary>
-    private static async Task<Harness> HostAsync(PostgresVersionMatrix matrix, int major)
+    /// <param name="matrix">The version matrix.</param>
+    /// <param name="major">The leg's major.</param>
+    /// <param name="holdHorizon">
+    /// Opens a repeatable-read transaction on the new database, with its snapshot taken, <i>before</i> the seed runs, and keeps it
+    /// open until the harness is disposed. No row the seed inserts can then be older than the database's oldest snapshot, so no
+    /// page of it is all-visible to anyone, by construction: not by a VACUUM, and not by on-access pruning, which PostgreSQL 19
+    /// uses to set a page's all-visible bit as a read passes over it, once the seed's commit is behind every snapshot (measured with
+    /// psql on 19rc1; a table nobody vacuumed is not enough).
+    /// </param>
+    private static async Task<Harness> HostAsync(PostgresVersionMatrix matrix, int major, bool holdHorizon = false)
     {
         MatrixServer leg = await matrix.ServerAsync(major);
         leg.SkipIfUnavailable();
 
         string database = await leg.CreateDatabaseAsync("x3_plan", Token);
         string app = leg.ConnectionString(MatrixRole.App, database);
+
+        NpgsqlConnection? horizon = null;
+
+        if (holdHorizon)
+        {
+            horizon = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(app) { Pooling = false }.ConnectionString);
+            await horizon.OpenAsync(Token);
+            await using NpgsqlCommand begin = new("begin transaction isolation level repeatable read; select count(*) from pg_catalog.pg_class;", horizon);
+            await begin.ExecuteNonQueryAsync(Token);
+        }
 
         await using (NpgsqlConnection connection = new(new NpgsqlConnectionStringBuilder(app) { Pooling = false }.ConnectionString))
         {
@@ -81,7 +106,7 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
             services => services.AddSingleton(source),
             static o => o.Capabilities.RunSql = true);
 
-        return new Harness(host, source, app);
+        return new Harness(host, source, app, horizon);
     }
 
     private static async Task<long> ScalarAsync(NpgsqlDataSource source, string sql)
@@ -98,6 +123,34 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
 
     private static IReadOnlyList<string> Codes(StudioCircuit circuit, QueryPlan plan) =>
         [.. PlanInsights.Evaluate(plan, circuit.Services.GetRequiredService<IStudioSettings>().Text).Select(static x => x.Insight.Code)];
+
+    /// <summary>
+    /// The precondition of P09's test, read from the visibility map itself (<c>pg_visibility</c>, in a schema of its own in this
+    /// test's database) and from the statistics ANALYZE wrote: not one page of <c>public.unvacuumed</c> is all-visible. A
+    /// violation reads as this, not as a missed P09.
+    /// </summary>
+    private static async Task AssertNoPageAllVisibleAsync(PostgresVersionMatrix matrix, int major, Harness harness, string when)
+    {
+        MatrixServer leg = await matrix.ServerAsync(major);
+        string database = new NpgsqlConnectionStringBuilder(harness.Connection).Database!;
+
+        await using NpgsqlConnection admin = await leg.OpenAsync(MatrixRole.Superuser, database, Token);
+
+        await using (NpgsqlCommand create = new("create schema vis; create extension pg_visibility schema vis", admin))
+        {
+            await create.ExecuteNonQueryAsync(Token);
+        }
+
+        await using NpgsqlCommand read = new(
+            "select (select all_visible from vis.pg_visibility_map_summary('public.unvacuumed'::regclass)), "
+            + "(select relallvisible from pg_catalog.pg_class where oid = 'public.unvacuumed'::regclass)",
+            admin);
+        await using NpgsqlDataReader reader = await read.ExecuteReaderAsync(Token);
+        (await reader.ReadAsync(Token)).Should().BeTrue();
+
+        reader.GetInt64(0).Should().Be(0, "precondition: the visibility map of public.unvacuumed has no all-visible page " + when);
+        reader.GetInt32(1).Should().Be(0, "precondition: ANALYZE recorded no all-visible page of public.unvacuumed " + when);
+    }
 
     // ---- Insights on real plans ----------------------------------------------------------------------------------------
 
@@ -133,8 +186,14 @@ public class PlanAnalyzerLiveTests(PostgresVersionMatrix matrix)
     [MemberData(nameof(Legs))]
     public async Task Explain_analyze_of_an_index_only_scan_over_an_unvacuumed_table_fires_P09(int major)
     {
-        await using Harness harness = await HostAsync(matrix, major);
+        // "Nobody vacuumed it" is not enough on 19: a read that passes a page can set its all-visible bit (on-access pruning), once
+        // the inserting transaction is committed (and, with the matrix's asynchronous commits, flushed) and older than every snapshot
+        // of the database - 248 heap fetches instead of 5000 in CI, 2026-11-04. A snapshot held from before the seed makes the
+        // seed's rows invisible-to-all by construction, on every leg.
+        await using Harness harness = await HostAsync(matrix, major, holdHorizon: true);
         await using StudioCircuit circuit = harness.Host.Circuit();
+
+        await AssertNoPageAllVisibleAsync(matrix, major, harness, "before the plan ran");
 
         PlanRunResult result = await circuit.Get<ISqlConsoleService>().PlanAsync(
             Scope, new PlanRunRequest("select id from public.unvacuumed where id between 1 and 5000 order by id", PlanMode.Analyze), Token);
