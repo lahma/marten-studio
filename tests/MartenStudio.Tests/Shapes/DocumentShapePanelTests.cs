@@ -300,6 +300,137 @@ public class DocumentShapePanelTests
         }
     }
 
+    [Fact]
+    public async Task Check_again_re_enables_itself_when_its_window_opens()
+    {
+        (DocumentsComponentContext context, FakeShapeCheck check) = Rig();
+        using (context)
+        {
+            ManualClock clock = new(new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero));
+            context.Services.AddSingleton<TimeProvider>(clock);
+            check.Result = Result(at: clock.GetUtcNow());
+            IRenderedComponent<ListPage> page = Render(context);
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => Button(page, "Check again")!.HasAttribute("disabled").Should().BeTrue());
+            clock.Timers.Should().ContainSingle().Which.Due.Should().Be(ShapeCheckLimits.RecheckAfter);
+
+            clock.Advance(ShapeCheckLimits.RecheckAfter + TimeSpan.FromSeconds(1));
+            clock.FireAll();
+
+            page.WaitForAssertion(() => Button(page, "Check again")!.HasAttribute("disabled").Should().BeFalse());
+
+            await ClickAsync(page, "Close");
+            clock.Timers.Should().OnlyContain(static x => x.Disposed, "the timer goes with the panel");
+        }
+    }
+
+    [Fact]
+    public async Task A_failed_result_does_not_hold_check_again_back()
+    {
+        (DocumentsComponentContext context, FakeShapeCheck check) = Rig();
+        using (context)
+        {
+            check.Result = Result(ShapeCoverage.NotChecked, 0, error: "The shape check could not be completed: busy.", at: DateTimeOffset.UtcNow);
+            IRenderedComponent<ListPage> page = Render(context);
+
+            await ClickAsync(page, "Check shapes");
+
+            page.WaitForAssertion(() => Button(page, "Check again")!.HasAttribute("disabled").Should().BeFalse());
+        }
+    }
+
+    [Fact]
+    public async Task A_scope_change_re_creates_the_open_panel_and_asks_again_for_the_new_scope()
+    {
+        (DocumentsComponentContext context, FakeShapeCheck check) = Rig();
+        using (context)
+        {
+            context.Catalog.WithStore("second", "Second", databaseIdentities: "localhost.marten");
+            check.Result = Result();
+            IRenderedComponent<ListPage> page = Render(context);
+
+            await ClickAsync(page, "Check shapes");
+            page.WaitForAssertion(() => check.Scopes.Select(static x => x.StoreKey).Should().Equal("default"));
+
+            await page.InvokeAsync(() => context.State.SetScopeAsync("second", null, null, Xunit.TestContext.Current.CancellationToken));
+
+            page.WaitForAssertion(() => check.Scopes.Select(static x => x.StoreKey).Should().Equal("default", "second"));
+            page.FindAll(".ms-shape-panel").Should().ContainSingle();
+        }
+    }
+
+    [Fact]
+    public async Task Example_links_are_built_from_the_scope_the_check_ran_with_not_the_one_active_at_render_time()
+    {
+        (DocumentsComponentContext context, FakeShapeCheck check) = Rig();
+        using (context)
+        {
+            context.Catalog.WithStore("second", "Second", databaseIdentities: "localhost.marten");
+            check.Result = Result(types: [Customer(Dropped("$.a"))]);
+            await context.State.EnsureInitializedAsync(Xunit.TestContext.Current.CancellationToken);
+
+            IRenderedComponent<MartenStudio.Components.Shapes.DocumentShapePanel> panel = context.Render<MartenStudio.Components.Shapes.DocumentShapePanel>(
+                parameters => parameters.Add(x => x.Alias, "customer"));
+
+            panel.WaitForAssertion(() => panel.Find("a.ms-id-text").GetAttribute("href").Should().Contain("store=default"));
+
+            await panel.InvokeAsync(() => context.State.SetScopeAsync("second", null, null, Xunit.TestContext.Current.CancellationToken));
+            panel.Render();
+
+            panel.Find("a.ms-id-text").GetAttribute("href").Should().Contain("store=default").And.NotContain("store=second");
+        }
+    }
+
+    /// <summary>A clock that moves when told, and whose timers fire when told.</summary>
+    private sealed class ManualClock(DateTimeOffset start) : TimeProvider
+    {
+        private DateTimeOffset now = start;
+
+        public List<ManualTimer> Timers { get; } = [];
+
+        public override DateTimeOffset GetUtcNow() => now;
+
+        public void Advance(TimeSpan by) => now += by;
+
+        public void FireAll()
+        {
+            foreach (ManualTimer timer in Timers.Where(static x => !x.Disposed).ToList())
+            {
+                timer.Callback(timer.State);
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            ManualTimer timer = new(callback, state, dueTime);
+            Timers.Add(timer);
+            return timer;
+        }
+    }
+
+    private sealed class ManualTimer(TimerCallback callback, object? state, TimeSpan due) : ITimer
+    {
+        public TimerCallback Callback { get; } = callback;
+
+        public object? State { get; } = state;
+
+        public TimeSpan Due { get; } = due;
+
+        public bool Disposed { get; private set; }
+
+        public bool Change(TimeSpan dueTime, TimeSpan period) => true;
+
+        public void Dispose() => Disposed = true;
+
+        public ValueTask DisposeAsync()
+        {
+            Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
+
     /// <summary>A hand-written check: a result to return, a gate to hold it, and a record of what was asked.</summary>
     private sealed class FakeShapeCheck : IDocumentShapeCheck
     {
@@ -309,9 +440,12 @@ public class DocumentShapePanelTests
 
         public List<(string Alias, bool Force)> Calls { get; } = [];
 
+        public List<StudioScope> Scopes { get; } = [];
+
         public Task<ShapeCheckResult> CheckAsync(StudioScope scope, string alias, bool force, CancellationToken cancellationToken)
         {
             Calls.Add((alias, force));
+            Scopes.Add(scope);
             return Gate is { } gate ? gate.Task.WaitAsync(cancellationToken) : Task.FromResult(Result);
         }
     }

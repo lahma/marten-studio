@@ -10,7 +10,8 @@ namespace MartenStudio.Integration.Tests.Documents;
 /// <summary>
 /// 1.2-SHAPE: the documents' shape check under conjoined tenancy. The same id exists in two tenants and only tenant B's copy no
 /// longer fits: tenant A's scope finds nothing, tenant B's finds it, and with no tenant in scope the example carries tenant B -
-/// which is only possible if a key is read as (tenant, id) and the histogram's other-tenant bounds never leave the database.
+/// which is only possible if a key is read as (tenant, id). The collection is small (complete, whole): the sampled cases - a tenant's
+/// spread, and the edges alone with every tenant in scope - are <c>DocumentShapeCheckLargeConjoinedLiveTests</c>'.
 /// </summary>
 public class DocumentShapeCheckConjoinedLiveTests(DocumentShapeCheckConjoinedLiveTests.Fixture fixture)
     : MartenTestBase(fixture), IClassFixture<DocumentShapeCheckConjoinedLiveTests.Fixture>

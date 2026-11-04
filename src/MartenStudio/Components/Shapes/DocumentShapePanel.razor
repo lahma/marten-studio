@@ -7,6 +7,7 @@
 @inject StudioState State
 @inject IOptions<MartenStudioOptions> Options
 @inject NavigationManager Navigation
+@inject IServiceProvider Services
 
 @*
     Check shapes, for one document collection (D-SHAPE S10). It exists only after a click, so it never runs during prerender, and it
@@ -111,14 +112,24 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
-    private bool RecheckDisabled => result is { } shown && DateTimeOffset.UtcNow < shown.RecheckAt;
+    // The scope the last check ran with: links to examples are built from it, never from whatever scope is active when this renders.
+    private StudioScope? ranScope;
+    private ITimer? recheckTimer;
+    private TimeProvider clock = TimeProvider.System;
+
+    // A failed result is not held (the cache runs again at the next press), so the button is not held back for it either.
+    private bool RecheckDisabled => result is { Error: null } shown && clock.GetUtcNow() < shown.RecheckAt;
 
     private string? RecheckTitle => RecheckDisabled && result is { } shown
         ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(shown.RecheckAt, "HH:mm:ss"))
         : null;
 
     /// <inheritdoc />
-    protected override Task OnInitializedAsync() => RunAsync(force: false);
+    protected override Task OnInitializedAsync()
+    {
+        clock = Services.GetService(typeof(TimeProvider)) as TimeProvider ?? TimeProvider.System;
+        return RunAsync(force: false);
+    }
 
     private Task CheckAgainAsync() => RunAsync(force: true);
 
@@ -151,7 +162,9 @@
 
         try
         {
+            ranScope = scope;
             result = await Check.CheckAsync(scope, Alias, force, token);
+            ArmRecheck();
         }
         catch (OperationCanceledException)
         {
@@ -172,9 +185,43 @@
         }
     }
 
+    /// <summary>
+    /// A one-shot timer for the moment Check again opens, so the button re-enables itself without a click on anything else. It goes
+    /// with the panel.
+    /// </summary>
+    private void ArmRecheck()
+    {
+        recheckTimer?.Dispose();
+        recheckTimer = null;
+
+        if (result is not { Error: null } shown)
+        {
+            return;
+        }
+
+        TimeSpan wait = shown.RecheckAt - clock.GetUtcNow();
+
+        if (wait > TimeSpan.Zero)
+        {
+            recheckTimer = clock.CreateTimer(static state => ((DocumentShapePanel) state!).Refresh(), this, wait, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private void Refresh()
+    {
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit ended between the timer firing and this: nothing is left to draw.
+        }
+    }
+
     private string HrefFor(string id, string? tenant, long? sequence, long? version)
     {
-        StudioScope? scope = State.ActiveScope;
+        StudioScope? scope = ranScope;
 
         if (scope is not null && scope.TenantId is null && tenant is not null)
         {
@@ -187,6 +234,7 @@
     /// <inheritdoc />
     public void Dispose()
     {
+        recheckTimer?.Dispose();
         cts?.Cancel();
         cts?.Dispose();
     }

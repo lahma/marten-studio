@@ -101,6 +101,23 @@ public class ShapeRoundTripTests : IDisposable
         ShapeSentinel.Strings(result).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void One_odd_document_whose_comparison_throws_fails_that_item_and_not_the_check_and_keeps_no_message()
+    {
+        ShapeItemResult result = ShapeRoundTrip.Check(
+            Options.Serializer(),
+            Options.FindOrResolveDocumentType(typeof(ShapeOrder)),
+            null,
+            """{"Id":"6e0f6a39-cb5b-4ea4-a56e-d3b3fd6a2c5f","Total":5}""",
+            static (_, _) => throw new ArgumentException("quotes " + Sentinel));
+
+        result.Members.Should().BeEmpty();
+        result.Failure.Should().NotBeNull();
+        result.Failure!.Kind.Should().Be(ShapeFailureKind.NotWritable);
+        result.Failure.ExceptionType.Should().Be(nameof(ArgumentException));
+        ShapeSentinel.Strings(result).Should().NotContain(x => x.Contains(Sentinel, StringComparison.Ordinal));
+    }
+
     public class ShapeOrder
     {
         public Guid Id { get; set; }

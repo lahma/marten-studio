@@ -101,6 +101,8 @@ public class ShapeCheckTextTests
     {
         ShapeCheckText.NoSuchDocumentType("ghost").Should().Be("There is no registered document type called 'ghost' to check.");
         ShapeCheckText.TableMissing.Should().Be("Marten has not created this table in this database yet, so there is nothing to check.");
+        ShapeCheckText.AllTenantsEdgesOnly.Should().Be(
+            "With all tenants in scope only the lowest and highest keys were read; choose a tenant for a spread sample.");
         ShapeCheckText.SoftDeletedLeftOut.Should().Be("Soft-deleted documents are not checked.");
         ShapeCheckText.NotAnalysed.Should().Be("PostgreSQL has not analysed this table yet, so only the lowest and highest ids were read.");
         ShapeCheckText.TooLarge(2).Should().Be("Too large to check: 2 (over 256 KiB each, counted and not read).");

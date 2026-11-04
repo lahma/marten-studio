@@ -127,6 +127,21 @@ public class ShapeAggregatorTests
     }
 
     [Fact]
+    public void Two_types_of_one_name_in_two_namespaces_are_two_types_told_apart_by_their_full_names()
+    {
+        ShapeAggregator aggregator = new();
+        aggregator.Add("Car", "Fleet.Old.Car", Key("a"), null, [Dropped("$.x")]);
+        aggregator.Add("Car", "Fleet.New.Car", Key("b"), null, []);
+        aggregator.Add("Boat", "Fleet.Boat", Key("c"), null, []);
+
+        IReadOnlyList<ShapeTypeResult> built = aggregator.Build();
+
+        built.Select(static x => x.TypeName).Should().Equal("Fleet.Old.Car", "Boat", "Fleet.New.Car");
+        built.Single(static x => x.TypeName == "Fleet.Old.Car").Members.Should().ContainSingle();
+        built.Single(static x => x.TypeName == "Fleet.New.Car").Members.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Read_as_another_type_and_binary_are_counted_beside_the_examined_items()
     {
         ShapeAggregator aggregator = new();

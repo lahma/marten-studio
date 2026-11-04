@@ -171,6 +171,44 @@ public class DocumentShapeQueriesTests
     }
 
     [Fact]
+    public void With_all_tenants_in_scope_the_edges_follow_the_primary_key_and_there_is_no_spread()
+    {
+        DocumentTableInfo table = Table(conjoined: true);
+
+        using NpgsqlCommand tenantFirst = DocumentShapeQueries.BuildSampledKeys(table, null, null, 25, 150, 10);
+        using NpgsqlCommand idFirst = DocumentShapeQueries.BuildSampledKeys(
+            table, null, null, 25, 150, 10, DocumentShapeQueries.PrimaryKeyOrder.IdThenTenant);
+        using NpgsqlCommand complete = DocumentShapeQueries.BuildCompleteKeys(table, null, null, 200, 10);
+
+        tenantFirst.CommandText.Should().Contain("order by d.\"tenant_id\" asc, d.\"id\" asc")
+            .And.Contain("order by d.\"tenant_id\" desc, d.\"id\" desc")
+            .And.NotContain("pg_stats").And.NotContain("histogram");
+        idFirst.CommandText.Should().Contain("order by d.\"id\" asc, d.\"tenant_id\" asc")
+            .And.Contain("order by d.\"id\" desc, d.\"tenant_id\" desc");
+        complete.CommandText.Should().Contain("order by d.\"tenant_id\" asc, d.\"id\" asc");
+        DocumentShapeQueries.CanSpread(table, null).Should().BeFalse();
+        DocumentShapeQueries.CanSpread(table).Should().BeTrue("the id column's type alone would allow one");
+    }
+
+    [Fact]
+    public void With_a_tenant_in_scope_or_on_a_single_tenanted_table_nothing_changes()
+    {
+        DocumentTableInfo conjoined = Table(conjoined: true);
+
+        using NpgsqlCommand oneTenant = DocumentShapeQueries.BuildSampledKeys(conjoined, "acme", null, 25, 150, 10);
+        using NpgsqlCommand single = DocumentShapeQueries.BuildSampledKeys(Table(), null, null, 25, 150, 10);
+
+        foreach (NpgsqlCommand command in new[] { oneTenant, single })
+        {
+            command.CommandText.Should().Contain("order by d.\"id\" asc").And.Contain("order by d.\"id\" desc")
+                .And.Contain("pg_stats");
+        }
+
+        DocumentShapeQueries.CanSpread(conjoined, "acme").Should().BeTrue();
+        DocumentShapeQueries.CanSpread(Table(), null).Should().BeTrue();
+    }
+
+    [Fact]
     public void The_rows_are_read_by_key_with_the_size_guard_and_a_typed_array()
     {
         using NpgsqlCommand rows = DocumentShapeQueries.BuildRows(Table(), null, null, [Guid.NewGuid(), Guid.NewGuid()], [null, null], 262144, 10);

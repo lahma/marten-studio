@@ -80,6 +80,9 @@ internal sealed class ShapeAggregator
     {
         List<ShapeTypeResult> results = [];
 
+        // The short name, unless two types share it: then the full name tells them apart.
+        HashSet<string> shared = [.. types.Values.GroupBy(static x => x.TypeName, StringComparer.Ordinal).Where(static x => x.Count() > 1).Select(static x => x.Key)];
+
         foreach (TypeBucket bucket in types.Values)
         {
             List<ShapeFailureGroup> failures = [.. bucket.Failures.Values
@@ -113,7 +116,7 @@ internal sealed class ShapeAggregator
             int moreMembers = Math.Max(0, members.Count - ShapeCheckLimits.MaxMemberFindings);
 
             results.Add(new ShapeTypeResult(
-                bucket.TypeName,
+                shared.Contains(bucket.TypeName) ? bucket.FullTypeName ?? bucket.TypeName : bucket.TypeName,
                 bucket.FullTypeName,
                 bucket.Examined,
                 bucket.ReadAsOtherType,
@@ -205,10 +208,13 @@ internal sealed class ShapeAggregator
 
     private TypeBucket Bucket(string typeName, string? fullTypeName)
     {
-        if (!types.TryGetValue(typeName, out TypeBucket? bucket))
+        // Keyed by the full name: two subclasses of one name in two namespaces are two types, and merging them would blame one for the other.
+        string key = fullTypeName ?? typeName;
+
+        if (!types.TryGetValue(key, out TypeBucket? bucket))
         {
             bucket = new TypeBucket(typeName, fullTypeName);
-            types[typeName] = bucket;
+            types[key] = bucket;
         }
 
         return bucket;

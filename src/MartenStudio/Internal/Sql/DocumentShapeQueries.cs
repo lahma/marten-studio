@@ -58,6 +58,30 @@ internal static class DocumentShapeQueries
     }
 
     /// <summary>
+    /// Whether the sample of <paramref name="table" /> in <paramref name="tenantId" />'s scope has a spread branch: the id column's type
+    /// allows one, and it is not a conjoined table read for every tenant. Under conjoined tenancy the primary key is
+    /// <c>(tenant_id, id)</c> by default, so a probe by <c>id</c> alone is not an index descent, and the histogram is every tenant's
+    /// ids together; with all tenants in scope only the edges are read, in primary-key order.
+    /// </summary>
+    /// <param name="table">The table.</param>
+    /// <param name="tenantId">The scope's tenant.</param>
+    public static bool CanSpread(DocumentTableInfo table, string? tenantId) =>
+        CanSpread(table) && !(tenantId is null && TenantColumn(table) is not null);
+
+    /// <summary>
+    /// The primary-key order of a conjoined table: <c>DocumentMapping.PrimaryKeyTenancyOrdering</c>, which the edges follow when no
+    /// tenant is in scope so that both are index scans.
+    /// </summary>
+    public enum PrimaryKeyOrder
+    {
+        /// <summary>The primary key is <c>(tenant_id, id)</c>: Marten's default.</summary>
+        TenantThenId,
+
+        /// <summary>The primary key is <c>(id, tenant_id)</c>.</summary>
+        IdThenTenant,
+    }
+
+    /// <summary>
     /// <c>select count(*) from (select 1 … limit @probe)</c>: at most <paramref name="probe" /> index entries, to tell a collection
     /// small enough to read whole from one that has to be sampled.
     /// </summary>
@@ -94,7 +118,13 @@ internal static class DocumentShapeQueries
     /// <summary>
     /// The keys of a collection that fits the sample: all of them, in id order, with each one's stored size.
     /// </summary>
-    public static NpgsqlCommand BuildCompleteKeys(DocumentTableInfo table, string? tenantId, string? subclassAlias, int sample, int commandTimeoutSeconds)
+    public static NpgsqlCommand BuildCompleteKeys(
+        DocumentTableInfo table,
+        string? tenantId,
+        string? subclassAlias,
+        int sample,
+        int commandTimeoutSeconds,
+        PrimaryKeyOrder keyOrder = PrimaryKeyOrder.TenantThenId)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -110,7 +140,7 @@ internal static class DocumentShapeQueries
                 + "from " + table.QualifiedName + " as " + Alias + "\n"
                 + "where true\n"
                 + scope
-                + "order by " + IdColumn + "\n"
+                + "order by " + KeyOrdering(table, tenantId, keyOrder, descending: false) + "\n"
                 + "limit " + parameters.Add(NpgsqlDbType.Integer, sample, "sample");
 
             return command;
@@ -124,7 +154,7 @@ internal static class DocumentShapeQueries
 
     /// <summary>
     /// The keys of a sampled collection, in one statement of up to three <c>union all</c> branches: the lowest ids, the highest, and
-    /// - when <see cref="CanSpread" /> - 150 probes of the primary key at the histogram's bounds.
+    /// - when <see cref="CanSpread(DocumentTableInfo, string?)" /> - 150 probes of the primary key at the histogram's bounds.
     /// </summary>
     public static NpgsqlCommand BuildSampledKeys(
         DocumentTableInfo table,
@@ -132,7 +162,8 @@ internal static class DocumentShapeQueries
         string? subclassAlias,
         int edge,
         int spread,
-        int commandTimeoutSeconds)
+        int commandTimeoutSeconds,
+        PrimaryKeyOrder keyOrder = PrimaryKeyOrder.TenantThenId)
     {
         ArgumentNullException.ThrowIfNull(table);
 
@@ -148,12 +179,12 @@ internal static class DocumentShapeQueries
             StringBuilder sql = new();
 
             sql.Append("(select ").Append(Keys(table, PartLowest)).Append('\n').Append(from)
-                .Append("order by ").Append(IdColumn).Append(" asc\nlimit ").Append(edgeParameter).Append(")\n");
+                .Append("order by ").Append(KeyOrdering(table, tenantId, keyOrder, descending: false)).Append("\nlimit ").Append(edgeParameter).Append(")\n");
             sql.Append("union all\n");
             sql.Append("(select ").Append(Keys(table, PartHighest)).Append('\n').Append(from)
-                .Append("order by ").Append(IdColumn).Append(" desc\nlimit ").Append(edgeParameter).Append(')');
+                .Append("order by ").Append(KeyOrdering(table, tenantId, keyOrder, descending: true)).Append("\nlimit ").Append(edgeParameter).Append(')');
 
-            if (IdCast(table.IdColumnType) is { } cast)
+            if (CanSpread(table, tenantId) && IdCast(table.IdColumnType) is { } cast)
             {
                 string schema = parameters.Add(NpgsqlDbType.Text, table.Schema, "schema");
                 string tableName = parameters.Add(NpgsqlDbType.Text, table.Table, "table");
@@ -239,7 +270,9 @@ internal static class DocumentShapeQueries
             sql.Append("       ").Append(typeColumn).Append(" as doc_type,\n");
             sql.Append("       ").Append(tenantColumn).Append(" as tenant_id\n");
             sql.Append("from ").Append(table.QualifiedName).Append(" as " + Alias).Append('\n');
-            sql.Append("cross join lateral (select ").Append(DataColumn).Append("::text as j) as t\n");
+            // "offset 0" keeps the planner from pulling the subquery up: inlined, d.data::text was computed three times a row
+            // (the blanking case, its test and the size), and rendering a jsonb as text is the one costly thing this statement does.
+            sql.Append("cross join lateral (select ").Append(DataColumn).Append("::text as j offset 0) as t\n");
             sql.Append("where true\n");
             sql.Append(scope);
 
@@ -340,6 +373,26 @@ internal static class DocumentShapeQueries
     /// <summary>The tenant column of a conjoined table; <see langword="null" /> when the table has none.</summary>
     private static string? TenantColumn(DocumentTableInfo table) =>
         table.TenancyStyle == TenancyStyle.Conjoined ? table.MetadataColumnName(DocumentMetadataColumn.TenantId) : null;
+
+    /// <summary>
+    /// The edges' <c>order by</c>: the id alone, except for a conjoined table read for every tenant, where it is the primary key's own
+    /// columns in the primary key's own order, ascending or descending together, so each edge is an index scan.
+    /// </summary>
+    private static string KeyOrdering(DocumentTableInfo table, string? tenantId, PrimaryKeyOrder keyOrder, bool descending)
+    {
+        string direction = descending ? " desc" : " asc";
+
+        if (tenantId is not null || TenantColumn(table) is not { } tenant)
+        {
+            return IdColumn + direction;
+        }
+
+        string tenantColumn = Alias + "." + SqlIdentifier.Quote(tenant);
+
+        return keyOrder == PrimaryKeyOrder.IdThenTenant
+            ? IdColumn + direction + ", " + tenantColumn + direction
+            : tenantColumn + direction + ", " + IdColumn + direction;
+    }
 
     private static string IdExpression(DocumentTableInfo table) =>
         table.IdColumnType == DocumentIdColumnType.Unknown ? IdColumn + "::text" : IdColumn;

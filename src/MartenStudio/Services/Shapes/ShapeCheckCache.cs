@@ -112,7 +112,18 @@ internal sealed class ShapeCheckCache
                 {
                     ShapeCheckResult result = await read(token).ConfigureAwait(false);
 
-                    Remember(key, result.CheckedAt);
+                    if (result.Error is not null)
+                    {
+                        // A failure (busy, could not connect, an SQLSTATE) is what the callers waiting on this run are given, and
+                        // nobody else: the entry goes, so the next press runs again and the re-check refusal never applies to it.
+                        cache.Invalidate(key);
+                        finished.TryRemove(key, out _);
+                    }
+                    else
+                    {
+                        Remember(key, result.CheckedAt);
+                    }
+
                     return result;
                 }
                 finally

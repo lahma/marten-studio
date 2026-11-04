@@ -157,6 +157,37 @@ public class ShapeCheckCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task A_failed_result_is_handed_to_those_waiting_and_not_kept_so_the_next_press_runs_at_once()
+    {
+        ShapeCheckCache cache = new(clock);
+        int reads = 0;
+        TaskCompletionSource gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Func<CancellationToken, Task<ShapeCheckResult>> failing = async _ =>
+        {
+            Interlocked.Increment(ref reads);
+            await gate.Task;
+            return ShapeCheckResult.Failed("order", "busy", clock.GetUtcNow(), TimeSpan.Zero, []);
+        };
+
+        Task<ShapeCheckResult> first = cache.GetAsync(Resolved(), "documents", "order", false, failing, CancellationToken.None);
+        Task<ShapeCheckResult> waiting = cache.GetAsync(Resolved(), "documents", "order", false, failing, CancellationToken.None);
+
+        gate.SetResult();
+
+        (await first).Error.Should().Be("busy");
+        (await waiting).Should().BeSameAs(await first, "everyone waiting on the run is given what it found");
+        reads.Should().Be(1);
+
+        // No time has passed: neither the five minutes nor the thirty seconds apply to a failure.
+        Counter again = new();
+        ShapeCheckResult next = await cache.GetAsync(Resolved(), "documents", "order", true, Read(again), CancellationToken.None);
+
+        again.Value.Should().Be(1);
+        next.Error.Should().BeNull();
+    }
+
+    [Fact]
     public async Task Two_scopes_do_not_share_a_result()
     {
         ShapeCheckCache cache = new(clock);

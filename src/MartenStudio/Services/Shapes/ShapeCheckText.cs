@@ -94,6 +94,10 @@ internal static class ShapeCheckText
     public const string NotAnalysed =
         "PostgreSQL has not analysed this table yet, so only the lowest and highest ids were read.";
 
+    /// <summary>A conjoined collection read for every tenant: no spread, because the primary key leads with the tenant.</summary>
+    public const string AllTenantsEdgesOnly =
+        "With all tenants in scope only the lowest and highest keys were read; choose a tenant for a spread sample.";
+
     /// <summary>The spread branch cannot be made for this id column.</summary>
     public const string IdTypeCannotBeSpread =
         "The id column's type cannot be spread, so only the lowest and highest ids were read.";

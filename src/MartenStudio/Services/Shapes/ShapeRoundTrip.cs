@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Json;
-
 using Marten;
 using Marten.Schema;
 
@@ -33,7 +31,13 @@ internal static class ShapeRoundTrip
     /// <param name="documentType">The collection's mapping.</param>
     /// <param name="rowAlias">The row's <c>mt_doc_type</c>, when the table has the column; <see langword="null" /> otherwise.</param>
     /// <param name="storedJson">The row's <c>data</c> as text.</param>
-    public static ShapeItemResult Check(ISerializer serializer, IDocumentType documentType, string? rowAlias, string storedJson)
+    /// <param name="compare">The comparison, for a test that needs it to throw; <see cref="ShapeDiff.Compare(string, string)" /> otherwise.</param>
+    public static ShapeItemResult Check(
+        ISerializer serializer,
+        IDocumentType documentType,
+        string? rowAlias,
+        string storedJson,
+        Func<string, string, IReadOnlyList<ShapeMember>>? compare = null)
     {
         ArgumentNullException.ThrowIfNull(serializer);
         ArgumentNullException.ThrowIfNull(documentType);
@@ -92,11 +96,13 @@ internal static class ShapeRoundTrip
 
         try
         {
-            return new ShapeItemResult(name, fullName, null, ShapeDiff.Compare(storedJson, roundTripped));
+            return new ShapeItemResult(name, fullName, null, (compare ?? ((stored, read) => ShapeDiff.Compare(stored, read)))(storedJson, roundTripped));
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            // Nested deeper than the canonicalizer reads: the item loaded, and the comparison could not be made.
+            // Nested deeper than the canonicalizer reads, or anything else one odd document does to the comparison: the item loaded,
+            // the comparison could not be made, and that is this item's finding - by the exception's type name alone - and not the
+            // check's failure.
             return new ShapeItemResult(
                 name, fullName, ShapeFailureDescriber.Of(ShapeFailureKind.NotWritable, exception.GetType().Name), []);
         }

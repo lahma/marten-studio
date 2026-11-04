@@ -243,12 +243,18 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
         ISerializer serializer = resolved.Store.Options.Serializer();
         ReadOnlySqlSession session = new(new ReadOnlySqlOptions { StatementTimeout = statementTimeout });
 
+        // The primary key's own order (Marten's default leads with the tenant), which the edges follow when every tenant is in scope.
+        DocumentShapeQueries.PrimaryKeyOrder keyOrder =
+            documentType is DocumentMapping { PrimaryKeyTenancyOrdering: PrimaryKeyTenancyOrdering.Id_Then_TenantId }
+                ? DocumentShapeQueries.PrimaryKeyOrder.IdThenTenant
+                : DocumentShapeQueries.PrimaryKeyOrder.TenantThenId;
+
         await session.InTransactionAsync(
                 connection,
                 async (transaction, cancel) =>
                 {
                     await ReadSampleAsync(
-                            connection, transaction, table, documentType, serializer, tenantId, subclassAlias, state, commandTimeout, cancel)
+                            connection, transaction, table, documentType, serializer, tenantId, subclassAlias, keyOrder, state, commandTimeout, cancel)
                         .ConfigureAwait(false);
 
                     return 0;
@@ -285,6 +291,7 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
         ISerializer serializer,
         string? tenantId,
         string? subclassAlias,
+        DocumentShapeQueries.PrimaryKeyOrder keyOrder,
         RunState state,
         int commandTimeout,
         CancellationToken token)
@@ -306,11 +313,11 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
         bool spreadAttempted = false;
 
         using (NpgsqlCommand command = state.Complete
-                   ? DocumentShapeQueries.BuildCompleteKeys(table, tenantId, subclassAlias, ShapeCheckLimits.SampleSize, commandTimeout)
+                   ? DocumentShapeQueries.BuildCompleteKeys(table, tenantId, subclassAlias, ShapeCheckLimits.SampleSize, commandTimeout, keyOrder)
                    : DocumentShapeQueries.BuildSampledKeys(
-                       table, tenantId, subclassAlias, ShapeCheckLimits.Edge, ShapeCheckLimits.Spread, commandTimeout))
+                       table, tenantId, subclassAlias, ShapeCheckLimits.Edge, ShapeCheckLimits.Spread, commandTimeout, keyOrder))
         {
-            spreadAttempted = !state.Complete && DocumentShapeQueries.CanSpread(table);
+            spreadAttempted = !state.Complete && DocumentShapeQueries.CanSpread(table, tenantId);
             Attach(command, connection, transaction, state);
 
             await using NpgsqlDataReader reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
@@ -333,6 +340,10 @@ internal sealed class DocumentShapeCheckService : IDocumentShapeCheck
             if (!DocumentShapeQueries.CanSpread(table))
             {
                 state.Reason = ShapeCheckText.IdTypeCannotBeSpread;
+            }
+            else if (!DocumentShapeQueries.CanSpread(table, tenantId))
+            {
+                state.Reason = ShapeCheckText.AllTenantsEdgesOnly;
             }
             else if (spreadAttempted && !keys.Exists(static x => x.Part == DocumentShapeQueries.PartSpread))
             {
