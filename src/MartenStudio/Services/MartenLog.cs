@@ -79,6 +79,10 @@ internal static partial class MartenLog
     [LoggerMessage(EventId = 9227, Level = LogLevel.Debug, Message = "Marten Studio checked the shapes of {Subject}: {Examined} examined, {Problems} kinds of problem, {Coverage}")]
     public static partial void DocumentShapesChecked(this ILogger logger, string subject, int examined, int problems, string coverage);
 
+    /// <remarks>9228: the events check's, in the same words and at the same level as 9227; the subject is the event type name as stored.</remarks>
+    [LoggerMessage(EventId = 9228, Level = LogLevel.Debug, Message = "Marten Studio checked the shapes of events {Subject}: {Examined} examined, {Problems} kinds of problem, {Coverage}")]
+    public static partial void EventShapesChecked(this ILogger logger, string subject, int examined, int problems, string coverage);
+
     /// <summary>9207, with the user's name, the projection and the scope escaped and bounded.</summary>
     public static void ProjectionRebuildStarted(this ILogger logger, string user, string projection, string storeKey, string databaseId)
     {

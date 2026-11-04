@@ -32,7 +32,9 @@ internal sealed class ShapeCheckCache
     private readonly StudioSnapshotCache cache;
     private readonly TimeProvider clock;
     private readonly ConcurrentDictionary<string, DateTimeOffset> finished = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, byte> running = new(StringComparer.Ordinal);
+    // Each run's own marker, so a run that ends removes only itself: a failed run invalidates its key from inside, a new press can start
+    // a new run before the old one's finally block, and removing "the key's" marker then would erase the new run's.
+    private readonly ConcurrentDictionary<string, object> running = new(StringComparer.Ordinal);
 
     /// <summary>The cache a host's container holds: the system clock.</summary>
     public ShapeCheckCache()
@@ -48,6 +50,12 @@ internal sealed class ShapeCheckCache
 
     /// <summary>How many keys hold a result or a run, for a test.</summary>
     internal int Count => cache.Count;
+
+    /// <summary>Run by a failed run once it has invalidated its key and before it ends, so a test can start a new press in that gap.</summary>
+    internal Action? AfterFailureInvalidated { get; set; }
+
+    /// <summary>Whether a run for <paramref name="key" /> is in flight, for a test.</summary>
+    internal bool IsRunning(string key) => running.ContainsKey(key);
 
     /// <summary>
     /// The key of one check: the resolved scope - the store's registered key, the database's own identity and the tenant - the
@@ -106,7 +114,8 @@ internal sealed class ShapeCheckCache
             key,
             async token =>
             {
-                running[key] = 0;
+                object marker = new();
+                running[key] = marker;
 
                 try
                 {
@@ -118,6 +127,7 @@ internal sealed class ShapeCheckCache
                         // nobody else: the entry goes, so the next press runs again and the re-check refusal never applies to it.
                         cache.Invalidate(key);
                         finished.TryRemove(key, out _);
+                        AfterFailureInvalidated?.Invoke();
                     }
                     else
                     {
@@ -128,10 +138,28 @@ internal sealed class ShapeCheckCache
                 }
                 finally
                 {
-                    running.TryRemove(key, out _);
+                    running.TryRemove(new KeyValuePair<string, object>(key, marker));
                 }
             },
             cancellationToken);
+    }
+
+    /// <summary>
+    /// The event type names this scope's events table holds besides the ones the store registers, read by <paramref name="read" /> at most
+    /// once per five minutes per resolved scope: what an event check validates a name against before it reaches the check's cache or any
+    /// statement. A read that throws is not kept.
+    /// </summary>
+    /// <param name="resolved">The scope as it resolved.</param>
+    /// <param name="read">The read: the Event types page's own listing.</param>
+    /// <param name="cancellationToken">Cancels this caller's wait.</param>
+    public Task<IReadOnlySet<string>> EventTypeNamesAsync(
+        ResolvedScope resolved,
+        Func<CancellationToken, Task<IReadOnlySet<string>>> read,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+
+        return cache.GetAsync(KeyOf(resolved, "event-type-names", string.Empty), read, cancellationToken);
     }
 
     private void Remember(string key, DateTimeOffset at)

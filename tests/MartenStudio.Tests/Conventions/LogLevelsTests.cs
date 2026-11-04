@@ -251,6 +251,8 @@ public class LogLevelsTests
             "A list header's count failed with an unexpected SQLSTATE; its timeout is Debug."),
         ["src/MartenStudio/Services/Shapes/DocumentShapeCheckService.cs : Marten Studio could not check the shapes of '{Subject}': {Reason}"] = (Verdict.VisitorAction,
             "A Check shapes the visitor pressed failed for a reason other than its timeouts (a result, not a log); the line carries the subject, an SQLSTATE or an exception type name, never a message."),
+        ["src/MartenStudio/Services/Shapes/EventShapeCheckService.cs : Marten Studio could not check the shapes of events '{Subject}': {Reason}"] = (Verdict.VisitorAction,
+            "A Check shapes the visitor pressed on Event types failed for a reason other than its timeouts (a result, not a log); the line carries the event type name, an SQLSTATE or an exception type name, never a message."),
         ["src/MartenStudio/Services/Documents/DocumentDataService.cs : Marten Studio could not list the document tables of the database"] = (Verdict.VisitorAction,
             "The rail's discovery of unregistered mt_doc tables failed on a catalog read."),
         ["src/MartenStudio/Services/Documents/DocumentDataService.cs : Marten Studio could not count '{Alias}' #2"] = (Verdict.VisitorAction,

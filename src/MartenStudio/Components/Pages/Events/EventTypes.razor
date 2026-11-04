@@ -3,6 +3,7 @@
 @using Microsoft.Extensions.Logging
 @using Microsoft.Extensions.Options
 @using PostgresStudio.Components.Pages.Health
+@using MartenStudio.Components.Shapes
 @using MartenStudio.Services
 @using MartenStudio.Services.Events
 @using MartenStudio.Services.Health
@@ -24,6 +25,7 @@
         <button type="button" class="ms-button" disabled="@(loading || counting)" @onclick="LoadCountsAsync">
             @(counting ? "Counting..." : "Load counts")
         </button>
+        <button type="button" class="ms-button" disabled="@loading" @onclick="OpenShapesAsync">Check shapes</button>
     </div>
 
     <p class="ms-muted">
@@ -57,6 +59,15 @@
                 </p>
             </div>
         </section>
+    }
+
+    @* 1.2-SHAPE: a scope change re-creates the panel (its key changes), and it starts its checks when it is created. *@
+    @if (shapeOpen && !loading && list is { Error: null } checkable)
+    {
+        <EventShapePanel @key="State.ActiveScope"
+                         TypeNames="@checkable.Types.Select(static x => x.Name).ToList()"
+                         Counts="@ShapeCounts(checkable)"
+                         OnClose="CloseShapesAsync" />
     }
 
     @if (loading)
@@ -245,6 +256,27 @@
     private bool counting;
     private bool countsRequested;
     private string? signature;
+
+    /// <summary>1.2-SHAPE: whether the shape check's panel is open.</summary>
+    private bool shapeOpen;
+
+    private Task OpenShapesAsync()
+    {
+        shapeOpen = true;
+        return Task.CompletedTask;
+    }
+
+    private Task CloseShapesAsync()
+    {
+        shapeOpen = false;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The counts this page has loaded, by type name: a type the page counted as empty is not sent to the check.</summary>
+    private static Dictionary<string, long> ShapeCounts(EventTypeList source) =>
+        source.CountsLoaded
+            ? source.Types.Where(static x => x.Count is not null).ToDictionary(static x => x.Name, static x => x.Count!.Value, StringComparer.Ordinal)
+            : [];
 
     /// <summary>The store's DCB tag types; empty on a store with none.</summary>
     private EventTagTypeList tagTypes = EventTagTypeList.None;

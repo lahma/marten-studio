@@ -15567,6 +15567,39 @@ a.ms-schema-health-mark:focus-visible {
     }
 }
 
+.ms-shape-event-type {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ms-space-xs);
+    min-width: 0;
+    padding-top: var(--ms-space-sm);
+    border-top: 1px solid var(--ms-color-border);
+}
+
+.ms-shape-rebuild {
+    margin: 0;
+    padding: var(--ms-space-sm);
+    border-left: 3px solid var(--ms-color-danger);
+    border-radius: var(--ms-radius-sm);
+    background: var(--ms-color-surface-alt);
+    overflow-wrap: anywhere;
+}
+
+.ms-shape-fits-fold {
+    min-width: 0;
+}
+
+.ms-shape-fits-fold > summary {
+    cursor: pointer;
+    font-weight: var(--ms-font-weight-medium);
+}
+
+.ms-shape-fits-list {
+    margin: var(--ms-space-xs) 0 0;
+    padding-left: var(--ms-space-lg);
+    overflow-wrap: anywhere;
+}
+
 /* ===== 1.2-INDEX Index advisor ===== */
 
 /* --------------------------------------------------------------------------

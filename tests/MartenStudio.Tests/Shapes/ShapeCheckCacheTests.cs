@@ -188,6 +188,45 @@ public class ShapeCheckCacheTests : IDisposable
     }
 
     [Fact]
+    public async Task A_failed_run_that_ends_after_a_new_press_began_leaves_the_new_run_marked_in_flight()
+    {
+        ShapeCheckCache cache = new(clock);
+        Counter reads = new();
+        TaskCompletionSource second = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        string key = ShapeCheckCache.KeyOf(Resolved(), "documents", "order");
+        Task<ShapeCheckResult>? replacement = null;
+
+        // The gap: the failed run has invalidated its key and has not yet ended, and a new press starts the key's next run in it.
+        cache.AfterFailureInvalidated = () =>
+        {
+            cache.AfterFailureInvalidated = null;
+            replacement = cache.GetAsync(Resolved(), "documents", "order", false, Read(reads, second.Task), CancellationToken.None);
+        };
+
+        ShapeCheckResult failed = await cache.GetAsync(
+            Resolved(),
+            "documents",
+            "order",
+            false,
+            _ => Task.FromResult(ShapeCheckResult.Failed("order", "busy", clock.GetUtcNow(), TimeSpan.Zero, [])),
+            CancellationToken.None);
+
+        failed.Error.Should().Be("busy");
+        replacement.Should().NotBeNull();
+        reads.Value.Should().Be(1, "the new press began a run of its own");
+        cache.IsRunning(key).Should().BeTrue("the old run's end must not erase the new run's marker");
+
+        // So a forced press, thirty seconds later, joins that run and starts no third.
+        clock.Advance(TimeSpan.FromSeconds(31));
+        Task<ShapeCheckResult> forced = cache.GetAsync(Resolved(), "documents", "order", true, Read(reads, second.Task), CancellationToken.None);
+
+        second.SetResult();
+        (await forced).Should().BeSameAs(await replacement!);
+        reads.Value.Should().Be(1);
+        cache.IsRunning(key).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Two_scopes_do_not_share_a_result()
     {
         ShapeCheckCache cache = new(clock);

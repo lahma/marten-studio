@@ -197,6 +197,7 @@ public class StudioRegistrationTests
         // 1.2-SHAPE: the shape check - the documents' check service, and the cache that makes it one read per scope and subject.
         (typeof(MartenStudio.Services.Shapes.ShapeCheckCache), ServiceLifetime.Singleton, How.Type, typeof(MartenStudio.Services.Shapes.ShapeCheckCache)),
         (typeof(MartenStudio.Services.Shapes.IDocumentShapeCheck), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Shapes.DocumentShapeCheckService)),
+        (typeof(MartenStudio.Services.Shapes.IEventShapeCheck), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Shapes.EventShapeCheckService)),
         (typeof(ISchemaDataService), ServiceLifetime.Scoped, How.Type, typeof(SchemaDataService)),
         (typeof(IConfigurationService), ServiceLifetime.Scoped, How.Type, typeof(ConfigurationService)),
         (typeof(IQueryService), ServiceLifetime.Scoped, How.Type, typeof(QueryService)),

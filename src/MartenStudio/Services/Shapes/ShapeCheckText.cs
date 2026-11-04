@@ -82,6 +82,178 @@ internal static class ShapeCheckText
     public static string AndMore(int more, string what) =>
         $"and {more.ToString("N0", CultureInfo.InvariantCulture)} more {what} not shown.";
 
+    // ---- Members (events) -----------------------------------------------------------------------------------------------------
+
+    /// <summary>A member the event type no longer declares: projections never see it, and nothing is lost from the log.</summary>
+    public static string EventDropped(int count, int examined, string path, string typeName) =>
+        $"{Of(count, examined)} sampled `{typeName}` events carry `{path}`, which `{typeName}` no longer declares: projections never see it. "
+        + "Events are never rewritten, so nothing is lost from the log.";
+
+    /// <summary>A stored value the event type reads as empty.</summary>
+    public static string EventNulled(int count, int examined, string path, string typeName) =>
+        $"{Of(count, examined)} sampled `{typeName}` events have a value at `{path}` that `{typeName}` reads as empty: projections see it as empty.";
+
+    /// <summary>A stored value of one JSON kind that the event type reads as another.</summary>
+    public static string EventRetyped(int count, int examined, string path, string typeName, System.Text.Json.JsonValueKind? stored, System.Text.Json.JsonValueKind? read) =>
+        $"{Of(count, examined)} sampled `{typeName}` events store `{path}` as {ShapeAggregator.KindPhrase(stored)}, and `{typeName}` reads it as {ShapeAggregator.KindPhrase(read)}: "
+        + $"projections see it as {ShapeAggregator.KindPhrase(read)}.";
+
+    /// <summary>A stored scalar that comes back different.</summary>
+    public static string EventRewritten(int count, int examined, string path, string typeName) =>
+        $"{Of(count, examined)} sampled `{typeName}` events have a value at `{path}` that comes back different: projections see a different value from the one stored.";
+
+    /// <summary>A value read under another spelling of its name.</summary>
+    public static string EventRespelled(int count, int examined, string path, string pairedPath, string typeName) =>
+        $"{Of(count, examined)} sampled `{typeName}` events store `{path}`, which `{typeName}` reads as `{pairedPath}`: the value reaches projections under the new spelling.";
+
+    /// <summary>A member the stored events lack.</summary>
+    public static string EventDefaulted(int count, int examined, string path, string typeName) =>
+        count >= examined
+            ? $"`{path}` is declared by `{typeName}` and set in none of the {examined.ToString("N0", CultureInfo.InvariantCulture)} sampled events."
+            : $"`{path}` is absent from {Of(count, examined)} sampled `{typeName}` events: projections read its default.";
+
+    // ---- Failures (events) ----------------------------------------------------------------------------------------------------
+
+    /// <summary>A failure group of an event check.</summary>
+    public static string EventFailure(ShapeFailureGroup failure, int examined, string typeName)
+    {
+        ArgumentNullException.ThrowIfNull(failure);
+
+        string head = $"{Of(failure.Count, examined)} sampled `{typeName}` events";
+
+        switch (failure.Kind)
+        {
+            case ShapeFailureKind.UnknownEventType:
+                string[] names = (failure.Detail ?? string.Empty).Split(" / ", 2);
+                string dotNet = names.Length > 1 && names[1].Length > 0 && names[1] != "(none)"
+                    ? $", and `{names[1]}` cannot be loaded"
+                    : ", and the row names no .NET type to load";
+
+                return $"{Of(failure.Count, examined)} `{typeName}` events cannot be read: no type is registered for `{names[0]}`{dotNet}.";
+            case ShapeFailureKind.ReadAsNothing:
+                return $"{head} are read as nothing at all: projections never see them.";
+            case ShapeFailureKind.NotWritable:
+                return $"{head} are read, but writing them back could not be checked (`{failure.ExceptionType}`).";
+            default:
+                string how = failure.Path is null
+                    ? $" (`{failure.ExceptionType}`)"
+                    : failure.StoredKind is { } kind
+                        ? $": `{failure.Path}` is stored as {ShapeAggregator.KindPhrase(kind)} (`{failure.ExceptionType}`)"
+                        : $": `{failure.Path}` cannot be read (`{failure.ExceptionType}`)";
+
+                return $"{head} cannot be read{how}.";
+        }
+    }
+
+    /// <summary>What a rebuild and the running daemon do about the events that cannot be deserialized.</summary>
+    /// <param name="typeName">The event type.</param>
+    /// <param name="firstSequence">The lowest sequence of a failing event.</param>
+    /// <param name="rebuildSkips"><c>Projections.RebuildErrors.SkipSerializationErrors</c>.</param>
+    /// <param name="daemonSkips"><c>Projections.Errors.SkipSerializationErrors</c>.</param>
+    public static string RebuildSerialization(string typeName, long? firstSequence, bool rebuildSkips, bool daemonSkips)
+    {
+        string at = firstSequence is { } sequence ? $"stops at sequence {sequence.ToString("N0", CultureInfo.InvariantCulture)}, the first of them, " : "stops at the first of them, ";
+
+        string rebuild = rebuildSkips
+            ? "A rebuild skips them and records each as a dead letter (`RebuildErrors.SkipSerializationErrors` is on): its projections leave them out."
+            : $"A rebuild of a projection that reads `{typeName}` {at}because `RebuildErrors.SkipSerializationErrors` is off.";
+
+        string daemon = daemonSkips
+            ? "The running daemon skips them and records each as a dead letter (`Errors.SkipSerializationErrors` is on)."
+            : "The running daemon pauses the shard at the first of them (`Errors.SkipSerializationErrors` is off).";
+
+        return rebuild + " " + daemon;
+    }
+
+    /// <summary>What a rebuild and the running daemon do about the events no type answers to.</summary>
+    /// <param name="firstSequence">The lowest sequence of a failing event.</param>
+    /// <param name="rebuildSkips"><c>Projections.RebuildErrors.SkipUnknownEvents</c>.</param>
+    /// <param name="daemonSkips"><c>Projections.Errors.SkipUnknownEvents</c>.</param>
+    public static string RebuildUnknown(long? firstSequence, bool rebuildSkips, bool daemonSkips)
+    {
+        string at = firstSequence is { } sequence ? $"stops at sequence {sequence.ToString("N0", CultureInfo.InvariantCulture)}, the first of them, " : "stops at the first of them, ";
+
+        string rebuild = rebuildSkips
+            ? "A rebuild skips them (`RebuildErrors.SkipUnknownEvents` is on): its projections leave them out."
+            : $"A rebuild of a projection that reads every event type {at}because `RebuildErrors.SkipUnknownEvents` is off.";
+
+        string daemon = daemonSkips
+            ? "The running daemon skips them (`Errors.SkipUnknownEvents` is on)."
+            : "The running daemon pauses the shard at the first of them (`Errors.SkipUnknownEvents` is off).";
+
+        return rebuild + " " + daemon;
+    }
+
+    /// <summary>The remedy for events the reader cannot deserialize.</summary>
+    public const string UpcasterRemedy =
+        "Register an upcaster for the old shape (`opts.Events.Upcast(...)`), or make the member accept both shapes.";
+
+    /// <summary>The line under an event type with nothing found.</summary>
+    public static string EveryEventFits(string typeName) => $"Every sampled event fits `{typeName}`.";
+
+    /// <summary>Events written as one type and read as another.</summary>
+    public static string EventsReadAsOtherType(int count, int examined, string typeName) =>
+        $"{Of(count, examined)} sampled `{typeName}` events were written as another type and are read as `{typeName}`: an upcaster or a renamed type maps them, so their members are not compared.";
+
+    /// <summary>Events with a binary body.</summary>
+    public static string EventsBinary(int count, int examined, string typeName) =>
+        $"{Of(count, examined)} sampled `{typeName}` events have a binary body: they are read, and not compared.";
+
+    // ---- The result (events) --------------------------------------------------------------------------------------------------
+
+    /// <summary>The event type is not one the store registers or its events table holds; one sentence for every such name.</summary>
+    public static string NoSuchEventType(string name) => $"There is no event type called '{name}' to check.";
+
+    /// <summary>No event of the type is in scope; the page's own count said so, or the table has none.</summary>
+    public const string NoEventsInScope = "There are no events of this type in scope.";
+
+    /// <summary>What the scope leaves out of an event check: archived events.</summary>
+    public const string ArchivedLeftOut = "Archived events are not checked: a rebuild skips them.";
+
+    /// <summary>What the scope leaves out of an event check: events marked skipped.</summary>
+    public const string SkippedLeftOut = "Events marked as skipped are not checked: a rebuild skips them.";
+
+    /// <summary>The type has no index, so only the edges were read.</summary>
+    public const string NoTypeIndex =
+        "Without an index on type, only the oldest and newest events of each type were read.";
+
+    /// <summary>The line that adds the index.</summary>
+    public const string TypeIndexRemedy = "opts.Events.EnableEventTypeIndex = true;";
+
+    /// <summary>Per-tenant sequences with every tenant in scope: no spread.</summary>
+    public const string EventsAllTenantsEdgesOnly =
+        "With all tenants in scope and a sequence of each tenant's own, only the oldest and newest events of each type were read; choose a tenant for a spread sample.";
+
+    /// <summary>The events table is missing columns the store's configuration reads.</summary>
+    public static string EventColumnsMissing(string schema, IReadOnlyList<string> missing) =>
+        $"{schema}.mt_events has no {(missing.Count == 1 ? "column" : "columns")} {string.Join(", ", missing)}, which this store's configuration reads. "
+        + "Apply the pending change from the Schema screen, then check again.";
+
+    /// <summary>The summary of a finished events check.</summary>
+    /// <param name="result">The result.</param>
+    /// <param name="checkedAt">When it finished, as text.</param>
+    public static string EventSummary(ShapeCheckResult result, string checkedAt)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        string count = result.Examined.ToString("N0", CultureInfo.InvariantCulture);
+        string noun = result.Examined == 1 ? "event" : "events";
+
+        return result.Coverage switch
+        {
+            ShapeCoverage.Complete when result.Examined == 0 => NoEventsInScope,
+            ShapeCoverage.Complete => $"Checked all {count} {noun} at {checkedAt}.",
+            ShapeCoverage.Sampled =>
+                $"Checked {count} {noun} at {checkedAt}: the {result.LowestPart.ToString("N0", CultureInfo.InvariantCulture)} oldest "
+                + $"and {result.HighestPart.ToString("N0", CultureInfo.InvariantCulture)} newest"
+                + (result.SpreadPart > 0
+                    ? $" and {result.SpreadPart.ToString("N0", CultureInfo.InvariantCulture)} spread between them."
+                    : "."),
+            ShapeCoverage.Partial => $"Stopped after {count} {noun}: {result.CoverageReason}",
+            _ => result.CoverageReason ?? result.Error ?? "Nothing was checked.",
+        };
+    }
+
     // ---- The result (documents) -----------------------------------------------------------------------------------------
 
     /// <summary>The alias is not a visible registered document type; one sentence for hidden, unknown and discovered alike.</summary>

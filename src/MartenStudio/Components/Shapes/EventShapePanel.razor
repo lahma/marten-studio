@@ -1,0 +1,355 @@
+@using Microsoft.Extensions.Options
+@using MartenStudio.Services.Events
+@using MartenStudio.Services.Shapes
+@using PostgresStudio.Components.Shared
+@implements IDisposable
+@inject IEventShapeCheck Check
+@inject StudioState State
+@inject IOptions<MartenStudioOptions> Options
+@inject NavigationManager Navigation
+@inject IServiceProvider Services
+
+@*
+    Check shapes, for the event types on the Event types page (D-SHAPE S10). It exists only after a click, so it never runs during
+    prerender, and it starts when it is created: the page re-creates it (a @key on the scope) when the scope changes.
+
+    One call of the check per event type, in the order the page lists them, drawing after each ("Checking 4 of 23..."). The types with
+    problems come first, each with the sentence a rebuild would be met with; the rest fold into "19 types fit". A type the page has
+    counted as empty is shown as having no events in scope without a call.
+
+    Nothing here can show a value of an event: the results hold paths, kinds, counts and ids. The scope is the circuit's own
+    (StudioState.ActiveScope), read here because a component parameter cannot be of an internal type (D12); every link is built from the
+    scope the check ran with.
+*@
+
+<section class="ms-shape-panel" aria-label="Shape check of the event types">
+    <div class="ms-shape-header">
+        <h2 class="ms-shape-title">Shape check</h2>
+        <div class="ms-shape-actions">
+            @if (running)
+            {
+                <button type="button" class="ms-button" @onclick="CancelAsync">Cancel</button>
+            }
+            else
+            {
+                <button type="button" class="ms-button" disabled="@RecheckDisabled" title="@RecheckTitle" @onclick="CheckAgainAsync">Check again</button>
+            }
+            <button type="button" class="ms-button" @onclick="CloseAsync">Close</button>
+        </div>
+    </div>
+
+    @if (running)
+    {
+        <LoadingSpinner />
+        <p class="ms-shape-note" role="status">Checking @Math.Min(entries.Count + 1, TypeNames.Count) of @TypeNames.Count...</p>
+    }
+
+    @if (problem is { Length: > 0 })
+    {
+        <ErrorAlert Message="@problem" />
+    }
+
+    @if (entries.Count > 0)
+    {
+        <p class="ms-shape-summary" role="status">@Summary</p>
+
+        @foreach (Entry entry in entries.Where(static x => x.HasProblem))
+        {
+            <section class="ms-shape-event-type" aria-label="@("Shape check of " + entry.Name)" @key="entry.Name">
+                <h3 class="ms-shape-type-title">
+                    <code>@entry.Name</code>
+                    <span class="ms-shape-muted">@ShapeCheckText.EventSummary(entry.Result, State.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"))</span>
+                </h3>
+
+                @if (entry.Result.Error is { Length: > 0 } error)
+                {
+                    <ErrorAlert Message="@error" />
+                }
+
+                @if (entry.Result.RebuildSentence is { Length: > 0 } rebuild)
+                {
+                    <p class="ms-shape-rebuild" role="note">@Text(rebuild)</p>
+                }
+
+                @Notes(entry.Result)
+
+                @foreach (ShapeTypeResult type in entry.Result.Types)
+                {
+                    <ShapeFindingsTable @key="type.TypeName" Model="type" HrefFor="HrefFor" Events="true" />
+                }
+
+                @if (entry.Result.Statements.Count > 0)
+                {
+                    <SqlDisclosure Sql="@string.Join(";\n\n", entry.Result.Statements.Select(static x => x.Sql))"
+                                   ParameterNames="@entry.Result.Statements.SelectMany(static x => x.ParameterNames).Distinct().ToList()"
+                                   Reads="@entry.Name" />
+                }
+            </section>
+        }
+
+        @if (entries.Count(static x => !x.HasProblem) is var fits and > 0)
+        {
+            <details class="ms-shape-fits-fold">
+                <summary>@(fits == 1 ? "1 type fits" : fits.ToString(System.Globalization.CultureInfo.InvariantCulture) + " types fit")</summary>
+                <ul class="ms-shape-fits-list">
+                    @foreach (Entry entry in entries.Where(static x => !x.HasProblem))
+                    {
+                        <li @key="entry.Name">
+                            <code>@entry.Name</code>
+                            <span class="ms-shape-muted">@ShapeCheckText.EventSummary(entry.Result, State.FormatInSelectedTimeZone(entry.Result.CheckedAt, "HH:mm"))</span>
+                        </li>
+                    }
+                </ul>
+            </details>
+        }
+    }
+</section>
+
+@code {
+    private readonly List<Entry> entries = [];
+    private CancellationTokenSource? cts;
+    private string? problem;
+    private bool running;
+
+    // The scope the last run used: links to examples are built from it, never from whatever scope is active when this renders.
+    private StudioScope? ranScope;
+    private ITimer? recheckTimer;
+    private TimeProvider clock = TimeProvider.System;
+
+    /// <summary>The event type names to check, in the order the page lists them.</summary>
+    [Parameter]
+    [EditorRequired]
+    public IReadOnlyList<string> TypeNames { get; set; } = [];
+
+    /// <summary>
+    /// The page's own counts for the names it has counted: a name whose count is zero is shown as having no events in scope, without a
+    /// call. Empty when the page has not counted.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyDictionary<string, long> Counts { get; set; } = new Dictionary<string, long>();
+
+    /// <summary>Raised when the visitor closes the panel.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    // A failed result is not held (the cache runs again at the next press), so the button is not held back for it either.
+    private DateTimeOffset? NextRecheck => entries
+        .Where(static x => x.Result is { Error: null })
+        .Select(static x => (DateTimeOffset?) x.Result.RecheckAt)
+        .Min();
+
+    private bool RecheckDisabled => !running && NextRecheck is { } at && clock.GetUtcNow() < at;
+
+    private string? RecheckTitle => RecheckDisabled && NextRecheck is { } at
+        ? ShapeCheckText.AvailableAt(State.FormatInSelectedTimeZone(at, "HH:mm:ss"))
+        : null;
+
+    private string Summary
+    {
+        get
+        {
+            int problems = entries.Count(static x => x.HasProblem);
+            string what = entries.Count == 1 ? "1 event type" : entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) + " event types";
+
+            return running
+                ? $"{what} checked so far, {problems} with problems."
+                : $"Checked {what}: {problems} with problems, {entries.Count - problems} fit.";
+        }
+    }
+
+    /// <inheritdoc />
+    protected override Task OnInitializedAsync()
+    {
+        clock = Services.GetService(typeof(TimeProvider)) as TimeProvider ?? TimeProvider.System;
+        return RunAsync(force: false);
+    }
+
+    private Task CheckAgainAsync() => RunAsync(force: true);
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private Task CancelAsync()
+    {
+        cts?.Cancel();
+        return Task.CompletedTask;
+    }
+
+    private async Task RunAsync(bool force)
+    {
+        StudioScope? scope = State.ActiveScope;
+
+        if (scope is null)
+        {
+            problem = "No database is selected.";
+            return;
+        }
+
+        CancellationTokenSource? previous = cts;
+        cts = new CancellationTokenSource();
+        previous?.Cancel();
+        previous?.Dispose();
+
+        CancellationToken token = cts.Token;
+        running = true;
+        problem = null;
+        ranScope = scope;
+        entries.Clear();
+        recheckTimer?.Dispose();
+        recheckTimer = null;
+
+        try
+        {
+            foreach (string name in TypeNames)
+            {
+                token.ThrowIfCancellationRequested();
+
+                ShapeCheckResult result = Counts.TryGetValue(name, out long count) && count == 0
+                    ? ShapeCheckResult.NotChecked(name, ShapeCheckText.NoEventsInScope, clock.GetUtcNow())
+                    : await Check.CheckAsync(scope, name, force, token);
+
+                entries.Add(new Entry(name, result));
+                StateHasChanged();
+            }
+
+            ArmRecheck();
+        }
+        catch (OperationCanceledException)
+        {
+            problem = $"The check was cancelled after {entries.Count} of {TypeNames.Count} event types. Each one finished carries on for anyone else waiting for it; Check again shows its result.";
+        }
+        catch (StudioNotAuthorizedException)
+        {
+            problem = "You are not authorized to read this store.";
+        }
+        catch (Exception exception)
+        {
+            // Never the exception's message: this is a screen about not showing values. The type is enough to search for.
+            problem = "The shape check failed (" + exception.GetType().Name + ").";
+        }
+        finally
+        {
+            running = false;
+        }
+    }
+
+    /// <summary>A one-shot timer for the moment Check again opens, so the button re-enables itself. It goes with the panel.</summary>
+    private void ArmRecheck()
+    {
+        recheckTimer?.Dispose();
+        recheckTimer = null;
+
+        if (NextRecheck is not { } at)
+        {
+            return;
+        }
+
+        TimeSpan wait = at - clock.GetUtcNow();
+
+        if (wait > TimeSpan.Zero)
+        {
+            recheckTimer = clock.CreateTimer(static state => ((EventShapePanel) state!).Refresh(), this, wait, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private void Refresh()
+    {
+        try
+        {
+            _ = InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The circuit ended between the timer firing and this: nothing is left to draw.
+        }
+    }
+
+    private string HrefFor(string id, string? tenant, long? sequence, long? version)
+    {
+        StudioScope? scope = ranScope;
+
+        if (scope is not null && scope.TenantId is null && tenant is not null)
+        {
+            scope = scope with { TenantId = tenant };
+        }
+
+        return EventLinks.To(
+            Options.Value,
+            EventLinks.StreamDetailRoute,
+            scope,
+            [new("id", id), new("v", EventLinks.Number(version))]);
+    }
+
+    private RenderFragment Notes(ShapeCheckResult result) => builder =>
+    {
+        int sequence = 0;
+
+        foreach (string note in NoteLines(result))
+        {
+            builder.OpenElement(sequence++, "p");
+            builder.AddAttribute(sequence++, "class", "ms-shape-note");
+            builder.AddContent(sequence++, note);
+            builder.CloseElement();
+        }
+
+        if (result.Remedy is { Length: > 0 } remedy)
+        {
+            builder.OpenElement(sequence++, "p");
+            builder.AddAttribute(sequence++, "class", "ms-shape-remedy");
+            builder.AddContent(sequence++, Text(remedy));
+            builder.CloseElement();
+        }
+    };
+
+    private static IEnumerable<string> NoteLines(ShapeCheckResult result)
+    {
+        if (result.CoverageReason is { Length: > 0 } reason && result.Coverage != ShapeCoverage.NotChecked)
+        {
+            yield return reason;
+        }
+
+        foreach (string left in result.LeftOut)
+        {
+            yield return left;
+        }
+
+        if (result.TooLarge > 0)
+        {
+            yield return ShapeCheckText.TooLarge(result.TooLarge);
+        }
+    }
+
+    private static RenderFragment Text(string sentence) => builder =>
+    {
+        int sequence = 0;
+
+        foreach ((string text, bool isCode) in ShapeCheckText.Split(sentence))
+        {
+            if (isCode)
+            {
+                builder.OpenElement(sequence++, "code");
+                builder.AddContent(sequence++, text);
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.AddContent(sequence++, text);
+            }
+        }
+    };
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        recheckTimer?.Dispose();
+        cts?.Cancel();
+        cts?.Dispose();
+    }
+
+    private sealed record Entry(string Name, ShapeCheckResult Result)
+    {
+        /// <summary>A failure, or a finding: the types that are shown first and in full.</summary>
+        public bool HasProblem =>
+            Result.Error is not null
+            || Result.Types.Any(static x => x.Failures.Count + x.Members.Count + x.MoreFailures + x.MoreMembers > 0);
+    }
+}

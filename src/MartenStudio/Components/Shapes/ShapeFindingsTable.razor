@@ -23,9 +23,19 @@
         <span class="ms-shape-muted">@type.Examined.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) examined</span>
     </h3>
 
+    @if (Events && type.ReadAsOtherType > 0)
+    {
+        <p class="ms-shape-note">@Text(ShapeCheckText.EventsReadAsOtherType(type.ReadAsOtherType, type.Examined, type.TypeName))</p>
+    }
+
+    @if (Events && type.Binary > 0)
+    {
+        <p class="ms-shape-note">@Text(ShapeCheckText.EventsBinary(type.Binary, type.Examined, type.TypeName))</p>
+    }
+
     @if (type.Failures.Count == 0 && type.Members.Count == 0 && type.MoreFailures == 0 && type.MoreMembers == 0)
     {
-        <p class="ms-shape-fits">@Text(ShapeCheckText.EveryDocumentFits(type.TypeName))</p>
+        <p class="ms-shape-fits">@Text(Events ? ShapeCheckText.EveryEventFits(type.TypeName) : ShapeCheckText.EveryDocumentFits(type.TypeName))</p>
     }
     else
     {
@@ -47,10 +57,10 @@
 
                         <tr @key="@("f" + i + failure.Kind + failure.Path)">
                             <td><span class="@("ms-badge ms-shape-kind ms-shape-kind-" + failure.Kind.ToString().ToLowerInvariant())">@FailureLabel(failure.Kind)</span></td>
-                            <td class="ms-shape-member">@if (failure.Path is { } path) { <code>@path</code> } else { <span class="ms-shape-muted">the whole document</span> }</td>
+                            <td class="ms-shape-member">@if (failure.Path is { } path) { <code>@path</code> } else { <span class="ms-shape-muted">@(Events ? "the whole event" : "the whole document")</span> }</td>
                             <td>@ShapeCheckText.Of(failure.Count, type.Examined)</td>
                             <td>@Example(failure.Example)</td>
-                            <td class="ms-shape-sentence">@Text(ShapeCheckText.DocumentFailure(failure, type.Examined, type.TypeName))</td>
+                            <td class="ms-shape-sentence">@Text(Events ? ShapeCheckText.EventFailure(failure, type.Examined, type.TypeName) : ShapeCheckText.DocumentFailure(failure, type.Examined, type.TypeName))</td>
                         </tr>
                     }
                     @for (int i = 0; i < type.Members.Count; i++)
@@ -109,6 +119,10 @@
     [Parameter]
     public Func<string, string?, long?, long?, string> HrefFor { get; set; } = static (_, _, _, _) => "#";
 
+    /// <summary>Whether the model is an event type's, whose sentences are the events'; a collection's otherwise.</summary>
+    [Parameter]
+    public bool Events { get; set; }
+
     private RenderFragment Example(ShapeItemKey key) =>
         @<a class="ms-id-text" href="@HrefFor(key.Id, key.TenantId, key.Sequence, key.Version)" title="@key.Id">@key.Id</a>;
 
@@ -140,7 +154,20 @@
         _ => "Unknown event type",
     };
 
-    private static string MemberSentence(ShapeMemberFinding member, ShapeTypeResult type) => member.Kind switch
+    private string MemberSentence(ShapeMemberFinding member, ShapeTypeResult type) =>
+        Events ? EventMemberSentence(member, type) : DocumentMemberSentence(member, type);
+
+    private static string EventMemberSentence(ShapeMemberFinding member, ShapeTypeResult type) => member.Kind switch
+    {
+        ShapeMemberKind.Dropped => ShapeCheckText.EventDropped(member.Count, type.Examined, member.Path, type.TypeName),
+        ShapeMemberKind.Nulled => ShapeCheckText.EventNulled(member.Count, type.Examined, member.Path, type.TypeName),
+        ShapeMemberKind.Retyped => ShapeCheckText.EventRetyped(member.Count, type.Examined, member.Path, type.TypeName, member.StoredKind, member.ReadKind),
+        ShapeMemberKind.Rewritten => ShapeCheckText.EventRewritten(member.Count, type.Examined, member.Path, type.TypeName),
+        ShapeMemberKind.Respelled => ShapeCheckText.EventRespelled(member.Count, type.Examined, member.Path, member.PairedPath ?? member.Path, type.TypeName),
+        _ => ShapeCheckText.EventDefaulted(member.Count, type.Examined, member.Path, type.TypeName),
+    };
+
+    private static string DocumentMemberSentence(ShapeMemberFinding member, ShapeTypeResult type) => member.Kind switch
     {
         ShapeMemberKind.Dropped => ShapeCheckText.DocumentDropped(member.Count, type.Examined, member.Path, type.TypeName),
         ShapeMemberKind.Nulled => ShapeCheckText.DocumentNulled(member.Count, type.Examined, member.Path, type.TypeName),

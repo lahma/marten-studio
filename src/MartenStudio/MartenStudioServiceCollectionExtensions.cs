@@ -181,6 +181,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         // minutes across circuits.
         services.TryAddSingleton<ShapeCheckCache>();
         services.TryAddScoped<IDocumentShapeCheck, DocumentShapeCheckService>();
+        services.TryAddScoped<IEventShapeCheck, EventShapeCheckService>();
         services.TryAddScoped<ISchemaDataService, SchemaDataService>();
         services.TryAddScoped<IConfigurationService, ConfigurationService>();
         services.TryAddScoped<IQueryService, QueryService>();
