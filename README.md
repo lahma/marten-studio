@@ -1067,8 +1067,9 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   outright for a document whose id the studio cannot build a typed expression for.
 - **No "integrate into my own Blazor app" mode.** The studio maps its own component root; its pages
   cannot be added to your router (D11).
-- **No keyboard cheat sheet.** The JSON viewer, its search bar and the editor have keyboard handling,
-  but there is no global shortcut map and no page that lists what exists.
+- **Keyboard shortcuts are listed, not configurable.** Press `?` outside a text field for the list; the
+  keys are the ones each control handles when it has focus, and the only global ones are `?` and Esc.
+  There are no user-defined shortcuts.
 - **No live SQL tail.** It would require replacing your `StoreOptions.Logger`, which is exactly the
   "registration changes host behaviour" failure this project refuses. Every generated grid carries a
   "Show SQL" disclosure instead.

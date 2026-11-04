@@ -133,3 +133,14 @@ content arrives after its first render reveals its own fragment once drawn (Heal
 navigation to land, and the shell writes the scope into the address only after it has read the address's own scope.
 `data-ms-interactive` on `.ms-studio` is the browser suites' sign that the circuit has rendered and interception is on. The
 AppContext switch `PostgresStudio.DisableNavigationInterception` restores 1.1's enhanced navigation (`docs/stability.md`).
+
+## Dialogs are native modals (1.2-A11Y)
+
+A studio dialog is a `ModalDialog` (`<dialog class="ms-modal ms-confirm-overlay">`) that the server renders with `open`
+and `studio.js` upgrades with `showModal()` (`martenStudio.dialog.present`/`release`): focus goes to the element marked
+`data-ms-dialog-focus` (a typed confirmation's box, else Cancel; never a danger or save button), Tab loops inside, Esc
+calls the owner's Cancel through `OnEscapeAsync`, and release restores focus to the invoker. Interop loss leaves the
+rendered overlay (hard rule 15). The shortcut sheet is `ShortcutSheet` in the shell, shown by `?`; its list is
+`StudioShortcuts` plus `StudioDescriptor.ExtraShortcuts`, and `ShortcutSheetMatchesHandlersTests` fails when a handler
+and the list drift. `::backdrop` is the only new visual. Native `close` events may arrive late: never act on one while
+`dialog.open`.
