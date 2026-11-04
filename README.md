@@ -14,16 +14,28 @@ It is **not** a standalone application, **not** a fleet monitor and **not** a co
 There is no "point it at a database" mode, and there never will be — a studio that could be aimed
 anywhere would have to re-implement everything Marten already knows, and would get it subtly wrong. Both
 packages are keyed on the databases the host registered, Marten's or not: Marten Studio on its stores, Postgres
-Studio on its `NpgsqlDataSource`s, each with the application's own role, pool and TLS. If
-you want production telemetry for a fleet of Marten services, that is
-[CritterWatch](https://jasperfx.net)'s job; if you want a general SQL client, that is pgAdmin's. The
-niche in between — *this* process, *this* store, with Marten's own metadata in front of you and every
-mutating action off until you turn it on — is what Marten Studio is for.
+Studio on its `NpgsqlDataSource`s, each with the application's own role, pool and TLS.
+[CritterWatch](https://jasperfx.net) is the Critter Stack's fleet console, with an embedded mode for Wolverine
+applications; pgAdmin is a general SQL client. Marten Studio is the local one between them — *this* process, *this*
+store, with Marten's own metadata in front of you and every mutating action off until you turn it on.
 
 Registering the studio must never change how your application behaves. No global styles, no
 component-library version pinned onto your host, no middleware ordering requirement, no altered
 authentication, no second projection daemon. A host that adds the package and never maps it is
 byte-for-byte the application it was.
+
+### The first five minutes, in Development
+
+- Map it behind your own policy ([Register and mount](#register-and-mount)) and turn capabilities on only where you
+  would hand out `psql`: `o.Capabilities = MartenStudioCapabilities.All()` is the one-line opt-in for a development box.
+  The header's badge says which environment you are looking at.
+- **Overview** and **Health**: your stores and databases, and findings with the `StoreOptions` line that would change
+  each one.
+- **Documents**: a collection, a `field:value` search with its index verdict, a document's JSON and metadata; **Check
+  shapes** says whether what is stored still fits your types.
+- **Events**: a stream's timeline and time travel; **Event flow** shows which projections read which event types.
+- **Query**: the Marten clause box, the SQL console and LINQ mode each keep recent and saved queries in your browser; the
+  console's results export as CSV and JSON. Press `?` for every keyboard shortcut.
 
 ## Three packages
 
@@ -1074,9 +1086,11 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
 - **No live SQL tail.** It would require replacing your `StoreOptions.Logger`, which is exactly the
   "registration changes host behaviour" failure this project refuses. Every generated grid carries a
   "Show SQL" disclosure instead.
-- **Read-only and the capabilities are process-wide**, not per store, per database or per tenant. *Which*
-  scopes a visitor sees is expressible, through `StoreAuthorizationPolicy`; "this tenant may edit but not
-  delete" is not.
+- **Read-only and the capabilities are process-wide switches**, not per store, per database or per tenant. What a
+  visitor may do in a scope is expressible all the same: `StoreAuthorizationPolicy` decides which scopes they see, and
+  `WriteAuthorizationPolicy` is asked on every mutating call with the capability and the store, database and tenant, so
+  "this tenant may edit but not delete" is a write policy that allows `EditDocuments` and refuses `DeleteDocuments` for
+  that tenant.
 - **Counts are estimates above `ExactCountThreshold`.** A `~` prefix says so. The `=` beside a collection
   asks for an exact `count(*)`: below the threshold you get one, bounded by Npgsql's `CommandTimeout`
   (from `QueryTimeout`) rather than by a server-side `statement_timeout`; above it the answer is the same
