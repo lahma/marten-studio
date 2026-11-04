@@ -464,7 +464,8 @@ takes; **Run deeper checks** reads a bounded slice of the data, and **Run statem
 database as a whole, and anything that names a session, a role, an address, a statement or a tenant needs
 `ViewDatabaseActivity`. The navigation entry carries a severity badge, a toast says when a Critical
 finding appears, and findings also show where they belong: D01 and D02 as Projections banners, index marks
-on Schema › Indexes, E05 on Event types. **Database › Sessions** (`/marten/database/sessions`) lists this
+on Schema › Indexes, E05 on Event types. A finding may carry an action that reads more when you press it, for you
+alone and audited: E06's lists the 20 longest streams and the aggregate each belongs to. **Database › Sessions** (`/marten/database/sessions`) lists this
 database's sessions, locks and prepared transactions under the same two gates, labels a lock by the
 store's own table it belongs to, counts sessions by application beside the server's connection budget, and has no
 cancel or terminate button. Its **Blocking** tab (`?view=blocking`) draws who holds up whom as trees - each chain's
@@ -484,15 +485,18 @@ pages show of the database as JSON, built from your own view of each page.
 by Marten operation and document type, behind `ViewDatabaseActivity`. A statement's **Plan** link (`?queryid=`) opens
 its drill-in: the text, the counters and its generic plan, planned as `SqlConsoleRole` with its plan insights and What
 if?, and audited. A write, a locking read, a cut text or one withheld from you gets no plan and says why, and a plan
-that reads a schema you may not see is not shown.
+that reads a schema you may not see is not shown. **Mark** (1.2) counts from now, in this tab: each statement's change
+since the mark instead of the advisor's window, kept in this tab's connection only.
 
 **Maintenance** (Operations, `/marten/maintenance`) — what autovacuum will do next and why: each table against the
 triggers autovacuum itself uses, what is running now, the workers, the freeze forecast and the vacuum horizon, with an
-on-demand bloat measure; see [`docs/health/tables.md`](docs/health/tables.md#the-maintenance-page).
+on-demand bloat measure; **Mark** (1.2) counts each table's vacuums and analyzes from now, in this tab; see
+[`docs/health/tables.md`](docs/health/tables.md#the-maintenance-page).
 
 **Storage** (Operations, `/marten/storage`) — how big the database is, how fast it grows and which tables hold the
 space, from the catalog's own page counts (no size function over a table, nothing locked); the exact size of one table
-is on its page in the database browser.
+is on its page in the database browser. **Mark** (1.2) counts each table's growth and rows written from now, in
+this tab.
 
 **Replication** (Operations, `/marten/replication`) — slots, the standbys streaming from the server or a standby's own
 replay, the archiver, WAL volume, checkpoints, I/O by backend type and tablespaces; names behind
@@ -954,8 +958,8 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   `ProjectionRebuildStarted`, 9208 `ProjectionRebuildFinished`, 9209 `DaemonControlRequested`, 9210
   `StoreUnavailable`, 9211 `DocumentWriteRoundTripDropped`. A database browser's first read of a
   relation's rows is 9235 and an opened row 9236, a read of other sessions' details is 9245, a LINQ
-  mode run, refusal and Postgres failure are 9260, 9261 and 9262, a bloat measure is audited as "Measure bloat", and
-  the Statements page's first read in a circuit is 9452. The ranges 9200–9299, 9300–9329 and 9400–9519 are
+  mode run, refusal and Postgres failure are 9260, 9261 and 9262, a bloat measure is audited as "Measure bloat", a
+  finding's action as its own name ("Find the longest streams"), and the Statements page's first read in a circuit is 9452. The ranges 9200–9299, 9300–9329 and 9400–9519 are
   reserved. Every value a visitor could shape - a typed `?store=`, a statement, a reason - reaches the log escaped and
   bounded, so it cannot write a log line of any length or forge a second one.
 - **Log levels.** A state the host configured is not a warning. No async daemon in this process, a
@@ -982,6 +986,7 @@ The long form is in [`docs/security.md`](docs/security.md). The short form:
   | 9220 | `LiveUpdateHandlerFailed` | A page's own refresh-failure handler threw |
   | 9221 | `TenantPolicyFailed` | The store policy threw while the scope selector filtered a database's tenants |
   | 9222 | `HealthCheckFailed` | A health check failed for a reason nobody chose; one the host's setup rules out is Debug |
+  | 9223, 9224 | `HealthActionFailed`, `HealthActionRefused` | A finding's action a visitor pressed failed for an unexpected reason (always Warning, one line per press); or was refused (Debug) |
   | 9246 | `SessionActivityReadFailed` | Database › Sessions could not read the sessions for a reason other than a privilege or a timeout |
   | 9251 | `DiagnosticsSectionFailed` | The diagnostics API could not read a section of a snapshot |
   | 9270 | `HealthExportFailed` | The opt-in health check itself failed, so it reports `Degraded` |

@@ -137,7 +137,8 @@ tests/MartenStudio.Integration.Tests/Documents/ Live Postgres: the document writ
 src/MartenStudio/Services/Projections/    Projection data service, daemon accessor, operation tracker; the lag history
                                          (M2); the progression-row classifier and the daemon topology (M47)
 src/PostgresStudio.Diagnostics/Services/Live/  The single-flight snapshot cache every reader shares (D10)
-src/PostgresStudio/Services/Live/         The per-page polling helper (D10) and the nav indicators
+src/PostgresStudio/Services/Live/         The per-page polling helper (D10) and the nav indicators, and the per-circuit
+                                         since-marks
 src/MartenStudio/Services/Live/           The tracker observer: the in-process daemon's latest shard state (D10)
 src/PostgresStudio.Diagnostics/Services/Settings/  The engine's settings seam, descriptor, words, mount path, registration marker, option validation and
                                          core registration (AddPostgresDiagnostics and every Add*Studio call it)
@@ -213,12 +214,14 @@ tests/MartenStudio.Integration.Tests/Database/  Live Postgres: catalog reads, th
                                          and the relational demo schemas' idempotency and demo-data flows
 src/PostgresStudio.Diagnostics/Services/Health/  The health advisor's engine: check model and registry, sweeper, sweep cache, history, the
                                          gate every reader applies, links and platform
-src/PostgresStudio/Services/Health/       The health advisor's visitor half: the per-visitor report and gates, mutes and toasts
+src/PostgresStudio/Services/Health/       The health advisor's visitor half: the per-visitor report and gates, mutes and toasts,
+                                         and the finding actions' seam and runner
 src/PostgresStudio.Diagnostics/Services/Health/Checks/  One file per shared health check (attribute, gatherer, pure evaluator); a
                                          check is added by adding its file here, nothing else
 src/PostgresStudio/Services/Health/Checks/  The three checks that judge the studio's own exposure (K05-K07): they read the
                                          studio's settings and mapping, so they are run only where a studio is registered
-src/MartenStudio/Services/Health/         What MartenStudio's checks read of the store (MartenHealthContext)
+src/MartenStudio/Services/Health/         What MartenStudio's checks read of the store (MartenHealthContext), and E06's
+                                         on-demand action
 src/MartenStudio/Services/Health/Checks/  One file per Marten-only health check - the store, the event store, the
                                          daemon - run against Marten stores only; added the same way
 src/PostgresStudio.Diagnostics/Services/Health/Export/  The opt-in ASP.NET Core health check: one run per interval over every

@@ -361,7 +361,9 @@ visitor and reports only codes, outcomes, severities and counts, never a name, a
 Postgres said. An accepted check (`AcceptedChecks`, #35) still runs and is shown on its check's row, out of every count
 and state; acceptance changes no gate. **Since 1.1 Database › Connection (D33) is the `Database` gate**, as is its
 paste-to-compare; only its sessions part and the pool peak counted by application name are `Activity`, recorded
-separately, and the Overview's line asks for neither. Full text: [health-engine.md](docs/maintainers/health-engine.md#d29).
+separately, and the Overview's line asks for neither. Since 1.2 a finding may offer an on-demand action
+(`IHealthFindingAction`, internal): one visitor's, under at least the finding's gate, audited, and kept nowhere; E06's
+reads `mt_streams` as `SqlConsoleRole`. Full text: [health-engine.md](docs/maintainers/health-engine.md#d29).
 
 **D30 — PostgresStudio: the core is a package of its own, and Marten Studio is built on it.** PostgresStudio is
 everything about a PostgreSQL database rather than a Marten store, Marten-free (hard rule 16); Marten Studio is built on

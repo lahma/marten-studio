@@ -85,6 +85,19 @@ banners (all through `HealthReportFinding.Counts` and the one list `CachedAsync`
 withheld, and its reason is shown on the check's row only beside a finding the visitor may see. The *Accepted checks*
 list (the Server page, Marten Studio's Configuration page) is configuration, shown to anyone who may open that page.
 
+**Actions on a finding** (1.2). A finding may offer an on-demand action (`IHealthFindingAction`, internal; MartenStudio
+registers E06's "Find the 20 longest streams"), which `HealthActionService` runs for the visitor who pressed it and never
+in a sweep. Each press asks the finding's own gate (and its tenant's store policy) again, through the one
+`HealthVisitorGate` the report asks, before anything is read, then whatever else the action asks: E06's asks the
+`Activity` gate when it would list a conjoined store's streams across tenants, and is filed under `ViewDatabaseActivity`
+then. One run at a time in a tab, and one per database and action across every visitor (`HealthActionFlights`: a second
+visitor is refused, never joined, because the two visitors' gates differ). The action reads in the studio's read-only
+session as `SqlConsoleRole`, under `QueryTimeout`. Every press past the "already running in this tab" and "no such action"
+checks is one Activity entry named by the action (`AuditAction`, "Find the longest streams"), with a count and never a
+value it read; a failure is logged as 9223 (Warning, one line per press), a refusal as 9224 (Debug). The runner holds no
+result, so nothing reaches another circuit and nothing is cached, and no result is in the sweep, the snapshot, the
+health-check export or the diagnostics API. Hidden document types are never named (`StreamAggregateMap.ShownAliases`).
+
 **The connection-settings checks** (1.1: C16, C17, C18, S11, S12, S13) judge one memoized `ConnectionFacts` per sweep
 (`ConnectionFacts.SharedAsync`: the redacted settings, what the server saw of the studio's connection as a new session
 of the login starts with it, the platform, the session statistics when pooling is off, and the count of this process's
