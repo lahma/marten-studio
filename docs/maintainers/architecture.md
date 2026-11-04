@@ -221,7 +221,11 @@ versus default is `ShouldSerialize` on the canonical keyword, never `ContainsKey
 *Held by tests, not by care.* `ConnectionSentinelTests`, `ConnectionChecksSentinelTests`,
 `ConnectionSnapshotAndSentinelTests` and the Marten section's sentinel test in `MartenConnectionInsightTests` run a data
 source whose every secret, path, host and option is a sentinel string through the reader, the page builder, the checks, the
-contributors, the snapshot, the log and the audit, and fail if a sentinel appears anywhere. A new keyword, row or card that could carry a value is a change to the catalogue and the sentinel set together.
+contributors, the snapshot, the log and the audit, and fail if a sentinel appears anywhere. `NamedPoolSiblingsTests` (1.2, #56) does the same for C18's identification of named pools: sentinel pool names, a sibling's
+Application Name, host, database, login and password reach none of the finding, the export, the diagnostics snapshot or
+the logs, and the host, database and login reach only the facts' own settings; a pool name that is not a connection string
+is identified against the names of the data sources the studio resolves, inside the same reader, and what is not
+identified is counted and said as not judged. A new keyword, row or card that could carry a value is a change to the catalogue and the sentinel set together.
 
 *The gate.* `Database` (D29): the source policy asked with `TenantId = null`, before anything is read. The sessions part
 (this application's sessions by application name, and the pool peak counted by application name) is `Activity`
