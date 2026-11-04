@@ -550,6 +550,10 @@ internal static class DocumentQueryBuilder
     /// <param name="table">The collection to probe.</param>
     /// <param name="rawId">The id as typed.</param>
     /// <param name="tenantId">The tenant in scope, when the collection is conjoined.</param>
+    /// <param name="tenants">
+    /// With no tenant in scope, the only tenants a conjoined collection is read for (<c>tenant_id = any(@tenants)</c>), so that rows of
+    /// tenants the visitor may not address cannot fill the row limit; <see langword="null" /> reads them all.
+    /// </param>
     /// <param name="commandTimeoutSeconds">The command timeout; zero leaves Npgsql's own default.</param>
     /// <param name="command">The probe, when the id parsed against this collection's id column.</param>
     /// <param name="shape">Which of the optional columns follow the constant in each row, in that order.</param>
@@ -557,6 +561,7 @@ internal static class DocumentQueryBuilder
         DocumentTableInfo table,
         string rawId,
         string? tenantId,
+        IReadOnlyList<string>? tenants,
         int commandTimeoutSeconds,
         [NotNullWhen(true)] out NpgsqlCommand? command,
         out DocumentFindShape shape)
@@ -609,6 +614,12 @@ internal static class DocumentQueryBuilder
                 .Append('\n');
 
             AppendTenantFilter(sql, table, tenantId, builder);
+
+            if (tenantId is null && tenants is not null && tenantColumn is not null)
+            {
+                sql.Append("  and ").Append(Column(tenantColumn)).Append(" = any(")
+                    .Append(builder.Add(NpgsqlDbType.Array | NpgsqlDbType.Varchar, tenants.ToArray(), "tenants")).Append(")\n");
+            }
 
             sql.Append("limit ").Append(FindLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
 

@@ -54,7 +54,19 @@ internal sealed class FindService : IDisposable
     /// <param name="typed">The box's text.</param>
     /// <param name="cancellationToken">Cancels the Find; a newer Find cancels it too.</param>
     /// <exception cref="OperationCanceledException">The Find was cancelled by the caller or by a newer Find.</exception>
-    public async Task<FindResult> FindAsync(StudioScope scope, string? typed, CancellationToken cancellationToken = default)
+    public Task<FindResult> FindAsync(StudioScope scope, string? typed, CancellationToken cancellationToken = default) =>
+        FindAsync(scope, typed, elsewhere: false, cancellationToken);
+
+    /// <summary>Searches <paramref name="scope" /> for what was typed.</summary>
+    /// <param name="scope">The store, database and tenant to search.</param>
+    /// <param name="typed">The box's text.</param>
+    /// <param name="elsewhere">
+    /// Whether <paramref name="scope" /> is not the scope on screen (the box's "Search in"): the kinds whose page does not apply its own
+    /// address's scope (<see cref="IFindContributor.SearchesOtherScopes" />) are left out, and say nothing.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the Find; a newer Find cancels it too.</param>
+    /// <exception cref="OperationCanceledException">The Find was cancelled by the caller or by a newer Find.</exception>
+    public async Task<FindResult> FindAsync(StudioScope scope, string? typed, bool elsewhere, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -76,7 +88,7 @@ internal sealed class FindService : IDisposable
 
         try
         {
-            return await RunAsync(scope, query, mine.Token).ConfigureAwait(false);
+            return await RunAsync(scope, query, elsewhere, mine.Token).ConfigureAwait(false);
         }
         finally
         {
@@ -118,7 +130,7 @@ internal sealed class FindService : IDisposable
         }
     }
 
-    private async Task<FindResult> RunAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
+    private async Task<FindResult> RunAsync(StudioScope scope, FindQuery query, bool elsewhere, CancellationToken cancellationToken)
     {
         // A scope the store policy refuses answers as a scope with nothing in it (F6): no phrase, no note.
         if (!await authorization.IsAuthorizedAsync(scope, capability: null, cancellationToken).ConfigureAwait(false))
@@ -137,6 +149,11 @@ internal sealed class FindService : IDisposable
         foreach (IFindContributor contributor in contributors)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (elsewhere && !contributor.SearchesOtherScopes)
+            {
+                continue;
+            }
 
             if (budget.IsCancellationRequested)
             {

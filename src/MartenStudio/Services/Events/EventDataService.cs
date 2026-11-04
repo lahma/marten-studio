@@ -164,6 +164,7 @@ internal sealed partial class EventDataService : IEventDataService
                 HasBinaryData = table.HasBinaryData,
                 OptionalColumns = MetadataColumns(table),
                 TenantId = scope.TenantId,
+                Scope = new StudioScope(resolved.Registration.Key, resolved.Database.Id.Identity, resolved.TenantId),
                 TagStorage = EventTagModel.From(resolved.Store.Options).Storage,
                 NaturalKeys = [.. NaturalKeyCatalog.From(resolved.Store.Options, options.Value.IsDocumentTypeVisible).Select(static x => x.Label)],
             };
@@ -219,6 +220,7 @@ internal sealed partial class EventDataService : IEventDataService
                 StreamId = request.StreamId,
                 TypePrefix = string.IsNullOrWhiteSpace(request.TypePrefix) ? null : request.TypePrefix,
                 TenantId = scope.TenantId,
+                Tenants = request.Tenants,
                 IncludeArchived = request.IncludeArchived,
                 Cursor = request.Order == StreamListOrder.Newest
                     ? ToBuilderCursor(request.Cursor)

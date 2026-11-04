@@ -43,6 +43,9 @@ internal sealed partial class FakeEventDataService
     /// <summary>The values the natural-key lookup was asked about.</summary>
     public List<string> NaturalKeyLookups { get; } = [];
 
+    /// <summary>The tenant restriction every natural-key lookup was given (Find by id).</summary>
+    public List<IReadOnlyList<string>?> NaturalKeyTenants { get; } = [];
+
     public Task<CompactionPlan> DescribeCompactionAsync(
         StudioScope scope,
         StreamState stream,
@@ -103,9 +106,11 @@ internal sealed partial class FakeEventDataService
         StudioScope scope,
         string value,
         bool includeArchived,
+        IReadOnlyList<string>? tenants,
         CancellationToken cancellationToken = default)
     {
         NaturalKeyLookups.Add(value);
+        NaturalKeyTenants.Add(tenants);
         return Task.FromResult(NaturalKeys);
     }
 

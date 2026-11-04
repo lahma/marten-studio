@@ -131,12 +131,17 @@ internal sealed class FakeDocumentDataService : IDocumentDataService
     /// <summary>Every value a find was asked for, with the scope it was asked in.</summary>
     public List<(StudioScope Scope, string Value)> Finds { get; } = [];
 
+    /// <summary>The tenant restriction every find was given.</summary>
+    public List<MartenStudio.Services.Find.FindTenants> FindTenantsAsked { get; } = [];
+
     public Task<DocumentFindResult> FindByIdAsync(
         StudioScope scope,
         string value,
+        MartenStudio.Services.Find.FindTenants tenants,
         CancellationToken cancellationToken = default)
     {
         Finds.Add((scope, value));
+        FindTenantsAsked.Add(tenants);
         return Task.FromResult(FindResult);
     }
 

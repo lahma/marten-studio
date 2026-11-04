@@ -157,7 +157,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         // 1.2-SCOPE-3: Find by id, in Marten's terms. Each kind asks the data service of the page its hit opens (documents, streams and
         // natural keys, event sequences), so every probe runs under that page's gates; the scoped helper reads the event store's shape
         // once per Find and asks the store policy about the tenants a hit names.
-        services.TryAddScoped<IFindEventScopes, FindEventScopes>();
+        services.TryAddScoped<IFindScopes, FindScopes>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, DocumentFindContributor>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, StreamFindContributor>());
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IFindContributor, EventSequenceFindContributor>());

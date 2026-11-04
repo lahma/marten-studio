@@ -183,7 +183,7 @@ public class StudioRegistrationTests
         (typeof(IHealthFindingAction), ServiceLifetime.Singleton, How.Type, typeof(MartenStudio.Services.Health.LongestStreamsAction)),
 
         // 1.2-SCOPE-3: Find by id, in Marten's terms - three kinds and the helper they share.
-        (typeof(MartenStudio.Services.Find.IFindEventScopes), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.FindEventScopes)),
+        (typeof(MartenStudio.Services.Find.IFindScopes), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.FindScopes)),
         (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.DocumentFindContributor)),
         (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.StreamFindContributor)),
         (typeof(PostgresStudio.Services.Find.IFindContributor), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Find.EventSequenceFindContributor)),

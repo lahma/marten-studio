@@ -2,6 +2,7 @@ using JasperFx.Events;
 
 using MartenStudio.Services.Events;
 using MartenStudio.Services.Find;
+using MartenStudio.Tests.Support;
 
 using PostgresStudio.Services;
 using PostgresStudio.Services.Find;
@@ -20,36 +21,24 @@ public class EventFindContributorTests
     private static readonly StudioScope Asked = new("default", string.Empty, null);
     private static readonly StudioScope Matched = new("default", "primary", null);
 
-    /// <summary>The event-side seam, said outright: the context and which tenants the policy admits.</summary>
-    private sealed class FakeScopes(FindEventContext? context, Func<string?, bool>? admits = null) : IFindEventScopes
-    {
-        public int Contexts { get; private set; }
-
-        public Task<FindEventContext?> ContextAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
-        {
-            Contexts++;
-            return Task.FromResult(context);
-        }
-
-        public ValueTask<List<T>> AdmitAsync<T>(StudioScope scope, IReadOnlyList<T> rows, Func<T, string?> tenantOf, CancellationToken cancellationToken) =>
-            ValueTask.FromResult<List<T>>([.. rows.Where(x => admits is null || admits(tenantOf(x)))]);
-    }
-
-    private static EventStoreShape Shape(StreamIdentity identity = StreamIdentity.AsGuid, bool perTenant = false, params string[] naturalKeys) => new()
+    private static EventStoreShape Shape(StreamIdentity identity = StreamIdentity.AsGuid, bool perTenant = false, bool conjoined = true, params string[] naturalKeys) => new()
     {
         StreamIdentity = identity,
         Schema = "studio_events",
         EventTablesExist = true,
         PerTenantSequences = perTenant,
+        EventsConjoined = conjoined,
         NaturalKeys = naturalKeys,
+        Scope = Matched,
     };
 
-    private static FindEventContext Context(EventStoreShape shape, StudioScope? scope = null) => new(scope ?? Matched, shape);
+    private static FindContext Context(EventStoreShape shape, StudioScope? scope = null, FindTenants? tenants = null) =>
+        new(scope ?? Matched, shape, tenants ?? FindTenants.Unrestricted);
 
-    private static StreamFindContributor Streams(FakeEventDataService events, FakeScopes scopes) =>
+    private static StreamFindContributor Streams(FakeEventDataService events, FakeFindScopes scopes) =>
         new(events, scopes, Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
 
-    private static EventSequenceFindContributor Sequences(FakeEventDataService events, FakeScopes scopes) =>
+    private static EventSequenceFindContributor Sequences(FakeEventDataService events, FakeFindScopes scopes) =>
         new(events, scopes, Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
 
     [Fact]
@@ -57,7 +46,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, "Order", version: 5)] };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
 
         StreamListRequest request = events.StreamRequests.Should().ContainSingle().Subject;
         request.StreamId.Should().Be(StreamId);
@@ -78,7 +67,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, archived: true, tenantId: "acme")] };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
 
         FindHit hit = found.Hits.Single();
         hit.Mark.Should().Be("archived");
@@ -92,7 +81,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new();
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
 
         events.StreamRequests.Should().BeEmpty();
         found.Hits.Should().BeEmpty();
@@ -103,7 +92,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream("ORD-1")] };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape(StreamIdentity.AsString)))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(StreamIdentity.AsString)))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
 
         events.StreamRequests.Should().ContainSingle();
         found.Hits.Should().ContainSingle();
@@ -122,7 +111,7 @@ public class EventFindContributorTests
             ],
         };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape()), tenant => tenant != "secret"))
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape()), tenant => tenant != "secret"))
             .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
 
         found.Hits.Select(static x => x.Scope.TenantId).Should().Equal("acme", "zeta");
@@ -134,7 +123,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new() { StreamsForId = [.. Enumerable.Range(1, 8).Select(i => FakeEventDataService.Stream(StreamId, tenantId: "t" + i))] };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
 
         found.Hits.Should().HaveCount(5);
         found.Hits[4].Detail.Should().EndWith("and 3 more tenants you may see");
@@ -151,7 +140,7 @@ public class EventFindContributorTests
                 ["Order.Number"]),
         };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape(naturalKeys: "Order.Number"))))
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"))))
             .FindAsync(Asked, FindQuery.Parse("ORD-2026-0001"), CancellationToken.None);
 
         events.NaturalKeyLookups.Should().Equal("ORD-2026-0001");
@@ -167,7 +156,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new();
 
-        await Streams(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
+        await Streams(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
 
         events.NaturalKeyLookups.Should().BeEmpty();
     }
@@ -181,7 +170,7 @@ public class EventFindContributorTests
             NaturalKeys = new NaturalKeyLookup([new NaturalKeyMatch("Order.Number", FakeEventDataService.Stream(StreamId))], ["Order.Number"]),
         };
 
-        FindContribution found = await Streams(events, new FakeScopes(Context(Shape(naturalKeys: "Order.Number"))))
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"))))
             .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
 
         found.Hits.Should().HaveCount(2);
@@ -192,7 +181,7 @@ public class EventFindContributorTests
     public async Task A_store_that_numbers_events_per_tenant_is_not_searched_for_streams_natural_keys_or_events_until_a_tenant_is_chosen()
     {
         FakeEventDataService events = new();
-        FakeScopes scopes = new(Context(Shape(perTenant: true, naturalKeys: "Order.Number")));
+        FakeFindScopes scopes = new(Context(Shape(perTenant: true, naturalKeys: "Order.Number")));
 
         FindContribution streams = await Streams(events, scopes).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
         FindContribution sequence = await Sequences(events, scopes).FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None);
@@ -211,7 +200,7 @@ public class EventFindContributorTests
     {
         StudioScope inTenant = Asked with { TenantId = "acme" };
         FakeEventDataService events = new() { EventBySequence = FakeEventDataService.Event(12, version: 3) };
-        FakeScopes scopes = new(Context(Shape(perTenant: true), Matched with { TenantId = "acme" }));
+        FakeFindScopes scopes = new(Context(Shape(perTenant: true), Matched with { TenantId = "acme" }));
 
         FindContribution found = await Sequences(events, scopes).FindAsync(inTenant, FindQuery.Parse("#12"), CancellationToken.None);
 
@@ -226,7 +215,7 @@ public class EventFindContributorTests
         StudioScope inTenant = Asked with { TenantId = "acme" };
         FakeEventDataService events = new() { EventBySequence = FakeEventDataService.Event(12, version: 3, streamId: StreamId) };
 
-        FindContribution found = await Sequences(events, new FakeScopes(Context(Shape(), Matched with { TenantId = "acme" })))
+        FindContribution found = await Sequences(events, new FakeFindScopes(Context(Shape(), Matched with { TenantId = "acme" })))
             .FindAsync(inTenant, FindQuery.Parse("#12"), CancellationToken.None);
 
         events.EventBySequenceScopes.Should().ContainSingle().Which.Should().Be(inTenant);
@@ -245,7 +234,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new() { EventBySequence = FakeEventDataService.Event(expected) };
 
-        FindContribution found = await Sequences(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(typed), CancellationToken.None);
+        FindContribution found = await Sequences(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(typed), CancellationToken.None);
 
         found.Hits.Single().Title.Should().Be("Event #12");
     }
@@ -258,7 +247,7 @@ public class EventFindContributorTests
     public async Task Anything_else_is_not_a_sequence_and_reads_nothing(string typed)
     {
         FakeEventDataService events = new();
-        FakeScopes scopes = new(Context(Shape()));
+        FakeFindScopes scopes = new(Context(Shape()));
 
         FindContribution found = await Sequences(events, scopes).FindAsync(Asked, FindQuery.Parse(typed), CancellationToken.None);
 
@@ -272,7 +261,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new() { EventBySequence = FakeEventDataService.Event(12) with { TenantId = "secret" } };
 
-        FindContribution found = await Sequences(events, new FakeScopes(Context(Shape()), tenant => tenant != "secret"))
+        FindContribution found = await Sequences(events, new FakeFindScopes(Context(Shape()), tenant => tenant != "secret"))
             .FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None);
 
         found.Hits.Should().BeEmpty();
@@ -284,7 +273,7 @@ public class EventFindContributorTests
     {
         FakeEventDataService events = new();
 
-        FindContribution found = await Sequences(events, new FakeScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None);
+        FindContribution found = await Sequences(events, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None);
 
         found.Hits.Should().BeEmpty();
         found.Searched.Should().Be("event sequences");
@@ -294,7 +283,7 @@ public class EventFindContributorTests
     public async Task A_scope_with_no_event_store_is_not_this_kinds_to_search()
     {
         FakeEventDataService events = new();
-        FakeScopes scopes = new(null);
+        FakeFindScopes scopes = new(null);
 
         (await Streams(events, scopes).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None)).Should().Be(FindContribution.NotApplicable);
         (await Sequences(events, scopes).FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None)).Should().Be(FindContribution.NotApplicable);
@@ -310,5 +299,118 @@ public class EventFindContributorTests
 
         url.Should().Contain("events/streams/s").And.Contain("id=" + StreamId).And.Contain("v=7")
             .And.Contain("store=default").And.Contain("db=primary").And.Contain("tenant=acme");
+    }
+
+    [Fact]
+    public async Task A_stream_of_a_store_that_is_not_conjoined_has_no_tenant_and_the_policy_is_not_asked_about_the_default_one()
+    {
+        List<string?> asked = [];
+        FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, tenantId: "*DEFAULT*")] };
+        FakeFindScopes scopes = new(Context(Shape(conjoined: false)), tenant =>
+        {
+            asked.Add(tenant);
+            return tenant is null;
+        });
+
+        FindContribution found = await Streams(events, scopes).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        FindHit hit = found.Hits.Should().ContainSingle("an allowlist policy must not hide what the Streams page shows").Subject;
+        hit.TenantChip.Should().BeNull();
+        hit.Scope.TenantId.Should().BeNull("so the one hit equals the scope on screen and opens by itself");
+        hit.Url.Should().NotContain("tenant=");
+        asked.Should().OnlyContain(static x => x == null);
+    }
+
+    [Fact]
+    public async Task An_event_of_a_store_that_is_not_conjoined_has_no_tenant_either()
+    {
+        FakeEventDataService events = new() { EventBySequence = FakeEventDataService.Event(12) with { TenantId = "*DEFAULT*" } };
+
+        FindContribution found = await Sequences(events, new FakeFindScopes(Context(Shape(conjoined: false)), static tenant => tenant is null))
+            .FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None);
+
+        FindHit hit = found.Hits.Should().ContainSingle().Subject;
+        hit.TenantChip.Should().BeNull();
+        hit.Scope.TenantId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_natural_key_match_of_a_store_that_is_not_conjoined_has_no_tenant_either()
+    {
+        FakeEventDataService events = new()
+        {
+            NaturalKeys = new NaturalKeyLookup([new NaturalKeyMatch("Order.Number", FakeEventDataService.Stream(StreamId, tenantId: "*DEFAULT*"))], ["Order.Number"]),
+        };
+
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(conjoined: false, naturalKeys: "Order.Number")), static tenant => tenant is null))
+            .FindAsync(Asked, FindQuery.Parse("ORD-1"), CancellationToken.None);
+
+        found.Hits.Should().ContainSingle().Which.TenantChip.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task With_a_policy_and_no_tenant_selected_the_stream_and_natural_key_reads_are_narrowed_to_the_tenants_the_visitor_may_address()
+    {
+        FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, tenantId: "acme")] };
+        FindTenants tenants = FindTenants.OnlyThese(["acme", "initech"]);
+
+        await Streams(events, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: tenants)))
+            .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        events.StreamRequests.Should().ContainSingle().Which.Tenants.Should().Equal("acme", "initech");
+        events.NaturalKeyTenants.Should().ContainSingle().Which.Should().Equal("acme", "initech");
+    }
+
+    [Fact]
+    public async Task The_restriction_is_not_passed_for_a_store_whose_events_are_not_conjoined_or_when_a_tenant_is_selected()
+    {
+        FindTenants tenants = FindTenants.OnlyThese(["acme"]);
+        FakeEventDataService single = new() { StreamsForId = [FakeEventDataService.Stream(StreamId)] };
+        FakeEventDataService selected = new() { StreamsForId = [FakeEventDataService.Stream(StreamId)] };
+
+        await Streams(single, new FakeFindScopes(Context(Shape(conjoined: false), tenants: tenants))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        await Streams(selected, new FakeFindScopes(Context(Shape(), Matched with { TenantId = "acme" }, tenants))).FindAsync(Asked with { TenantId = "acme" }, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        single.StreamRequests.Single().Tenants.Should().BeNull("every row's tenant there is *DEFAULT*, which the restriction would hide");
+        selected.StreamRequests.Single().Tenants.Should().BeNull("a selected tenant is the restriction");
+    }
+
+    [Fact]
+    public async Task When_the_visitors_tenants_cannot_be_listed_nothing_is_read_across_tenants_and_the_visitor_is_asked_to_select_one()
+    {
+        FakeEventDataService events = new() { StreamsForId = [FakeEventDataService.Stream(StreamId, tenantId: "acme")] };
+
+        FindContribution found = await Streams(events, new FakeFindScopes(Context(Shape(naturalKeys: "Order.Number"), tenants: FindTenants.Selection)))
+            .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        found.Notes.Should().Equal(FindTenants.SelectionNeededNote);
+        found.Hits.Should().BeEmpty();
+        events.StreamRequests.Should().BeEmpty();
+        events.NaturalKeyLookups.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Or_more_is_said_only_when_the_page_was_full_of_rows_the_visitor_may_see()
+    {
+        FakeEventDataService full = new() { StreamsForId = [.. Enumerable.Range(1, 21).Select(i => FakeEventDataService.Stream(StreamId, tenantId: "t" + i))] };
+        FakeEventDataService trimmed = new() { StreamsForId = [.. Enumerable.Range(1, 21).Select(i => FakeEventDataService.Stream(StreamId, tenantId: "t" + i))] };
+
+        FindContribution all = await Streams(full, new FakeFindScopes(Context(Shape()))).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+        FindContribution some = await Streams(trimmed, new FakeFindScopes(Context(Shape()), static tenant => tenant is not null && int.Parse(tenant.AsSpan(1), System.Globalization.CultureInfo.InvariantCulture) <= 8))
+            .FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None);
+
+        all.Hits[4].Detail.Should().EndWith("and 16 more tenants you may see (or more)");
+        some.Hits[4].Detail.Should().EndWith("and 3 more tenants you may see", "a refused row filled part of the page, so the limit says nothing about more");
+    }
+
+    [Fact]
+    public async Task A_scope_with_no_event_tables_is_not_this_kinds_to_search()
+    {
+        EventStoreShape noTables = Shape() with { EventTablesExist = false };
+        FakeEventDataService events = new();
+        FakeFindScopes scopes = new(Context(noTables));
+
+        (await Streams(events, scopes).FindAsync(Asked, FindQuery.Parse(StreamId), CancellationToken.None)).Should().Be(FindContribution.NotApplicable);
+        (await Sequences(events, scopes).FindAsync(Asked, FindQuery.Parse("#12"), CancellationToken.None)).Should().Be(FindContribution.NotApplicable);
     }
 }

@@ -99,6 +99,81 @@ public class RelationFindContributorTests
         objects.Reads.Should().Be(0);
     }
 
+    /// <summary>A browser with more tables than one list holds: <paramref name="count" /> names that contain "orders", the exact one last.</summary>
+    private sealed class CrowdedObjects(int count, int cap) : IDatabaseObjectService
+    {
+        public List<int> Limits { get; } = [];
+
+        private static DatabaseRelationSummary Table(string name) => new(
+            DatabaseObjectKind.Table, "app", name, new DatabaseObjectOwnership(DatabaseObjectOwner.Other), null, true, 10, 8192, true, 0, 0, 0, false, true, false, null, true, DatabaseRowAccess.Granted, false);
+
+        public Task<DatabaseObjectList> ListAsync(StudioScope scope, DatabaseObjectQuery query, CancellationToken cancellationToken = default)
+        {
+            Limits.Add(query.Limit ?? 0);
+
+            List<DatabaseObjectSummary> all = query.Category == DatabaseObjectCategory.Tables
+                ? [.. Enumerable.Range(0, count).Select(i => (DatabaseObjectSummary) Table("orders_" + i.ToString("0000", System.Globalization.CultureInfo.InvariantCulture))), Table("orders")]
+                : [];
+            int limit = Math.Min(query.Limit ?? cap, cap);
+
+            return Task.FromResult(new DatabaseObjectList(
+                query with { Limit = limit },
+                [.. all.Take(limit)],
+                new DatabaseOwnerCounts(all.Count, 0, all.Count),
+                all.Count > limit,
+                limit,
+                FakeDatabaseObjects.Access(),
+                DatabaseRefusal.None,
+                null));
+        }
+
+        public Task<DatabaseBrowserOverview> GetOverviewAsync(StudioScope scope, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<DatabaseObjectDetail> GetObjectAsync(StudioScope scope, string schema, string name, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<DatabaseObjectDefinition> GetDefinitionAsync(StudioScope scope, DatabaseObjectRef reference, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<DatabaseSequenceValue> GetSequenceValueAsync(StudioScope scope, string schema, string name, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private static RelationFindContributor Crowded(CrowdedObjects objects) => new(
+        objects,
+        new PostgresStudioSettings(Microsoft.Extensions.Options.Options.Create(new PostgresStudioOptions())),
+        PostgresStudioDescriptor.Instance);
+
+    [Fact]
+    public async Task An_exact_name_past_the_first_fifty_that_contain_it_is_still_found()
+    {
+        CrowdedObjects objects = new(count: 120, cap: 5000);
+
+        FindContribution found = await Crowded(objects).FindAsync(Scope, FindQuery.Parse("orders"), CancellationToken.None);
+
+        found.Hits.Should().ContainSingle().Which.Title.Should().Be("app.orders");
+        found.Notes.Should().BeEmpty();
+        objects.Limits.Should().Contain(RelationFindContributor.ListLimit, "the first ask is small").And.Contain(5000, "and the second is as many as the browser reads");
+    }
+
+    [Fact]
+    public async Task A_name_found_in_the_first_list_asks_only_once_per_kind()
+    {
+        CrowdedObjects objects = new(count: 10, cap: 5000);
+
+        (await Crowded(objects).FindAsync(Scope, FindQuery.Parse("orders"), CancellationToken.None)).Hits.Should().ContainSingle();
+
+        objects.Limits.Should().Equal(RelationFindContributor.ListLimit, RelationFindContributor.ListLimit);
+    }
+
+    [Fact]
+    public async Task When_even_the_biggest_list_is_full_and_holds_no_exact_name_the_note_says_the_search_could_not_be_exact()
+    {
+        CrowdedObjects objects = new(count: 300, cap: 100);
+
+        FindContribution found = await Crowded(objects).FindAsync(Scope, FindQuery.Parse("orders"), CancellationToken.None);
+
+        found.Hits.Should().BeEmpty();
+        found.Notes.Should().ContainSingle().Which.Should().StartWith("Tables and views: more names contain this than the browser reads");
+    }
+
     [Fact]
     public async Task A_list_that_could_not_be_read_is_a_note_and_no_hit()
     {

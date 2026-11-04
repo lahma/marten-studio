@@ -1,5 +1,6 @@
 using MartenStudio.Services.Query;
 using PostgresStudio.Internal.Sql;
+using MartenStudio.Services.Find;
 using PostgresStudio.Services;
 using PostgresStudio.Services.Query;
 
@@ -140,8 +141,9 @@ internal interface IDocumentDataService
     /// </summary>
     /// <param name="scope">The store, database and (optionally) tenant.</param>
     /// <param name="value">What was typed.</param>
+    /// <param name="tenants">Which tenants a conjoined collection is read across when no tenant is selected (see <see cref="FindTenants" />).</param>
     /// <param name="cancellationToken">Cancels the probes.</param>
-    Task<DocumentFindResult> FindByIdAsync(StudioScope scope, string value, CancellationToken cancellationToken = default);
+    Task<DocumentFindResult> FindByIdAsync(StudioScope scope, string value, FindTenants tenants, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The <c>_recent</c> pseudo-collection: the most recently modified documents of any type, with the

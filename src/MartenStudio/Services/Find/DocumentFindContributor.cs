@@ -17,16 +17,20 @@ namespace MartenStudio.Services.Find;
 /// <remarks>
 /// A hidden or infrastructure document type is never probed and never counted: the phrase says how many visible types were searched,
 /// the number the rail shows. A tenant-partitioned collection is not probed while no tenant is selected, and the note says so once.
-/// Each hit is a document row - one per tenant that holds the id - linked to the document page with that row's tenant.
+/// Each hit is a document row - one per tenant that holds the id - linked to the document page with that row's tenant. With a store
+/// policy in force and no tenant selected the probe reads only the tenants the visitor may address (<see cref="FindTenants" />), so that
+/// rows of other tenants cannot fill its row limit and hide the visitor's own.
 /// </remarks>
 internal sealed class DocumentFindContributor : IFindContributor
 {
     private readonly IDocumentDataService documents;
+    private readonly IFindScopes scopes;
     private readonly IOptions<MartenStudioOptions> options;
 
-    public DocumentFindContributor(IDocumentDataService documents, IOptions<MartenStudioOptions> options)
+    public DocumentFindContributor(IDocumentDataService documents, IFindScopes scopes, IOptions<MartenStudioOptions> options)
     {
         this.documents = documents;
+        this.scopes = scopes;
         this.options = options;
     }
 
@@ -47,7 +51,13 @@ internal sealed class DocumentFindContributor : IFindContributor
             return FindContribution.NotApplicable;
         }
 
-        DocumentFindResult found = await documents.FindByIdAsync(scope, query.Value, cancellationToken).ConfigureAwait(false);
+        FindContext? context = await scopes.ContextAsync(scope, query, cancellationToken).ConfigureAwait(false);
+        if (context is null)
+        {
+            return new FindContribution([], null, ["Documents: could not be searched."]);
+        }
+
+        DocumentFindResult found = await documents.FindByIdAsync(scope, query.Value, context.Tenants, cancellationToken).ConfigureAwait(false);
 
         List<FindHit> hits = [];
         foreach (DocumentFindHit hit in found.Hits)
@@ -59,8 +69,9 @@ internal sealed class DocumentFindContributor : IFindContributor
 
                 // The hit says what is beyond the five tenants it names, on its last line.
                 string? detail = row.TypeName is null ? null : "as " + row.TypeName;
-                // Counted from the admitted tenants only: "or more" is said when the probe's row limit was reached, never from rows
-                // a refused tenant held, which would tell the visitor that something is there.
+
+                // Counted from the admitted tenants only, and "(or more)" only when the probe's row limit was reached by rows that were all
+                // admitted: a limit that refused rows helped to fill says nothing about how many more the visitor may see.
                 if (index == hit.Rows.Count - 1 && hit.MoreTenants > 0)
                 {
                     string more = $"and {hit.MoreTenants.ToString(CultureInfo.InvariantCulture)} more {(hit.MoreTenants == 1 ? "tenant" : "tenants")} you may see{(hit.MoreMaybe ? " (or more)" : string.Empty)}";
@@ -83,6 +94,11 @@ internal sealed class DocumentFindContributor : IFindContributor
         if (found.PartitionedSkipped > 0)
         {
             notes.Add($"{found.PartitionedSkipped.ToString(CultureInfo.InvariantCulture)} document {(found.PartitionedSkipped == 1 ? "type" : "types")} partitioned by tenant {(found.PartitionedSkipped == 1 ? "was" : "were")} not searched: select a tenant.");
+        }
+
+        if (found.TenantedSkipped > 0)
+        {
+            notes.Add(FindTenants.SelectionNeededNote);
         }
 
         if (found.ProbeLimitReached)

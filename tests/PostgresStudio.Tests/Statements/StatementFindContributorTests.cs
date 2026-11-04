@@ -72,6 +72,12 @@ public class StatementFindContributorTests
     }
 
     [Fact]
+    public void The_statements_page_does_not_apply_its_scope_so_it_is_not_searched_in_another_store()
+    {
+        Contributor(new FakeStatements(Read())).SearchesOtherScopes.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task A_queryid_the_list_does_not_hold_is_no_hit()
     {
         FakeStatements statements = new(Read(Row(7_000_000_000_000, "select 1")));

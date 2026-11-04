@@ -85,7 +85,7 @@ public class FindBoxStoresTests
         await box.InvokeAsync(() => box.FindAll(".ms-find-other-store").Single(static x => x.TextContent.Trim() == "Invoicing").Click());
 
         contributor.Calls.Should().HaveCount(2);
-        contributor.Calls[1].Should().Be((new StudioScope("invoicing", string.Empty, null), "INV-77"), "the value the visitor typed, in the store they chose");
+        contributor.Calls[1].Should().Be((new StudioScope("invoicing", "billing", null), "INV-77"), "the value the visitor typed, in the first database of the store they chose that the catalog lists for them");
         context.State.ActiveScope.Should().Be(before, "Find never moves the scope");
         context.Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().Uri.Should().Be(uriBefore);
     }
@@ -110,6 +110,42 @@ public class FindBoxStoresTests
         box.Find("a.ms-find-hit").GetAttribute("href").Should().Be("/marten/documents/invoice/doc?id=INV-77&store=invoicing&db=billing");
         context.Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().Uri.Should().Be(uriBefore, "a pushed address would be built from a scope the shell is not on");
         context.State.ActiveScope!.StoreKey.Should().Be("default");
+    }
+
+    [Fact]
+    public async Task Searching_in_another_store_picks_the_first_database_the_catalog_admits_not_the_first_the_store_has()
+    {
+        Recording contributor = new();
+        await using StudioComponentContext context = await ReadyAsync(contributor, catalog => catalog
+            .WithStore("default", "Default", DatabaseCardinality.Single, "primary")
+            .WithStore("invoicing", "Invoicing", DatabaseCardinality.StaticMultiple, "archive", "billing", "reporting"));
+
+        // The policy-filtered listing the header offers: the store's first database is not among the ones this visitor may see.
+        context.Catalog.Databases["invoicing"].RemoveAt(0);
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+        await box.InvokeAsync(() => box.Instance.FindAsync("INV-77"));
+
+        await box.InvokeAsync(() => box.FindAll(".ms-find-other-store").Single().Click());
+
+        contributor.Calls[^1].Scope.Should().Be(new StudioScope("invoicing", "billing", null));
+    }
+
+    [Fact]
+    public async Task A_store_with_no_database_the_visitor_may_see_has_nothing_to_search_in_and_nothing_is_asked()
+    {
+        Recording contributor = new();
+        await using StudioComponentContext context = await ReadyAsync(contributor, catalog => catalog
+            .WithStore("default", "Default", DatabaseCardinality.Single, "primary")
+            .WithStore("invoicing", "Invoicing", DatabaseCardinality.Single, "billing"));
+        context.Catalog.Databases["invoicing"].Clear();
+        IRenderedComponent<FindBox> box = context.Render<FindBox>();
+        await box.InvokeAsync(() => box.Instance.FindAsync("INV-77"));
+        int asked = contributor.Calls.Count;
+
+        await box.InvokeAsync(() => box.FindAll(".ms-find-other-store").Single().Click());
+
+        contributor.Calls.Should().HaveCount(asked);
+        box.Find(".ms-find-status").TextContent.Should().Be("Nothing found");
     }
 
     [Fact]

@@ -2,6 +2,8 @@ using System.Globalization;
 
 using JasperFx.Events;
 
+using PostgresStudio.Services;
+
 namespace MartenStudio.Services.Events;
 
 /// <summary>
@@ -101,6 +103,12 @@ internal sealed record EventStoreShape
 
     /// <summary>The natural keys the Streams box can look a stream up by, as <c>Aggregate.Member</c>.</summary>
     public IReadOnlyList<string> NaturalKeys { get; init; } = [];
+
+    /// <summary>
+    /// The scope as the resolver matched it - the registered store key and the database's own identity, with the tenant selected (Find
+    /// by id, 1.2): what a link carries and what a policy is asked about a tenant, however the visitor spelled the scope.
+    /// </summary>
+    public StudioScope? Scope { get; init; }
 }
 
 /// <summary>One row of the stream list.</summary>
@@ -193,6 +201,12 @@ internal sealed record StreamListRequest
 
     /// <summary>How many streams to return.</summary>
     public int PageSize { get; init; } = 50;
+
+    /// <summary>
+    /// With no tenant selected, the only tenants whose streams are read (Find by id, 1.2): the ones the visitor's policy admits, so that
+    /// streams of other tenants cannot fill the page. <see langword="null" /> reads them all.
+    /// </summary>
+    public IReadOnlyList<string>? Tenants { get; init; }
 }
 
 /// <summary>One page of the stream list.</summary>

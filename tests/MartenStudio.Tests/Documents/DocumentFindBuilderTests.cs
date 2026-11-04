@@ -15,7 +15,7 @@ public class DocumentFindBuilderTests
     [Fact]
     public void A_fully_featured_hierarchy_selects_the_tenant_the_subclass_and_the_deleted_flag_and_never_the_document()
     {
-        DocumentQueryBuilder.TryBuildFind(FeaturedHierarchy(), Guid.NewGuid().ToString("D"), null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+        DocumentQueryBuilder.TryBuildFind(FeaturedHierarchy(), Guid.NewGuid().ToString("D"), null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
             .Should().BeTrue();
 
         using (command)
@@ -36,7 +36,7 @@ public class DocumentFindBuilderTests
     [Fact]
     public void A_table_without_subclasses_has_no_discriminator_to_select()
     {
-        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
             .Should().BeTrue();
 
         using (command)
@@ -55,7 +55,7 @@ public class DocumentFindBuilderTests
     [Fact]
     public void A_bare_table_selects_only_a_constant()
     {
-        DocumentQueryBuilder.TryBuildFind(SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
             .Should().BeTrue();
 
         using (command)
@@ -70,7 +70,7 @@ public class DocumentFindBuilderTests
     [Fact]
     public void A_selected_tenant_is_a_predicate_on_a_conjoined_table_and_a_parameter()
     {
-        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme'; drop table x; --", 0, out NpgsqlCommand? command, out _)
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme'; drop table x; --", null, 0, out NpgsqlCommand? command, out _)
             .Should().BeTrue();
 
         using (command)
@@ -81,10 +81,42 @@ public class DocumentFindBuilderTests
         }
     }
 
+    private static readonly string[] Tenants = ["acme", "globex'; --"];
+
+    [Fact]
+    public void With_no_tenant_selected_a_conjoined_table_is_read_only_for_the_tenants_given_and_they_are_a_parameter()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, Tenants, 0, out NpgsqlCommand? command, out _)
+            .Should().BeTrue();
+
+        using (command)
+        {
+            command!.CommandText.Should().Contain("and d.\"tenant_id\" = any(@tenants)\nlimit 21");
+            command.CommandText.Should().NotContain("globex").And.NotContain("tenant_id\" = @tenant");
+            command.Parameters["tenants"].Value.Should().BeEquivalentTo(Tenants);
+        }
+    }
+
+    [Fact]
+    public void A_selected_tenant_wins_over_the_tenants_given_and_a_single_tenant_table_ignores_them()
+    {
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), "acme", ["globex"], 0, out NpgsqlCommand? selected, out _)
+            .Should().BeTrue();
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.MetadataLess(), Guid.NewGuid().ToString("D"), null, ["globex"], 0, out NpgsqlCommand? single, out _)
+            .Should().BeTrue();
+
+        using (selected)
+        using (single)
+        {
+            selected!.CommandText.Should().Contain("= @tenant").And.NotContain("any(@tenants)");
+            single!.CommandText.Should().NotContain("tenant");
+        }
+    }
+
     [Fact]
     public void The_id_is_always_a_parameter_whatever_the_column_type()
     {
-        DocumentQueryBuilder.TryBuildFind(SqlTestTables.StringKeyed(), "ORD-1' or '1'='1", null, 0, out NpgsqlCommand? command, out _)
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.StringKeyed(), "ORD-1' or '1'='1", null, null, 0, out NpgsqlCommand? command, out _)
             .Should().BeTrue();
 
         using (command)
@@ -97,7 +129,7 @@ public class DocumentFindBuilderTests
     [Fact]
     public void An_id_that_cannot_fit_the_column_is_not_probed_at_all()
     {
-        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), "not-a-guid", null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), "not-a-guid", null, null, 0, out NpgsqlCommand? command, out DocumentFindShape shape)
             .Should().BeFalse();
 
         command.Should().BeNull();
@@ -107,7 +139,7 @@ public class DocumentFindBuilderTests
     [Fact]
     public void The_command_carries_the_studios_timeout()
     {
-        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, 9, out NpgsqlCommand? command, out _)
+        DocumentQueryBuilder.TryBuildFind(SqlTestTables.FullyFeatured(), Guid.NewGuid().ToString("D"), null, null, 9, out NpgsqlCommand? command, out _)
             .Should().BeTrue();
 
         using (command)

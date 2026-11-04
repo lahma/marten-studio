@@ -87,6 +87,11 @@ public class TenancyEnumerationCallTests
             + "never FindOrCreateDatabase, which would create the database a URL named"),
         new("src/PostgresStudio/Services/StudioScopeCatalog.cs", "DatabasesAsync", 2,
             "names, for the database picker; and the instance tenant discovery reads, for the header"),
+        // 1.2-SCOPE-3-FU: Find's "Search in" another store.
+        new("src/PostgresStudio/Components/Layout/FindBox.razor", "ListDatabasesAsync", 1,
+            "names, to search the first database the catalog lists for this visitor in another store: asked only when the visitor "
+            + "presses that store's button, once, and it is the listing the header's picker makes when that store is selected - "
+            + "never on a render, a poll or a keystroke, and never for the active store"),
         // Issue #20: Sessions > Holders names a database of the server only where a registered source holds it and the policy
         // admits it.
         new("src/PostgresStudio/Services/Database/SessionHolderNames.cs", "DatabasesAsync", 1,

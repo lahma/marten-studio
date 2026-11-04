@@ -113,6 +113,9 @@ internal sealed record StreamListQuery
     /// <summary>Only this tenant's streams.</summary>
     public string? TenantId { get; init; }
 
+    /// <summary>With no <see cref="TenantId" />, only these tenants' streams (<c>tenant_id = any(@tenants)</c>); <see langword="null" /> for all.</summary>
+    public IReadOnlyList<string>? Tenants { get; init; }
+
     /// <summary>Whether archived streams are included.</summary>
     public bool IncludeArchived { get; init; }
 
@@ -911,6 +914,12 @@ internal static class EventQueryBuilder
         {
             sql.Append("  and (").Append(parameters.AddNullable(NpgsqlDbType.Varchar, query.TenantId, "tenant"))
                 .Append(" is null or ").Append(Column(StreamAlias, "tenant_id")).Append(" = @tenant)\n");
+
+            if (query.TenantId is null && query.Tenants is not null)
+            {
+                sql.Append("  and ").Append(Column(StreamAlias, "tenant_id")).Append(" = any(")
+                    .Append(parameters.Add(NpgsqlDbType.Array | NpgsqlDbType.Text, query.Tenants.ToArray(), "tenants")).Append(")\n");
+            }
         }
 
         if (table.HasStreamColumn("is_archived"))

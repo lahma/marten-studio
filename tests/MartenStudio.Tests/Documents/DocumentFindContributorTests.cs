@@ -17,8 +17,8 @@ public class DocumentFindContributorTests
     private static readonly StudioScope Asked = new("default", string.Empty, null);
     private static readonly StudioScope Matched = new("default", "primary", null);
 
-    private static DocumentFindContributor Contributor(FakeDocumentDataService documents) =>
-        new(documents, Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
+    private static DocumentFindContributor Contributor(FakeDocumentDataService documents, FakeFindScopes? scopes = null) =>
+        new(documents, scopes ?? new FakeFindScopes(FakeFindScopes.Context(Matched)), Microsoft.Extensions.Options.Options.Create(new MartenStudioOptions()));
 
     private static DocumentFindHit Hit(string alias, string id, params DocumentFindRow[] rows) =>
         new(alias, 120, id, rows, 0, false);
@@ -144,6 +144,39 @@ public class DocumentFindContributorTests
         FindContribution found = await Contributor(documents).FindAsync(Asked, FindQuery.Parse(typed), CancellationToken.None);
 
         found.Should().Be(FindContribution.NotApplicable);
+        documents.Finds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_tenants_the_visitor_may_address_are_handed_to_the_probe()
+    {
+        FindTenants tenants = FindTenants.OnlyThese(["acme", "globex"]);
+        FakeDocumentDataService documents = new() { FindResult = new([], 3, 0, false, Matched) };
+
+        await Contributor(documents, new FakeFindScopes(FakeFindScopes.Context(Matched, tenants: tenants))).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+
+        documents.FindTenantsAsked.Should().ContainSingle().Which.Should().BeSameAs(tenants);
+    }
+
+    [Fact]
+    public async Task Tenanted_collections_left_unread_because_the_visitor_must_select_a_tenant_say_so()
+    {
+        FakeDocumentDataService documents = new() { FindResult = new([], 3, 0, false, Matched, TenantedSkipped: 2) };
+
+        FindContribution found = await Contributor(documents).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+
+        found.Notes.Should().Equal(FindTenants.SelectionNeededNote);
+        found.Notes[0].Should().Contain("select a tenant to search documents and streams");
+    }
+
+    [Fact]
+    public async Task A_scope_that_could_not_be_read_is_a_note_and_the_probe_is_not_made()
+    {
+        FakeDocumentDataService documents = new();
+
+        FindContribution found = await Contributor(documents, new FakeFindScopes(null)).FindAsync(Asked, FindQuery.Parse("c-1"), CancellationToken.None);
+
+        found.Notes.Should().Equal("Documents: could not be searched.");
         documents.Finds.Should().BeEmpty();
     }
 }

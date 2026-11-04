@@ -568,7 +568,8 @@
             }
 
             const slash = event.key === "/" && !event.ctrlKey && !event.metaKey;
-            const chord = (event.key === "k" || event.key === "K") && (event.ctrlKey || event.metaKey) && !event.shiftKey;
+            // `code` as well as `key`: on a layout whose letters are not Latin the K key reports another character.
+            const chord = (event.key === "k" || event.key === "K" || event.code === "KeyK") && (event.ctrlKey || event.metaKey) && !event.shiftKey;
             if (!slash && !chord) {
                 return;
             }

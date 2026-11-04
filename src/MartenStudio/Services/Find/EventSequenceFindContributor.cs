@@ -27,10 +27,10 @@ namespace MartenStudio.Services.Find;
 internal sealed class EventSequenceFindContributor : IFindContributor
 {
     private readonly IEventDataService events;
-    private readonly IFindEventScopes scopes;
+    private readonly IFindScopes scopes;
     private readonly IOptions<MartenStudioOptions> options;
 
-    public EventSequenceFindContributor(IEventDataService events, IFindEventScopes scopes, IOptions<MartenStudioOptions> options)
+    public EventSequenceFindContributor(IEventDataService events, IFindScopes scopes, IOptions<MartenStudioOptions> options)
     {
         this.events = events;
         this.scopes = scopes;
@@ -54,15 +54,15 @@ internal sealed class EventSequenceFindContributor : IFindContributor
             return FindContribution.NotApplicable;
         }
 
-        FindEventContext? context = await scopes.ContextAsync(scope, query, cancellationToken).ConfigureAwait(false);
-        if (context is null)
+        FindContext? context = await scopes.ContextAsync(scope, query, cancellationToken).ConfigureAwait(false);
+        if (context is not { Shape.EventTablesExist: true })
         {
             return FindContribution.NotApplicable;
         }
 
         if (context.NeedsTenant)
         {
-            return new FindContribution([], null, [FindEventContext.PerTenantNote]);
+            return new FindContribution([], null, [FindContext.PerTenantNote]);
         }
 
         EventRow? row = await events.GetEventBySequenceAsync(scope, sequence, cancellationToken).ConfigureAwait(false);
@@ -71,13 +71,16 @@ internal sealed class EventSequenceFindContributor : IFindContributor
             return new FindContribution([], "event sequences", []);
         }
 
-        List<EventRow> admitted = await scopes.AdmitAsync(context.Scope, [row], static x => x.TenantId, cancellationToken).ConfigureAwait(false);
+        // Marten writes *DEFAULT* into the tenant of every event of a store that is not conjoined: that is no tenant (FindContext.TenantOf).
+        string? rowTenant = context.TenantOf(row.TenantId);
+
+        List<EventRow> admitted = await scopes.AdmitAsync(context.Scope, [row], x => context.TenantOf(x.TenantId), cancellationToken).ConfigureAwait(false);
         if (admitted.Count == 0)
         {
             return new FindContribution([], "event sequences", []);
         }
 
-        StudioScope at = context.Scope with { TenantId = row.TenantId is { Length: > 0 } tenant ? tenant : context.Scope.TenantId };
+        StudioScope at = context.Scope with { TenantId = rowTenant ?? context.Scope.TenantId };
         string number = sequence.ToString(CultureInfo.InvariantCulture);
 
         return new FindContribution(
@@ -88,7 +91,7 @@ internal sealed class EventSequenceFindContributor : IFindContributor
                     Url: EventLinks.ToStreamAt(options.Value, at, row.StreamId, row.Version),
                     Scope: at,
                     Id: number,
-                    TenantChip: row.TenantId is { Length: > 0 } ? "tenant " + row.TenantId : null,
+                    TenantChip: rowTenant is null ? null : "tenant " + rowTenant,
                     Mark: row.IsArchived ? "archived" : null,
                     Detail: $"{row.EventType}, version {row.Version.ToString(CultureInfo.InvariantCulture)} of stream {row.StreamId}"),
             ],

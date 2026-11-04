@@ -7,6 +7,7 @@ using Marten.Schema;
 using Marten.Storage;
 
 using MartenStudio.Internal.Sql;
+using MartenStudio.Services.Find;
 
 using Microsoft.Extensions.Logging;
 
@@ -325,10 +326,11 @@ internal sealed partial class DocumentDataService
     internal const int MaxFindTenantsShown = 5;
 
     /// <inheritdoc />
-    public async Task<DocumentFindResult> FindByIdAsync(StudioScope scope, string value, CancellationToken cancellationToken = default)
+    public async Task<DocumentFindResult> FindByIdAsync(StudioScope scope, string value, FindTenants tenants, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(value);
+        ArgumentNullException.ThrowIfNull(tenants);
 
         ResolvedScope resolved = await resolver.ResolveAsync(scope, null, cancellationToken).ConfigureAwait(false);
 
@@ -339,6 +341,7 @@ internal sealed partial class DocumentDataService
         List<DocumentFindHit> hits = [];
         int visible = 0;
         int partitionedSkipped = 0;
+        int tenantedSkipped = 0;
         int probed = 0;
         bool limited = false;
 
@@ -368,7 +371,15 @@ internal sealed partial class DocumentDataService
                     .GetAsync(connection, documentType.TableName.Schema, documentType.TableName.Name, cancellationToken)
                     .ConfigureAwait(false));
 
-            if (!DocumentQueryBuilder.TryBuildFind(table, value, resolved.TenantId, CommandTimeoutSeconds, out NpgsqlCommand? command, out DocumentFindShape shape))
+            // A policy that limits the tenants the visitor may address, over a store with more tenants than the header can list: nothing is
+            // read across tenants, and the visitor is asked to select one (FindTenants).
+            if (resolved.TenantId is null && tenants.SelectionNeeded && table.TenancyStyle == JasperFx.MultiTenancy.TenancyStyle.Conjoined)
+            {
+                tenantedSkipped++;
+                continue;
+            }
+
+            if (!DocumentQueryBuilder.TryBuildFind(table, value, resolved.TenantId, tenants.Only, CommandTimeoutSeconds, out NpgsqlCommand? command, out DocumentFindShape shape))
             {
                 continue;
             }
@@ -397,7 +408,7 @@ internal sealed partial class DocumentDataService
 
                         bool deleted = shape.Deleted && !reader.IsDBNull(at) && reader.GetBoolean(at);
 
-                        rows.Add(new DocumentFindRow(tenant, SubclassName(documentType, discriminator), deleted));
+                        rows.Add(new DocumentFindRow(tenant, SubclassName(documentType, discriminator, options.Value.IsDocumentTypeVisible), deleted));
                     }
                 }
             }
@@ -416,8 +427,6 @@ internal sealed partial class DocumentDataService
                 continue;
             }
 
-            bool maybeMore = rows.Count >= DocumentQueryBuilder.FindLimit;
-
             // Every tenant a hit names is one the store policy admits for this database; a refused one is dropped and never counted.
             // With no store policy nothing is asked (StudioAuthorization.FilterAsync).
             List<DocumentFindRow> admitted = shape.Tenant
@@ -431,6 +440,10 @@ internal sealed partial class DocumentDataService
                 continue;
             }
 
+            // "Or more" only when the row limit was reached and every row read was one the visitor may see: with refused rows among them
+            // the limit says nothing about how many more tenants the visitor may see, and saying "or more" would hint that others exist.
+            bool maybeMore = rows.Count >= DocumentQueryBuilder.FindLimit && admitted.Count == rows.Count;
+
             hits.Add(new DocumentFindHit(
                 table.Alias,
                 CollectionColorizer.HueFor(table.Alias),
@@ -440,11 +453,14 @@ internal sealed partial class DocumentDataService
                 maybeMore));
         }
 
-        return new DocumentFindResult(hits, visible, partitionedSkipped, limited, concrete);
+        return new DocumentFindResult(hits, visible, partitionedSkipped, limited, concrete, tenantedSkipped);
     }
 
     /// <summary>The name of the subclass a row is, or <see langword="null" /> for the collection's own type or an alias nothing claims.</summary>
-    private static string? SubclassName(IDocumentType documentType, string? discriminator)
+    /// <param name="documentType">The collection.</param>
+    /// <param name="discriminator">The row's <c>mt_doc_type</c>.</param>
+    /// <param name="isVisible">The host's <c>IsDocumentTypeVisible</c>: a subclass it hides is not named, because a hidden type never answers.</param>
+    internal static string? SubclassName(IDocumentType documentType, string? discriminator, Func<Type, bool>? isVisible)
     {
         if (string.IsNullOrWhiteSpace(discriminator) || string.Equals(discriminator, documentType.Alias, StringComparison.Ordinal))
         {
@@ -454,7 +470,7 @@ internal sealed partial class DocumentDataService
         try
         {
             Type type = documentType.TypeFor(discriminator);
-            return type == documentType.DocumentType ? null : type.Name;
+            return type == documentType.DocumentType || (isVisible is not null && !isVisible(type)) ? null : type.Name;
         }
         catch (ArgumentOutOfRangeException)
         {

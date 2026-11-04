@@ -27,6 +27,12 @@ internal interface IFindContributor
     /// <summary>What this contributor searches, for a note that it did not: "Documents", "Tables and views".</summary>
     string Noun { get; }
 
+    /// <summary>
+    /// Whether this kind may be searched in a scope other than the one on screen. False for a kind whose page does not apply its own
+    /// address's scope (Statements): its hit would open the page in the scope on screen, not the one searched.
+    /// </summary>
+    bool SearchesOtherScopes => true;
+
     /// <summary>Looks for the value.</summary>
     /// <param name="scope">The store, database and tenant to look in.</param>
     /// <param name="query">What was typed.</param>

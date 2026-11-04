@@ -52,23 +52,26 @@ internal sealed class RelationFindContributor : IFindContributor
 
         List<FindHit> hits = [];
         bool failed = false;
+        bool tooMany = false;
 
         foreach (DatabaseObjectCategory category in new[] { DatabaseObjectCategory.Tables, DatabaseObjectCategory.Views })
         {
-            DatabaseObjectList list = await objects
-                .ListAsync(scope, new DatabaseObjectQuery(category, Schema: null, NameFilter: identifier.Name, Limit: ListLimit), cancellationToken)
-                .ConfigureAwait(false);
+            DatabaseObjectList list = await ListAsync(scope, category, identifier.Name, ListLimit, cancellationToken).ConfigureAwait(false);
+            List<DatabaseObjectSummary> exact = Exact(list, identifier);
+
+            // The list is bounded and ordered by owner and name, so an exact name can sit past the first fifty that merely contain it:
+            // when the list came back full and held no exact match, ask once more for as many as the browser ever reads.
+            if (list.Truncated && exact.Count == 0 && list.Refusal == DatabaseRefusal.None)
+            {
+                list = await ListAsync(scope, category, identifier.Name, DatabaseCatalog.ListCap, cancellationToken).ConfigureAwait(false);
+                exact = Exact(list, identifier);
+                tooMany |= list.Truncated && exact.Count == 0;
+            }
 
             failed |= list.Refusal == DatabaseRefusal.Unavailable;
 
-            foreach (DatabaseObjectSummary item in list.Items)
+            foreach (DatabaseObjectSummary item in exact)
             {
-                if (!string.Equals(item.Name, identifier.Name, StringComparison.OrdinalIgnoreCase)
-                    || (identifier.Schema is not null && !string.Equals(item.Schema, identifier.Schema, StringComparison.OrdinalIgnoreCase)))
-                {
-                    continue;
-                }
-
                 string qualified = DatabaseLinks.QualifiedName(item.Schema, item.Name);
                 hits.Add(new FindHit(
                     Kind: DatabasePresentation.KindLabel(item.Kind) is { } label ? char.ToUpperInvariant(label[0]) + label[1..] : "Table",
@@ -80,9 +83,26 @@ internal sealed class RelationFindContributor : IFindContributor
             }
         }
 
-        return new FindContribution(
-            hits,
-            "tables and views",
-            failed ? ["Tables and views: could not be searched."] : []);
+        List<string> notes = [];
+        if (failed)
+        {
+            notes.Add("Tables and views: could not be searched.");
+        }
+
+        if (tooMany)
+        {
+            notes.Add("Tables and views: more names contain this than the browser reads, so an exact match could not be looked for. Type more of the name.");
+        }
+
+        return new FindContribution(hits, "tables and views", notes);
     }
+
+    private Task<DatabaseObjectList> ListAsync(StudioScope scope, DatabaseObjectCategory category, string name, int limit, CancellationToken cancellationToken) =>
+        objects.ListAsync(scope, new DatabaseObjectQuery(category, Schema: null, NameFilter: name, Limit: limit), cancellationToken);
+
+    /// <summary>The listed objects whose name is exactly the typed one (and whose schema is, when one was typed), ignoring case.</summary>
+    private static List<DatabaseObjectSummary> Exact(DatabaseObjectList list, FindIdentifier identifier) =>
+        [.. list.Items.Where(item =>
+            string.Equals(item.Name, identifier.Name, StringComparison.OrdinalIgnoreCase)
+            && (identifier.Schema is null || string.Equals(item.Schema, identifier.Schema, StringComparison.OrdinalIgnoreCase)))];
 }

@@ -159,7 +159,7 @@ public class ShortcutSheetMatchesHandlersTests
 
         // Find by id (1.2): `/`, and Ctrl/Cmd+K, on the document; ignored while typing and while a dialog is open.
         script.Should().Contain("const slash = event.key === \"/\" && !event.ctrlKey && !event.metaKey;");
-        script.Should().Contain("(event.key === \"k\" || event.key === \"K\") && (event.ctrlKey || event.metaKey)");
+        script.Should().Contain("(event.key === \"k\" || event.key === \"K\" || event.code === \"KeyK\") && (event.ctrlKey || event.metaKey)");
         script.Should().Contain("window.martenStudio.isTypingTarget(event.target) || document.querySelector(\"dialog[open]\")");
         SheetKeys("Anywhere").Should().BeEquivalentTo("?", "/", "K", "Esc");
         SheetKeys("In a dialog").Should().BeEquivalentTo("Tab", "Esc");

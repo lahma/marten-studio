@@ -7,6 +7,7 @@ using Marten;
 using Marten.Schema;
 
 using MartenStudio.Integration.Tests.Tenancy;
+using MartenStudio.Services.Find;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -89,6 +90,14 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         both.Searched.Should().Contain("2 document types", "the phrase counts the visible types, which is what the rail shows");
         both.Searched.Should().Contain("streams");
 
+        // F1: Marten writes *DEFAULT* into the tenant of every stream and event of a store that is not conjoined. That is no tenant:
+        // not shown, not in the link, not asked of a policy, and the scope of the hit is the scope on screen, so one hit opens by itself.
+        StudioState state = circuit.ServiceProvider.GetRequiredService<StudioState>();
+        await state.EnsureInitializedAsync(Token);
+        StudioScope onScreen = state.ActiveScope!;
+        both.Hits.Should().OnlyContain(static x => x.TenantChip == null && x.Scope.TenantId == null && !x.Url.Contains("tenant=", StringComparison.Ordinal));
+        both.Hits.Should().OnlyContain(x => x.Scope == onScreen);
+
         // A soft-deleted document is found and marked, as the detail page links to it.
         FindResult gone = await find.FindAsync(Whole, deleted.ToString(), Token);
         gone.Hits.Should().ContainSingle().Which.Mark.Should().Be("deleted");
@@ -101,7 +110,9 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         FindResult byHash = await find.FindAsync(Whole, "#1", Token);
         FindHit sequence = byHash.Hits.Should().ContainSingle().Subject;
         sequence.Kind.Should().Be("Event");
-        sequence.Url.Should().Contain("events/streams/s").And.Contain("id=" + shared).And.Contain("v=1");
+        sequence.Url.Should().Contain("events/streams/s").And.Contain("id=" + shared).And.Contain("v=1").And.NotContain("tenant=");
+        sequence.TenantChip.Should().BeNull();
+        sequence.Scope.Should().Be(onScreen);
         (await find.FindAsync(Whole, "1", Token)).Hits.Select(static x => x.Kind).Should().Contain("Event");
         (await find.FindAsync(Whole, "#99", Token)).Found.Should().BeFalse();
 
@@ -124,6 +135,19 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         studio.Services.GetRequiredService<StudioActionLogService>().GetLatest().Should().BeEmpty();
 
         before.ShouldBeUnchangedIn(await SnapshotAsync(owned));
+
+        // F1 again, under a policy that allows the store and no tenant at all: the stream and the event are still the visitor's to see.
+        await using TenancyStudio allowlisted = TenancyStudio.Start(
+            Configure,
+            extra: static services => services.AddAuthorization(static options => options.AddPolicy(
+                "NoTenant",
+                static policy => policy.RequireAssertion(static context => context.Resource is MartenStoreResource { TenantId: null }))),
+            studio: static options => options.StoreAuthorizationPolicy = "NoTenant");
+        await using AsyncServiceScope guarded = allowlisted.Services.CreateAsyncScope();
+        FindService guardedFind = guarded.ServiceProvider.GetRequiredService<FindService>();
+
+        (await guardedFind.FindAsync(Whole, shared.ToString(), Token)).Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
+        (await guardedFind.FindAsync(Whole, "#1", Token)).Hits.Should().ContainSingle().Which.Kind.Should().Be("Event");
     }
 
     [PostgresFact]
@@ -397,6 +421,109 @@ public class FindByIdLiveTests(PostgresFixture postgres)
         hit.Scope.StoreKey.Should().Be(nameof(IFindLiveSecondStore));
         hit.Scope.DatabaseId.Should().NotBeNullOrEmpty("the hit names the database the resolver matched, not the empty one that was asked");
         hit.Url.Should().Contain("store=" + nameof(IFindLiveSecondStore));
+    }
+
+    private static void ConfigureCrowd(StoreOptions options, string database)
+    {
+        options.Connection(database);
+        options.DatabaseSchemaName = Schema;
+        options.Events.DatabaseSchemaName = Events;
+        options.Schema.For<FindNote>().MultiTenanted();
+        options.Events.TenancyStyle = TenancyStyle.Conjoined;
+        options.Events.AddEventType<TenancyNoteWritten>();
+    }
+
+    private static async Task SeedCrowdAsync(string database, Guid shared, int tenants, string[] holders)
+    {
+        await using DocumentStore seed = DocumentStore.For(options => ConfigureCrowd(options, database));
+        await seed.Storage.ApplyAllConfiguredChangesToDatabaseAsync();
+
+        for (int i = 1; i <= tenants; i++)
+        {
+            string tenant = "t" + i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            await using IDocumentSession session = seed.LightweightSession(tenant);
+
+            session.Store(new FindNote { Id = holders.Contains(tenant, StringComparer.Ordinal) ? shared : Guid.NewGuid() });
+            if (holders.Contains(tenant, StringComparer.Ordinal))
+            {
+                session.Events.StartStream(shared, new TenancyNoteWritten(tenant));
+            }
+
+            await session.SaveChangesAsync(Token);
+        }
+    }
+
+    [PostgresFact]
+    public async Task An_id_held_by_more_tenants_than_a_probe_reads_is_still_found_for_the_one_tenant_the_policy_admits()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "crowd"], Token);
+        string database = owned[0];
+        Guid shared = Guid.NewGuid();
+
+        // Twenty-five tenants hold the id: more than the 21 rows one probe reads, and the one the visitor may address is the seventh.
+        string[] holders = [.. Enumerable.Range(1, 25).Select(static i => "t" + i.ToString(System.Globalization.CultureInfo.InvariantCulture))];
+        await SeedCrowdAsync(database, shared, 25, holders);
+
+        await using TenancyStudio studio = TenancyStudio.Start(
+            options => ConfigureCrowd(options, database),
+            extra: static services => services.AddAuthorization(static options => options.AddPolicy(
+                "OnlySeven",
+                static policy => policy.RequireAssertion(static context => context.Resource is MartenStoreResource { TenantId: null or "t7" }))),
+            studio: static options => options.StoreAuthorizationPolicy = "OnlySeven");
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+
+        FindResult found = await circuit.ServiceProvider.GetRequiredService<FindService>().FindAsync(Whole, shared.ToString(), Token);
+
+        found.Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
+        found.Hits.Should().OnlyContain(static x => x.Scope.TenantId == "t7" && x.TenantChip == "tenant t7");
+        found.Notes.Should().BeEmpty();
+        JsonSerializer.Serialize(found).Should().NotContain("t8", "a tenant the visitor may not address is not named, counted or hinted at");
+    }
+
+    [PostgresFact]
+    public async Task When_the_visitors_tenants_cannot_all_be_listed_nothing_is_read_across_tenants_and_a_selected_tenant_is_searched()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "truncated"], Token);
+        string database = owned[0];
+        Guid shared = Guid.NewGuid();
+
+        // More tenants than the header lists (200): the list is not the whole truth, so "all of mine" cannot be said.
+        await SeedCrowdAsync(database, shared, 205, ["t7"]);
+
+        await using TenancyStudio studio = TenancyStudio.Start(
+            options => ConfigureCrowd(options, database),
+            extra: static services => services.AddAuthorization(static options => options.AddPolicy(
+                "OnlySeven",
+                static policy => policy.RequireAssertion(static context => context.Resource is MartenStoreResource { TenantId: null or "t7" }))),
+            studio: static options => options.StoreAuthorizationPolicy = "OnlySeven");
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+        FindService find = circuit.ServiceProvider.GetRequiredService<FindService>();
+
+        FindResult across = await find.FindAsync(Whole, shared.ToString(), Token);
+        across.Found.Should().BeFalse();
+        across.Notes.Should().Contain(FindTenants.SelectionNeededNote);
+
+        FindResult selected = await find.FindAsync(Whole with { TenantId = "t7" }, shared.ToString(), Token);
+        selected.Hits.Select(static x => x.Kind).Should().Equal("Document", "Stream");
+        selected.Notes.Should().BeEmpty();
+    }
+
+    [PostgresFact]
+    public async Task Without_a_policy_the_probe_is_not_narrowed_and_says_or_more_when_its_rows_ran_out()
+    {
+        await using OwnedDatabases owned = await OwnedDatabases.CreateAsync(postgres, [Prefix + "nopolicy"], Token);
+        string database = owned[0];
+        Guid shared = Guid.NewGuid();
+        await SeedCrowdAsync(database, shared, 25, [.. Enumerable.Range(1, 25).Select(static i => "t" + i.ToString(System.Globalization.CultureInfo.InvariantCulture))]);
+
+        await using TenancyStudio studio = TenancyStudio.Start(options => ConfigureCrowd(options, database));
+        await using AsyncServiceScope circuit = studio.Services.CreateAsyncScope();
+
+        FindResult found = await circuit.ServiceProvider.GetRequiredService<FindService>().FindAsync(Whole, shared.ToString(), Token);
+
+        FindHit[] documents = [.. found.Hits.Where(static x => x.Kind == "Document")];
+        documents.Should().HaveCount(5);
+        documents[^1].Detail.Should().Be("and 16 more tenants you may see (or more)");
     }
 
     private static Task<ServerSnapshot> SnapshotAsync(OwnedDatabases owned) =>

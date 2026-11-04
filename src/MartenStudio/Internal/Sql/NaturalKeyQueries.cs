@@ -30,6 +30,9 @@ internal sealed record NaturalKeyLookupQuery
     /// <summary>The scope's tenant, or <see langword="null" /> for all of them.</summary>
     public string? TenantId { get; init; }
 
+    /// <summary>With no <see cref="TenantId" />, only these tenants' streams (Find by id, 1.2); <see langword="null" /> for all.</summary>
+    public IReadOnlyList<string>? Tenants { get; init; }
+
     /// <summary>Whether archived streams are found too, as the Streams page's toggle says.</summary>
     public bool IncludeArchived { get; init; }
 }
@@ -123,6 +126,12 @@ internal static class NaturalKeyQueries
             if (streamsHaveTenant)
             {
                 sql.Append("  and (@tenant is null or ").Append(Stream("tenant_id")).Append(" = @tenant)\n");
+
+                if (query.TenantId is null && query.Tenants is not null)
+                {
+                    command.Parameters.Add(new NpgsqlParameter("tenants", NpgsqlDbType.Array | NpgsqlDbType.Text) { Value = query.Tenants.ToArray() });
+                    sql.Append("  and ").Append(Stream("tenant_id")).Append(" = any(@tenants)\n");
+                }
             }
 
             if (table.HasStreamColumn("is_archived"))

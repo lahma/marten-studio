@@ -46,7 +46,7 @@ internal sealed class FakeFindContributor(int order, string noun) : IFindContrib
 
             TaskCompletionSource<FindContribution> never = new(TaskCreationOptions.RunContinuationsAsynchronously);
             await using CancellationTokenRegistration registration = token.Register(() => never.TrySetCanceled(token));
-            return await never.Task;
+            return await never.Task.Bounded();
         };
 
         return contributor;

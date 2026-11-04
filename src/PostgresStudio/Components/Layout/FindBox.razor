@@ -5,6 +5,7 @@
 @implements IAsyncDisposable
 @inject FindService Finder
 @inject StudioState State
+@inject IStudioScopeCatalog Catalog
 @inject NavigationManager Navigation
 @inject IJSRuntime JsRuntime
 @inject ILogger<FindBox> Logger
@@ -218,10 +219,39 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private Task SearchInAsync(StoreListing store)
+    private async Task SearchInAsync(StoreListing store)
     {
-        // The store's first database, which the resolver matches for an empty id; no tenant.
-        return RunAsync(new StudioScope(store.Key, string.Empty, null), lastValue, store.DisplayName);
+        // The store's first database the catalog admits for this visitor - not the first one the store knows, which may be one the policy
+        // refuses - and no tenant. A store with no such database has nothing to search in.
+        StudioScope? scope = null;
+
+        try
+        {
+            IReadOnlyList<DatabaseListing> databases = await Catalog.ListDatabasesAsync(store.Key);
+            if (databases.Count > 0)
+            {
+                scope = new StudioScope(store.Key, databases[0].Identity, null);
+            }
+        }
+        catch (Exception e) when (StudioLiveUpdates.IsInteropUnavailable(e))
+        {
+            return;
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            Logger.LogDebug(e, "Find could not list the databases of '{Store}'", StudioLogValue.Cap(store.Key));
+        }
+
+        if (scope is null)
+        {
+            result = FindResult.Nothing(lastValue, new StudioScope(store.Key, string.Empty, null));
+            error = null;
+            busy = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        await RunAsync(scope, lastValue, store.DisplayName);
     }
 
     private async Task RunAsync(StudioScope? scope, string value, string? where)
@@ -240,7 +270,7 @@
 
         try
         {
-            FindResult found = await Finder.FindAsync(scope, lastValue);
+            FindResult found = await Finder.FindAsync(scope, lastValue, elsewhere: where is not null);
             if (disposed)
             {
                 return;

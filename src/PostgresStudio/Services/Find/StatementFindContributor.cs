@@ -39,6 +39,9 @@ internal sealed class StatementFindContributor : IFindContributor
     /// <inheritdoc />
     public string Noun => "Statements";
 
+    /// <summary>The Statements page does not apply its address's scope, so a statement of another store is not offered from here.</summary>
+    public bool SearchesOtherScopes => false;
+
     /// <inheritdoc />
     public async Task<FindContribution> FindAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
     {

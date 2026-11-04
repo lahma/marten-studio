@@ -134,7 +134,7 @@ public class FindServiceTests
         FakeFindContributor unreached = new FakeFindContributor(30, "Unreached").Returns("unreached");
 
         Task<FindResult> running = Service(time, contributors: [fast, slow, unreached]).FindAsync(Scope, "abc", TestContext.Current.CancellationToken);
-        await started.Task;
+        await started.Task.Bounded();
 
         time.Advance(FindService.Budget);
         FindResult result = await running;
@@ -153,7 +153,7 @@ public class FindServiceTests
         FindService service = Service(contributors: [contributor]);
 
         Task<FindResult> first = service.FindAsync(Scope, "first", TestContext.Current.CancellationToken);
-        await started.Task;
+        await started.Task.Bounded();
 
         contributor.Behavior = static (_, _, _) => Task.FromResult(FindContribution.NotApplicable);
         FindResult second = await service.FindAsync(Scope, "second", TestContext.Current.CancellationToken);
@@ -171,7 +171,7 @@ public class FindServiceTests
         FindService service = Service(contributors: [FakeFindContributor.Blocking(10, "Slow", started)]);
 
         Task<FindResult> running = service.FindAsync(Scope, "abc", caller.Token);
-        await started.Task;
+        await started.Task.Bounded();
         await caller.CancelAsync();
 
         Func<Task> find = () => running;
@@ -185,7 +185,7 @@ public class FindServiceTests
         FindService service = Service(contributors: [FakeFindContributor.Blocking(10, "Slow", started)]);
 
         Task<FindResult> running = service.FindAsync(Scope, "abc", TestContext.Current.CancellationToken);
-        await started.Task;
+        await started.Task.Bounded();
         service.Cancel();
 
         Func<Task> find = () => running;
@@ -215,6 +215,41 @@ public class FindServiceTests
         FindResult result = await Service(contributors: [streams, events]).FindAsync(Scope, "abc", TestContext.Current.CancellationToken);
 
         result.Notes.Should().ContainSingle().Which.Should().Be(note);
+    }
+
+    private sealed class ScreenBound(int order, string noun) : IFindContributor
+    {
+        public List<StudioScope> Calls { get; } = [];
+
+        public int Order { get; } = order;
+
+        public string Noun { get; } = noun;
+
+        public bool SearchesOtherScopes => false;
+
+        public Task<FindContribution> FindAsync(StudioScope scope, FindQuery query, CancellationToken cancellationToken)
+        {
+            Calls.Add(scope);
+            return Task.FromResult(new FindContribution([], "bound", []));
+        }
+    }
+
+    [Fact]
+    public async Task A_kind_whose_page_does_not_apply_its_scope_is_searched_on_screen_and_left_out_elsewhere_without_a_word()
+    {
+        ScreenBound bound = new(10, "Statements");
+        FakeFindContributor anywhere = new FakeFindContributor(20, "Documents").Returns("documents");
+        FindService service = Service(contributors: [bound, anywhere]);
+        StudioScope other = new("other", "db", null);
+
+        FindResult here = await service.FindAsync(Scope, "abc", TestContext.Current.CancellationToken);
+        FindResult away = await service.FindAsync(other, "abc", elsewhere: true, TestContext.Current.CancellationToken);
+
+        here.Searched.Should().Equal("bound", "documents");
+        away.Searched.Should().Equal("documents");
+        away.Notes.Should().BeEmpty();
+        bound.Calls.Should().Equal(Scope);
+        anywhere.Calls.Select(static x => x.Scope).Should().Equal(Scope, other);
     }
 
     [Fact]

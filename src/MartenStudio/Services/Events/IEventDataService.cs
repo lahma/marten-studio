@@ -239,6 +239,20 @@ internal interface IEventDataService
         StudioScope scope,
         string value,
         bool includeArchived,
+        CancellationToken cancellationToken = default) =>
+        FindStreamsByNaturalKeyAsync(scope, value, includeArchived, tenants: null, cancellationToken);
+
+    /// <summary>The same lookup, narrowed - with no tenant selected - to the streams of <paramref name="tenants" /> (Find by id, 1.2).</summary>
+    /// <param name="scope">The store, database and tenant; a tenant narrows the lookup to its own streams.</param>
+    /// <param name="value">What was typed.</param>
+    /// <param name="includeArchived">Whether archived streams are found too.</param>
+    /// <param name="tenants">The only tenants whose streams are found when no tenant is selected; <see langword="null" /> for all.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    Task<NaturalKeyLookup> FindStreamsByNaturalKeyAsync(
+        StudioScope scope,
+        string value,
+        bool includeArchived,
+        IReadOnlyList<string>? tenants,
         CancellationToken cancellationToken = default);
 
     /// <summary>

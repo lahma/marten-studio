@@ -19,6 +19,7 @@ internal sealed partial class EventDataService
         StudioScope scope,
         string value,
         bool includeArchived,
+        IReadOnlyList<string>? tenants,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
@@ -81,6 +82,7 @@ internal sealed partial class EventDataService
                     KeyType = keyType,
                     TableHasTenant = lookup.Has("tenant_id"),
                     TenantId = resolved.TenantId,
+                    Tenants = tenants,
                     IncludeArchived = includeArchived,
                 });
 

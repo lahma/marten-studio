@@ -309,7 +309,7 @@ internal sealed class StudioScopeCatalog : IStudioScopeCatalog
                 cancellationToken)
             .ConfigureAwait(false);
 
-        return tenants with { Ids = allowed, IsTruncated = true };
+        return tenants with { Ids = allowed, IsTruncated = true, IsComplete = !tenants.IsTruncated && tenants.Source != TenantListSource.Unavailable };
     }
 
     /// <summary>The databases of one source the visitor may see, one per identity.</summary>
