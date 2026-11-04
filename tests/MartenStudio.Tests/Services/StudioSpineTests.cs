@@ -120,7 +120,7 @@ public class StudioSpineTests
 
         descriptor.SourceQueryParameter.Should().Be("store");
         descriptor.Navigation.SelectMany(static x => x.Items).Select(static x => x.Label).Should().Equal(
-            "Overview", "Stores", "Documents", "Query", "Plan", "Tables", "Connection", "Relationships", "Streams", "Feed", "Event types", "Event flow", "Dead letters",
+            "Overview", "Stores", "Tenants", "Documents", "Query", "Plan", "Tables", "Connection", "Relationships", "Streams", "Feed", "Event types", "Event flow", "Dead letters",
             "Health", "Statements", "Maintenance", "Storage", "Replication", "Projections", "Schema", "Server", "Configuration", "Activity");
 
         StudioNavItem deadLetters = descriptor.Navigation.SelectMany(static x => x.Items).Single(static x => x.Label == "Dead letters");

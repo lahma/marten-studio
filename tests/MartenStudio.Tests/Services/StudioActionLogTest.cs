@@ -229,7 +229,7 @@ public class StudioActionLogTest
         // are Database > Sessions' (H3, 9245-9249): the first details read, and the throttled read failure.
         // 9225 and 9226 are 1.2-PROJ's: an orphaned progression row being removed, and a removal the service refused at the click.
         // 9227 is 1.2-SHAPE's: a documents shape check that finished, at Debug; 9228 is the events check's, in the same words.
-        // 9260-9264 are LINQ mode's (F7): a run, a refusal, a Postgres failure, an unexpected exception, and the
+        // 9265 is the Tenants overview's (1.2: the first read of its activity-gated columns). 9260-9264 are LINQ mode's (F7): a run, a refusal, a Postgres failure, an unexpected exception, and the
         // advice it could not give. 9270 is the opt-in health export's throttled failure (H8, 9270-9274). 9280 is
         // the statement checks' (H7, 9280-9284): a statement T02 could not plan, and a plan's prepared statement it
         // could not take back, both at Debug. 9290 is the server checks' platform detector (H10, 9290-9294), at Debug.
@@ -253,7 +253,7 @@ public class StudioActionLogTest
         declared.Should().Equal(
             9200, 9201, 9202, 9203, 9204, 9205, 9206, 9207, 9208, 9209, 9210, 9211,
             9212, 9213, 9214, 9215, 9216, 9217, 9218, 9219, 9220, 9221, 9222, 9223, 9224, 9225, 9226, 9227, 9228, 9230, 9235, 9236, 9237, 9245,
-            9246, 9250, 9251, 9260, 9261, 9262, 9263, 9264, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421, 9430, 9431, 9440,
+            9246, 9250, 9251, 9260, 9261, 9262, 9263, 9264, 9265, 9270, 9280, 9281, 9290, 9320, 9410, 9420, 9421, 9430, 9431, 9440,
             9450, 9451, 9452, 9460, 9461, 9462, 9463, 9464, 9490, 9500, 9501);
     }
 
@@ -280,6 +280,6 @@ public class StudioActionLogTest
             9490, 9500, 9501);
 
         Ids(typeof(MartenLog)).Should().Equal(
-            9206, 9207, 9208, 9209, 9211, 9212, 9215, 9216, 9217, 9218, 9225, 9226, 9227, 9228, 9260, 9261, 9262, 9263, 9264, 9320);
+            9206, 9207, 9208, 9209, 9211, 9212, 9215, 9216, 9217, 9218, 9225, 9226, 9227, 9228, 9260, 9261, 9262, 9263, 9264, 9265, 9320);
     }
 }

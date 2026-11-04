@@ -6,6 +6,7 @@ using JasperFx.MultiTenancy;
 using Marten;
 using Marten.Schema;
 using Marten.Storage;
+using MartenStudio.Internal.Sql;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -157,6 +158,37 @@ internal sealed class TenantDiscovery
         return discovered;
     }
 
+    /// <summary>
+    /// The tenants Marten itself lists for <paramref name="database" /> - tier 2 and never tier 3, so no tenant-column scan runs in
+    /// any database (1.2: the Tenants overview asks it of every database but the scope's own). Not cached: it is the
+    /// enumeration's own lists, already in hand, read through the same private path <see cref="DiscoverAsync" />'s tier 2 takes.
+    /// </summary>
+    /// <param name="store">The store.</param>
+    /// <param name="database">The database.</param>
+    /// <param name="listed">What <c>Storage.AllDatabases()</c> answered for this request, <paramref name="database" /> among it.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The list, or <see langword="null" /> when Marten lists none for this database or cannot say.</returns>
+    public async ValueTask<TenantList?> ListedOnlyAsync(
+        IDocumentStore store,
+        IMartenDatabase database,
+        IReadOnlyList<IMartenDatabase> listed,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentNullException.ThrowIfNull(listed);
+
+        try
+        {
+            return await ListedTenantsAsync(store, database, listed, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            logger.LogDebug(exception, "Marten Studio could not describe the tenants of one database of a store for the Tenants page");
+            return null;
+        }
+    }
+
     /// <summary>Forgets what was cached, for the selector's refresh button.</summary>
     public void Invalidate()
     {
@@ -208,7 +240,7 @@ internal sealed class TenantDiscovery
 
         // Tier 3: the tenant columns, which are the only place tenant ids exist as data rather than as
         // configuration.
-        List<string> tables = TenantedTables(store, value);
+        List<(string Schema, string Table)> tables = TenantedTables(store, value);
         if (tables.Count == 0)
         {
             return TenantList.Unavailable;
@@ -239,13 +271,13 @@ internal sealed class TenantDiscovery
     /// Every table of <paramref name="store" /> that carries a <c>tenant_id</c>, quoted, event store
     /// first.
     /// </summary>
-    private static List<string> TenantedTables(IDocumentStore store, MartenStudioOptions value)
+    private static List<(string Schema, string Table)> TenantedTables(IDocumentStore store, MartenStudioOptions value)
     {
-        List<string> tables = [];
+        List<(string Schema, string Table)> tables = [];
 
         if (store.Options.Events.TenancyStyle == TenancyStyle.Conjoined)
         {
-            tables.Add(SqlIdentifier.Qualify(store.Options.Events.DatabaseSchemaName, "mt_streams"));
+            tables.Add((store.Options.Events.DatabaseSchemaName, "mt_streams"));
         }
 
         // The visibility filter is applied here as well as in navigation (AGENTS.md: it is a data-layer
@@ -264,10 +296,9 @@ internal sealed class TenantDiscovery
                 continue;
             }
 
-            // Both halves are Marten's own mapping, and both go through the quoting builder rather than
-            // into the string as they are (AGENTS.md hard rule 4).
-            string table = SqlIdentifier.Qualify(documentType.TableName.Schema, documentType.TableName.Name);
-            if (!tables.Contains(table, StringComparer.Ordinal))
+            // Both halves are Marten's own mapping, and the statement quotes them (TenantIdQueries, hard rule 4).
+            (string Schema, string Table) table = (documentType.TableName.Schema, documentType.TableName.Name);
+            if (!tables.Contains(table))
             {
                 tables.Add(table);
             }
@@ -433,21 +464,16 @@ internal sealed class TenantDiscovery
     /// runs behind a page that someone is looking at.
     /// </remarks>
     private static async ValueTask<TenantList> QueryAsync(
-        IReadOnlyList<string> tables,
+        IReadOnlyList<(string Schema, string Table)> tables,
         IMartenDatabase database,
         MartenStudioOptions value,
         CancellationToken cancellationToken)
     {
-        string branches = string.Join(
-            " union ",
-            tables.Select(table => $"(select distinct tenant_id from {table} order by tenant_id limit {MaxListedTenants + 1})"));
-
         await using NpgsqlConnection connection = MartenStudioDatabase.CreateConnection(database, ConnectionUsage.Read);
         await connection.OpenStudioAsync(cancellationToken).ConfigureAwait(false);
 
         await using NpgsqlCommand command = connection.CreateCommand();
-        command.CommandText =
-            $"select tenant_id from ({branches}) as tenants where tenant_id is not null order by tenant_id limit {MaxListedTenants + 1}";
+        command.CommandText = TenantIdQueries.DistinctTenantIds(tables, MaxListedTenants);
         command.CommandTimeout = (int) Math.Ceiling(value.QueryTimeout.TotalSeconds);
 
         List<string> ids = [];

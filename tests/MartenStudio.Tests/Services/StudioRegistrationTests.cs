@@ -183,6 +183,7 @@ public class StudioRegistrationTests
         (typeof(StudioScopeResolver), ServiceLifetime.Scoped, How.Type, typeof(StudioScopeResolver)),
         (typeof(TenantDiscovery), ServiceLifetime.Scoped, How.Type, typeof(TenantDiscovery)),
         (typeof(IStoreInfoService), ServiceLifetime.Scoped, How.Type, typeof(StoreInfoService)),
+        (typeof(MartenStudio.Services.Tenants.ITenantOverviewService), ServiceLifetime.Scoped, How.Type, typeof(MartenStudio.Services.Tenants.TenantOverviewService)),
         (typeof(IDocumentDataService), ServiceLifetime.Scoped, How.Type, typeof(DocumentDataService)),
         (typeof(DocumentBrowserState), ServiceLifetime.Scoped, How.Type, typeof(DocumentBrowserState)),
         (typeof(IDocumentWriteService), ServiceLifetime.Scoped, How.Type, typeof(DocumentWriteService)),

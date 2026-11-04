@@ -141,6 +141,32 @@ public class ScopeFollowsClickedLinkTests
 
         context.State.ActiveScope!.StoreKey.Should().Be("default", "Back and Forward are not intercepted links");
         rig.Scopes.Should().HaveCount(changes);
+        rig.Navigation.Uri.Should().Contain("store=default").And.NotContain("store=other", "the address follows the scope again");
+    }
+
+    [Fact]
+    public async Task Back_after_a_clicked_link_rewrites_the_address_to_the_scope_on_screen()
+    {
+        Rig rig = await StartAsync();
+        await using StudioComponentContext context = rig.Context;
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=default"));
+        string before = rig.Navigation.Uri;
+
+        string href = rig.Routes.FindAll(".ms-stores-strip-link").Single(static x => x.TextContent.Trim() == "Other").GetAttribute("href")!;
+        rig.Navigation.Click(href);
+        rig.Routes.WaitForAssertion(() =>
+        {
+            context.State.ActiveScope!.StoreKey.Should().Be("other");
+            rig.Navigation.Uri.Should().Contain("store=other");
+        });
+
+        // Back: the browser returns to the address before the click, which names the first store. The scope stays on Other.
+        int requests = rig.Navigation.Requests.Count;
+        rig.Navigation.HistoryMove(before);
+
+        rig.Routes.WaitForAssertion(() => rig.Navigation.Uri.Should().Contain("store=other").And.NotContain("store=default"));
+        context.State.ActiveScope!.StoreKey.Should().Be("other", "Back never moves the scope");
+        rig.Navigation.Requests.Skip(requests).Should().ContainSingle("one rewrite").Which.Options.ReplaceHistoryEntry.Should().BeTrue();
     }
 
     [Fact]

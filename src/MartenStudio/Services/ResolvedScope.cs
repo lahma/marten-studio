@@ -38,6 +38,28 @@ internal sealed record ResolvedScope(
 
     /// <summary>The database the scope resolved to; get-only, because the base record's <c>Target</c> is built from it.</summary>
     public IMartenDatabase Database { get; } = Database;
+
+    /// <summary>
+    /// Every database the resolver's one enumeration listed, in the order <c>AllDatabases()</c> answered (1.2): what the Tenants
+    /// overview places its rows with, so it enumerates nothing of its own. Empty for the unattended resolution and for a test that
+    /// builds a scope by hand; the overview then uses <see cref="Database" /> alone.
+    /// </summary>
+    public IReadOnlyList<IMartenDatabase> ListedDatabases { get; init; } = [];
+
+    /// <summary>
+    /// Two scopes over the same registration, store, database and scope are equal: <see cref="ListedDatabases" /> is what the
+    /// resolution saw, not what the scope is, and a wrapper of one instance is equal to another of it.
+    /// </summary>
+    /// <param name="other">The other scope.</param>
+    public bool Equals(ResolvedScope? other) =>
+        other is not null
+        && base.Equals((ResolvedSource) other)
+        && EqualityComparer<MartenStoreRegistration>.Default.Equals(Registration, other.Registration)
+        && ReferenceEquals(Store, other.Store)
+        && Equals(Database, other.Database);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), Registration, Store, Database);
 }
 
 /// <summary>The Marten spellings of the shared scope types.</summary>

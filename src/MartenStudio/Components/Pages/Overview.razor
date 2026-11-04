@@ -139,7 +139,12 @@
                 @* Not "nothing to report" while the advisor has findings this visitor is not shown: that would be an
                    all-clear the visitor has no way to know is false. *@
                 <p class="ms-muted ms-overview-health-empty">
-                    @(health.WithheldCount > 0 ? HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason) : "Nothing to report.")
+                    @(health.WithheldCount > 0 ? HealthPresentation.Withheld(health.WithheldCount, health.WithheldReason) : FailedChecks == 0 ? "Nothing to report." : string.Empty)
+                    @* Never "Nothing to report." while a check could not run: the sweep is incomplete (1.2). *@
+                    @if (FailedChecks > 0)
+                    {
+                        <span class="ms-overview-health-failed">@(HealthPresentation.Count(FailedChecks, "check") + " could not run.")</span>
+                    }
                     <a href="@HealthLinks.ToPage(Options.Value, State.ActiveScope)">See what was checked</a>
                 </p>
             }
@@ -649,7 +654,8 @@
 
             HealthSeverity? worst = health.Findings.Where(x => x.Counts(HealthMutes.IsMuted)).Select(static x => (HealthSeverity?) x.Severity).Min();
 
-            if (worst is null && FailedChecks > 0)
+            // Warning whenever a check could not run and nothing worse is showing: an Info suggestion beside a failed check is not an info tile.
+            if (FailedChecks > 0 && worst is not (HealthSeverity.Critical or HealthSeverity.Warning))
             {
                 return "warning";
             }
@@ -946,7 +952,7 @@
         {
             // On the page rather than in the log only: a failure the visitor cannot see is a page that
             // silently shows nothing.
-            loadError = exception.Message;
+            loadError = StudioHostFailure.Words(exception);
         }
         finally
         {

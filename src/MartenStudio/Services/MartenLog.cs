@@ -44,6 +44,20 @@ internal static partial class MartenLog
     [LoggerMessage(EventId = 9226, Level = LogLevel.Information, Message = "Marten Studio refused user {User}'s removal of the progression row {Row} from store {StoreKey}, database {DatabaseId}: {Reason}")]
     public static partial void OrphanedProgressionRemovalRefusedRaw(this ILogger logger, string user, string row, string storeKey, string databaseId, string reason);
 
+    [LoggerMessage(EventId = 9265, Level = LogLevel.Information, Message = "Marten Studio user {User} read the per-tenant row estimates and last events of {Tenants} tenants in store {StoreKey}, database {DatabaseId}")]
+    public static partial void TenantVolumesReadRaw(this ILogger logger, string user, int tenants, string storeKey, string databaseId);
+
+    /// <summary>9265, with the user's name and the scope escaped and bounded.</summary>
+    /// <remarks>
+    /// The Tenants overview's audit, the first read in a circuit of a database's activity-gated columns (hard rule 5, a read authorized
+    /// like a write). It carries a count and the scope, never a tenant's id: the ring entry says the same.
+    /// </remarks>
+    public static void TenantVolumesRead(this ILogger logger, string user, int tenants, string storeKey, string databaseId)
+    {
+        (user, storeKey, databaseId) = (StudioLogValue.Cap(user), StudioLogValue.Cap(storeKey), StudioLogValue.Cap(databaseId));
+        logger.TenantVolumesReadRaw(user, tenants, storeKey, databaseId);
+    }
+
     /// <summary>9225, with the user's name, the row's name and the scope escaped and bounded.</summary>
     /// <remarks>
     /// Written after the service has read the table again and found the row, immediately before Marten's call. The name is still

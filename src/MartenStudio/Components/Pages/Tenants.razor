@@ -1,0 +1,386 @@
+@page "/marten/tenants"
+@using System.Globalization
+@using MartenStudio.Services
+@using MartenStudio.Services.Documents
+@using MartenStudio.Services.Events
+@using MartenStudio.Services.Tenants
+@using Microsoft.Extensions.Options
+@using PostgresStudio.Components.Shared
+@using PostgresStudio.Services
+@implements IAsyncDisposable
+@inject ITenantOverviewService Data
+@inject StudioState State
+@inject NavigationManager Navigation
+@inject IOptions<MartenStudioOptions> Options
+
+@*
+    1.2 SCOPE-2: the tenants the visitor may address, placed in their databases, with the volumes that compare them. Read-only: nothing
+    here provisions, enables, disables or deletes a tenant. It reads nothing while it is prerendered, and its estimates are the catalog's
+    statistics (D8) - never a count(*).
+*@
+
+<PageTitle>Tenants</PageTitle>
+
+<div class="ms-page ms-tenants">
+    <div class="ms-page-header">
+        <h1 class="ms-page-title">Tenants</h1>
+        <button type="button" class="ms-button ms-tenants-refresh" disabled="@loading" @onclick="RefreshAsync">Refresh</button>
+    </div>
+
+    @if (actionError is { Length: > 0 } problem)
+    {
+        <ErrorAlert Message="@problem" />
+    }
+
+    @if (State.ActiveScope is null)
+    {
+        <div class="ms-empty">
+            <p class="ms-empty-title">No store selected</p>
+            <p class="ms-empty-description">Pick a store in the header to see its tenants.</p>
+        </div>
+    }
+    else if (loading)
+    {
+        <p class="ms-muted ms-tenants-loading" role="status">Loading tenants…</p>
+    }
+    else if (loadError is { Length: > 0 })
+    {
+        <ErrorAlert Message="@loadError" OnRetry="RefreshAsync" />
+    }
+    else if (overview is { Refusal: TenantOverviewRefusal.StorePolicy })
+    {
+        <ScopeNotAuthorized StoreName="@State.ActiveScope.StoreKey" />
+    }
+    else if (overview is { Refusal: TenantOverviewRefusal.Unavailable } unavailable)
+    {
+        <ErrorAlert Message="@unavailable.Reason" OnRetry="RefreshAsync" />
+    }
+    else if (overview is { KeepsNoTenants: true })
+    {
+        <div class="ms-empty ms-tenants-none">
+            <p class="ms-empty-title">This store keeps no data per tenant</p>
+            <p class="ms-empty-description">
+                No document type is conjoined (<code>MultiTenanted()</code>) and neither is the event store.
+            </p>
+        </div>
+    }
+    else if (overview is { } view)
+    {
+        <div class="ms-tenants-filter">
+            <label class="ms-tenants-filter-label" for="ms-tenants-filter">Tenant id starts with</label>
+            <input id="ms-tenants-filter"
+                   type="text"
+                   class="ms-input ms-input-mono"
+                   maxlength="@TenantOverviewRequest.MaxFilterLength"
+                   @bind="filterText"
+                   @bind:event="oninput"
+                   @onkeydown="OnFilterKeyAsync" />
+            <button type="button" class="ms-button ms-tenants-filter-apply" @onclick="ApplyFilterAsync">Filter</button>
+        </div>
+
+        <div class="ms-tenants-notes">
+            @if (view.UnderPolicy)
+            {
+                <p class="ms-muted ms-tenants-policy">These are the tenants you may address; there may be others.</p>
+            }
+
+            @if (view.ListTruncated)
+            {
+                <p class="ms-muted ms-tenants-truncated">More than @TenantList.MaxListedTenants.ToString(CultureInfo.InvariantCulture) tenants: the first @TenantList.MaxListedTenants.ToString(CultureInfo.InvariantCulture) by id are listed. Type any other in the header's tenant box.</p>
+            }
+
+            @if (view.IdsWithoutDatabases)
+            {
+                <p class="ms-muted ms-tenants-unplaced">KnownTenantIds names tenants without their databases; pick a database in the header to read one.</p>
+            }
+
+            @if (!view.VolumesShown && view.VolumesWithheldReason is { Length: > 0 } why)
+            {
+                <p class="ms-muted ms-tenants-withheld">@why</p>
+            }
+
+            @if (view.ProjectionsAreShared)
+            {
+                <p class="ms-muted ms-tenants-shared-projections">Projections run every tenant's events together in this store.</p>
+            }
+        </div>
+
+        @if (view.ListUnavailable)
+        {
+            <p class="ms-muted ms-tenants-unavailable">Tenant discovery is off and the host listed no tenants (KnownTenantIds): there is nothing to list.</p>
+        }
+        else if (view.Rows.Count == 0)
+        {
+            <p class="ms-muted ms-tenants-empty">No tenant@(string.IsNullOrEmpty(loadedFilter) ? string.Empty : " starts with that") that you may address.</p>
+        }
+        else
+        {
+            <TableScroll Label="Tenants">
+                <table class="ms-table ms-tenants-table">
+                    <thead>
+                        <tr>
+                            <th>Tenant</th>
+                            <th>Database</th>
+                            <th>Where it lives</th>
+                            <th>~Documents</th>
+                            <th>~Events</th>
+                            <th>~Streams</th>
+                            <th>Last event</th>
+                            @if (view.HasProjectionsColumn)
+                            {
+                                <th>Projections</th>
+                            }
+                            <th>Open</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (TenantRow row in view.Rows)
+                        {
+                            <tr class="ms-table-row @(IsSelected(row) ? "ms-tenants-selected" : string.Empty)" @key="(row.DatabaseId, row.TenantId)">
+                                <td class="ms-table-cell ms-table-cell-mono">
+                                    @row.TenantId
+                                    @if (row.ReadProblem is { Length: > 0 } readProblem)
+                                    {
+                                        <span class="ms-muted ms-tenants-problem">(@readProblem)</span>
+                                    }
+                                </td>
+                                <td class="ms-table-cell ms-table-cell-mono">@(row.DatabaseId.Length == 0 ? "—" : row.DatabaseId)</td>
+                                <td class="ms-table-cell">@row.PlacementText</td>
+                                <td class="ms-table-cell ms-table-cell-number" title="@row.Documents.Title">@row.Documents.Text</td>
+                                <td class="ms-table-cell ms-table-cell-number" title="@row.Events.Title">@row.Events.Text</td>
+                                <td class="ms-table-cell ms-table-cell-number" title="@row.Streams.Title">@row.Streams.Text</td>
+                                <td class="ms-table-cell" title="@row.LastEvent.Title">
+                                    @row.LastEvent.Text
+                                    @if (row.LastEvent.At is { } at)
+                                    {
+                                        <TimeAgo Timestamp="at" />
+                                    }
+                                </td>
+                                @if (view.HasProjectionsColumn)
+                                {
+                                    <td class="ms-table-cell" title="@row.Projections?.Title">@(row.Projections?.Text ?? "—")</td>
+                                }
+                                <td class="ms-table-cell ms-tenants-open">
+                                    @if (row.DatabaseId.Length > 0)
+                                    {
+                                        <a href="@Open(DocumentLinks.Root, row)">Documents</a>
+                                        <a href="@Open(EventLinks.StreamsRoute, row)">Streams</a>
+                                        <a href="@Open(EventLinks.FeedRoute, row)">Feed</a>
+                                        <a href="@Open("projections", row)">Projections</a>
+                                        <button type="button" class="ms-button ms-tenants-select" @onclick="() => SelectAsync(row)">Select</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                    @if (view.Shared is { } shared)
+                    {
+                        <tfoot>
+                            <tr class="ms-tenants-shared-row">
+                                <td class="ms-table-cell" colspan="3">Shared by every tenant (@shared.Collections.ToString(CultureInfo.InvariantCulture) @(shared.Collections == 1 ? "collection" : "collections") that are not tenanted)</td>
+                                <td class="ms-table-cell ms-table-cell-number" title="@shared.Documents.Title">@shared.Documents.Text</td>
+                                <td class="ms-table-cell" colspan="@(view.HasProjectionsColumn ? 5 : 4)"></td>
+                            </tr>
+                        </tfoot>
+                    }
+                </table>
+            </TableScroll>
+
+            @if (view.Captions.Count > 0)
+            {
+                <p class="ms-muted ms-tenants-captions">Estimates from the catalog's statistics; @string.Join(" and ", view.Captions).</p>
+            }
+
+            <nav class="ms-tenants-pager" aria-label="Tenant pages">
+                @if (view.Page > 0)
+                {
+                    <a class="ms-tenants-previous" href="@PageHref(view.Page - 1)">Previous</a>
+                }
+
+                <span class="ms-muted">Page @((view.Page + 1).ToString(CultureInfo.InvariantCulture))</span>
+
+                @if (view.HasNext)
+                {
+                    <a class="ms-tenants-next" href="@PageHref(view.Page + 1)">Next</a>
+                }
+            </nav>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The tenant-id prefix in the address (D9: the filter and the page travel in the query string).</summary>
+    [SupplyParameterFromQuery(Name = "filter")]
+    public string? Filter { get; set; }
+
+    /// <summary>The page in the address, one-based; absent opens on the page that holds the scope's tenant, or the first.</summary>
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageNumber { get; set; }
+
+    private readonly CancellationTokenSource pageCancellation = new();
+
+    private TenantOverview? overview;
+    private bool loading = true;
+    private bool started;
+    private bool disposed;
+    private string? loadError;
+    private string? actionError;
+    private string filterText = string.Empty;
+    private string? loadedFilter;
+
+    protected override void OnInitialized()
+    {
+        State.ScopeChanged += OnScopeChangedAsync;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        filterText = Filter ?? string.Empty;
+
+        // The first read is OnAfterRenderAsync's: nothing is read while prerendered. After it, a new filter or page is a new read.
+        if (started && (!string.Equals(Filter ?? string.Empty, loadedFilter ?? string.Empty, StringComparison.Ordinal) || RequestedPage != loadedPage))
+        {
+            await LoadAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || started || disposed)
+        {
+            return;
+        }
+
+        started = true;
+        await LoadAsync();
+    }
+
+    private int? RequestedPage => PageNumber is { } page ? Math.Max(page - 1, 0) : null;
+
+    private int? loadedPage;
+
+    private async Task RefreshAsync() => await LoadAsync();
+
+    private async Task OnScopeChangedAsync()
+    {
+        if (started && !disposed)
+        {
+            await InvokeAsync(LoadAsync);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        StudioScope? scope = State.ActiveScope;
+        loadError = null;
+
+        if (scope is null)
+        {
+            loading = false;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        string? filter = Filter;
+        int? page = RequestedPage;
+        loading = overview is null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            TenantOverview read = await Data.GetAsync(scope, new TenantOverviewRequest { Filter = filter, Page = page }, pageCancellation.Token);
+
+            // Stamped with what it was asked for: a read the visitor has since moved on from is not drawn.
+            if (State.ActiveScope == scope && string.Equals(Filter ?? string.Empty, filter ?? string.Empty, StringComparison.Ordinal))
+            {
+                overview = read;
+                loadedFilter = filter;
+                loadedPage = page;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            loadError = StudioHostFailure.Words(exception);
+        }
+        finally
+        {
+            loading = false;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string Open(string route, TenantRow row) =>
+        EventLinks.To(Options.Value, route, new StudioScope(State.ActiveScope?.StoreKey ?? string.Empty, row.DatabaseId, row.TenantId));
+
+    private string PageHref(int page) =>
+        EventLinks.To(
+            Options.Value,
+            "tenants",
+            State.ActiveScope,
+            new KeyValuePair<string, string?>("filter", loadedFilter),
+            new KeyValuePair<string, string?>("page", (page + 1).ToString(CultureInfo.InvariantCulture)));
+
+    private bool IsSelected(TenantRow row) =>
+        State.ActiveScope is { TenantId: { } tenant } active
+        && string.Equals(tenant, row.TenantId, StringComparison.Ordinal)
+        && string.Equals(active.DatabaseId, row.DatabaseId, StringComparison.OrdinalIgnoreCase);
+
+    private async Task OnFilterKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await ApplyFilterAsync();
+        }
+    }
+
+    private Task ApplyFilterAsync()
+    {
+        string? filter = string.IsNullOrWhiteSpace(filterText) ? null : filterText.Trim();
+        Navigation.NavigateTo(EventLinks.To(Options.Value, "tenants", State.ActiveScope, new KeyValuePair<string, string?>("filter", filter)));
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>"Select" on a row: the same call the header's pickers make.</summary>
+    private async Task SelectAsync(TenantRow row)
+    {
+        try
+        {
+            actionError = null;
+            await State.SetScopeAsync(State.ActiveScope?.StoreKey, row.DatabaseId, row.TenantId, pageCancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            actionError = StudioHostFailure.Words(exception);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        disposed = true;
+        State.ScopeChanged -= OnScopeChangedAsync;
+
+        try
+        {
+            await pageCancellation.CancelAsync();
+        }
+        finally
+        {
+            pageCancellation.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+}

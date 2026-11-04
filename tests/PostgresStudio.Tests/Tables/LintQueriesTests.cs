@@ -17,6 +17,7 @@ public partial class LintQueriesTests
         .. IndexLintQueries.ListStatements.Select((_, i) => "IndexLintQueries[" + i + "]"),
         .. PartitionQueries.ListStatements.Select((_, i) => "PartitionQueries[" + i + "]"),
         .. ColumnSkewQueries.ListStatements.Select((_, i) => "ColumnSkewQueries[" + i + "]"),
+        .. ColumnValueRowsQueries.ListStatements.Select((_, i) => "ColumnValueRowsQueries[" + i + "]"),
     ];
 
     private static string Sql(string name)
@@ -25,6 +26,7 @@ public partial class LintQueriesTests
 
         return name.StartsWith("IndexLint", StringComparison.Ordinal) ? IndexLintQueries.ListStatements[index]
             : name.StartsWith("ColumnSkew", StringComparison.Ordinal) ? ColumnSkewQueries.ListStatements[index]
+            : name.StartsWith("ColumnValueRows", StringComparison.Ordinal) ? ColumnValueRowsQueries.ListStatements[index]
             : PartitionQueries.ListStatements[index];
     }
 
@@ -60,6 +62,32 @@ public partial class LintQueriesTests
             .And.Contain("pg_catalog.pg_get_expr(c.relpartbound, 0)")
             .And.Contain("limit 2", "only the two largest values come back: a tenant partition's name is never listed");
         ColumnSkewQueries.Skew([new HealthTableTarget("app", "orders")], "tenant_id").ParameterNames.Should().Equal("@schemas", "@tables", "@column");
+    }
+
+    /// <summary>
+    /// 1.2-SCOPE-2: the Tenants overview's two reads take their values as parameters, deparse a bound with no relation, never list a
+    /// partition's name, and answer for the caller's values alone.
+    /// </summary>
+    [Fact]
+    public void The_column_value_reads_take_values_as_parameters_and_return_no_partition_name()
+    {
+        ColumnValueRowsQueries.PartitionRowsSql.Should().Contain("= any(@bounds)").And.Contain("pg_catalog.pg_get_expr(c.relpartbound, 0)")
+            .And.Contain("pg_catalog.pg_inherits").And.NotContain("pg_partition_tree").And.NotContain("pg_get_partkeydef");
+        ColumnValueRowsQueries.StatisticsRowsSql.Should().Contain("v.value = any(@values)").And.Contain("pg_catalog.unnest(@values)")
+            .And.Contain("not s.inherited").And.Contain("pg_catalog.has_column_privilege(lf.oid, a.attnum, 'SELECT')");
+
+        // The select lists: a name is the partitioned parent's (a table the caller listed), the bound the caller's own text, and no
+        // partition's relname - a leaf's name is selected into a column only inside the CTEs, never into the result.
+        string partitionSelect = ColumnValueRowsQueries.PartitionRowsSql[ColumnValueRowsQueries.PartitionRowsSql.LastIndexOf("select l.nspname", StringComparison.Ordinal)..];
+        partitionSelect.Should().NotContain("c.relname").And.NotContain("ch.relname");
+
+        HealthQuery partitions = ColumnValueRowsQueries.PartitionRows([new HealthTableTarget("app", "orders")], "tenant_id", ["FOR VALUES IN ('acme')"]);
+        partitions.ParameterNames.Should().BeEquivalentTo("@schemas", "@tables", "@column", "@bounds");
+        partitions.Sql.Should().NotContain("acme", "the values travel as parameters");
+
+        HealthQuery statistics = ColumnValueRowsQueries.StatisticsRows([new HealthTableTarget("app", "orders")], "tenant_id", ["acme", "o'hara"]);
+        statistics.ParameterNames.Should().BeEquivalentTo("@schemas", "@tables", "@column", "@values");
+        statistics.Sql.Should().NotContain("acme").And.NotContain("hara");
     }
 
     [Theory]
@@ -136,7 +164,7 @@ public partial class LintQueriesTests
         "any", "all", "exists", "in", "coalesce", "greatest", "least", "case", "u", "ordinality", "select", "and", "or", "not",
         "when", "then", "else", "is", "on", "as", "filter", "from", "extract", "rows", "lateral", "union", "where", "join",
         "listed", "tree", "keys", "referenced", "leaves", "fed", "members", "keyed", "bounds", "valued", "read_back", "settings",
-        "judged", "sized", "candidates", "h", "x", "d", "b", "n", "m", "v",
+        "judged", "sized", "candidates", "h", "x", "d", "b", "n", "m", "v", "w", "sampled", "plain", "partitioned",
     ];
 
     [GeneratedRegex(@"pg_(?:total_)?relation_size|pg_indexes_size|pg_table_size|pg_database_size|pg_partition_(?:tree|ancestors|root)|pg_sequence_last_value", RegexOptions.IgnoreCase)]

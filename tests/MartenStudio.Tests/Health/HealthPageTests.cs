@@ -329,7 +329,7 @@ public class HealthPageTests
         {
             Checks =
             [
-                new HealthCheckStatus("D01", "Daemon", HealthArea.Daemon, HealthCostTier.Catalog, HealthCheckOutcome.Failed, 0, null, "it failed", null, "https://example.invalid", []),
+                FailedCheck(),
                 new HealthCheckStatus("K01", "Config", HealthArea.Configuration, HealthCostTier.InProcess, HealthCheckOutcome.Checked, 0, null, null, null, "https://example.invalid", []),
             ],
         };
@@ -338,6 +338,39 @@ public class HealthPageTests
 
         page.WaitForAssertion(() => page.StatCardValue("Health").Should().Be("1 check could not run"));
         page.StatCardClasses("Health").Should().Contain("ms-stat-card-warning").And.NotContain("ms-stat-card-success");
+    }
+
+    private static HealthCheckStatus FailedCheck() =>
+        new("D01", "Daemon", HealthArea.Daemon, HealthCostTier.Catalog, HealthCheckOutcome.Failed, 0, null, "it failed", null, "https://example.invalid", []);
+
+    /// <summary>The health region says the failed-check sentence, never "Nothing to report.", while a check could not run.</summary>
+    [Fact]
+    public async Task The_overview_health_region_says_a_check_could_not_run_and_never_nothing_to_report()
+    {
+        await using StudioComponentContext context = await ReadyAsync(static x => x.StoreInfo.WithStore());
+        context.Health.Report = context.Health.Report with { Checks = [FailedCheck(), FailedCheck() with { Code = "D02" }] };
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.Find(".ms-overview-health-empty").TextContent.Should().Contain("2 checks could not run."));
+        page.Find(".ms-overview-health-empty").TextContent.Should().NotContain("Nothing to report");
+    }
+
+    /// <summary>A suggestion beside a failed check is not an info tile: the tile is the warning colour unless something worse is showing.</summary>
+    [Theory]
+    [InlineData("Info", "ms-stat-card-warning")]
+    [InlineData("Warning", "ms-stat-card-warning")]
+    [InlineData("Critical", "ms-stat-card-danger")]
+    public async Task The_overview_tile_is_the_warning_colour_for_a_failed_check_unless_a_critical_finding_shows(string severity, string expected)
+    {
+        HealthSeverity worst = Enum.Parse<HealthSeverity>(severity);
+        await using StudioComponentContext context = await ReadyAsync(static x => x.StoreInfo.WithStore());
+        context.Health.WithFindings(FakeHealthService.Finding("K02", worst, "A finding"));
+        context.Health.Report = context.Health.Report with { Checks = [FailedCheck()] };
+
+        var page = context.Render<Overview>();
+
+        page.WaitForAssertion(() => page.StatCardClasses("Health").Should().Contain(expected));
     }
 
     [Fact]

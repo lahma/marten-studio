@@ -250,11 +250,21 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
 
         List<HealthPartitionedTableRow> partitions = [];
         List<HealthColumnSkewRow> skews = [];
+        List<ColumnPartitionRow> valuePartitions = [];
+        List<ColumnStatisticsRow> valueStatistics = [];
 
         (await host.RunAsync(Read(PartitionQueries.Partitions(tables), PartitionQueries.ReadPartitionedTable, partitions), LockTimeout))
             .Should().BeNull("the partition read deparses bounds with no relation and counts rows from the catalog (D27)");
         (await host.RunAsync(Read(ColumnSkewQueries.Skew(tables, "tenant_id"), ColumnSkewQueries.ReadSkew, skews), LockTimeout))
             .Should().BeNull("the skew read takes pg_stats and the catalog, never the tables");
+
+        // 1.2-SCOPE-2: the Tenants overview's two reads, behind the same held locks.
+        (await host.RunAsync(
+            Read(ColumnValueRowsQueries.PartitionRows(tables, "tenant_id", ["FOR VALUES IN ('acme')", "FOR VALUES IN ('nobody')"]), ColumnValueRowsQueries.ReadPartition, valuePartitions),
+            LockTimeout)).Should().BeNull("the partition-rows read deparses bounds with no relation and counts rows from the catalog (D27)");
+        (await host.RunAsync(
+            Read(ColumnValueRowsQueries.StatisticsRows(tables, "tenant_id", ["acme", "zed"]), ColumnValueRowsQueries.ReadStatistics, valueStatistics),
+            LockTimeout)).Should().BeNull("the statistics-rows read takes pg_stats and the catalog, never the tables");
 
         await holding.RollbackAsync(Token);
 
@@ -284,6 +294,20 @@ public class LintMatrixLiveTests(PostgresVersionMatrix matrix)
         shared.ReadableLeaves.Should().Be(1, "app owns the table, so pg_stats shows it the column");
         shared.TopValues[0].Should().Be("acme");
         (shared.TopRows[0] / shared.RowsCounted).Should().BeApproximately(0.75, 0.01, "1,500 of 2,000 rows, every one of them in ANALYZE's sample");
+
+        // The Tenants overview's reads: a partition only for the bound asked about, and only the values asked about, on every release.
+        ColumnPartitionRow acme = valuePartitions.Should().ContainSingle("only tenants is partitioned on the column; 'nobody' has no partition, and globex's bound was not asked about").Subject;
+        (acme.Schema, acme.Table, acme.Bound).Should().Be(("public", "tenants", "FOR VALUES IN ('acme')"), "as {0} writes the bound", major);
+        acme.Tuples.Should().Be(900);
+
+        valueStatistics.Select(static x => x.Table).Distinct().Should().BeEquivalentTo(["ledger", "events", "shared"], "tenants is partitioned on the column, so it is the partition read's");
+        valueStatistics.Select(static x => x.Value).Distinct().Should().BeEquivalentTo(["acme", "zed"], "no value but the ones asked about");
+
+        ColumnStatisticsRow sharedAcme = valueStatistics.Single(static x => x.Table == "shared" && x.Value == "acme");
+        sharedAcme.HasStatistics.Should().BeTrue();
+        sharedAcme.ReadableLeaves.Should().Be(1);
+        sharedAcme.Tuples.Should().BeApproximately(1_500, 30, "75% of 2,000 rows from the most common values");
+        valueStatistics.Single(static x => x.Table == "shared" && x.Value == "zed").Tuples.Should().Be(0);
     }
 
     /// <summary>A matrix read that runs <paramref name="query" /> and keeps every row it maps.</summary>

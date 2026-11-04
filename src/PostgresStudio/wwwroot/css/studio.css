@@ -15902,3 +15902,63 @@ a.ms-schema-health-mark:focus-visible {
 .ms-index-statement-summary:hover {
     color: var(--ms-color-text);
 }
+
+/* ===== 1.2-TENANTS the Tenants page ===== */
+
+/* Tenants (SCOPE-2). The table is the shared .ms-table in a TableScroll (D25); this only spaces the notes, right-aligns the estimates and
+   keeps the row's links on one line where they fit. A later rule of an earlier selector wins on purpose (D26). */
+
+.ms-tenants-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ms-space-sm);
+  margin-bottom: var(--ms-space-md);
+}
+
+.ms-tenants-filter-label {
+  color: var(--ms-color-text-secondary);
+  font-size: var(--ms-font-size-sm);
+}
+
+.ms-tenants-notes p {
+  margin: 0 0 var(--ms-space-xs);
+}
+
+.ms-tenants-table .ms-table-cell-number {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ms-tenants-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ms-space-xs) var(--ms-space-md);
+}
+
+.ms-tenants-selected {
+  background: var(--ms-color-surface-hover);
+  font-weight: var(--ms-font-weight-semibold);
+}
+
+.ms-tenants-problem {
+  font-weight: var(--ms-font-weight-normal, 400);
+}
+
+.ms-tenants-captions,
+.ms-tenants-pager {
+  margin: var(--ms-space-sm) 0 0;
+}
+
+.ms-tenants-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ms-space-md);
+}
+
+.ms-tenants-shared-row > .ms-table-cell {
+  color: var(--ms-color-text-secondary);
+  background: var(--ms-color-surface-alt);
+}

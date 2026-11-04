@@ -46,7 +46,7 @@ internal sealed class TenancyStudio : IAsyncDisposable
     public IServiceProvider Services => provider;
 
     /// <summary>A studio over a store configured by <paramref name="configure" />, and nothing else - or with the stores <paramref name="extra" /> adds.</summary>
-    public static TenancyStudio Start(Action<StoreOptions> configure, Action<IServiceCollection>? extra = null)
+    public static TenancyStudio Start(Action<StoreOptions> configure, Action<IServiceCollection>? extra = null, Action<MartenStudioOptions>? studio = null)
     {
         ArgumentNullException.ThrowIfNull(configure);
 
@@ -58,7 +58,11 @@ internal sealed class TenancyStudio : IAsyncDisposable
         extra?.Invoke(services);
 
         // Tenant discovery stays on: tier 2 and tier 3 are part of what a first navigation does.
-        services.AddMartenStudio(static options => options.AuthorizationPolicy = null);
+        services.AddMartenStudio(options =>
+        {
+            options.AuthorizationPolicy = null;
+            studio?.Invoke(options);
+        });
 
         return new TenancyStudio(services.BuildServiceProvider());
     }

@@ -166,6 +166,7 @@ public static partial class MartenStudioServiceCollectionExtensions
         services.TryAddScoped<StudioScopeResolver>();
         services.TryAddScoped<TenantDiscovery>();
         services.TryAddScoped<IStoreInfoService, StoreInfoService>();
+        services.TryAddScoped<Services.Tenants.ITenantOverviewService, Services.Tenants.TenantOverviewService>();
         services.TryAddScoped<IDocumentDataService, DocumentDataService>();
         services.TryAddScoped<DocumentBrowserState>();
         services.TryAddScoped<IDocumentWriteService, DocumentWriteService>();

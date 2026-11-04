@@ -168,6 +168,10 @@
                                             <td class="ms-table-cell">
                                                 <a href="@OverviewHref(store.Key, database.Identity)">Overview</a>
                                                 <a href="@HealthHref(store.Key, database.Identity)">Health</a>
+                                                @if (store.Tenancy.Kind != StoreTenancyKind.Single)
+                                                {
+                                                    <a class="ms-stores-tenants-link" href="@TenantsHref(store.Key, database.Identity)">Tenants</a>
+                                                }
                                             </td>
                                         </tr>
                                     }
@@ -552,6 +556,9 @@
 
     private string OverviewHref(string storeKey, string identity) =>
         EventLinks.To(Options.Value, string.Empty, new StudioScope(storeKey, identity, null));
+
+    private string TenantsHref(string storeKey, string identity) =>
+        EventLinks.To(Options.Value, MartenStudioDescriptor.TenantsRoute, new StudioScope(storeKey, identity, null));
 
     private string HealthHref(string storeKey, string identity) =>
         HealthLinks.ToPage(Options.Value, new StudioScope(storeKey, identity, null));

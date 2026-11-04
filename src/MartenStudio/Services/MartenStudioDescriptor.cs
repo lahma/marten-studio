@@ -27,6 +27,9 @@ internal static class MartenStudioDescriptor
     /// <summary>The Stores page, relative to the studio root (1.2).</summary>
     public const string StoresRoute = "stores";
 
+    /// <summary>The Tenants page, relative to the studio root (1.2).</summary>
+    public const string TenantsRoute = "tenants";
+
     /// <summary>The dead-letter entry's badge key.</summary>
     public const string DeadLettersBadge = "dead-letters";
 
@@ -93,6 +96,13 @@ internal static class MartenStudioDescriptor
             new("Stores", StoresRoute, "grid", Title: "Every store you may see: whether it builds, its tenancy, its databases and their health")
             {
                 IsShownInScope = static state => state.KnownStoreCount > 1,
+            },
+
+            // 1.2 (SCOPE-2): the tenants the visitor may address, drawn where the header draws a tenant picker: a store with anything tenanted
+            // per row (TenantDiscovery.IsTenantScopeRelevant, which the scope state already holds as ShowTenantSelector).
+            new("Tenants", TenantsRoute, "list", Title: "The tenants you may address, where each lives and how big it is")
+            {
+                IsShownInScope = static state => state.ShowTenantSelector,
             },
             new("Documents", "documents", "doc"),
 

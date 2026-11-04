@@ -308,6 +308,19 @@ internal static class MatrixReads
                 "store.l's two tenant partitions, read by their bounds");
         }),
 
+        // ---- 1.2-SCOPE-2: the Tenants overview's two reads over the same tables: store.l's partition for tenant "a" by its bound, and
+        // the statistics of store.r's tenant_id for the values asked about - each returns behind the lock the matrix holds.
+        new("tenants: column value rows", true, static async (x, t) =>
+        {
+            IReadOnlyList<ColumnPartitionRow> partitions = await QueryAsync(
+                x, ColumnValueRowsQueries.PartitionRows(LintTargets, "tenant_id", ["FOR VALUES IN ('a')", "FOR VALUES IN ('nobody')"]), ColumnValueRowsQueries.ReadPartition, t);
+            partitions.Should().OnlyContain(static y => y.Table == "l" && (y.Bound == null || y.Bound == "FOR VALUES IN ('a')"), "only the bound asked about, and never a partition's name");
+
+            IReadOnlyList<ColumnStatisticsRow> statistics = await QueryAsync(
+                x, ColumnValueRowsQueries.StatisticsRows(LintTargets, "tenant_id", ["a", "zed"]), ColumnValueRowsQueries.ReadStatistics, t);
+            statistics.Should().OnlyContain(static y => y.Value == "a" || y.Value == "zed", "only the values asked about");
+        }),
+
         // ---- 0.10-A: the Plan page's facts - the six statements of PlanFactsQueries, over store's tables by name, the two the matrix
         // holds ACCESS EXCLUSIVE on among them: they resolve by name with no lock and read the catalog by oid with no size or deparse
         // function, so each returns behind the lock (issue #28; D27).

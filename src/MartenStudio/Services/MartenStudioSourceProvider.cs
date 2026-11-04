@@ -323,7 +323,7 @@ internal sealed class MartenStudioSource : IStudioSource
             matched = StudioScopeResolver.InstanceFor(databases, matched, tenantId);
         }
 
-        return new ResolvedScope(scope, Marten, Store, matched);
+        return new ResolvedScope(scope, Marten, Store, matched) { ListedDatabases = Unwrap(all) };
     }
 
     /// <summary>The shared cardinality of JasperFx's.</summary>

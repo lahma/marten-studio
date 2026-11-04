@@ -1024,6 +1024,55 @@ internal static class EventQueryBuilder
         return escaped.Append('%').ToString();
     }
 
+    /// <summary>
+    /// The newest event of a database, <c>seq_id</c> and time - the Tenants overview's "last event" for a database that is one
+    /// tenant's alone (1.2). A backward scan of the <c>seq_id</c> primary key (<c>EventsTable.cs:21</c>, Marten 9.57): one index
+    /// page, whatever the table holds.
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    public static NpgsqlCommand BuildLatestEvent(string schema, TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+
+        var command = new NpgsqlCommand
+        {
+            CommandText = "select e." + SqlIdentifier.Quote("seq_id") + ", e." + SqlIdentifier.Quote("timestamp")
+                + " from " + SqlIdentifier.Qualify(schema, EventTableInfo.EventsTable) + " e order by e." + SqlIdentifier.Quote("seq_id")
+                + " desc limit 1",
+        };
+
+        ApplyTimeout(command, commandTimeout);
+
+        return command;
+    }
+
+    /// <summary>
+    /// The newest event of one tenant under <c>UseTenantPartitionedEvents</c>: the tenant predicate prunes the read to its partition
+    /// at plan time (the caller runs it with <c>plan_cache_mode = force_custom_plan</c>, so a generic plan never locks every
+    /// partition), and the partition's primary key is scanned backward from <c>seq_id</c> (1.2).
+    /// </summary>
+    /// <param name="schema">The event store's schema.</param>
+    /// <param name="tenantId">The tenant - a value, never text in the statement.</param>
+    /// <param name="commandTimeout">A bound on the read.</param>
+    public static NpgsqlCommand BuildLatestEventOfTenant(string schema, string tenantId, TimeSpan? commandTimeout = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        var command = new NpgsqlCommand
+        {
+            CommandText = "select e." + SqlIdentifier.Quote("seq_id") + ", e." + SqlIdentifier.Quote("timestamp")
+                + " from " + SqlIdentifier.Qualify(schema, EventTableInfo.EventsTable) + " e where e." + SqlIdentifier.Quote("tenant_id")
+                + " = @tenant order by e." + SqlIdentifier.Quote("seq_id") + " desc limit 1",
+        };
+
+        command.Parameters.Add(new NpgsqlParameter("tenant", NpgsqlDbType.Varchar) { Value = tenantId });
+        ApplyTimeout(command, commandTimeout);
+
+        return command;
+    }
+
     private static string Column(string alias, string name) => alias + "." + SqlIdentifier.Quote(name);
 
     /// <summary>

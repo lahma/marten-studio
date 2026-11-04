@@ -3,6 +3,7 @@ using Bunit;
 using MartenStudio.Services;
 
 using PostgresStudio.Components.Layout;
+using PostgresStudio.Services;
 using PostgresStudio.Services.Settings;
 
 namespace MartenStudio.Tests.Components;
@@ -72,6 +73,25 @@ public class NavMenuScopeTests
         IRenderedComponent<NavMenu> nav = context.Render<NavMenu>();
 
         nav.FindAll("a.ms-nav-link .ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().Contain("Stores");
+    }
+
+    /// <summary>1.2-SCOPE-2 T1: Tenants is drawn where the header draws a tenant picker, and not otherwise.</summary>
+    [Fact]
+    public async Task Tenants_follows_the_header_s_tenant_selector()
+    {
+        await using StudioComponentContext without = new();
+        without.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten");
+        await without.State.EnsureInitializedAsync(Token);
+
+        without.Render<NavMenu>().FindAll("a.ms-nav-link .ms-nav-link-text").Select(static x => x.TextContent.Trim()).Should().NotContain("Tenants");
+
+        await using StudioComponentContext with = new();
+        with.Catalog.WithStore("default", "Default", databaseIdentities: "localhost.marten").WithTenants("default", new TenantList(["acme"], false, TenantListSource.Configured));
+        await with.State.EnsureInitializedAsync(Token);
+
+        string[] labels = [.. with.Render<NavMenu>().FindAll("a.ms-nav-link .ms-nav-link-text").Select(static x => x.TextContent.Trim())];
+        labels.Should().Contain("Tenants");
+        labels.Should().NotContain("Stores", "one store");
     }
 
     [Fact]

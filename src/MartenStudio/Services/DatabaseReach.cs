@@ -138,7 +138,7 @@ internal static class DatabaseReach
     /// hands out; any other options object falls back to <c>IReadOnlyEventStoreOptions.Projections()</c>,
     /// which lists the projections without the raw subscriptions. Configuration only - no connection.
     /// </remarks>
-    private static HashSet<string>? RegisteredShardIdentities(IDocumentStore store)
+    internal static HashSet<string>? RegisteredShardIdentities(IDocumentStore store)
     {
         try
         {
@@ -225,18 +225,58 @@ internal static class DatabaseReach
                 return false;
             }
 
-            string corrected = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenantId);
-
             IReadOnlyList<IMartenDatabase> databases = await store.Storage.AllDatabases().ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
 
             // After the refresh, never before it: the list is what AllDatabases() just reconciled.
+            return IsExclusivelyTenants(store, database, tenantId, databases);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="IsExclusivelyTenantsAsync" />'s four conditions, asked of a list of databases the caller already holds (1.2): the
+    /// Tenants overview places every row of a page with the enumeration the scope's resolution has just made, and enumerates nothing
+    /// of its own.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="listed" /> must be what <c>AllDatabases()</c> answered for this request - the call that reconciles a dynamic
+    /// tenancy's tenant lists - and is read here, never refreshed. A list that is empty stands for "no other database"; anything
+    /// that cannot be answered is <see langword="false" />, the stricter question.
+    /// </remarks>
+    /// <param name="store">The store.</param>
+    /// <param name="database">The database a tenant is placed in.</param>
+    /// <param name="tenantId">The tenant.</param>
+    /// <param name="listed">Every database the store's enumeration listed, twins of <paramref name="database" /> included.</param>
+    public static bool IsExclusivelyTenants(
+        IDocumentStore store,
+        IMartenDatabase database,
+        string tenantId,
+        IReadOnlyList<IMartenDatabase> listed)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(database);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentNullException.ThrowIfNull(listed);
+
+        try
+        {
+            if (IsPooledByDesign(store.Options.Tenancy) || IsDefaultDatabase(store, database))
+            {
+                return false;
+            }
+
+            string corrected = store.Options.TenantIdStyle.MaybeCorrectTenantId(tenantId);
+
             if (!HoldsOnly(database, corrected))
             {
                 return false;
             }
 
-            foreach (IMartenDatabase other in databases)
+            foreach (IMartenDatabase other in listed)
             {
                 if (!ReferenceEquals(other, database)
                     && string.Equals(other.Id.Identity, database.Id.Identity, StringComparison.OrdinalIgnoreCase)

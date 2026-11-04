@@ -188,7 +188,7 @@ public class StoresPageTests
         sections[1].QuerySelector(".ms-stores-open-overview")!.GetAttribute("href").Should().Be("?store=other");
 
         string[] rowLinks = [.. sections[1].QuerySelectorAll("tbody td:last-child a").Select(static x => x.GetAttribute("href")!)];
-        rowLinks.Should().Equal("?store=other&db=db-x", "health?store=other&db=db-x");
+        rowLinks.Should().Equal("?store=other&db=db-x", "health?store=other&db=db-x", "tenants?store=other&db=db-x");
     }
 
     [Fact]

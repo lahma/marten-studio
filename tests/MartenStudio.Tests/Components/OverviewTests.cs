@@ -170,6 +170,19 @@ public class OverviewTests
         page.Find(".ms-error-alert").TextContent.Should().Contain("no connection string was configured");
     }
 
+    /// <summary>The Overview's own load error is the host-failure words, never Postgres' own (1.2-SCOPE-1-FIX).</summary>
+    [Fact]
+    public void A_postgres_failure_to_load_is_said_without_postgres_own_words()
+    {
+        using var context = new StudioComponentContext();
+        context.StoreInfo.Failure = new Npgsql.PostgresException("relation secret_schema.salaries does not exist", "ERROR", "ERROR", "42P01");
+
+        var page = context.Render<Overview>();
+
+        string alert = page.Find(".ms-error-alert").TextContent;
+        alert.Should().Contain("Postgres refused a read (42P01)").And.NotContain("secret_schema");
+    }
+
     [Fact]
     public void A_failure_to_load_is_shown_with_a_retry_that_asks_again()
     {
