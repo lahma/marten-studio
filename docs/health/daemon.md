@@ -504,15 +504,18 @@ version sets `GateSideEffectsBehindPriorVersion`. The daemon reads the highest p
 version starts, and suppresses side effects for events up to its position. Removing it before the new version has passed
 that position raises side effects again for events the prior version already handled.
 
-There is no `StoreOptions` line, and the studio removes nothing: whether to remove a row is the host's decision. Marten
+There is no `StoreOptions` line, and whether to remove a row is the host's decision; the studio removes one only for a
+visitor whose host enabled `Capabilities.CorrectProgression` and whose store and write policies allow the database as a
+whole (whatever tenant is selected), after a confirmation and a second read of the table. Marten
 removes one by its exact name, whether or not a projection of that name is registered, with
 `IEventDatabase.DeleteProjectionProgressByShardNameAsync` (marten#4785, jasperfx#473; public at `V9.39.0` and `v9.54.2`,
 and it first ensures the event store's storage, as every write to it does). `IEventStore.DeleteProjectionProgressAsync`,
 which takes a projection's name, looks it up among the registered projections and throws `ArgumentOutOfRangeException`
 for any other, so it cannot. The finding's remedy is that call, for each row the daemon does not read; a tenant's row is
 said in words. The projections screen lists the rows under **Orphaned progression rows** - counted for everyone the scope
-admits, named for a visitor the store policy allows for the database as a whole - with Marten's call and the equivalent
-statement for each, under "For your own migrations - the studio never runs this":
+admits, named for a visitor the store policy allows for the database as a whole - with Marten's call for each, which the
+screen's Remove button runs where `CorrectProgression` is on, and the equivalent statement for each, which the studio
+never runs, under "For your own migrations - the studio never runs this":
 
 ```csharp
 await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("TripsBeforeRename:All");

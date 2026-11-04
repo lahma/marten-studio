@@ -97,8 +97,7 @@ internal sealed class ShardStalledCheck : HealthCheck<ShardStalledFacts>
             // series every trend and D04 read are the thresholds that apply.
             ProjectionLagThreshold? option = facts.Configuration.ThresholdOptionFor(shard);
 
-            long? warningBehind = option is null ? row?.WarningThreshold : option.WarningBehind;
-            long? criticalBehind = option is null ? row?.CriticalThreshold : option.CriticalBehind;
+            (long? warningBehind, long? criticalBehind) = LagThresholdResolver.Applying(option, row?.WarningThreshold, row?.CriticalThreshold);
 
             if (warningBehind is { } warning)
             {

@@ -377,6 +377,30 @@ public class PostgresStudioOptionsTests
         PostgresStudioSettings.Of(options).AcceptedChecks["s04"].Should().Be("the login is a superuser on purpose");
     }
 
+    /// <summary>
+    /// The entries are read once, at startup: options validation freezes a copy, so a change the host makes afterwards changes
+    /// nothing the sweep sees and cannot break an enumeration it is part-way through.
+    /// </summary>
+    [Fact]
+    public void Changing_AcceptedChecks_after_startup_changes_nothing_and_cannot_break_an_enumeration()
+    {
+        PostgresStudioOptions options = Resolve(static x => x.AcceptedChecks["K05"] = "managed roles");
+        PostgresStudioSettings settings = PostgresStudioSettings.Of(options);
+
+        IReadOnlyDictionary<string, string> seen = settings.AcceptedChecks;
+        using IEnumerator<KeyValuePair<string, string>> enumerating = seen.GetEnumerator();
+        enumerating.MoveNext().Should().BeTrue();
+
+        options.AcceptedChecks["S04"] = "late";
+        options.AcceptedChecks.Remove("K05");
+
+        Action carryingOn = () => enumerating.MoveNext();
+        carryingOn.Should().NotThrow();
+
+        settings.AcceptedChecks.Should().ContainSingle().Which.Key.Should().Be("K05");
+        settings.AcceptedChecks.ContainsKey("k05").Should().BeTrue("keys are still compared ignoring case");
+    }
+
     [Theory]
     [InlineData("X99")]
     [InlineData("K5")]

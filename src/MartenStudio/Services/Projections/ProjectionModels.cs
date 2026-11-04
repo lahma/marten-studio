@@ -834,7 +834,13 @@ internal static class OrphanWording
         + "replaying from the first event.";
 
     /// <summary>What introduces Marten's calls in the hand-over block.</summary>
-    public const string CallLead = "From the host's own code, through Marten - database is this database's IMartenDatabase:";
+    /// <remarks>
+    /// This is the call the Remove button runs, where <c>CorrectProgression</c> is on and the write policy allows it - so unlike the
+    /// SQL below it, which the studio never runs (<see cref="SqlHeading" />), it is not drawn under that heading.
+    /// </remarks>
+    public const string CallLead =
+        "From the host's own code, through Marten - database is this database's IMartenDatabase. This is the call the Remove "
+        + "button runs, where CorrectProgression is on:";
 
     /// <summary>What introduces the SQL in the hand-over block.</summary>
     public const string SqlLead = "Or as SQL, in a migration:";
@@ -844,7 +850,10 @@ internal static class OrphanWording
         "Their names are shown only to a visitor the store policy allows for this database as a whole, with no tenant "
         + "selected in the policy's resource: they are the database's, not one tenant's.";
 
-    /// <summary>The heading the removal statements are drawn under - the health advisor's own (<c>HealthRemedy.MigrationHeading</c>).</summary>
+    /// <summary>
+    /// The heading the removal <em>statements</em> alone are drawn under - the health advisor's own
+    /// (<c>HealthRemedy.MigrationHeading</c>). Marten's call is not under it: the Remove button runs that one.
+    /// </summary>
     public const string SqlHeading = "For your own migrations - the studio never runs this";
 
     /// <summary>What the removal statements do and do not do.</summary>
@@ -883,12 +892,21 @@ internal static class OrphanWording
     /// </summary>
     /// <param name="name">The row's name.</param>
     /// <param name="databaseAutoCreate">The database's <c>AutoCreate</c>, when it was read.</param>
-    public static string RemoveMessage(string name, string? databaseAutoCreate) =>
+    /// <param name="lastWritten">When the row was last written (<c>last_updated</c>, server time), already formatted, or <see langword="null" />.</param>
+    public static string RemoveMessage(string name, string? databaseAutoCreate, string? lastWritten = null) =>
         "This removes the row " + name + " from mt_event_progression in this database, and nothing else: the documents and tables "
         + "the projection wrote stay. Marten's call first ensures the event store's storage under the store's AutoCreate"
         + (databaseAutoCreate is { Length: > 0 } auto ? " (" + auto + " for this database)" : string.Empty)
-        + ", as every write to it does. A projection registered again under this name and version would resume from its "
-        + "position rather than replay from the first event.";
+        + ", as every write to it does. "
+        + (lastWritten is { Length: > 0 } written ? "The row was last written " + written + " (database server time). " : string.Empty)
+        + "Remove it once the rename or removal has shipped: an instance still running the old deployment may write it again. "
+        + "A projection registered again under this name and version would resume from its position rather than replay from "
+        + "the first event.";
+
+    /// <summary>The message for a row that was in the table at the re-check and not at the call.</summary>
+    /// <param name="name">The row's name.</param>
+    public static string RemovalAlreadyGone(string name) =>
+        "The row " + name + " was already gone when Marten's call was about to be made, so nothing was removed.";
 
     /// <summary>"1 row" or "3 rows".</summary>
     public static string Count(int count) =>

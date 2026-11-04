@@ -46,6 +46,16 @@ internal static class LagThresholdResolver
             ? found
             : null;
 
+    /// <summary>
+    /// The thresholds that apply to a shard, as numbers when somebody set them: the option's pair when there is one, else the
+    /// row's two columns, each as it is (a column nobody wrote is <see langword="null" />, and the consumer's default applies).
+    /// </summary>
+    /// <param name="option">The host's option for the shard's projection.</param>
+    /// <param name="rowWarning">The row's <c>warning_behind_threshold</c>.</param>
+    /// <param name="rowCritical">The row's <c>critical_behind_threshold</c>.</param>
+    public static (long? Warning, long? Critical) Applying(ProjectionLagThreshold? option, long? rowWarning, long? rowCritical) =>
+        option is null ? (rowWarning, rowCritical) : (option.WarningBehind, option.CriticalBehind);
+
     /// <summary>Each shard of <paramref name="shards" /> with its projection's option applied, where it has one.</summary>
     public static List<ShardProgress> Apply(
         IReadOnlyList<ShardProgress> shards,

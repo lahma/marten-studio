@@ -108,6 +108,50 @@ public class ProjectionThresholdOptionTests
         message.Length.Should().BeLessThan(1_000);
     }
 
+    /// <summary>
+    /// The entries are read once, at startup: options validation freezes a copy, so a host that changes the dictionary
+    /// afterwards - from another thread, while a page or a sweep enumerates - changes nothing and breaks nothing.
+    /// </summary>
+    [Fact]
+    public void Changing_the_dictionary_after_startup_changes_nothing_and_cannot_break_an_enumeration()
+    {
+        MartenStudioOptions options = Resolve(static x => x.ProjectionThresholds["Trips"] = new ProjectionLagThreshold(5_000, 50_000));
+
+        IReadOnlyDictionary<string, ProjectionLagThreshold> seen = options.ProjectionLagThresholdsByName;
+        using IEnumerator<KeyValuePair<string, ProjectionLagThreshold>> enumerating = seen.GetEnumerator();
+        enumerating.MoveNext().Should().BeTrue();
+
+        options.ProjectionThresholds["Trips"] = new ProjectionLagThreshold(1, 2);
+        options.ProjectionThresholds["Late"] = new ProjectionLagThreshold(3, 4);
+        options.ProjectionThresholds.Remove("Trips");
+
+        Action carryingOn = () => enumerating.MoveNext();
+        carryingOn.Should().NotThrow("the snapshot is not the dictionary the host holds");
+
+        options.ProjectionLagThresholdsByName.Should().BeSameAs(seen);
+        options.ProjectionLagThresholdsByName.Should().ContainSingle().Which.Value.Should().Be(new ProjectionLagThreshold(5_000, 50_000));
+        LagThresholdResolver.OptionFor(options.ProjectionLagThresholdsByName, "Late").Should().BeNull();
+    }
+
+    [Fact]
+    public void Accepted_checks_are_read_once_too()
+    {
+        MartenStudioOptions options = Resolve(static x => x.AcceptedChecks["K05"] = "managed roles");
+
+        IReadOnlyDictionary<string, string> seen = options.AcceptedCheckReasons;
+        using IEnumerator<KeyValuePair<string, string>> enumerating = seen.GetEnumerator();
+        enumerating.MoveNext().Should().BeTrue();
+
+        options.AcceptedChecks["D01"] = "late";
+        options.AcceptedChecks.Remove("K05");
+
+        Action carryingOn = () => enumerating.MoveNext();
+        carryingOn.Should().NotThrow();
+
+        options.AcceptedCheckReasons.Should().ContainSingle().Which.Key.Should().Be("K05");
+        options.AcceptedCheckReasons.ContainsKey("k05").Should().BeTrue("keys are still compared ignoring case");
+    }
+
     // ---- Precedence: option > the row's columns > the studio's defaults ------------------------------------------------
 
     [Fact]
@@ -153,6 +197,14 @@ public class ProjectionThresholdOptionTests
 
         LagThresholdResolver.Apply([Shard("Trips", lag: 150_000)], Option("Trips", 200_000, 500_000))
             .Single().Severity.Should().Be(LagSeverity.Ok);
+    }
+
+    [Fact]
+    public void The_recorded_pair_is_the_options_else_the_rows_columns_each_as_they_are()
+    {
+        LagThresholdResolver.Applying(new ProjectionLagThreshold(5, 50), 1, 2).Should().Be((5L, 50L));
+        LagThresholdResolver.Applying(null, 1, null).Should().Be((1L, (long?) null));
+        LagThresholdResolver.Applying(null, null, null).Should().Be(((long?) null, (long?) null));
     }
 
     [Fact]

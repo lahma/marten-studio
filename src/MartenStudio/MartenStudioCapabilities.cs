@@ -30,7 +30,10 @@ public sealed class MartenStudioCapabilities
     /// <summary>Rebuild projections.</summary>
     public bool RebuildProjections { get; set; }
 
-    /// <summary>Advance the high-water mark or correct projection progression in the database.</summary>
+    /// <summary>
+    /// Advance the high-water mark, correct projection progression in the database, or remove an orphaned progression row
+    /// (Marten's own <c>DeleteProjectionProgressByShardNameAsync</c>, asked for the database as a whole).
+    /// </summary>
     public bool CorrectProgression { get; set; }
 
     /// <summary>Apply pending schema migrations to the database.</summary>

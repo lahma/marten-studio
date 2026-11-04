@@ -46,8 +46,8 @@ internal static partial class MartenLog
 
     /// <summary>9225, with the user's name, the row's name and the scope escaped and bounded.</summary>
     /// <remarks>
-    /// The row is what the circuit named - the page sends the name of the row it drew, and the service checks it against the
-    /// table before it deletes anything, but this line is written first - so it is the visitor's text and is capped (H1).
+    /// Written after the service has read the table again and found the row, immediately before Marten's call. The name is still
+    /// the circuit's - the page sends the name of the row it drew - so it is the visitor's text, and is capped (H1).
     /// </remarks>
     public static void OrphanedProgressionRemovalRequested(this ILogger logger, string user, string row, string storeKey, string databaseId)
     {

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+
 using Npgsql;
 
 using PostgresStudio.Services.Postgres;
@@ -91,14 +93,23 @@ public class PostgresDiagnosticsOptions
     /// may open that page, so a reason should hold nothing you would not show them.
     /// </para>
     /// <para>
-    /// Keys are compared ignoring case. Validation at startup refuses a key that is not a check of this studio, and a reason
-    /// that is empty, whitespace or longer than 500 characters.
+    /// Keys are compared ignoring case. The entries are read once, at startup (a frozen copy is taken when options validation
+    /// runs): add them in the registration callback, because a change made afterwards is not seen. Validation at startup refuses
+    /// a key that is not a check of this studio, and a reason that is empty, whitespace or longer than 500 characters.
     /// </para>
     /// </remarks>
     public IDictionary<string, string> AcceptedChecks => acceptedChecks;
 
-    /// <summary><see cref="AcceptedChecks" /> as the studio reads it.</summary>
-    internal IReadOnlyDictionary<string, string> AcceptedCheckReasons => acceptedChecks;
+    private FrozenDictionary<string, string>? acceptedCheckSnapshot;
+
+    /// <summary>
+    /// <see cref="AcceptedChecks" /> as the studio reads it: a frozen copy taken the first time anything reads it, which is options
+    /// validation at startup. A change a host makes afterwards is not seen, and cannot break an enumeration part-way through.
+    /// </summary>
+    internal IReadOnlyDictionary<string, string> AcceptedCheckReasons =>
+        LazyInitializer.EnsureInitialized(
+            ref acceptedCheckSnapshot,
+            () => acceptedChecks.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// The Postgres schemas the database browser shows. Their structure - tables, columns, keys, indexes - is visible to

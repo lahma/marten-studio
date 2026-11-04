@@ -63,6 +63,11 @@ internal sealed partial class ProjectionDataService
         // What the circuit named, until it has been found in the table: the audit dispatchers and the log wrappers cap it.
         string target = rowName;
 
+        // The scope an audit entry is filed under. The ring shows an entry to anyone admitted at its (store, database, tenant), and a
+        // row's name is the database's, withheld from a visitor short of (store, database, null) - and a tenant row's name carries
+        // its tenant - so once that question has been answered the entry is the database's too, whatever tenant the URL named.
+        StudioScope auditScope = scope;
+
         try
         {
             capabilities.Require(capability);
@@ -76,6 +81,8 @@ internal sealed partial class ProjectionDataService
             // (store, database, null), always: not RequireWholeDatabaseAsync, whose exception for a database that is exclusively
             // the selected tenant's would let a tenant's visitor remove a row the view never named to them.
             await reach.RequireDatabaseAsync(resolved, databaseId, tenantId: null, capability, cancellationToken).ConfigureAwait(false);
+
+            auditScope = new StudioScope(resolved.Registration.Key, databaseId, null);
 
             string storeKey = resolved.Registration.Key;
             string user = await authorization.UserNameAsync().ConfigureAwait(false);
@@ -91,7 +98,7 @@ internal sealed partial class ProjectionDataService
             if (refusal is not null)
             {
                 logger.OrphanedProgressionRemovalRefused(user, rowName, storeKey, databaseId, refusal);
-                audit.Record(RemoveOrphanAction, target, false, refusal, capability, scope);
+                audit.Record(RemoveOrphanAction, target, false, refusal, capability, auditScope);
 
                 return new OrphanRemoval(rowName, false, refusal);
             }
@@ -105,7 +112,24 @@ internal sealed partial class ProjectionDataService
 
             logger.OrphanedProgressionRemovalRequested(user, name, storeKey, databaseId);
 
+            // Marten's call returns nothing, so it cannot say that it removed a row. The window between the re-check and the call is
+            // a second read away, and a row that has gone since is said to have been gone rather than removed.
+            if (!await RowExistsAsync(resolved, name, cancellationToken).ConfigureAwait(false))
+            {
+                string gone = OrphanWording.RemovalAlreadyGone(name);
+                audit.Record(RemoveOrphanAction, name, false, gone, capability, auditScope);
+                cache.InvalidatePrefix(CachePrefix(resolved));
+
+                return new OrphanRemoval(name, false, gone);
+            }
+
             await events.DeleteProjectionProgressByShardNameAsync(name, cancellationToken).ConfigureAwait(false);
+
+            // And what the call did, read back: a row still there after a call that did not throw is not "removed".
+            if (await RowExistsAsync(resolved, name, cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Marten's removal returned, and the progression row is still in mt_event_progression.");
+            }
 
             audit.Record(
                 RemoveOrphanAction,
@@ -113,7 +137,7 @@ internal sealed partial class ProjectionDataService
                 true,
                 "Removed one row of mt_event_progression (Marten first ensured the event store's storage).",
                 capability,
-                scope);
+                auditScope);
 
             // The database's own bookkeeping changed, for every tenant's view of it.
             cache.InvalidatePrefix(CachePrefix(resolved));
@@ -132,7 +156,7 @@ internal sealed partial class ProjectionDataService
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            audit.Record(RemoveOrphanAction, target, false, exception.Message, capability, scope);
+            audit.Record(RemoveOrphanAction, target, false, exception.Message, capability, auditScope);
             throw;
         }
     }
@@ -145,18 +169,7 @@ internal sealed partial class ProjectionDataService
     {
         List<ProjectionInfo> projections = RegisteredProjectionsOf(resolved.Store);
 
-        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
-
-        ProgressionRows rows = await ProjectionProgressQueries
-            .ReadProgressionRowsAsync(
-                connection,
-                catalog,
-                EventSchemaOf(resolved),
-                resolved.Store.Options.Events.EnableExtendedProgressionTracking,
-                tenantId: null,
-                CommandTimeout,
-                cancellationToken)
-            .ConfigureAwait(false);
+        ProgressionRows rows = await ReadWholeTableAsync(resolved, cancellationToken).ConfigureAwait(false);
 
         List<ShardState> states = [.. rows.Rows.Select(ToShardState)];
 
@@ -170,5 +183,30 @@ internal sealed partial class ProjectionDataService
             projections, states, NoLiveState, 0, byName, ProgressionRowClassifier.For(resolved.Store, projections));
 
         return OrphanRowsOf(merged).FirstOrDefault(x => string.Equals(x.ShardName, rowName, StringComparison.Ordinal));
+    }
+
+    /// <summary>Whether a row called <paramref name="name" /> is in the progression table now, whoever owns it.</summary>
+    private async Task<bool> RowExistsAsync(ResolvedScope resolved, string name, CancellationToken cancellationToken)
+    {
+        ProgressionRows rows = await ReadWholeTableAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        return rows.Rows.Any(x => string.Equals(x.Name, name, StringComparison.Ordinal));
+    }
+
+    /// <summary>The progression table of the scope's database, every tenant's rows, read with the studio's own SQL.</summary>
+    private async Task<ProgressionRows> ReadWholeTableAsync(ResolvedScope resolved, CancellationToken cancellationToken)
+    {
+        await using NpgsqlConnection connection = await OpenAsync(resolved, cancellationToken).ConfigureAwait(false);
+
+        return await ProjectionProgressQueries
+            .ReadProgressionRowsAsync(
+                connection,
+                catalog,
+                EventSchemaOf(resolved),
+                resolved.Store.Options.Events.EnableExtendedProgressionTracking,
+                tenantId: null,
+                CommandTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 }

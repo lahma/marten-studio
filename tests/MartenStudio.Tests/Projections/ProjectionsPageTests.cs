@@ -541,9 +541,13 @@ public class ProjectionsPageTests
         row.QuerySelector(".ms-orphaned-progression-reason")!.TextContent
             .Should().Be("No projection or subscription named RetiredProjection is registered: it was renamed or removed.");
 
-        // Marten's own removal by name and the equivalent statement are text for the host, under the advisor's own heading;
-        // 1.2-PROJ adds the studio's own Remove beside them, which is the only button here and is off without CorrectProgression.
+        // Marten's own removal by name is the call the studio's Remove runs (1.2-PROJ), so it is not under the advisor's heading, which
+        // says the studio never runs what is under it: that heading is over the equivalent statement alone. Remove is the only
+        // button here and is off without CorrectProgression.
         page.Find(".ms-orphaned-progression-sql summary").TextContent.Should().Be("For your own migrations - the studio never runs this");
+        page.FindAll(".ms-orphaned-progression-sql .ms-orphaned-progression-calls").Should().BeEmpty("the Remove button runs that call");
+        page.Find(".ms-orphaned-progression-call p").TextContent.Should().Be(OrphanWording.CallLead)
+            .And.Contain("the call the Remove button runs");
         page.Find(".ms-orphaned-progression-calls").TextContent
             .Should().Be("""await ((IEventDatabase) database).DeleteProjectionProgressByShardNameAsync("RetiredProjection:All");""");
         page.Find(".ms-orphaned-progression-sql-statements").TextContent

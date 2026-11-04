@@ -17,6 +17,8 @@
  */
 #endregion
 
+using System.Collections.Frozen;
+
 namespace MartenStudio;
 
 /// <summary>
@@ -206,14 +208,23 @@ public sealed class MartenStudioOptions
     /// may open that page, so a reason should hold nothing you would not show them.
     /// </para>
     /// <para>
-    /// Keys are compared ignoring case. Validation at startup refuses a key that is not a check of this studio, and a reason
+    /// Keys are compared ignoring case. The entries are read once, at startup (a frozen copy is taken when options validation runs):
+    /// add them in the <c>AddMartenStudio</c> callback, because a change made afterwards is not seen. Validation at startup refuses a key that is not a check of this studio, and a reason
     /// that is empty, whitespace or longer than 500 characters.
     /// </para>
     /// </remarks>
     public IDictionary<string, string> AcceptedChecks => acceptedChecks;
 
-    /// <summary><see cref="AcceptedChecks"/> as the studio reads it.</summary>
-    internal IReadOnlyDictionary<string, string> AcceptedCheckReasons => acceptedChecks;
+    private FrozenDictionary<string, string>? acceptedCheckSnapshot;
+
+    /// <summary>
+    /// <see cref="AcceptedChecks"/> as the studio reads it: a frozen copy taken the first time anything reads it, which is options
+    /// validation at startup. A change a host makes afterwards is not seen, and cannot break an enumeration part-way through.
+    /// </summary>
+    internal IReadOnlyDictionary<string, string> AcceptedCheckReasons =>
+        LazyInitializer.EnsureInitialized(
+            ref acceptedCheckSnapshot,
+            () => acceptedChecks.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase));
 
     private readonly Dictionary<string, ProjectionLagThreshold> projectionThresholds = new(StringComparer.Ordinal);
 
@@ -233,14 +244,24 @@ public sealed class MartenStudioOptions
     /// <para>
     /// The dictionary applies to <b>every store</b> of the application, by projection name alone; a name that no projection of
     /// a store has is not an error (projections are often registered per environment), the disclosure just says so. Keys are
-    /// compared exactly, case included. Validation at startup refuses an entry whose numbers are not greater than zero or
+    /// compared exactly, case included. The entries are <b>read once, at startup</b> (options validation freezes a copy): add them in
+    /// the <c>AddMartenStudio</c> callback, because a change made afterwards is not seen. Validation at startup refuses an entry whose numbers are not greater than zero or
     /// whose critical threshold is below its warning threshold, naming the projection.
     /// </para>
     /// </remarks>
     public IDictionary<string, ProjectionLagThreshold> ProjectionThresholds => projectionThresholds;
 
-    /// <summary><see cref="ProjectionThresholds"/> as the studio reads it.</summary>
-    internal IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionLagThresholdsByName => projectionThresholds;
+    private FrozenDictionary<string, ProjectionLagThreshold>? projectionThresholdsSnapshot;
+
+    /// <summary>
+    /// <see cref="ProjectionThresholds"/> as the studio reads it: a frozen copy taken the first time anything reads it, which is
+    /// options validation at startup. An entry a host adds, replaces or removes afterwards is not seen - and cannot break an
+    /// enumeration a page or a health sweep is part-way through.
+    /// </summary>
+    internal IReadOnlyDictionary<string, ProjectionLagThreshold> ProjectionLagThresholdsByName =>
+        LazyInitializer.EnsureInitialized(
+            ref projectionThresholdsSnapshot,
+            () => projectionThresholds.ToFrozenDictionary(StringComparer.Ordinal));
 
     /// <summary>
     /// The per-shard replay timeout handed to Marten's rebuild. At least one minute.

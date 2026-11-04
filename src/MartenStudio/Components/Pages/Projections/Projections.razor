@@ -732,8 +732,8 @@
                                             {
                                                 <button type="button"
                                                         class="ms-btn ms-btn-sm ms-orphan-remove"
-                                                        disabled="@(!CorrectEnabled)"
-                                                        title="@CorrectTitle"
+                                                        disabled="@(!RemoveOrphanEnabled)"
+                                                        title="@RemoveOrphanTitle"
                                                         @onclick="() => AskRemoveOrphanAsync(orphan.Name)">
                                                     Remove
                                                 </button>
@@ -753,26 +753,33 @@
                                                 Action="Removing an orphaned progression row" />
                         }
 
-                        <WriteRefusal Refused="RefusedByPolicy(StudioCapability.CorrectProgression)"
+                        @* Asked at the database as a whole, as the service asks it: not the URL's tenant-scoped answer the Advance buttons use. *@
+                        <WriteRefusal Refused="@(Capabilities.IsEnabled(StudioCapability.CorrectProgression) && !mayRemoveOrphan)"
                                       Capability="@nameof(StudioCapability.CorrectProgression)" />
+                    }
+
+                    @if (view.Orphans.RemovalCalls.Count > 0)
+                    {
+                        @* Marten's call is what the Remove button runs, so it is not under the heading that says the studio never
+                           runs what is under it - that is the SQL's alone. *@
+                        <div class="ms-orphaned-progression-call">
+                            <p class="ms-muted">@OrphanWording.CallLead</p>
+                            <pre class="ms-orphaned-progression-statements ms-orphaned-progression-calls"><code>@string.Join("\n", view.Orphans.RemovalCalls)</code></pre>
+                        </div>
+                    }
+
+                    @if (view.Orphans.RemovalStatements.Count > 0)
+                    {
+                        <details class="ms-orphaned-progression-sql">
+                            <summary>@OrphanWording.SqlHeading</summary>
+                            <p class="ms-muted">@OrphanWording.SqlLead</p>
+                            <pre class="ms-orphaned-progression-statements ms-orphaned-progression-sql-statements"><code>@string.Join("\n", view.Orphans.RemovalStatements)</code></pre>
+                        </details>
                     }
 
                     @if (view.Orphans.RemovalStatements.Count > 0 || view.Orphans.RemovalCalls.Count > 0)
                     {
-                        <details class="ms-orphaned-progression-sql">
-                            <summary>@OrphanWording.SqlHeading</summary>
-                            @if (view.Orphans.RemovalCalls.Count > 0)
-                            {
-                                <p class="ms-muted">@OrphanWording.CallLead</p>
-                                <pre class="ms-orphaned-progression-statements ms-orphaned-progression-calls"><code>@string.Join("\n", view.Orphans.RemovalCalls)</code></pre>
-                            }
-                            @if (view.Orphans.RemovalStatements.Count > 0)
-                            {
-                                <p class="ms-muted">@OrphanWording.SqlLead</p>
-                                <pre class="ms-orphaned-progression-statements ms-orphaned-progression-sql-statements"><code>@string.Join("\n", view.Orphans.RemovalStatements)</code></pre>
-                            }
-                            <p class="ms-muted">@OrphanWording.SqlNote</p>
-                        </details>
+                        <p class="ms-muted ms-orphaned-progression-sql-note">@OrphanWording.SqlNote</p>
                     }
                 }
             </section>
@@ -871,6 +878,13 @@
     /// <inheritdoc cref="mayControl" />
     private bool mayCorrect = true;
 
+    /// <summary>
+    /// Whether the policies let this visitor remove an orphaned progression row: <c>CorrectProgression</c> asked about the
+    /// database as a whole, <c>TenantId = null</c>, whatever tenant is selected - the row is the database's bookkeeping - and
+    /// not <see cref="mayCorrect" />'s answer for the scope in the URL. Fail-open for the same reason as the others.
+    /// </summary>
+    private bool mayRemoveOrphan = true;
+
     /// <summary>The health findings this screen draws as banners: D01 and D02, nothing else.</summary>
     private static readonly string[] BannerCodes = ["D01", "D02"];
 
@@ -934,6 +948,10 @@
             mayControl = await Authorization.IsAuthorizedAsync(scope, StudioCapability.ControlDaemon, cancellationToken);
             mayRebuild = await Authorization.IsAuthorizedAsync(scope, StudioCapability.RebuildProjections, cancellationToken);
             mayCorrect = await Authorization.IsAuthorizedAsync(scope, StudioCapability.CorrectProgression, cancellationToken);
+
+            StudioScope wholeDatabase = new(scope.StoreKey, scope.DatabaseId, null);
+            mayRemoveOrphan = await Authorization.IsAuthorizedAsync(wholeDatabase, null, cancellationToken)
+                && await Authorization.IsAuthorizedAsync(wholeDatabase, StudioCapability.CorrectProgression, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -1087,6 +1105,19 @@
 
     private bool CorrectEnabled =>
         Capabilities.IsEnabled(StudioCapability.CorrectProgression) && mayCorrect;
+
+    /// <summary>
+    /// Whether an orphaned row may be removed: the capability, and the policies' yes for the database as a whole
+    /// (<see cref="mayRemoveOrphan" />) rather than for the scope in the URL, because that is the question the service asks.
+    /// </summary>
+    private bool RemoveOrphanEnabled =>
+        Capabilities.IsEnabled(StudioCapability.CorrectProgression) && mayRemoveOrphan;
+
+    /// <summary>The Remove button's hover text: the option that is off, the policy that refuses, or nothing.</summary>
+    private string RemoveOrphanTitle =>
+        !Capabilities.IsEnabled(StudioCapability.CorrectProgression) ? CorrectTitle
+        : !mayRemoveOrphan ? WritePolicyRefusal.For(StudioCapability.CorrectProgression)
+        : string.Empty;
 
     /// <summary>
     /// Whether one agent may be started or stopped right now.
@@ -1754,10 +1785,16 @@
         }
     }
 
+    /// <summary>When the row the Remove dialog is about was last written, as the page drew it - or <see langword="null" /> when not recorded.</summary>
+    private string? PendingOrphanLastWritten =>
+        view?.Orphans.Rows.FirstOrDefault(x => string.Equals(x.Name, pendingOrphan, StringComparison.Ordinal))?.LastUpdated is { } updated
+            ? State.FormatInSelectedTimeZone(updated)
+            : null;
+
     private string PendingMessage => pending switch
     {
         PendingAction.RemoveOrphan =>
-            OrphanWording.RemoveMessage(pendingOrphan ?? string.Empty, view?.DatabaseAutoCreate)
+            OrphanWording.RemoveMessage(pendingOrphan ?? string.Empty, view?.DatabaseAutoCreate, PendingOrphanLastWritten)
             + " It is the database's bookkeeping, not one tenant's, so it is refused unless you may change this database as a "
             + "whole, whatever tenant is selected.",
         PendingAction.PauseDaemon =>

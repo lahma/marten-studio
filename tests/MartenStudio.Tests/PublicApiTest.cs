@@ -9,7 +9,7 @@ namespace MartenStudio.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The surface is meant to be two static classes, two classes and one record (AGENTS.md hard rule 7).
+/// The surface is meant to be three static classes, two classes and two records (AGENTS.md hard rule 7).
 /// Anything else appearing in the baseline is a mistake rather than a feature: everything a consumer can
 /// bind to is everything this project has to keep working, and an internal data seam is what keeps that
 /// small (D12).
