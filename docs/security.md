@@ -49,7 +49,9 @@ therefore ends a studio session at its next page load or reconnect rather than a
 to end sooner revalidates the circuit's authentication state (`RevalidatingServerAuthenticationStateProvider`): the studio reads
 the visitor from `AuthenticationStateProvider` on every call, so a visitor the provider has dropped is refused by the next one,
 provided `StoreAuthorizationPolicy` (`SourceAuthorizationPolicy` in Postgres Studio) is a policy that refuses that visitor; a
-studio authorized by `AuthorizationPolicy` alone asks no policy per call.
+studio authorized by `AuthorizationPolicy` alone asks no policy per call. A link the visitor clicks that names another
+store, database or tenant moves the studio to it only when the visitor's own listings carry it, as the store policy decided
+them; Back, Forward and a page's own navigation never move the scope.
 
 Layer 2 filters listings rather than annotating them. A tenant you may not see is one you never learn
 exists — the *count* of tenants in a process is itself something a tenant should not learn. In Postgres Studio layer 2
@@ -69,7 +71,9 @@ public sealed record MartenStoreResource(
 ```
 
 One `AuthorizationHandler<TRequirement, MartenStoreResource>` answers for the scope selector, the page
-frame and every data call. `Capability` is `null` for a read and carries the capability's own name for a
+frame and every data call. `DatabaseIdentifier` is empty only when the studio asks whether to name a store that would not
+build, or whose databases could not be listed (the picker, the Overview and, since 1.2, the Stores page); nothing is read on
+that answer, and a handler must not treat it as every database. `Capability` is `null` for a read and carries the capability's own name for a
 write, so a single handler can be as coarse or as fine as you want.
 
 `TenantId = null` means every tenant at once, so a handler must require an explicit all-tenants claim for
@@ -235,7 +239,8 @@ Both are audited by signature, never per poll. The first read of session details
 database is one Activity entry and event 9245. On the Health page, the first report in a circuit that shows
 any evidence behind the activity gate for a store and database is one Activity entry under
 `ViewDatabaseActivity` (event 9200, with the checks it came from), and another is recorded only when the set
-of checks showing it changes; the sidebar's health badge shows no evidence and records nothing. A read that
+of checks showing it changes; the sidebar's health badge and the Stores page's chips show no evidence and record nothing,
+and the Stores page's Check (1.2) starts the same regular sweep an Overview would, for a database the store policy admits. A read that
 fails for a reason nobody chose is event 9246, throttled. The studio never cancels or terminates a session.
 
 Database › Sessions › Blocking (0.6) draws the same snapshot as trees, behind the same gate and audited with the rest of
@@ -295,6 +300,14 @@ plan is masked as the text is.
 Each plan is audited by `queryid` ("Plan database statement"), and so is each What if? there ("What-if database
 statement").
 
+**Index advisor** (1.2). On a press, behind the page's own gate, it plans up to 20 of the statements the visitor may see -
+as the drill-in plans them, as `SqlConsoleRole` in the read-only transaction - now and with up to 12 indexes their plans
+suggest, imagined by hypopg and reset on the same connection, at most 150 plans in 60 seconds; one run per database in the
+process (refused, never joined) and one per tab. `?advise=<schema.table>` narrows it to one table: a statement the visitor
+may not see, or whose plan reads a schema withheld from them, is passed over and not counted, so the answer for a withheld
+table is the answer for one that does not exist. A remedy for a Marten document table is a `StoreOptions` line, for a
+visible type only. Each run is one Activity entry, "Advise indexes for database statements", with counts only.
+
 ### Replication names
 
 Replication shows counts, sizes, lag, LSNs and settings at the database-wide gate. Standby application names, client
@@ -350,8 +363,15 @@ kept, logged above Debug, audited or sent anywhere but to the page that asked. E
 name with a count and never a value it read; a refusal that names a capability is filed under it, so the entry is shown
 only to somebody who may make that read.
 
-The one action in 1.2 is E06's **Find the 20 longest streams** ([events.md](health/events.md#on-demand-the-20-longest-streams)):
-a sequential scan of `mt_streams` with a limit of 20. On a conjoined event store a stream belongs to one tenant, so
+1.2 has three. T15's **What if it had an index?** plans the lookup Postgres runs for the foreign key - read again from the
+catalog by the finding's subject - now and with a hypothetical index on the key's columns (hypopg, reset on the same
+connection), at the finding's own `Database` gate; it is not offered on a partitioned table or a partition, and nothing is
+shown when either plan reads another table (row-level security). T01's **Try indexes against this table's statements** runs
+the Statements page's index advisor for the finding's table, at the `Activity` gate. Each is audited under its own name:
+"Find the longest streams", "What-if foreign key lookup", "Try indexes for a table". A finding from another database (the
+scope moved while the page still showed the old report) is refused before anything is read.
+
+E06's **Find the 20 longest streams** ([events.md](health/events.md#on-demand-the-20-longest-streams)) is a sequential scan of `mt_streams` with a limit of 20. On a conjoined event store a stream belongs to one tenant, so
 the list across tenants names them: it needs `ViewDatabaseActivity` and the write policy allowing it, which is stricter
 than Events › Streams (where the store policy alone names a tenant), because the result ranks streams across tenants by
 size, comparative data like T18's. With a tenant selected, only that tenant's streams are read. A stream whose tenant the
@@ -424,7 +444,31 @@ runs under `QueryTimeout`. An exception a method throws is shown on the page, it
 stepper stops on that event and logs nothing, since a projection that fails on an event is what it is there to
 find; time travel reports it as a failed read (event 9217, throttled). The aggregate types offered are the
 store's own single-stream projections and the document types `IsDocumentTypeVisible` shows, and a type name is
-never looked up from what the browser sent.
+never looked up from what the browser sent. An event whose type name this process has not mapped is not folded (1.2): handing
+it to Marten's resolver would load the .NET type its `mt_dotnet_type` names and add it to your store's event mappings for the
+life of the process, after which E05 would no longer report that alias.
+
+### Check shapes (1.2)
+
+On Documents and Event types: a plain read under the store policy, like the list it sits on, and not audited (9227 and
+9228, at Debug). It reads a bounded sample of one visible collection or one event type in scope with the studio's own SQL,
+round-trips each document through the store's serializer and hands each event to Marten's resolver only for an alias this
+process maps, and reports paths, kinds, counts, ids and sequences - never a value or an exception's message. A hidden,
+unknown or Marten-owned alias gets one sentence. Results are shared for five minutes between visitors who resolve the same
+store, database and tenant. Events › Event flow (1.2) is a configuration read under the store policy: no connection,
+nothing audited, and its model shared by every visitor of the store.
+
+### What `IsDocumentTypeVisible` hides
+
+`IsDocumentTypeVisible` hides document types: their collections, rows, counts, findings and plans, and the Event flow's
+outputs. It does not hide projections or events. A projection is named by its own name on Projections, in its rebuild
+dialog, in the daemon's findings and in Events › Event flow even when every document it writes is hidden, and the flow names
+the event types such a projection declares; a snapshot or single-stream projection is often named after its aggregate type.
+The event screens - Streams, a stream's events and their JSON, Event types with each type's .NET name (`Compacted<T>` names
+its `T`), LINQ over events and an event type's shape check - show every event the store holds, a hidden aggregate's streams
+included. Keep a type's name or its events from a visitor with the store policy, not with the delegate. The delegate must
+answer from the type alone, and the same way every time: since 1.2 a shape check's result and the Event flow's model are
+shared between visitors who resolve the same scope.
 
 ### The opt-in health check
 
@@ -561,6 +605,10 @@ ROLLBACK;                                             -- always, on its own canc
 Every GUC — the role included — is set through `select set_config(@name, @value, true)` rather than a
 `SET` statement, because `SET` takes no parameters and would mean interpolating text into SQL. The role
 is *also* validated at startup against the shape of a plain Postgres identifier; both, not either.
+
+Since 1.2 the statement is first described inside that transaction - Parse and Describe, never executed - so that
+pgvector's types, and others Npgsql cannot read, are requested as text; on a data source with `Max Auto Prepare` above zero
+the step is skipped, because Npgsql would cache the formats against the statement's text.
 
 So: **no `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE` or DDL survives**, whatever the parser thought. Three
 timeouts, because there are three ways to hang: the query itself, a lock queue in front of somebody's
@@ -870,11 +918,10 @@ a statement out of the record.
 | 9207 | `ProjectionRebuildStarted` | Information |
 | 9208 | `ProjectionRebuildFinished` — elapsed milliseconds and the outcome | Information |
 | 9209 | `DaemonControlRequested` — the operation and its target | Information |
-| 9225 | `OrphanedProgressionRemovalRequested` — the row being removed, its store and database | Information |
-| 9226 | `OrphanedProgressionRemovalRefused` — the re-check declined the row, and why | Information |
-| 9265 | `TenantVolumesRead` — Tenants' first read in a circuit of a database's per-tenant estimates and last events: how many tenants | Information |
 | 9210 | `StoreUnavailable` — a registered store that would not build, and why | Warning |
 | 9211 | `DocumentWriteRoundTripDropped` — a save whose round trip dropped properties, counted and named | Warning |
+| 9225 | `OrphanedProgressionRemovalRequested` — the row being removed, its store and database | Information |
+| 9226 | `OrphanedProgressionRemovalRefused` — the re-check declined the row, and why | Information |
 | 9235 | `TableRowsRead` — the first read of a relation's rows per signature: the relation, the filter as typed and the sort | Information |
 | 9236 | `TableRowOpened` — a row opened, a cell expanded or a key followed: the relation and the row's key | Information |
 | 9245 | `SessionDetailsRead` — the first read of other sessions' details per circuit, store and database | Information |
@@ -882,12 +929,14 @@ a statement out of the record.
 | 9261 | `LinqQueryRefused` — a LINQ mode refusal, naming its stage | Information |
 | 9262 | `LinqQueryFailed` — a LINQ mode query Postgres failed, by SQLSTATE | Information |
 | 9263 | `LinqQueryUnexpected` — a LINQ mode query the studio could not build | Information |
+| 9265 | `TenantVolumesRead` — Tenants' first read in a circuit of a database's per-tenant estimates and last events: how many tenants | Information |
 | 9452 | `StatementsRead` — Operations › Statements' first read in a circuit, per store and database: how many statements it showed | Information |
 
 The Activity ring also records, under 9200 and 9201, the reads that reveal other people's details for the first time
 in a circuit - "Read replication names", "Read Aurora session waits", the Health page's first evidence behind the
-activity gate - and every "Measure bloat", every press of a finding's action on the Health page ("Find the longest streams"),
-every Statements drill-in plan ("Plan database statement") and every What
+activity gate - and every "Measure bloat", every press of a finding's action on the Health page ("Find the longest streams",
+"What-if foreign key lookup", "Try indexes for a table"), every run of the index advisor ("Advise indexes for database
+statements"), every Statements drill-in plan ("Plan database statement") and every What
 if? ("RunSql what-if", "ExplainQuery what-if", "LinqWhatIf", "DocumentsWhatIf" and "What-if database statement"). LINQ
 mode over events records "LinqEventQuery" (a run, success and failure) and "LinqEventExplain" (a refused plan). "Read
 tenant volumes" (`ViewDatabaseActivity`, 9265) is Tenants' first read in a circuit, per store and database, of the row

@@ -51,6 +51,8 @@ This is the full text of hard rules 1 to 16, moved word for word from AGENTS.md 
    (LINQ mode's `Logged*` values); and every Warning that carries a typed route value. `RefusalLogValuesTests` also
    holds every `[LoggerMessage]` template's call sites, at any level, to it. The one exception is 9204's executed
    statement, which is kept whole up to the circuit's 32 KB receive bound, and by its head and tail beyond it.
+   A gated column or piece of evidence withheld from a visitor who asked for something else is not a refusal, and is
+   not audited (the Health page's evidence, Tenants' volumes, a migration preview's sessions).
 6. **No `async void`.** Component events are `Func<Task>`, handlers are `private async Task` with a `try`/`catch` that
    puts the failure on screen. An `async void` handler's exception escapes the synchronization context unobserved and
    kills the circuit: the page silently stops responding and the server log gets an unhandled exception with no
