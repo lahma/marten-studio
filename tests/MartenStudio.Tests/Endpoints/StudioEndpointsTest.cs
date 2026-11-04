@@ -199,6 +199,7 @@ public class StudioEndpointsTest
 
         patterns.Should().Contain("/ops/marten/_framework/blazor.web.js");
         patterns.Should().Contain("/ops/marten/_framework/opaque-redirect");
+        patterns.Should().Contain("/ops/marten/_framework/{**file}");
         patterns.Should().Contain("/ops/marten/_content/PostgresStudio/{**path}");
         patterns.Should().Contain("_content/PostgresStudio/{**path}");
     }
@@ -226,6 +227,8 @@ public class StudioEndpointsTest
             .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/opaque-redirect")
             .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
+        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/{**file}")
+            .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/PostgresStudio/{**path}")
             .Metadata.GetMetadata<IAuthorizeData>()!.Policy.Should().Be("studio-policy");
     }
@@ -247,6 +250,8 @@ public class StudioEndpointsTest
         // Package content: the stylesheet and the framework script stay reachable under a fail-closed
         // FallbackPolicy, because a studio without its stylesheet is not a security win.
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/blazor.web.js")
+            .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
+        endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_framework/{**file}")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
         endpoints.First(x => x.RoutePattern.RawText == "/ops/marten/_content/PostgresStudio/{**path}")
             .Metadata.GetMetadata<IAllowAnonymous>().Should().NotBeNull();
@@ -664,8 +669,10 @@ public class StudioEndpointsTest
 
         patterns.Where(x => x?.StartsWith("/_blazor", StringComparison.Ordinal) == true).Should().BeEmpty();
         patterns.Should().NotContain("/_framework/opaque-redirect");
+        patterns.Should().NotContain("/_framework/{**file}");
 
         patterns.Should().Contain("/marten");
+        patterns.Should().Contain("/marten/_framework/{**file}");
         patterns.Should().Contain("/marten/_blazor/negotiate");
         patterns.Should().Contain("/marten/_framework/opaque-redirect");
         patterns.Should().Contain("/marten/_framework/blazor.web.js");

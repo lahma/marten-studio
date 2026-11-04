@@ -788,6 +788,16 @@ tenant, because there is nothing to filter on and hiding it would hide something
   `_content/PostgresStudio/` mirror under the path, and the shell renders a studio-rooted `<base href>`.
   Every mount is studio-rooted — including the default `/marten` — so a host that has a Blazor app of
   its own does not end up with two endpoints on `/_blazor`.
+- **.NET 11 and the hot-reload initializer.** A Debug build of the host with the .NET 11 SDK lists a hot-reload
+  script among the page's Blazor initializers. From 1.2.0 the studio serves the host's whole `_framework` tree under
+  its path, so that script loads and the page starts; on 1.1.x, build the host with
+  `-p:EnableHotReloadInRuntimeConfigDevFile=false`.
+- **.NET 11 and a fail-closed `FallbackPolicy`.** A mapping that says `AllowAnonymous()` (for example in Development
+  only) in an application whose `FallbackPolicy` requires an authenticated user does not start its circuit for an
+  unauthenticated visitor on .NET 11: ASP.NET Core 11 holds the async hub methods Blazor's circuit uses to the
+  `FallbackPolicy` whatever the endpoint allows ([dotnet/aspnetcore#69624](https://github.com/dotnet/aspnetcore/issues/69624),
+  open). The studio does not work around it; until it is fixed, an anonymous mapping on .NET 11 needs an application
+  without a fail-closed `FallbackPolicy`.
 - **Behind a reverse proxy**, forward the studio prefix and it works: the studio's plumbing is all under
   its own path. If the proxy strips a prefix, give the application the same prefix with
   `app.UsePathBase("/…")` so that the routes and the `<base href>` agree; mounting at

@@ -13,7 +13,14 @@ pack's `buildTransitive` targets run in any Web SDK executable that references t
 and make `_framework/blazor.web.js` **that project's own** static web asset, served by its `MapStaticAssets()` and
 forwarded to by the studio's `{Path}/_framework/blazor.web.js` endpoint. `MapStudioFrameworkScript` tries the host
 web root, then the host endpoint, then a normally absent packaged copy
-(`_content/PostgresStudio/_framework/blazor.web.js`), as the host's copy must always win. Measurements, and the
+(`_content/PostgresStudio/_framework/blazor.web.js`), as the host's copy must always win. Since 1.2 the same
+studio-rooted `<base href>` is answered for the rest of the `_framework` tree by `MapStudioFrameworkFiles`
+(`{Path}/_framework/{**file}`): it forwards to whatever the host serves at `/_framework/{file}` (the exact-route endpoint
+`MapStaticAssets` registers per file), else to the web root's `_framework/`, behind the studio's own authorization like
+the other mirrored endpoints, and answers 404 for a missing file or a path containing `..`. A Debug build with the .NET 11
+SDK lists a hot-reload JS initializer (`Microsoft.NET.Sdk.BlazorWeb.DotNetWatch.<hash>.lib.module.js`) among the page's
+Blazor initializers, and a 404 on it stops `Blazor.start`. D24 holds: the packages ship no initializer, this serves only
+the host's own files. Measurements, and the
 vendored copy that was tried and dropped: decision-notes.md, D22.
 
 ## D23

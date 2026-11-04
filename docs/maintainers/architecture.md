@@ -30,8 +30,12 @@ why: decision-notes.md, D10).
 
 **D11 — Sub-path mounting is ported from Quartz.Dashboard.** Compile-time routes are re-rooted at map time, from
 each assembly's own root (`/postgres` for PostgresStudio's pages, `/marten` for MartenStudio's), and `/_blazor`,
-`blazor.web.js`, `opaque-redirect` and `_content/PostgresStudio` - the shared assembly's assets, whichever studio
-is mounted - are mirrored under the mount path (`StudioEndpointMapper`). Endpoint display names keep the
+`blazor.web.js`, `opaque-redirect`, `_content/PostgresStudio` - the shared assembly's assets, whichever studio
+is mounted - and, since 1.2, every other file of the host's `_framework` tree (`{Path}/_framework/{**file}`, forwarded to
+whatever the host serves at `/_framework/{file}`, else its web root's `_framework/`, and a 404 for a path that could
+climb out of it) are mirrored under the mount path (`StudioEndpointMapper`). The last is what lets the .NET 11 SDK's
+hot-reload initializer, which a Debug build lists among the page's Blazor initializers, load under the studio-rooted
+`<base href>`; the two literal endpoints keep their own handlers by route precedence. Endpoint display names keep the
 compile-time template, so no log or diagnostic text is ever built from one. This is ~250 lines of genuinely fiddly engineering that already works in production
 somewhere; rewriting it would be the single most likely way to ship something that renders locally and
 404s behind a path base. There is no "integrate into the host's own Blazor app" mode in v1.
