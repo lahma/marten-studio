@@ -38,13 +38,15 @@ internal sealed class FakeJsRuntime : IJSRuntime
     public bool Unwatched => Calls.Contains("martenStudio.visibility.unwatch");
 
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
-// A test fake forwarding to its own Invoke<TValue>, not a studio interop call site; BL0016 (SDK 11) is meant for real call sites, which the studio guards with StudioLiveUpdates.IsInteropUnavailable (hard rule 15).
+        // A test fake forwarding to its own Invoke<TValue>, not a studio interop call site: BL0016 (SDK 11) is for real call
+        // sites, which the studio guards with StudioLiveUpdates.IsInteropUnavailable (hard rule 15).
 #pragma warning disable BL0016
         Invoke<TValue>(identifier, args);
 #pragma warning restore BL0016
 
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
-// A test fake forwarding to its own Invoke<TValue>, not a studio interop call site; BL0016 (SDK 11) is meant for real call sites, which the studio guards with StudioLiveUpdates.IsInteropUnavailable (hard rule 15).
+        // A test fake forwarding to its own Invoke<TValue>, not a studio interop call site: BL0016 (SDK 11) is for real call
+        // sites, which the studio guards with StudioLiveUpdates.IsInteropUnavailable (hard rule 15).
 #pragma warning disable BL0016
         Invoke<TValue>(identifier, args);
 #pragma warning restore BL0016

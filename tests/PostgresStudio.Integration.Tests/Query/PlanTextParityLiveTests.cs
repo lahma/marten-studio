@@ -28,8 +28,8 @@ namespace PostgresStudio.Integration.Tests.Query;
 /// </para>
 /// <para>
 /// <b>Two executions are not one.</b> (1.2-FLK) The shape of an executed plan - node types, relations, keys, the order of children -
-/// its estimates and its node set are still compared exactly, but the counts the two executions measured (blocks touched, actual rows
-/// and loops) are compared within <c>PlanParity.ExecutedTolerance</c>, the larger of 8 and 2 % of the larger count, because two runs of
+/// its estimates, its actual rows and loops and its node set are still compared exactly, but the blocks the two executions touched
+/// are compared within <c>PlanParity.ExecutedTolerance</c>, the larger of 8 and 2 % of the larger count, because two runs of
 /// one statement differ by a few blocks (PostgreSQL 19, sort-spill: 837 against 834). A plain <c>EXPLAIN</c> runs nothing and stays exact.
 /// </para>
 /// <para>
